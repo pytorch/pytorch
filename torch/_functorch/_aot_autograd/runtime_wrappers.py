@@ -70,8 +70,9 @@ from .descriptors import (
 from .functional_utils import (
     clear_input_view_bits_for_spec,
     gen_alias_from_base,
-    normalize_backward_input_view_bits_in_place,
+    normalize_saved_tensor_view_bits_in_place,
     replay_view_meta_sequence,
+    resolve_input_view_bits,
     restore_input_view_bits_for_spec,
 )
 from .graph_capture_wrappers import aot_dispatch_subclass
@@ -216,6 +217,9 @@ class RuntimeWrapper(CompilerWrapper):
             indices_of_inps_to_detach=self.indices_of_inps_to_detach,
             trace_joint=self.trace_joint,
             keep_input_mutations=aot_config.keep_inference_input_mutations,
+            check_all_runtime_view_bits=(
+                aot_config.aot_autograd_arg_pos_to_source is None
+            ),
             disable_amp=self.disable_amp,
         )
 
@@ -264,7 +268,14 @@ class AliasOfInputHandler:
         self.view_meta_sequence = info.view_meta_sequence
         self.is_conj = info.is_conj
         self.is_neg = info.is_neg
-        self.base_input_has_view_bits = info.base_input_has_view_bits
+        self.base_input_has_view_bits = runtime_metadata.input_info[
+            self.base_idx
+        ].has_view_bits
+        preserve_view_bits = (
+            self.base_input_has_view_bits or self.is_conj or self.is_neg
+        )
+        self.target_is_conj = self.is_conj if preserve_view_bits else None
+        self.target_is_neg = self.is_neg if preserve_view_bits else None
         self.use_pre_mutation_base = (
             self.base_input_has_view_bits
             and runtime_metadata.input_info[self.base_idx].mutates_metadata
@@ -291,8 +302,9 @@ class AliasOfInputHandler:
             self.requires_grad,
             self.view_meta_sequence,
             replay_views=self.replay_views,
-            target_is_conj=self.is_conj,
-            target_is_neg=self.is_neg,
+            target_is_conj=self.target_is_conj,
+            target_is_neg=self.target_is_neg,
+            translate_storage_offset=self.base_input_has_view_bits,
         )
 
 
@@ -344,6 +356,9 @@ class AliasOfIntermediateHandler:
         self.view_meta_sequence = info.view_meta_sequence
         self.is_conj = info.is_conj
         self.is_neg = info.is_neg
+        preserve_view_bits = self.is_conj or self.is_neg
+        self.target_is_conj = self.is_conj if preserve_view_bits else None
+        self.target_is_neg = self.is_neg if preserve_view_bits else None
         self.replay_views = config.view_replay_for_aliased_outputs
 
     def __call__(
@@ -360,8 +375,8 @@ class AliasOfIntermediateHandler:
             self.requires_grad,
             self.view_meta_sequence,
             replay_views=self.replay_views,
-            target_is_conj=self.is_conj,
-            target_is_neg=self.is_neg,
+            target_is_conj=self.target_is_conj,
+            target_is_neg=self.target_is_neg,
         )
 
 
@@ -628,9 +643,10 @@ class _RuntimeCompiledFnInvoker:
                         torch._C._set_view_replay_enabled(True)
                     with torch.enable_grad():
                         for idx, is_conj, is_neg in self.view_bit_input_specs:
-                            args_[idx] = clear_input_view_bits_for_spec(
-                                args_[idx], is_conj=is_conj, is_neg=is_neg
-                            )
+                            if isinstance(args_[idx], torch.Tensor):
+                                args_[idx] = clear_input_view_bits_for_spec(
+                                    args_[idx], is_conj=is_conj, is_neg=is_neg
+                                )
                         on_before_call()
                         return call_func_at_runtime_with_args(
                             self.compiled_fn,
@@ -652,9 +668,10 @@ class _RuntimeCompiledFnInvoker:
                 if grad_enabled:
                     torch._C._set_grad_enabled(False)
                 for idx, is_conj, is_neg in self.view_bit_input_specs:
-                    args[idx] = clear_input_view_bits_for_spec(
-                        args[idx], is_conj=is_conj, is_neg=is_neg
-                    )
+                    if isinstance(args[idx], torch.Tensor):
+                        args[idx] = clear_input_view_bits_for_spec(
+                            args[idx], is_conj=is_conj, is_neg=is_neg
+                        )
                 on_before_call()
                 return call_func_at_runtime_with_args(
                     self.compiled_fn,
@@ -700,8 +717,8 @@ class _RuntimeForwardEpilogue:
                 info.base_idx
                 for info in self.runtime_metadata.output_info
                 if info.output_type == OutputType.alias_of_input
-                and info.base_input_has_view_bits
                 and info.base_idx is not None
+                and self.runtime_metadata.input_info[info.base_idx].has_view_bits
                 and self.runtime_metadata.input_info[info.base_idx].mutates_metadata
             )
         )
@@ -824,16 +841,16 @@ class _RuntimeForwardEpilogue:
                         original_inpt.set_(updated_inpt)
                 continue
             if meta.mutates_metadata and not meta.mutates_data:
-                if self.trace_joint:
+                if meta.mutation_view_meta_sequence is not None:
+                    updated_inpt = replay_view_meta_sequence(
+                        original_inpt, meta.mutation_view_meta_sequence
+                    )
+                elif self.trace_joint:
                     if not isinstance(updated_inpt, TensorAlias):
                         raise AssertionError(
                             f"expected TensorAlias for updated_inpt, got {type(updated_inpt)}"
                         )
                     updated_inpt = updated_inpt.alias
-                if meta.mutation_view_meta_sequence is not None:
-                    updated_inpt = replay_view_meta_sequence(
-                        original_inpt, meta.mutation_view_meta_sequence
-                    )
                 original_inpt.as_strided_(
                     updated_inpt.size(),
                     updated_inpt.stride(),
@@ -863,6 +880,7 @@ class _RuntimeForwardEpilogue:
                         updated_inpt,
                         is_conj=meta.is_conj,
                         is_neg=meta.is_neg,
+                        allow_mismatch=True,
                     )
                 if meta.is_leaf and original_inpt.requires_grad:
                     # We can hit this situation in this case:
@@ -937,8 +955,6 @@ def _codegen_capture_orig_inputs(
             for i in pre_mutation_base_indices
         )
         buf.emit(f"pre_mutation_bases = {{{idx_str}}}", indent=1)
-    else:
-        buf.emit("pre_mutation_bases = {}", indent=1)
 
 
 def _codegen_increment_mutation_versions(
@@ -993,10 +1009,11 @@ def _codegen_compiled_fn_invocation(
         buf.emit("torch._C._set_view_replay_enabled(True)", indent=4)
         buf.emit("with torch.enable_grad():", indent=3)
         for idx, is_conj, is_neg in view_bit_input_specs:
+            buf.emit(f"if isinstance(args_[{idx}], torch.Tensor):", indent=4)
             buf.emit(
                 f"args_[{idx}] = _clear_input_view_bits_(args_[{idx}], "
                 f"is_conj={is_conj!r}, is_neg={is_neg!r})",
-                indent=4,
+                indent=5,
             )
         buf.emit("_on_before_call_()", indent=4)
         if disable_amp:
@@ -1020,10 +1037,11 @@ def _codegen_compiled_fn_invocation(
         buf.emit("try:", indent=2)
         buf.emit("if grad_enabled: torch._C._set_grad_enabled(False)", indent=3)
         for idx, is_conj, is_neg in view_bit_input_specs:
+            buf.emit(f"if isinstance(args[{idx}], torch.Tensor):", indent=3)
             buf.emit(
                 f"args[{idx}] = _clear_input_view_bits_(args[{idx}], "
                 f"is_conj={is_conj!r}, is_neg={is_neg!r})",
-                indent=3,
+                indent=4,
             )
         buf.emit("_on_before_call_()", indent=3)
         if disable_amp:
@@ -1044,7 +1062,9 @@ def _codegen_compiled_fn_invocation(
 # always builds and returns a list, so list[Any] is tighter than the reference's
 # -> Any (the early `return fw_outs` path does not exist in the codegen'd fn).
 _EpilogueApplyMutationsFn = Callable[[dict[int, Tensor], list[Any]], None]
-_EpilogueReplayAliasesFn = Callable[[dict[int, Tensor], list[Any]], list[Any]]
+_EpilogueReplayAliasesFn = Callable[
+    [dict[int, Tensor], dict[int, Tensor] | None, list[Any]], list[Any]
+]
 
 
 def _codegen_epilogue(
@@ -1052,6 +1072,7 @@ def _codegen_epilogue(
     runtime_metadata: ViewAndMutationMeta,
     apply_mutations_fn: _EpilogueApplyMutationsFn | None,
     replay_aliases_fn: _EpilogueReplayAliasesFn | None,
+    has_pre_mutation_bases: bool,
     num_mutated_runtime_inps: int,
     expected_outs: int,
 ) -> None:
@@ -1072,8 +1093,9 @@ def _codegen_epilogue(
 
     if runtime_metadata.num_outputs_aliased > 0:
         buf.add_global("_replay_aliases_", replay_aliases_fn)
+        pre_mutation_bases = "pre_mutation_bases" if has_pre_mutation_bases else "None"
         buf.emit(
-            "ret_outs = _replay_aliases_(orig_inputs, pre_mutation_bases, fw_outs)",
+            f"ret_outs = _replay_aliases_(orig_inputs, {pre_mutation_bases}, fw_outs)",
             indent=1,
         )
     else:
@@ -1103,12 +1125,13 @@ def _create_runtime_wrapper(
     indices_of_inps_to_detach: list[int],
     trace_joint: bool,
     keep_input_mutations: bool,
+    check_all_runtime_view_bits: bool,
     disable_amp: bool,
 ) -> Callable[..., Any]:
     view_bit_input_specs = tuple(
         (i, info.is_conj, info.is_neg)
         for i, info in enumerate(runtime_metadata.input_info)
-        if info.has_view_bits
+        if check_all_runtime_view_bits or info.has_view_bits
     )
     compiled_invoker = _RuntimeCompiledFnInvoker(
         compiled_fn=compiled_fn,
@@ -1168,8 +1191,10 @@ def _create_runtime_wrapper(
                         f"{base_expr}, {out_expr}, "
                         f"{handler.requires_grad!r}, {vms_name}, "
                         f"replay_views={handler.replay_views!r}, "
-                        f"target_is_conj={handler.is_conj!r}, "
-                        f"target_is_neg={handler.is_neg!r}))"
+                        f"target_is_conj={handler.target_is_conj!r}, "
+                        f"target_is_neg={handler.target_is_neg!r}, "
+                        "translate_storage_offset="
+                        f"{handler.base_input_has_view_bits!r}))"
                     )
                 elif isinstance(handler, AliasOfIntermediateHandler):
                     vms_name = buf.bind_value("_vms", handler.view_meta_sequence)
@@ -1191,8 +1216,8 @@ def _create_runtime_wrapper(
                         f"{base_expr}, {out_expr}, "
                         f"{handler.requires_grad!r}, {vms_name}, "
                         f"replay_views={handler.replay_views!r}, "
-                        f"target_is_conj={handler.is_conj!r}, "
-                        f"target_is_neg={handler.is_neg!r}))"
+                        f"target_is_conj={handler.target_is_conj!r}, "
+                        f"target_is_neg={handler.target_is_neg!r}))"
                     )
                 else:
                     raise AssertionError(
@@ -1293,7 +1318,8 @@ def _create_runtime_wrapper(
                         copy_src = buf.fresh_name("_u_data")
                         buf.writeline(
                             f"{copy_src} = _clear_input_view_bits({ui}, "
-                            f"is_conj={meta.is_conj!r}, is_neg={meta.is_neg!r})"
+                            f"is_conj={meta.is_conj!r}, is_neg={meta.is_neg!r}, "
+                            "allow_mismatch=True)"
                         )
                     if meta.is_leaf:
                         buf.writeline(
@@ -1359,6 +1385,7 @@ def _create_runtime_wrapper(
         runtime_metadata,
         codegen_apply_mutations,
         codegen_alias_fn,
+        bool(runtime_epilogue.pre_mutation_base_indices),
         num_mutated_runtime_inps,
         expected_outs,
     )
@@ -2152,6 +2179,8 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                         view_tensor,
                         view_tensor.requires_grad,
                         replay_views=replay_views,
+                        target_is_conj=view_tensor.is_conj(),
+                        target_is_neg=view_tensor.is_neg(),
                     )
                     f_args_inner.append(view_arg)
             return f_args_inner
@@ -2810,12 +2839,17 @@ class AOTDispatchAutogradCompileSpec:
 @dataclass
 class _AutogradSavedState:
     metadata: ViewAndMutationMeta
+    has_input_aliases: bool = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.has_input_aliases = any(
+            info is not None for info in self.metadata.saved_tensor_input_aliases
+        )
 
     @staticmethod
     def _rebuild_input_alias(
         graph_inputs: Sequence[Any],
         info: SavedTensorInputAliasInfo,
-        runtime_saved_tensor: torch.Tensor,
     ) -> torch.Tensor:
         tensor = graph_inputs[info.input_index]
         if not isinstance(tensor, torch.Tensor):
@@ -2824,19 +2858,14 @@ class _AutogradSavedState:
                 f"got {type(tensor)}"
             )
         if not info.input_metadata_matches:
-            size = (
-                info.size
-                if info.size is not None
-                else tuple(runtime_saved_tensor.shape)
-            )
-            stride = (
-                info.stride
-                if info.stride is not None
-                else runtime_saved_tensor.stride()
-            )
+            if info.size is None or info.stride is None:
+                raise AssertionError(
+                    "saved input aliases with different metadata must have "
+                    "concrete size and stride"
+                )
             tensor = tensor.as_strided(
-                size,
-                stride,
+                info.size,
+                info.stride,
                 tensor.storage_offset() + info.storage_offset_delta,
             )
         return restore_input_view_bits_for_spec(
@@ -2846,12 +2875,12 @@ class _AutogradSavedState:
     def save_from_forward(
         self, ctx: Any, fw_outs: Sequence[Any], graph_inputs: Sequence[Any]
     ) -> None:
-        tensors_saved_with_vc_check = list(
-            fw_outs[self.metadata.tensors_saved_for_backwards_with_vc_check_slice]
-        )
-        tensors_saved_no_vc_check = list(
-            fw_outs[self.metadata.tensors_saved_for_backwards_no_vc_check_slice]
-        )
+        tensors_saved_with_vc_check = fw_outs[
+            self.metadata.tensors_saved_for_backwards_with_vc_check_slice
+        ]
+        tensors_saved_no_vc_check = fw_outs[
+            self.metadata.tensors_saved_for_backwards_no_vc_check_slice
+        ]
         if not all(isinstance(x, torch.Tensor) for x in tensors_saved_with_vc_check):
             raise AssertionError(
                 "expected all tensors_saved_with_vc_check to be Tensors, "
@@ -2867,22 +2896,29 @@ class _AutogradSavedState:
         num_vc_check = len(tensors_saved_with_vc_check)
         is_graph_input = self.metadata.saved_tensor_is_graph_input
         saved_input_aliases = self.metadata.saved_tensor_input_aliases
-        if len(saved_input_aliases) != (num_vc_check + len(tensors_saved_no_vc_check)):
-            raise AssertionError(
-                "expected one input-alias entry per saved tensor, "
-                f"got {len(saved_input_aliases)} != "
-                f"{num_vc_check + len(tensors_saved_no_vc_check)}"
-            )
-        for i, info in enumerate(saved_input_aliases[:num_vc_check]):
-            if info is not None:
-                tensors_saved_with_vc_check[i] = self._rebuild_input_alias(
-                    graph_inputs, info, tensors_saved_with_vc_check[i]
+        if self.has_input_aliases:
+            if len(saved_input_aliases) != (
+                num_vc_check + len(tensors_saved_no_vc_check)
+            ):
+                raise AssertionError(
+                    "expected one input-alias entry per saved tensor, "
+                    f"got {len(saved_input_aliases)} != "
+                    f"{num_vc_check + len(tensors_saved_no_vc_check)}"
                 )
-        for i, info in enumerate(saved_input_aliases[num_vc_check:]):
-            if info is not None:
-                tensors_saved_no_vc_check[i] = self._rebuild_input_alias(
-                    graph_inputs, info, tensors_saved_no_vc_check[i]
-                )
+            if not isinstance(tensors_saved_with_vc_check, list):
+                tensors_saved_with_vc_check = list(tensors_saved_with_vc_check)
+            if not isinstance(tensors_saved_no_vc_check, list):
+                tensors_saved_no_vc_check = list(tensors_saved_no_vc_check)
+            for i, info in enumerate(saved_input_aliases[:num_vc_check]):
+                if info is not None:
+                    tensors_saved_with_vc_check[i] = self._rebuild_input_alias(
+                        graph_inputs, info
+                    )
+            for i, info in enumerate(saved_input_aliases[num_vc_check:]):
+                if info is not None:
+                    tensors_saved_no_vc_check[i] = self._rebuild_input_alias(
+                        graph_inputs, info
+                    )
 
         tensors_to_save = [
             x if is_graph_input[i] or not x._is_view() else x.detach()
@@ -3398,6 +3434,21 @@ def _codegen_backward_prologue(
                     "requires_grad in backward for create_graph=True')"
                 )
 
+        has_saved_view_bits = any(
+            is_conj or is_neg for is_conj, is_neg in fw_metadata.saved_tensor_view_bits
+        )
+        if has_saved_view_bits:
+            buf.bind(
+                _normalize_view_bits_=normalize_saved_tensor_view_bits_in_place,
+                _saved_input_aliases_=fw_metadata.saved_tensor_input_aliases,
+                _saved_view_bits_=fw_metadata.saved_tensor_view_bits,
+            )
+            buf.writeline(
+                "all_args = _normalize_view_bits_(all_args, "
+                f"num_symints_saved_for_bw={fw_metadata.num_symints_saved_for_bw}, "
+                "saved_tensor_view_bits=_saved_view_bits_, "
+                "saved_tensor_input_aliases=_saved_input_aliases_)"
+            )
         buf.writeline("return all_args")
 
     return buf.build()
@@ -3863,11 +3914,7 @@ class _AOTDispatchAutogradFunctionFactory:
 
                 return call_func_at_runtime_with_args(
                     compiled_bw,
-                    normalize_backward_input_view_bits_in_place(
-                        all_args,
-                        num_symints_saved_for_bw=num_symints_saved_for_bw_,
-                        saved_tensor_view_bits=fw_metadata.saved_tensor_view_bits,
-                    ),
+                    all_args,
                     steal_args=True,
                     disable_amp=disable_amp,
                 )
@@ -4023,6 +4070,9 @@ Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
                 compile_id_str,
                 tangent_stack_trace,
             )
+
+        if not is_traceable_wrapper_subclass(x):
+            x = resolve_input_view_bits(x)
 
         # Coerce to expected memory format
         if not meta.memory_format:

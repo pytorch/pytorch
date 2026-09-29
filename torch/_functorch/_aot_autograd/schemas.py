@@ -128,9 +128,6 @@ class OutputAliasInfo:
     # resolved tensors, so alias replay cannot recover these from its output.
     is_conj: bool = False
     is_neg: bool = False
-    # Whether the base input carried lazy conjugate/negative view bits. Alias
-    # reconstruction must replay its view recipe from that original input.
-    base_input_has_view_bits: bool = False
 
 
 class MutationType(Enum):
@@ -152,16 +149,15 @@ class InputAliasInfo:
     mutation_is_shallow_copy_data: bool
     requires_grad: bool
     keep_input_mutations: bool
-    has_view_bits: bool = False
     is_conj: bool = False
     is_neg: bool = False
     mutation_view_meta_sequence: ViewMetaSequence | None = None
 
+    @property
+    def has_view_bits(self) -> bool:
+        return self.is_conj or self.is_neg
+
     def __post_init__(self) -> None:
-        if self.has_view_bits != (self.is_conj or self.is_neg):
-            raise AssertionError(
-                "has_view_bits must match the conjugate/negative input view bits"
-            )
         if self.mutates_storage_metadata:
             # For convenience, we guarantee that this is always true.
             # In practice, If we call .set_(), then at runtime there is no need
@@ -267,11 +263,11 @@ class OpaqueMeta:
 
 @dataclass(frozen=True)
 class SavedTensorInputAliasInfo:
-    """How to rebuild a saved view that aliases a lazy-bit graph input.
+    """How to rebuild a saved tensor in an input-rooted lazy-bit alias family.
 
-    Concrete size/stride metadata is stored when available.  For symbolic
-    views, runtime size/stride come from the backend output while the storage
-    offset remains relative to the input's runtime storage offset.
+    Concrete size/stride metadata is stored for views whose metadata differs
+    from the input. Symbolic view geometry is rejected because a backend may
+    materialize its saved output with a different layout.
     """
 
     input_index: int
@@ -281,6 +277,15 @@ class SavedTensorInputAliasInfo:
     size: tuple[int, ...] | None = None
     stride: tuple[int, ...] | None = None
     storage_offset_delta: int = 0
+
+    def __post_init__(self) -> None:
+        has_geometry = self.size is not None and self.stride is not None
+        if (self.size is None) != (self.stride is None):
+            raise AssertionError("saved alias size and stride must be present together")
+        if self.input_metadata_matches == has_geometry:
+            raise AssertionError(
+                "saved aliases need concrete geometry exactly when input metadata differs"
+            )
 
 
 @dataclass
@@ -556,8 +561,8 @@ class ViewAndMutationMeta:
     # Runtime clears matching bits with views before the backward graph restores
     # them explicitly. This preserves storage aliases and version counters.
     saved_tensor_view_bits: list[tuple[bool, bool]] = field(default_factory=list)
-    # For saved tensors that alias a graph input carrying lazy view bits, this
-    # records the runtime input and (when needed) concrete view geometry.  The
+    # For saved tensors in lazy-bit alias families rooted at graph inputs, this
+    # records the runtime input and (when needed) concrete view geometry. The
     # runtime uses it both to retain eager version checks and to keep no-VC
     # custom-autograd saves live instead of accepting a backend materialization.
     saved_tensor_input_aliases: list[SavedTensorInputAliasInfo | None] = field(
@@ -813,7 +818,7 @@ class ViewAndMutationMeta:
             if isinstance(inp_meta, SubclassCreationMeta):
                 inp_meta.make_runtime_safe()
 
-        for i, inp_info in enumerate(self.input_info):
+        for inp_info in self.input_info:
             if inp_info.mutation_view_meta_sequence is not None and any(
                 vm.has_symbolic_inputs
                 for vm in inp_info.mutation_view_meta_sequence.sequence

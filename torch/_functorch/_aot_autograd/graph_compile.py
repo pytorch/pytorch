@@ -2064,19 +2064,33 @@ def _categorize_saved_tensors_for_backward(
     saved_tensor_view_bits: list[tuple[bool, bool]] = []
     saved_tensor_input_aliases: list[SavedTensorInputAliasInfo | None] = []
 
-    lazy_input_storages: dict[StorageWeakRef, list[tuple[int, torch.Tensor]]] = (
-        defaultdict(list)
+    input_nodes = list(fw_module.graph.find_nodes(op="placeholder"))
+    has_lazy_input = any(
+        node.meta.get("aot_input_view_bits") is not None for node in input_nodes
     )
-    for input_index, input_node in enumerate(
-        fw_module.graph.find_nodes(op="placeholder")
-    ):
-        input_val = input_node.meta.get("val")
-        if input_node.meta.get("aot_input_view_bits") is not None and is_fake_tensor(
-            input_val
-        ):
-            lazy_input_storages[StorageWeakRef(input_val.untyped_storage())].append(
-                (input_index, input_val)
-            )
+    input_storages: (
+        dict[StorageWeakRef, list[tuple[int, torch.Tensor, bool]]] | None
+    ) = None
+
+    def get_input_storages() -> dict[
+        StorageWeakRef, list[tuple[int, torch.Tensor, bool]]
+    ]:
+        nonlocal input_storages
+        if input_storages is None:
+            input_storages = defaultdict(list)
+            for input_index, input_node in enumerate(input_nodes):
+                input_val = input_node.meta.get("val")
+                if is_fake_tensor(input_val):
+                    input_storages[StorageWeakRef(input_val.untyped_storage())].append(
+                        (
+                            input_index,
+                            input_val,
+                            input_node.meta.get("aot_input_view_bits") is not None,
+                        )
+                    )
+        if input_storages is None:
+            raise AssertionError("input storage map was not initialized")
+        return input_storages
 
     def metadata_matches(a: torch.Tensor, b: torch.Tensor) -> bool:
         return (
@@ -2092,11 +2106,36 @@ def _categorize_saved_tensors_for_backward(
         )
 
     def input_alias_info(val: torch.Tensor) -> SavedTensorInputAliasInfo | None:
-        candidates = lazy_input_storages.get(StorageWeakRef(val.untyped_storage()), [])
-        if not candidates:
+        if not (val.is_conj() or val.is_neg() or has_lazy_input):
             return None
 
-        input_index, input_val = candidates[0]
+        # Existing AOTAutograd handling is sufficient when neither the saved
+        # tensor nor an aliased input carries lazy bits. Otherwise, rebuild the
+        # saved tensor from a runtime input so backend materialization cannot
+        # sever eager's version counter.
+        candidates = get_input_storages().get(StorageWeakRef(val.untyped_storage()), [])
+        if not candidates or not (
+            val.is_conj() or val.is_neg() or any(c[2] for c in candidates)
+        ):
+            return None
+
+        compatible = [
+            candidate for candidate in candidates if candidate[1].dtype == val.dtype
+        ]
+        if not compatible:
+            raise RuntimeError(
+                "torch.compile does not yet support a saved view with a "
+                "different dtype that aliases an input with lazy conjugate "
+                "or negative bits"
+            )
+        input_index, input_val, _ = next(
+            (
+                candidate
+                for candidate in compatible
+                if metadata_matches(val, candidate[1])
+            ),
+            compatible[0],
+        )
         matches = metadata_matches(val, input_val)
         size: tuple[int, ...] | None = None
         stride: tuple[int, ...] | None = None
@@ -2112,9 +2151,14 @@ def _categorize_saved_tensors_for_backward(
                 )
             else:
                 storage_offset_delta = offset_delta
-            if all(isinstance(x, int) for x in (*val.shape, *val.stride())):
-                size = tuple(cast(int, x) for x in val.shape)
-                stride = tuple(cast(int, x) for x in val.stride())
+            if not all(isinstance(x, int) for x in (*val.shape, *val.stride())):
+                raise RuntimeError(
+                    "torch.compile does not yet support a saved view with a "
+                    "symbolic size or stride that aliases an input with lazy "
+                    "conjugate or negative bits"
+                )
+            size = tuple(cast(int, x) for x in val.shape)
+            stride = tuple(cast(int, x) for x in val.stride())
 
         return SavedTensorInputAliasInfo(
             input_index=input_index,
@@ -2446,35 +2490,40 @@ def _aot_stage2b_bw_compile(
     """
     with torch.no_grad():
         inner_meta = _get_inner_meta(maybe_subclass_meta, fw_metadata)
-        placeholders = list(bw_module.graph.find_nodes(op="placeholder"))
-        saved_start = num_symints_saved_for_bw
         saved_view_bits = inner_meta.saved_tensor_view_bits
-        saved_end = saved_start + len(saved_view_bits)
-        if saved_end > len(placeholders):
-            raise AssertionError(
-                "backward graph has fewer placeholders than saved tensors: "
-                f"{len(placeholders)} < {saved_end}"
+        if any(is_conj or is_neg for is_conj, is_neg in saved_view_bits):
+            placeholders = list(bw_module.graph.find_nodes(op="placeholder"))
+            saved_start = num_symints_saved_for_bw
+            saved_end = saved_start + len(saved_view_bits)
+            if saved_end > len(placeholders):
+                raise AssertionError(
+                    "backward graph has fewer placeholders than saved tensors: "
+                    f"{len(placeholders)} < {saved_end}"
+                )
+            insertion_point = next(
+                node for node in bw_module.graph.nodes if node.op != "placeholder"
             )
 
-        for i, node in enumerate(placeholders):
-            val = node.meta.get("val")
-            if not isinstance(val, torch.Tensor):
-                continue
-            if saved_start <= i < saved_end:
-                is_conj, is_neg = saved_view_bits[i - saved_start]
-                if is_conj or is_neg:
+            for saved_idx, (is_conj, is_neg) in enumerate(saved_view_bits):
+                if not (is_conj or is_neg):
+                    continue
+                node = placeholders[saved_start + saved_idx]
+                val = node.meta.get("val")
+                if not isinstance(val, torch.Tensor):
+                    continue
+                if inner_meta.saved_tensor_input_aliases[saved_idx] is not None:
                     clear_input_view_bits_and_insert_restore(
                         bw_module.graph,
                         node,
                         val,
+                        insertion_point,
                         is_conj=is_conj,
                         is_neg=is_neg,
                     )
-                    continue
-            node.meta["val"] = resolve_input_view_bits(val)
-
-        bw_module.graph.lint()
-        bw_module.recompile()
+                else:
+                    node.meta["val"] = resolve_input_view_bits(val)
+            bw_module.graph.lint()
+            bw_module.recompile()
         # NB: It's important to compile backwards ahead of time, as this may
         # add extra guards which we need to apply to the Dynamo cache at
         # forwards

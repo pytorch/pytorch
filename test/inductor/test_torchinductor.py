@@ -8443,6 +8443,46 @@ for dtype in (torch.int32, torch.int64):
         self.assertEqual(actual, expected)
         self.assertEqual(actual_base.grad, expected_base.grad)
 
+    def test_negative_view_graph_input_mutation(self):
+        def fn(x):
+            x.add_(1)
+            return x * x
+
+        def run(f):
+            base = torch.tensor([1.0, 2.0, 3.0], device=self.device, requires_grad=True)
+            x = (base * 1)._neg_view()
+            f(x).sum().backward()
+            return base.grad, x
+
+        expected_grad, expected_x = run(fn)
+        actual_grad, actual_x = run(torch.compile(fn, fullgraph=True))
+
+        self.assertEqual(actual_grad, expected_grad)
+        self.assertEqual(actual_x, expected_x)
+
+    def test_negative_view_graph_input_unsafe_view_alias(self):
+        def fn(x):
+            return torch.ops.aten._unsafe_view.default(x, [2, 3])
+
+        expected_base = torch.arange(8.0, device=self.device)
+        expected_x = expected_base[1:7]._neg_view()
+        expected = fn(expected_x)
+
+        actual_base = torch.arange(8.0, device=self.device)
+        actual_x = actual_base[1:7]._neg_view()
+        actual = torch.compile(fn, fullgraph=True)(actual_x)
+
+        self.assertEqual(actual, expected, exact_stride=True)
+        self.assertEqual(actual.is_neg(), expected.is_neg())
+        self.assertEqual(
+            actual.untyped_storage()._cdata,
+            actual_x.untyped_storage()._cdata,
+        )
+
+        expected.add_(10)
+        actual.add_(10)
+        self.assertEqual(actual_base, expected_base)
+
     def test_negative_view_graph_input_saved_version_counter(self):
         def fn(x):
             return x * x

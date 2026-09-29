@@ -330,6 +330,15 @@ def _clear_flat_args_and_restore_in_fn(
 def _propagate_no_vc_check_through_view_bit_restores(
     graph: torch.fx.Graph,
 ) -> None:
+    nodes = list(graph.nodes)
+    lazy_inputs = {
+        node
+        for node in nodes
+        if node.op == "placeholder" and node.meta.get("aot_input_view_bits") is not None
+    }
+    if not lazy_inputs:
+        return
+
     def same_storage(a: torch.fx.Node, b: torch.fx.Node) -> bool:
         a_val = a.meta.get("val")
         b_val = b.meta.get("val")
@@ -340,41 +349,49 @@ def _propagate_no_vc_check_through_view_bit_restores(
             == StorageWeakRef(b_val.untyped_storage())
         )
 
-    def path_to_lazy_input(
-        node: torch.fx.Node, seen: set[torch.fx.Node]
-    ) -> list[torch.fx.Node] | None:
-        if node in seen:
-            return None
-        next_seen = seen | {node}
-        if node.op == "placeholder":
-            return [node] if node.meta.get("aot_input_view_bits") is not None else None
+    reaches_lazy = set(lazy_inputs)
+    parent_to_lazy: dict[torch.fx.Node, torch.fx.Node] = {}
+    for node in nodes:
+        if node in lazy_inputs:
+            continue
         for arg in pytree.tree_leaves(node.args):
-            if isinstance(arg, torch.fx.Node) and same_storage(node, arg):
-                path = path_to_lazy_input(arg, next_seen)
-                if path is not None:
-                    return [node, *path]
-        return None
+            if (
+                isinstance(arg, torch.fx.Node)
+                and arg in reaches_lazy
+                and same_storage(node, arg)
+            ):
+                reaches_lazy.add(node)
+                parent_to_lazy[node] = arg
+                break
+
+    def mark_paths(*, with_vc_check: bool) -> None:
+        key = (
+            "saved_tensor_with_vc_check"
+            if with_vc_check
+            else "saved_tensor_with_no_vc_check"
+        )
+        marked: set[torch.fx.Node] = set()
+        for node in nodes:
+            if not node.meta.get(key, False) or node not in reaches_lazy:
+                continue
+            source = node
+            while source not in marked:
+                if with_vc_check:
+                    source.meta["saved_tensor_with_vc_check"] = True
+                    source.meta.pop("saved_tensor_with_no_vc_check", None)
+                elif not source.meta.get("saved_tensor_with_vc_check", False):
+                    source.meta["saved_tensor_with_no_vc_check"] = True
+                marked.add(source)
+                parent = parent_to_lazy.get(source)
+                if parent is None:
+                    break
+                source = parent
 
     # If the same alias family is both stashed directly on ctx and passed to
     # save_for_backward, eager performs a version check.  Propagate that fact
     # first and let it take precedence over the no-check path.
-    for node in graph.nodes:
-        if not node.meta.get("saved_tensor_with_vc_check", False):
-            continue
-        path = path_to_lazy_input(node, set())
-        if path is not None:
-            for source in path:
-                source.meta["saved_tensor_with_vc_check"] = True
-                source.meta.pop("saved_tensor_with_no_vc_check", None)
-
-    for node in graph.nodes:
-        if not node.meta.get("saved_tensor_with_no_vc_check", False):
-            continue
-        path = path_to_lazy_input(node, set())
-        if path is not None:
-            for source in path:
-                if not source.meta.get("saved_tensor_with_vc_check", False):
-                    source.meta["saved_tensor_with_no_vc_check"] = True
+    mark_paths(with_vc_check=True)
+    mark_paths(with_vc_check=False)
 
 
 def aot_dispatch_base_graph(
@@ -596,8 +613,16 @@ def aot_dispatch_autograd_graph(
     # traced_tangents corresponds to the set of outputs in the traced forward that should get grad_outputs in the traced backward.
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
-    traced_tangents = pytree.tree_map_only(
-        torch.Tensor, resolve_input_view_bits, fw_metadata.traced_tangents
+    has_lazy_tangent = any(
+        isinstance(tangent, torch.Tensor) and (tangent.is_conj() or tangent.is_neg())
+        for tangent in pytree.tree_leaves(fw_metadata.traced_tangents)
+    )
+    traced_tangents = (
+        pytree.tree_map_only(
+            torch.Tensor, resolve_input_view_bits, fw_metadata.traced_tangents
+        )
+        if has_lazy_tangent
+        else fw_metadata.traced_tangents
     )
     joint_inputs = (graph_flat_args, traced_tangents)
     joint_inputs_descs = (flat_args_descs, fw_metadata.traced_tangents_descs)
@@ -651,7 +676,8 @@ def aot_dispatch_autograd_graph(
             if desc == lazy_desc:
                 node.meta["aot_input_view_bits"] = view_bits
                 break
-    _propagate_no_vc_check_through_view_bit_restores(fx_g.graph)
+    if lazy_input_descs:
+        _propagate_no_vc_check_through_view_bit_restores(fx_g.graph)
 
     # Redundant with the check above, but worth having in case tracing introduced
     # a fake tensor. Unlikely.

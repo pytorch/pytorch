@@ -93,6 +93,7 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertNotIn("_is_view_replay_enabled", source)
         self.assertNotIn("_set_view_replay_enabled", source)
         self.assertNotIn("_clear_input_view_bits_", source)
+        self.assertNotIn("pre_mutation_bases", source)
 
     def test_inference_clears_only_lazy_view_bit_inputs(self):
         with capture_codegen_source("runtime_wrapper_orchestration") as captured:
@@ -138,6 +139,7 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertIn("if not prev_view_replay_enabled:", source)
         self.assertIn("torch.enable_grad()", source)
         self.assertNotIn("_clear_input_view_bits_", source)
+        self.assertNotIn("pre_mutation_bases", source)
 
     def test_training_with_detach_indices(self):
         """

@@ -1327,6 +1327,12 @@ def aot_dispatch_subclass(
             maybe_subclass_meta=None,
         )
 
+    if any(info.has_view_bits for info in meta.input_info):
+        raise RuntimeError(
+            "AOTAutograd does not support inputs with conjugate or negative "
+            "view bits together with tensor subclass dispatch"
+        )
+
     # TODO: add subclass guards (later PR).
 
     # What's going on here? We need to compute subclass metadata about the outputs of the joint (grad_inputs).

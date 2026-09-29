@@ -1530,7 +1530,11 @@ def forward(self, arg0_1, arg1_1):
             fn = unsafe_view
 
         compiled = aot_function(fn, fw_compiler=checking_compiler)
-        self.assertEqual(compiled(x), fn(x))
+        actual = compiled(x)
+        expected = fn(x)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.is_conj(), expected.is_conj())
+        self.assertEqual(actual.is_neg(), expected.is_neg())
 
     @parametrize("view_bits", ["negative", "conjugate", "both"])
     def test_lazy_view_bits_are_visible_during_tracing_and_autograd(self, view_bits):
@@ -1609,9 +1613,30 @@ def forward(self, arg0_1, arg1_1):
         cleared.add_(1)
         self.assertEqual(cleared._version, x._version)
 
+    def test_lazy_view_bits_runtime_mismatch_raises(self):
+        def fn(x):
+            return x[1:]
+
+        lazy = torch.arange(4.0)._neg_view()
+        compiled_lazy = aot_function(fn, fw_compiler=nop)
+        self.assertEqual(compiled_lazy(lazy), fn(lazy))
+
+        with self.assertRaisesRegex(RuntimeError, "bits observed while tracing"):
+            compiled_lazy(torch.arange(4.0))
+
+        plain = torch.arange(4.0)
+        compiled_plain = aot_function(fn, fw_compiler=nop)
+        self.assertEqual(compiled_plain(plain), fn(plain))
+
+        with self.assertRaisesRegex(RuntimeError, "bits observed while tracing"):
+            compiled_plain(lazy)
+
     @parametrize("mutation", ["data", "metadata", "data_and_metadata"])
     @parametrize("view_replay", [False, True])
-    def test_lazy_view_bits_preserve_aliases_and_mutations(self, mutation, view_replay):
+    @parametrize("view_bits", ["negative", "conjugate", "both"])
+    def test_lazy_view_bits_preserve_aliases_and_mutations(
+        self, mutation, view_replay, view_bits
+    ):
         def checking_compiler(gm, example_inputs):
             self.assertTrue(
                 all(
@@ -1638,12 +1663,21 @@ def forward(self, arg0_1, arg1_1):
                 x.add_(2)
             return x[1:] if mutation == "data" else x[:, 1:]
 
-        base_eager = torch.arange(20.0).reshape(4, 5)
-        x_eager = base_eager[1:3, 1:4]._neg_view()
+        def make_input():
+            base = torch.arange(20.0).reshape(4, 5)
+            if view_bits in ("conjugate", "both"):
+                base = base.to(torch.complex64)
+            x = base[1:3, 1:4]
+            if view_bits in ("conjugate", "both"):
+                x = x.conj()
+            if view_bits in ("negative", "both"):
+                x = x._neg_view()
+            return base, x
+
+        base_eager, x_eager = make_input()
         out_eager = fn(x_eager)
 
-        base_actual = torch.arange(20.0).reshape(4, 5)
-        x_actual = base_actual[1:3, 1:4]._neg_view()
+        base_actual, x_actual = make_input()
         with patch(
             "torch._functorch.config.view_replay_for_aliased_outputs",
             view_replay,
@@ -1710,6 +1744,17 @@ def forward(self, arg0_1, arg1_1):
         def fn(x):
             return x.narrow(0, 1, x.shape[0] - 1)
 
+        def cloning_compiler(gm, _):
+            def compiled(*args):
+                return gm(
+                    *(
+                        arg.clone() if isinstance(arg, torch.Tensor) else arg
+                        for arg in args
+                    )
+                )
+
+            return make_boxed_func(compiled)
+
         base = torch.arange(12.0)
         x = base[2:10]._neg_view()
         with patch(
@@ -1717,15 +1762,54 @@ def forward(self, arg0_1, arg1_1):
         ):
             compiled = aot_function(
                 fn,
-                fw_compiler=lambda gm, _: make_boxed_func(gm.forward),
+                fw_compiler=cloning_compiler,
                 dynamic=True,
             )
             actual = compiled(x)
         self.assertEqual(actual, fn(x), exact_stride=True)
         self.assertTrue(actual.is_neg())
 
+    @parametrize("view_bits", ["negative", "conjugate", "both"])
+    def test_lazy_view_bits_preserve_intermediate_output_aliases(self, view_bits):
+        def materializing_compiler(gm, _):
+            def compiled(args):
+                return [
+                    out.clone() if isinstance(out, torch.Tensor) else out
+                    for out in gm(*args)
+                ]
+
+            compiled._boxed_call = True
+            return compiled
+
+        def fn(x):
+            y = x.clone()
+            alias = y.conj() if view_bits in ("conjugate", "both") else y
+            if view_bits in ("negative", "both"):
+                alias = alias._neg_view()
+            return y, alias
+
+        dtype = torch.complex64 if view_bits in ("conjugate", "both") else torch.float32
+        expected = fn(torch.arange(4.0).to(dtype))
+        compiled = aot_function(fn, fw_compiler=materializing_compiler)
+        actual = compiled(torch.arange(4.0).to(dtype))
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual[1].is_conj(), expected[1].is_conj())
+        self.assertEqual(actual[1].is_neg(), expected[1].is_neg())
+        self.assertEqual(
+            actual[0].untyped_storage()._cdata,
+            actual[1].untyped_storage()._cdata,
+        )
+
+        expected[1].add_(10)
+        actual[1].add_(10)
+        self.assertEqual(actual[0], expected[0])
+
     @parametrize("case", ["lazy_grad_output", "saved_lazy_activation"])
-    def test_lazy_view_bits_are_normalized_before_backward_backend(self, case):
+    @parametrize("view_bits", ["negative", "conjugate", "both"])
+    def test_lazy_view_bits_are_normalized_before_backward_backend(
+        self, case, view_bits
+    ):
         def checking_compiler(gm, example_inputs):
             for arg in example_inputs:
                 if isinstance(arg, torch.Tensor):
@@ -1738,6 +1822,13 @@ def forward(self, arg0_1, arg1_1):
                     self.assertFalse(val.is_neg())
             return make_boxed_func(gm.forward)
 
+        def apply_view_bits(x):
+            if view_bits in ("conjugate", "both"):
+                x = x.conj()
+            if view_bits in ("negative", "both"):
+                x = x._neg_view()
+            return x
+
         if case == "lazy_grad_output":
 
             def fn(x):
@@ -1745,11 +1836,12 @@ def forward(self, arg0_1, arg1_1):
         else:
 
             def fn(x):
-                y = x._neg_view()
+                y = apply_view_bits(x)
                 return y * y
 
-        x_eager = torch.randn(4, requires_grad=True)
-        grad_out = torch.randn(4)._neg_view()
+        dtype = torch.complex64 if view_bits in ("conjugate", "both") else torch.float32
+        x_eager = torch.randn(4, dtype=dtype, requires_grad=True)
+        grad_out = apply_view_bits(torch.randn(4, dtype=dtype))
         (expected,) = torch.autograd.grad(fn(x_eager), x_eager, grad_out)
 
         x_actual = x_eager.detach().clone().requires_grad_()
@@ -1760,6 +1852,74 @@ def forward(self, arg0_1, arg1_1):
         )
         (actual,) = torch.autograd.grad(compiled(x_actual), x_actual, grad_out)
         self.assertEqual(actual, expected)
+
+    def test_lazy_view_bits_materialized_independent_saved_intermediate_avoids_restore(
+        self,
+    ):
+        def fn(x):
+            y = x.clone()._neg_view()
+            return y * y
+
+        def fw_compiler(gm, _):
+            def compiled(args):
+                return [
+                    out.clone() if isinstance(out, torch.Tensor) else out
+                    for out in gm(*args)
+                ]
+
+            compiled._boxed_call = True
+            return compiled
+
+        def bw_compiler(gm, _):
+            self.assertNotIn(
+                torch.ops.aten._neg_view.default,
+                (node.target for node in gm.graph.nodes),
+            )
+            return make_boxed_func(gm.forward)
+
+        expected_x = torch.randn(4, requires_grad=True)
+        fn(expected_x).sum().backward()
+
+        actual_x = expected_x.detach().clone().requires_grad_()
+        compiled = aot_function(
+            fn,
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+        )
+        compiled(actual_x).sum().backward()
+        self.assertEqual(actual_x.grad, expected_x.grad)
+
+    @parametrize("view_bits", ["negative", "conjugate"])
+    @parametrize("materialize_outputs", [False, True])
+    def test_lazy_view_bits_preserve_forward_created_view_version_counter(
+        self, view_bits, materialize_outputs
+    ):
+        def fn(x):
+            y = x._neg_view() if view_bits == "negative" else x.conj()
+            return y * y
+
+        def compiler(gm, _):
+            if not materialize_outputs:
+                return make_boxed_func(gm.forward)
+
+            def compiled(args):
+                return [
+                    out.clone() if isinstance(out, torch.Tensor) else out
+                    for out in gm(*args)
+                ]
+
+            compiled._boxed_call = True
+            return compiled
+
+        dtype = torch.float32 if view_bits == "negative" else torch.complex64
+        x = torch.arange(1.0, 5.0).to(dtype).requires_grad_()
+        compiled = aot_function(fn, fw_compiler=compiler, bw_compiler=compiler)
+        out = compiled(x)
+        with torch.no_grad():
+            x.add_(10)
+
+        with self.assertRaisesRegex(RuntimeError, "modified by an inplace"):
+            out.real.sum().backward()
 
     @parametrize("saves_input", [False, True])
     @parametrize("materialize_outputs", [False, True])
@@ -1834,6 +1994,18 @@ def forward(self, arg0_1, arg1_1):
         with self.assertRaisesRegex(RuntimeError, "modified by an inplace"):
             out.sum().backward()
 
+    @parametrize("part", ["real", "imag"])
+    def test_lazy_view_bits_reject_saved_dtype_changing_view(self, part):
+        def fn(x, y):
+            return getattr(x, part) * y
+
+        compiled = aot_function(fn, fw_compiler=nop, bw_compiler=nop)
+        x = torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64).conj()
+        y = torch.tensor([5.0, 6.0], requires_grad=True)
+
+        with self.assertRaisesRegex(RuntimeError, "saved view with a different dtype"):
+            compiled(x, y)
+
     @parametrize("lazy", [False, True])
     def test_lazy_view_bits_preserve_static_inputs(self, lazy):
         from torch._functorch._aot_autograd.collect_metadata_analysis import (
@@ -1865,6 +2037,19 @@ def forward(self, arg0_1, arg1_1):
             dynamic=True,
         )
         with self.assertRaisesRegex(RuntimeError, "symbolic storage offset"):
+            compiled(x)
+
+        def symbolic_saved_metadata(x):
+            y = x.transpose(0, 1)
+            return (y * y).sum()
+
+        x = torch.arange(6.0).reshape(2, 3)._neg_view().requires_grad_()
+        compiled = aot_function(
+            symbolic_saved_metadata,
+            fw_compiler=lambda gm, _: make_boxed_func(gm.forward),
+            dynamic=True,
+        )
+        with self.assertRaisesRegex(RuntimeError, "symbolic size or stride"):
             compiled(x)
 
         def metadata_mutation(x):
@@ -1950,7 +2135,32 @@ def forward(self, arg0_1, arg1_1):
             fn,
             fw_compiler=lambda gm, _: make_boxed_func(gm.forward),
         )
-        self.assertEqual(compiled(x, y), fn(x, y))
+        with self.assertRaisesRegex(RuntimeError, "together with tensor subclass"):
+            compiled(x, y)
+
+    def test_forward_created_lazy_view_bits_next_to_tensor_subclass(self):
+        def fn(a, b):
+            lazy = a._neg_view()
+            return lazy * lazy, b.clone()
+
+        compiled = aot_function(
+            fn,
+            fw_compiler=lambda gm, _: make_boxed_func(gm.forward),
+            bw_compiler=lambda gm, _: make_boxed_func(gm.forward),
+        )
+
+        expected_x = torch.arange(4.0, requires_grad=True)
+        expected_y = TwoTensor(torch.arange(4.0), torch.arange(4.0))
+        expected = fn(expected_x, expected_y)
+        expected[0].sum().backward()
+
+        actual_x = torch.arange(4.0, requires_grad=True)
+        actual_y = TwoTensor(torch.arange(4.0), torch.arange(4.0))
+        actual = compiled(actual_x, actual_y)
+        actual[0].sum().backward()
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_x.grad, expected_x.grad)
 
     @parametrize("backend", ["aot_eager", "inductor"])
     @parametrize("view_replay_for_aliased_outputs", [False, True])
@@ -5887,6 +6097,16 @@ class TestAOTExport(AOTTestCase):
         super().setUp()
         torch._dynamo.reset()
 
+    def test_export_preserves_lazy_input_view_bits(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.imag
+
+        mod = M()
+        x = torch.tensor([1 + 2j, 3 + 4j], dtype=torch.complex64).conj()
+        exported = torch.export.export(mod, (x,))
+        self.assertEqual(exported.module()(x), mod(x))
+
     def test_aot_export_module_graph_module_serialization(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -8812,6 +9032,7 @@ def forward(self, primals_1, tangents_1):
         source = captured[0]
         self.assertIn("def _backward_prologue(", source)
         self.assertIn("torch._C._functorch.peek_interpreter_stack()", source)
+        self.assertNotIn("_normalize_view_bits_", source)
 
     def test_backward_prologue_no_codegen_for_inference(self):
         with capture_codegen_source("backward_prologue") as captured:
@@ -10127,6 +10348,21 @@ def forward(self, primals_1, tangents_1):
         actual = self._run_with_compiled_autograd(run)
         self.assertEqual(actual[0], expected[0])
         self.assertEqual(actual[1], expected[1])
+
+    def test_lazy_view_bits_compiled_autograd(self):
+        @torch.compile(backend="aot_eager", fullgraph=True)
+        def f(x):
+            return x * x
+
+        def run():
+            x = torch.tensor([1.0, 2.0, 3.0])._neg_view().detach().requires_grad_()
+            f(x).sum().backward()
+            return x.grad
+
+        expected = run()
+        torch._dynamo.reset()
+        actual = self._run_with_compiled_autograd(run)
+        self.assertEqual(actual, expected)
 
     # --- AOTSyntheticBaseWrapper codegen tests ---
 

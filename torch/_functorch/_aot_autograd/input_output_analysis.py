@@ -111,7 +111,6 @@ def remove_dupe_metadata(
                 view_meta_sequence=o.view_meta_sequence,
                 is_conj=o.is_conj,
                 is_neg=o.is_neg,
-                base_input_has_view_bits=o.base_input_has_view_bits,
             )
             for o in m.output_info
         ],
@@ -192,6 +191,9 @@ def create_synthetic_base_metadata(
         mutation_inductor_storage_resize = all(
             m.input_info[x].mutation_inductor_storage_resize for x in outer_indices
         )
+        single_info = (
+            m.input_info[outer_indices[0]] if len(outer_indices) == 1 else None
+        )
 
         inpt_info = InputAliasInfo(
             # If len(outer_indices) > 1, then this input is a synthetic base.
@@ -204,42 +206,29 @@ def create_synthetic_base_metadata(
                 m.input_info[x].mutations_hidden_from_autograd for x in outer_indices
             ),
             mutates_storage_metadata=(
-                False
-                if len(outer_indices) > 1
-                else m.input_info[outer_indices[0]].mutates_storage_metadata
+                single_info.mutates_storage_metadata
+                if single_info is not None
+                else False
             ),
             mutation_is_shallow_copy_data=(
-                False
-                if len(outer_indices) > 1
-                else m.input_info[outer_indices[0]].mutation_is_shallow_copy_data
+                single_info.mutation_is_shallow_copy_data
+                if single_info is not None
+                else False
             ),
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             mutation_inductor_storage_resize=mutation_inductor_storage_resize,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
             keep_input_mutations=(
-                m.input_info[outer_indices[0]].keep_input_mutations
-                if len(outer_indices) == 1
+                single_info.keep_input_mutations
+                if single_info is not None
                 else m.keep_input_mutations
             ),
-            has_view_bits=(
-                m.input_info[outer_indices[0]].has_view_bits
-                if len(outer_indices) == 1
-                else False
-            ),
-            is_conj=(
-                m.input_info[outer_indices[0]].is_conj
-                if len(outer_indices) == 1
-                else False
-            ),
-            is_neg=(
-                m.input_info[outer_indices[0]].is_neg
-                if len(outer_indices) == 1
-                else False
-            ),
+            is_conj=single_info.is_conj if single_info is not None else False,
+            is_neg=single_info.is_neg if single_info is not None else False,
             mutation_view_meta_sequence=(
-                m.input_info[outer_indices[0]].mutation_view_meta_sequence
-                if len(outer_indices) == 1
+                single_info.mutation_view_meta_sequence
+                if single_info is not None
                 else None
             ),
         )
@@ -271,13 +260,13 @@ def create_synthetic_base_metadata(
             requires_grad_for_backward=requires_grad,
             is_conj=outer_args[outer_idx].is_conj(),
             is_neg=outer_args[outer_idx].is_neg(),
-            base_input_has_view_bits=False,
         )
         for outer_idx in outer_aliased_arg_idx_with_metadata_mutations
     ]
     existing_output_infos = []
     for o in m.output_info:
         input_merged = False
+        lazy_input_merged = False
         if o.base_idx is None or o.output_type not in INPUT_ALIAS_TYPES:
             # base_idx is not an input index for these, so synthetic bases
             # leave it alone. See OutputAliasInfo.base_idx.
@@ -288,6 +277,7 @@ def create_synthetic_base_metadata(
             # If the original input was merged into a synthetic base, then an
             # output that was literally that input is now a view of the base.
             input_merged = isinstance(synthetic_base_info_for_output, tuple)
+            lazy_input_merged = input_merged and m.input_info[o.base_idx].has_view_bits
             new_base_idx = (
                 synthetic_base_info_for_output[0]  # type: ignore[index]
                 if input_merged
@@ -307,12 +297,11 @@ def create_synthetic_base_metadata(
                 base_idx=new_base_idx,  # type: ignore[arg-type]
                 requires_grad=o.requires_grad,
                 requires_grad_for_backward=o.requires_grad_for_backward,
-                view_meta_sequence=(None if input_merged else o.view_meta_sequence),
+                view_meta_sequence=(
+                    None if lazy_input_merged else o.view_meta_sequence
+                ),
                 is_conj=o.is_conj,
                 is_neg=o.is_neg,
-                base_input_has_view_bits=(
-                    False if input_merged else o.base_input_has_view_bits
-                ),
             )
         )
 

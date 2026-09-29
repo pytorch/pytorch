@@ -46,6 +46,7 @@ from .functional_utils import (
     has_data_mutation,
     has_metadata_mutation,
     has_same_metadata,
+    has_same_storage_metadata,
     MetadataKey,
     replay_view_meta_sequence,
     to_fun,
@@ -310,7 +311,6 @@ def run_functionalized_fw_and_collect_metadata(
                     mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
                     keep_input_mutations=keep_input_mutations_for_arg,
-                    has_view_bits=has_view_bits,
                     is_conj=isinstance(arg, Tensor) and arg.is_conj(),
                     is_neg=isinstance(arg, Tensor) and arg.is_neg(),
                     mutation_view_meta_sequence=mutation_view_meta_sequence,
@@ -327,6 +327,40 @@ def run_functionalized_fw_and_collect_metadata(
             for idx, inpt in enumerate(flat_f_args)
             if isinstance(inpt, Tensor)
         }
+        original_input_storage_refs: collections.defaultdict[
+            StorageWeakRef, list[int]
+        ] = collections.defaultdict(list)
+        for idx, inpt in enumerate(flat_args):
+            if isinstance(inpt, Tensor) and input_info[idx].has_view_bits:
+                original_input_storage_refs[
+                    StorageWeakRef(inpt.untyped_storage())
+                ].append(idx)
+
+        def lazy_input_base_from_unwrapped_output(
+            output: FunctionalTensor,
+        ) -> int | None:
+            """Recover views whose FunctionalTensor wrapper hides input aliasing.
+
+            ``_unsafe_view`` is the motivating case: its FunctionalTensor has a
+            distinct wrapper storage even though the unwrapped tensor aliases
+            the input. Only use this fallback for lazy-bit inputs, and require
+            view replay to reproduce the output metadata exactly.
+            """
+            unwrapped = from_fun(output)
+            if not isinstance(unwrapped, Tensor):
+                return None
+            candidates = original_input_storage_refs.get(
+                StorageWeakRef(unwrapped.untyped_storage()), []
+            )
+            view_meta_sequence = ViewMetaSequence(output)
+            for idx in candidates:
+                replayed = replay_view_meta_sequence(flat_args[idx], view_meta_sequence)
+                if replayed.dtype == unwrapped.dtype and has_same_metadata(
+                    replayed, unwrapped
+                ):
+                    return idx
+            return None
+
         # We need inp tensor id's to be able to tell if an outputs **are** inputs.
         inp_tensor_id_to_idx = {
             id(inpt): idx
@@ -492,6 +526,13 @@ def run_functionalized_fw_and_collect_metadata(
                 if not isinstance(o, torch.Tensor)
                 else StorageWeakRef(o.untyped_storage())
             )
+            unwrapped_lazy_base_idx = (
+                lazy_input_base_from_unwrapped_output(o)
+                if isinstance(o, FunctionalTensor)
+                and curr_storage not in inp_storage_refs
+                and not functional_tensor_storage_changed
+                else None
+            )
             outs_with_identical_metadata_that_require_grad: list[torch.Tensor] = (
                 []
                 if not isinstance(o, Tensor)
@@ -542,11 +583,13 @@ def run_functionalized_fw_and_collect_metadata(
                 output_type = OutputType.custom_function_view
                 base_idx = None
             elif (
-                curr_storage in inp_storage_refs
-                and not functional_tensor_storage_changed
-            ):
-                # pyrefly: ignore [bad-index, index-error]
-                base_idx = inp_storage_refs[curr_storage]
+                curr_storage in inp_storage_refs or unwrapped_lazy_base_idx is not None
+            ) and not functional_tensor_storage_changed:
+                base_idx = (
+                    unwrapped_lazy_base_idx
+                    if unwrapped_lazy_base_idx is not None
+                    else inp_storage_refs[curr_storage]  # type: ignore[index]
+                )
                 is_input_tensor = id(o) in inp_tensor_ids
                 num_aliased_outs = out_tensor_alias_counts[curr_storage]
                 num_multi_output_view_outs = (
@@ -679,7 +722,7 @@ from a multi-output view call"
             elif (
                 o._base is not None
                 and not is_traceable_wrapper_subclass(o)
-                and has_same_metadata(o, o._base)
+                and has_same_storage_metadata(o, o._base)
                 and id(o._base) in out_tensor_ids
             ):
                 # o is a no-op view of another user output, but not
@@ -786,7 +829,6 @@ from a multi-output view call"
                 view_meta_sequence=view_meta_sequence,
                 is_conj=is_conj,
                 is_neg=is_neg,
-                base_input_has_view_bits=base_input_has_view_bits,
             )
             output_info.append(out_info)
 

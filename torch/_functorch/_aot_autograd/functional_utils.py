@@ -72,25 +72,41 @@ def resolve_input_view_bits(t: torch.Tensor) -> torch.Tensor:
     return t
 
 
-def clear_input_view_bits(t: torch.Tensor) -> torch.Tensor:
-    """Return a view of ``t`` with its lazy conjugate/negative bits cleared."""
-    if t.is_conj():
+def set_input_view_bits(
+    t: torch.Tensor, *, is_conj: bool, is_neg: bool
+) -> torch.Tensor:
+    if t.is_conj() != is_conj:
         t = t.conj()
-    if t.is_neg():
+    if t.is_neg() != is_neg:
         t = t._neg_view()
     return t
 
 
+def clear_input_view_bits(t: torch.Tensor) -> torch.Tensor:
+    """Return a view of ``t`` with its lazy conjugate/negative bits cleared."""
+    return set_input_view_bits(t, is_conj=False, is_neg=False)
+
+
 def clear_input_view_bits_for_spec(
-    t: torch.Tensor, *, is_conj: bool, is_neg: bool
+    t: torch.Tensor,
+    *,
+    is_conj: bool,
+    is_neg: bool,
+    allow_mismatch: bool = False,
 ) -> torch.Tensor:
     """Make the bit-free physical input for a graph that restores ``is_*``.
 
-    The fast path only creates views.  The fallback handles callers/backends that
-    materialized a tensor whose compile-time example carried lazy view bits.
+    Runtime graph inputs must match the trace-time bits. Backend-produced
+    tensors may opt into the fallback because a backend can resolve their bits.
     """
     if t.is_conj() == is_conj and t.is_neg() == is_neg:
         return clear_input_view_bits(t)
+
+    if not allow_mismatch:
+        raise RuntimeError(
+            "AOTAutograd received runtime conjugate/negative bits that differ "
+            "from the bits observed while tracing"
+        )
 
     t = resolve_input_view_bits(t)
     if is_conj:
@@ -103,17 +119,14 @@ def clear_input_view_bits_for_spec(
 def restore_input_view_bits_for_spec(
     t: torch.Tensor, *, is_conj: bool, is_neg: bool
 ) -> torch.Tensor:
-    if is_conj:
-        t = t.conj()
-    if is_neg:
-        t = t._neg_view()
-    return t
+    return set_input_view_bits(t, is_conj=is_conj, is_neg=is_neg)
 
 
 def clear_input_view_bits_and_insert_restore(
     graph: torch.fx.Graph,
     placeholder: torch.fx.Node,
     example: torch.Tensor,
+    insertion_point: torch.fx.Node,
     *,
     is_conj: bool,
     is_neg: bool,
@@ -140,7 +153,7 @@ def clear_input_view_bits_and_insert_restore(
         *([torch.ops.aten._conj.default] if is_conj else []),
         *([torch.ops.aten._neg_view.default] if is_neg else []),
     ):
-        with graph.inserting_after(restored):
+        with graph.inserting_before(insertion_point):
             restored = graph.call_function(target, (restored,))
         restored.meta = copy.copy(original_meta)
         if isinstance(meta_val, torch.Tensor):
@@ -152,25 +165,34 @@ def clear_input_view_bits_and_insert_restore(
     return cleared_example
 
 
-def normalize_backward_input_view_bits_in_place(
+def normalize_saved_tensor_view_bits_in_place(
     args: list[Any],
     *,
     num_symints_saved_for_bw: int,
     saved_tensor_view_bits: list[tuple[bool, bool]],
+    saved_tensor_input_aliases: list[object | None],
 ) -> list[Any]:
+    if len(saved_tensor_view_bits) != len(saved_tensor_input_aliases):
+        raise AssertionError(
+            "expected one input-alias entry per saved tensor view-bit entry"
+        )
     saved_start = num_symints_saved_for_bw
-    saved_end = saved_start + len(saved_tensor_view_bits)
-    for i, arg in enumerate(args):
+    for saved_idx, (is_conj, is_neg) in enumerate(saved_tensor_view_bits):
+        if not (is_conj or is_neg):
+            continue
+        i = saved_start + saved_idx
+        arg = args[i]
         if not isinstance(arg, torch.Tensor):
             continue
-        if saved_start <= i < saved_end:
-            is_conj, is_neg = saved_tensor_view_bits[i - saved_start]
-            if is_conj or is_neg:
-                args[i] = clear_input_view_bits_for_spec(
-                    arg, is_conj=is_conj, is_neg=is_neg
-                )
-                continue
-        args[i] = resolve_input_view_bits(arg)
+        if saved_tensor_input_aliases[saved_idx] is None:
+            args[i] = resolve_input_view_bits(arg)
+        else:
+            args[i] = clear_input_view_bits_for_spec(
+                arg,
+                is_conj=is_conj,
+                is_neg=is_neg,
+                allow_mismatch=True,
+            )
     return args
 
 
@@ -432,26 +454,30 @@ def gen_alias_from_base(
     replay_views: bool,
     target_is_conj: bool | None = None,
     target_is_neg: bool | None = None,
+    translate_storage_offset: bool = False,
 ) -> Tensor:
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
     # and (ii) the concrete returned output does require grad or not.
-    def patch_requires_grad(out: Tensor) -> Tensor:
+    def patch_output_properties(out: Tensor) -> Tensor:
         if aliased_base_tensor.requires_grad and not target_requires_grad:
             out = out.detach()
         elif not aliased_base_tensor.requires_grad and target_requires_grad:
             out.requires_grad_(True)
-        return out
-
-    def patch_view_bits(out: Tensor) -> Tensor:
-        is_conj = (
-            target_meta_tensor.is_conj() if target_is_conj is None else target_is_conj
-        )
-        is_neg = target_meta_tensor.is_neg() if target_is_neg is None else target_is_neg
-        if out.is_conj() != is_conj:
-            out = out.conj()
-        if out.is_neg() != is_neg:
-            out = out._neg_view()
+        if target_is_conj is not None or target_is_neg is not None:
+            out = set_input_view_bits(
+                out,
+                is_conj=(
+                    target_meta_tensor.is_conj()
+                    if target_is_conj is None
+                    else target_is_conj
+                ),
+                is_neg=(
+                    target_meta_tensor.is_neg()
+                    if target_is_neg is None
+                    else target_is_neg
+                ),
+            )
         return out
 
     # If provided, use the target functional tensor for replaying the views.
@@ -475,7 +501,7 @@ def gen_alias_from_base(
                 "incorrect out shape after application of ViewMeta sequence: "
                 f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
             )
-        return patch_view_bits(patch_requires_grad(out))
+        return patch_output_properties(out)
 
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.
@@ -503,23 +529,18 @@ def gen_alias_from_base(
         #
         # As a stopgap, we'll fall back to as_strided.
         if out is not None and out.shape == target_meta_tensor.shape:
-            return patch_view_bits(patch_requires_grad(out))
+            return patch_output_properties(out)
 
     size = target_meta_tensor.size()
     stride = target_meta_tensor.stride()
     storage_offset = target_meta_tensor.storage_offset()
-    # If the target lives on a different storage than the aliased base
-    # (e.g. because inductor's copy_misaligned_inputs cloned the input to
-    # obtain an aligned buffer), ``target.storage_offset()`` is expressed in
-    # the cloned storage and would pick the wrong slice when applied via
-    # ``as_strided()`` on the original aliased base tensor. Translate the
-    # offset: the traced FakeTensor's storage_offset equals the trace-time
-    # RELATIVE offset from the input, so add back the runtime input's
-    # ``storage_offset`` to keep the alias anchored to the correct slice.
+    # For a lazy-bit input alias without a replayable view sequence, the
+    # backend may have cloned the input. Its output offset is then relative to
+    # that clone, so add the original input's offset before replaying the view.
     # Compare storages via ``_cdata`` (raw c10::Storage handle) rather than
     # ``.data_ptr()`` so this is safe on fake/meta storages that would raise
     # from ``.data_ptr()`` during AOT tracing.
-    if (
+    if translate_storage_offset and (
         aliased_base_tensor.untyped_storage()._cdata
         != target_meta_tensor.untyped_storage()._cdata
     ):
@@ -534,16 +555,14 @@ def gen_alias_from_base(
         )
     else:
         aliased_out = aliased_base_tensor.as_strided(size, stride, storage_offset)
-    # For outputs aliasing inputs, we need to check if the requires-gradness has changed.
-    aliased_out = patch_requires_grad(aliased_out)
     # For outputs aliasing inputs, we need to check if the dtype has changed.
     # as_strided() is the "most generic" view, but it does not cover cross-dtype views
     if aliased_out.dtype != target_meta_tensor.dtype:
         aliased_out = aliased_out.view(target_meta_tensor.dtype)
-    return patch_view_bits(aliased_out)
+    return patch_output_properties(aliased_out)
 
 
-def has_same_metadata(t1: Tensor, t2: Tensor) -> bool:
+def has_same_storage_metadata(t1: Tensor, t2: Tensor) -> bool:
     return (
         guard_or_false(sym_eq(t1.size(), t2.size()))
         and guard_or_false(t1.layout == t2.layout)
@@ -554,6 +573,12 @@ def has_same_metadata(t1: Tensor, t2: Tensor) -> bool:
                 and guard_or_false(t1.storage_offset() == t2.storage_offset())
             )
         )
+    )
+
+
+def has_same_metadata(t1: Tensor, t2: Tensor) -> bool:
+    return (
+        has_same_storage_metadata(t1, t2)
         and t1.is_conj() == t2.is_conj()
         and t1.is_neg() == t2.is_neg()
     )
