@@ -3010,7 +3010,13 @@ class BuiltinVariable(BaseBuiltinVariable):
             if spec.is_python_constant() and spec_type != "str":
                 msg = f"format() argument 2 must be str, not {spec_type}"
                 raise_type_error(tx, msg)
-            return _format_string.call_method(tx, "__format__", [spec], {})
+            result = _format_string.call_method(tx, "__format__", [spec], {})
+            if not issubclass(maybe_get_python_type(result), str):
+                raise_type_error(
+                    tx,
+                    f"__format__ must return a str, not {result.python_type_name()}",
+                )
+            return result
         format_string = _format_string.as_python_constant()
         format_string = str(format_string)
         return StringFormatVariable.create(format_string, list(args), kwargs)

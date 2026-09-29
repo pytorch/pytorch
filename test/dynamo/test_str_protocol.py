@@ -28,6 +28,11 @@ class _FormatSpecEcho:
         return f"<{spec}>"
 
 
+class _NonStringFormatResult:
+    def __format__(self, spec):
+        return 7
+
+
 class _OpaqueStrDescriptorObject:
     __str__ = str.upper
 
@@ -132,6 +137,12 @@ class FormatTests(TestCase):
         obj = _FormatSpecEcho()
         self.assertEqual(format(obj, "x"), "<x>")
         self.assertEqual(format(obj), "<>")
+
+    @torch._dynamo.config.patch(enable_trace_unittest=True)
+    @make_dynamo_test
+    def test_builtin_format_non_string_result(self):
+        with self.assertRaisesRegex(TypeError, "__format__ must return a str, not int"):
+            format(_NonStringFormatResult(), "x")
 
 
 class TpStrUserDefinedTests(TestCase):
