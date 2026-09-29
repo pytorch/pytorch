@@ -17944,6 +17944,32 @@ fn
         self.assertEqual(fn(x, get_foo()), opt_fn(x, get_foo()))
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___metaclass_global_read(self):
+        class Meta(type):
+            def __new__(cls, name, bases, ns):
+                ns["tag"] = _build_class_meta_tag
+                return super().__new__(cls, name, bases, ns)
+
+        def fn(t):
+            class A(metaclass=Meta):
+                pass
+
+            return t + A.tag
+
+        t = torch.ones(1)
+        globals()["_build_class_meta_tag"] = 2
+        try:
+            opt_fn = torch.compile(fn, backend="eager")
+            self.assertEqual(opt_fn(t), fn(t))
+            globals()["_build_class_meta_tag"] = 3
+            self.assertEqual(opt_fn(t), fn(t))
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(Unsupported, "__build_class__"):
+                torch.compile(fn, backend="eager", fullgraph=True)(t)
+        finally:
+            del globals()["_build_class_meta_tag"]
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test___build_class___metaclass_kwargs(self):
         class Outer:
             factor = 2

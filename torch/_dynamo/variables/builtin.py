@@ -23,6 +23,7 @@ import abc
 import ast
 import builtins
 import contextlib
+import dis
 import functools
 import inspect
 import itertools
@@ -2144,6 +2145,15 @@ class BuiltinVariable(BaseBuiltinVariable):
                 for v in vars(klass).values()
                 if isinstance(f := getattr(v, "__func__", v), types.FunctionType)
                 for name, cell in zip(f.__code__.co_freevars, f.__closure__ or ())
+            ):
+                fail(args, kwargs)
+            if isinstance(meta, type) and any(
+                instruction.opname == "LOAD_GLOBAL"
+                and instruction.argval in f.__globals__
+                for klass in meta.__mro__
+                for v in vars(klass).values()
+                if isinstance(f := getattr(v, "__func__", v), types.FunctionType)
+                for instruction in dis.get_instructions(f)
             ):
                 fail(args, kwargs)
             try:
