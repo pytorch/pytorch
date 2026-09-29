@@ -6148,9 +6148,11 @@ class TestPrecompileRuntimeCache(TestCase):
         )
         with open(cache, "rb") as f:
             original = f.read()
-        with self.assertRaisesRegex(PrecompileError, "Could not finalize") as failure:
+        with self.assertRaisesRegex(
+            PrecompileError, "^precompile\\.finalize_cache: Could not finalize"
+        ) as failure:
             pc.finalize_cache(artifact_path=source, cache_path=cache)
-        self.assertIn("capture_runtime scope", str(failure.exception.__cause__))
+        self.assertIn("capture_runtime scope", str(failure.exception))
 
         with pc.capture_runtime():
             # A forked child inherits the parent's scope object.
@@ -6251,8 +6253,10 @@ class TestPrecompileRuntimeCache(TestCase):
             getattr(pc, operation)(artifact_path=source, cache_path=cache)
 
     @parametrize("operation", ("finalize_cache", "prepare_runtime"))
-    @parametrize("damage", ("no_artifact", "no_cache", "corrupt", "format"))
-    def test_runtime_cache_names_operation_for_unreadable_pair(self, operation, damage):
+    @parametrize(
+        "damage", ("no_artifact", "no_cache", "corrupt", "format", "code_hash")
+    )
+    def test_runtime_cache_errors_name_operation_and_pair(self, operation, damage):
         pc = torch.compiler.precompile
         source, cache = _capture_files(
             self, _no_compilation_single_graph, [(torch.ones(4),)], backend="eager"
@@ -6265,12 +6269,17 @@ class TestPrecompileRuntimeCache(TestCase):
             with open(cache, "r+b") as f:
                 f.truncate(20)
         else:
-            _rewrite_envelope(cache, format="incompatible")
+            _rewrite_envelope(cache, **{damage: "incompatible"})
         with (
             pc.capture_runtime(),
-            self.assertRaisesRegex(PrecompileError, f"^precompile\\.{operation} "),
+            self.assertRaisesRegex(
+                PrecompileError, f"^precompile\\.{operation} "
+            ) as failure,
         ):
             getattr(pc, operation)(artifact_path=source, cache_path=cache)
+        self.assertIn(
+            f"(artifact_path={source!r}, cache_path={cache!r})", str(failure.exception)
+        )
 
     def test_envelope_reader_parses_emitted_dynamo_header(self):
         from torch._precompile import _read_runtime_cache_envelope
