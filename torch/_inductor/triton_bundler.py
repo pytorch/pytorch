@@ -420,10 +420,10 @@ class TritonBundler:
             for artifacts in bundle.kernel_artifacts:
                 device = artifacts.device
                 if device is None:
-                    extensions = {
+                    extensions = OrderedSet(
                         os.path.splitext(artifact.filename)[1]
                         for artifact in artifacts.artifacts
-                    }
+                    )
                     device_type = next(
                         (
                             t
@@ -437,7 +437,10 @@ class TritonBundler:
 
                         # Match the directory CachingAutotuner resolves for a
                         # rank-agnostic (compile_on_one_rank) GPU kernel.
-                        device = _resolve_load_device(None, device_type)
+                        resolved = _resolve_load_device(None, device_type)
+                        if resolved is None:
+                            raise AssertionError("a GPU device resolves to an index")
+                        device = resolved
                 basedir = triton_cache_dir(device)
                 directory = os.path.join(basedir, artifacts.kernel_hash)
 
