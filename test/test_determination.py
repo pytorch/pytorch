@@ -4,9 +4,9 @@ import os
 from types import SimpleNamespace
 
 import run_test
+
 from _pytest.reports import TestReport
 from conftest import _NodeReporterReruns, _pytest_testcase_identity
-
 from tools.testing.modulefinder_determinator import test_impact_of_file
 
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -183,7 +183,7 @@ class TestPytestTestcaseIdentity(TestCase):
             (
                 "test/test_example.py::Outer::Inner::test_nested[a::b]",
                 "test/test_example.py",
-                ("Outer.Inner", "test_example.py"),
+                ("Inner", "test_example.py"),
             ),
             (
                 "test/test_example.py::test_function",
@@ -191,8 +191,8 @@ class TestPytestTestcaseIdentity(TestCase):
                 ("test_example", "test_example.py"),
             ),
             (
-                "test/test_example.py::TestExample::test_windows",
-                "test\\distributed\\test_example.py",
+                "test/distributed/test_example.py::TestExample::test_inherited",
+                "torch/testing/_internal/common_fsdp.py",
                 ("TestExample", "distributed/test_example.py"),
             ),
         ]
@@ -207,7 +207,7 @@ class TestPytestTestcaseIdentity(TestCase):
     def test_reporter_normalizes_before_serialization(self):
         report = TestReport(
             nodeid="test/test_example.py::TestFailure::test_fails",
-            location=("test/test_example.py", 2, "test_fails"),
+            location=("torch/testing/_internal/common_utils.py", 2, "test_fails"),
             keywords={},
             outcome="failed",
             longrepr="assert False",

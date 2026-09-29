@@ -177,9 +177,9 @@ def pytest_unconfigure(config: Config) -> None:
 def _pytest_testcase_identity(report: TestReport) -> tuple[str, str]:
     names = mangle_test_address(report.nodeid)
     class_parts = names[1:-1]
-    filename = report.location[0].replace("\\", "/").removeprefix("test/")
+    filename = report.nodeid.split("::", 1)[0].removeprefix("test/")
     classname = (
-        ".".join(class_parts)
+        class_parts[-1]
         if class_parts
         else os.path.splitext(os.path.basename(filename))[0]
     )
