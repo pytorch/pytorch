@@ -924,7 +924,6 @@ libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Event.cpp",
     "torch/csrc/xpu/Module.cpp",
     "torch/csrc/xpu/Stream.cpp",
-    "torch/csrc/xpu/XPUPluggableAllocator.cpp",
     "torch/csrc/xpu/memory_snapshot.cpp",
     "torch/csrc/xpu/MemPool.cpp",
     "torch/csrc/xpu/Graph.cpp",
@@ -932,7 +931,9 @@ libtorch_python_xpu_sources = [
     "torch/csrc/inductor/aoti_torch/shim_xpu.cpp",
 ]
 
-libtorch_xpu_sources = libtorch_python_xpu_sources
+libtorch_xpu_sources = libtorch_python_xpu_sources + [
+    "torch/csrc/xpu/XPUPluggableAllocator.cpp",
+]
 
 libtorch_python_core_sources = [
     "torch/csrc/DataLoader.cpp",
@@ -1584,6 +1585,18 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/transformers/attention.cpp",
     "aten/src/ATen/native/transformers/sdp_utils_cpp.cpp",
     "aten/src/ATen/native/transformers/transformer.cpp",
+    "aten/src/ATen/native/FusedAdam.cpp",
+    "aten/src/ATen/native/FusedSGD.cpp",
+    "aten/src/ATen/native/FusedAdagrad.cpp",
+    # Files not in native, but depends on native symbols
+    # "aten/src/ATen/TensorIndexing.cpp",
+    "aten/src/ATen/TensorIterator.cpp",
+]
+
+# These sources are the only ones that require linking against XNNPACK itself, so
+# they live in a dedicated list/target. That lets full PyTorch and PyTorch mobile
+# each pick their own XNNPACK dep without the choice leaking into aten_native_cpu.
+aten_native_xnnpack_source_list = [
     "aten/src/ATen/native/xnnpack/Activation.cpp",
     "aten/src/ATen/native/xnnpack/ChannelShuffle.cpp",
     "aten/src/ATen/native/xnnpack/Convolution.cpp",
@@ -1594,12 +1607,6 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/xnnpack/OpContext.cpp",
     "aten/src/ATen/native/xnnpack/RegisterOpContextClass.cpp",
     "aten/src/ATen/native/xnnpack/Shim.cpp",
-    "aten/src/ATen/native/FusedAdam.cpp",
-    "aten/src/ATen/native/FusedSGD.cpp",
-    "aten/src/ATen/native/FusedAdagrad.cpp",
-    # Files not in native, but depends on native symbols
-    # "aten/src/ATen/TensorIndexing.cpp",
-    "aten/src/ATen/TensorIterator.cpp",
 ]
 
 # 1. Files in ATen/native with a few exceptions
