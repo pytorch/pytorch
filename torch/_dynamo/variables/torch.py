@@ -1287,9 +1287,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 check_positional(tx, "sumprod", len(args), 2, 2)
                 if check_unspec_or_constant_args(args, kwargs):
                     return None
-                # Lists/tuples that are not all constants hold traced values, so
-                # use the plain accumulation. Other iterables are materialized
-                # first so lists of constants still fold with CPython's float path.
+                # Lists/tuples with any non-constant element use plain accumulation
+                # for the whole call. Other iterables are materialized first so
+                # lists of constants still fold with CPython's float path.
                 if all(isinstance(a, (ListVariable, TupleVariable)) for a in args):
                     fn = polyfills.sumprod_generic
                 else:

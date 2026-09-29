@@ -3613,6 +3613,24 @@ partial_fn = functools.partial(fn, scale=2)
     @unittest.skipIf(
         sys.version_info < (3, 12), "math.sumprod introduced in python 3.12"
     )
+    def test_math_sumprod_mixed_constant_and_tensor(self):
+        # Documented divergence, same as the sum polyfill in polyfills/builtins.py:
+        # a list with any non-constant element is accumulated plainly, so the
+        # float constants lose CPython's extended precision (eager gives 1.0 for
+        # them, compiled gives 0.0).
+        def func(x):
+            return math.sumprod([1e20, 1.0, -1e20, x.sum()], [1, 1, 1, 1])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(func, backend=cnt, fullgraph=True)
+        x = torch.rand(10)
+        self.assertEqual(func(x), x.sum() + 1.0)
+        self.assertEqual(opt(x), x.sum())
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12), "math.sumprod introduced in python 3.12"
+    )
     @parametrize("call", ("uneven", "raising_mul", "keyword"))
     def test_math_sumprod_errors(self, call):
         class BadMul:

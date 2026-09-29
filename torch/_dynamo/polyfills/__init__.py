@@ -149,6 +149,9 @@ def sumprod(p: Iterable[Any], q: Iterable[Any], /) -> Any:
 
 def sumprod_generic(p: Iterable[Any], q: Iterable[Any], /) -> Any:
     # Generic path of CPython's math_sumprod_impl, without the float fast path.
+    # Used for any list containing a non-constant element, so float constants
+    # in that list are accumulated plainly too, like the sum polyfill in
+    # polyfills/builtins.py.
     total = 0
     for p_i, q_i in _sumprod_pairs(p, q):
         total = total + p_i * q_i
