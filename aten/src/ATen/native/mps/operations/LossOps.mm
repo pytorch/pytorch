@@ -919,6 +919,18 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
                                     double delta,
                                     Tensor& grad_input) {
   using namespace mps;
+  // Unlike the forward, the reference builds a plain TensorIterator with no promotion, so every
+  // operand must already agree; MPSGraph would abort rather than raise.
+  TORCH_CHECK(input.scalar_type() == target.scalar_type() && input.scalar_type() == grad_output.scalar_type() &&
+                  input.scalar_type() == grad_input.scalar_type(),
+              "huber_loss_backward: expected all tensors to have the same dtype, but got input ",
+              input.scalar_type(),
+              ", target ",
+              target.scalar_type(),
+              ", grad_output ",
+              grad_output.scalar_type(),
+              " and grad_input ",
+              grad_input.scalar_type());
   auto is_mean_reduction = reduction == Reduction::Mean;
   auto input_numel = input.numel();
 
