@@ -1131,6 +1131,30 @@ def forward(self, x_1, output_1):
         compiled_result = torch.compile(call_triton)(t1, t2)
         self.assertEqual(torch_result, compiled_result)
 
+    @staticmethod
+    def _run_and_get_triton_reinplacement_info(fn, *args):
+        """Collect kernel mutations and computed buffers writing the same storage."""
+        result, (graph,) = run_and_get_graph_lowering(fn, *args)
+        triton_kernels = [
+            op for op in graph.operations if isinstance(op, ir.UserDefinedTritonKernel)
+        ]
+        kernel_mutations = [
+            {
+                name
+                for output in kernel.mutation_outputs
+                for name in output.get_mutation_names()
+            }
+            for kernel in triton_kernels
+        ]
+        mutated_names = set().union(*kernel_mutations)
+        mutation_buffers = [
+            buffer
+            for buffer in graph.buffers
+            if isinstance(buffer, ir.ComputedBuffer)
+            and mutated_names.intersection(buffer.get_mutation_names())
+        ]
+        return result, graph, triton_kernels, kernel_mutations, mutation_buffers
+
     @requires_gpu
     def test_triton_kernel_with_reinplace_scatter_copy_back(self):
         def call_triton_inplace_view(x: torch.Tensor):
@@ -1142,39 +1166,50 @@ def forward(self, x_1, output_1):
         t = torch.rand(4, 4, device=GPU_TYPE)
         t2 = t.clone()
 
-        _, (graph,) = run_and_get_graph_lowering(
-            torch.compile(call_triton_inplace_view, fullgraph=True),
-            t2,
+        _, graph, triton_kernels, kernel_mutations, mutation_buffers = (
+            self._run_and_get_triton_reinplacement_info(
+                torch.compile(call_triton_inplace_view, fullgraph=True),
+                t2,
+            )
         )
 
         t[2:] *= 2
         self.assertEqual(t, t2)
 
-        triton_kernels = [
-            op for op in graph.operations if isinstance(op, ir.UserDefinedTritonKernel)
-        ]
         self.assertEqual(len(triton_kernels), 1)
-
-        kernel_mutations = {
-            name
-            for output in triton_kernels[0].mutation_outputs
-            for name in output.get_mutation_names()
-        }
 
         # The re-inplacement should mean that the kernel directly mutates the
         # single graph input in this case, rather than through the scatter
         # view copy-back pattern.
-        self.assertEqual(kernel_mutations, set(graph.graph_inputs))
+        self.assertEqual(kernel_mutations, [set(graph.graph_inputs)])
 
         # The scatter should be gone from the graph, so there should be no
         # ComputedBuffers that mutates anything already mutated by the kernel.
-        scatter_buffers = [
-            buffer
-            for buffer in graph.buffers
-            if isinstance(buffer, ir.ComputedBuffer)
-            and any(name in kernel_mutations for name in buffer.get_mutation_names())
-        ]
-        self.assertEqual(len(scatter_buffers), 0)
+        self.assertEqual(len(mutation_buffers), 0)
+
+    @requires_gpu
+    def test_triton_kernel_reinplace_nested_view_copy_back(self):
+        def call_triton_inplace_view(x: torch.Tensor):
+            x_slice = x[1][2:]
+            n_elements = x_slice.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            mul2_inplace_kernel[grid](x_slice, n_elements, BLOCK_SIZE=16)
+
+        expected = torch.rand(4, 4, device=GPU_TYPE)
+        actual = expected.clone()
+
+        _, graph, triton_kernels, kernel_mutations, mutation_buffers = (
+            self._run_and_get_triton_reinplacement_info(
+                torch.compile(call_triton_inplace_view, fullgraph=True), actual
+            )
+        )
+
+        expected[1][2:] *= 2
+        self.assertEqual(actual, expected)
+
+        self.assertEqual(len(triton_kernels), 1)
+        self.assertEqual(kernel_mutations, [set(graph.graph_inputs)])
+        self.assertEqual(len(mutation_buffers), 0)
 
     @requires_gpu
     def test_triton_kernel_reinplace_view_copy_back_training(self):
@@ -1197,24 +1232,18 @@ def forward(self, x_1, output_1):
             "min_cut_rematerialization_partition",
             wraps=compile_fx.min_cut_rematerialization_partition,
         ) as partitioner:
-            result, (graph,) = run_and_get_graph_lowering(
-                torch.compile(call_triton_inplace_view, fullgraph=True), x
+            result, graph, triton_kernels, kernel_mutations, _ = (
+                self._run_and_get_triton_reinplacement_info(
+                    torch.compile(call_triton_inplace_view, fullgraph=True), x
+                )
             )
         self.assertGreater(partitioner.call_count, 0)
         self.assertEqual(x, expected)
         result.backward()
         self.assertIsNotNone(leaf.grad)
 
-        triton_kernels = [
-            op for op in graph.operations if isinstance(op, ir.UserDefinedTritonKernel)
-        ]
         self.assertEqual(len(triton_kernels), 1)
-        kernel_mutations = {
-            name
-            for output in triton_kernels[0].mutation_outputs
-            for name in output.get_mutation_names()
-        }
-        self.assertEqual(kernel_mutations, set(graph.graph_inputs))
+        self.assertEqual(kernel_mutations, [set(graph.graph_inputs)])
 
     @requires_gpu
     def test_triton_kernel_reinplace_scatter_copy_back_with_additional_user(self):
@@ -1232,40 +1261,27 @@ def forward(self, x_1, output_1):
         t = torch.rand(4, 4, device=GPU_TYPE)
         t2 = t.clone()
 
-        result, (graph,) = run_and_get_graph_lowering(
-            torch.compile(call_triton_inplace_view, fullgraph=True),
-            t2,
+        result, graph, triton_kernels, kernel_mutations, mutation_buffers = (
+            self._run_and_get_triton_reinplacement_info(
+                torch.compile(call_triton_inplace_view, fullgraph=True),
+                t2,
+            )
         )
 
         t[2:] *= 2
         self.assertEqual(t, t2)
         self.assertEqual(t + 1, result)
 
-        triton_kernels = [
-            op for op in graph.operations if isinstance(op, ir.UserDefinedTritonKernel)
-        ]
         self.assertEqual(len(triton_kernels), 1)
-
-        kernel_mutations = {
-            name
-            for output in triton_kernels[0].mutation_outputs
-            for name in output.get_mutation_names()
-        }
 
         # The re-inplacement should mean that the kernel directly mutates the
         # single graph input in this case, rather than through the scatter
         # view copy-back pattern.
-        self.assertEqual(kernel_mutations, set(graph.graph_inputs))
+        self.assertEqual(kernel_mutations, [set(graph.graph_inputs)])
 
         # The scatter should be gone from the graph, so there should be no
         # ComputedBuffers that mutates anything already mutated by the kernel.
-        scatter_buffers = [
-            buffer
-            for buffer in graph.buffers
-            if isinstance(buffer, ir.ComputedBuffer)
-            and any(name in kernel_mutations for name in buffer.get_mutation_names())
-        ]
-        self.assertEqual(len(scatter_buffers), 0)
+        self.assertEqual(len(mutation_buffers), 0)
 
     @requires_gpu
     def test_triton_kernel_does_not_reinplace_with_live_overlapping_input_view(self):
@@ -1355,37 +1371,24 @@ def forward(self, x_1, output_1):
 
         expected = call_triton_inplace_view(eager_input)
 
-        result, (graph,) = run_and_get_graph_lowering(
-            torch.compile(call_triton_inplace_view, fullgraph=True),
-            compiled_input,
+        result, graph, triton_kernels, kernel_mutations, mutation_buffers = (
+            self._run_and_get_triton_reinplacement_info(
+                torch.compile(call_triton_inplace_view, fullgraph=True),
+                compiled_input,
+            )
         )
 
         self.assertEqual(expected, result)
         self.assertEqual(eager_input, compiled_input)
 
-        triton_kernels = [
-            op for op in graph.operations if isinstance(op, ir.UserDefinedTritonKernel)
-        ]
         self.assertEqual(len(triton_kernels), 1)
 
-        kernel_mutations = {
-            name
-            for output in triton_kernels[0].mutation_outputs
-            for name in output.get_mutation_names()
-        }
-
         # The Triton mutation should be applied directly to the graph input.
-        self.assertEqual(kernel_mutations, set(graph.graph_inputs))
+        self.assertEqual(kernel_mutations, [set(graph.graph_inputs)])
 
         # A later computed buffer still performs the final copy_ back to the
         # graph input. This is the copy that represents both source mutations.
-        input_mutation_buffers = [
-            buffer
-            for buffer in graph.buffers
-            if isinstance(buffer, ir.ComputedBuffer)
-            and any(name in graph.graph_inputs for name in buffer.get_mutation_names())
-        ]
-        self.assertEqual(len(input_mutation_buffers), 1)
+        self.assertEqual(len(mutation_buffers), 1)
 
     @requires_gpu
     def test_triton_kernel_does_not_reinplace_before_unrelated_input_overwrite(self):
@@ -1403,32 +1406,25 @@ def forward(self, x_1, output_1):
         replacement = torch.rand_like(eager_input)
 
         expected = call_triton_then_overwrite(eager_input, replacement)
-        result, (graph,) = run_and_get_graph_lowering(
-            torch.compile(call_triton_then_overwrite, fullgraph=True),
-            compiled_input,
-            replacement,
+        result, graph, triton_kernels, kernel_mutations, _ = (
+            self._run_and_get_triton_reinplacement_info(
+                torch.compile(call_triton_then_overwrite, fullgraph=True),
+                compiled_input,
+                replacement,
+            )
         )
 
         self.assertEqual(expected, result)
         self.assertEqual(replacement, eager_input)
         self.assertEqual(replacement, compiled_input)
 
-        triton_kernels = [
-            op for op in graph.operations if isinstance(op, ir.UserDefinedTritonKernel)
-        ]
         self.assertEqual(len(triton_kernels), 1)
-
-        kernel_mutations = {
-            name
-            for output in triton_kernels[0].mutation_outputs
-            for name in output.get_mutation_names()
-        }
 
         # The final input value does not depend on the Triton result. An
         # unrelated copy_ must not be used as evidence that the earlier view
         # mutation can be re-inplaced.
-        self.assertTrue(kernel_mutations)
-        self.assertTrue(kernel_mutations.isdisjoint(graph.graph_inputs))
+        self.assertTrue(kernel_mutations[0])
+        self.assertTrue(kernel_mutations[0].isdisjoint(graph.graph_inputs))
 
     @requires_gpu
     def test_triton_kernel_reinplace_multiple_mutating_same_input(self):
@@ -1444,35 +1440,46 @@ def forward(self, x_1, output_1):
         compiled_input = eager_input.clone()
 
         call_triton_twice(eager_input)
-        _, (graph,) = run_and_get_graph_lowering(
-            torch.compile(call_triton_twice, fullgraph=True),
-            compiled_input,
+        _, graph, triton_kernels, kernel_mutations, mutation_buffers = (
+            self._run_and_get_triton_reinplacement_info(
+                torch.compile(call_triton_twice, fullgraph=True),
+                compiled_input,
+            )
         )
 
         self.assertNotEqual(original_input, compiled_input)
         self.assertEqual(eager_input, compiled_input)
 
-        triton_kernels = [
-            op for op in graph.operations if isinstance(op, ir.UserDefinedTritonKernel)
-        ]
         self.assertEqual(len(triton_kernels), 2)
+        self.assertEqual(kernel_mutations, [set(graph.graph_inputs)] * 2)
+        self.assertEqual(len(mutation_buffers), 0)
 
-        for kernel in triton_kernels:
-            kernel_mutations = {
-                name
-                for output in kernel.mutation_outputs
-                for name in output.get_mutation_names()
-            }
+    @requires_gpu
+    def test_triton_kernel_reinplace_different_slices_of_same_input(self):
+        def call_triton_on_slices(x: torch.Tensor):
+            first = x[1:2]
+            second = x[2:3]
+            n_elements = first.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            mul2_inplace_kernel[grid](first, n_elements, BLOCK_SIZE=16)
+            mul2_inplace_kernel[grid](second, n_elements, BLOCK_SIZE=16)
 
-            self.assertEqual(kernel_mutations, set(graph.graph_inputs))
+        original = torch.rand(4, 4, device=GPU_TYPE)
+        expected = original.clone()
+        actual = original.clone()
 
-        scatter_buffers = [
-            buffer
-            for buffer in graph.buffers
-            if isinstance(buffer, ir.ComputedBuffer)
-            and any(name in graph.graph_inputs for name in buffer.get_mutation_names())
-        ]
-        self.assertEqual(len(scatter_buffers), 0)
+        expected[1:3] *= 2
+        _, graph, triton_kernels, kernel_mutations, mutation_buffers = (
+            self._run_and_get_triton_reinplacement_info(
+                torch.compile(call_triton_on_slices, fullgraph=True), actual
+            )
+        )
+
+        self.assertEqual(actual, expected)
+        self.assertNotEqual(actual, original)
+        self.assertEqual(len(triton_kernels), 2)
+        self.assertEqual(kernel_mutations, [set(graph.graph_inputs)] * 2)
+        self.assertEqual(len(mutation_buffers), 0)
 
     @requires_gpu
     @common_utils.parametrize("grad", [False, True])
