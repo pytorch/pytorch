@@ -2037,9 +2037,13 @@ _SERVING_NOTES = {
 # This artifact SERVES BY INSTALLING the Dynamo package in _PACKAGE onto the live code
 # objects of the captured modules, so loading it mutates global state: a frame the
 # entry reaches by an ordinary call (a graph break inside a child module's forward)
-# can only be served through Dynamo's frame evaluator. Calls run under the
-# fail_on_recompile stance, so a call no captured variant covers raises rather than
-# compiling a new graph.
+# can only be served through Dynamo's frame evaluator. Its calls refuse to compile,
+# as under the fail_on_recompile stance (but without setting that process-wide
+# stance), so a call no captured variant covers raises rather than compiling a new
+# graph, under every process-wide stance that would compile it (force_backend,
+# "eager_then_compile", ...) too. Two stances you set yourself do change serving:
+# "force_eager" runs every call eagerly, bypassing the installed entries, and
+# "eager_on_recompile" serves the captured variants and runs any other call eagerly.
 """,
 }
 
@@ -3306,7 +3310,14 @@ def load(
     compiled a frame the entry reaches only by an ordinary call (a graph break
     inside a child module's forward): its artifact has ``SERVING_MODE =
     "installed"`` and serves by installing the captured entries onto the live
-    code objects, under the ``fail_on_recompile`` stance. A Dynamo artifact whose
+    code objects; its calls refuse to compile, as under the ``fail_on_recompile``
+    stance, without setting that process-wide stance, and keep refusing under
+    every process-wide stance that would compile (``force_backend``,
+    ``"eager_then_compile"``, ...). Under ``"force_eager"`` every call runs
+    eagerly, bypassing the installed entries; under ``"eager_on_recompile"`` the
+    captured variants are served and any other call runs eagerly. An installed
+    artifact refuses to load with ``torch._dynamo.config.compiled_autograd``
+    enabled, which would compile backward graphs outside it. A Dynamo artifact whose
     capture graph-broke cannot load beside the live compile that captured it
     (the continuation names collide): load it in a fresh process.
 

@@ -733,9 +733,9 @@ def _build_installed_forward():
     the standalone dispatcher never sees. Serving those frames takes Dynamo's
     own frame evaluator: this installs the captured package's guarded entries
     onto the live code objects of the captured modules, the way a warm
-    torch.compile cache load does, and calls the entry through it. Every call
-    runs under the fail_on_recompile stance, so, as for a standalone artifact, a
-    call no captured variant covers raises instead of compiling.
+    torch.compile cache load does, and calls the entry through it. The entry's
+    callback is fail_on_recompile's, so, as for a standalone artifact, a call no
+    captured variant covers raises instead of compiling.
     """
     import base64
     import importlib
@@ -744,6 +744,11 @@ def _build_installed_forward():
     import sys as _sys
 
     import torch
+    from torch._dynamo.eval_frame import (
+        _RecompileRefusedError,
+        _RefuseRecompileCallback,
+        OptimizeContext,
+    )
     from torch._dynamo.package import CompilePackage
     from torch._precompile import PrecompileError as _PrecompileError
 
@@ -780,8 +785,29 @@ def _build_installed_forward():
     try:
         # CompilePackage refuses a module whose captured source has changed.
         package = CompilePackage(fn, dynamo)
-        compiled = torch._dynamo.optimize(BACKEND, package=package)(fn)
+        if torch._dynamo.config.compiled_autograd:
+            # OptimizeContext would compile backward graphs through a fresh,
+            # non-refusing callback.
+            raise _PrecompileError(
+                "precompile: an installed artifact cannot load with "
+                "torch._dynamo.config.compiled_autograd enabled: backward graphs "
+                "would compile outside the artifact. Disable it before load()."
+            )
+        context = torch._dynamo.optimize(BACKEND, package=package)
+        if not isinstance(context, OptimizeContext):
+            raise _PrecompileError(
+                "precompile: an installed artifact serves through Dynamo, which is "
+                "disabled in this process (TORCHDYNAMO_DISABLE=1 or the "
+                "enable_dynamo killswitch)."
+            )
+        # The refusal is this callable's own callback, not the process-global
+        # stance, so other threads' compiles are unaffected. It must be bound
+        # before context(fn), which captures the callback when it wraps.
+        context.callback = _RefuseRecompileCallback(context.callback)
+        compiled = context(fn)
         package.install(package_state["backends"])
+    except _PrecompileError:
+        raise
     except Exception as _e:
         raise _PrecompileError(
             f"precompile: this installed artifact could not be installed onto "
@@ -790,19 +816,16 @@ def _build_installed_forward():
         ) from _e
 
     def forward(*args, **kwargs):
-        with torch.compiler.set_stance("fail_on_recompile"):
-            try:
-                return compiled(*args, **kwargs)
-            except RuntimeError as _e:
-                if "stance is 'fail_on_recompile'" not in str(_e):
-                    raise
-                raise _PrecompileError(
-                    f"precompile: no captured variant matches this call. Either a "
-                    f"guard on the call's arguments or on a module global the graph "
-                    f"baked in no longer holds (restore that environment), or this "
-                    f"call shape was never captured: the artifact serves only what "
-                    f"capture exercised, so add an example covering it and "
-                    f"recapture. Dynamo reported: {_e}"
-                ) from None
+        try:
+            return compiled(*args, **kwargs)
+        except _RecompileRefusedError as _e:
+            raise _PrecompileError(
+                f"precompile: no captured variant matches this call. Either a "
+                f"guard on the call's arguments or on a module global the graph "
+                f"baked in no longer holds (restore that environment), or this "
+                f"call shape was never captured: the artifact serves only what "
+                f"capture exercised, so add an example covering it and "
+                f"recapture. Dynamo reported: {_e}"
+            ) from None
 
     return forward
