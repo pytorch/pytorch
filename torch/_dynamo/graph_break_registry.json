@@ -2173,6 +2173,17 @@
       ]
     }
   ],
+  "GB5821": [
+    {
+      "Gb_type": "register_post_accumulate_grad_hook on an intermediate tensor",
+      "Context": "str(self)",
+      "Explanation": "Dynamo cannot preserve post-accumulate hook semantics for an intermediate tensor without compiled autograd.",
+      "Hints": [
+        "Move the hook registration outside the compiled region.",
+        "Use compiled autograd if the hook must be registered inside it."
+      ]
+    }
+  ],
   "GB0139": [
     {
       "Gb_type": "Unsupported autograd.Function context method",
@@ -3817,6 +3828,26 @@
       ]
     }
   ],
+  "GB1350": [
+    {
+      "Gb_type": "length_hint with a non-constant result",
+      "Context": "length_hint {obj} returned {hint}",
+      "Explanation": "Dynamo cannot verify the type and range of a non-constant __length_hint__ result.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0507": [
+    {
+      "Gb_type": "length_hint with a non-constant default",
+      "Context": "length_hint default {args[1]}",
+      "Explanation": "Dynamo cannot convert a non-constant default to an integer index.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB6890": [
     {
       "Gb_type": "Missing hash_impl override",
@@ -4458,6 +4489,16 @@
       "Explanation": "Dynamo does not yet model this C-level descriptor deleter for user-defined objects.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1392": [
+    {
+      "Gb_type": "Attribute mutation on a sourced but untracked user-defined object",
+      "Context": "object={self}, name={name_str}, value={value}",
+      "Explanation": "Dynamo encountered a sourced user-defined object that supports mutation tracking but was not registered for it.",
+      "Hints": [
+        "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
     }
   ],
@@ -6426,6 +6467,16 @@
       "Explanation": "Dynamo does not know the equality comparison of the underlying python object for {self}",
       "Hints": [
         "Consider using a different type of object as the dictionary key instead of {self.python_type()}.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1940": [
+    {
+      "Gb_type": "Attribute mutation on an untracked user-defined object",
+      "Context": "object={self}, name={name_str}, value={value}",
+      "Explanation": "Dynamo cannot safely apply this attribute mutation because the object is not tracked for mutation.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
