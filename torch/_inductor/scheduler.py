@@ -5940,9 +5940,14 @@ class Scheduler:
 
         # pyrefly: ignore [bad-assignment]
         metrics.ir_nodes_pre_fusion += len(self.nodes)
-        from torch._inductor.debug import log_ir_post_fusion, log_ir_pre_fusion
+        from torch._inductor.debug import (
+            log_ir_post_fusion,
+            log_ir_pre_fusion,
+            log_ir_pre_fusion_pretty,
+        )
 
         log_ir_pre_fusion(self.nodes)
+        log_ir_pre_fusion_pretty(self.nodes)
         self.num_orig_nodes = len(self.nodes)
         self.create_foreach_nodes()
         self.nodes = self.topological_sort_schedule(self.nodes)
