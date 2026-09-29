@@ -3258,13 +3258,6 @@ class TestFakeTensor(TestCase):
             device, dtype, op, partial(torch.amp.autocast, device_type=device)
         )
 
-    # _refs.logspace computes in float64
-    @skipOps(
-        {
-            xfail("_refs.logspace", device_type="mps"),
-            xfail("_refs.logspace", "tensor_overload", device_type="mps"),
-        }
-    )
     @ops([op for op in ops_and_refs if op.is_factory_function])
     def test_strided_layout(self, device, dtype, op):
         samples = op.sample_inputs(device, dtype)
