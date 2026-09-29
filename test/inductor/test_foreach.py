@@ -242,6 +242,42 @@ class ForeachTests(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    def test_foreach_copy_cross_aliasing_views(self):
+        def fn(x):
+            torch._foreach_copy_([x[0], x[1]], [x[1], x[0]])
+            return x
+
+        x = torch.tensor([[1.0], [2.0]])
+        expected = fn(x.clone())
+        actual = torch.compile(fn, fullgraph=True)(x.clone())
+        self.assertEqual(actual, expected)
+
+        def fn_with_other_destination(x, y):
+            torch._foreach_copy_([x[0], y], [y, x[0]])
+            return x, y
+
+        y = torch.tensor([3.0])
+        expected = fn_with_other_destination(x.clone(), y.clone())
+        actual = torch.compile(fn_with_other_destination, fullgraph=True)(
+            x.clone(), y.clone()
+        )
+        self.assertEqual(actual, expected)
+
+    def test_foreach_copy_cross_aliasing_storage(self):
+        def args():
+            storage = torch.tensor([1.0, 2.0]).untyped_storage()
+            x = torch.empty(0).set_(storage, 0, (1,), (1,))
+            y = torch.empty(0).set_(storage, 1, (1,), (1,))
+            return x, y
+
+        def fn(x, y):
+            torch._foreach_copy_([x, y], [y, x])
+            return x, y
+
+        expected = fn(*args())
+        actual = torch.compile(fn, fullgraph=True)(*args())
+        self.assertEqual(actual, expected)
+
     def _test_single_list(self, op):
         if op in un_ops_under_test:
 
