@@ -14,18 +14,18 @@ PyCodegen = Any
 # We use a dynamo-generated index as a level of indirection
 # this allows us to register objects externally in pre-graph bytecode that we want
 # to pass to the graph, but not support their types as graph inputs
-index_to_bytecode_constructor: dict[int, Callable[[PyCodegen], None]] = {}
+index_to_bytecode_constructor: list[Callable[[PyCodegen], None]] = []
 
-index_to_external_object_weakref: dict[int, weakref.ReferenceType[Any]] = {}
+index_to_external_object_weakref: list[weakref.ReferenceType[object]] = []
 
-keep_alive: list[Any] = []
+keep_alive: list[object] = []
 
 
 def has_user_objects() -> bool:
     return bool(index_to_bytecode_constructor)
 
 
-def stash_graph_created_object(obj: Any) -> Any:
+def stash_graph_created_object(obj: object) -> object:
     keep_alive.append(obj)
     return obj
 
@@ -33,27 +33,29 @@ def stash_graph_created_object(obj: Any) -> Any:
 CURRENT_STREAM_INDEX = 0
 
 
-def set_external_object_by_index(index: int, value: Any) -> None:
-    """Update an entry in the external object registry at runtime."""
+def set_external_object_by_index(index: int, value: object) -> None:
+    """Add or update an entry in the external object registry at runtime."""
     keep_alive.append(value)
-    index_to_external_object_weakref[index] = weakref.ref(value)
+    if index == len(index_to_external_object_weakref):
+        index_to_external_object_weakref.append(weakref.ref(value))
+    elif index < len(index_to_external_object_weakref):
+        index_to_external_object_weakref[index] = weakref.ref(value)
+    else:
+        raise AssertionError("Index past the end of index_to_user_object_weakref")
 
 
-def get_external_object_by_index(index: int) -> Any:
-    if index not in index_to_external_object_weakref:
+def get_external_object_by_index(index: int) -> object:
+    if index >= len(index_to_external_object_weakref):
         raise AssertionError("Index not registered in index_to_user_object_weakref")
     obj = index_to_external_object_weakref[index]()
     if obj is None:
         raise AssertionError("User object is no longer alive")
-    return index_to_external_object_weakref[index]()
+    return obj
 
 
-def store_user_object_weakrefs(*args: Any) -> None:
+def store_user_object_weakrefs(*args: object) -> None:
     global index_to_external_object_weakref
-    index_to_external_object_weakref.clear()
-    index_to_external_object_weakref.update(
-        {i: weakref.ref(arg) for i, arg in enumerate(args)}
-    )
+    index_to_external_object_weakref = list(map(weakref.ref, args))
 
 
 def reset_user_object_tracking() -> None:
@@ -63,15 +65,15 @@ def reset_user_object_tracking() -> None:
 
 
 def register_graph_created_object(
-    example_value: Any, construct_fn: Callable[[int, PyCodegen], None]
+    example_value: object, construct_fn: Callable[[int, PyCodegen], None]
 ) -> int:
     global index_to_bytecode_constructor
     global keep_alive
     keep_alive.append(example_value)
     index = len(index_to_bytecode_constructor)
-    index_to_bytecode_constructor[index] = lambda cg: construct_fn(index, cg)
+    index_to_bytecode_constructor.append(lambda cg: construct_fn(index, cg))
     try:
-        index_to_external_object_weakref[index] = weakref.ref(example_value)
+        index_to_external_object_weakref.append(weakref.ref(example_value))
     except TypeError as e:
         from .exc import unimplemented
 
@@ -86,12 +88,12 @@ def register_graph_created_object(
 
 
 # Register a user object to be used in the graph
-def register_user_object(value: Any, source: Source) -> int:
+def register_user_object(value: object, source: Source) -> int:
     global index_to_bytecode_constructor
     index = len(index_to_bytecode_constructor)
-    index_to_bytecode_constructor[index] = lambda cg: cg(source)
+    index_to_bytecode_constructor.append(lambda cg: cg(source))
     try:
-        index_to_external_object_weakref[index] = weakref.ref(value)
+        index_to_external_object_weakref.append(weakref.ref(value))
     except TypeError as e:
         from .exc import unimplemented
 

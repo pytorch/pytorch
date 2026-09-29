@@ -129,6 +129,58 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @unittest.skipIf(sys.version_info < (3, 12), "requires LOAD_FAST_CHECK")
+    def test_exception_target_cleanup(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            try:
+                return exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_exception_target_cleanup_double_delete(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            try:
+                del exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+            return x
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires LOAD_FAST_CHECK")
+    def test_exception_target_cleanup_graph_break(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            x = x * 2
+            torch._dynamo.graph_break()
+            try:
+                return exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+
+        x = torch.ones(1)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_exception4(self):
         def fn(x):
             for i in range(10):
@@ -233,6 +285,65 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             try:
                 raise ValueError("v") from dict
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_scalar_type_error(self):
+        def fn(x):
+            try:
+                try:
+                    raise ValueError("v")
+                except 42:  # noqa: B030
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_tuple_with_bad_member_type_error(self):
+        # The raised exception deliberately does not match the tuple's valid
+        # member (ValueError), so the bad member (42) is reached regardless
+        # of match order.
+        def fn(x):
+            try:
+                try:
+                    raise RuntimeError("v")
+                except (ValueError, 42):  # noqa: B030
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_instance_type_error(self):
+        def fn(x):
+            try:
+                try:
+                    raise ValueError("v")
+                except object():
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_string_type_error(self):
+        def fn(x):
+            try:
+                try:
+                    raise ValueError("v")
+                except "string":  # noqa: B030
+                    pass
             except TypeError as e:
                 return x.sin(), str(e)
 
@@ -418,6 +529,18 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         inp = torch.ones(3)
         out = f(inp)
         self.assertTrue(torch.equal(out, inp + 1))
+
+    def test_observed_exception_with_non_string_args(self):
+        def fn(x):
+            try:
+                type("A", (), {"__doc__": "x\udcdcy"})
+            except UnicodeEncodeError:
+                return x + 1
+            return x
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
     @make_dynamo_test
     def test_isinstance_CustomException(self):
@@ -1462,6 +1585,50 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(y, t.sin())
         self.assertEqual(s, str(("hello", 42)))
         self.assertEqual(r, "ValueError('hello', 42)")
+
+    @parametrize(
+        "args", [(), ("k",), ("",), ("it's a key",), (42,), (("k", 1),), ("k", 1)]
+    )
+    def test_str_keyerror(self, args):
+        def fn(t):
+            try:
+                raise KeyError(*args)
+            except KeyError as e:
+                return t.sin(), str(e), f"key error: {e}", repr(e), e.args
+
+        t = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
+
+    @parametrize("key", ["missing", "", "it's a key", 42, ("k", 1)])
+    def test_str_keyerror_dict_lookup(self, key):
+        def fn(t):
+            try:
+                {}[key]
+            except KeyError as e:
+                return t.sin(), str(e), f"key error: {e}", repr(e), e.args
+
+        t = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
+
+    def test_str_keyerror_custom_key(self):
+        class Key:
+            def __str__(self):
+                return "key str"
+
+            def __repr__(self):
+                return "key repr"
+
+        def fn(t):
+            try:
+                raise KeyError(Key())
+            except KeyError as e:
+                return t.sin(), str(e), f"key error: {e}"
+
+        t = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
 
     def test_frozen_dataclass_setattr_raises(self):
         @dataclasses.dataclass(frozen=True)
