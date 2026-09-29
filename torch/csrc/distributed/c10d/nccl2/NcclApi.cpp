@@ -64,10 +64,7 @@ ncclResult_t DefaultNcclApi::commAbort(ncclComm_t comm) {
 
 ncclResult_t DefaultNcclApi::commRevoke(ncclComm_t comm) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-  // RCCL first shipped ncclCommRevoke in 2.30.4 (ROCm 7.14). Keep the CUDA
-  // NCCL 2.28.0 gate unchanged.
-#if (defined(USE_ROCM) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 30, 4)) || \
-    (!defined(USE_ROCM) && NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0))
+#ifdef NCCL_HAS_COMM_REVOKE
   return ncclCommRevoke(comm, 0);
 #else
   std::ignore = comm;
