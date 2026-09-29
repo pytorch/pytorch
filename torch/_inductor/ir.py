@@ -5245,25 +5245,24 @@ class MutationLayoutSHOULDREMOVE(Layout):
         return layout
 
     @staticmethod
-    def _reads_only_where_it_writes(src: IRNode, dst: IRNode) -> bool:
+    def _reads_only_where_it_writes(node: Pointwise, dst: IRNode) -> bool:
         """
-        The kernel that computes src may write straight into dst's buffer only if
-        it reads that buffer at the position it writes: x + y does,
-        x + x.flip(0) does not.
+        Whether the kernel that computes node, storing straight into dst's
+        buffer, reads that buffer only at the element it writes: x + y does,
+        x + x.flip(0) does not. This is the same index rule that
+        Scheduler.fusable_weak_dep applies to a read and a later in-place write
+        of the same buffer.
         """
-        loops = src.data if isinstance(src, StorageBox) else src
-        if isinstance(loops, ComputedBuffer):
-            loops = loops.data
-        if not isinstance(loops, Pointwise):
-            return False
         name = dst.get_name()
+        if name not in node.get_read_names():
+            return True
         with patch.object(FlexibleLayout, "allow_indexing", True):
-            loader, indexer = loops.make_loader(), dst.make_indexer()
+            loader, indexer = node.make_loader(), dst.make_indexer()
 
             def body(index: Sequence[Expr]) -> None:
                 ops.store(name, indexer(index), loader(index))
 
-            read_writes = extract_read_writes(body, loops.get_size())
+            read_writes = extract_read_writes(body, node.get_size())
         (write,) = read_writes.writes
         return all(
             isinstance(read, dependencies.MemoryDep) and read.index == write.index
@@ -5292,10 +5291,19 @@ class MutationLayoutSHOULDREMOVE(Layout):
         # dst, we can alias src to dst.
         src.realize_hint()
 
-        if unsafe_alias and not cls._reads_only_where_it_writes(src, dst):
-            # Compute src into a buffer of its own, then copy that into dst.
-            src.realize()
-            unsafe_alias = False
+        if unsafe_alias:
+            # The kernel that computes src would write dst itself. Unless it is
+            # a pointwise one that reads dst only where it writes, compute src
+            # into a buffer of its own and copy that into dst.
+            loops = src.data if isinstance(src, StorageBox) else src
+            if isinstance(loops, ComputedBuffer):
+                loops = loops.data
+            if not (
+                isinstance(loops, Pointwise)
+                and cls._reads_only_where_it_writes(loops, dst)
+            ):
+                src.realize()
+                unsafe_alias = False
 
         if not unsafe_alias:
             node = Pointwise.create(
