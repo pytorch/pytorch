@@ -14,7 +14,11 @@ from torch import Tensor
 from torch._dynamo.testing import CompileCounterWithBackend
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.auto_functionalize import try_use_slice
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.logging_utils import logs_to_string
 
 
@@ -355,24 +359,31 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
-    def test_unbacked_auto_functionalize_op(self):
-        @torch.library.custom_op(
-            "mylib::mk_image", mutates_args=("decoder",), device_types=["cpu"]
-        )
-        def mk_image(decoder: Tensor) -> Tensor:
-            return torch.randn(2, 3, 4, 5)
+    @parametrize("increase_gb", (None, 0.0))
+    def test_unbacked_auto_functionalize_op(self, increase_gb):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("mk_image(Tensor(a!) decoder) -> Tensor")
 
-        @torch.library.register_fake("mylib::mk_image")
-        def _(decoder: Tensor) -> Tensor:
-            image_size = [torch.library.get_ctx().new_dynamic_size() for _ in range(4)]
-            return torch.empty(image_size)
+            @torch.library.impl("mylib::mk_image", "CPU", lib=lib)
+            def mk_image(decoder: Tensor) -> Tensor:
+                return torch.randn(2, 3, 4, 5)
 
-        @torch.compile(fullgraph=True)
-        def f(x):
-            return torch.ops.mylib.mk_image.default(x)
+            @torch.library.register_fake("mylib::mk_image", lib=lib)
+            def _(decoder: Tensor) -> Tensor:
+                image_size = [
+                    torch.library.get_ctx().new_dynamic_size() for _ in range(4)
+                ]
+                return torch.empty(image_size)
 
-        x = torch.zeros(100, dtype=torch.int64)
-        f(x)
+            @torch.compile(fullgraph=True)
+            def f(x):
+                return torch.ops.mylib.mk_image.default(x)
+
+            x = torch.zeros(100, dtype=torch.int64)
+            with inductor_config.patch(
+                fusion_memory_timeline_peak_memory_increase_gb=increase_gb
+            ):
+                f(x)
 
     @torch._inductor.config.patch(enable_auto_functionalized_v2=True)
     def test_auto_functionalize_v2(self, _dynamic=False):
@@ -2148,6 +2159,9 @@ def forward(self, arg0_1: "f32[2][1]cpu"):
             expected = f(dout, weight, 8)
             got = torch.compile(f, fullgraph=True, dynamic=True)(dout, weight, 8)
             self.assertEqual(got, expected)
+
+
+instantiate_parametrized_tests(AutoFunctionalizeTests)
 
 
 if __name__ == "__main__":
