@@ -497,15 +497,6 @@ class TestInductorDynamic(DynamicShapesTestCase):
         opt_r = opt_f(splits)
         self.assertEqual(r, opt_r)
 
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @parametrize("fill_value", (0, 3))
-    def test_full_symbolic_fill_respects_dtype(self, device, fill_value):
-        def f(x):
-            return torch.full((2,), x.item(), dtype=torch.bool, device=device).sum()
-
-        x = torch.tensor(fill_value, device=device)
-        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
-
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_size_factory_nobreak(self, device):
         def f(x, b):
@@ -1589,7 +1580,21 @@ class TestInductorDynamic(DynamicShapesTestCase):
             self.assertEqual(actual, expected)
 
 
+class TestSymbolicFull(TestCase):
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize("fill_value", (0, 3))
+    def test_full_symbolic_fill_respects_dtype(self, device, fill_value):
+        def f(x):
+            return torch.full((2,), x.item(), dtype=torch.bool, device=device).sum()
+
+        x = torch.tensor(fill_value, device=device)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
+instantiate_device_type_tests(
+    TestSymbolicFull, globals(), allow_mps=True, allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
