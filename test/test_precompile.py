@@ -5316,10 +5316,10 @@ class TestPrecompileDynamoCapture(TestCase):
             load(other_artifact, self.cache)
 
 
-def _capture_files(fn, example_inputs, backend, dynamic=None, tracer=None):
+def _capture_files(test, fn, example_inputs, backend, dynamic=None, tracer=None):
     """Capture ``fn`` (Dynamo tracer by default) and return (artifact_path, cache_path)."""
     temp_dir = tempfile.TemporaryDirectory()
-    unittest.addModuleCleanup(temp_dir.cleanup)
+    test.addCleanup(temp_dir.cleanup)
     directory = temp_dir.name
     artifact_path = os.path.join(directory, "artifact.py")
     cache_path = os.path.join(directory, "artifact.cache")
@@ -5361,7 +5361,7 @@ class TestPrecompileNoCompilation(TestCase):
     @parametrize("damage", ("corrupt", "format", "version"))
     def test_strict_load_rejects_bad_envelope_before_execution(self, damage):
         artifact, cache = _capture_files(
-            lambda x: x.sin(), [(torch.ones(4),)], backend="eager"
+            self, lambda x: x.sin(), [(torch.ones(4),)], backend="eager"
         )
         if damage == "corrupt":
             with open(cache, "r+b") as f:
@@ -5381,7 +5381,7 @@ class TestPrecompileNoCompilation(TestCase):
         from torch.compiler._cache import CacheInfo
 
         artifact, cache = _capture_files(
-            _no_compilation_inductor_graph, [(torch.ones(4),)], backend="inductor"
+            self, _no_compilation_inductor_graph, [(torch.ones(4),)], backend="inductor"
         )
         if failure == "missing":
             _rewrite_envelope(cache, artifact=None)
@@ -5407,6 +5407,7 @@ class TestPrecompileNoCompilation(TestCase):
         x = torch.ones(2, 8)
         with fresh_cache():
             artifact, cache = _capture_files(
+                self,
                 _no_compilation_inductor_graph,
                 [(x,)],
                 backend="inductor",
@@ -5429,6 +5430,7 @@ class TestPrecompileNoCompilation(TestCase):
         x = torch.ones(2, 8, device="cuda")
         with fresh_cache():
             artifact, cache = _capture_files(
+                self,
                 _no_compilation_inductor_graph,
                 [(x,)],
                 backend="inductor",
@@ -5460,6 +5462,7 @@ class TestPrecompileNoCompilation(TestCase):
     def test_strict_loaded_artifact_rejects_shape_miss(self):
         expected = _no_compilation_single_graph(torch.ones(2, 8))
         artifact, cache = _capture_files(
+            self,
             _no_compilation_single_graph,
             [(torch.ones(2, 8),)],
             backend="eager",
