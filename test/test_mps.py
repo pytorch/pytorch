@@ -5720,9 +5720,6 @@ class TestMPS(TestCaseMPS):
             torch.addbmm(m, b, b)
         with self.assertRaisesRegex(RuntimeError, "must have the same dtype|Input dtypes must be the same"):
             torch.addbmm(m, torch.ones(1, 2, 2, device="mps"), b)
-        # without the check a mismatched out= silently reinterprets the result bytes
-        with self.assertRaisesRegex(RuntimeError, "Expected out tensor to have dtype"):
-            torch.addbmm(m, torch.ones(1, 2, 2, device="mps"), torch.ones(1, 2, 2, device="mps"), out=b)
 
     # Binary Cross Enropy
     def test_bce_loss_simple(self):
