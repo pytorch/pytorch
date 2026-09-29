@@ -4635,6 +4635,21 @@ def breaking_helper(y):
 
 def calls_breaking_helper(model, x):
     return breaking_helper(model(x)) + 1
+
+
+RAISE = []
+
+
+@torch._dynamo.disable
+def maybe_raise():
+    if RAISE:
+        raise RuntimeError("raised by the served model")
+
+
+def raises_on_request(model, x):
+    y = breaking_helper(model(x))
+    maybe_raise()
+    return y + 1
 """
 
 _GOLDEN_LOADER = """
@@ -4653,15 +4668,10 @@ for args, kwargs, expected in saved["calls"]:
     torch.testing.assert_close(f(model, *args, **kwargs), expected)
 for name, grad in saved["grads"].items():
     torch.testing.assert_close(model.get_parameter(name).grad, grad)
-# An installed artifact serves under the fail_on_recompile stance.
-error, message = {
-    "standalone": (torch.compiler.PrecompileError, "no captured variant"),
-    "installed": (RuntimeError, "fail_on_recompile"),
-}[mode]
 try:
     f(model, saved["calls"][0][0][0].double())
-except error as e:
-    assert message in str(e), e
+except torch.compiler.PrecompileError as e:
+    assert "no captured variant" in str(e), e
 else:
     raise AssertionError("an uncovered call was served")
 print("served")
@@ -4783,6 +4793,65 @@ class TestPrecompileDynamoCapture(TestCase):
         self.assertIn(unreachable, python_code)
         calls = [((self.x2,), {}, y2), ((self.x3,), {}, y3)]
         self._serve_in_fresh_process(calls, mode="installed")
+
+    @skipIfCrossRef
+    def test_an_installed_artifact_refuses_changed_source_at_load(self):
+        fn = self.mod.calls_breaking_helper
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+        path = os.path.join(self.dir, self.module_name + ".py")
+        with open(path, "w") as f:
+            f.write(_GOLDEN_MODULE.replace("y.sin()", "y.sin() * 1"))
+        script = (
+            "import sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "try:\n"
+            "    torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "except torch.compiler.PrecompileError as e:\n"
+            "    assert 'Source code changes detected' in str(e), e\n"
+            "    print('refused')\n"
+        )
+        argv = [self.dir, self.artifact, self.cache]
+        out = subprocess.run(
+            [sys.executable, "-c", script, *argv],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("refused", out.stdout)
+
+    @skipIfCrossRef
+    def test_an_installed_artifact_passes_the_models_own_errors_through(self):
+        # Only Dynamo's fail_on_recompile refusal becomes a PrecompileError; a
+        # RuntimeError the served model raises on a covered call is its own.
+        fn = self.mod.raises_on_request
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+        script = (
+            "import sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "mod = __import__(sys.argv[4])\n"
+            "f = torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "assert f.installed\n"
+            "mod.RAISE.append(True)\n"
+            "try:\n"
+            "    f(mod.Model(), torch.randn(2, 4))\n"
+            "except torch.compiler.PrecompileError as e:\n"
+            "    raise AssertionError(e) from None\n"
+            "except RuntimeError as e:\n"
+            "    assert str(e) == 'raised by the served model', e\n"
+            "    print('passed through')\n"
+        )
+        argv = [self.dir, self.artifact, self.cache, self.module_name]
+        out = subprocess.run(
+            [sys.executable, "-c", script, *argv],
+            capture_output=True,
+            text=True,
+            timeout=900,
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("passed through", out.stdout)
 
     @parametrize("backend", ["inductor", "eager"])
     def test_a_single_graph_serves_in_process(self, backend):
