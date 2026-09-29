@@ -7300,6 +7300,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyAccelerator
     @largeTensorTest("20GB")
+    @expectedFailureMPS  # MPS pooling does not support 64-bit indexing
     def test_large_max_pool2d_ch_last(self, device):
         # https://github.com/pytorch/pytorch/issues/165297
         N, C, H, W = 70, 64, 512, 960  # dims to extend > int32
