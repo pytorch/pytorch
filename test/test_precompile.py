@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import HAS_TRITON
 
 
 # A module-level (global) model + a function referencing it, to exercise the
@@ -2855,6 +2856,7 @@ class TestPrecompile(TestCase):
             "Capture",
             "DynamoTracer",
             "MakeFxTracer",
+            "no_compilation",
             "PrecompiledRunnable",
             "PrecompileSummary",
         }
@@ -5282,6 +5284,131 @@ class TestPrecompileDynamoCapture(TestCase):
             load(self.artifact, other_cache)
         with self.assertRaisesRegex(PrecompileError, "tracer|does not match"):
             load(other_artifact, self.cache)
+
+
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+class TestPrecompileNoCompilation(TestCase):
+    def test_no_compilation_covers_background_threads_and_restores(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from torch.compiler._no_compile import is_compilation_forbidden
+
+        env = "TORCH_PRECOMPILE_NO_COMPILATION"
+        previous = os.environ.get(env)
+        compiled = torch.compile(lambda x: x.sin(), backend="eager")
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            first = torch.compiler.precompile.no_compilation()
+            second = torch.compiler.precompile.no_compilation()
+            first.__enter__()
+            second.__enter__()
+            try:
+                first.__exit__(None, None, None)
+                self.assertTrue(is_compilation_forbidden())
+                self.assertEqual(os.environ.get(env), "1")
+                future = pool.submit(compiled, torch.ones(4))
+                with self.assertRaisesRegex(
+                    PrecompileError, "forbids Dynamo graph compilation"
+                ):
+                    future.result()
+            finally:
+                second.__exit__(None, None, None)
+            self.assertFalse(is_compilation_forbidden())
+            self.assertEqual(os.environ.get(env), previous)
+            self.assertEqual(
+                pool.submit(compiled, torch.ones(4)).result(), torch.ones(4).sin()
+            )
+
+    def test_no_compilation_is_not_suppressed(self):
+        compiled = torch.compile(lambda x: x.cos(), backend="eager")
+        with (
+            torch._dynamo.config.patch(suppress_errors=True),
+            torch.compiler.precompile.no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "forbids Dynamo graph compilation"),
+        ):
+            compiled(torch.ones(4))
+
+    def test_backend_no_compilation_error_is_not_suppressed(self):
+        # Another thread can enter no_compilation() after this frame passed
+        # Dynamo's check, so Inductor raises from inside the backend.
+        def backend(gm, example_inputs):
+            raise PrecompileError(
+                "precompile.no_compilation() forbids Inductor graph compilation"
+            )
+
+        compiled = torch.compile(lambda x: x.cos(), backend=backend)
+        with (
+            torch._dynamo.config.patch(suppress_errors=True),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.BackendCompilerFailed,
+                "forbids Inductor graph compilation",
+            ),
+        ):
+            compiled(torch.ones(4))
+
+    def test_no_compilation_rejects_inductor_graph_compilation(self):
+        from torch._inductor.compile_fx import compile_fx
+
+        gm = torch.fx.symbolic_trace(lambda x: x.sin())
+        with (
+            torch.compiler.precompile.no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "Inductor graph compilation"),
+        ):
+            compile_fx(gm, [torch.ones(4)])
+
+    def test_no_compilation_does_not_disable_triton(self):
+        with mock.patch.dict(os.environ):
+            os.environ.pop("TRITON_DISABLE_COMPILATION", None)
+            with torch.compiler.precompile.no_compilation():
+                self.assertNotIn("TRITON_DISABLE_COMPILATION", os.environ)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_no_compilation_rejects_late_triton_cache_miss_before_dispatch(self):
+        from torch._inductor.async_compile import AsyncCompile, CompiledTritonKernels
+
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch.object(CompiledTritonKernels, "get", return_value=None),
+            mock.patch.object(AsyncCompile, "use_process_pool") as readiness,
+            mock.patch.object(AsyncCompile, "process_pool") as pool,
+            self.assertRaisesRegex(PrecompileError, "Triton kernel cache miss"),
+        ):
+            AsyncCompile().triton("missing_kernel", "missing bundled kernel")
+        readiness.assert_not_called()
+        pool.assert_not_called()
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_no_compilation_loads_cached_kernel_without_compile_pool(self):
+        from torch._inductor.async_compile import AsyncCompile, CompiledTritonKernels
+        from torch._inductor.codecache import CodeCacheFuture
+
+        future = mock.Mock(spec=CodeCacheFuture)
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch.object(CompiledTritonKernels, "get", return_value=future),
+            mock.patch.object(AsyncCompile, "use_process_pool") as readiness,
+            mock.patch.object(AsyncCompile, "process_pool") as pool,
+        ):
+            self.assertIs(
+                AsyncCompile().triton("cached_kernel", "bundled kernel"),
+                future.result.return_value,
+            )
+        future.result.assert_called_once_with()
+        readiness.assert_not_called()
+        pool.assert_not_called()
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_no_compilation_rejects_kernel_compile_and_autotune(self):
+        from torch._inductor.runtime.triton_heuristics import CachingAutotuner
+
+        autotuner = mock.Mock(spec=CachingAutotuner)
+        with torch.compiler.precompile.no_compilation():
+            with self.assertRaisesRegex(PrecompileError, "Triton kernel compilation"):
+                CachingAutotuner._precompile_config(autotuner, mock.Mock())
+            with self.assertRaisesRegex(PrecompileError, "Triton kernel benchmarking"):
+                CachingAutotuner.bench(autotuner, mock.Mock())
+            with self.assertRaisesRegex(PrecompileError, "Triton kernel autotuning"):
+                CachingAutotuner.autotune_to_one_config(autotuner)
+        self.assertEqual(autotuner.mock_calls, [])
 
 
 if __name__ == "__main__":

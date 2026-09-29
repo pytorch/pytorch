@@ -251,6 +251,7 @@ it.
 from __future__ import annotations
 
 import base64
+import contextlib  # noqa: TC003
 import dataclasses
 import errno
 import functools
@@ -3021,6 +3022,34 @@ def _read_artifact(
             f"{artifact_path!r}, cache_path={cache_path!r}): {e}"
         ) from e
     return python_code, cache
+
+
+def no_compilation() -> contextlib.AbstractContextManager[None]:
+    """
+    Forbid graph/kernel compilation and autotuning on every thread of this process.
+
+    Use it around a serving worker's lifetime to prove that a loaded artifact
+    and its kernel/autotune cache cover every execution: anything that would
+    trace a graph, compile a kernel, benchmark or autotune raises
+    :class:`~torch.compiler.PrecompileError` instead of silently compiling::
+
+        runnable = torch.compiler.precompile.load(artifact_path, cache_path)
+        with torch.compiler.precompile.no_compilation():
+            serve(runnable)  # raises rather than compiling on a cache miss
+
+    Only kernels already in the in-process kernel cache may run.
+
+    Unlike ``precompile.serving()``, which is thread-local, the policy is
+    process-wide. Nested and overlapping uses are depth-counted, so it stays
+    active until the last owner exits; callers must drain work they dispatched
+    (e.g. to compile workers) before that exit. While active,
+    ``TORCH_PRECOMPILE_NO_COMPILATION=1`` is exported so child processes
+    inherit it, and setting exactly ``"1"`` before startup enables the policy
+    for the whole process.
+    """
+    from torch.compiler._no_compile import no_compilation as _no_compilation
+
+    return _no_compilation()
 
 
 def _runnable_from_pair(
