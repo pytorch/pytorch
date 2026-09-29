@@ -91,9 +91,11 @@ def finalize_runtime_cache(
 ) -> None:
     """Pass the finalized cache artifact to ``write``, then keep the scope sealed.
 
-    The scope is sealed before the artifact is serialized, so a compile racing
-    finalization raises instead of being left out, and unsealed again if
-    ``write`` raises so the caller can retry.
+    Pending async compiles are waited on first, then the scope is sealed so any
+    later compile raises, and it is unsealed again if serialization or ``write``
+    raises so the caller can retry. The caller must stop compiling before
+    calling this: a compile submitted on another thread after the wait but
+    before the seal is neither waited on nor rejected.
     """
     import torch
     from torch._inductor.async_compile import AsyncCompile
@@ -113,6 +115,8 @@ def finalize_runtime_cache(
         )
         if artifacts is None:
             raise RuntimeError("Cannot finalize an unreadable precompile cache")
+        # Drain before sealing: compile result callbacks re-check
+        # check_compilation_allowed, so draining under the seal rejects them.
         AsyncCompile.drain_pending()
         if torch.cuda.is_initialized():
             torch.cuda.synchronize()
