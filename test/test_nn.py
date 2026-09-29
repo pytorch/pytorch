@@ -11540,7 +11540,7 @@ class TestNNDeviceType(NNTestCase):
                 self._test_batchnorm_eval(2, device, dtype)
                 self._test_batchnorm_eval(3, device, dtype)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "mps"])
     @dtypes(torch.bfloat16, torch.half)
     def test_batchnorm_eval_mixed(self, device, dtype):
         # Test bfloat16 input with float module
@@ -16331,7 +16331,6 @@ if __name__ == '__main__':
         torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
     @onlyAccelerator
-    @skipMPS
     @parametrize_test("dims", [2, 3], name_fn=lambda x: f"{x}D")
     @parametrize_test("mode", ["train", "inference"], name_fn=lambda x: x)
     @parametrize_test(
@@ -16378,6 +16377,9 @@ if __name__ == '__main__':
 
             if mode == "train" and mixed and dims == 3 and dtype == torch.half and fmt_ref == ("NCHW", "native"):
                 self.skipTest("Failed on CUDA")
+
+        if self.device_type == "mps" and mode == "train" and mixed:
+            self.skipTest("MPS accumulates batch statistics at the input dtype rather than in float")
 
         if dims == 3 and memory_format in ("NHWC", "NCHW"):
             memory_format = memory_format + "3D"

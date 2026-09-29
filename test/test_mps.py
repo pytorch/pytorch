@@ -5712,59 +5712,38 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, "expected all tensors to have the same dtype"):
             torch.ops.aten.huber_loss_backward(torch.ones_like(x), x, t, 1, 1.0)
 
-    # batch_norm only accepts a mixed pair when the parameters are float32; other combinations are
-    # rejected by the reference with "expect parameter to have scalar type of Float".
     @parametrize("in_dtype", [torch.float16, torch.bfloat16])
-    def test_batch_norm_mixed_dtype_eval(self, in_dtype):
+    def test_batch_norm_mixed_dtype_backward(self, in_dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/154887
-        # float32 running stats against a half input: the inference path fed the stats into
-        # normalizationWithTensor uncast, and its backward subtracted them from the input, both of
-        # which abort inside MPSGraph's verifier rather than raising. Training mode is excluded
-        # on purpose: it was never broken, and it differs by a few ulps because MPS accumulates the
-        # batch stats at the input dtype where the reference uses float (see the "Accumulate type?"
-        # TODO in batch_norm_mps), which is a separate issue from the dtype reinterpretation here.
+        # test_nn covers the forward; this checks eval-mode gradients against CPU, since grad_weight is
+        # computed at the parameter dtype rather than the input dtype
         cpu_x = torch.rand((2, 3, 4), dtype=in_dtype)
         cpu_p = [torch.rand((3,)) for _ in range(4)]
         cpu_p[1] += 1  # running_var must be positive
 
         def run(device):
             x = cpu_x.to(device).clone().requires_grad_()
-            mean, var, weight, bias = (t.to(device).clone() for t in cpu_p)
-            weight.requires_grad_()
-            bias.requires_grad_()
-            out = F.batch_norm(x, mean, var, weight=weight, bias=bias)
-            out.sum().backward()
-            return out, x.grad, weight.grad, bias.grad
+            mean, var, weight, bias = (t.to(device).clone().requires_grad_(i > 1) for i, t in enumerate(cpu_p))
+            F.batch_norm(x, mean, var, weight=weight, bias=bias).sum().backward()
+            return x.grad, weight.grad, bias.grad
 
-        # The output, grad_input and grad_bias match the reference bit-exactly; grad_weight is a
-        # float32 reduction and lands within an ulp of it, so default tolerances apply there.
-        for res, ref in zip(run("mps"), run("cpu")):
-            self.assertEqual(res.dtype, ref.dtype)
-            self.assertEqual(res, ref)
+        self.assertEqual(run("mps"), run("cpu"))
 
-    def test_batch_norm_mixed_dtype_no_training_op(self):
-        # the _native_batch_norm_legit_no_training overload from the issue report
-        cpu_args = (torch.rand((2, 3, 4), dtype=torch.float16), None, None,
-                    torch.rand((3,), dtype=torch.float32), torch.rand((3,), dtype=torch.float32) + 1)
-        mps_args = tuple(a.to("mps") if a is not None else None for a in cpu_args)
-        op = torch.ops.aten._native_batch_norm_legit_no_training.default
-        self.assertEqual(op(*mps_args, 0.1, 1e-5)[0], op(*cpu_args, 0.1, 1e-5)[0])
+        # Without weight, only the stats dtype distinguishes these two backward graphs
+        for stats_dtype in (torch.float32, in_dtype):
+            grads = []
+            for device in ("mps", "cpu"):
+                x = cpu_x.to(device).clone().requires_grad_()
+                F.batch_norm(x, cpu_p[0].to(device, stats_dtype), cpu_p[1].to(device, stats_dtype)).sum().backward()
+                grads.append(x.grad)
+            self.assertEqual(*grads)
 
-    def test_batch_norm_backward_mixed_dtype_stats(self):
-        x = torch.randn(2, 3, 4, dtype=torch.half, requires_grad=True)
-        # Same shapes, different running-stat dtypes: must not share a cached backward graph
-        for dtype in (torch.float32, torch.float16):
-            mps_x = x.detach().to("mps").requires_grad_()
-            F.batch_norm(mps_x, torch.zeros(3, device="mps", dtype=dtype), torch.ones(3, device="mps", dtype=dtype)).sum().backward()
-            self.assertEqual(mps_x.grad, torch.ones_like(mps_x) / (1 + 1e-5) ** 0.5)
-        # float32 save_mean/save_invstd against a half input in training mode
-        args = (x.detach(), x.detach(), torch.ones(3), None, None, torch.zeros(3), torch.ones(3), True, 1e-5, [True] * 3)
-        mps_args = tuple(a.to("mps") if isinstance(a, torch.Tensor) else a for a in args)
-        ref_args = tuple(a.float() if isinstance(a, torch.Tensor) else a for a in args)
+        # float32 save_mean/save_invstd are only reachable by calling the op directly. Training-mode
+        # backward runs at the input dtype on MPS but in float on CPU, hence the tolerance.
+        args = (cpu_x, cpu_x, cpu_p[2], None, None, cpu_p[0], cpu_p[1], True, 1e-5, [True] * 3)
+        mps_args = (a.to("mps") if isinstance(a, torch.Tensor) else a for a in args)
         res = torch.ops.aten.native_batch_norm_backward(*mps_args)
-        ref = torch.ops.aten.native_batch_norm_backward(*ref_args)
-        for r, e in zip(res, ref):
-            self.assertEqual(r.float(), e, atol=2e-3, rtol=2e-3)
+        self.assertEqual(res, torch.ops.aten.native_batch_norm_backward(*args), atol=5e-3, rtol=1e-2)
 
     def test_addbmm_mixed_dtype_errors(self):
         # addbmm has no promotion on any backend, so it must raise rather than abort
