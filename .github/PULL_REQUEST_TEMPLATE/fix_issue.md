@@ -8,11 +8,11 @@ Before submitting, please review:
 
 ## Issue
 
-Fixes #<!-- Issue number. PRs without a linked issue may be automatically closed. -->
+Fixes #<!-- Issue number. PRs without a linked actionable issue will be automatically closed. -->
 
 Or
 
-Part of the umbrella issue #<!-- Issue number. PRs without a linked issue may be automatically closed. -->
+Part of #<!-- Issue number. PRs without a linked actionable issue will be automatically closed. -->
 
 ## Summary
 
