@@ -497,8 +497,13 @@ static void max_pool_with_indices_out_mps_template(const Tensor& output,
                                                    bool ceil_mode,
                                                    const int32_t pooling_dims,
                                                    const std::string& op_name) {
-  auto [dims, output_size, kernel_size, stride, padding, dilation_opt] =
+  auto [dims_binding, output_size, kernel_size_binding, stride_binding, padding_binding, dilation_opt] =
       process_pool_sizes(input, _kernel_size, _stride, _padding, _dilation, ceil_mode, pooling_dims, op_name);
+  // Work around "capturing a structured binding is not yet supported in OpenMP".
+  const auto dims = dims_binding;
+  const auto& kernel_size = kernel_size_binding;
+  const auto& stride = stride_binding;
+  const auto& padding = padding_binding;
   TORCH_INTERNAL_ASSERT(dilation_opt.has_value());
   auto dilation = dilation_opt.value();
   const Tensor& indices = *(at::borrow_from_optional_tensor(indices_opt));
@@ -838,8 +843,13 @@ static void avg_pool_out_mps_template(const Tensor& output,
                                       const int32_t pooling_dims,
                                       const std::string& op_name) {
   TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()), "Not implemented for complex");
-  auto [dims, output_size, kernel_size, stride, padding, _] =
+  auto [dims_binding, output_size, kernel_size_binding, stride_binding, padding_binding, _] =
       process_pool_sizes(input, _kernel_size, _stride, _padding, std::nullopt, ceil_mode, pooling_dims, op_name);
+  // Work around "capturing a structured binding is not yet supported in OpenMP".
+  const auto dims = dims_binding;
+  const auto& kernel_size = kernel_size_binding;
+  const auto& stride = stride_binding;
+  const auto& padding = padding_binding;
 
   const auto memory_format = input.suggest_memory_format();
   output.resize_(output_size, memory_format);
@@ -908,8 +918,13 @@ static void avg_pool_backward_out_mps_template(const Tensor& grad_input,
   // Nondeterministic due to atomic_add
   at::globalContext().alertNotDeterministic(op_name);
 
-  auto [dims, _, kernel_size, stride, padding, __] =
+  auto [dims_binding, _, kernel_size_binding, stride_binding, padding_binding, __] =
       process_pool_sizes(input, _kernel_size, _stride, _padding, std::nullopt, ceil_mode, pooling_dims, op_name);
+  // Work around "capturing a structured binding is not yet supported in OpenMP".
+  const auto dims = dims_binding;
+  const auto& kernel_size = kernel_size_binding;
+  const auto& stride = stride_binding;
+  const auto& padding = padding_binding;
 
   const auto memory_format = input.suggest_memory_format();
   grad_input.resize_(input.sizes(), memory_format);
