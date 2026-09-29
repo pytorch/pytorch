@@ -243,6 +243,26 @@ inductor_skips["xpu"] = {
 inductor_skips["xpu"]["nn.functional.linear"] = {f16}
 inductor_skips["xpu"]["masked.cumprod"] = {f16}
 
+# Ascend NPU (PrivateUse1): aclnn eager kernels reject these dtype combos.
+inductor_skips["npu"] = {
+    # https://gitcode.com/Ascend/pytorch/issues/4938
+    "nn.functional.pad.reflect": {i32, i64, f32},
+    "nn.functional.prelu": {f16, f32},
+    "unfold": {f16, f32},
+    # aclnn MultilabelMarginLossForward eager rejection
+    # https://gitcode.com/Ascend/pytorch/issues/5217
+    "nn.functional.multilabel_margin_loss": {f32},
+    # https://gitcode.com/Ascend/pytorch/issues/4599
+    # (masked_fill_ in native aclnn fallback path rejects DT_DOUBLE;
+    # residuals of https://gitcode.com/Ascend/pytorch/issues/4934)
+    "nn.functional.interpolate.nearest": {f64},
+    "nn.functional.upsample_nearest": {f64},
+    # https://gitcode.com/Ascend/pytorch/issues/5237
+    # (aclnnSoftmaxBackward rejects DT_DOUBLE gradOutput on with_dtype variants)
+    "softmax.with_dtype": {f16, f32},
+    "nn.functional.softmin.with_dtype": {f16, f32},
+}
+
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
