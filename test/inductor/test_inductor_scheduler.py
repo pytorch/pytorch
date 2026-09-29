@@ -9,6 +9,7 @@ import sympy
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.ir as ir
+import torch._inductor.memory as inductor_memory
 import torch._inductor.metrics as metrics
 import torch.utils.flop_counter
 from torch._dynamo.utils import counters
@@ -32,9 +33,11 @@ from torch._inductor.scheduler import (
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     FusedNestedReductions,
+    FusionMemoryState,
     MemoryDepMatch,
     NestedReduction,
     OrderedParentNodes,
+    PendingFusion,
     Scheduler,
     SchedulerNode,
     SubParentAccessRelation,
@@ -49,6 +52,7 @@ from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    onlyAccelerator,
     onlyCUDA,
     skipCUDAIf,
 )
@@ -56,6 +60,8 @@ from torch.testing._internal.common_utils import (
     DeterministicGuard,
     parametrize,
     run_tests,
+    skipIfMPS,
+    skipIfXpu,
     TestCase,
     xfailIfNoAcceleratorTriton,
 )
@@ -135,6 +141,25 @@ class TestScheduler(TestCase):
         snode = object.__new__(ExternKernelSchedulerNode)
         snode.node = node
         return snode
+
+    def test_stable_topological_sort_schedule(self):
+        consumer = self._mock_base_snode("consumer")
+        independent = self._mock_base_snode("independent")
+        producer = self._mock_base_snode("producer")
+        producer.get_buffer_names.return_value = OrderedSet(["producer_buf"])
+        consumer.unmet_dependencies = OrderedSet(
+            [MemoryDep("producer_buf", sympy.S.Zero, (), ())]
+        )
+        independent.unmet_dependencies = OrderedSet(
+            [MemoryDep("outside_region", sympy.S.Zero, (), ())]
+        )
+        producer.unmet_dependencies = OrderedSet()
+
+        result = Scheduler._stable_topological_sort_schedule(
+            [consumer, independent, producer]
+        )
+
+        self.assertEqual(result, [independent, producer, consumer])
 
     def _mock_schedule_node(
         self,
@@ -299,7 +324,7 @@ class TestScheduler(TestCase):
 
     def test_fuse_two_nodes_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
-        device = torch.device("cuda", 0)
+        device = torch.device(GPU_TYPE, 0)
         node1 = self._mock_base_snode("node1", device)
         node2 = self._mock_base_snode("node2", device)
         node3 = self._mock_base_snode("node3", device)
@@ -321,6 +346,80 @@ class TestScheduler(TestCase):
         self.assertIn(node3, fused_nodes)
         self.assertNotIn(node1, fused_nodes)
         self.assertNotIn(node2, fused_nodes)
+
+    def test_pending_fusion_does_not_repeat_legality_check(self):
+        scheduler = object.__new__(Scheduler)
+        pending_node1 = self._mock_base_snode("pending_node1")
+        pending_node2 = self._mock_base_snode("pending_node2")
+        next_node = self._mock_base_snode("next_node")
+        fused = self._mock_base_snode("fused")
+        scheduler.name_to_fused_node = {
+            "pending_node1": pending_node1,
+            "pending_node2": pending_node2,
+            "next_node": next_node,
+        }
+        scheduler._fusion_memory_state = None
+        scheduler.seen_template_fusions = OrderedSet()
+        scheduler.can_fuse = Mock(return_value=False)
+        scheduler.will_fusion_create_cycle = Mock(return_value=False)
+
+        def fuse_two_nodes(node1, node2, fused_nodes):
+            fused_nodes.difference_update((node1, node2))
+            fused_nodes.add(fused)
+            scheduler.name_to_fused_node.update(
+                {node1.get_first_name(): fused, node2.get_first_name(): fused}
+            )
+            return fused
+
+        scheduler.fuse_two_nodes = Mock(side_effect=fuse_two_nodes)
+        speedup = Mock(return_value=True)
+        pending = PendingFusion(speedup, pending_node1, pending_node2)
+        fused_nodes = OrderedSet([pending_node1, pending_node2, next_node])
+
+        scheduler._try_fusion_pairs(
+            [(pending_node1, next_node)],
+            {pending_node1: pending, pending_node2: pending},
+            {},
+            fused_nodes,
+            is_reorder_round=True,
+        )
+
+        speedup.assert_called_once()
+        scheduler.will_fusion_create_cycle.assert_called_once_with(
+            pending_node1, next_node
+        )
+        scheduler.can_fuse.assert_called_once_with(fused, next_node, can_reorder=True)
+        scheduler.fuse_two_nodes.assert_called_once_with(
+            pending_node1, pending_node2, fused_nodes
+        )
+
+    @parametrize("memory_guard_enabled", (False, True))
+    def test_pending_template_fusion_resolves_retired_operand(
+        self, memory_guard_enabled
+    ):
+        scheduler = object.__new__(Scheduler)
+        template = self._mock_base_snode("template")
+        retired = self._mock_base_snode("retired")
+        current = self._mock_base_snode("current")
+        template.is_template.return_value = True
+        template.get_template_node.return_value = None
+        scheduler.name_to_fused_node = {
+            "template": template,
+            "retired": current,
+            "current": current,
+        }
+        scheduler._fusion_memory_state = Mock() if memory_guard_enabled else None
+        scheduler.fuse_if_speedup = Mock(return_value=False)
+        speedup = Mock(return_value=True)
+        pending = PendingFusion(speedup, template, retired)
+        fused_nodes = OrderedSet([template, current])
+
+        scheduler._evaluate_pending_template_fusions({retired: [pending]}, fused_nodes)
+
+        expected = current if memory_guard_enabled else retired
+        scheduler.fuse_if_speedup.assert_called_once_with(
+            template, expected, speedup, fused_nodes
+        )
 
     def test_nested_reduction_fuse_with_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
@@ -373,10 +472,11 @@ class TestScheduler(TestCase):
 
         self.assertIsNone(result)
 
+    @skipIfMPS  # MPS is filtered by _filter_nodes_for_combo_kernel_grouping
     @inductor_config.patch(combo_kernel_max_num_nodes=16)
     def test_combo_kernel_grouping_respects_mempool(self):
         scheduler = Mock()
-        device = torch.device("cuda", 0)
+        device = torch.device(GPU_TYPE, 0)
         pool_node1 = self._mock_base_snode("pool_node1", device)
         pool_node2 = self._mock_base_snode("pool_node2", device)
         default_node = self._mock_base_snode("default_node", device)
@@ -405,6 +505,218 @@ class TestScheduler(TestCase):
         self.assertEqual(
             groups, [[pool_node1, pool_node2], [default_node], [other_pool_node]]
         )
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_fusion_memory_guard_rejects_in_torch_compile(self, device):
+        def fn(x, weight):
+            early = torch.mm(torch.sin(x).sum(dim=0)[None, :], weight)
+            late = torch.cos(x).sum(dim=0)
+            return early, late
+
+        x = torch.testing.make_tensor((1, 4096), device=device, dtype=torch.bool)
+        weight = torch.testing.make_tensor(
+            (4096, 1), device=device, dtype=torch.float32
+        )
+
+        def compile_and_measure(increase_gb, pct_threshold):
+            torch._dynamo.reset()
+            metrics.reset()
+            final_peaks = []
+            original_fuse_nodes = Scheduler.fuse_nodes
+
+            def fuse_nodes_and_record(scheduler, nodes):
+                nodes = original_fuse_nodes(scheduler, nodes)
+                buffer_to_step = {
+                    name: step
+                    for step, node in enumerate(nodes)
+                    for name in node.get_buffer_names()
+                }
+                for step, node in enumerate(nodes):
+                    for dep in node.unmet_dependencies:
+                        if dep.name in buffer_to_step:
+                            self.assertLessEqual(buffer_to_step[dep.name], step)
+                graph_inputs = OrderedSet(V.graph.graph_inputs.keys())
+                graph_outputs = OrderedSet(V.graph.get_output_names())
+                freeable = inductor_memory.get_freeable_input_buf(nodes, graph_inputs)
+                inductor_memory.assign_memory_planning_info_for_scheduler_buffers(
+                    nodes, scheduler.name_to_buf
+                )
+                inductor_memory.assign_memory_planning_info_for_scheduler_nodes(
+                    nodes,
+                    scheduler.name_to_fused_node,
+                    scheduler.name_to_buf,
+                    freeable,
+                )
+                peak, _ = inductor_memory.estimate_peak_memory(
+                    nodes, freeable, graph_outputs
+                )
+                final_peaks.append(peak)
+                return nodes
+
+            with patch.object(Scheduler, "fuse_nodes", fuse_nodes_and_record):
+                compiled = torch.compile(
+                    fn,
+                    backend="inductor",
+                    fullgraph=True,
+                    options={
+                        "fx_graph_cache": False,
+                        "reorder_for_peak_memory": False,
+                        "fusion_memory_timeline_peak_memory_increase_gb": increase_gb,
+                        "fusion_memory_timeline_peak_memory_pct_threshold": pct_threshold,
+                    },
+                )
+                self.assertEqual(compiled(x, weight), fn(x, weight))
+
+            self.assertEqual(len(final_peaks), 1)
+            return metrics.generated_kernel_count, final_peaks[0]
+
+        unrestricted_count, unrestricted_peak = compile_and_measure(None, None)
+        guarded_count, guarded_peak = compile_and_measure(0.0, None)
+
+        self.assertEqual(unrestricted_count, 1)
+        self.assertEqual(guarded_count, 2)
+        self.assertLess(guarded_peak, unrestricted_peak)
+        self.assertEqual(compile_and_measure(1000.0, None)[0], 1)
+        self.assertEqual(compile_and_measure(None, 1000.0)[0], 1)
+        self.assertEqual(compile_and_measure(1000.0, 0.0)[0], 2)
+
+    @xfailIfNoAcceleratorTriton
+    @onlyCUDA
+    def test_fusion_memory_guard_foreach(self, device):
+        def fn(a, b):
+            values = torch._foreach_abs([a, b])
+            return values, torch._foreach_sqrt(values)
+
+        args = (
+            torch.testing.make_tensor((10, 10), device=device, dtype=torch.float32),
+            torch.testing.make_tensor((20, 20), device=device, dtype=torch.float32),
+        )
+        expected = fn(*args)
+        compiled = torch.compile(
+            fn,
+            fullgraph=True,
+            options={
+                "fx_graph_cache": False,
+                "fusion_memory_timeline_peak_memory_increase_gb": 1000.0,
+            },
+        )
+        self.assertEqual(compiled(*args), expected)
+
+    def test_fusion_memory_update_resolves_retired_consumer(self):
+        scheduler = object.__new__(Scheduler)
+        d = self._mock_base_snode("d")
+        a = self._mock_base_snode("a")
+        b = self._mock_base_snode("b")
+        e = self._mock_base_snode("e")
+        a1 = self._mock_base_snode("a1")
+        a2 = self._mock_base_snode("a2")
+        c = self._mock_base_snode("c")
+        f = self._mock_base_snode("f")
+
+        a.get_first_name.return_value = "a1"
+        a.get_nodes.return_value = [a1, a2]
+        c.get_first_name.return_value = "a1"
+        c.get_nodes.return_value = [a1, a2, b]
+
+        c_output = Mock()
+        c_output.get_name.return_value = "c_out"
+        c_output.mpi_buffer = inductor_memory.MemoryPlanningInfoForBuffer(
+            size_alloc=8,
+            size_free=8,
+            succ_nodes=OrderedSet([e, f]),
+            succ_nodes_for_ordering=OrderedSet([e, f]),
+        )
+        c.get_buffer_names.return_value = OrderedSet(["c_out"])
+        c.get_outputs.return_value = (c_output,)
+
+        input_buffer = inductor_memory.FreeableInputBuffer(
+            "input",
+            inductor_memory.MemoryPlanningInfoForBuffer(
+                size_free=100,
+                succ_nodes=OrderedSet([a]),
+                succ_nodes_for_ordering=OrderedSet([a]),
+            ),
+        )
+        c.mpi_node = inductor_memory.MemoryPlanningInfoForNode(
+            pred_buffers=OrderedSet([input_buffer])
+        )
+
+        for node in (d, e):
+            node.get_outputs.return_value = ()
+            node.mpi_node = inductor_memory.MemoryPlanningInfoForNode()
+        d.unmet_dependencies = OrderedSet()
+        e.unmet_dependencies = OrderedSet([MemoryDep("c_out", sympy.S.Zero, (), ())])
+        c.unmet_dependencies = OrderedSet()
+
+        scheduler.name_to_fused_node = {
+            "d": d,
+            "a1": c,
+            "a2": c,
+            "b": c,
+            "e": e,
+            "f": f,
+        }
+        state = FusionMemoryState(
+            nodes=[d, c, None, e, f],
+            graph_outputs=OrderedSet(),
+            node_to_idx={d: 0, a: 1, b: 1, c: 1, a1: 1, a2: 1, e: 3, f: 4},
+            baseline_peak=108,
+            baseline_live_before=[100, 100, 8, 8, 8, 0],
+            baseline_live_after=[100, 8, 8, 8, 0],
+            peak_limit=108,
+        )
+
+        update = scheduler._fusion_memory_update(state, d, e)
+
+        self.assertIsNotNone(update)
+        self.assertEqual(update.live_before[-1], 8)
+
+        state.baseline_live_before[4] = 9
+        scheduler._fusion_memory_state = state
+        scheduler._fusion_memory_guard_disabled = False
+        with patch("torch._logging.warning_once") as warning_once:
+            can_fuse, update = scheduler._can_fuse_peak_memory_check(state, d, e)
+
+        self.assertTrue(can_fuse)
+        self.assertIsNone(update)
+        self.assertTrue(scheduler._fusion_memory_guard_disabled)
+        self.assertIsNone(scheduler._fusion_memory_state)
+        warning_once.assert_called_once()
+
+    def test_possible_fusions_defer_cycle_check(self):
+        scheduler = object.__new__(Scheduler)
+        node1 = self._mock_base_snode("node1")
+        node2 = self._mock_base_snode("node2")
+        node1.used_buffer_names.return_value = OrderedSet(["buf"])
+        node2.used_buffer_names.return_value = OrderedSet(["buf"])
+
+        scheduler.name_to_fused_node = {"node1": node1, "node2": node2}
+        scheduler._fusion_memory_state = None
+        scheduler._can_fuse_impl = Mock(return_value=True)
+        scheduler.will_fusion_create_cycle = Mock(return_value=True)
+        scheduler.unfusable_node = Mock(return_value=False)
+        scheduler.get_possible_fusions_with_highest_priority = Mock(
+            side_effect=lambda fusions: fusions
+        )
+        scheduler.score_fusion_key = Mock(return_value=(0,))
+
+        with inductor_config.patch(aggressive_fusion=False):
+            possible = scheduler.get_possible_fusions([node1, node2], False)
+
+        self.assertEqual(possible, [(node1, node2)])
+        scheduler.will_fusion_create_cycle.assert_not_called()
+        speedup = Mock(return_value=True)
+        self.assertFalse(
+            scheduler.fuse_if_speedup(node1, node2, speedup, OrderedSet([node1, node2]))
+        )
+        scheduler.will_fusion_create_cycle.assert_called_once_with(node1, node2)
+        speedup.assert_not_called()
+
+        scheduler._fusion_memory_state = Mock()
+        scheduler.will_fusion_create_cycle.reset_mock()
+        self.assertFalse(scheduler.can_fuse(node1, node2))
+        scheduler.will_fusion_create_cycle.assert_called_once_with(node1, node2)
 
     def test_snode_args_kwargs_removes_filled_positional_kwargs(self):
         snode = Mock()
@@ -1764,6 +2076,7 @@ class TestScheduler(TestCase):
         {"force_disable_caches": True, "shape_padding": False}
     )
     @skipIf(not IS_BIG_GPU, "we can't use Triton only as a backend for max autotune")
+    @skipIfXpu(msg="torch-xpu-ops/issues/4853")
     def test_flop_counter_op(self, device, dtype, options):
         if device == "cpu":
             return
@@ -1947,7 +2260,7 @@ class TestScheduler(TestCase):
         self.assertFalse(can_fuse_prologue(hook_blocks=True))
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_index_add_fusion_prevented(self):
         """
         Test that index_add_ (scatter with atomic_add mode) is not fused with
@@ -1968,7 +2281,7 @@ class TestScheduler(TestCase):
             F_u_at_atom = F_u_mol[batch] + 1e-6
             return f_u / F_u_at_atom
 
-        device = "cuda"
+        device = GPU_TYPE
         f = torch.ones(1024, 1, device=device)
         batch = torch.zeros(1024, dtype=torch.long, device=device)
 
@@ -1988,7 +2301,7 @@ class TestScheduler(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_atomic_add_no_fusion_correctness(self):
         """
         Test that atomic_add operations produce correct results.
@@ -1999,7 +2312,7 @@ class TestScheduler(TestCase):
             out.index_add_(0, idx, x)  # atomic_add: scatter to shared locations
             return out[idx] + 1.0  # read from same buffer: requires sync
 
-        device = "cuda"
+        device = GPU_TYPE
         x = torch.ones(5, device=device)
         idx = torch.tensor([0, 1, 0, 1, 0], device=device, dtype=torch.long)
 
@@ -2019,7 +2332,7 @@ class TestScheduler(TestCase):
         )
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_expand_reuse_does_not_realize_before_reduction(self):
         def fn(icrd1, icrd2, wcrd, ocrd, meta, input1, input2, weight, output):
             input1_selected = torch.index_select(input1, 2, icrd1)
@@ -2045,7 +2358,7 @@ class TestScheduler(TestCase):
         U = 4
         V = 4
         W = 4
-        device = "cuda"
+        device = GPU_TYPE
 
         torch.manual_seed(0)
         input1 = torch.rand((B, U, L), dtype=torch.float32, device=device)
@@ -2090,7 +2403,7 @@ class TestScheduler(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
 
     @xfailIfNoAcceleratorTriton
-    @onlyCUDA
+    @onlyAccelerator
     def test_expand_reuse_realizes_in_deterministic_mode(self):
         def fn(a, b, c, d, e):
             x = a * b * c * d * e
@@ -2107,7 +2420,7 @@ class TestScheduler(TestCase):
             self.assertEqual(metrics.ir_nodes_pre_fusion, 2)
             self.assertEqual(metrics.generated_kernel_count, 2)
 
-        device = "cuda"
+        device = GPU_TYPE
         torch.manual_seed(0)
         args = [
             torch.rand((8, 8), dtype=torch.float32, device=device) for _ in range(5)

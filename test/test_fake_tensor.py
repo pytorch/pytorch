@@ -235,6 +235,10 @@ class FakeTensorTest(TestCase):
                 torch.ops.aten.sparse_compressed_tensor.comp_plain_value_size(
                     *cuda_args, [2, 2], layout=torch.sparse_csr, device="cuda:1"
                 )
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.ops.aten.sparse_compressed_tensor.comp_plain_value_size(
+                    *cuda_args, [2, 2], layout=torch.sparse_csr
+                )
 
     def test_nansum_nanmean_empty_dim(self):
         # nansum/nanmean reduce over all dimensions when dim=() or dim=[] is
@@ -3757,6 +3761,30 @@ class FakeTensorDispatchCache(TestCase):
             y = torch.randn(4, 3)
             z = x.to(device="cuda")
             self._test_cache_key(fm, x, y, z)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cache_key_indexless_device_pins_current_index(self):
+        # An index-less device argument means "the current one", so it denotes a
+        # different device depending on ambient state. Keying it unresolved lets a
+        # call made while cuda:0 is current serve one made while cuda:1 is, and the
+        # cached output then carries the wrong device. Patching current_device is
+        # enough to see it: the resolution happens in the key, so this needs one GPU.
+        func = aten.zeros.default
+        state = _CacheKeyState()
+        with FakeTensorMode() as fm:
+            args = [[4, 3]]
+            kwargs = {"device": torch.device("cuda")}
+            with patch.object(torch.cuda, "current_device", return_value=0):
+                key_dev0 = fm._cache_key(state, func, args, kwargs)
+            with patch.object(torch.cuda, "current_device", return_value=1):
+                key_dev1 = fm._cache_key(state, func, args, kwargs)
+            # An explicit index is already unambiguous and must be unaffected.
+            explicit = {"device": torch.device("cuda", 0)}
+            with patch.object(torch.cuda, "current_device", return_value=1):
+                key_explicit = fm._cache_key(state, func, args, explicit)
+
+        self.assertNotEqual(key_dev0, key_dev1)
+        self.assertEqual(key_dev0, key_explicit)
 
     def test_cache_key_memory_format(self):
         with FakeTensorMode() as fm:
