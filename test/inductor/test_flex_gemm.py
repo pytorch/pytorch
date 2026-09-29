@@ -438,6 +438,30 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
         self.assertEqual(flex_gemm_search_space(sm120), sm120[:12])
 
+    @parametrize(
+        "m,varlen,include_skinny",
+        (
+            (32, False, True),
+            (128, False, True),
+            (129, False, False),
+            (2048, False, False),
+            (32, True, False),
+        ),
+    )
+    def test_flex_gemm_skinny_search_space(self, m, varlen, include_skinny):
+        key = self.searchSpaceKey
+        default = key(128, 128, 2, 1, True)
+        skinny = (
+            key(128, 32, 2, 1, True, swap_ab=True),
+            key(128, 32, 2, 2, False, swap_ab=True),
+        )
+        legal = (default, skinny[1], key(128, 64, 1, 1, True), skinny[0])
+        expected = (default, *skinny) if include_skinny else (default,)
+        self.assertEqual(
+            flex_gemm_search_space(legal, varlen=varlen, dense_shape=(m, 2048)),
+            expected,
+        )
+
     def test_flex_gemm_dense_default_config_by_shape(self):
         key = self.searchSpaceKey
         quack_default = key(256, 256, 2, 1, True)
@@ -9455,6 +9479,50 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         self.assertIn(" ===== ANALYSIS DETAILS =====", verbose)
         self.assertIn(" ===== GENERATED EPILOGUE =====", verbose)
         self.assertIn("@cute.jit", verbose)
+
+    @parametrize("dtype", (torch.bfloat16, torch.float16))
+    @parametrize("cluster_n,dynamic", ((1, True), (2, False)))
+    def test_mm_tuned_skinny_candidates(self, device, dtype, cluster_n, dynamic):
+        if torch.cuda.get_device_capability(device)[0] != 10:
+            self.skipTest("SM100-family search configurations")
+
+        def skinny_candidate(legal, **kwargs):
+            choices = flex_gemm_search_space(legal, **kwargs)
+            wanted = dict(
+                tile_m=128,
+                tile_n=32,
+                cluster_m=2,
+                cluster_n=cluster_n,
+                swap_ab=True,
+                is_dynamic_persistent=dynamic,
+            )
+            choices = tuple(
+                c
+                for c in choices
+                if all(dict(c)[name] == value for name, value in wanted.items())
+            )
+            self.assertTrue(choices, "skinny candidate missing from production search")
+            return choices
+
+        def epilogue(acc):
+            return F.silu(acc.float()).to(acc.dtype)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue,
+                kernel_options={"backend": "QUACK", "tuned": True},
+            )
+
+        a = self.makeTensor(32, 128, device=device, dtype=dtype)
+        b = self.makeTensor(512, 128, device=device, dtype=dtype).t()
+        # Exercise each new candidate without bypassing production search/legality.
+        with mock.patch.object(lowering, "flex_gemm_search_space", skinny_candidate):
+            actual = torch.compile(fn, fullgraph=True)(a, b)
+        self.assertMatchesLowPrecisionEager(
+            actual, epilogue(a @ b), epilogue(a.double() @ b.double()), a.shape[1]
+        )
 
     def test_addmm_swap_ab_matches_non_swap_and_reference(self, device):
         m, n, k = 128, 192, 64
