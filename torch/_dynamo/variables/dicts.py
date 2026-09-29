@@ -870,90 +870,23 @@ class ConstDictVariable(VariableTracker):
         return super().tp_getattro_impl(tx, name)
 
 
-class GlobalsDictVariable(ConstDictVariable):
-    def _reject_unsafe_operation(
-        self, tx: "InstructionTranslatorBase", operation: str
-    ) -> VariableTracker:
-        unimplemented(
-            gb_type="unsafe operation on globals() mapping",
-            context=operation,
-            explanation=(
-                "Dynamo cannot safely trace mutations or shape-dependent "
-                "operations on the live globals namespace."
-            ),
-            hints=[*graph_break_hints.SUPPORTABLE],
-            skip_frame=True,
-        )
-
-    def call_method(
-        self,
-        tx: "InstructionTranslatorBase",
-        name: str,
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        if name == "get":
-            return super().call_method(tx, name, args, kwargs)
-        return self._reject_unsafe_operation(tx, name)
-
-    def mp_subscript_impl(
-        self, tx: "InstructionTranslatorBase", key: VariableTracker
-    ) -> VariableTracker:
-        if (
-            key.is_python_constant()
-            and isinstance(key.as_python_constant(), str)
-            and key.as_python_constant() in tx.symbolic_globals
-        ):
-            return self._reject_unsafe_operation(tx, "read after global write")
-        return super().mp_subscript_impl(tx, key)
-
-    def mp_ass_subscript_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        key: VariableTracker,
-        value: VariableTracker | None,
-    ) -> VariableTracker:
-        operation = "__delitem__" if value is None else "__setitem__"
-        return self._reject_unsafe_operation(tx, operation)
-
-    def sq_contains_impl(
-        self, tx: "InstructionTranslatorBase", item: VariableTracker
-    ) -> VariableTracker:
-        return self._reject_unsafe_operation(tx, "containment")
-
-    def nb_inplace_or_impl(
-        self, tx: "InstructionTranslatorBase", other: VariableTracker
-    ) -> VariableTracker:
-        return self._reject_unsafe_operation(tx, "__ior__")
-
-    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return self._reject_unsafe_operation(tx, "iteration")
-
-    def unpack_var_sequence(
-        self, tx: "InstructionTranslatorBase"
-    ) -> list[VariableTracker]:
-        return self._reject_unsafe_operation(tx, "unpacking")
-
-    def tp_init_impl(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        return self._reject_unsafe_operation(tx, "copy")
-
-    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return self._reject_unsafe_operation(tx, "len")
-
-    def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        return self._reject_unsafe_operation(tx, "len")
-
-
 def globals_dict_variable(
     tx: "InstructionTranslatorBase", f_globals: dict[str, Any]
-) -> GlobalsDictVariable:
+) -> VariableTracker:
     from ..symbolic_convert import _registered_module_for_globals
-    from .builder import VariableBuilder
+    from .user_defined import GlobalsNamespaceVariable
+
+    if f_globals in tx.output.side_effects:
+        tracked = tx.output.side_effects[f_globals]
+        if not isinstance(tracked, GlobalsNamespaceVariable):
+            unimplemented(
+                gb_type="globals() namespace already tracked as dict",
+                context=tx.f_code.co_name,
+                explanation="Dynamo cannot safely reinterpret a tracked globals dict.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+            )
+        return tracked
 
     registered_module = _registered_module_for_globals(
         f_globals.get("__name__"), f_globals
@@ -965,13 +898,10 @@ def globals_dict_variable(
         globals_name = tx.output.install_global_by_id("___unnamed_scope", f_globals)
         source = GlobalSource(globals_name)
 
-    globals_vt = VariableBuilder(tx, source)(f_globals)
-    if not isinstance(globals_vt, ConstDictVariable):
-        raise AssertionError(f"expected ConstDictVariable, got {type(globals_vt)}")
-    if not isinstance(globals_vt, GlobalsDictVariable):
-        # Keep the builder-cached tracker shared with function.__globals__.
-        globals_vt.__class__ = GlobalsDictVariable
-    return cast(GlobalsDictVariable, globals_vt)
+    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+    return tx.output.side_effects.track_mutable(
+        f_globals, GlobalsNamespaceVariable(f_globals, source=source)
+    )
 
 
 class OrderedDictVariable(ConstDictVariable):

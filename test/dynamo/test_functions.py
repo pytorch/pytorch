@@ -2400,6 +2400,190 @@ partial_fn = functools.partial(fn, scale=2)
             else:
                 globals().pop(key, None)
 
+    def test_function_globals_get_after_global_store_graph_breaks(self):
+        old_value = _variable
+
+        def target():
+            return None
+
+        def fn(x):
+            global _variable
+            _variable = 2
+            return x + target.__globals__.get("_variable")
+
+        x = torch.ones(2)
+        try:
+            with self.assertRaises(Unsupported):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+        finally:
+            globals()["_variable"] = old_value
+
+    def test_cached_globals_get_after_inlined_store_graph_breaks(self):
+        old_value = _variable
+
+        def write_global():
+            global _variable
+            _variable = 3
+
+        def fn(x):
+            namespace = globals()
+            write_global()
+            return x + namespace.get("_variable")
+
+        x = torch.ones(2)
+        try:
+            with self.assertRaises(Unsupported):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
+            self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+        finally:
+            globals()["_variable"] = old_value
+
+    def test_inlined_globals_read_after_store_graph_breaks(self):
+        module_name = f"_dynamo_globals_read_test_{id(self)}"
+        module = types.ModuleType(module_name)
+        sys.modules[module_name] = module
+        exec(
+            "value = 0\ndef fn(x):\n global value\n value = 3\n return x + globals()['value']",
+            module.__dict__,
+        )
+
+        def outer(x):
+            return module.fn(x)
+
+        x = torch.ones(2)
+        try:
+            with self.assertRaises(Unsupported):
+                torch.compile(outer, backend="eager", fullgraph=True)(x)
+            self.assertEqual(torch.compile(outer, backend="eager")(x), outer(x))
+        finally:
+            del sys.modules[module_name]
+
+    @parametrize(
+        "namespace_kind",
+        ("globals", "function_globals", "container", "inlined_break"),
+    )
+    def test_live_globals_across_graph_break_skips_frame(self, namespace_kind):
+        old_value = _variable
+
+        def target():
+            return None
+
+        def break_graph():
+            torch._dynamo.graph_break()
+
+        def fn(x):
+            if namespace_kind == "function_globals":
+                namespace = target.__globals__
+            else:
+                namespace = globals()
+            if namespace_kind == "container":
+                namespace = [namespace]
+
+            x = x + 1
+            if namespace_kind == "inlined_break":
+                break_graph()
+            else:
+                torch._dynamo.graph_break()
+            global _variable
+            _variable = 2
+            if namespace_kind == "container":
+                namespace = namespace[0]
+            return x + namespace.get("_variable")
+
+        x = torch.tensor(10)
+        try:
+            expected = fn(x)
+            globals()["_variable"] = old_value
+            counter = torch._dynamo.testing.CompileCounter()
+            actual = torch.compile(fn, backend=counter)(x)
+            self.assertEqual(actual, expected)
+            self.assertEqual(counter.frame_count, 0)
+        finally:
+            globals()["_variable"] = old_value
+
+    @parametrize("namespace_kind", ("globals", "function_globals"))
+    @parametrize("storage", ("global", "attribute", "list", "cell"))
+    def test_escaped_globals_across_graph_break_skips_frame(
+        self, namespace_kind, storage
+    ):
+        store, read = {
+            "global": ("saved = {namespace}", "saved"),
+            "attribute": ("holder.namespace = {namespace}", "holder.namespace"),
+            "list": ("items.append({namespace})", "items[-1]"),
+            "cell": ("cell = {namespace}", "read_cell()"),
+        }[storage]
+        module_name = f"_dynamo_escaped_globals_{id(self)}"
+        namespace = "globals()" if namespace_kind == "globals" else "target.__globals__"
+        source = f"""
+class Holder:
+    pass
+holder = Holder()
+items = []
+saved = None
+value = 0
+def target():
+    pass
+def make():
+    cell = None
+    def read_cell():
+        return cell
+    def fn(x):
+        global saved, value
+        nonlocal cell
+        {store.format(namespace=namespace)}
+        x = x + 1
+        torch._dynamo.graph_break()
+        value = 2
+        return x + {read}.get('value')
+    return fn
+fn = make()
+"""
+        results = []
+        try:
+            for compiled in (False, True):
+                module = types.ModuleType(module_name)
+                module.torch = torch
+                sys.modules[module_name] = module
+                exec(source, module.__dict__)
+                counter = torch._dynamo.testing.CompileCounter()
+                fn = (
+                    torch.compile(module.fn, backend=counter) if compiled else module.fn
+                )
+                results.append(fn(torch.tensor(10)))
+                self.assertEqual(module.value, 2)
+            self.assertEqual(results[0], torch.tensor(13))
+            self.assertEqual(results[1], results[0])
+            self.assertEqual(counter.frame_count, 0)
+        finally:
+            sys.modules.pop(module_name, None)
+
+    def test_function_globals_direct_dict_length_graph_breaks(self):
+        def target():
+            return None
+
+        def fn(x):
+            return x + dict.__len__(target.__globals__)
+
+        x = torch.ones(2)
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
+    def test_function_globals_repr_graph_breaks(self):
+        def target():
+            return None
+
+        isolated_fn = types.FunctionType(target.__code__, {"value": 1})
+
+        def fn(x):
+            return x + len(repr(isolated_fn.__globals__))
+
+        x = torch.ones(2)
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
+
     def test_globals_mapping_store_graph_breaks(self):
         old_value = _variable
 

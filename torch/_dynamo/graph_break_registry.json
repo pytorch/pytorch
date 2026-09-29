@@ -2635,7 +2635,7 @@
     {
       "Gb_type": "unsafe operation on globals() mapping",
       "Context": "operation",
-      "Explanation": "Dynamo cannot safely trace mutations or shape-dependent operations on the live globals namespace.",
+      "Explanation": "Dynamo cannot safely trace operations on the live globals namespace.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -3105,6 +3105,16 @@
       "Explanation": "functools.partial() expects literal/string keywords",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
+      ]
+    }
+  ],
+  "GB1550": [
+    {
+      "Gb_type": "live globals namespace across graph break",
+      "Context": "tx.f_code.co_name",
+      "Explanation": "Dynamo cannot resume a frame with a live globals namespace.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -5347,6 +5357,16 @@
       "Gb_type": "richcompare identity fallback undetermined",
       "Context": "generic_richcompare({lhs}, {rhs}, {op})",
       "Explanation": "Cannot determine object identity for comparison fallback.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5595": [
+    {
+      "Gb_type": "globals() namespace already tracked as dict",
+      "Context": "tx.f_code.co_name",
+      "Explanation": "Dynamo cannot safely reinterpret a tracked globals dict.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

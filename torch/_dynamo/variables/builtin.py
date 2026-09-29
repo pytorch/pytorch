@@ -23,7 +23,6 @@ import abc
 import ast
 import builtins
 import contextlib
-import dis
 import functools
 import inspect
 import itertools
@@ -161,7 +160,11 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .user_defined import (
+    GlobalsNamespaceVariable,
+    UserDefinedObjectVariable,
+    UserDefinedVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -1632,21 +1635,6 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         if args or kwargs:
             raise_observed_exception(TypeError, tx)
-        if tx.symbolic_globals or any(
-            inst.opname == "STORE_GLOBAL"
-            and inst.offset > tx.current_instruction.offset
-            for inst in dis.get_instructions(tx.f_code)
-        ):
-            unimplemented(
-                gb_type="globals() in function with global writes",
-                context=tx.f_code.co_name,
-                explanation=(
-                    "Dynamo cannot safely read globals() after or before a "
-                    "STORE_GLOBAL in the same function."
-                ),
-                hints=[*graph_break_hints.SUPPORTABLE],
-                skip_frame=True,
-            )
         from .dicts import globals_dict_variable
 
         return globals_dict_variable(tx, tx.f_globals)
@@ -3491,6 +3479,9 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if args and isinstance(args[0], GlobalsNamespaceVariable):
+            return args[0]._reject_mapping_operation(tx, name)
+
         if name == "__new__":
             if args:
                 # dict.__new__ (tp_new) ignores extra args — only the first
