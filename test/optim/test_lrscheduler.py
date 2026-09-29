@@ -724,6 +724,40 @@ class TestLRScheduler(TestCase):
         for group, type_ in zip(self.opt.param_groups, types):
             self.assertEqual(type(group["lr"]), type_)
 
+    def test_tensor_lr_assignment_leaves_the_caller_tensor(self):
+        schedulers = [
+            lambda opt: StepLR(opt, step_size=2, gamma=0.5),
+            lambda opt: ExponentialLR(opt, gamma=0.9),
+            lambda opt: CosineAnnealingLR(opt, T_max=5),
+            lambda opt: LinearLR(opt, start_factor=0.5, total_iters=4),
+            lambda opt: PolynomialLR(opt, total_iters=4, power=2),
+            lambda opt: ConstantLR(opt, factor=0.3, total_iters=2),
+        ]
+        for make in schedulers:
+            weight = torch.nn.Parameter(torch.zeros(1))
+            given = torch.tensor(0.1)
+            tensor_opt = SGD([weight], lr=given)
+            float_opt = SGD([torch.nn.Parameter(torch.zeros(1))], lr=0.1)
+            tensor_sched = make(tensor_opt)
+            float_sched = make(float_opt)
+            self.assertEqual(given, torch.tensor(0.1))
+            self.assertIsInstance(tensor_opt.param_groups[0]["lr"], torch.Tensor)
+            self.assertNotEqual(tensor_opt.param_groups[0]["lr"].data_ptr(), given.data_ptr())
+            for _ in range(6):
+                self.assertEqual(
+                    tensor_opt.param_groups[0]["lr"].item(),
+                    float_opt.param_groups[0]["lr"],
+                    atol=1e-5,
+                    rtol=0,
+                )
+                self.assertIsInstance(tensor_opt.param_groups[0]["lr"], torch.Tensor)
+                self.assertNotIsInstance(float_opt.param_groups[0]["lr"], torch.Tensor)
+                tensor_opt.step()
+                float_opt.step()
+                tensor_sched.step()
+                float_sched.step()
+            self.assertEqual(given, torch.tensor(0.1))
+
     def test_sequentiallr1(self):
         epochs = 19
         schedulers = [None] * 2

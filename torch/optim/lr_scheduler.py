@@ -83,11 +83,18 @@ def _param_groups_val_list(optimizer: Optimizer, key: str) -> list[Any]:
 def _update_param_group_val(
     param_group: dict[str, Any], key: str, val: float | Tensor
 ) -> None:
-    """Set param_group[key] to val without aliasing or assignment when they're
-    both tensors. Raises a KeyError if param_group[key] does not exist.
+    """Set param_group[key] to val.
+
+    A tensor hyperparameter is replaced by a new 0-dim tensor of the same
+    dtype and device. The tensor object that was already in the group is not
+    written. A Python float stays a Python float. Raises a KeyError if
+    param_group[key] does not exist.
     """
-    if isinstance(param_group[key], Tensor):
-        param_group[key].fill_(_to_scalar(val))
+    current = param_group[key]
+    if isinstance(current, Tensor):
+        updated = current.new_empty(())
+        updated.fill_(_to_scalar(val))
+        param_group[key] = updated
     else:
         param_group[key] = val
 
