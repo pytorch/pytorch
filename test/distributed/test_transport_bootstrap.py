@@ -38,7 +38,7 @@ def _bootstrap_worker(rank, port, path, implicit):
         if rank < 2:
             transport = new_transport_rank(
                 "bootstrap-test",
-                store=store,
+                store=None if implicit else store,
                 peer_rank=1 - rank if implicit else 11 - rank,
                 rank=None if implicit else 10 + rank,
                 bootstrap_tag="pair",
@@ -57,7 +57,7 @@ class TestRankBootstrap(TestCase):
     def test_tcpstore_explicit_rank_without_process_group(self):
         self._run_tcpstore(implicit=False)
 
-    def test_tcpstore_implicit_rank(self):
+    def test_default_store_and_rank(self):
         self._run_tcpstore(implicit=True)
 
     def _run_tcpstore(self, implicit):
