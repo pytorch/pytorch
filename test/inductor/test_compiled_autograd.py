@@ -48,6 +48,7 @@ from torch.testing._internal.common_utils import (
     scoped_load_inline,
     skipIfWindows,
     skipIfXpu,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import (
@@ -3197,9 +3198,12 @@ main()
     @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
     def test_chained_cudnn_lstm(self):
         # https://github.com/pytorch/pytorch/issues/198652
-        # _cudnn_rnn_backward has no meta kernel, so the first node graph breaks. With
-        # static sizes the second node is lowered as an inductor fallback, which hands
-        # the kernel a contiguous copy of the transposed saved output.
+        # _cudnn_rnn_backward has no meta kernel, so it only traces through the fake
+        # tensor fallback that runs the real kernel, which rejects SymInt arguments.
+        # Compiled autograd feeds the first node its SymInt hidden_size as a dynamic
+        # size, so that node graph breaks; the second one is lowered as an inductor
+        # fallback, which hands the kernel a contiguous copy of the transposed saved
+        # output. miopen_rnn_backward takes a plain int, so on ROCm both nodes lower.
         def fn():
             enc = nn.LSTM(8, 8, batch_first=True, device="cuda")
             dec = nn.LSTM(8, 8, batch_first=True, device="cuda")
@@ -3212,7 +3216,7 @@ main()
 
         self.check_output_and_recompiles(
             fn,
-            count=[1, 2],
+            count=[1, 1] if TEST_WITH_ROCM else [1, 2],
             compiler_fn=make_compiler_fn(fullgraph=False, dynamic=False),
         )
 
