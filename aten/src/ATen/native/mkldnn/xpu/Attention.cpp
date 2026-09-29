@@ -27,6 +27,17 @@ bool check_head_dim_size_xpu(sdp::sdp_params const& params, bool debug) {
     return false;
   }
 
+  if (!TORCH_GUARD_OR_FALSE(query_size_last.sym_gt(0))) {
+    if (debug) {
+      TORCH_WARN(
+          "OneDNN attention requires q,k to have a non-zero head dimension.",
+          " Got Query.size(-1): ",
+          query_size_last,
+          " instead.");
+    }
+    return false;
+  }
+
   constexpr int MAX_HEAD_DIM = 576;
   const auto max_size_last = query_size_last.max(value_size_last);
   if (!TORCH_GUARD_OR_FALSE(max_size_last.sym_le(MAX_HEAD_DIM))) {
