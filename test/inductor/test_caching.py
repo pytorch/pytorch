@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError, wait
 from contextlib import contextmanager
 from functools import wraps
 from itertools import combinations
 from random import Random
 from shutil import rmtree
-from tempfile import NamedTemporaryFile, TemporaryDirectory
 from threading import Event, Lock
 from typing import Any, TYPE_CHECKING
 from typing_extensions import TypeVar
@@ -108,7 +108,7 @@ class ConfigTest(TestCase):
     FOO_OSS_DEFAULT: bool = False
     FOO_ENV_VAR_OVERRIDE: str = "foo_env_var_override"
     FOO_ENV_VAR_OVERRIDE_LOCK_FPATH: str = os.path.join(
-        TemporaryDirectory().name, f"{FOO_ENV_VAR_OVERRIDE}.lock"
+        tempfile.gettempdir(), f"{FOO_ENV_VAR_OVERRIDE}.lock"
     )
     FOO_ENV_VAR_OVERRIDE_LOCK: FileLock = FileLock(FOO_ENV_VAR_OVERRIDE_LOCK_FPATH)
 
@@ -1365,8 +1365,9 @@ class InterfacesTest(TestMixin, TestCase):
         the Memoizer initializes with an empty cache without crashing.
         """
         # Setup: Configure path to non-existent file
-        with NamedTemporaryFile(suffix=".json") as f:
-            non_existent_path = f.name
+        non_existent_path = os.path.join(
+            tempfile.gettempdir(), "this_file_does_not_exist_12345.json"
+        )
 
         with patch.object(
             config, "CACHE_DUMP_FILE_PATH", return_value=non_existent_path

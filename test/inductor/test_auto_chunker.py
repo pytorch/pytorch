@@ -174,7 +174,7 @@ class AutoChunkerTest(TestCase):
                 for step in range(5):
                     with torch.profiler.record_function(f"Step {step}"):
                         opt_f(x, y)
-            with tempfile.NamedTemporaryFile(suffix=".json") as f:
+            with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
                 path = f.name
             print(f"Write the chrome trace to {path}")
             p.export_chrome_trace(path)

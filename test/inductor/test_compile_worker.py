@@ -1047,7 +1047,9 @@ class _FakeTritonKernel:
 
 
 class TestSubprocessEnv(TestCase):
-    current_inductor_cache_path: str = tempfile.mkdtemp("current-inductor-cache")
+    current_inductor_cache_path: str = os.path.join(
+        tempfile.gettempdir(), "current-inductor-cache"
+    )
 
     def assert_path_in_dir(self, path, expected_dir):
         expected_dir = os.path.abspath(expected_dir)
@@ -1314,7 +1316,7 @@ class TestSubprocessEnv(TestCase):
 
         old_env = os.environ.get("TRITON_LIBDEVICE_PATH")
         old_knob = knobs.nvidia.libdevice_path
-        stale_libdevice_path = tempfile.gettempdir() + "/stale-libdevice.bc"
+        stale_libdevice_path = os.path.join(tempfile.gettempdir(), "stale-libdevice.bc")
 
         try:
             kernel, _ = _worker_compile_triton(

@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-from tempfile import TemporaryDirectory
 from typing import cast
 from unittest.mock import patch
 
@@ -62,6 +61,7 @@ class TestDCPCompatbility(TestCase):
                 "The change may break the BC of distributed checkpoint."
             ) from e
 
+    @with_temp_dir
     def test_sharded_tensor_dependency(self) -> None:
         # Ensure that we can load the existing DCP checkpoints back even if the
         # metadata contain # _shard.sharded_tensor.metadata.
@@ -69,17 +69,16 @@ class TestDCPCompatbility(TestCase):
             TensorProperties as stp,
         )
 
-        with TemporaryDirectory(prefix="dcp_testing") as tmpdir:
-            with patch("torch.distributed.checkpoint.metadata.TensorProperties", stp):
-                dcp.save(
-                    {"a": torch.zeros(4, 4)},
-                    dcp.FileSystemWriter(tmpdir),
-                )
-
-            dcp.load(
+        with patch("torch.distributed.checkpoint.metadata.TensorProperties", stp):
+            dcp.save(
                 {"a": torch.zeros(4, 4)},
-                dcp.FileSystemReader(tmpdir),
+                dcp.FileSystemWriter(self.temp_dir),
             )
+
+        dcp.load(
+            {"a": torch.zeros(4, 4)},
+            dcp.FileSystemReader(self.temp_dir),
+        )
 
     @with_temp_dir
     def test_storage_meta(self) -> None:

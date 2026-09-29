@@ -6,6 +6,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import multiprocessing as mp
+import os
+import shutil
 import signal
 import tempfile
 import time
@@ -41,8 +43,9 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
         def setUp(self):
             super().setUp()
             self.max_interval = 0.01
-            with tempfile.NamedTemporaryFile() as f:
-                self.file_path = f.name
+            tmp_dir = tempfile.mkdtemp()
+            self.addCleanup(shutil.rmtree, tmp_dir)
+            self.file_path = os.path.join(tmp_dir, "timer")
             self.server = timer.FileTimerServer(
                 self.file_path, "test", self.max_interval
             )
@@ -213,8 +216,9 @@ if not (IS_WINDOWS or IS_MACOS or IS_ARM64):
 
         def setUp(self):
             super().setUp()
-            with tempfile.NamedTemporaryFile() as f:
-                self.file_path = f.name
+            tmp_dir = tempfile.mkdtemp()
+            self.addCleanup(shutil.rmtree, tmp_dir)
+            self.file_path = os.path.join(tmp_dir, "timer")
             self.max_interval = 0.01
             self.server = timer.FileTimerServer(
                 self.file_path, "test", self.max_interval

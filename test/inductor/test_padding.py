@@ -169,7 +169,7 @@ class TestCaseBase(TestCase):
                     f_rhs(*args, **kwargs)
             device_interface.synchronize()
 
-        with tempfile.NamedTemporaryFile(suffix=".json") as f:
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
             profile_path = f.name
         p.export_chrome_trace(profile_path)
         print(f"Chrome trace is written to {profile_path}")
