@@ -173,12 +173,14 @@ void scaled_gemm(
     ScalarType mat1_dtype,
     ScalarType mat1_scale_dtype,
     at::blas::ScalingType mat1_scaling_type,
+    at::blas::SwizzleType mat1_swizzle_type,
     const void* mat2_ptr,
     const void* mat2_scale_ptr,
     int64_t mat2_ld,
     ScalarType mat2_dtype,
     ScalarType mat2_scale_dtype,
     at::blas::ScalingType mat2_scaling_type,
+    at::blas::SwizzleType mat2_swizzle_type,
     const void* bias_ptr,
     ScalarType bias_dtype,
     void* result_ptr,
@@ -186,7 +188,12 @@ void scaled_gemm(
     int64_t result_ld,
     ScalarType result_dtype,
     bool use_fast_accum,
-    const std::optional<Tensor>& alpha);
+    const std::optional<Tensor>& alpha,
+    // C uses the result dtype and leading dimension. A nonzero beta requires C.
+    const void* c_ptr = nullptr,
+    float beta = 0.0f,
+    float alpha_multiplier = 1.0f,
+    const Tensor* device_beta = nullptr);
 
 void grouped_gemm(
       char transa,

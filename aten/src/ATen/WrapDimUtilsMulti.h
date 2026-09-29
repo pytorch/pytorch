@@ -2,7 +2,6 @@
 
 #include <ATen/WrapDimUtils.h>
 #include <c10/core/TensorImpl.h>
-#include <c10/util/irange.h>
 #include <bitset>
 #include <sstream>
 
@@ -24,8 +23,8 @@ inline std::bitset<dim_bitset_size> dim_list_to_bitset(
   std::bitset<dim_bitset_size> seen;
   if (opt_dims.has_value()) {
     auto dims = opt_dims.value();
-    for (const auto i : c10::irange(dims.size())) {
-      size_t dim = maybe_wrap_dim(dims[i], static_cast<int64_t>(ndims));
+    for (const auto& dims_elem : dims) {
+      size_t dim = maybe_wrap_dim(dims_elem, static_cast<int64_t>(ndims));
       TORCH_CHECK(
           !seen[dim],
           "dim ",

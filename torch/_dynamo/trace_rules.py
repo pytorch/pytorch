@@ -59,6 +59,7 @@ from .utils import (
 )
 from .variables import (
     BuiltinVariable,
+    ByteArrayBuiltinVariable,
     DictBuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
@@ -264,6 +265,9 @@ manual_torch_name_rule_map: dict[
     "torch.Tensor#__init__": SkipFunctionVariable,
     "torch.Tensor#split": TorchInGraphFunctionVariable,
     "torch.cuda.set_device": SkipFunctionVariable,
+    # Deprecated wrapper; warnings.warn inside it graph-breaks, which would run the
+    # wrapped set_device_index eagerly without reaching the compile_on_one_rank check.
+    "torch.accelerator.set_device_idx": SkipFunctionVariable,
     "torch.cuda.current_device": TorchInGraphFunctionVariable,
     "torch.autograd.grad": TorchInGraphFunctionVariable,
     "torch.autograd.grad_mode._enter_inference_mode": TorchInGraphFunctionVariable,
@@ -707,6 +711,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._dispatch_tls_set_dispatch_key_excluded",
         "torch._C._dispatch_tls_set_dispatch_key_included",
         "torch._C._dist_autograd_init",
+        "torch._C._dynamo.utils.get_current_stream",
         "torch._C._dump_local_tls_set",
         "torch._C._dump_upgraders_map",
         "torch._C._enable_mobile_interface_call_export",
@@ -811,6 +816,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_nested_int",
         "torch._C._get_tensor_metadata",
         "torch._C._get_tracing_state",
+        "torch._C._is_tracing",
         "torch._C._get_upgrader_ranges",
         "torch._C._get_upgraders_entry_map",
         "torch._C._get_upgraders_map_size",
@@ -1760,6 +1766,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._scaled_dot_product_flash_attention",
         "torch._scaled_dot_product_flash_attention_for_cpu",
         "torch._scaled_dot_product_cudnn_attention",
+        "torch._scaled_addmm",
+        "torch._scaled_addmm_",
         "torch._scaled_mm",
         "torch._scaled_mm_v2",
         "torch._scaled_grouped_mm",
@@ -2876,6 +2884,9 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.mps.set_per_process_memory_fraction",
         "torch.mps.set_rng_state",
         "torch.mps.synchronize",
+        "torch.mtia.current_stream",
+        "torch.mtia.stream",
+        "torch.mtia.synchronize",
         "torch.nested._internal.nested_tensor.buffer_from_jagged",
         "torch.nested._internal.nested_tensor.get_tensor_symint",
         "torch.nested._internal.nested_tensor.is_expandable_to",
@@ -2997,7 +3008,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.norm",
         "torch.quantization.default_eval_fn",
         "torch.random._seed_custom_device",
-        "torch.random.fork_rng",
         "torch.random.initial_seed",
         "torch.random.seed",
         "torch.return_types.pytree_register_structseq",
@@ -4128,6 +4138,7 @@ Main entry point for looking up the trace rule (the Dynamo variable) for a given
 """
 
 BUILTIN_CALLABLES = {
+    bytearray: ByteArrayBuiltinVariable,
     dict: DictBuiltinVariable,
     getattr: GetAttrBuiltinVariable,
     hasattr: HasAttrBuiltinVariable,
