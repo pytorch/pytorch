@@ -96,8 +96,8 @@ class Transport(ABC):
     unregistering memory or closing; local completion does not establish that a peer has stopped accessing
     this endpoint. Descriptors are invalid after unregistration or their owner closes.
 
-    ``read_stream`` and ``write_stream`` order transfers on a CUDA stream: the
-    transfer starts after prior work on the stream, and later work on the stream
+    ``read_stream`` and ``write_stream`` order transfers on the current CUDA
+    stream: the transfer starts after prior work on the stream, and later work
     waits for it to complete. They return after enqueueing, without holding SMs
     while the transfer is in flight, and can be captured with ``cuda_graph``.
     Transfer failures terminate the process, since consumers may already be
@@ -187,14 +187,11 @@ class Transport(ABC):
         local_buffer: MemoryView,
         remote_buffer: RemoteBuffer,
         *,
-        stream: torch.cuda.Stream | None = None,
-        async_op: bool = False,
         timeout: float | None = None,
-    ) -> int | Work:
-        """Write a local view in order on ``stream`` (the current stream by default).
+    ) -> None:
+        """Write a local view in order on the current CUDA stream.
 
-        Returns zero once enqueued, or Work observing host completion for
-        ``async_op=True``. Backends with native stream support may override this.
+        Returns once enqueued. Backends with native stream support may override this.
         """
         _validate_timeout(timeout)
         if timeout == 0:
@@ -203,19 +200,16 @@ class Transport(ABC):
         submit = partial(
             self.write, local_buffer, remote_buffer, async_op=True, timeout=timeout
         )
-        work = self._cuda_stream(stream).enqueue(submit, local_buffer)
-        return work if async_op else 0
+        self._cuda_stream(torch.cuda.current_stream()).enqueue(submit, local_buffer)
 
     def read_stream(
         self,
         local_buffer: MutableMemoryView,
         remote_buffer: RemoteBuffer,
         *,
-        stream: torch.cuda.Stream | None = None,
-        async_op: bool = False,
         timeout: float | None = None,
-    ) -> int | Work:
-        """Read into a local view in order on ``stream``; see ``write_stream``."""
+    ) -> None:
+        """Read into a local view in order on the current CUDA stream."""
         _validate_timeout(timeout)
         if timeout == 0:
             raise ValueError("stream transfers require a positive timeout")
@@ -223,16 +217,14 @@ class Transport(ABC):
         submit = partial(
             self.read, local_buffer, remote_buffer, async_op=True, timeout=timeout
         )
-        work = self._cuda_stream(stream).enqueue(submit, local_buffer)
-        return work if async_op else 0
+        self._cuda_stream(torch.cuda.current_stream()).enqueue(submit, local_buffer)
 
     def cuda_graph(
-        self, stream: torch.cuda.Stream | None = None
+        self, stream: torch.cuda.Stream
     ) -> AbstractContextManager[torch.cuda.CUDAGraph]:
-        """Capture stream transfers into a CUDA graph; close resets the graph.
+        """Capture stream transfers on ``stream`` into a CUDA graph.
 
-        Register buffers and warm up transfers first. Captured Work cannot be
-        waited on; synchronize the replay stream instead.
+        Register buffers and warm up transfers first. Close resets the graph.
         """
         return self._cuda_stream(stream).capture()
 
@@ -241,10 +233,9 @@ class Transport(ABC):
     ) -> None:
         """Validate a transfer before it is enqueued on a CUDA stream."""
 
-    def _cuda_stream(self, stream: torch.cuda.Stream | None) -> _CudaStreamOrdering:
+    def _cuda_stream(self, stream: torch.cuda.Stream) -> _CudaStreamOrdering:
         from ._cuda_stream import _CudaStreamOrdering
 
-        stream = torch.cuda.current_stream() if stream is None else stream
         key = (stream.device.index, stream.cuda_stream)
         if key not in self._cuda_streams:
             self._cuda_streams[key] = _CudaStreamOrdering(stream)

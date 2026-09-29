@@ -16,7 +16,6 @@ import queue
 import sys
 import threading
 from contextlib import contextmanager
-from datetime import timedelta
 from typing import Any, cast, TYPE_CHECKING
 
 import torch
@@ -72,52 +71,6 @@ def _fatal(message: str, error: BaseException) -> None:
     # them from observing incomplete data.
     logger.critical(message, exc_info=error)
     os._exit(1)
-
-
-class _StreamWork(Work):
-    def __init__(self, captured: bool) -> None:
-        super().__init__()
-        self._captured = captured
-        self._done = threading.Event()
-        self._future: torch.futures.Future[Any] = torch.futures.Future()
-
-    def _complete(self) -> None:
-        # Captured Work is replayed and never observed.
-        if self._captured:
-            return
-        self._done.set()
-        self._future.set_result([])
-
-    def is_completed(self) -> bool:
-        if self._captured:
-            raise RuntimeError(
-                "captured Work has no per-replay completion; synchronize the stream"
-            )
-        return self._done.is_set()
-
-    def wait(self, timeout: timedelta = timedelta(0)) -> bool:
-        self.is_completed()
-        seconds = timeout.total_seconds()
-        if not self._done.wait(seconds or None):
-            raise TimeoutError("transport wait timed out; operation remains pending")
-        return True
-
-    def is_success(self) -> bool:
-        return self.is_completed()
-
-    def exception(self) -> BaseException | None:
-        return None
-
-    def get_future(self) -> torch.futures.Future[list[torch.Tensor]]:
-        self.is_completed()
-        return self._future
-
-    def result(self) -> list[torch.Tensor]:
-        self.wait()
-        return []
-
-    def synchronize(self) -> None:
-        self.wait()
 
 
 class _CudaStreamOrdering:
@@ -200,7 +153,7 @@ class _CudaStreamOrdering:
         finally:
             self._capturing = False
 
-    def enqueue(self, submit: Callable[[], int | Work], view: Any) -> _StreamWork:
+    def enqueue(self, submit: Callable[[], int | Work], view: Any) -> None:
         with self._lock, torch.cuda.stream(self._stream):
             if self._closed:
                 raise RuntimeError("transport is closed")
@@ -216,12 +169,10 @@ class _CudaStreamOrdering:
             slot = self._free_slots.pop()
             flag = self._flag(slot)
             flag.value = 0
-            work = _StreamWork(capturing)
 
             def transfer() -> None:
                 try:
                     cast(Work, submit()).wait()
-                    work._complete()
                 except BaseException as error:
                     _fatal("CUDA stream transfer failed", error)
 
@@ -262,7 +213,6 @@ class _CudaStreamOrdering:
                 retired = torch.cuda.Event()
                 retired.record(self._stream)
                 self._pending.append((retired, view, slot, callback))
-            return work
 
     def close(self) -> None:
         with self._lock:

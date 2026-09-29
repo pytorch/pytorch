@@ -2294,11 +2294,10 @@ types are rejected. Tensor contents and native handles are never serialized.
 CUDA streams
 ~~~~~~~~~~~~
 
-``read_stream`` and ``write_stream`` order a transfer on a CUDA stream, the
-current stream by default. The transfer starts after prior work on the stream;
-later work waits for it to complete. Calls return after enqueueing and no kernel
-runs while the transfer is in flight. ``async_op=True`` additionally returns Work
-for host-side completion.
+``read_stream`` and ``write_stream`` order a transfer on the current CUDA
+stream. The transfer starts after prior work on the stream; later work waits for
+it to complete. Calls return after enqueueing and no kernel runs while the
+transfer is in flight.
 
 .. code-block:: python
 
@@ -2310,8 +2309,7 @@ for host-side completion.
 
 Capture with ``transport.cuda_graph(stream)``, not ``torch.cuda.graph``, so the
 transport keeps callbacks and buffers alive until ``close``. Register buffers
-and warm up transfers before capture. Each replay submits a new transfer;
-captured Work cannot be waited on, so synchronize the replay stream instead.
+and warm up transfers before capture. Each replay submits a new transfer.
 
 .. code-block:: python
 
