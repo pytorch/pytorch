@@ -1,6 +1,5 @@
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/native/CanUse32BitIndexMath.h>
-#include <ATen/native/Resize.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
@@ -250,8 +249,6 @@ at::Tensor& reduce_scatter_copy_in_cuda(
   metadata.num_blocks_per_chunk =
       metadata.start_block_idx_per_tensor_chunk.back();
   metadata.slice_size = num_chunks * metadata.chunk_size;
-  at::native::resize_output(
-      out, {num_chunks, metadata.chunk_size / dst_elem_size});
   auto packed = detail::pack_vecs(
       {&metadata.srcs,
        &metadata.block_idx_to_tensor_idx,

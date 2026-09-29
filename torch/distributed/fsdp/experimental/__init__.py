@@ -24,27 +24,26 @@ to reconstruct the parameter. Existing hooks returning tensors remain supported.
     internals may change without backward compatibility.
 """
 
+from collections.abc import Callable
+
 import torch
-from torch.distributed.fsdp._fully_shard._fsdp_api import (
-    AllGatherInput,
-    ReduceScatterInput,
-)
-from torch.distributed.fsdp._fully_shard._fsdp_collectives import AllGatherResult
-from torch.distributed.fsdp._fully_shard._fsdp_common import _get_dim0_padded_size
-from torch.distributed.fsdp._fully_shard._fsdp_param import FSDPParam
+from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
 
 
 __all__ = [
     "AllGatherInput",
-    "ReduceScatterInput",
     "all_gather_output_fn_with_native_copy",
     "reduce_scatter_input_fn_with_native_copy",
 ]
 
+AllGatherInput.__module__ = "torch.distributed.fsdp.experimental"
+
 
 def all_gather_output_fn_with_native_copy(
-    fsdp_params: list[FSDPParam],
-    all_gather_result: AllGatherResult,
+    all_gather_output: torch.Tensor,
+    outputs: list[torch.Tensor],
+    split_sizes: list[int],
+    outer_sizes: list[int],
     world_size: int,
 ) -> None:
     r"""Copy gathered payloads directly into their final layout.
@@ -53,38 +52,16 @@ def all_gather_output_fn_with_native_copy(
     :meth:`torch.distributed.fsdp.FSDPModule.set_all_gather_output_fn`.
     See the module documentation for the performance tradeoffs.
     """
-    all_gather_output = all_gather_result.all_gather_output
-    device = all_gather_output.device
-    copy_outputs: list[torch.Tensor] = []
-    outer_sizes: list[int] = []
-    for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
-        all_gather_result.param_all_gather_input_numels,
-        all_gather_result.param_all_gather_input_dtypes,
-        fsdp_params,
-    ):
-        fsdp_param.init_all_gather_outputs(
-            all_gather_input_numels, all_gather_input_dtypes, world_size, device
-        )
-        fsdp_param.alloc_all_gather_outputs()
-        copy_outputs.extend(fsdp_param.all_gather_outputs)
-        for layout in fsdp_param.all_gather_copy_layouts:
-            outer_sizes.append(layout.outer_size)
-    non_inference_outputs = tuple(t for t in copy_outputs if not t.is_inference())
-    with torch.autograd._unsafe_preserve_version_counter(non_inference_outputs):
-        torch.ops.fsdp._all_gather_copy_out_(
-            copy_outputs,
-            all_gather_output,
-            all_gather_result.all_gather_input_split_sizes,
-            outer_sizes,
-            world_size,
-        )
+    torch.ops.fsdp._all_gather_copy_out_(
+        outputs, all_gather_output, split_sizes, outer_sizes, world_size
+    )
 
 
 def reduce_scatter_input_fn_with_native_copy(
-    fsdp_params: list[FSDPParam],
     unsharded_grads: list[torch.Tensor],
+    shard_dims: list[int],
     world_size: int,
-) -> ReduceScatterInput:
+) -> Callable[[torch.Tensor], None]:
     r"""Prepare gradients for a native copy into the reduce-scatter buffer.
 
     Register with
@@ -95,36 +72,18 @@ def reduce_scatter_input_fn_with_native_copy(
     Noncontiguous gradients use the existing chunk-and-concatenate reorder.
     Groups with only Shard(0) gradients, or of size one, use the original operator.
     """
-    padded_unsharded_sizes: list[torch.Size] = []
-    num_leading_dims: list[int] = []
-    for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
-        shard_dim = fsdp_param.fsdp_placement.dim
-        if world_size > 1 and shard_dim != 0:
-            if unsharded_grad.size(shard_dim) % world_size != 0:
-                raise AssertionError(
-                    f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} "
-                    f"{world_size=}"
-                )
-            if unsharded_grad.is_contiguous():
-                num_leading_dims.append(shard_dim)
-                # Even nonzero-dim shards need no padding.
-                padded_unsharded_sizes.append(unsharded_grad.size())
+    num_leading_dims = [0] * len(unsharded_grads)
+    if world_size > 1:
+        for i, shard_dim in enumerate(shard_dims):
+            if shard_dim == 0:
                 continue
-            unsharded_grad = torch.cat(
-                torch.chunk(unsharded_grad, world_size, dim=shard_dim),
-                dim=0,
-            )
-            unsharded_grads[i] = unsharded_grad
-        num_leading_dims.append(0)
-        padded_unsharded_sizes.append(
-            _get_dim0_padded_size(unsharded_grad.size(), world_size)
-        )
+            if unsharded_grads[i].is_contiguous():
+                num_leading_dims[i] = shard_dim
+            else:
+                chunks = torch.chunk(unsharded_grads[i], world_size, dim=shard_dim)
+                unsharded_grads[i] = torch.cat(chunks, dim=0)
 
-    def copy_in(
-        unsharded_grads: list[torch.Tensor],
-        output: torch.Tensor,
-        world_size: int,
-    ) -> None:
+    def copy_in(output: torch.Tensor) -> None:
         torch.ops.fsdp._reduce_scatter_copy_in_(
             output.view(world_size, -1),
             unsharded_grads,
@@ -132,4 +91,4 @@ def reduce_scatter_input_fn_with_native_copy(
             world_size,
         )
 
-    return ReduceScatterInput(padded_unsharded_sizes, copy_in)
+    return copy_in

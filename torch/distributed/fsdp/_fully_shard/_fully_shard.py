@@ -19,6 +19,10 @@ from ._fsdp_api import (
     OffloadPolicy,
     ReduceScatter,
 )
+from ._fsdp_collectives import (
+    _default_all_gather_output_fn,
+    _default_reduce_scatter_input_fn,
+)
 from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
     _apply_to_module,
@@ -39,6 +43,7 @@ if TYPE_CHECKING:
 
     from torch.distributed.tensor import DeviceMesh
 
+    from ._fsdp_collectives import AllGatherOutputFn, PrepareReduceScatterInputsFn
     from ._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
@@ -677,34 +682,35 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
-    def set_all_gather_output_fn(self, fn: Callable, *, recurse: bool = True) -> None:
+    def set_all_gather_output_fn(
+        self, fn: AllGatherOutputFn | None, *, recurse: bool = True
+    ) -> None:
         r"""Set the function that copies a parameter group's all-gather outputs.
 
         .. warning::
             This API is experimental. The callback signature and supported FSDP
             internals may change without backward compatibility.
 
-        The function takes ``(fsdp_params, all_gather_result, world_size)`` and
-        returns ``None``. ``all_gather_result`` is an ``AllGatherResult`` with the
-        flat rank-major collective buffer, per-parameter input element counts
-        and dtypes, and per-rank input split sizes in buffer elements (bytes for
-        mixed-dtype buffers). ``world_size`` is the all-gather group size.
-        Each parameter's ``all_gather_copy_layouts`` describes its payloads in
-        order: ``input_size`` and ``dim`` specify concatenation across ranks,
-        ``output_size`` specifies the gathered view passed to an extension,
-        and ``outer_size`` gives the product of input sizes before ``dim``
-        (1 for empty payloads).
-        The function initializes and allocates each parameter's final
-        ``all_gather_outputs`` and owns copying and any reordering into them,
-        preserving their dtype, device, and version counters. It runs on the
-        current compute stream after FSDP waits for the collective to complete.
-        Reduce-scatter input preparation is unaffected.
+        The function is called as
+        ``fn(all_gather_output, outputs, split_sizes, outer_sizes, world_size)``.
+        ``all_gather_output`` is the flat rank-major collective buffer, and
+        ``outputs`` are the preallocated all-gather outputs of the parameter
+        group, viewed as ``uint8`` if the buffer is. For each output,
+        ``split_sizes`` gives its per-rank element count in the buffer and
+        ``outer_sizes`` gives the product of its dimensions before the
+        concatenation dimension. Each rank's slice is concatenated along that
+        dimension into the output. The function runs on the current stream
+        after the collective completes and must only write to ``outputs``.
+        See :mod:`torch.distributed.fsdp.experimental` for a native
+        implementation.
 
         Args:
-            fn (Callable): Function that initializes and copies all-gather outputs.
+            fn (Optional[Callable]): Copy-out function, or ``None`` to restore
+                the default.
             recurse (bool): Whether to also set the function for all nested FSDP
                 modules. Defaults to ``True``.
         """
+        fn = _default_all_gather_output_fn if fn is None else fn
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
         for module in modules:
@@ -714,7 +720,7 @@ class FSDPModule:
                     fsdp_param_group._all_gather_output_fn = fn
 
     def set_reduce_scatter_input_fn(
-        self, fn: Callable, *, recurse: bool = True
+        self, fn: PrepareReduceScatterInputsFn | None, *, recurse: bool = True
     ) -> None:
         r"""Set the function that prepares reduce-scatter inputs.
 
@@ -722,30 +728,23 @@ class FSDPModule:
             This API is experimental. The callback signature and supported FSDP
             internals may change without backward compatibility.
 
-        The function takes ``(fsdp_params, unsharded_grads, world_size)``
-        and returns a :class:`torch.distributed.fsdp.experimental.ReduceScatterInput`.
-        Its ``padded_unsharded_sizes`` contains one ``torch.Size`` per entry in
-        ``fsdp_params`` in the same order. ``world_size`` is the reduce-scatter
-        group size, or 1 when no reduce-scatter is needed.
-        Only parameters participating in this reduction are passed.
-        The function prepares copy inputs by modifying ``unsharded_grads`` in
-        place and may replace or expand its entries. These inputs must preserve
-        dtype and device. After allocating the collective buffer, FSDP calls
-        ``copy_in(unsharded_grads, output, world_size)`` on the returned result.
-        This callable owns packing, padding, and conversion to the reduction
-        dtype. It fills the flat contiguous output in rank-major order and
-        returns ``None``. Metadata needed only for copying can be bound to the
-        callable without changing the preparation result's fields.
-        Preparation and copying run on the current compute stream. FSDP releases
-        the result and clears the same gradient list after copy submission, then
-        handles stream synchronization and communication. All-gather copy-out
-        is unaffected.
+        The function is called as
+        ``copy_in = fn(unsharded_grads, shard_dims, world_size)`` before FSDP
+        allocates the reduce-scatter input and may replace entries of
+        ``unsharded_grads`` with reordered gradients. FSDP then calls
+        ``copy_in(reduce_scatter_input)``, which must fill the flat input
+        buffer with each rank's padded shards in rank-major order, converting
+        to the buffer's dtype. ``world_size`` is 1 when no reduce-scatter is
+        needed. Both calls run on the current stream. See
+        :mod:`torch.distributed.fsdp.experimental` for a native implementation.
 
         Args:
-            fn (Callable): Function that prepares reduce-scatter inputs.
+            fn (Optional[Callable]): Copy-in function, or ``None`` to restore
+                the default.
             recurse (bool): Whether to also set the function for all nested FSDP
                 modules. Defaults to ``True``.
         """
+        fn = _default_reduce_scatter_input_fn if fn is None else fn
         self_module = cast(nn.Module, self)
         modules = list(self_module.modules()) if recurse else [self_module]
         for module in modules:

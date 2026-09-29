@@ -37,7 +37,6 @@ bool check_all_gather_copy_out_inputs(
 
   int64_t remaining = input.numel() / num_chunks;
   bool needs_resize = false;
-  const bool byte_input = input.scalar_type() == at::kByte;
   for (const auto i : c10::irange(out.size())) {
     TORCH_CHECK(
         split_sizes[i] >= 0 && split_sizes[i] <= remaining,
@@ -51,16 +50,20 @@ bool check_all_gather_copy_out_inputs(
         out[i].device() == input.device(),
         "input and outputs must be on the same device");
     TORCH_CHECK(
-        byte_input || out[i].dtype() == input.dtype(),
-        "output dtype must match the input unless the input has dtype uint8");
+        out[i].dtype() == input.dtype(), "output dtype must match the input");
     TORCH_CHECK(
         out[i].numel() % num_chunks == 0,
         "output size must be divisible by num_chunks");
-    const int64_t output_chunk_size =
-        out[i].numel() / num_chunks * (byte_input ? out[i].element_size() : 1);
+    const int64_t output_chunk_size = out[i].numel() / num_chunks;
     TORCH_CHECK(
         output_chunk_size % outer_sizes[i] == 0,
         "output size per chunk must be divisible by its outer size");
+    TORCH_CHECK(
+        split_sizes[i] <= output_chunk_size,
+        "split size ",
+        split_sizes[i],
+        " exceeds the output size per chunk ",
+        output_chunk_size);
     needs_resize |= output_chunk_size != split_sizes[i];
   }
   TORCH_CHECK(remaining == 0, "split sizes must sum to the input chunk size");
@@ -75,17 +78,13 @@ std::vector<at::Tensor> split_all_gather_output_with_resize(
     at::IntArrayRef split_sizes,
     at::IntArrayRef outer_sizes,
     int64_t num_chunks) {
-  // Hooks may change payload sizes while reusing cached outputs. Resize only
-  // the rank-major copy views, then reassemble using the cached output layout.
+  // Hooks may shrink payloads while reusing cached outputs. Resize only the
+  // rank-major copy views, then reassemble using the cached output layout.
   std::vector<at::Tensor> outputs;
   outputs.reserve(out.size());
   for (const auto i : c10::irange(out.size())) {
     auto buffer = outer_sizes[i] == 1 ? out[i] : at::empty_like(out[i]);
-    auto output = buffer.view({num_chunks, -1});
-    if (input.scalar_type() == at::kByte) {
-      output = output.view(at::kByte);
-    }
-    outputs.push_back(std::move(output));
+    outputs.push_back(buffer.view({num_chunks, -1}));
   }
   if (input.numel() > 0) {
     at::split_with_sizes_copy_out(
@@ -106,10 +105,7 @@ void all_gather_copy_out_with_resize(
       out, input, split_sizes, outer_sizes, num_chunks);
   for (const auto i : c10::irange(out.size())) {
     if (outer_sizes[i] != 1 && split_sizes[i] > 0) {
-      auto output = out[i];
-      if (input.scalar_type() == at::kByte) {
-        output = output.view({-1}).view(at::kByte);
-      }
+      const auto& output = out[i];
       const auto& buffer = outputs[i];
       const auto outer_size = outer_sizes[i];
       // The copy view may have resized; reassemble the cached output layout.
@@ -152,20 +148,12 @@ void all_gather_copy_out(
   for (const auto i : c10::irange(out.size())) {
     const auto size = split_sizes[i] / outer_sizes[i];
     if (outer_sizes[i] == 1) {
-      auto output = out[i].view({num_chunks, -1});
-      if (input.scalar_type() == at::kByte) {
-        output = output.view(at::kByte);
-      }
       sizes.push_back(size);
-      outputs.push_back(std::move(output));
+      outputs.push_back(out[i].view({num_chunks, -1}));
       continue;
     }
-    auto output = out[i].view({-1});
-    if (input.scalar_type() == at::kByte) {
-      output = output.view(at::kByte);
-    }
     auto outer_slices =
-        output.view({outer_sizes[i], num_chunks, size}).unbind(0);
+        out[i].view({outer_sizes[i], num_chunks, size}).unbind(0);
     sizes.insert(sizes.end(), outer_sizes[i], size);
     outputs.insert(outputs.end(), outer_slices.begin(), outer_slices.end());
   }
@@ -196,6 +184,7 @@ void check_reduce_scatter_copy_in_inputs(
   TORCH_CHECK(out.layout() == at::kStrided, "expected a strided output");
 
   bool has_input = false;
+  int64_t chunk_numel = 0;
   for (const auto i : c10::irange(tensors.size())) {
     const auto& tensor = tensors[i];
     const auto dim = num_leading_dims[i];
@@ -221,8 +210,20 @@ void check_reduce_scatter_copy_in_inputs(
     } else {
       has_input = true;
     }
+    const auto sizes = tensor.sizes();
+    chunk_numel += c10::multiply_integers(sizes.slice(0, dim)) *
+        ((sizes[dim] + num_chunks - 1) / num_chunks) *
+        c10::multiply_integers(sizes.slice(dim + 1));
   }
   TORCH_CHECK(has_input, "expected a non-empty input tensor list");
+  TORCH_CHECK(
+      out.dim() == 2 && out.size(0) == num_chunks && out.size(1) == chunk_numel,
+      "expected output of shape [",
+      num_chunks,
+      ", ",
+      chunk_numel,
+      "] but got ",
+      out.sizes());
 }
 
 at::Tensor& reduce_scatter_copy_in(

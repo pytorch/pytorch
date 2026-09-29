@@ -41,7 +41,6 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
 from torch.distributed.fsdp.experimental import (
     all_gather_output_fn_with_native_copy,
     reduce_scatter_input_fn_with_native_copy,
-    ReduceScatterInput,
 )
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
@@ -53,6 +52,7 @@ from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     compiled_fsdp_test,
     FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     MLPStack,
@@ -434,29 +434,23 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         }
         copy_calls: dict[tuple[int, ...], int] = defaultdict(int)
 
-        def prepare_inputs(fsdp_params, grads, world_size):
-            self.assertEqual(len(fsdp_params), len(grads))
+        def prepare_inputs(grads, shard_dims, world_size):
+            self.assertEqual(shard_dims, [0] * len(grads))
             group_sizes = tuple(grad.numel() for grad in grads)
-            padded_sizes = []
             copy_offsets = []
             offset = 0
             for grad in grads:
                 rows = (grad.size(0) + world_size - 1) // world_size
-                padded_size = torch.Size((rows * world_size, *grad.shape[1:]))
-                shard_numel = padded_size.numel() // world_size
-                padded_sizes.append(padded_size)
+                shard_numel = rows * grad[0].numel()
                 copy_offsets.append((offset, rows, shard_numel))
                 offset += shard_numel
 
-            def copy_in(unsharded_grads, output, num_ranks):
-                self.assertEqual(num_ranks, world_size)
+            def copy_in(output):
                 self.assertEqual(output.shape, (offset * world_size,))
                 self.assertEqual(output.dtype, torch.float64)
                 output.zero_()
                 rank_outputs = output.view(world_size, -1)
-                for grad, (start, rows, shard_numel) in zip(
-                    unsharded_grads, copy_offsets
-                ):
+                for grad, (start, rows, shard_numel) in zip(grads, copy_offsets):
                     self.assertEqual(grad.dtype, torch.float32)
                     for rank in range(world_size):
                         shard = grad[rank * rows : (rank + 1) * rows].reshape(-1)
@@ -464,7 +458,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                         rank_output[: shard.numel()].copy_(shard)
                 copy_calls[group_sizes] += 1
 
-            return ReduceScatterInput(padded_sizes, copy_in)
+            return copy_in
 
         mp_policy = MixedPrecisionPolicy(reduce_dtype=torch.float64)
         for group in groups:
@@ -474,7 +468,9 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-2)
         optim = torch.optim.SGD(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
-        for iter_idx in range(3):
+        for iter_idx in range(4):
+            if iter_idx == 3:
+                model.set_reduce_scatter_input_fn(None)
             inp = torch.randn((4, 5), device=device_type.type)
             losses = []
             for module, optimizer in ((ref_model, ref_optim), (model, optim)):
@@ -485,7 +481,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 losses.append(loss)
             self.assertEqual(losses[0], losses[1])
             check_sharded_parity(self, ref_model, model)
-            self.assertEqual(copy_calls, dict.fromkeys(expected_groups, iter_idx + 1))
+            num_calls = min(iter_idx + 1, 3)
+            self.assertEqual(copy_calls, dict.fromkeys(expected_groups, num_calls))
 
     def _test_train_parity_single_group(
         self,
@@ -514,10 +511,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             shard_placement_fn=shard_placement_fn,
             reshard_after_forward=reshard_after_forward,
         )
-        if copy_fns[0] is not None:
-            model.set_all_gather_output_fn(copy_fns[0])
-        if copy_fns[1] is not None:
-            model.set_reduce_scatter_input_fn(copy_fns[1])
+        model.set_all_gather_output_fn(copy_fns[0])
+        model.set_reduce_scatter_input_fn(copy_fns[1])
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
         inp = (torch.randn((4, lin_shapes[0][0]), device=device_type.type),)
@@ -1070,6 +1065,29 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             ac=False,
         )
 
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_partial_group_releases_deferred_all_gather_after_backward(self):
+        """Root backward releases state retained by a partial forward."""
+        dim, vocab_size = 32, 128
+        model = ChunkedHeadModel(dim, vocab_size, tie=False).to(device_type)
+        fully_shard([model.norm, model.head])
+        fully_shard(model)
+        tokens = torch.randint(0, vocab_size, (2, 16), device=device_type.type)
+
+        hidden = model(tokens, skip_head=True)
+        chunk = hidden.detach().requires_grad_()
+        model.head(chunk).sum().backward()
+        comm_ctx = model.head._get_fsdp_state()._comm_ctx
+        # The standalone head forward leaves this deferred state for the root
+        # backward boundary to release.
+        self.assertIsNotNone(comm_ctx.all_gather_state)
+
+        # Pipeline schedules use non-final backwards while accumulating grads.
+        model.set_is_last_backward(False)
+        hidden.backward(chunk.grad)
+
+        self.assertIsNone(comm_ctx.all_gather_state)
+
     def _test_partial_group_forward_then_standalone(
         self,
         reshard_after_forward: bool | int,
@@ -1429,7 +1447,10 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
             model(tokens, skip_head=True)
         model.body.armed = False
 
+        comm_ctx = model._get_fsdp_state()._comm_ctx
+        self.assertIsNotNone(comm_ctx.all_gather_state)
         model.reset_iter_state()
+        self.assertIsNone(comm_ctx.all_gather_state)
 
         # Proves the reset is real: the next iteration completes cleanly.
         model(tokens).sum().backward()
@@ -1636,13 +1657,12 @@ class TestFullyShardShardPlacementFnMultiThread(FSDPTestMultiThread):
             self.assertTrue(param.grad.to_local().is_contiguous())
 
 
-class TestFullyShardSharedParams(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        min_world_size = 4
-        if device_type.type == "cpu":
-            return min_world_size
-        return min(min_world_size, torch.get_device_module(device_type).device_count())
+class TestFullyShardSharedParams(FSDPTestContinuous):
+    world_size = (
+        4
+        if device_type.type == "cpu"
+        else min(4, torch.get_device_module(device_type).device_count())
+    )
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_train_parity_with_shared_params(self):
@@ -1824,13 +1844,12 @@ class TestFullyShardSharedParams(FSDPTest):
         out.sum().backward()
 
 
-class TestFullyShardGradientAccumulation(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        min_world_size = 4
-        if device_type.type == "cpu":
-            return min_world_size
-        return min(min_world_size, torch.get_device_module(device_type).device_count())
+class TestFullyShardGradientAccumulation(FSDPTestContinuous):
+    world_size = (
+        4
+        if device_type.type == "cpu"
+        else min(4, torch.get_device_module(device_type).device_count())
+    )
 
     @skip_if_lt_x_gpu(2, allow_cpu=True)
     def test_gradient_accumulation(self):
@@ -2755,8 +2774,7 @@ class TestFullyShardInference(FSDPTest):
         model = nn.Linear(8, 4, bias=False, device=device_type)
         ref_model = copy.deepcopy(model)
         fully_shard(model, shard_placement_fn=lambda _: Shard(1))
-        if all_gather_output_fn is not None:
-            model.set_all_gather_output_fn(all_gather_output_fn)
+        model.set_all_gather_output_fn(all_gather_output_fn)
         with torch.inference_mode():
             inp = torch.ones((2, 8), device=device_type)
             self.assertEqual(model(inp), ref_model(inp))

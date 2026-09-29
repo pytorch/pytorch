@@ -11,8 +11,9 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
+    _get_padded_sharded_numels,
     AllGatherResult,
-    foreach_reduce_scatter_copy_in,
+    foreach_all_gather_copy_out,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import FSDPMeshInfo
 from torch.distributed.fsdp._fully_shard._fsdp_param import (
@@ -40,7 +41,13 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+from torch.testing._internal.optests.generate_tests import DEFAULT_TEST_UTILS
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+def _copy_out(params, result, world_size, copy_out_fn=_default_all_gather_output_fn):
+    group = Mock(**{"size.return_value": world_size})
+    foreach_all_gather_copy_out(result, params, group, all_gather_output_fn=copy_out_fn)
 
 
 class _OpCounter(TorchDispatchMode):
@@ -56,16 +63,31 @@ class _OpCounter(TorchDispatchMode):
 @unittest.skipIf(IS_WINDOWS, "FSDP2 is not supported on Windows")
 @unittest.skipIf(not dist.is_available(), "distributed not available")
 class TestPrefixCopy(TestCase):
-    def _make_extension_param(self, world_size, shard_dim, padded_size, inputs):
+    def _make_extension_param(
+        self, world_size, shard_dim, padded_size, inputs, local_size=None
+    ):
         param = FSDPParam.__new__(FSDPParam)
         param.mesh_info = Mock(spec=FSDPMeshInfo, shard_mesh_size=world_size)
+        param.mesh_info.mesh = Mock(**{"size.return_value": world_size})
         param.fsdp_placement = Shard(shard_dim)
         param.padded_sharded_param_size = torch.Size(padded_size)
         param.sharded_state = ShardedState.SHARDED
         param.offload_to_cpu = False
         param._shard_mesh = Mock()
-        local_tensor = Mock(spec=["fsdp_pre_all_gather", "fsdp_post_all_gather"])
-        local_tensor.fsdp_pre_all_gather = lambda mesh: (inputs, None)
+        local_tensor = Mock(
+            spec=["fsdp_pre_all_gather", "fsdp_post_all_gather", "size"]
+        )
+        if local_size is None:
+            local_tensor.fsdp_pre_all_gather = lambda mesh: (inputs, None)
+        else:
+            param._orig_size = torch.Size((local_size[0] * world_size, *local_size[1:]))
+            param._contiguous_orig_stride = None
+            param._module_info = Mock()
+            param.mp_policy = None
+            local_tensor.size.return_value = torch.Size(local_size)
+            local_tensor.fsdp_pre_all_gather = (
+                lambda mesh, outer_size, outer_stride, module, mp_policy: (inputs, None)
+            )
         param.sharded_param = Mock(_local_tensor=local_tensor)
         param._init_extensions()
         param.all_gather_outputs = []
@@ -88,26 +110,29 @@ class TestPrefixCopy(TestCase):
                 world_size=2,
                 shard_dim=1,
                 padded_sharded_size=tensor.size(),
-                require_padding=False,
             )
 
     @parametrize("explicit_layout", [False, True])
     def test_all_gather_input_padding(self, device, explicit_layout):
         tensor = torch.empty(2, 3, device=device)
         inputs = (AllGatherInput(tensor, dim=1) if explicit_layout else tensor,)
-        kwargs = {
-            "world_size": 2,
-            "shard_dim": 0,
-            "padded_sharded_size": torch.Size((4, 3)),
-            "require_padding": True,
-        }
+        param = self._make_extension_param(2, 0, (4, 3), inputs, local_size=(3, 3))
         if explicit_layout:
-            tensors, layouts = _normalize_all_gather_inputs(inputs, **kwargs)
-            self.assertIs(tensors[0], tensor)
-            self.assertEqual(layouts[0].output_size, (2, 6))
+            (flat_input,) = param.all_gather_inputs
+            self.assertEqual(flat_input.data_ptr(), tensor.data_ptr())
+            self.assertEqual(param.all_gather_copy_layouts[0].output_size, (2, 6))
         else:
-            with self.assertRaisesRegex(AssertionError, "padded sharded size"):
-                _normalize_all_gather_inputs(inputs, **kwargs)
+            with self.assertRaisesRegex(
+                AssertionError,
+                r"unevenly sharded by FSDP \(orig size=torch.Size\(\[6, 3\]\), "
+                r"FSDP world size=2\).*padded sharded size",
+            ):
+                _ = param.all_gather_inputs
+
+    def test_all_gather_input_type(self, device):
+        param = self._make_extension_param(2, 0, (2, 3), (Mock(),))
+        with self.assertRaisesRegex(TypeError, "Expected an all-gather input Tensor"):
+            _ = param.all_gather_inputs
 
     @parametrize("world_size", [1, 2])
     def test_legacy_all_gather_input_size(self, device, world_size):
@@ -116,7 +141,6 @@ class TestPrefixCopy(TestCase):
             "world_size": world_size,
             "shard_dim": 1,
             "padded_sharded_size": torch.Size((4, 3)),
-            "require_padding": False,
         }
         if world_size == 1:
             tensors, layouts = _normalize_all_gather_inputs((tensor,), **kwargs)
@@ -135,7 +159,6 @@ class TestPrefixCopy(TestCase):
             "world_size": 2,
             "shard_dim": 1,
             "padded_sharded_size": torch.Size((4, 3)),
-            "require_padding": False,
         }
         if input_size is None:
             self.assertEqual(_normalize_all_gather_inputs((), **kwargs), ([], ()))
@@ -160,7 +183,6 @@ class TestPrefixCopy(TestCase):
             world_size=world_size,
             shard_dim=1,
             padded_sharded_size=shards[0].size(),
-            require_padding=False,
         )
         self.assertIs(tensors[0], shards[0])
         self.assertIs(tensors[1], empty)
@@ -179,13 +201,13 @@ class TestPrefixCopy(TestCase):
             [[shards[0].numel(), 0]],
             [shards[0].numel(), 0],
         )
-        copy_outputs = (
+        copy_out_fn = (
             all_gather_output_fn_with_native_copy
             if native_copy
             else _default_all_gather_output_fn
         )
         with torch.no_grad(), _OpCounter() as counter:
-            copy_outputs([param], result, world_size)
+            _copy_out([param], result, world_size, copy_out_fn)
         output, empty_output = param.all_gather_outputs
         self.assertEqual(output.view_as(expected), expected, atol=0, rtol=0)
         self.assertEqual(empty_output.view(layouts[1].output_size).size(), (0, 3))
@@ -228,21 +250,17 @@ class TestPrefixCopy(TestCase):
         expected = torch.cat(
             [shard[rank].flatten() for rank in range(world_size) for shard in shards]
         ).float()
-        params = [Mock(fsdp_placement=Shard(dim)) for dim in shard_dims]
-        prepare = (
+        numels = _get_padded_sharded_numels(grads, shard_dims, world_size)
+        self.assertEqual(sum(numels) * world_size, expected.numel())
+        copy_in_fn = (
             reduce_scatter_input_fn_with_native_copy
             if native_copy
             else _default_reduce_scatter_input_fn
         )
-        prepared = prepare(params, grads, world_size)
-        sizes = prepared.padded_unsharded_sizes
-        if not native_copy:
-            self.assertIs(prepared.copy_in, foreach_reduce_scatter_copy_in)
-        self.assertEqual(len(sizes), len(params))
-        self.assertEqual(sum(size.numel() for size in sizes), expected.numel())
+        copy_in = copy_in_fn(grads, shard_dims, world_size)
         output = torch.empty_like(expected)
         with _OpCounter() as counter:
-            prepared.copy_in(grads, output, world_size)
+            copy_in(output)
         self.assertEqual(output, expected, atol=0, rtol=0)
         self.assertEqual(
             counter.counts[torch.ops.fsdp._reduce_scatter_copy_in_.default],
@@ -360,13 +378,13 @@ class TestPrefixCopy(TestCase):
             splits,
         )
         versions = [output._version for output in outputs]
-        copy_outputs = (
+        copy_out_fn = (
             all_gather_output_fn_with_native_copy
             if native_copy
             else _default_all_gather_output_fn
         )
         with torch.no_grad(), _OpCounter() as counter:
-            copy_outputs(params, result, world_size)
+            _copy_out(params, result, world_size, copy_out_fn)
 
         self.assertEqual(
             [output.view(tensor.shape) for output, tensor in zip(outputs, expected)],
@@ -375,16 +393,12 @@ class TestPrefixCopy(TestCase):
             rtol=0,
         )
         self.assertEqual([output._version for output in outputs], versions)
-        use_direct_copy = native_copy
         copy_out_op = torch.ops.fsdp._all_gather_copy_out_.default
-        self.assertEqual(counter.counts[copy_out_op], int(use_direct_copy))
-        self.assertEqual(
-            counter.counts[torch.ops.fsdp.split_with_sizes_copy.default],
-            int(not use_direct_copy and packed.numel() > 0),
-        )
-        reorder_layouts = (
-            ("shard1", "singleton_outer_size", "extension") if not native_copy else ()
-        )
+        split_copy_op = torch.ops.fsdp.split_with_sizes_copy.default
+        num_copies = int(packed.numel() > 0)
+        self.assertEqual(counter.counts[copy_out_op], num_copies * native_copy)
+        self.assertEqual(counter.counts[split_copy_op], num_copies * (not native_copy))
+        reorder_layouts = () if native_copy else ("shard1", "extension")
         num_reorders = sum(kind in reorder_layouts for kind in layouts)
         self.assertEqual(counter.counts[torch.ops.aten.cat.out], num_reorders)
 
@@ -436,13 +450,13 @@ class TestPrefixCopy(TestCase):
             return
         _ = param.all_gather_inputs
         self.assertEqual(param._unflatten_all_gather_outputs()[0].size(), output.size())
-        copy_outputs = (
+        copy_out_fn = (
             all_gather_output_fn_with_native_copy
             if native_copy
             else _default_all_gather_output_fn
         )
         with torch.no_grad(), _OpCounter() as counter:
-            copy_outputs([param], result, world_size)
+            _copy_out([param], result, world_size, copy_out_fn)
         self.assertIs(param.all_gather_outputs[0], output)
         self.assertEqual(output.dtype, dtype)
         self.assertEqual(output.view_as(expected), expected, atol=0, rtol=0)
@@ -499,13 +513,13 @@ class TestPrefixCopy(TestCase):
                 [[payload.numel()]],
                 [payload.numel()],
             )
-            copy_outputs = (
+            copy_out_fn = (
                 all_gather_output_fn_with_native_copy
                 if native_copy
                 else _default_all_gather_output_fn
             )
             with torch.no_grad():
-                copy_outputs([param], result, world_size)
+                _copy_out([param], result, world_size, copy_out_fn)
                 param.init_unsharded_param()
             self.assertEqual(param.unsharded_param, expected, atol=0, rtol=0)
             if output is None:
@@ -573,7 +587,11 @@ class TestPrefixCopy(TestCase):
         splits = [t.nbytes // num_chunks for t in expected]
 
         torch.ops.fsdp._all_gather_copy_out_(
-            outputs, source, splits, [1, 2, 6], num_chunks
+            [t.view(torch.uint8) for t in outputs],
+            source,
+            splits,
+            [1, 2, 6],
+            num_chunks,
         )
 
         self.assertEqual(outputs, expected, atol=0, rtol=0)
@@ -600,12 +618,12 @@ class TestPrefixCopy(TestCase):
         buffer = packed.new_full((packed.numel(), 2), 7)
         source = buffer[:, 0]
         source.copy_(packed)
-        outputs = [torch.empty_like(t).flatten() for t in expected]
+        outputs = [torch.empty_like(t).flatten().view(dtype) for t in expected]
         torch.ops.fsdp._all_gather_copy_out_(
             outputs, source, [part.size(1) for part in parts], [1, 2], 2
         )
         for output, part, outer_size in zip(outputs, parts, (1, 2)):
-            restored = output.view(dtype).view(outer_size, 2, -1).transpose(0, 1)
+            restored = output.view(outer_size, 2, -1).transpose(0, 1)
             self.assertEqual(restored.flatten()[: part.numel()], part.flatten())
         self.assertEqual(source, packed)
         self.assertEqual(buffer[:, 1], buffer.new_full((packed.numel(),), 7))
@@ -630,7 +648,7 @@ class TestPrefixCopy(TestCase):
         pointers = [output.data_ptr() for output in outputs]
 
         torch.ops.fsdp._all_gather_copy_out_(
-            outputs, source, splits, outer_sizes, num_chunks
+            [t.view(dtype) for t in outputs], source, splits, outer_sizes, num_chunks
         )
 
         for output, part, outer_size, buffer, version, pointer in zip(
@@ -741,6 +759,8 @@ class TestPrefixCopy(TestCase):
             ("output_size", "output size"),
             ("output_outer_size", "output size"),
             ("dtype", "dtype"),
+            ("byte_input", "dtype"),
+            ("payload_growth", "exceeds"),
             ("output_contiguity", "contiguous"),
         ],
     )
@@ -770,6 +790,11 @@ class TestPrefixCopy(TestCase):
             outputs = [outputs[0][:-2]]
         elif invalid == "dtype":
             outputs = [outputs[0].to(torch.float64)]
+        elif invalid == "byte_input":
+            source = source.view(torch.uint8)
+            splits = [32]
+        elif invalid == "payload_growth":
+            outputs = [outputs[0][:8]]
         elif invalid == "output_contiguity":
             outputs = [torch.empty(32, device=device)[::2]]
         with self.assertRaisesRegex(RuntimeError, match):
@@ -876,6 +901,7 @@ class TestPrefixCopy(TestCase):
             ("indivisible_shard", "evenly divisible"),
             ("dtype", "same dtype"),
             ("input_contiguity", "contiguous"),
+            ("output_shape", "output of shape"),
         ],
     )
     def test_chunk_cat_invalid(self, device, invalid, match):
@@ -901,6 +927,8 @@ class TestPrefixCopy(TestCase):
             dims.append(1)
         elif invalid == "input_contiguity":
             tensors = [torch.zeros(8, 2, device=device).t()]
+        elif invalid == "output_shape":
+            output = output.view(-1)
         with self.assertRaisesRegex(RuntimeError, match):
             torch.ops.fsdp._reduce_scatter_copy_in_(output, tensors, dims, num_chunks)
 
@@ -953,23 +981,22 @@ class TestPrefixCopy(TestCase):
         self.assertEqual(output, expected, atol=0, rtol=0)
         self.assertEqual(result, expected, atol=0, rtol=0)
 
-    def test_all_gather_schema(self, device):
-        source = torch.arange(8, device=device, dtype=torch.float32)
+    @parametrize("outer_size", [1, 2])
+    def test_opcheck(self, device, outer_size):
+        tensor = make_tensor((outer_size, 8, 3), device=device, dtype=torch.float32)
+        packed = torch.stack([t.flatten() for t in torch.chunk(tensor, 4, dim=1)])
+        # The kernels read concrete sizes, so dynamic shapes are unsupported.
+        test_utils = [u for u in DEFAULT_TEST_UTILS if u != "test_aot_dispatch_dynamic"]
         torch.library.opcheck(
             torch.ops.fsdp._all_gather_copy_out_.default,
-            ([torch.empty_like(source)], source, [4], [2], 2),
-            test_utils="test_schema",
+            ([torch.empty_like(tensor)], packed, [packed.size(1)], [outer_size], 4),
+            test_utils=test_utils,
         )
-
-    def test_all_gather_fake_constant(self, device):
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        with FakeTensorMode():
-            source = torch.tensor([1.0], device=device)
-            output = torch.empty_like(source)
-            self.assertIsNotNone(source.constant)
-            torch.ops.fsdp._all_gather_copy_out_([output], source, [1], [1], 1)
-            self.assertEqual(output.size(), (1,))
+        torch.library.opcheck(
+            torch.ops.fsdp._reduce_scatter_copy_in_.default,
+            (torch.empty_like(packed), [tensor], [1], 4),
+            test_utils=test_utils,
+        )
 
     @onlyCUDA
     def test_device_mismatch(self, device):
