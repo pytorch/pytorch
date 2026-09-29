@@ -7501,41 +7501,55 @@ def meta_quantize_tensor(
     swizzle_type: int,
     scaling_type_square_block_and_expand: bool = False,
 ) -> list[torch.Tensor]:
-    torch._check(input.dim() == 2, lambda: "quantize_tensor requires a 2D input")
+    torch._check_value(input.dim() == 2, lambda: "quantize_tensor requires a 2D input")
+    rows, cols = input.shape
+    torch._check_value(
+        cols % 32 == 0, lambda: "quantize_tensor requires columns divisible by 32"
+    )
     is_dim_k = input.is_contiguous()
     if not is_dim_k:
-        torch._check(
+        torch._check_value(
             input.t().is_contiguous(),
             lambda: "input must be contiguous or a transpose of contiguous",
         )
-    torch._check(
+    torch._check_value(
         input.dtype in (torch.float16, torch.bfloat16, torch.float32),
         lambda: "quantize_tensor supports only fp16, bf16, and fp32 input",
     )
-    torch._check(
-        qdata_dtype == torch.float8_e4m3fn
-        and inner_scale_calc == 0
-        and scaling_type == 3,
-        lambda: "only MXFP8 RCEIL with BlockWise1x32 is supported",
+    torch._check_value(
+        qdata_dtype == torch.float8_e4m3fn,
+        lambda: "quantize_tensor supports only float8_e4m3fn qdata",
     )
-    torch._check(
+    torch._check_value(
+        inner_scale_calc == 0,
+        lambda: "quantize_tensor supports only RCEIL_E8M0 inner scales",
+    )
+    torch._check_value(
+        scaling_type == 3,
+        lambda: "quantize_tensor supports only BlockWise1x32 scaling",
+    )
+    torch._check_value(
         swizzle_type in (0, 1),
         lambda: "unsupported swizzle type",
     )
-    torch._check(
+    torch._check_value(
         is_dim_k or swizzle_type == 1,
         lambda: "dim-m quantization requires SWIZZLE_32_4_4",
     )
-    torch._check(
+    torch._check_value(
         not scaling_type_square_block_and_expand or (is_dim_k and swizzle_type == 1),
         lambda: "32x32 MXFP8 scaling requires dim-k and SWIZZLE_32_4_4",
     )
-    rows, cols = input.shape
-    torch._check(cols % 32 == 0)
     if not is_dim_k:
-        torch._check(rows % 16 == 0)
+        torch._check_value(rows % 16 == 0)
     if scaling_type_square_block_and_expand:
-        torch._check(rows % 32 == 0)
+        torch._check_value(rows % 32 == 0)
+    if input.requires_grad and torch.is_grad_enabled():
+        raise RuntimeError("quantize_tensor does not support autograd")
+    if input.device.type not in ("cuda", "meta") or (
+        input.device.type == "cuda" and torch.version.hip is not None
+    ):
+        raise RuntimeError("quantize_tensor requires an NVIDIA CUDA tensor")
 
     scale_shape = (
         ((rows + 127) // 128, (cols + 127) // 128, 32, 16)
@@ -7557,28 +7571,50 @@ def meta_quantize_tensor_dual(
     swizzle_type: int,
     scaling_type_square_block_and_expand: bool = False,
 ) -> list[torch.Tensor]:
-    torch._check(input.dim() == 2, lambda: "quantize_tensor_dual requires a 2D input")
-    torch._check(
+    torch._check_value(
+        input.dim() == 2, lambda: "quantize_tensor_dual requires a 2D input"
+    )
+    rows, cols = input.shape
+    torch._check_value(
+        rows % 32 == 0,
+        lambda: "dual quantization requires both dimensions divisible by 32",
+    )
+    torch._check_value(
+        cols % 32 == 0,
+        lambda: "dual quantization requires both dimensions divisible by 32",
+    )
+    torch._check_value(
         input.is_contiguous(), lambda: "dual quantization requires contiguous input"
     )
-    torch._check(
+    torch._check_value(
         input.dtype in (torch.float16, torch.bfloat16, torch.float32),
         lambda: "quantize_tensor_dual supports only fp16, bf16, and fp32 input",
     )
-    torch._check(
-        qdata_dtype == torch.float8_e4m3fn
-        and inner_scale_calc == 0
-        and scaling_type == 3,
-        lambda: "only MXFP8 RCEIL with BlockWise1x32 is supported",
+    torch._check_value(
+        qdata_dtype == torch.float8_e4m3fn,
+        lambda: "quantize_tensor_dual supports only float8_e4m3fn qdata",
     )
-    torch._check(swizzle_type == 1, lambda: "dual quantization requires SWIZZLE_32_4_4")
-    torch._check(
+    torch._check_value(
+        inner_scale_calc == 0,
+        lambda: "quantize_tensor_dual supports only RCEIL_E8M0 inner scales",
+    )
+    torch._check_value(
+        scaling_type == 3,
+        lambda: "quantize_tensor_dual supports only BlockWise1x32 scaling",
+    )
+    torch._check_value(
+        swizzle_type == 1, lambda: "dual quantization requires SWIZZLE_32_4_4"
+    )
+    torch._check_value(
         not scaling_type_square_block_and_expand,
         lambda: "dual quantization does not support 32x32 MXFP8 scaling",
     )
-    rows, cols = input.shape
-    torch._check(rows % 32 == 0)
-    torch._check(cols % 32 == 0)
+    if input.requires_grad and torch.is_grad_enabled():
+        raise RuntimeError("quantize_tensor_dual does not support autograd")
+    if input.device.type not in ("cuda", "meta") or (
+        input.device.type == "cuda" and torch.version.hip is not None
+    ):
+        raise RuntimeError("quantize_tensor_dual requires an NVIDIA CUDA tensor")
     return [
         torch.empty((rows, cols), device=input.device, dtype=qdata_dtype),
         torch.empty(

@@ -373,7 +373,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             )
         with self.assertRaisesRegex(ValueError, "RCEIL_E8M0"):
             F.quantize_tensor(
-                data, **(_MXFP8_NO_SWIZZLE_KWARGS | {"inner_scale_calc": "other"})
+                data, **(_MXFP8_NO_SWIZZLE_KWARGS | {"inner_scale_calc": 1})
             )
         with self.assertRaisesRegex(ValueError, "BlockWise1x32"):
             F.quantize_tensor(
@@ -444,7 +444,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         qdata, scales = torch._quantize_tensor(  # pyrefly: ignore[missing-attribute]
             input,
             qdata_dtype=torch.float8_e4m3fn,
-            inner_scale_calc=0,
+            inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0.value,
             scaling_type=F.ScalingType.BlockWise1x32.value,
             swizzle_type=SwizzleType.SWIZZLE_32_4_4.value,
         )
@@ -461,7 +461,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         actual = torch.ops.aten._quantize_tensor_dual.default(
             input,
             qdata_dtype=torch.float8_e4m3fn,
-            inner_scale_calc=0,
+            inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0.value,
             scaling_type=F.ScalingType.BlockWise1x32.value,
             swizzle_type=SwizzleType.SWIZZLE_32_4_4.value,
         )
@@ -754,7 +754,28 @@ class TestMXFP8ReferenceNumerics(TestCase):
 
 @instantiate_parametrized_tests
 class TestQuantizeTensorMeta(TestCase):
+    @parametrize(
+        "quantize_fn,kwargs",
+        (
+            subtest((F.quantize_tensor, _MXFP8_NO_SWIZZLE_KWARGS), name="single"),
+            subtest(
+                (
+                    F.quantize_tensor_dual,
+                    {**_MXFP8_KWARGS, "swizzle_type": SwizzleType.SWIZZLE_32_4_4},
+                ),
+                name="dual",
+            ),
+        ),
+    )
+    def test_meta_validates_arguments(self, quantize_fn, kwargs):
+        input = torch.empty((32, 32), dtype=torch.bfloat16, device="meta")
+        with self.assertRaisesRegex(ValueError, "RCEIL_E8M0"):
+            quantize_fn(input, **(kwargs | {"inner_scale_calc": 1}))
+        with self.assertRaisesRegex(ValueError, "2D"):
+            quantize_fn(input.flatten(), **kwargs)
+
     def test_quantize_tensor_argument_names(self):
+        self.assertEqual(F.InnerScaleCalc.RCEIL_E8M0.value, 0)
         public_names = tuple(inspect.signature(F.quantize_tensor).parameters)
         dual_names = tuple(inspect.signature(F.quantize_tensor_dual).parameters)
         native = torch.ops.aten._quantize_tensor.default._schema.arguments
@@ -770,19 +791,11 @@ class TestQuantizeTensorMeta(TestCase):
                 self.assertEqual(param.kind, inspect.Parameter.KEYWORD_ONLY)
             self.assertEqual(params[4].default, inspect.Parameter.empty)
         for schema_args in (native, native_dual):
+            self.assertEqual(str(schema_args[2].type), "int")
             self.assertFalse(schema_args[0].kwarg_only)
             for arg in schema_args[1:]:
                 self.assertTrue(arg.kwarg_only)
             self.assertFalse(schema_args[4].has_default_value())
-
-    def test_cpu_is_unsupported(self):
-        data = torch.empty((32, 32), dtype=torch.float32)
-        with self.assertRaisesRegex(RuntimeError, "NVIDIA CUDA"):
-            F.quantize_tensor(data, **_MXFP8_NO_SWIZZLE_KWARGS)
-        with self.assertRaisesRegex(RuntimeError, "NVIDIA CUDA"):
-            F.quantize_tensor_dual(
-                data, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
-            )
 
     @parametrize(
         "shape,transposed,square,swizzle",
@@ -844,7 +857,7 @@ class TestQuantizeTensorMeta(TestCase):
         qdata, scales = torch._quantize_tensor(  # pyrefly: ignore[missing-attribute]
             input,
             qdata_dtype=torch.float8_e4m3fn,
-            inner_scale_calc=0,
+            inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0.value,
             scaling_type=F.ScalingType.BlockWise1x32.value,
             swizzle_type=SwizzleType.SWIZZLE_32_4_4.value,
         )

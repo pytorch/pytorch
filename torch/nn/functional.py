@@ -5,7 +5,7 @@ import importlib
 import math
 import warnings
 from collections.abc import Callable
-from enum import Enum
+from enum import IntEnum
 from typing import Any as _Any, Optional, TYPE_CHECKING
 
 import torch
@@ -39,10 +39,10 @@ ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
 
 
-class InnerScaleCalc(str, Enum):
+class InnerScaleCalc(IntEnum):
     r"""Method used to calculate block scales for :func:`quantize_tensor`."""
 
-    RCEIL_E8M0 = "rceil_e8m0"
+    RCEIL_E8M0 = 0
 
 
 if TYPE_CHECKING:
@@ -7287,32 +7287,11 @@ def quantize_tensor(
         ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
         ... )
     """
-    if input.dim() != 2:
-        raise ValueError("quantize_tensor requires a 2D input")
-    if input.size(1) % 32 != 0:
-        raise ValueError("quantize_tensor requires columns divisible by 32")
-    if input.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-        raise ValueError("quantize_tensor supports only fp16, bf16, and fp32 input")
-    if qdata_dtype != torch.float8_e4m3fn:
-        raise ValueError("quantize_tensor supports only float8_e4m3fn qdata")
-    if inner_scale_calc != InnerScaleCalc.RCEIL_E8M0:
-        raise ValueError("quantize_tensor supports only RCEIL_E8M0 inner scales")
-    if scaling_type != ScalingType.BlockWise1x32:
-        raise ValueError("quantize_tensor supports only BlockWise1x32 scaling")
-    if swizzle_type not in (SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_32_4_4):
-        raise ValueError("unsupported quantize_tensor swizzle type")
-    if input.requires_grad and torch.is_grad_enabled():
-        raise RuntimeError("quantize_tensor does not support autograd")
-    if input.device.type not in ("cuda", "meta") or (
-        input.device.type == "cuda" and torch.version.hip is not None
-    ):
-        raise RuntimeError("quantize_tensor requires an NVIDIA CUDA tensor")
-
     # TODO(future PR): add torch.export support for the native quantization op.
     outputs = torch.ops.aten._quantize_tensor.default(
         input,
         qdata_dtype=qdata_dtype,
-        inner_scale_calc=0,
+        inner_scale_calc=getattr(inner_scale_calc, "value", inner_scale_calc),
         scaling_type=scaling_type.value,
         swizzle_type=swizzle_type.value,
         scaling_type_square_block_and_expand=scaling_type_square_block_and_expand,
@@ -7367,35 +7346,10 @@ def quantize_tensor_dual(
         ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
         ... )
     """
-    if input.dim() != 2:
-        raise ValueError("quantize_tensor_dual requires a 2D input")
-    if input.size(0) % 32 != 0 or input.size(1) % 32 != 0:
-        raise ValueError("dual quantization requires both dimensions divisible by 32")
-    if not input.is_contiguous():
-        raise ValueError("quantize_tensor_dual requires a contiguous input")
-    if input.dtype not in (torch.float16, torch.bfloat16, torch.float32):
-        raise ValueError("dual quantization supports only fp16, bf16, and fp32 input")
-    if qdata_dtype != torch.float8_e4m3fn:
-        raise ValueError("quantize_tensor_dual supports only float8_e4m3fn qdata")
-    if inner_scale_calc != InnerScaleCalc.RCEIL_E8M0:
-        raise ValueError("quantize_tensor_dual supports only RCEIL_E8M0 inner scales")
-    if scaling_type != ScalingType.BlockWise1x32:
-        raise ValueError("quantize_tensor_dual supports only BlockWise1x32 scaling")
-    if swizzle_type != SwizzleType.SWIZZLE_32_4_4:
-        raise ValueError("quantize_tensor_dual requires SWIZZLE_32_4_4")
-    if scaling_type_square_block_and_expand:
-        raise ValueError("quantize_tensor_dual does not support 32x32 MXFP8 scaling")
-    if input.requires_grad and torch.is_grad_enabled():
-        raise RuntimeError("quantize_tensor_dual does not support autograd")
-    if input.device.type not in ("cuda", "meta") or (
-        input.device.type == "cuda" and torch.version.hip is not None
-    ):
-        raise RuntimeError("quantize_tensor_dual requires an NVIDIA CUDA tensor")
-
     outputs = torch.ops.aten._quantize_tensor_dual.default(
         input,
         qdata_dtype=qdata_dtype,
-        inner_scale_calc=0,
+        inner_scale_calc=getattr(inner_scale_calc, "value", inner_scale_calc),
         scaling_type=scaling_type.value,
         swizzle_type=swizzle_type.value,
         scaling_type_square_block_and_expand=scaling_type_square_block_and_expand,
