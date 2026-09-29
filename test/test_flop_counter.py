@@ -1644,19 +1644,6 @@ class TestFlexAttentionEstimationDevice(TestCase):
         self.assertGreater(est_ms, 0.0)
 
 
-instantiate_parametrized_tests(TestFlopCounter)
-instantiate_device_type_tests(
-    TestFlopCounterDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
-)
-instantiate_device_type_tests(TestFlopCounterCUDA, globals(), only_for="cuda")
-instantiate_device_type_tests(
-    TestFlexAttentionEstimationDevice,
-    globals(),
-    only_for=("cuda", "xpu"),
-    allow_xpu=True,
-)
-
-
 class _MockHOP(HigherOrderOperator):
     """Minimal HOP that dispatches through super().__call__() like real HOPs."""
 
@@ -1680,6 +1667,8 @@ _inner_mm_hop = _MockHOP("mock_inner_mm_hop", lambda x: torch.mm(x, x))
     TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
 )
 class TestSkipUnsupported(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_custom_op_not_tracked_by_default(self):
         """Custom ops without a formula execute and count 0 FLOPs by default."""
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
@@ -1858,76 +1847,6 @@ class TestSkipUnsupported(TestCase):
         self.assertEqual(out, x * 2)
         self.assertEqual(mode.get_total_flops(), 100)
 
-    @requires_cuda_and_triton
-    def test_triton_skip_unsupported(self):
-        """Unregistered Triton kernels execute and are tracked with skip_unsupported=True."""
-        import triton
-        import triton.language as tl
-
-        @triton.jit
-        def cos_kernel(x_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(x_ptr + offsets, mask=mask)
-            out = tl.cos(x)
-            tl.store(out_ptr + offsets, out, mask=mask)
-
-        x = torch.randn(3, device="cuda")
-        out = torch.full((3,), float("nan"), device="cuda")
-        expected = torch.cos(x)
-
-        def cos_grid(meta):
-            return (triton.cdiv(3, meta["BLOCK_SIZE"]),)
-
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            with FlopCounterMode(skip_unsupported=True) as mode:
-                torch.library.wrap_triton(cos_kernel)[cos_grid](x, out, 3, 256)
-
-        self.assertEqual(out, expected)
-        self.assertEqual(mode.get_total_flops(), 0)
-        self.assertEqual(mode.get_unsupported_ops()["cos_kernel"], 1)
-        self.assertTrue(any("cos_kernel" in str(warning.message) for warning in w))
-
-    @requires_cuda_and_triton
-    def test_triton_registered_kernel_executes_with_skip_unsupported(self):
-        """Registered Triton kernels execute (not just count) with skip_unsupported=True."""
-        import triton
-        import triton.language as tl
-
-        from torch.utils.flop_counter import flop_registry, register_flop_formula
-
-        @triton.jit
-        def sin_kernel_skip(x_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(x_ptr + offsets, mask=mask)
-            out = tl.sin(x)
-            tl.store(out_ptr + offsets, out, mask=mask)
-
-        @register_flop_formula(sin_kernel_skip)
-        def sin_kernel_skip_flops(*args, **kwargs) -> int:
-            return 2
-
-        self.addCleanup(lambda: flop_registry.pop(sin_kernel_skip, None))
-
-        x = torch.randn(3, device="cuda")
-        out = torch.full((3,), float("nan"), device="cuda")
-
-        def grid(meta):
-            return (triton.cdiv(3, meta["BLOCK_SIZE"]),)
-
-        with FlopCounterMode(skip_unsupported=True) as mode:
-            torch.library.wrap_triton(sin_kernel_skip)[grid](x, out, 3, 256)
-
-        self.assertEqual(out, torch.sin(x))
-        self.assertEqual(mode.get_total_flops(), 2)
-        self.assertEqual(len(mode.get_unsupported_ops()), 0)
-
     def test_registered_formula_wins_over_decompose(self):
         """A CompositeImplicitAutograd op reached below autograd (inference_mode)
         uses its registered formula instead of decomposing."""
@@ -1950,6 +1869,99 @@ class TestSkipUnsupported(TestCase):
                 op(x)
 
         self.assertEqual(mode.get_total_flops(), 999)
+
+
+@unittest.skipIf(
+    TEST_WITH_TORCHDYNAMO, "torchdynamo doesn't work with __torch_dispatch__ right now"
+)
+class TestSkipUnsupportedDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_triton()
+    def test_triton_skip_unsupported(self, device):
+        """Unregistered Triton kernels execute and are tracked with skip_unsupported=True."""
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def cos_kernel(x_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            out = tl.cos(x)
+            tl.store(out_ptr + offsets, out, mask=mask)
+
+        x = torch.randn(3, device=device)
+        out = torch.full((3,), float("nan"), device=device)
+        expected = torch.cos(x)
+
+        def cos_grid(meta):
+            return (triton.cdiv(3, meta["BLOCK_SIZE"]),)
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            with FlopCounterMode(skip_unsupported=True) as mode:
+                torch.library.wrap_triton(cos_kernel)[cos_grid](x, out, 3, 256)
+
+        self.assertEqual(out, expected)
+        self.assertEqual(mode.get_total_flops(), 0)
+        self.assertEqual(mode.get_unsupported_ops()["cos_kernel"], 1)
+        self.assertTrue(any("cos_kernel" in str(warning.message) for warning in w))
+
+    @requires_triton()
+    def test_triton_registered_kernel_executes_with_skip_unsupported(self, device):
+        """Registered Triton kernels execute (not just count) with skip_unsupported=True."""
+        import triton
+        import triton.language as tl
+
+        from torch.utils.flop_counter import flop_registry, register_flop_formula
+
+        @triton.jit
+        def sin_kernel_skip(x_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            out = tl.sin(x)
+            tl.store(out_ptr + offsets, out, mask=mask)
+
+        @register_flop_formula(sin_kernel_skip)
+        def sin_kernel_skip_flops(*args, **kwargs) -> int:
+            return 2
+
+        self.addCleanup(lambda: flop_registry.pop(sin_kernel_skip, None))
+
+        x = torch.randn(3, device=device)
+        out = torch.full((3,), float("nan"), device=device)
+
+        def grid(meta):
+            return (triton.cdiv(3, meta["BLOCK_SIZE"]),)
+
+        with FlopCounterMode(skip_unsupported=True) as mode:
+            torch.library.wrap_triton(sin_kernel_skip)[grid](x, out, 3, 256)
+
+        self.assertEqual(out, torch.sin(x))
+        self.assertEqual(mode.get_total_flops(), 2)
+        self.assertEqual(len(mode.get_unsupported_ops()), 0)
+
+
+instantiate_parametrized_tests(TestFlopCounter)
+instantiate_device_type_tests(
+    TestFlopCounterDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
+instantiate_device_type_tests(TestFlopCounterCUDA, globals(), only_for="cuda")
+instantiate_device_type_tests(
+    TestFlexAttentionEstimationDevice,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestSkipUnsupportedDevice, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 
 if __name__ == "__main__":
