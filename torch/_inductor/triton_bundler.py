@@ -419,11 +419,15 @@ class TritonBundler:
             kernel_names: list[str] = []
 
             for artifacts in bundle.kernel_artifacts:
-                device = (
-                    torch.accelerator.current_device_index()
-                    if torch.compiler.config.compile_on_one_rank
-                    else artifacts.device
-                )
+                device = artifacts.device
+                if device is None and any(
+                    os.path.splitext(artifact.filename)[1]
+                    in GPU_KERNEL_BIN_EXTS.values()
+                    for artifact in artifacts.artifacts
+                ):
+                    # Match the directory CachingAutotuner resolves for a
+                    # rank-agnostic (compile_on_one_rank) GPU kernel.
+                    device = torch.accelerator.current_device_index()
                 basedir = triton_cache_dir(device)
                 directory = os.path.join(basedir, artifacts.kernel_hash)
 
