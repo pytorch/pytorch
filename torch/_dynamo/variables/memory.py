@@ -12,7 +12,6 @@ from ..source import AttrSource, CallFunctionNoArgsSource, ImportSource
 from .base import Member, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import ContextWrappingVariable
-from ...jit import isinstance
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
@@ -82,12 +81,11 @@ has_side_effect(torch.ops.mempool.end.default)
 
 class CUDAMemPoolVariable(VariableTracker):
     """Represents a torch.cuda.MemPool object."""
-    iface = _get_mempool_iface()
 
     def __init__(
         self,
         proxy: Proxy,
-        value: Any,
+        value: torch.cuda.MemPool,
         user_object_index: int,
         **kwargs: Any,
     ) -> None:
@@ -97,7 +95,7 @@ class CUDAMemPoolVariable(VariableTracker):
         self.user_object_index = user_object_index
 
     def python_type(self) -> type:
-        return self.iface.get_mempool_type()
+        return torch.cuda.MemPool
 
     def get_real_python_backed_value(self) -> object:
         return self.value
