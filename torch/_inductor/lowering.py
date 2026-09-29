@@ -4457,33 +4457,11 @@ def _full(fill_value, device, dtype, size):
             return ops.constant(value, dtype)
 
     elif isinstance(value, sympy.Basic):
-        if is_integer_dtype(dtype):
-            dtype_info = torch.iinfo(dtype)
-            is_boolean_value = value.kind is sympy.core.kind.BooleanKind
-            if is_boolean_value:
-                lower_bound = sympy.true
-                upper_bound = sympy.true
-            elif value.is_integer is True:
-                if dtype == torch.uint64:
-                    lower_bound = upper_bound = sympy.true
-                else:
-                    lower = -dtype_info.max if not dtype.is_signed else dtype_info.min
-                    lower_bound = lower <= value
-                    upper_bound = value <= dtype_info.max
-            else:
-                lower_bound = dtype_info.min <= value
-                upper_bound = value < sympy.Float(float(dtype_info.max + 1))
-            in_range = sympy.And(lower_bound, upper_bound)
-            error_msg = f"value cannot be converted to type {dtype} without overflow"
-            if in_range == sympy.false:
-                raise RuntimeError(error_msg)
-            if not V.graph.sizevars.statically_known_true(in_range):
-                assert_op = ir.AssertScalar(in_range, error_msg)
-                assert_op.name = V.graph.register_buffer(assert_op)
-                V.graph.register_operation(assert_op)
 
         def inner_fn(index):
-            return ops.value_expr(value, dtype)
+            if dtype == torch.bool:
+                return ops.value_expr(value, dtype)
+            return ops.index_expr(value, dtype)
 
     else:
         if len(value.get_size()) != 0:

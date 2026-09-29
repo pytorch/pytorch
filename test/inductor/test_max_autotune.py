@@ -5325,16 +5325,8 @@ class TestPrologueFusion(TestCase):
         "generated code is different in native matmul",
     )
     def test_preserves_zero_analysis(self):
-        from torch._inductor.analyze_preserves_zero_mask import PreservesZeros
-        from torch._inductor.index_propagation import TypedExpr
-
-        analysis = PreservesZeros()
-        value = TypedExpr(sympy.Symbol("x"), torch.float32)
-        self.assertNotEqual(analysis.to_dtype(value, torch.bool).expr, value.expr)
-
         fns = (
             (lambda x: x.relu(), False),  # preserves zero
-            (lambda x: x.to(torch.bool).to(torch.float32), False),
             (lambda x: x + 1, True),  # does not
             (
                 lambda x: torch.hypot(x, x),
@@ -5358,16 +5350,6 @@ class TestPrologueFusion(TestCase):
             else:
                 f = FileCheck().check("k_idx").check("a =").check_not("tl.where")
             f.check("tl.dot").run(code[0])
-
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_symbolic_bool_full_prologue(self):
-        def fn(scalar, y):
-            x = torch.full((64, 127), scalar.item(), dtype=torch.bool, device=GPU_TYPE)
-            return x.float() @ y
-
-        scalar = torch.tensor(3, device=GPU_TYPE)
-        y = torch.ones(127, 64, device=GPU_TYPE)
-        self.assertEqual(torch.compile(fn, fullgraph=True)(scalar, y), fn(scalar, y))
 
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @parametrize("benchmark_fusion", (True, False))

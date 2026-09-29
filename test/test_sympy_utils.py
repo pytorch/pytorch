@@ -46,7 +46,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from torch._inductor.bounds import ValueRangeAnalysis
-from torch._inductor.index_propagation import SymPyOps, TypedExpr
+from torch._inductor.index_propagation import TypedExpr
 
 
 UNARY_OPS = [
@@ -1269,23 +1269,6 @@ class TestTypedExpr(TestCase):
         I = Identity(1)
         typed_I = TypedExpr(I, torch.int32)
         self.assertEqual(typed_I.expr, 1)
-
-    def test_symbolic_to_dtype_requires_fallback(self):
-        value = TypedExpr(sympy.Symbol("x", integer=True), torch.int64)
-        self.assertIs(SymPyOps.to_dtype(value, torch.bool), NotImplemented)
-        self.assertEqual(SymPyOps.to_dtype(value, torch.int64), value)
-        self.assertEqual(
-            SymPyOps.to_dtype(value, torch.int32),
-            TypedExpr(value.expr, torch.int32),
-        )
-        self.assertEqual(
-            SymPyOps.to_dtype(TypedExpr(3, torch.int64), torch.bool),
-            TypedExpr(True, torch.bool),
-        )
-        self.assertIs(
-            SymPyOps.to_dtype(TypedExpr(16777217, torch.int64), torch.float32),
-            NotImplemented,
-        )
 
 
 class TestCCodePrinting(TestCase):

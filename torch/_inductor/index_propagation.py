@@ -111,13 +111,6 @@ class SymPyOps:
         if not use_compute_types and dtype in (torch.float16, torch.bfloat16):
             # Keep explicit rounding instead of folding it into a compute-type expression.
             return NotImplemented
-        if value.dtype != dtype:
-            if dtype == torch.bool and not value.is_constant():
-                # Retagging a symbolic expression would erase boolean saturation.
-                return NotImplemented
-            if dtype == torch.float32 and value.is_constant():
-                # SymPy arithmetic does not model floating-point rounding.
-                return NotImplemented
         return TypedExpr(value.expr, dtype)
 
     @staticmethod

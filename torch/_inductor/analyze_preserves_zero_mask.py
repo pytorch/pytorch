@@ -39,17 +39,6 @@ class PreservesZeros(SymPyOps, DefaultHandler):
             sympy.Float(0) if dtype.is_floating_point else sympy.Integer(0), dtype
         )
 
-    def to_dtype(
-        self,
-        value: TypedExpr,
-        dtype: torch.dtype,
-        src_dtype: torch.dtype | None = None,
-        use_compute_types: bool = True,
-    ) -> TypedExpr:
-        if value.is_constant():
-            return TypedExpr(value.expr, dtype)
-        return TypedExpr(construct_symbol(next(self.count), dtype), dtype)
-
     def store(
         self, name: str, index: sympy.Expr, value: TypedExpr, mode: "StoreMode" = None
     ) -> None:
