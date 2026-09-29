@@ -798,8 +798,8 @@ class TestGpuBenchmarkDeviceTypes(TestCase):
         self.assertFalse(hasattr(torch, self._SENTINEL_DEVICE))
         with (
             patch(
-            "torch._inductor.runtime.benchmarking.get_gpu_benchmark_device_types",
-            return_value=[self._SENTINEL_DEVICE, "cuda"],
+                "torch._inductor.runtime.benchmarking.get_gpu_benchmark_device_types",
+                return_value=[self._SENTINEL_DEVICE, "cuda"],
             ),
             patch("torch.cuda.is_available", return_value=False),
         ):
@@ -815,8 +815,8 @@ class TestGpuBenchmarkDeviceTypes(TestCase):
 
         with (
             patch(
-            "torch._inductor.runtime.benchmarking.get_gpu_benchmark_device_types",
-            return_value=[self._SENTINEL_DEVICE, "cuda"],
+                "torch._inductor.runtime.benchmarking.get_gpu_benchmark_device_types",
+                return_value=[self._SENTINEL_DEVICE, "cuda"],
             ),
             patch.object(torch, self._SENTINEL_DEVICE, _FakeMod, create=True),
             patch("torch.cuda.is_available", return_value=True),
