@@ -12670,11 +12670,7 @@ op_db: list[OpInfo] = [
                # addbmm does not correctly warn when resizing out= inputs
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # https://github.com/pytorch/pytorch/issues/55907
-               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
-               # AssertionError: RuntimeError not raised : Expected RuntimeError
-               # when doing an unsafe cast from a result of dtype torch.float32
-               # into an out= with dtype torch.long
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', dtypes=(torch.float32,), device_type='mps'))),
+               DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),)),
     OpInfo('baddbmm',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
@@ -12798,9 +12794,6 @@ op_db: list[OpInfo] = [
                             dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16)),
                # FIXME: AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
-               # FIXME: AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe cast
-               # from a result of dtype torch.float32 into an out= with dtype torch.long
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
                # FIXME: RuntimeError: value cannot be converted to type double without overflow
                DecorateInfo(
                    unittest.expectedFailure,

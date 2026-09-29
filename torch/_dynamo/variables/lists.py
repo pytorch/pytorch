@@ -746,23 +746,10 @@ class BaseListVariable(VariableTracker):
             raise_observed_exception(ValueError, tx, args=["list modified during sort"])
         return ConstantVariable.create(None)
 
-    def list_reversed(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # list/tuple/namedtuple __reversed__: reverse iterator over items.
-        return ListIteratorVariable(
-            list(reversed(self.items)),
-            mutation_type=ValueMutationNew(),
-        )
-
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/listobject.c#L3597-L3616
     tp_methods = {
         "index": Method(list_index),
         "count": Method(list_count),
-        "__reversed__": Method(list_reversed),
     }
 
 
@@ -1389,6 +1376,18 @@ class ListVariable(BaseListVariable):
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
+    def list_reversed(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # list __reversed__: reverse iterator over items.
+        return ListReverseIteratorVariable(
+            source_seq=self,
+            mutation_type=ValueMutationNew(),
+        )
+
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/listobject.c#L3597-L3616
     tp_methods = {
         "append": Method(BaseListVariable.list_append),
@@ -1400,6 +1399,7 @@ class ListVariable(BaseListVariable):
         "reverse": Method(BaseListVariable.list_reverse),
         "remove": Method(BaseListVariable.list_remove),
         "sort": Method(BaseListVariable.list_sort),
+        "__reversed__": Method(list_reversed),
     }
 
 
@@ -2490,10 +2490,16 @@ class BaseListIteratorVariable(IteratorVariable):
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
-        if self.is_exhausted:
+        if self.is_exhausted or self.index >= len(self.items):
+            self.is_exhausted = True
             return []
+        if not self.is_mutable():
+            raise AssertionError("list iterator must be mutable to iterate")
+        tx.output.side_effects.mutation(self)
         self.is_exhausted = True
-        return list(self.items[self.index :])
+        res = list(self.items[self.index :])
+        self.index = len(self.items)
+        return res
 
     def length_hint(
         self,
@@ -2623,6 +2629,115 @@ class DequeReverseIteratorVariable(BaseListIteratorVariable):
 
     def python_type(self) -> type:
         return type(reversed(collections.deque()))
+
+
+class ListReverseIteratorVariable(IteratorVariable):
+    # PyListRevIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3960
+    _cpython_type = type(reversed([]))
+
+    _nonvar_fields = {
+        "index",
+        "it_index",
+        "is_exhausted",
+        *IteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        source_seq: VariableTracker,
+        it_index: int | None = None,
+        index: int = 0,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        if it_index is None:
+            it_index = len(source_seq.items) - 1  # type: ignore[attr-defined]
+        self.source_seq = source_seq
+        self.it_index = it_index
+        self.index = index
+        self.is_exhausted = False
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(source_seq={self.source_seq!r}, "
+            f"it_index={self.it_index!r}, index={self.index!r})"
+        )
+
+    def python_type(self) -> type:
+        return type(reversed([]))
+
+    def as_python_constant(self) -> Any:
+        raise NotImplementedError
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        return ConstantVariable.create(hasattr(reversed([]), name))
+
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if not self.is_mutable():
+            raise AssertionError("list reverse iterator must be mutable to iterate")
+        if (
+            self.is_exhausted
+            or self.it_index < 0
+            or self.it_index >= len(self.source_seq.items)  # type: ignore[attr-defined]
+        ):
+            self.is_exhausted = True
+            raise_observed_exception(StopIteration, tx)
+
+        tx.output.side_effects.mutation(self)
+        item = self.source_seq.items[self.it_index]  # type: ignore[attr-defined]
+        self.it_index -= 1
+        self.index += 1
+        return item
+
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
+        if (
+            self.is_exhausted
+            or self.it_index < 0
+            or self.it_index >= len(self.source_seq.items)  # type: ignore[attr-defined]
+        ):
+            self.is_exhausted = True
+            return []
+        if not self.is_mutable():
+            raise AssertionError("list reverse iterator must be mutable to iterate")
+        tx.output.side_effects.mutation(self)
+        self.is_exhausted = True
+        remaining = [
+            self.source_seq.items[i]  # type: ignore[attr-defined]
+            for i in range(self.it_index, -1, -1)
+        ]
+        self.index += len(remaining)
+        self.it_index = -1
+        return remaining
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        if self.is_exhausted or self.it_index != len(self.source_seq.items) - 1:  # type: ignore[attr-defined]
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    "torch._dynamo.utils", "list_reverseiterator_setstate"
+                )
+            )
+            codegen.add_push_null(
+                lambda: codegen.append_output(
+                    codegen.create_load_python_module(reversed)  # type: ignore[arg-type]
+                )
+            )
+            codegen(self.source_seq)
+            codegen.extend_output(create_call_function(1, False))
+            target_index = -1 if self.is_exhausted else self.it_index
+            codegen.append_output(codegen.create_load_const(target_index))
+            codegen.extend_output(create_call_function(2, False))
+        else:
+            codegen.add_push_null(
+                lambda: codegen.append_output(
+                    codegen.create_load_python_module(reversed)  # type: ignore[arg-type]
+                )
+            )
+            codegen(self.source_seq)
+            codegen.extend_output(create_call_function(1, False))
 
 
 class RangeIteratorVariable(IteratorVariable):
