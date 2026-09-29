@@ -742,6 +742,35 @@ class ComputedLazyConstantTests(TestCase):
 
         self._check(fn, [(t, 4, 2), (t, 9, 3)], expected_frames=2)
 
+    def test_unused_constant_divisor_does_not_recompile(self):
+        t = torch.ones(2)
+        cases = [
+            ("floordiv_int", lambda t, a: (t.sin(), a // 2), [(t, 7), (t, 9)]),
+            ("mod_int", lambda t, a: (t.sin(), a % 4), [(t, 7), (t, 9)]),
+            ("truediv_float", lambda t, a: (t.sin(), a / 2.0), [(t, 7.0), (t, 9.0)]),
+            ("floordiv_float", lambda t, a: (t.sin(), a // 2.0), [(t, 7.5), (t, 9.5)]),
+        ]
+        for name, fn, arg_sets in cases:
+            with self.subTest(name=name):
+                torch._dynamo.reset()
+                self._check(fn, arg_sets, expected_frames=1)
+
+    def test_unused_mixed_type_division_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a):
+            return t.sin(), a // 2.0
+
+        self._check(fn, [(t, 7), (t, 9)], expected_frames=2)
+
+    def test_unused_lazy_divisor_recompiles(self):
+        t = torch.ones(2)
+
+        def fn(t, a, b):
+            return t.sin(), a // b
+
+        self._check(fn, [(t, 7, 2), (t, 7, 4)], expected_frames=2)
+
     def test_unused_comparison_does_not_recompile(self):
         t = torch.ones(2)
 
