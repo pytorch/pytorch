@@ -45,14 +45,14 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     bytes_to_scalar, parametrize, noncontiguous_like,
     AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo,
     xfailIfS390X, set_warn_always_context, decorateIf, isRocmArchAnyOf,
-    IS_MACOS, HardwareClassification,
+    IS_MACOS, HardwareClassification, instantiate_parametrized_tests,
 )
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
     expectedFailureXLA,
     instantiate_device_type_tests,
-    onlyCUDA, onlyCPU,
+    onlyCUDA,
     dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
     skipMeta, PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes, skipCUDAIfNotRocm,
     get_all_device_types, skipXLA, onlyAccelerator)
@@ -88,6 +88,35 @@ AMPERE_OR_ROCM = TEST_WITH_ROCM or torch.cuda.is_tf32_supported()
 
 
 is_cuda_sm86 = torch.cuda.is_available() and torch.cuda.get_device_capability(0) == (8, 6)
+
+
+# FIXME: move to test_scatter_gather_ops
+def _test_gather_backward_one_dim(test_case, device, deterministic: bool = False) -> None:
+    with DeterministicGuard(deterministic):
+        m = random.randint(2000, 3000)
+        elems = random.randint(10 * m, 20 * m)
+        dim = 0
+        src = torch.randn(m, device=device, requires_grad=True)
+        idx = torch.randint(m, (elems,), device=device)
+        res = torch.gather(src, dim, idx)
+        weight = torch.rand_like(res, device=device) * 10 ** 6
+        res.backward(weight)
+        if src.grad is None:
+            raise AssertionError("expected src.grad to be not None")
+        grad = src.grad.detach().clone()
+
+        if torch.device(device).type == 'cuda' or torch.device(device).type == 'mtia':
+            for _ in range(2):
+                src.grad.data.zero_()
+                res = torch.gather(src, dim, idx)
+                res.backward(weight)
+                test_case.assertEqual(src.grad, grad, atol=0, rtol=0)
+        else:
+            expected = torch.zeros_like(src, device=device)
+            for i in range(elems):
+                expected[idx[i]] += weight[i]
+            test_case.assertEqual(grad, expected, atol=0, rtol=0)
+
 
 class TestTorchDeviceType(TestCase):
     exact_dtype = True
@@ -433,15 +462,6 @@ class TestTorchDeviceType(TestCase):
 
             with self.assertRaisesRegex(NotImplementedError, r'Cannot copy out'):
                 s1.copy_(s0)
-
-    @onlyCPU
-    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
-    @slowTestIf(IS_WINDOWS)
-    def test_storage_meta_ok(self, device, dtype):
-        s0 = torch.TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
-
-        # This is OK, it changes the meta storage size without allocating
-        s0.resize_(10)
 
     @onlyAccelerator
     def test_module_share_memory(self, device):
@@ -1235,16 +1255,6 @@ class TestTorchDeviceType(TestCase):
             _test_in_place_broadcastable(small2, small_expanded, large_expanded)
             _test_in_place_broadcastable(small2, small, large)
 
-    @onlyCPU
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @dtypes(*get_all_qint_dtypes())
-    def test_nondeterministic_resize_quantized(self, device, dtype):
-        a = torch.tensor([-1, 0, 1, 2, 3], dtype=torch.float, device=device)
-        b = torch.quantize_per_tensor(a, 0.1, 10, dtype)
-        self.check_nondeterministic_alert(
-            lambda: b.resize_((10,)),
-            'quantized_resize_cpu_')
-
     @skipXLA
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64))
@@ -1990,41 +2000,9 @@ class TestTorchDeviceType(TestCase):
         test_func_expect_error('out with indices', is_cuda)
 
     # FIXME: move to test_scatter_gather_ops
-    def _test_gather_backward_one_dim(self, device, deterministic: bool = False) -> None:
-        with DeterministicGuard(deterministic):
-            m = random.randint(2000, 3000)
-            elems = random.randint(10 * m, 20 * m)
-            dim = 0
-            src = torch.randn(m, device=device, requires_grad=True)
-            idx = torch.randint(m, (elems,), device=device)
-            res = torch.gather(src, dim, idx)
-            weight = torch.rand_like(res, device=device) * 10 ** 6
-            res.backward(weight)
-            if src.grad is None:
-                raise AssertionError("expected src.grad to be not None")
-            grad = src.grad.detach().clone()
-
-            if torch.device(device).type == 'cuda' or torch.device(device).type == 'mtia':
-                for _ in range(2):
-                    src.grad.data.zero_()
-                    res = torch.gather(src, dim, idx)
-                    res.backward(weight)
-                    self.assertEqual(src.grad, grad, atol=0, rtol=0)
-            else:
-                expected = torch.zeros_like(src, device=device)
-                for i in range(elems):
-                    expected[idx[i]] += weight[i]
-                self.assertEqual(grad, expected, atol=0, rtol=0)
-
-    # FIXME: move to test_scatter_gather_ops
     @onlyNativeDeviceTypes
     def test_gather_backward_deterministic_path(self, device) -> None:
-        self._test_gather_backward_one_dim(device, True)
-
-    # FIXME: move to test_scatter_gather_ops
-    @onlyCPU
-    def test_gather_backward_one_dim(self, device) -> None:
-        self._test_gather_backward_one_dim(device, False)
+        _test_gather_backward_one_dim(self, device, True)
 
     # FIXME: move to test_scatter_gather_ops
     @onlyNativeDeviceTypes
@@ -3224,17 +3202,6 @@ class TestTorchDeviceType(TestCase):
             # not the data
             self.assertEqual(x, y)
 
-    @onlyCPU
-    def test_bfloat16_neg_abs(self, device):
-        src = torch.randn(256)
-        src[0] = torch.nan
-        src[1] = -torch.nan
-        src[2] = torch.inf
-        src[3] = -torch.inf
-        src_bf16 = src.bfloat16()
-        self.assertEqual(src.neg().bfloat16(), src_bf16.neg())
-        self.assertEqual(src.abs().bfloat16(), src_bf16.abs())
-
     @onlyNativeDeviceTypes
     @dtypes(torch.bfloat16, torch.half)
     def test_reduced_type_float_copy(self, device, dtype):
@@ -4233,6 +4200,23 @@ class TestTorchDeviceType(TestCase):
         x2 = torch.randn(r2, 2, dtype=torch.float32)
         actual = torch.cdist(x1.to(device), x2.to(device), p=3).cpu()
         self.assertEqual(actual, torch.cdist(x1, x2, p=3), atol=1e-4, rtol=1e-4)
+
+    # The cdist backward kernel indexed in int32: (2, 1024, 2048) pushes the per-batch
+    # buffer offset r1 * r2 * m to 2^31, and (32, 8192, 1) pushes dist.numel() to 2^31.
+    # The last batch is checked against the same batch computed on its own, which stays
+    # within int32. With p=1 and integer grads the reductions are exact, so both agree
+    # bitwise regardless of summation order. See #128791.
+    @onlyCUDA
+    @largeTensorTest('32GB', device='cuda')
+    @parametrize("b, r, m", [(2, 1024, 2048), (32, 8192, 1)])
+    def test_cdist_backward_large_index(self, device, b, r, m):
+        x1 = torch.randn(b, r, m, device=device, requires_grad=True)
+        x2 = torch.randn(b, r, m, device=device)
+        grad = torch.randint(-4, 5, (b, r, r), device=device, dtype=torch.float)
+        (actual,) = torch.autograd.grad(torch.cdist(x1, x2, p=1), x1, grad)
+        x1_last = x1[-1:].detach().requires_grad_()
+        (expected,) = torch.autograd.grad(torch.cdist(x1_last, x2[-1:], p=1), x1_last, grad[-1:])
+        self.assertEqual(actual[-1:], expected)
 
     # FIXME: move to elementwise ternary test suite
     @onlyNativeDeviceTypes
@@ -11360,6 +11344,43 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
 
             self.assertEqual(len(w), 0)
 
+    @parametrize("dtype", all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @slowTestIf(IS_WINDOWS)
+    def test_storage_meta_ok(self, dtype):
+        s0 = torch.TypedStorage([1, 2, 3, 4], device='meta', dtype=dtype)
+
+        # This is OK, it changes the meta storage size without allocating
+        s0.resize_(10)
+
+
+class TestTorchCPU(TestCase):
+    hw_classification = HardwareClassification.CPU
+    exact_dtype = True
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @dtypes(*get_all_qint_dtypes())
+    def test_nondeterministic_resize_quantized(self, device, dtype):
+        a = torch.tensor([-1, 0, 1, 2, 3], dtype=torch.float, device=device)
+        b = torch.quantize_per_tensor(a, 0.1, 10, dtype)
+        self.check_nondeterministic_alert(
+            lambda: b.resize_((10,)),
+            'quantized_resize_cpu_')
+
+    # FIXME: move to test_scatter_gather_ops
+    def test_gather_backward_one_dim(self):
+        _test_gather_backward_one_dim(self, 'cpu', False)
+
+    def test_bfloat16_neg_abs(self):
+        src = torch.randn(256)
+        src[0] = torch.nan
+        src[1] = -torch.nan
+        src[2] = torch.inf
+        src[3] = -torch.inf
+        src_bf16 = src.bfloat16()
+        self.assertEqual(src.neg().bfloat16(), src_bf16.neg())
+        self.assertEqual(src.abs().bfloat16(), src_bf16.abs())
+
+
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
 # Functions to test negative dimension wrapping
@@ -11485,6 +11506,8 @@ instantiate_device_type_tests(TestTensorDeviceOps, globals())
 instantiate_device_type_tests(TestTorchDeviceType, globals())
 instantiate_device_type_tests(TestTorchCUDA, globals(), only_for="cuda")
 instantiate_device_type_tests(TestDevicePrecision, globals(), except_for='cpu', allow_xpu=True)
+instantiate_device_type_tests(TestTorchCPU, globals(), only_for="cpu")
+instantiate_parametrized_tests(TestTorch)
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True
