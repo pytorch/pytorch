@@ -100,20 +100,28 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
                                                          Tensor& save_var) {
   // Flatten 5D to 4D: MPSGraph normalization is significantly slower for rank-5 tensors.
   // Merging spatial dims is safe since BatchNorm reduces over all dims except channel.
+  // Flattening in the input's own memory format turns channels_last_3d into channels_last, which the 4D path
+  // handles without relying on the strided API (unavailable before macOS 15).
   if (self.dim() == 5) {
-    auto input_4d = self.contiguous().reshape({self.size(0), self.size(1), self.size(2) * self.size(3), self.size(4)});
-    auto output_4d = output.reshape(input_4d.sizes());
-    return batch_norm_mps_out(input_4d,
-                              weight_opt,
-                              bias_opt,
-                              running_mean_opt,
-                              running_var_opt,
-                              train,
-                              momentum,
-                              epsilon,
-                              output_4d,
-                              save_mean,
-                              save_var);
+    const auto memory_format = self.suggest_memory_format();
+    const std::vector<int64_t> sizes_4d{self.size(0), self.size(1), self.size(2) * self.size(3), self.size(4)};
+    auto input_4d = self.contiguous(memory_format).view(sizes_4d);
+    auto output_4d = output.is_contiguous(memory_format) ? output.view(sizes_4d) : at::empty_like(input_4d);
+    batch_norm_mps_out(input_4d,
+                       weight_opt,
+                       bias_opt,
+                       running_mean_opt,
+                       running_var_opt,
+                       train,
+                       momentum,
+                       epsilon,
+                       output_4d,
+                       save_mean,
+                       save_var);
+    if (!output_4d.is_alias_of(output)) {
+      output.copy_(output_4d.view(output.sizes()));
+    }
+    return std::tuple<Tensor&, Tensor&, Tensor&>(output, save_mean, save_var);
   }
 
   TORCH_CHECK_NOT_IMPLEMENTED(
