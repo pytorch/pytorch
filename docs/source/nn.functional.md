@@ -191,6 +191,7 @@ scaled_dot_product_attention.
     linear_cross_entropy
     mse_loss
     margin_ranking_loss
+    bpr_loss
     multilabel_margin_loss
     multilabel_soft_margin_loss
     multi_margin_loss
