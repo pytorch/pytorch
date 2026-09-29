@@ -918,6 +918,10 @@ class FSDPParamGroup:
     # Utilities #
     def _to_sharded(self):
         if not self.is_sharded:
+            if self._all_gather_result is not None:
+                # Discard a post-forward mesh prefetch before changing meshes.
+                _wait_all_gather(self._all_gather_result)
+                self._all_gather_result = None
             for fsdp_param in self.fsdp_params:
                 fsdp_param.to_sharded()
             self._sharded_state = ShardedState.SHARDED

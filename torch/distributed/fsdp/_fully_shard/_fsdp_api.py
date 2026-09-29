@@ -114,6 +114,9 @@ class AllGather(Comm):
         """Release this group's output lease on the compute stream.
 
         Called after reshard or after waiting for a discarded unused prefetch.
+        Finishing a backward callback or clearing deferred communication state
+        does not release the lease while the parameters remain unsharded. This
+        also applies when gradient reduction or backward finalization is deferred.
         Previously returned parameter views must remain valid objects. A backend
         sharing their storage must restore the same regions on the next gather
         and order overwrites after all local and remote consumers finish.

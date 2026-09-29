@@ -79,6 +79,15 @@ class AllGatherOutputs:
     backend_owned: bool = False
 
 
+@dataclass
+class _DefaultAllGatherCopyPlan:
+    input_split_sizes: list[int]
+    outputs: list[list[torch.Tensor]]
+    copy_outputs: list[torch.Tensor]
+    reorder_infos: list[tuple[int, torch.Size, list[torch.Tensor], list[torch.Tensor]]]
+    clone_input: bool = False
+
+
 class AllGatherLayout(ABC):
     """Input packing and output handling for an all-gather backend.
 
@@ -189,8 +198,9 @@ class DefaultAllGatherLayout(AllGatherLayout):
     """Rank-major collective output copied into stable parameter storage."""
 
     def _bind_owner(self, owner: object) -> None:
-        # Stateless layouts may be shared by existing collective backends.
-        pass
+        # Only the built-in default layout is known to be stateless.
+        if type(self) is not DefaultAllGatherLayout:
+            super()._bind_owner(owner)
 
     def prepare(
         self, input_metadata: AllGatherInputMetadata
@@ -229,51 +239,62 @@ class DefaultAllGatherLayout(AllGatherLayout):
         )
         from ._fsdp_param import alloc_storage
 
-        outputs = []
-        copy_outputs = []
-        reorder_infos = []
-        split_sizes = (
-            [] if output_metadata is None else cast(list[int], output_metadata)
-        )
-        for param in param_metadata:
-            param_outputs = param.outputs or [
-                torch.empty(
-                    numel * world_size, dtype=dtype, device=all_gather_output.device
-                )
-                for numel, dtype in zip(param.input_numels, param.input_dtypes)
-            ]
-            if not param.backend_owned:
-                for tensor in param_outputs:
-                    alloc_storage(tensor)
-            outputs.append(param_outputs)
-            if output_metadata is None:
-                split_sizes.extend(
-                    numel * tensor.element_size() // all_gather_output.element_size()
-                    for numel, tensor in zip(param.input_numels, param_outputs)
-                )
-            if param.shard_dim != 0:
-                temporary_outputs = [torch.empty_like(t) for t in param_outputs]
-                reorder_infos.append((param, temporary_outputs, param_outputs))
-                copy_outputs.extend(temporary_outputs)
-            else:
-                copy_outputs.extend(param_outputs)
-
-        # Fallback may receive the same persistent buffer that parameters alias.
-        if any(
-            param.backend_owned
-            and any(
-                tensor.untyped_storage().data_ptr()
-                == all_gather_output.untyped_storage().data_ptr()
-                for tensor in param.outputs
+        if isinstance(output_metadata, _DefaultAllGatherCopyPlan):
+            plan = output_metadata
+        else:
+            # Custom layouts may delegate rank-major output to this finalizer.
+            plan = _DefaultAllGatherCopyPlan(
+                [] if output_metadata is None else cast(list[int], output_metadata),
+                [],
+                [],
+                [],
             )
-            for param in param_metadata
-        ):
+            for param in param_metadata:
+                param_outputs = param.outputs or [
+                    torch.empty(
+                        numel * world_size, dtype=dtype, device=all_gather_output.device
+                    )
+                    for numel, dtype in zip(param.input_numels, param.input_dtypes)
+                ]
+                if param.backend_owned:
+                    plan.clone_input = plan.clone_input or any(
+                        tensor.untyped_storage().data_ptr()
+                        == all_gather_output.untyped_storage().data_ptr()
+                        for tensor in param.outputs
+                    )
+                else:
+                    for tensor in param_outputs:
+                        alloc_storage(tensor)
+                plan.outputs.append(param_outputs)
+                if output_metadata is None:
+                    plan.input_split_sizes.extend(
+                        numel
+                        * tensor.element_size()
+                        // all_gather_output.element_size()
+                        for numel, tensor in zip(param.input_numels, param_outputs)
+                    )
+                if param.shard_dim != 0:
+                    temporary_outputs = [torch.empty_like(t) for t in param_outputs]
+                    plan.reorder_infos.append(
+                        (
+                            param.shard_dim,
+                            param.padded_sharded_size,
+                            temporary_outputs,
+                            param_outputs,
+                        )
+                    )
+                    plan.copy_outputs.extend(temporary_outputs)
+                else:
+                    plan.copy_outputs.extend(param_outputs)
+
+        if plan.clone_input:
+            # Fallback may gather into storage that existing parameters alias.
             all_gather_output = all_gather_output.clone()
         _copy_all_gather_outputs(
-            all_gather_output, split_sizes, copy_outputs, world_size
+            all_gather_output, plan.input_split_sizes, plan.copy_outputs, world_size
         )
-        _reassemble_all_gather_outputs(reorder_infos, world_size)
-        return AllGatherOutputs(outputs)
+        _reassemble_all_gather_outputs(plan.reorder_infos, world_size)
+        return AllGatherOutputs(plan.outputs)
 
 
 DEFAULT_ALL_GATHER_LAYOUT = DefaultAllGatherLayout()
