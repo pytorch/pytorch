@@ -391,6 +391,10 @@ class EpiOp:
         """Per-call runtime argument matching the compiled signature."""
         return value
 
+    def sink_alloc_dtype(self):
+        """Return the torch dtype for graph-owned sink storage."""
+        return torch.float32
+
     def arg_spec_type(self, const=False):
         """Type annotation for this op's EpilogueArguments field. ``const``
         reflects host_arg_form: a Constexpr[...] annotation makes the TVM-FFI

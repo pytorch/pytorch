@@ -36,6 +36,14 @@ if TYPE_CHECKING:
 
 
 @dataclasses.dataclass(frozen=True)
+class FlexGemmEpilogueIndexedOutputConfig:
+    """Template input positions for one row-indexed auxiliary output."""
+
+    out_index: int
+    indices_index: int
+
+
+@dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueLocalReduceConfig:
     """Template-time local-reduce metadata; geometry is in physical accumulator columns."""
 
@@ -127,6 +135,7 @@ class FlexGemmEpilogueConfig:
         epilogue_arg_indices: Template input indices for read-only epilogue captures.
         epilogue_arg_kinds: Broadcast kind for each captured epilogue tensor.
         aux_out_indices: Template input indices for same-shape aux outputs.
+        indexed_output: Runtime input positions for one indexed auxiliary output.
         local_reduce: Concrete local-reduce consumer rendered into runtime kwargs.
     """
 
@@ -141,6 +150,7 @@ class FlexGemmEpilogueConfig:
     epilogue_arg_indices: tuple[int, ...]
     epilogue_arg_kinds: tuple[str, ...]
     aux_out_indices: tuple[int, ...]
+    indexed_output: FlexGemmEpilogueIndexedOutputConfig | None
     local_reduce: FlexGemmEpilogueLocalReduceConfig | None
     output_contraction: FlexGemmOutputContraction | None
 
@@ -161,6 +171,7 @@ class FlexGemmEpilogueConfig:
             quack_epilogue_dtype,
         )
 
+        indexed = self.indexed_output
         return flex_gemm_epimod(
             epilogue_fn,
             tuple(
@@ -168,6 +179,12 @@ class FlexGemmEpilogueConfig:
             ),
             self.epilogue_arg_kinds,
             len(self.aux_out_indices),
+            None
+            if indexed is None
+            else (
+                quack_epilogue_dtype(input_dtypes[indexed.out_index]),
+                input_dtypes[indexed.indices_index],
+            ),
             None
             if self.local_reduce is None
             else self.local_reduce.runtime_plan(resolve, self.epilogue_name),
@@ -342,6 +359,11 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
         if config.aux_out_indices:
             aux_outs = ", ".join(input_args[index] for index in config.aux_out_indices)
             kwargs.append(f", aux_outs=({aux_outs},)")
+        if config.indexed_output is not None:
+            kwargs.append(
+                f", indexed_out={input_args[config.indexed_output.out_index]}, "
+                f"indexed_indices={input_args[config.indexed_output.indices_index]}"
+            )
         if config.local_reduce is not None:
             kwargs.append(
                 self._local_reduce_kwargs(
