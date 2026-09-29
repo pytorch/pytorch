@@ -9751,13 +9751,14 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 class TestLinalgSVD(TestCase):
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
-    @dtypes(torch.float32, torch.complex64)
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_svd_ill_conditioned(self, device, dtype):
         # Small columns must still undergo Jacobi rotations: skipping them at
         # an absolute epsilon cutoff breaks orthogonality and inflates sigma.
         q = torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q
         v = torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q
-        A = (q * torch.logspace(-5, 0, 32)) @ v.mH
+        A = (q * torch.logspace(-5, 0, 32, dtype=q.real.dtype)) @ v.mH
         cpu_s = torch.linalg.svdvals(A)
         U, S, Vh = (t.cpu() for t in torch.linalg.svd(A.to(device), full_matrices=False))
         eye = torch.eye(32, dtype=dtype).expand(16, 32, 32)
