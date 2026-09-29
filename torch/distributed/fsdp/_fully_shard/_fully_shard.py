@@ -197,10 +197,12 @@ def fully_shard(
             - After forward, the parameters registered to the module depend on
               to this: The registered parameters are the sharded parameters if
               ``True``; unsharded parameters if ``False``; and the parameters
-              resharded to the smaller mesh otherwise. To modify the parameters
-              between forward and backward, the registered parameters must be
-              the sharded parameters. For ``False`` or an ``int``, this can be
-              done by manually resharding via :meth:`reshard`.
+              resharded to the smaller mesh otherwise. For ``False`` or an
+              ``int``, the sharded parameters can be registered by manually
+              resharding via :meth:`reshard`.
+            - Modifying the parameters between forward and backward is not
+              supported: the backward all-gather is not ordered after such
+              writes, so backward may see the old values.
         shard_placement_fn (Optional[Callable[[nn.Parameter], Optional[Shard | ShardPlacementResult]]]):
             This callable can be used to override the sharding placement and/or
             mesh for a parameter. It can return:
@@ -409,6 +411,68 @@ class FSDPModule:
         """
         state = self._get_fsdp_state()
         state._state_ctx.is_last_backward = is_last_backward
+
+    def set_manual_backward_finalization(self, enabled: bool) -> None:
+        """
+        Set whether the caller must finalize backward.
+
+        This must be called on the root FSDP module. When enabled, manual
+        finalization supersedes :meth:`set_is_last_backward`. Call
+        :meth:`finalize_backward` after all backward passes in the logical
+        backward operation and before reading or clearing gradients. Otherwise,
+        gradients may remain unreduced and backward iteration state is retained.
+        Gradient synchronization and parameter resharding follow their current
+        settings.
+
+        Set this before backward. The mode cannot change after backward starts
+        until the backward iteration is finalized or reset.
+        """
+        state = self._get_fsdp_state()
+        if state._is_root is False:
+            raise RuntimeError(
+                "set_manual_backward_finalization must be called on the root "
+                f"{state._state_name} module"
+            )
+        if (
+            enabled != state._state_ctx.manual_backward_finalization
+            and torch._C._current_graph_task_id() != -1
+        ):
+            raise RuntimeError(
+                "set_manual_backward_finalization cannot change mode during backward"
+            )
+        active_mode = state._state_ctx.manual_backward_finalization_active
+        if active_mode is not None and enabled != active_mode:
+            raise RuntimeError(
+                "set_manual_backward_finalization cannot change mode after backward starts"
+            )
+        state._state_ctx.manual_backward_finalization = enabled
+
+    @_dynamo_disable
+    def finalize_backward(self) -> None:
+        """
+        Finalize backward on the calling thread.
+
+        Enable manual finalization before forward, then call this after all
+        backward passes in the logical backward operation. This completes
+        pending gradient reduction and resharding according to their current
+        settings. Calling this before the root module's first forward is a no-op.
+        It is also safe after a completed backward that did not reach any
+        FSDP-managed parameters. Do not call it between forward and backward.
+
+        If several backward passes precede one finalization, disable gradient
+        synchronization for those backward passes and re-enable it before
+        finalization.
+
+        Manual finalization lets callers choose a finalization point that is
+        separate from any backward call. This supports schedules that represent
+        gradient reduction as a separate action. CUDA graph capture does not
+        support CPU gradient offload or an outstanding asynchronous unshard.
+
+        Partial gradient reduction for ``replicate()`` and HSDP is not
+        supported. Enable all-reduce before finalization.
+        """
+        state = self._get_fsdp_state()
+        state.finalize_backward()
 
     def set_requires_gradient_sync(
         self, requires_gradient_sync: bool, *, recurse: bool = True
