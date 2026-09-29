@@ -8525,6 +8525,16 @@ for dtype in (torch.int32, torch.int64):
         y = torch.randn(20, 1024 * 1024)
         self.common(f, (x, y), atol=1e-3, rtol=1e-3)
 
+    def test_inplace_flip_after_index_put(self):
+        # After index_put_ has mutated x, the flip reads x under the name of
+        # the index_put_ output, which the copy back into x must not fuse with.
+        def f(x):
+            x.index_put_((torch.arange(x.size(0), device=x.device),), x * 2.0)
+            x.add_(x.flip(0))
+            return x
+
+        self.common(f, (torch.randn(20, 1024),))
+
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
             src_node_feat = node_feat[edge_index[0]]
