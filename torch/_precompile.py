@@ -3060,6 +3060,7 @@ def _verified_cache_envelope(
     tracer: str,
     code_hash: str,
     strict: bool,
+    caller: str = "strict precompile.load",
 ) -> dict[str, Any] | None:
     # weights_only=True is safe (plain str/int/bytes dict). Outside strict mode the
     # cache is acceleration only, so an unreadable envelope or a FORMAT / VERSION
@@ -3072,7 +3073,7 @@ def _verified_cache_envelope(
         if blob.get("format") != _CACHE_FORMAT or blob.get("version") != _CACHE_VERSION:
             if strict:
                 raise PrecompileError(
-                    "strict precompile.load requires a compatible cache envelope; "
+                    f"{caller} requires a compatible cache envelope; "
                     f"got format={blob.get('format')!r}, "
                     f"version={blob.get('version')!r}, "
                     f"expected {_CACHE_FORMAT!r}, {_CACHE_VERSION!r}."
@@ -3112,9 +3113,7 @@ def _verified_cache_envelope(
         raise
     except Exception as e:
         if strict:
-            raise PrecompileError(
-                "strict precompile.load could not read the cache envelope"
-            ) from e
+            raise PrecompileError(f"{caller} could not read the cache envelope") from e
         log.warning(
             "torch.compiler.precompile could not read the cache envelope (%s: %s); the "
             "cache is likely corrupt or from a different torch build. Falling back "
@@ -3147,49 +3146,58 @@ def _read_runtime_cache_envelope(
     digest = hashlib.sha256()
     metadata = {}
     header_size = 0
-    with open(artifact_path, "rb") as source:
-        for expected in ("BACKEND", "TRACER"):
-            while True:
-                line = source.readline(65537)
-                header_size += len(line)
-                if not line or header_size > 65536:
-                    raise unsupported()
-                digest.update(line)
-                if line.strip() and not line.lstrip().startswith(b"#"):
-                    break
-            try:
-                statements = ast.parse(line.decode("utf-8")).body
-                if len(statements) != 1 or not isinstance(statements[0], ast.Assign):
-                    raise ValueError("Expected an artifact metadata assignment")
-                assignment = statements[0]
-                if len(assignment.targets) != 1 or not isinstance(
-                    assignment.targets[0], ast.Name
-                ):
-                    raise ValueError("Expected one metadata name")
-                if assignment.targets[0].id != expected:
-                    raise ValueError(f"Expected {expected}")
-                value = ast.literal_eval(assignment.value)
-                if not isinstance(value, str):
-                    raise ValueError("Expected string metadata")
-                metadata[expected] = value
-            except (SyntaxError, UnicodeDecodeError, ValueError) as exc:
-                raise unsupported() from exc
-        if metadata["TRACER"] != "dynamo":
-            raise PrecompileError(
-                f"precompile.{operation} supports only Dynamo captures, and "
-                f"{os.fspath(artifact_path)} was captured with the "
-                f"{metadata['TRACER']!r} tracer"
-            )
-        while chunk := source.read(1024 * 1024):
-            digest.update(chunk)
-    with open(cache_path, "rb") as f:
-        cache = f.read()
+    try:
+        with open(artifact_path, "rb") as source:
+            for expected in ("BACKEND", "TRACER"):
+                while True:
+                    line = source.readline(65537)
+                    header_size += len(line)
+                    if not line or header_size > 65536:
+                        raise unsupported()
+                    digest.update(line)
+                    if line.strip() and not line.lstrip().startswith(b"#"):
+                        break
+                try:
+                    statements = ast.parse(line.decode("utf-8")).body
+                    if len(statements) != 1 or not isinstance(
+                        statements[0], ast.Assign
+                    ):
+                        raise ValueError("Expected an artifact metadata assignment")
+                    assignment = statements[0]
+                    if len(assignment.targets) != 1 or not isinstance(
+                        assignment.targets[0], ast.Name
+                    ):
+                        raise ValueError("Expected one metadata name")
+                    if assignment.targets[0].id != expected:
+                        raise ValueError(f"Expected {expected}")
+                    value = ast.literal_eval(assignment.value)
+                    if not isinstance(value, str):
+                        raise ValueError("Expected string metadata")
+                    metadata[expected] = value
+                except (SyntaxError, ValueError) as exc:
+                    raise unsupported() from exc
+            if metadata["TRACER"] != "dynamo":
+                raise PrecompileError(
+                    f"precompile.{operation} supports only Dynamo captures, and "
+                    f"{os.fspath(artifact_path)} was captured with the "
+                    f"{metadata['TRACER']!r} tracer"
+                )
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+        with open(cache_path, "rb") as f:
+            cache = f.read()
+    except OSError as e:
+        raise PrecompileError(
+            f"precompile.{operation} could not read the artifact pair (artifact_path="
+            f"{artifact_path!r}, cache_path={cache_path!r}): {e}"
+        ) from e
     blob = _verified_cache_envelope(
         cache,
         backend=metadata["BACKEND"],
         tracer=metadata["TRACER"],
         code_hash=digest.hexdigest(),
         strict=True,
+        caller=f"precompile.{operation}",
     )
     if blob is None:
         raise AssertionError("a strict envelope read returns the envelope or raises")
@@ -3233,17 +3241,17 @@ def capture_runtime() -> contextlib.AbstractContextManager[None]:
 
         with torch.compiler.precompile.capture_runtime():
             with torch.compiler.precompile.capture(
-                "m.py", "m.cache", tracer=torch.compiler.precompile.DynamoTracer()
-            ):
-                fn(model, x)
+                fn, artifact_path="m.py", cache_path="m.cache"
+            ) as cap:
+                cap(model, x)
             torch.compiler.precompile.finalize_cache(
                 artifact_path="m.py", cache_path="m.cache"
             )
             shutdown_application()  # raises if it would still compile
 
-    :func:`finalize_cache` seals the scope: from then until the scope exits,
-    compilation is forbidden as under :func:`no_compilation`, so any compile the
-    finalized cache would not cover raises
+    :func:`finalize_cache` seals the scope before it rewrites the cache: from then
+    until the scope exits, compilation is forbidden as under :func:`no_compilation`,
+    so any compile the finalized cache would not cover raises
     :class:`~torch.compiler.PrecompileError` instead of passing silently.
 
     When the installed Triton can export its runtime cache, set an explicit,
@@ -3278,17 +3286,18 @@ def finalize_cache(
     during the scope added. When the installed Triton can export its runtime
     cache, that cache (Triton JIT binaries and autotuning decisions under
     ``TRITON_CACHE_DIR``) is added too.
-    Once the rewrite succeeds the enclosing :func:`capture_runtime` scope is
-    sealed; if it fails, the scope stays unsealed and ``cache_path`` is left as it
-    was, so the call can be retried. Stop compiling on every thread before
+    The enclosing :func:`capture_runtime` scope is sealed while the cache is
+    rewritten and stays sealed once the rewrite succeeds; if the rewrite fails, the
+    scope is unsealed again and ``cache_path`` is left as it was, so the call can
+    be retried. Stop compiling on every thread before
     calling it: compile work submitted while it runs is not guaranteed to be
     waited on or rejected.
 
     Raises :class:`~torch.compiler.PrecompileError` outside a
     :func:`capture_runtime` scope, when called a second time in one scope, for a
     make_fx capture, for an inductor capture that saved no compiled cache artifact
-    (which strict :func:`load` could not serve either), when the pair does not
-    match, or when ``TRITON_CACHE_DIR`` changed since :func:`capture_runtime`
+    (which strict :func:`load` could not serve either), when the pair cannot be
+    read or does not match, or when ``TRITON_CACHE_DIR`` changed since :func:`capture_runtime`
     was entered.
     """
     from torch.compiler._runtime_cache import finalize_runtime_cache
@@ -3317,7 +3326,7 @@ def prepare_runtime(
     *, artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
 ) -> None:
     """
-    Install a finalized cache's runtime dependencies before the application starts.
+    Verify a finalized cache's runtime dependencies before the application starts.
 
     Call it early in a serving worker, before the application imports anything that
     compiles, and then :func:`load` the same pair::
