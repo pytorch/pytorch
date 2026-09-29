@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import ValuesView
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
@@ -401,8 +402,8 @@ def _multi_outputs(kernel) -> list[Any]:
 
     def flatten(value) -> Iterator[Any]:
         if isinstance(value, dict):
-            value = list(value.values())
-        if isinstance(value, (list, tuple)):
+            value = value.values()
+        if isinstance(value, (list, tuple, ValuesView)):
             for item in value:
                 yield from flatten(item)
         elif isinstance(value, ir.MultiOutput):
