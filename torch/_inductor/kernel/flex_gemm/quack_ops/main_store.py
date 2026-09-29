@@ -4,6 +4,9 @@
 import cutlass
 import cutlass.cute as cute
 
+from torch._inductor.kernel.flex_gemm.quack_ops.grouped_reduce import (
+    grouped_reduce_supports_config,
+)
 from torch._vendor.quack.epilogue.ops import setup_epi_tensor, TileStore
 
 
@@ -35,17 +38,22 @@ class GroupedMainStore(TileStore):
 
     supports_swap_ab = False
 
-    def __init__(self, name, group):
+    def __init__(self, name, group, min_fragment_n=None):
         if group not in (2, 4):
             raise ValueError("GroupedMainStore supports group 2 or 4")
+        if min_fragment_n is not None and (
+            min_fragment_n <= 0 or min_fragment_n % group
+        ):
+            raise ValueError("min_fragment_n must be a positive multiple of group")
         epi_tile_fn = (
             _grouped_main_epi_tile_2 if group == 2 else _grouped_main_epi_tile_4
         )
         super().__init__(name, epi_tile_fn=epi_tile_fn)
         self.group = group
+        self.min_fragment_n = min_fragment_n
 
     def config_key(self):
-        return (self.group, *super().config_key())
+        return (self.group, self.min_fragment_n, *super().config_key())
 
     def output_n(self, n):
         """Return the contracted logical output N extent."""
@@ -57,6 +65,11 @@ class GroupedMainStore(TileStore):
 
     def supports_config(self, config):
         """Return whether a config has validated grouped-main store ownership."""
+        # Feed-main fragment reductions need this even without a partial-output sink.
+        if self.min_fragment_n is not None and not grouped_reduce_supports_config(
+            config, 1, self.min_fragment_n
+        ):
+            return False
         supported_arch = (
             config.device_capacity in (10, 11)
             if self.group == 2
@@ -77,7 +90,11 @@ class GroupedMainStore(TileStore):
 
     def supports_problem(self, config, m, n):
         """Apply problem-size legality not expressible from config fields alone."""
-        return n % self.group == 0 and config.tile_n <= n
+        return (
+            n % self.group == 0
+            and config.tile_n <= n
+            and (self.min_fragment_n is None or n % self.min_fragment_n == 0)
+        )
 
     def config_support_error(self, configs):
         if self.group == 4:
@@ -102,6 +119,15 @@ class GroupedMainStore(TileStore):
             self._epi_tile_key(): epi_tile_out,
             self._dtype_field(): tensor.element_type,
         }
+
+    def min_epi_tile_n(self, arg_tensor):
+        """Keep stores vectorizable and fragment reductions complete."""
+        store_width = 0
+        if arg_tensor is not None:
+            width = arg_tensor.element_type.width
+            store_width = self.group * ((128 + width - 1) // width)
+        required_n = max(store_width, self.min_fragment_n or 0)
+        return required_n or None
 
     def store_tile_shape_mn(self, gemm):
         return (gemm.cta_tile_shape_mnk[0], gemm.cta_tile_shape_mnk[1] // self.group)
