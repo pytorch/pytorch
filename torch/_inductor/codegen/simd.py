@@ -2417,6 +2417,7 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
         value_resolver: _SubParentValueResolver | None = None,
         replay_context: _SubParentReplayContext | None = None,
         replay_node: Any | None = None,
+        replay_accesses: tuple[tuple[MemoryDep, sympy.Expr], ...] | None = None,
     ):
         super().__init__(inner)
         self._kernel = kernel
@@ -2425,18 +2426,28 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
         self._value_resolver = value_resolver
         self._replay_context = replay_context
         self._replay_node = replay_node
+        self._replay_accesses = replay_accesses
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         planned = False
         if self._value_resolver is not None:
             planned = self._value_resolver.is_planned(name)
             if planned:
-                value = self._value_resolver.resolve_load(
-                    name,
-                    index,
-                    replay_context=self._replay_context,
-                    replay_node=self._replay_node,
-                )
+                if self._replay_accesses is None:
+                    value = self._value_resolver.resolve_load(
+                        name,
+                        index,
+                        replay_context=self._replay_context,
+                        replay_node=self._replay_node,
+                    )
+                else:
+                    value = self._value_resolver.resolve_load(
+                        name,
+                        index,
+                        replay_context=self._replay_context,
+                        replay_node=self._replay_node,
+                        replay_accesses=self._replay_accesses,
+                    )
                 if value is not None:
                     return value
         remapped_index = self._family.remap_index(index)
@@ -2932,6 +2943,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         index: sympy.Expr,
         replay_context: _SubParentReplayContext | None,
         replay_node: Any | None,
+        replay_accesses: tuple[tuple[MemoryDep, sympy.Expr], ...] | None,
     ) -> tuple[int, _SubParentRelationDescriptor] | None:
         candidates = [
             (descriptor_index, self._relation_descriptors[descriptor_index])
@@ -2951,14 +2963,31 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
                 for descriptor_index, descriptor in candidates
                 if descriptor.replay_node is replay_node
             ]
-        if len(candidates) > 1:
-            exact = [
+        if replay_accesses is None:
+            candidates = [
                 (descriptor_index, descriptor)
                 for descriptor_index, descriptor in candidates
-                if descriptor.relation.consumer_access.index == index
+                if V.graph.sizevars.statically_known_equals(
+                    descriptor.relation.consumer_access.index, index
+                )
             ]
-            if exact:
-                candidates = exact
+        else:
+            candidates = [
+                (descriptor_index, descriptor)
+                for descriptor_index, descriptor in candidates
+                if any(
+                    self._accesses_match_in_child_frame(
+                        descriptor.relation.consumer_access,
+                        read,
+                        descriptor.parent_shape[0],
+                        descriptor.child_shape[1],
+                    )
+                    and V.graph.sizevars.statically_known_equals(
+                        replay_index, index
+                    )
+                    for read, replay_index in replay_accesses
+                )
+            ]
         if len(candidates) == 1:
             return candidates[0]
         if not candidates:
@@ -3169,11 +3198,12 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         *,
         replay_context: _SubParentReplayContext | None = None,
         replay_node: Any | None = None,
+        replay_accesses: tuple[tuple[MemoryDep, sympy.Expr], ...] | None = None,
     ) -> CSEVariable | None:
         """Try each live source, requiring in-kernel values to resolve."""
         if name in self._dense_descriptor_indices:
             selected = self._select_dense_descriptor(
-                name, index, replay_context, replay_node
+                name, index, replay_context, replay_node, replay_accesses
             )
             if selected is None:
                 if self._contracts[name].source_is_internal:
@@ -4564,6 +4594,18 @@ class SIMDScheduling(BaseScheduling):
                     value_resolver=value_resolver,
                     replay_context=replay_context,
                     replay_node=sn,
+                    replay_accesses=tuple(
+                        (
+                            read,
+                            sympy_subs(
+                                read.index,
+                                dict(zip(read.var_names, iter_vars)),
+                            ),
+                        )
+                        for read in sn.read_writes.reads
+                        if isinstance(read, MemoryDep)
+                        and len(read.var_names) == len(iter_vars)
+                    ),
                 )
                 self._prepare_loop_body(sn._body)
                 with V.set_ops_handler(handler), kernel.set_current_node(sn):

@@ -978,7 +978,11 @@ class NestedReduction:
             )
         )
         parent_source_names -= broadcast_source_names
-        internal_relations = cls._sub_parent_internal_access_relations(output_groups)
+        read_group_indices: dict[MemoryDep, OrderedSet[int]] = {}
+        internal_relations = cls._sub_parent_internal_access_relations(
+            output_groups,
+            read_group_indices=read_group_indices,
+        )
         if internal_relations is None:
             return plan_failure
         known_extent_subs: dict[sympy.Expr, sympy.Expr] = {}
@@ -998,6 +1002,16 @@ class NestedReduction:
             sub_parent_factor,
             known_extent_subs=known_extent_subs or None,
         )
+        if source_relations is None:
+            return plan_failure
+        if config.polyhedral_fusion and not cls._sub_parent_dense_relations_are_admitted(
+            source_relations,
+            output_groups,
+            read_group_indices,
+            V.graph.sizevars.simplify(sympy_subs(parent_rnumel, known_extent_subs)),
+            sub_parent_factor,
+        ):
+            return plan_failure
         output_relations = ()
         if config.polyhedral_fusion:
             output_relations = cls.sub_parent_output_access_relations(
@@ -1009,7 +1023,7 @@ class NestedReduction:
             )
             if output_relations is None:
                 return plan_failure
-        if source_relations is None or not (source_relations or output_relations):
+        if not (source_relations or output_relations):
             return plan_failure
         broadcast_relations = cls._sub_parent_broadcast_access_relations(
             parent_nodes,
@@ -2114,6 +2128,7 @@ class NestedReduction:
     def _sub_parent_internal_access_relations(
         cls,
         output_groups: Sequence[SubParentOutputGroup],
+        read_group_indices: dict[MemoryDep, OrderedSet[int]] | None = None,
     ) -> tuple[SubParentAccessRelation, ...] | None:
         """Record values forwarded between sub-parent epilogue nodes.
 
@@ -2133,6 +2148,8 @@ class NestedReduction:
         for group_index, group in enumerate(output_groups):
             for node_index, node in enumerate(group.nodes):
                 for dep in node.read_writes.reads:
+                    if read_group_indices is not None and isinstance(dep, MemoryDep):
+                        read_group_indices.setdefault(dep, OrderedSet()).add(group_index)
                     if dep.name not in writes_by_name:
                         continue
                     if not isinstance(dep, MemoryDep):
@@ -2168,6 +2185,41 @@ class NestedReduction:
                     )
                 )
         return tuple(relations)
+
+    @staticmethod
+    def _sub_parent_dense_relations_are_admitted(
+        relations: Sequence[SubParentAccessRelation],
+        output_groups: Sequence[SubParentOutputGroup],
+        read_group_indices: dict[MemoryDep, OrderedSet[int]],
+        parent_rnumel: sympy.Expr,
+        sub_parent_factor: int,
+        allow_unmatched: bool = False,
+    ) -> bool:
+        """Require dense reads to cover the complete output-group width."""
+        child_width = V.graph.sizevars.simplify(
+            FloorDiv(parent_rnumel, sub_parent_factor)
+        )
+        for relation in relations:
+            if relation.access_stride != 1:
+                continue
+            group_indices = read_group_indices.get(relation.consumer_access)
+            if not group_indices:
+                if allow_unmatched:
+                    continue
+                return False
+            if len(group_indices) != 1:
+                return False
+            group_index = next(iter(group_indices))
+            if not 0 <= group_index < len(output_groups):
+                return False
+            expected_extent = V.graph.sizevars.simplify(
+                child_width * output_groups[group_index].output_lanes
+            )
+            if not V.graph.sizevars.statically_known_equals(
+                relation.extent, expected_extent
+            ):
+                return False
+        return True
 
     @staticmethod
     def _sub_parent_consumer_is_trailing_broadcast(
@@ -10476,6 +10528,27 @@ class Scheduler:
             mapped_parent_rnumel = V.graph.sizevars.simplify(
                 sympy_subs(plan.parent_rnumel, extent_subs)
             )
+            if plan.nested_stage is None and any(
+                relation.access_stride == 1 for relation in affine_relations
+            ):
+                read_group_indices: dict[MemoryDep, OrderedSet[int]] = {}
+                if (
+                    NestedReduction._sub_parent_internal_access_relations(
+                        stage.output_groups,
+                        read_group_indices=read_group_indices,
+                    )
+                    is None
+                ):
+                    return None
+                if not NestedReduction._sub_parent_dense_relations_are_admitted(
+                    affine_relations,
+                    stage.output_groups,
+                    read_group_indices,
+                    mapped_parent_rnumel,
+                    stage.factor,
+                    allow_unmatched=True,
+                ):
+                    return None
             child_frame = (
                 (
                     plan.parent_numel,

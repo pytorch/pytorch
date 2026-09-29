@@ -399,6 +399,64 @@ class TestScheduler(TestCase):
         )
         self.assertFalse(relation.requires_live_source)
 
+    @parametrize("consumer_extent, expected_admission", ((64, False), (192, True)))
+    def test_sub_parent_dense_relation_matches_output_group_width(
+        self, consumer_extent, expected_admission
+    ):
+        row, feature = sympy.symbols(
+            "group_width_row group_width_feature", integer=True, nonnegative=True
+        )
+        source = MemoryDep(
+            "source",
+            256 * row + feature,
+            (row, feature),
+            (4, 256),
+        )
+        consumer = MemoryDep(
+            "source",
+            256 * row + feature + 64,
+            (row, feature),
+            (4, consumer_extent),
+        )
+        epilogue = Mock(
+            read_writes=ReadWrites(
+                OrderedSet([consumer]), OrderedSet(), OrderedSet()
+            )
+        )
+        output_groups = (SubParentOutputGroup(3, (epilogue,)),)
+        read_group_indices: dict[MemoryDep, OrderedSet[int]] = {}
+
+        with (
+            V.set_graph_handler(Mock(sizevars=SizeVarAllocator())),
+            inductor_config.patch(polyhedral_fusion=True),
+        ):
+            self.assertEqual(
+                NestedReduction._sub_parent_internal_access_relations(
+                    output_groups,
+                    read_group_indices=read_group_indices,
+                ),
+                (),
+            )
+            self.assertEqual(read_group_indices[consumer], OrderedSet([0]))
+            relation = SubParentAccessRelation(
+                (source,),
+                consumer,
+                requires_live_source=False,
+                access_stride=1,
+                base_offset=64,
+                extent=consumer_extent,
+            )
+            self.assertEqual(
+                NestedReduction._sub_parent_dense_relations_are_admitted(
+                    (relation,),
+                    output_groups,
+                    read_group_indices,
+                    256,
+                    4,
+                ),
+                expected_admission,
+            )
+
     def _mock_base_snode(self, name, device=None):
         node = Mock()
         node.get_name.return_value = name
@@ -468,6 +526,7 @@ class TestScheduler(TestCase):
         factor=2,
         parent_numel=None,
         parent_rnumel=None,
+        output_groups=(),
     ):
         """Build a resolver with only the collaborators relevant to a unit case."""
         if kernel is None:
@@ -481,6 +540,7 @@ class TestScheduler(TestCase):
             Mock() if family is None else family,
             access_relations=access_relations,
             sub_parent_factor=factor,
+            output_groups=output_groups,
             parent_numel=parent_numel,
             parent_rnumel=parent_rnumel,
         )
@@ -1190,6 +1250,53 @@ class TestScheduler(TestCase):
             )
             resolver._values = {"buf0": [Mock()]}
             self.assertIsNone(resolver.resolve_load("buf0", consumer.index))
+
+    def test_sub_parent_dense_mapping_requires_matching_replay_index(self):
+        row, feature = sympy.symbols(
+            "dense_replay_row dense_replay_feature", integer=True, nonnegative=True
+        )
+        source = MemoryDep(
+            "buf0", 16 * row + feature, (row, feature), (2, 16)
+        )
+        consumer = MemoryDep(
+            "buf0", 16 * row + feature, (row, feature), (2, 8)
+        )
+        relation = SubParentAccessRelation(
+            (source,),
+            consumer,
+            requires_live_source=True,
+            access_stride=1,
+            base_offset=0,
+            extent=8,
+        )
+        replay_node = Mock(
+            read_writes=ReadWrites(OrderedSet([consumer]), OrderedSet(), OrderedSet())
+        )
+        graph_handler = Mock(sizevars=SizeVarAllocator())
+        kernel = Mock(_load_mask=None, _load_other=None)
+        kernel.cse.contains_value.return_value = True
+        with V.set_graph_handler(graph_handler):
+            resolver = self._make_sub_parent_value_resolver(
+                (relation,),
+                kernel=kernel,
+                factor=2,
+                parent_numel=2,
+                parent_rnumel=16,
+                output_groups=(SubParentOutputGroup(1, (replay_node,)),),
+            )
+            resolver._values = {"buf0": [Mock()]}
+            resolver._materialize_dense_source = Mock(return_value=Mock())
+            self.assertIsNotNone(
+                resolver.resolve_load(
+                    "buf0", consumer.index, replay_node=replay_node
+                )
+            )
+            with self.assertRaisesRegex(
+                AssertionError, "no dense sub-parent relation"
+            ):
+                resolver.resolve_load(
+                    "buf0", consumer.index + 1, replay_node=replay_node
+                )
 
     def test_sub_parent_external_fallback_and_atomic_store(self):
         resolver = Mock()
