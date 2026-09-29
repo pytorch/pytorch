@@ -1104,7 +1104,7 @@ class CommonTemplate:
 
     # FIXME: fails for Triton CPU. Tiling does not contain YBLOCK.
     @test_torchinductor.xfail_if_triton_cpu
-    @xfail_if_tensor_descriptor
+    @xfail_if_cpu_tensor_descriptor
     def test_reduction_padded_output_tiling(self):
         """
         Test a [Y, X, R0] reduction with tiled output dimensions.
@@ -1116,7 +1116,11 @@ class CommonTemplate:
         result, (code,) = self._run_and_compare(
             functools.partial(torch.amax, dim=-1),
             x,
-            expected_num_block_pointers=2,
+            expected_num_block_pointers=(
+                1
+                if self.block_descriptor_constructor_str == "tl.make_tensor_descriptor"
+                else 2
+            ),
             expected_num_triton_kernels=1,
             config_patches={
                 "pad_outputs": True,
@@ -1758,6 +1762,36 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         # The store must fall back to scalar indexing, not TMA.
         self.assertIn("tl.store", code)
         self.assertNotIn("make_tensor_descriptor", code)
+
+    def test_reduction_padded_output_tiling_device_tma_metadata(self):
+        """
+        Device-TMA metadata for a reduction store: tma_min_block_sizes and
+        uses_device_tma must appear in inductor_meta when the store emits
+        an in-kernel TensorDescriptorOptions.
+        """
+        x = torch.randn((9, 11, 2), device=self.device)
+
+        result, (code,) = self._run_and_compare(
+            functools.partial(torch.amax, dim=-1),
+            x,
+            expected_num_block_pointers=1,  # One tensor descriptor is emitted for this device-TMA kernel
+            expected_num_triton_kernels=1,
+            config_patches={
+                "pad_outputs": True,
+                "padding_alignment_bytes": 32,
+                "padding_stride_threshold": 0,
+                "unroll_reductions_threshold": 1,
+                **tiled_reduction_config,
+            },
+        )
+
+        # Bind the minimum value to the metadata field, rather than matching
+        # an unrelated config repr that also contains XBLOCK.
+        self.assertRegex(
+            code,
+            r"'tma_min_block_sizes': \{[^}]*'XBLOCK': 4(?=,|\})",
+        )
+        self.assertIn("'uses_device_tma': True", code)
 
     def test_bool_dtype_skips_tma(self):
         """
@@ -2511,16 +2545,15 @@ if GPU_TYPE == "cuda":
 
     # Known TMA API limitations: these cases also fail for device-side TMA (they
     # carry @xfail_if_use_tensor_descriptor). For host-side TMA they either produce
-    # different (still-correct) codegen that breaks the device-specific code asserts,
-    # or hit the same descriptor constraints (e.g. the 16-byte last-dim minimum in
-    # test_reduction_padded_output_tiling).
+    # different (still-correct) codegen that breaks the device-specific code asserts.
+    # test_reduction_padded_output_tiling is intentionally not listed because both
+    # its host-side and device-side TMA variants are passing regressions.
     _HOST_TMA_EXPECTED_FAILURES = [
         "test_boundary_check_block_multiple_False_ynumel_exceed_ygrid_size_False_include_z_True_cuda",
         "test_boundary_check_block_multiple_True_ynumel_exceed_ygrid_size_True_include_z_False_cuda",
         "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_False_cuda",
         "test_pointwise_broadcast_nonzero_strides_prefer_nd_tiling_True_cuda",
         "test_pointwise_index_order_cuda",
-        "test_reduction_padded_output_tiling_cuda",
     ]
     for _name in _HOST_TMA_EXPECTED_FAILURES:
         setattr(
