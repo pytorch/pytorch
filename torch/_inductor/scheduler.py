@@ -5690,11 +5690,17 @@ def _is_prologue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
     return config.prologue_fusion
 
 
-def _effective_producer_fusion_allowed_inputs(
+def _producer_fusion_enabled_inputs(
     template_node: BaseSchedulerNode,
     choice: Any | None = None,
 ) -> OrderedSet[str]:
-    """Return producer inputs enabled by their required codegen placements."""
+    """Template inputs a producer may fuse into under the current fusion flags.
+
+    The template's load_input/store_output_fusion_allowed_inputs describe what the
+    template supports. prologue_fusion/allow_prologue_fusion gate load_input
+    placements and epilogue_fusion/allow_epilogue_fusion gate store_output
+    placements. An input that needs both placements requires both flags.
+    """
     template = template_node.get_template_node()
     if template is None:
         return OrderedSet()
@@ -5744,16 +5750,16 @@ def is_epilogue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     )
 
 
-def is_prologue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
+def is_producer_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     return (
         node2.is_template()
         and not node1.is_template()
-        and bool(_effective_producer_fusion_allowed_inputs(node2))
+        and bool(_producer_fusion_enabled_inputs(node2))
     )
 
 
 def is_template_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
-    return is_epilogue_fusion(node1, node2) or is_prologue_fusion(node1, node2)
+    return is_epilogue_fusion(node1, node2) or is_producer_fusion(node1, node2)
 
 
 def template_fusion_pw_node(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
@@ -7468,7 +7474,7 @@ class Scheduler:
                     "expected multi_node to be an ir.MultiTemplateBuffer"
                 )
             template_scheduler_node = node1 if consumer_fusion else node2
-            enabled_multi_inputs = _effective_producer_fusion_allowed_inputs(
+            enabled_multi_inputs = _producer_fusion_enabled_inputs(
                 template_scheduler_node
             )
             # Check for layout conflicts before committing to Triton template
@@ -7575,9 +7581,7 @@ class Scheduler:
                 return not (
                     not consumer_fusion
                     and hasattr(choice, "load_input_fusion_allowed_inputs")
-                    and _effective_producer_fusion_allowed_inputs(
-                        template_scheduler_node, choice
-                    )
+                    and _producer_fusion_enabled_inputs(template_scheduler_node, choice)
                     != enabled_multi_inputs
                 )
 
@@ -7680,9 +7684,7 @@ class Scheduler:
                     is_triton
                     and not consumer_fusion
                     and hasattr(choice, "load_input_fusion_allowed_inputs")
-                    and _effective_producer_fusion_allowed_inputs(
-                        template_scheduler_node, choice
-                    )
+                    and _producer_fusion_enabled_inputs(template_scheduler_node, choice)
                     != enabled_multi_inputs
                 ):
                     continue
@@ -8077,9 +8079,9 @@ class Scheduler:
                 else:
                     if node1 != candidate:
                         raise AssertionError("expected node1 to equal candidate")
-                    if not is_prologue_fusion(node1, node2):
+                    if not is_producer_fusion(node1, node2):
                         raise AssertionError(
-                            "expected node1, node2 to be a prologue fusion"
+                            "expected node1, node2 to be a producer fusion"
                         )
                     template_node = node2
 
@@ -8262,7 +8264,7 @@ class Scheduler:
         )
         new_possible_fusions = []
         for n1, n2 in possible_fusions:
-            if is_prologue_fusion(n1, n2) and n2 in epilogue_template_nodes:
+            if is_producer_fusion(n1, n2) and n2 in epilogue_template_nodes:
                 deferred_prologue_fusions.append((n1, n2))
             else:
                 new_possible_fusions.append((n1, n2))
@@ -10612,7 +10614,7 @@ class Scheduler:
                 return False
 
             template = node2.get_template_node_or_throw()
-            enabled_producer_inputs = _effective_producer_fusion_allowed_inputs(node2)
+            enabled_producer_inputs = _producer_fusion_enabled_inputs(node2)
             if not enabled_producer_inputs:
                 why("template has no inputs enabled for producer fusion")
                 return False
@@ -11442,7 +11444,7 @@ class Scheduler:
                     if (
                         isinstance(user.node, BaseSchedulerNode)
                         and user.node.is_template()
-                        and _effective_producer_fusion_allowed_inputs(user.node)
+                        and _producer_fusion_enabled_inputs(user.node)
                     ):
                         # Check if this output is actually in the template's
                         # producer_fusion_allowed_inputs. If not, fusing horizontally
@@ -11451,9 +11453,7 @@ class Scheduler:
                         if template_node is not None and isinstance(
                             template_node, ir.TritonTemplateBuffer
                         ):
-                            allowed_inps = _effective_producer_fusion_allowed_inputs(
-                                user.node
-                            )
+                            allowed_inps = _producer_fusion_enabled_inputs(user.node)
                             if node1_output_names & allowed_inps:
                                 node1_prologue_eligible_template_users.add(user.node)
                         else:
@@ -11475,8 +11475,8 @@ class Scheduler:
                             if template_node is not None and isinstance(
                                 template_node, ir.TritonTemplateBuffer
                             ):
-                                allowed_inps = (
-                                    _effective_producer_fusion_allowed_inputs(user.node)
+                                allowed_inps = _producer_fusion_enabled_inputs(
+                                    user.node
                                 )
                                 if node2_output_names & allowed_inps:
                                     return False
