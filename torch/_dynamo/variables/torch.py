@@ -3833,14 +3833,22 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # Guard against inplace view op on input tensor (not supported)
             if args and args[0].is_tensor():
                 tensor_var = args[0]
-                # Check if input tensor and inplace_view op specifically
-                if tensor_var.source is not None and hasattr(torch.ops.aten, name):
+                # Check if input tensor and inplace_view op specifically. A tensor
+                # without a source can still be a graph input (see
+                # TensorVariable.graph_input_source); in-place view ops all end with "_".
+                if (tensor_var.source is not None or name.endswith("_")) and hasattr(
+                    torch.ops.aten, name
+                ):
                     fn = getattr(torch.ops.aten, name)
                     if (
                         hasattr(fn, "overloads")
                         and hasattr(fn, fn.overloads()[0])
                         and torch.Tag.inplace_view
                         in getattr(fn, fn.overloads()[0]).tags
+                        and (
+                            tensor_var.source is not None
+                            or tensor_var.graph_input_source(tx) is not None
+                        )
                     ):
                         unimplemented(
                             gb_type="Inplace op on input tensor",
