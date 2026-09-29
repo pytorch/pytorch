@@ -2098,6 +2098,11 @@ class BuiltinVariable(BaseBuiltinVariable):
         if not result.is_python_constant():
             return None
         value = result.as_python_constant()
+        value_type = type(value)
+        if value_type is not str:
+            str_method = inspect.getattr_static(value_type, "__str__")
+            if str_method is not str.__str__:
+                return None
         if str.isascii(value):
             return result
         return variables.ConstantVariable.create(
