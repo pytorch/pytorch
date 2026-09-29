@@ -5196,6 +5196,43 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = torch.compile(fn, fullgraph=True, backend="eager")(x)
         self.assertEqual(result, correct)
 
+    def test_copy_container_subclasses(self):
+        class ListSubclass(list):
+            pass
+
+        class DictSubclass(dict):
+            pass
+
+        def shallow_copy(obj):
+            return copy.copy(obj)
+
+        def deep_copy(obj):
+            return copy.deepcopy(obj)
+
+        for copy_fn, fn in ((copy.copy, shallow_copy), (copy.deepcopy, deep_copy)):
+            compiled_fn = torch.compile(fn, fullgraph=True, backend="eager")
+            originals = (
+                ListSubclass([torch.randn(2)]),
+                DictSubclass(value=torch.randn(2)),
+            )
+            for original in originals:
+                original.attr = "state"
+                result = compiled_fn(original)
+                self.assertIs(type(result), type(original))
+                self.assertEqual(result, original)
+                self.assertEqual(result.attr, original.attr)
+
+                if isinstance(original, list):
+                    original_tensor = original[0]
+                    result_tensor = result[0]
+                else:
+                    original_tensor = original["value"]
+                    result_tensor = result["value"]
+                if copy_fn is copy.deepcopy:
+                    self.assertIsNot(result_tensor, original_tensor)
+                else:
+                    self.assertIs(result_tensor, original_tensor)
+
     def test_deepcopy_user_defined_object(self):
         class MyConfig:
             def __init__(self, hidden_size=64):
