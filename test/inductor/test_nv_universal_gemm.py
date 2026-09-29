@@ -3,6 +3,7 @@
 
 import threading
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
@@ -404,6 +405,7 @@ class TestNVUniversalGemm(TestCase):
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import (
             NVUniversalGemmCaller,
         )
+
         def is_target(caller):
             return (
                 isinstance(caller, NVUniversalGemmCaller)
@@ -425,9 +427,7 @@ class TestNVUniversalGemm(TestCase):
         ):
             compiled = torch.compile(scaled_mm)
             result, (code,) = run_and_get_code(compiled, a, b, scale_a, scale_b, alpha)
-            torch.testing.assert_close(
-                result, expected, equal_nan=True, atol=0, rtol=0
-            )
+            torch.testing.assert_close(result, expected, equal_nan=True, atol=0, rtol=0)
 
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph):

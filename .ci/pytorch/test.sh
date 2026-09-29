@@ -53,7 +53,7 @@ if [[ "$TEST_CONFIG" != "onnx" ]]; then
 fi
 
 # Remove dill to test that serialization works without it
-if [[ "$BUILD_ENVIRONMENT" == *py3.10-gcc11 ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *py3.11-gcc11 ]]; then
   pip uninstall -y dill 2>/dev/null || true
 fi
 
@@ -217,7 +217,7 @@ export LANG=C.UTF-8
 
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
 
-if [[ -d "${HF_CACHE}" && "$TEST_CONFIG" != "onnx" ]]; then
+if [[ -d "${HF_CACHE}" ]]; then
   export HF_HOME="${HF_CACHE}"
 fi
 
@@ -1761,6 +1761,10 @@ test_libtorch_profiler() {
     # Kineto's xpu tests compile SYCL device code through an ExternalProject,
     # so the PyTorch build leaves them out. See cmake/Dependencies.cmake.
     echo "Skipping Kineto C++ tests on XPU"
+  elif [[ "${TEST_CONFIG}" == *nogpu* ]]; then
+    # CUDA builds link Kineto's tests against CUPTI, which segfaults without
+    # a driver present rather than letting the tests skip.
+    echo "Skipping Kineto C++ tests on nogpu"
   else
     echo "Testing Kineto C++ tests"
     local kineto_bin_dir="${BUILD_BIN_DIR}/kineto"
