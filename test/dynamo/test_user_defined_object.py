@@ -1250,9 +1250,11 @@ class TestObjectConstruction(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
     def test_init_must_return_none(self):
+        def init(self):
+            return 10
+
         class Foo:
-            def __init__(self):
-                return 10  # noqa: PLE0101
+            __init__ = init
 
         def fn():
             try:
