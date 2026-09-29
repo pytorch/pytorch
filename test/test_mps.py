@@ -5738,12 +5738,11 @@ class TestMPS(TestCaseMPS):
                 grads.append(x.grad)
             self.assertEqual(*grads)
 
-        # float32 save_mean/save_invstd are only reachable by calling the op directly. Training-mode
-        # backward runs at the input dtype on MPS but in float on CPU, hence the tolerance.
+        # training-mode backward with float32 save_mean/save_invstd
         args = (cpu_x, cpu_x, cpu_p[2], None, None, cpu_p[0], cpu_p[1], True, 1e-5, [True] * 3)
         mps_args = (a.to("mps") if isinstance(a, torch.Tensor) else a for a in args)
         res = torch.ops.aten.native_batch_norm_backward(*mps_args)
-        self.assertEqual(res, torch.ops.aten.native_batch_norm_backward(*args), atol=5e-3, rtol=1e-2)
+        self.assertEqual(res, torch.ops.aten.native_batch_norm_backward(*args))
 
     def test_addbmm_mixed_dtype_errors(self):
         # addbmm has no promotion on any backend, so it must raise rather than abort
