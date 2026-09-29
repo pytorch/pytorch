@@ -1325,7 +1325,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 handlers.append(call_binop_handlers)
 
         self_handler = getattr(obj, f"call_{fn.__name__}", None)
-        if self_handler and fn is not format:
+        if self_handler:
 
             def call_self_handler(
                 tx: "InstructionTranslatorBase",
@@ -2996,6 +2996,21 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        if self.fn is format:
+            # builtins.format and str.format share this handler by name.
+            # format(value, spec="") is type(value).__format__(value, spec).
+            if kwargs:
+                raise_type_error(tx, "format() takes no keyword arguments")
+            if len(args) > 1:
+                raise_type_error(
+                    tx, f"format expected at most 2 arguments, got {len(args) + 1}"
+                )
+            spec = args[0] if args else ConstantVariable.create("")
+            spec_type = spec.python_type_name()
+            if spec.is_python_constant() and spec_type != "str":
+                msg = f"format() argument 2 must be str, not {spec_type}"
+                raise_type_error(tx, msg)
+            return _format_string.call_method(tx, "__format__", [spec], {})
         format_string = _format_string.as_python_constant()
         format_string = str(format_string)
         return StringFormatVariable.create(format_string, list(args), kwargs)
