@@ -28,6 +28,7 @@ from torch.testing._internal import composite_compliance, opinfo
 from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
+    dtypes,
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyCPU,
@@ -65,6 +66,7 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_FBCODE,
     is_iterable_of_tensors,
+    IS_S390X,
     IS_SANDCASTLE,
     MACOS_VERSION,
     noncontiguous_like,
@@ -147,7 +149,6 @@ meta_consistency_out_dtype_mismatch_xfails = {
     xfail("diag"),
     xfail("geqrf"),
     xfail("heaviside"),
-    xfail("histc"),
     xfail("isin"),
     xfail("kthvalue"),
     xfail("lerp"),
@@ -471,6 +472,23 @@ class TestCommon(TestCase):
                 self.compare_with_reference(
                     op, op.ref, sample_input, exact_dtype=(dtype is not torch.long)
                 )
+
+    @dtypes(torch.float32)
+    @parametrize("sign", [-1, 1])
+    def test_expm1_small(self, device, dtype, sign):
+        x = torch.logspace(-8, -1, 100, dtype=dtype)
+        cutoffs = torch.tensor([1e-5, 0.1], dtype=dtype)
+        values = (
+            x,
+            torch.tensor([0.0, 0.0074433], dtype=dtype),
+            torch.nextafter(cutoffs, torch.zeros_like(cutoffs)),
+            cutoffs,
+            torch.nextafter(cutoffs, torch.ones_like(cutoffs)),
+        )
+        x = torch.cat(values) * sign
+        expected = torch.expm1(x.double())
+        actual = torch.expm1(x.to(device)).cpu().double()
+        self.assertEqual(actual, expected, atol=0, rtol=1e-6)
 
     # Tests that the cpu and gpu results are consistent
     @onlyAccelerator
@@ -815,6 +833,11 @@ class TestCommon(TestCase):
     @with_tf32_off
     @onlyNativeDeviceTypesAnd(["hpu"])
     @suppress_warnings
+    @skipOps(
+        {skip("grid_sampler_2d", device_type="cpu", dtypes=(torch.float32,))}
+        if IS_S390X
+        else set()
+    )
     @ops(op_db, allowed_dtypes=(torch.float32, torch.long, torch.complex64))
     def test_noncontiguous_samples(self, device, dtype, op):
         test_grad = dtype in op.supported_backward_dtypes(torch.device(device).type)
