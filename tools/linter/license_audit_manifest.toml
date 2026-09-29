@@ -9,6 +9,7 @@ excluded = [
   # docs/ trees (not compiled)
   'third_party/aiter/3rdparty/composable_kernel/docs/license.rst',
   'third_party/composable_kernel/docs/license.rst',
+  'third_party/cutlass/media/docs/pythonDSL/license.rst',
   'third_party/fbgemm/external/composable_kernel/docs/license.rst',
   'third_party/flash-attention/csrc/composable_kernel/docs/license.rst',
   'third_party/flash-attention/third_party/aiter/3rdparty/composable_kernel/docs/license.rst',
@@ -17,6 +18,7 @@ excluded = [
   'third_party/benchmark/LICENSE',
   # nested vendoring / test / docs inside shipped deps (not linked)
   'third_party/cudnn_frontend/include/cudnn_frontend/thirdparty/nlohmann/LICENSE.MIT',  # codespell:ignore thirdparty
+  'third_party/cutlass/cutlass_compiler/LICENSE.txt',
   'third_party/cutlass/python/LICENSE.txt',
   'third_party/fbgemm/external/asmjit/db/LICENSE.md',
   'third_party/fbgemm/external/cutlass/python/LICENSE.txt',
