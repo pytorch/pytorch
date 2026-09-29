@@ -7,10 +7,11 @@ from torch._dynamo.device_interface import (
     CudaInterface,
     device_interfaces,
     DeviceInterface,
+    get_interface_for_device,
     register_interface_for_device,
     XpuInterface,
 )
-from torch._inductor.codecache import FxGraphHashDetails
+from torch._inductor.codecache import compiled_fx_graph_hash, FxGraphHashDetails
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.template.triton import MMTemplateConfigMixin
 from torch._inductor.ir import Buffer, FixedLayout
@@ -36,6 +37,18 @@ class _TensorNode:
 
     def get_stride(self) -> tuple[int, ...]:
         return (self._size[-1], 1)
+
+
+class _MutableAllowTf32Interface(DeviceInterface):
+    enabled = False
+
+    @staticmethod
+    def allow_tf32() -> bool:
+        return _MutableAllowTf32Interface.enabled
+
+    @staticmethod
+    def is_available() -> bool:
+        return True
 
 
 class _AllowTf32Interface(DeviceInterface):
@@ -153,6 +166,9 @@ class TestAllowTf32ExtraKwargs(TestCase):
             torch.backends.cuda.matmul.fp32_precision = orig
 
     def test_xpu_unaffected_by_cuda_shape_threshold(self):
+        # Platform check. On a non-XPU build both sides are False, so this does
+        # not prove the shape gate was skipped. CPU CI coverage for that is
+        # test_registered_privateuse1_allow_tf32_true, which uses a 2x2 shape.
         # CUDA would force ALLOW_TF32 off for these shapes. XPU follows the flag.
         kernel_inputs = self._mm_kernel_inputs("xpu", m=2, n=2, k=2)
         if torch.xpu._is_compiled():
@@ -185,6 +201,28 @@ class TestAllowTf32ExtraKwargs(TestCase):
             torch.backends.cuda.matmul.fp32_precision = orig
         self.assertIn(("cuda", True), enabled.mm_template_allow_tf32)
         self.assertIn(("cuda", False), disabled.mm_template_allow_tf32)
+
+    def test_non_cuda_flag_changes_fx_graph_cache_key(self):
+        # cuda_matmul_settings already hashes CUDA fp32_precision. This swaps
+        # the CPU interface so a flag outside that tuple changes the cache key.
+        get_interface_for_device("cpu")
+        previous = device_interfaces["cpu"]
+        gm = make_fx(lambda x: x * 2)(torch.zeros(2, 2))
+        example = [torch.zeros(2, 2)]
+        try:
+            register_interface_for_device("cpu", _MutableAllowTf32Interface)
+            _MutableAllowTf32Interface.enabled = True
+            enabled = FxGraphHashDetails(gm, example, {}, [])
+            enabled_key, _ = compiled_fx_graph_hash(gm, example, {}, [])
+            _MutableAllowTf32Interface.enabled = False
+            disabled = FxGraphHashDetails(gm, example, {}, [])
+            disabled_key, _ = compiled_fx_graph_hash(gm, example, {}, [])
+            self.assertEqual(enabled.mm_template_allow_tf32, (("cpu", True),))
+            self.assertEqual(disabled.mm_template_allow_tf32, (("cpu", False),))
+            self.assertNotEqual(enabled_key, disabled_key)
+        finally:
+            _MutableAllowTf32Interface.enabled = False
+            register_interface_for_device("cpu", previous)
 
 
 if __name__ == "__main__":
