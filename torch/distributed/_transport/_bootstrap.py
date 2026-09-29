@@ -26,7 +26,6 @@ def new_transport_rank(
     store: dist.Store | None = None,
     peer_rank: int,
     rank: int | None = None,
-    bootstrap_tag: str,
     bootstrap_timeout: float = 30.0,
     **kwargs: Any,
 ) -> Transport:
@@ -42,9 +41,6 @@ def new_transport_rank(
         rank: Local identity; defaults to ``torch.distributed.get_rank()``. An
             explicit override requires no initialized process group. Identities
             need not be contiguous, but must be distinct for the two peers.
-        bootstrap_tag: Nonempty unique name per rank pair for the Store lifetime,
-            including failed attempts. Both peers must use the same tag and call
-            concurrently with reciprocal rank/peer_rank values.
         bootstrap_timeout: Bind, endpoint exchange, and connect wait budget in
             seconds. Native calls and Store network operations may exceed this
             budget. Does not change the Store's timeout.
@@ -61,21 +57,19 @@ def new_transport_rank(
             "nixl",
             "cpu",
             peer_rank=1 - dist.get_rank(),
-            bootstrap_tag="checkpoint-channel-0",
         )
         # Exchange registered-memory descriptors separately. Coordinate with
         # peers before unregistering memory or closing the transport.
 
-    Duplicate local claims fail rather than reuse an endpoint. A nonce handshake
-    prevents accepting stale peer publications. Failed attempts consume their tag;
-    retry with a new tag. Construction/connection failures do not release Store
-    keys. Bootstrap failures attempt to close the partially created transport.
+    Calls are matched in order per rank pair and backend: the Nth call on each
+    peer connects to the other's Nth call, including failed calls. One Store can
+    therefore connect a rank to every other rank. A nonce handshake prevents
+    accepting stale peer publications. Bootstrap failures attempt to close the
+    partially created transport.
     """
     _validate_timeout(bootstrap_timeout)
     if bootstrap_timeout is None:
         raise ValueError("bootstrap_timeout must be finite")
-    if not isinstance(bootstrap_tag, str) or not bootstrap_tag:
-        raise ValueError("bootstrap_tag must be a nonempty, unique string")
     rank = dist.get_rank() if rank is None else rank
     store = dist.distributed_c10d._get_default_store() if store is None else store
     if type(rank) is not int or rank < 0:
@@ -84,19 +78,9 @@ def new_transport_rank(
         raise ValueError("peer_rank must be a nonnegative integer")
     if peer_rank == rank:
         raise ValueError("peer_rank must differ from the local rank")
-    prefix = json.dumps(
-        [
-            "transport",
-            backend.lower(),
-            bootstrap_tag,
-            min(rank, peer_rank),
-            max(rank, peer_rank),
-        ]
-    )
-    store = dist.PrefixStore(prefix, store)
-    # Never consume stale endpoint data when a tag is accidentally reused.
-    if store.add(f"claim/{rank}", 1) != 1:
-        raise ValueError("bootstrap_tag was already used for this rank pair")
+    pair = ["transport", backend.lower(), min(rank, peer_rank), max(rank, peer_rank)]
+    attempt = store.add(json.dumps([*pair, "attempts", rank]), 1)
+    store = dist.PrefixStore(json.dumps([*pair, attempt]), store)
     transport = new_transport(backend, device, **kwargs)
     deadline = time.monotonic() + bootstrap_timeout
 

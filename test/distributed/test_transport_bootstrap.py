@@ -41,7 +41,6 @@ def _bootstrap_worker(rank, port, path, implicit):
                 store=None if implicit else store,
                 peer_rank=1 - rank if implicit else 11 - rank,
                 rank=None if implicit else 10 + rank,
-                bootstrap_tag="pair",
             )
             if transport.connect.call_args.args != (bytes([1 - rank, 0, 255]),):
                 raise AssertionError("incorrect peer endpoint")
@@ -71,9 +70,13 @@ class TestRankBootstrap(TestCase):
 
     def test_pair(self):
         store = dist.HashStore()
+        for attempt in range(2):
+            self._connect_pair(store, attempt)
+
+    def _connect_pair(self, store, attempt):
         transports = [Mock(spec=Transport), Mock(spec=Transport)]
         for rank, transport in enumerate(transports):
-            transport.bind.return_value = bytes([rank, 0, 255])
+            transport.bind.return_value = bytes([rank, attempt, 255])
         with (
             patch(
                 "torch.distributed._transport._bootstrap.new_transport",
@@ -88,7 +91,6 @@ class TestRankBootstrap(TestCase):
                     store=store,
                     rank=rank,
                     peer_rank=1 - rank,
-                    bootstrap_tag="pair",
                     bootstrap_timeout=2,
                     fixture=transport,
                 )
@@ -98,7 +100,7 @@ class TestRankBootstrap(TestCase):
                 future.result(timeout=5)
         for rank, transport in enumerate(transports):
             self.assertEqual(
-                transport.connect.call_args.args, (bytes([1 - rank, 0, 255]),)
+                transport.connect.call_args.args, (bytes([1 - rank, attempt, 255]),)
             )
             self.assertGreater(transport.connect.call_args.kwargs["timeout"], 0)
             self.assertLessEqual(transport.connect.call_args.kwargs["timeout"], 2)
@@ -106,9 +108,7 @@ class TestRankBootstrap(TestCase):
 
     def test_stale_peer_times_out_and_closes(self):
         store = dist.HashStore()
-        prefixed = dist.PrefixStore(
-            json.dumps(["transport", "test", "pair", 0, 1]), store
-        )
+        prefixed = dist.PrefixStore(json.dumps(["transport", "test", 0, 1, 1]), store)
         prefixed.set("1", "old")
         prefixed.set("endpoint/old", "b2xkIGVuZHBvaW50")
         transport = Mock(spec=Transport)
@@ -125,7 +125,6 @@ class TestRankBootstrap(TestCase):
                 store=store,
                 rank=0,
                 peer_rank=1,
-                bootstrap_tag="pair",
                 bootstrap_timeout=0.05,
             )
         transport.connect.assert_not_called()
@@ -147,12 +146,11 @@ class TestRankBootstrap(TestCase):
                 store=dist.HashStore(),
                 rank=0,
                 peer_rank=1,
-                bootstrap_tag="pair",
                 bootstrap_timeout=1,
             )
         self.assertIn("close failed", error.exception.__notes__[0])
 
-    def test_rank_override_and_duplicate_tag(self):
+    def test_rank_override_and_attempt_count(self):
         store = dist.HashStore()
         with (
             patch(
@@ -163,14 +161,9 @@ class TestRankBootstrap(TestCase):
                 side_effect=RuntimeError("construction stopped"),
             ) as factory,
         ):
-            with self.assertRaisesRegex(RuntimeError, "construction stopped"):
-                new_transport_rank(
-                    "test", store=store, rank=10, peer_rank=5, bootstrap_tag="pair"
-                )
-            with self.assertRaisesRegex(ValueError, "already used"):
-                new_transport_rank(
-                    "test", store=store, rank=10, peer_rank=5, bootstrap_tag="pair"
-                )
+            for _ in range(2):
+                with self.assertRaisesRegex(RuntimeError, "construction stopped"):
+                    new_transport_rank("test", store=store, rank=10, peer_rank=5)
             for rank, peer in ((-1, 0), (True, 0), (0, -1), (0, True), (0, 0)):
                 with self.assertRaises(ValueError):
                     new_transport_rank(
@@ -178,9 +171,10 @@ class TestRankBootstrap(TestCase):
                         store=store,
                         rank=rank,
                         peer_rank=peer,
-                        bootstrap_tag="other",
                     )
-            factory.assert_called_once()
+            self.assertEqual(factory.call_count, 2)
+        attempts = json.dumps(["transport", "test", 5, 10, "attempts", 10])
+        self.assertEqual(store.get(attempts), b"2")
 
     def test_implicit_rank_lookup(self):
         store = dist.HashStore()
@@ -192,12 +186,10 @@ class TestRankBootstrap(TestCase):
             ),
             self.assertRaisesRegex(RuntimeError, "construction stopped"),
         ):
-            new_transport_rank("test", store=store, peer_rank=8, bootstrap_tag="pair")
+            new_transport_rank("test", store=store, peer_rank=8)
         get_rank.assert_called_once_with()
-        prefixed = dist.PrefixStore(
-            json.dumps(["transport", "test", "pair", 4, 8]), store
-        )
-        self.assertEqual(prefixed.get("claim/4"), b"1")
+        attempts = json.dumps(["transport", "test", 4, 8, "attempts", 4])
+        self.assertEqual(store.get(attempts), b"1")
 
 
 if __name__ == "__main__":
