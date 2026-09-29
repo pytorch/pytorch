@@ -3126,6 +3126,15 @@ def _verified_cache_envelope(
         return None
 
 
+def _runtime_cache_pair(
+    artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
+) -> str:
+    return (
+        f"(artifact_path={os.fspath(artifact_path)!r}, "
+        f"cache_path={os.fspath(cache_path)!r})"
+    )
+
+
 def _read_runtime_cache_envelope(
     artifact_path: str | os.PathLike[str],
     cache_path: str | os.PathLike[str],
@@ -3138,14 +3147,15 @@ def _read_runtime_cache_envelope(
     """
     import ast
 
+    pair = _runtime_cache_pair(artifact_path, cache_path)
+
     def unsupported() -> PrecompileError:
         return PrecompileError(
-            f"precompile.{operation} supports only Dynamo captures (make_fx captures "
-            f"are not supported), and {os.fspath(artifact_path)} has no generated "
-            "Dynamo artifact header"
+            f"precompile.{operation} {pair} supports only Dynamo captures (make_fx "
+            "captures are not supported), and the artifact has no generated Dynamo "
+            "artifact header"
         )
 
-    pair = f"(artifact_path={artifact_path!r}, cache_path={cache_path!r})"
     digest = hashlib.sha256()
     metadata = {}
     header_size = 0
@@ -3181,9 +3191,9 @@ def _read_runtime_cache_envelope(
                     raise unsupported() from exc
             if metadata["TRACER"] != "dynamo":
                 raise PrecompileError(
-                    f"precompile.{operation} supports only Dynamo captures, and "
-                    f"{os.fspath(artifact_path)} was captured with the "
-                    f"{metadata['TRACER']!r} tracer"
+                    f"precompile.{operation} {pair} supports only Dynamo captures, "
+                    f"and the artifact was captured with the {metadata['TRACER']!r} "
+                    "tracer"
                 )
             while chunk := source.read(1024 * 1024):
                 digest.update(chunk)
@@ -3296,8 +3306,9 @@ def finalize_cache(
     blob = _read_runtime_cache_envelope(artifact_path, cache_path, "finalize_cache")
     if blob.get("backend") == "inductor" and not blob.get("artifact"):
         raise PrecompileError(
-            "precompile.finalize_cache requires the compiled cache artifact of an "
-            "inductor capture, and this graph saved none"
+            f"precompile.finalize_cache {_runtime_cache_pair(artifact_path, cache_path)} "
+            "requires the compiled cache artifact of an inductor capture, and this "
+            "graph saved none"
         )
 
     def write(artifact: bytes | None) -> None:
@@ -3310,7 +3321,7 @@ def finalize_cache(
     except Exception as exc:
         raise PrecompileError(
             "precompile.finalize_cache: Could not finalize precompile runtime "
-            f"dependencies for cache_path={cache_path!r}: {exc}"
+            f"dependencies for cache_path={os.fspath(cache_path)!r}: {exc}"
         ) from exc
 
 
@@ -3346,7 +3357,7 @@ def prepare_runtime(
         except Exception as exc:
             raise PrecompileError(
                 "precompile.prepare_runtime: Could not prepare precompile runtime "
-                f"dependencies for cache_path={cache_path!r}: {exc}"
+                f"dependencies for cache_path={os.fspath(cache_path)!r}: {exc}"
             ) from exc
 
 

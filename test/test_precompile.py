@@ -6229,12 +6229,17 @@ class TestPrecompileRuntimeCache(TestCase):
         _rewrite_envelope(cache, artifact=None)
         with (
             pc.capture_runtime(),
-            self.assertRaisesRegex(PrecompileError, "saved none"),
+            self.assertRaisesRegex(PrecompileError, "saved none") as failure,
         ):
             pc.finalize_cache(artifact_path=source, cache_path=cache)
+        self.assertIn(
+            f"(artifact_path={source!r}, cache_path={cache!r})", str(failure.exception)
+        )
 
     @parametrize("operation", ("finalize_cache", "prepare_runtime"))
     def test_runtime_cache_rejects_make_fx_capture(self, operation):
+        from pathlib import Path
+
         pc = torch.compiler.precompile
         source, cache = _capture_files(
             self,
@@ -6246,11 +6251,16 @@ class TestPrecompileRuntimeCache(TestCase):
         with (
             pc.capture_runtime(),
             self.assertRaisesRegex(
-                PrecompileError,
-                f"precompile.{operation} supports only Dynamo captures",
-            ),
+                PrecompileError, "supports only Dynamo captures"
+            ) as failure,
         ):
-            getattr(pc, operation)(artifact_path=source, cache_path=cache)
+            getattr(pc, operation)(artifact_path=Path(source), cache_path=Path(cache))
+        self.assertTrue(
+            str(failure.exception).startswith(
+                f"precompile.{operation} (artifact_path={source!r}, "
+                f"cache_path={cache!r})"
+            )
+        )
 
     @parametrize("operation", ("finalize_cache", "prepare_runtime"))
     @parametrize(
