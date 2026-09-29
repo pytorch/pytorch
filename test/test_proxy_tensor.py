@@ -834,7 +834,7 @@ class TestGenericProxyTensorDevice(TestCase):
             return torch.nn.functional.conv2d(x, w, stride=layer.stride)
 
         inp = torch.randn(4, 3, 10, 10, device=device)
-        with torch.autocast(device):
+        with torch.autocast(torch.device(device).type):
             out_graph = make_fx(f)(inp, layer.weight).graph
             out_graph2 = make_fx(f)(inp, layer.weight).graph
 
