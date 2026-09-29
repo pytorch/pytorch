@@ -3350,7 +3350,9 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return DictBuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
+        return DictBuiltinVariable.call_custom_dict_fromkeys(
+            tx, dict, None, *args, **kwargs
+        )
 
     tp_methods = {
         "fromkeys": Method(fromkeys),
@@ -3411,6 +3413,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
     def call_custom_dict_fromkeys(
         tx: "InstructionTranslatorBase",
         user_cls: type,
+        cls_vt: VariableTracker | None,
         /,
         *args: VariableTracker,
         **kwargs: VariableTracker,
@@ -3427,6 +3430,24 @@ class DictBuiltinVariable(BaseBuiltinVariable):
                     f"Ensure {user_cls.__name__} is a type of dict, OrderedDict, or defaultdict.",
                 ],
             )
+        # The subclass result below is built without running user code, so any
+        # override of how fromkeys constructs or fills the result must graph break.
+        if user_cls is not OrderedDict and issubclass(user_cls, OrderedDict):
+            if (
+                inspect.getattr_static(user_cls, "fromkeys")
+                is not OrderedDict.__dict__["fromkeys"]
+                or user_cls.__new__ is not OrderedDict.__new__
+                or user_cls.__init__ is not OrderedDict.__init__
+                or user_cls.__setitem__ is not OrderedDict.__setitem__
+                # fromkeys constructs through cls(), i.e. the metaclass __call__
+                or type(user_cls).__call__ is not type.__call__
+            ):
+                unimplemented(
+                    gb_type="OrderedDict subclass fromkeys override",
+                    context=user_cls.__name__,
+                    explanation="Cannot trace fromkeys with overridden construction or insertion",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
         if kwargs:
             # OrderedDict.fromkeys also accepts `value` on inherited subclasses.
             if (
@@ -3472,7 +3493,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
 
                 result = tx.output.side_effects.track_new_user_defined_object(
                     SourcelessBuilder.create(tx, dict),
-                    VariableTracker.build(tx, user_cls),
+                    cls_vt or VariableTracker.build(tx, user_cls),
                     [],
                     tx=tx,
                 )

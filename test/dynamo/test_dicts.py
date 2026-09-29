@@ -65,6 +65,10 @@ class FakeMapping:
         return self._value
 
 
+class _OrderedDictSubclass(OrderedDict):
+    pass
+
+
 class DictTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -1272,13 +1276,19 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(), (9, 9, 6, [("a", 9)]))
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
-    def test_ordered_dict_setdefault_keyword_default(self):
+    @parametrize("method", ["pop", "setdefault"])
+    def test_dict_keyword_arguments_rejected(self, method):
         def fn():
-            d = OrderedDict(a=1)
-            d.setdefault("c", default=3)
-            return list(d.items())
+            d = dict(a=1)
+            try:
+                getattr(d, method)("a", default=2)
+            except TypeError as e:
+                return str(e)
+            return "no error"
 
-        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+        expected = f"dict.{method}() takes no keyword arguments"
+        self.assertEqual(fn(), expected)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), expected)
 
     def test_ordered_dict_setdefault_keyword_key_eq_once(self):
         class Key:
@@ -1330,36 +1340,63 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     def test_ordered_dict_subclass_fromkeys(self):
         def fn():
-            class OD(OrderedDict):
-                pass
-
-            d = OD.fromkeys("abc")
+            d = _OrderedDictSubclass.fromkeys("abc", 0)
             d.move_to_end("a")
-            return type(d).__name__, list(d)
+            return d
 
-        with torch._dynamo.config.patch(enable_trace_load_build_class=True):
-            self.assertEqual(fn(), ("OD", ["b", "c", "a"]))
-            self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+        res = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIs(type(res), _OrderedDictSubclass)
+        self.assertEqual(list(res.items()), [("b", 0), ("c", 0), ("a", 0)])
 
-    def test_ordered_dict_subclass_fromkeys_metaclass_call(self):
+    def test_ordered_dict_subclass_fromkeys_graph_break(self):
+        def fn(x):
+            d = _OrderedDictSubclass.fromkeys("abc")
+            x = x + 1
+            torch._dynamo.graph_break()
+            d.move_to_end("a")
+            return d, x + 1
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        res, _ = torch.compile(fn, backend=cnt)(torch.ones(1))
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertIs(type(res), _OrderedDictSubclass)
+        self.assertEqual(list(res), ["b", "c", "a"])
+
+    @parametrize("override", ["__new__", "__init__", "__setitem__", "metaclass"])
+    def test_ordered_dict_subclass_fromkeys_override(self, override):
         calls = []
 
         class Meta(type):
             def __call__(cls, *args, **kwargs):
-                calls.append(cls.__name__)
+                calls.append("metaclass")
                 return super().__call__(*args, **kwargs)
 
-        class OD(OrderedDict, metaclass=Meta):
-            pass
+        class OD(OrderedDict, metaclass=Meta if override == "metaclass" else type):
+            if override == "__new__":
+
+                def __new__(cls, *args, **kwargs):
+                    calls.append("__new__")
+                    return OrderedDict.__new__(cls)
+
+            elif override == "__init__":
+
+                def __init__(self, *args, **kwargs):
+                    calls.append("__init__")
+                    super().__init__(*args, **kwargs)
+
+            elif override == "__setitem__":
+
+                def __setitem__(self, key, value):
+                    calls.append("__setitem__")
+                    super().__setitem__(key, value)
 
         def fn():
             d = OD.fromkeys("ab")
             return type(d).__name__, list(d)
 
         self.assertEqual(fn(), ("OD", ["a", "b"]))
-        self.assertEqual(calls, ["OD"])
-        # fromkeys constructs through the metaclass __call__, which Dynamo
-        # does not model here; it must graph break rather than bypass it.
+        self.assertIn(override, calls)
+        # fromkeys would skip the user override, so it must graph break.
         with self.assertRaisesRegex(Unsupported, "fromkeys override"):
             torch.compile(fn, backend="eager", fullgraph=True)()
 

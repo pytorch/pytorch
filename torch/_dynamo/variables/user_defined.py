@@ -1147,31 +1147,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
-        elif name == "fromkeys" and self.value in {
-            collections.OrderedDict,
-            collections.defaultdict,
-        }:
+        elif name == "fromkeys" and (
+            self.value is collections.defaultdict
+            or issubclass(self.value, collections.OrderedDict)
+        ):
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
-                tx, self.value, *args, **kwargs
-            )
-        elif name == "fromkeys" and issubclass(self.value, collections.OrderedDict):
-            if (
-                inspect.getattr_static(self.value, "fromkeys")
-                is not collections.OrderedDict.__dict__["fromkeys"]
-                or self.value.__new__ is not collections.OrderedDict.__new__
-                or self.value.__init__ is not collections.OrderedDict.__init__
-                or self.value.__setitem__ is not collections.OrderedDict.__setitem__
-                # fromkeys constructs through cls(), i.e. the metaclass __call__
-                or type(self.value).__call__ is not type.__call__
-            ):
-                unimplemented(
-                    gb_type="OrderedDict subclass fromkeys override",
-                    context=self.value.__name__,
-                    explanation="Cannot trace fromkeys with overridden construction or insertion",
-                    hints=[*graph_break_hints.SUPPORTABLE],
-                )
-            return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
-                tx, self.value, *args, **kwargs
+                tx, self.value, self, *args, **kwargs
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
