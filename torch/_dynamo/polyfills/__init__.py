@@ -109,11 +109,10 @@ def radians(x: float) -> float:
     return math.pi / 180.0 * x
 
 
-def sumprod(p: Iterable[Any], q: Iterable[Any], /) -> Any:
-    # Generic path of CPython's math_sumprod_impl, without the float fast path.
+def _sumprod_pairs(p: Iterable[Any], q: Iterable[Any]) -> Iterator[tuple[Any, Any]]:
+    # Advance p and q in lockstep like CPython's math_sumprod_impl.
     p_it = iter(p)
     q_it = iter(q)
-    total = 0
     while True:
         try:
             p_i = next(p_it)
@@ -121,13 +120,39 @@ def sumprod(p: Iterable[Any], q: Iterable[Any], /) -> Any:
             try:
                 next(q_it)
             except StopIteration:
-                return total
-            raise ValueError("Inputs are not the same length")
+                return
+            raise ValueError("Inputs are not the same length") from None
         try:
             q_i = next(q_it)
         except StopIteration:
-            raise ValueError("Inputs are not the same length")
+            raise ValueError("Inputs are not the same length") from None
+        yield p_i, q_i
+
+
+def sumprod(p: Iterable[Any], q: Iterable[Any], /) -> Any:
+    # Materialize arbitrary iterables and call math.sumprod again on the lists.
+    # Lists of constants are constant-folded, which keeps CPython's
+    # extended-precision float accumulation; anything else goes to
+    # sumprod_generic.
+    import math
+
+    # Narrows math for mypy on <3.12 stubs; the handler only dispatches here on 3.12+.
+    if not hasattr(math, "sumprod"):
+        raise NotImplementedError("math.sumprod requires Python 3.12+")
+    ps: list[Any] = []
+    qs: list[Any] = []
+    for p_i, q_i in _sumprod_pairs(p, q):
+        ps.append(p_i)
+        qs.append(q_i)
+    return math.sumprod(ps, qs)
+
+
+def sumprod_generic(p: Iterable[Any], q: Iterable[Any], /) -> Any:
+    # Generic path of CPython's math_sumprod_impl, without the float fast path.
+    total = 0
+    for p_i, q_i in _sumprod_pairs(p, q):
         total = total + p_i * q_i
+    return total
 
 
 def infer_size(a: Sequence[Any], b: Sequence[Any]) -> torch.Size:

@@ -3577,6 +3577,42 @@ partial_fn = functools.partial(fn, scale=2)
     @unittest.skipIf(
         sys.version_info < (3, 12), "math.sumprod introduced in python 3.12"
     )
+    def test_math_sumprod_float_iterables(self):
+        # Plain float summation gives 0.0 here; CPython's sumprod gives 1.0.
+        vals = [1e20, 1.0, -1e20]
+
+        def func(x):
+            return (
+                x + 1,
+                math.sumprod((v for v in vals), [1.0, 1.0, 1.0]),
+                math.sumprod(iter(vals), (1, 1, 1)),
+                math.sumprod(map(float, vals), iter([1.0, 1.0, 1.0])),
+                math.sumprod([0.1] * 10, (v for v in [0.1] * 10)),
+            )
+
+        x = torch.rand(10)
+        opt = torch.compile(func, backend="eager", fullgraph=True)
+        expected = func(x)
+        actual = opt(x)
+        self.assertEqual(actual[0], expected[0])
+        self.assertEqual(actual[1:], expected[1:], atol=0, rtol=0)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12), "math.sumprod introduced in python 3.12"
+    )
+    def test_math_sumprod_tensor_elements(self):
+        def func(x):
+            return math.sumprod([x.sum(), x.mean()], (v for v in [2.0, 3.0]))
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt = torch.compile(func, backend=cnt, fullgraph=True)
+        x = torch.rand(10)
+        self.assertEqual(opt(x), func(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12), "math.sumprod introduced in python 3.12"
+    )
     @parametrize("call", ("uneven", "raising_mul", "keyword"))
     def test_math_sumprod_errors(self, call):
         class BadMul:
