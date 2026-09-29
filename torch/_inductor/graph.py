@@ -551,9 +551,12 @@ class GraphLowering(torch.fx.Interpreter):
         self.mutated_input_idxs: list[int] = []
         self.name_to_buffer: dict[str, ir.Buffer] = {}
         self.name_to_users: defaultdict[str, list[ir.IRNode]] = defaultdict(list)
-        # Realized buffers that alias another buffer's memory (e.g. the output of a
-        # fallback view kernel such as aten.view.dtype), indexed by the aliased
-        # buffer name. Built incrementally by mark_buffer_mutated.
+        # Buffers that share memory through a realized alias (e.g. the output of a
+        # fallback view kernel such as aten.view.dtype), in both directions: the
+        # aliased buffer maps to its aliases and each alias to the buffer it
+        # aliases. Built incrementally by mark_buffer_mutated from the tail of
+        # self.buffers, which relies on self.buffers only being appended to while
+        # lowering.
         self._buffer_aliases: defaultdict[str, list[str]] = defaultdict(list)
         self._buffer_aliases_indexed_upto: int = 0
         self.name_to_op: dict[str, ir.Operation] = {}
@@ -1223,20 +1226,21 @@ class GraphLowering(torch.fx.Interpreter):
             raise AssertionError(f"Expected str, got {type(name)}")
         self.mutated_buffers.add(name)
 
-        # Consumers of a buffer that merely *aliases* the mutated one (e.g. buf0
-        # = aten.view.dtype(arg0) lowered as a fallback kernel) read the same
-        # memory, so their pending, not-yet-realized users must be realized
-        # before the mutation too. Otherwise they are materialized later and
-        # observe the mutated value:
+        # Buffers that share memory with the mutated one through an alias (e.g.
+        # buf0 = aten.view.dtype(arg0) lowered as a fallback kernel) read the
+        # mutated memory too, whichever of them is mutated, so their pending,
+        # not-yet-realized users must be realized before the mutation as well.
+        # Otherwise they are materialized later and observe the mutated value:
         #     y = x.view(torch.int32) * 2; y.sub_(-4); x[:, 2:5] = 2
         #     return y.view(torch.int64)      # was computed from the mutated x
         for buf in self.buffers[self._buffer_aliases_indexed_upto :]:
             for aliased in buf.get_inputs_that_alias_output():
                 self._buffer_aliases[aliased].append(buf.get_name())
+                self._buffer_aliases[buf.get_name()].append(aliased)
         self._buffer_aliases_indexed_upto = len(self.buffers)
 
         names = [name]
-        seen = {name}
+        seen = OrderedSet([name])
         while names:
             current = names.pop()
             for user in self.name_to_users.get(current, ()):
