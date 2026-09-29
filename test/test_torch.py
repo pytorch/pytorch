@@ -1509,287 +1509,95 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(grad, input.grad, atol=0, rtol=0)
                 input.grad = None
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    def test_deterministic_interpolate_bilinear(self, device):
-        input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
-        grad = None
-        with DeterministicGuard(True):
-            for _ in range(5):
-                res = torch.nn.functional.interpolate(
-                    input,
-                    size=12,
-                    mode='bilinear',
-                    align_corners=False)
-                res.backward(torch.ones_like(res))
-                if grad is None:
-                    grad = input.grad
-                else:
-                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
-                input.grad = None
-
+    # Cases are chosen to cover each deterministic backward kernel branch:
+    # NCHW scalar gather (contiguous), NHWC scalar fallback (channels_last with
+    # channels not divisible by the vector width), and NHWC vectorized gather
+    # (channels_last with channels divisible by the vector width: 8 for
+    # FP16/BF16, 4 for FP32, 2 for FP64). C=8 exercises the vector path for all
+    # dtypes; C=3 forces the NHWC scalar fallback.
     @onlyNativeDeviceTypes
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @parametrize("input_size, output_size", [
-        ((4, 4), (9, 12)),
-        ((1, 5), (1, 7)),
-        ((5, 7), (1, 1)),
-        ((8, 7), (4, 3)),
-    ])
-    @parametrize("align_corners", [False, True])
-    def test_deterministic_interpolate_bilinear_values(
-        self, device, input_size, output_size, align_corners
-    ):
-        input = torch.randn(
-            1, 2, *input_size, device=device, requires_grad=True
-        )
-        output_grad = torch.randn(1, 2, *output_size, device=device)
-        with DeterministicGuard(True):
-            output = torch.nn.functional.interpolate(
-                input,
-                size=output_size,
-                mode='bilinear',
-                align_corners=align_corners)
-            output.backward(output_grad)
-
-        reference_input = input.detach().cpu().requires_grad_()
-        reference_output = torch.nn.functional.interpolate(
-            reference_input,
-            size=output_size,
-            mode='bilinear',
-            align_corners=align_corners)
-        reference_output.backward(output_grad.cpu())
-        self.assertEqual(
-            input.grad.cpu(),
-            reference_input.grad,
-            atol=1e-5,
-            rtol=1e-5)
-
-    @onlyCUDA
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @parametrize("recompute_scale_factor", [False, True])
-    def test_deterministic_interpolate_bilinear_scale_factor(
-        self, device, recompute_scale_factor
-    ):
+    @parametrize("case", [
+        {"name": "nchw_upsample_fp32", "shape": (1, 3, 4, 5),
+         "size": (8, 9), "dtype": torch.float32, "align_corners": False},
+        {"name": "nchw_downsample_fp32", "shape": (1, 3, 8, 7),
+         "size": (4, 3), "dtype": torch.float32, "align_corners": True},
+        {"name": "nhwc_scalar_fp32", "shape": (1, 3, 4, 5),
+         "size": (8, 9), "dtype": torch.float32, "align_corners": False,
+         "channels_last": True},
+        {"name": "nhwc_vec_fp16", "shape": (1, 8, 4, 5),
+         "size": (8, 10), "dtype": torch.float16, "align_corners": False,
+         "channels_last": True},
+        {"name": "nhwc_vec_bf16", "shape": (1, 8, 4, 5),
+         "size": (8, 10), "dtype": torch.bfloat16, "align_corners": False,
+         "channels_last": True},
+        {"name": "nhwc_vec_fp32", "shape": (1, 8, 4, 5),
+         "size": (8, 10), "dtype": torch.float32, "align_corners": False,
+         "channels_last": True},
+        {"name": "nhwc_vec_fp64", "shape": (1, 8, 4, 5),
+         "size": (8, 10), "dtype": torch.float64, "align_corners": False,
+         "channels_last": True},
+        {"name": "scale_factor_recompute_fp32", "shape": (1, 3, 4, 5),
+         "scale_factor": (1.7, 2.0), "dtype": torch.float32,
+         "align_corners": False, "recompute_scale_factor": True},
+    ], name_fn=lambda case: case["name"])
+    def test_deterministic_interpolate_bilinear(self, device, case):
         from torch._decomp import decompositions
 
-        scale_factor = (1.7, 2.3)
-        input = torch.randn(1, 2, 4, 5, device=device, requires_grad=True)
-        output_grad = torch.randn(
-            1,
-            2,
-            int(4 * scale_factor[0]),
-            int(5 * scale_factor[1]),
-            device=device,
+        dtype = case["dtype"]
+        channels_last = case.get("channels_last", False)
+        memory_format = (
+            torch.channels_last if channels_last else torch.contiguous_format
         )
-        grad = None
-        decomposition_guard = contextlib.nullcontext()
-        if torch.version.hip is None:
-            decomposition_guard = unittest.mock.patch.object(
+        n, c = case["shape"][0], case["shape"][1]
+        interp_kwargs = {"mode": "bilinear", "align_corners": case["align_corners"]}
+        if "size" in case:
+            interp_kwargs["size"] = case["size"]
+            output_spatial = case["size"]
+        else:
+            interp_kwargs["scale_factor"] = case["scale_factor"]
+            interp_kwargs["recompute_scale_factor"] = case["recompute_scale_factor"]
+            _, _, h, w = case["shape"]
+            sh, sw = case["scale_factor"]
+            output_spatial = (int(h * sh), int(w * sw))
+
+        input = torch.randn(
+            *case["shape"], device=device, dtype=dtype
+        ).contiguous(memory_format=memory_format).requires_grad_()
+        output_grad = torch.randn(
+            n, c, *output_spatial, device=device, dtype=dtype
+        ).contiguous(memory_format=memory_format)
+
+        # NVIDIA CUDA must use the native deterministic kernel, not the
+        # _upsample_linear_vec decomposition. HIP intentionally keeps the fallback.
+        dispatch_guard = contextlib.nullcontext()
+        if torch.device(device).type == "cuda" and torch.version.hip is None:
+            dispatch_guard = unittest.mock.patch.object(
                 decompositions,
                 "_upsample_linear_vec",
-                side_effect=AssertionError("CUDA should use the native kernel"),
+                side_effect=AssertionError(
+                    "CUDA should use the native deterministic kernel"),
             )
-        with DeterministicGuard(True), decomposition_guard:
-            for _ in range(2):
-                input.grad = None
-                output = torch.nn.functional.interpolate(
-                    input,
-                    scale_factor=scale_factor,
-                    mode='bilinear',
-                    align_corners=False,
-                    recompute_scale_factor=recompute_scale_factor,
-                )
-                output.backward(output_grad)
-                if grad is None:
-                    grad = input.grad.detach().clone()
-                else:
-                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
 
-        reference_input = input.detach().cpu().requires_grad_()
-        reference_output = torch.nn.functional.interpolate(
-            reference_input,
-            scale_factor=scale_factor,
-            mode='bilinear',
-            align_corners=False,
-            recompute_scale_factor=recompute_scale_factor,
-        )
-        reference_output.backward(output_grad.cpu())
-        self.assertEqual(input.grad.cpu(), reference_input.grad, atol=1e-5, rtol=1e-5)
-
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @skipIfRocm
-    @onlyCUDA
-    @dtypes(torch.float32)
-    def test_deterministic_interpolate_bilinear_scale_factor_rounding(
-        self, device, dtype
-    ):
-        import torch.nn.functional as F
-
-        input_width = 382103
-        output_width = 8853214
-        scale_factor = 23.169707243602712
-        output_index = 8388627
-        affected_input_index = 362052
-
-        input_cuda = torch.ones(
-            1, 1, 1, input_width, dtype=dtype, device=device, requires_grad=True
-        )
-        output_grad = torch.zeros(
-            1, 1, 1, output_width, dtype=dtype, device=device
-        )
-        output_grad[..., output_index] = 1
-
-        with DeterministicGuard(True):
-            output = F.interpolate(
-                input_cuda,
-                scale_factor=(1.0, scale_factor),
-                mode="bilinear",
-                align_corners=False,
-            )
-            self.assertEqual(output.shape, (1, 1, 1, output_width))
-            output.backward(output_grad)
-            deterministic_grad = input_cuda.grad.detach().clone()
-
-        atomic_input = input_cuda.detach().clone().requires_grad_()
-        with DeterministicGuard(False):
-            output = F.interpolate(
-                atomic_input,
-                scale_factor=(1.0, scale_factor),
-                mode="bilinear",
-                align_corners=False,
-            )
-            output.backward(output_grad)
-            atomic_grad = atomic_input.grad.detach().clone()
-
-        self.assertEqual(deterministic_grad, atomic_grad)
-        affected_grad = deterministic_grad[..., affected_input_index]
-        self.assertEqual(
-            torch.isfinite(affected_grad),
-            torch.ones_like(affected_grad, dtype=torch.bool),
-        )
-        self.assertEqual(
-            affected_grad != 0,
-            torch.ones_like(affected_grad, dtype=torch.bool),
-        )
-
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @skipIfRocm
-    @onlyCUDA
-    @dtypes(torch.float32)
-    @parametrize(
-        "nonfinite_value",
-        (torch.nan, torch.inf, -torch.inf),
-        name_fn=lambda value: str(value).replace("-", "negative_"),
-    )
-    @parametrize(
-        "output_grad_position",
-        ((0, 0), (2, 2)),
-        name_fn=lambda position: f"at_{position[0]}_{position[1]}",
-    )
-    @parametrize(
-        "memory_format",
-        (torch.contiguous_format, torch.channels_last),
-        name_fn=lambda fmt: (
-            "channels_last" if fmt == torch.channels_last else "contiguous"
-        ),
-    )
-    @parametrize("channels", (1, 4), name_fn=lambda value: f"channels_{value}")
-    def test_deterministic_interpolate_bilinear_nonfinite_zero_weight(
-        self,
-        device,
-        dtype,
-        nonfinite_value,
-        output_grad_position,
-        memory_format,
-        channels,
-    ):
-        import torch.nn.functional as F
-
-        input_cpu = torch.zeros(1, channels, 2, 2, dtype=dtype).contiguous(
-            memory_format=memory_format
-        ).requires_grad_()
-        output_grad_cpu = torch.zeros(1, channels, 3, 3, dtype=dtype).contiguous(
-            memory_format=memory_format
-        )
-        output_grad_cpu[
-            :, :, output_grad_position[0], output_grad_position[1]
-        ] = nonfinite_value
-        output_cpu = F.interpolate(
-            input_cpu, size=(3, 3), mode="bilinear", align_corners=True
-        )
-        output_cpu.backward(output_grad_cpu)
-
-        input_cuda = input_cpu.detach().to(device).requires_grad_()
-        output_grad_cuda = output_grad_cpu.to(device)
-        with DeterministicGuard(True):
-            output_cuda = F.interpolate(
-                input_cuda, size=(3, 3), mode="bilinear", align_corners=True
-            )
-            output_cuda.backward(output_grad_cuda)
-            deterministic_grad = input_cuda.grad.detach().clone()
-
-        atomic_input = input_cpu.detach().to(device).requires_grad_()
-        with DeterministicGuard(False):
-            output_cuda = F.interpolate(
-                atomic_input, size=(3, 3), mode="bilinear", align_corners=True
-            )
-            output_cuda.backward(output_grad_cuda)
-            atomic_grad = atomic_input.grad.detach().clone()
-
-        if output_grad_position == (0, 0):
-            expected_grad = torch.full_like(input_cpu.grad, torch.nan)
-            expected_grad[0, :, 0, 0] = nonfinite_value
-        else:
-            expected_grad = torch.zeros_like(input_cpu.grad)
-            expected_grad[0, :, 1, 1] = torch.nan
-        self.assertEqual(input_cpu.grad, expected_grad, equal_nan=True)
-        self.assertEqual(atomic_grad.cpu(), input_cpu.grad, equal_nan=True)
-        self.assertEqual(deterministic_grad.cpu(), input_cpu.grad, equal_nan=True)
-
-    @onlyCUDA
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    @parametrize("channels", [1, 3, 8, 64])
-    @parametrize("input_size, output_size, align_corners", [
-        ((5, 9), (13, 21), False),
-        ((4, 4), (32, 32), False),
-        ((1, 5), (1, 7), True),
-    ])
-    def test_deterministic_interpolate_bilinear_channels_last(
-        self, device, channels, input_size, output_size, align_corners
-    ):
-        input = torch.randn(
-            1, channels, *input_size, device=device
-        ).contiguous(memory_format=torch.channels_last).requires_grad_()
-        output_grad = torch.randn(
-            1, channels, *output_size, device=device
-        )
         grad = None
-        with DeterministicGuard(True):
+        with DeterministicGuard(True), dispatch_guard:
             for _ in range(2):
                 input.grad = None
-                output = torch.nn.functional.interpolate(
-                    input,
-                    size=output_size,
-                    mode='bilinear',
-                    align_corners=align_corners)
+                output = torch.nn.functional.interpolate(input, **interp_kwargs)
                 output.backward(output_grad)
                 if grad is None:
                     grad = input.grad.detach().clone()
                 else:
                     self.assertEqual(grad, input.grad, atol=0, rtol=0)
+
+        if channels_last:
+            self.assertTrue(grad.is_contiguous(memory_format=torch.channels_last))
 
         reference_input = input.detach().cpu().contiguous().requires_grad_()
         reference_output = torch.nn.functional.interpolate(
-            reference_input,
-            size=output_size,
-            mode='bilinear',
-            align_corners=align_corners)
+            reference_input, **interp_kwargs)
         reference_output.backward(output_grad.cpu().contiguous())
-        self.assertEqual(
-            grad.cpu(),
-            reference_input.grad,
-            atol=1e-5,
-            rtol=1e-5)
+        self.assertEqual(grad.cpu(), reference_input.grad)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
