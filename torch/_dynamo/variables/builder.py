@@ -1371,6 +1371,8 @@ class VariableBuilder:
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
         ) or is_pybind11_enum_member(value):
             self.install_guards(GuardBuilder.ID_MATCH)
+            # _call_impl registers this object with SideEffects after _wrap returns,
+            # so sourced enum members support attribute mutation.
             return UserDefinedObjectVariable(value, source=self.source)
         elif DebuggingVariable.is_reorderable_logging_function(value):
             # Put this above builtin_callable so that print() can be handled

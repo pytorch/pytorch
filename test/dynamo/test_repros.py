@@ -83,7 +83,6 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfWindows,
     skipIfXpu,
-    TEST_WITH_ROCM,
     xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -1745,6 +1744,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.fail("unexpected export success")
         except torch._dynamo.exc.Unsupported:
             pass
+
+    def test_fork_rng_with_set_devices(self):
+        def fn():
+            with torch.random.fork_rng(devices={torch.device("cuda:0")}, enabled=False):
+                return torch.randn((1, 2))
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+
+        self.assertEqual(opt_fn().shape, (1, 2))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
 
     def test_threading_local(self):
         import threading
@@ -3575,13 +3586,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager")
         with self.assertRaisesRegex(AssertionError, "tensor"):
             opt_f(args)
-        for gb, cnt in torch._dynamo.utils.counters["graph_break"].items():
-            if "assert with non-string message" in gb:
-                self.assertEqual(cnt, 1)
-                break
-        else:
-            # graph break not found
-            self.assertTrue(False)
+        self.assertEqual(torch._dynamo.utils.counters["graph_break"], {})
 
     def test_rewrite_assert_noop(self):
         def f(x):
@@ -10014,7 +10019,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             self.assertEqual(grad, ref_grad)
 
     @unittest.skipIf(
-        TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION,
         "flash attention not supported",
     )
     def test_flex_attention_guard_on_constant_func_defaults(self, device):

@@ -62,7 +62,10 @@ bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
           {sdp::check_nested_tensor,
            sdp::check_for_dropout,
            sdp::check_tensor_shapes,
-           sdp::check_batch_size_and_num_heads_dense<true /*supports GQA*/>,
+           sdp::check_batch_size_and_num_heads_dense<
+               true /*supports GQA*/,
+               true /*requires_same_num_heads*/,
+               true /*supports_mqa*/>,
            sdp::check_attn_mask_shape,
            sdp::check_nonzero_sequence_lengths_dense,
            sdp::check_last_dim_stride_equals_1_dense<

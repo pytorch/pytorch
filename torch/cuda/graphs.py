@@ -1175,7 +1175,7 @@ def export_graph_data(path: str) -> Callable[[CUDAGraph], None]:
 # Recognized keys of graph()'s annotation_config, each mapped to (default, allowed values).
 _ANNOTATION_CONFIG_KEYS: dict[str, tuple[typing.Any, tuple[typing.Any, ...]]] = {
     "backend": ("auto", ("auto", "cupti", "edge_walk")),
-    "key_by": ("exec", ("exec", "source")),
+    "key_by": ("exec", ("exec", "source", "auto")),
 }
 
 
@@ -1245,7 +1245,10 @@ class graph:
             ``instantiate()``, matching the graph node id CUPTI reports for replayed work;
             ``"source"`` leaves them on the capture graph, for a consumer that reads CUPTI's
             ``sourceGraphNodeId`` instead (needs CUPTI >= 13.4 and a CUDA driver >= 13.4,
-            else the capture raises).
+            else the capture raises); ``"auto"`` is ``"source"`` where the stack supports it
+            and ``"exec"`` where it does not, so it never raises. ``"exec"`` remains the
+            default because kineto reports only the exec node id, so a trace exported
+            through it cannot resolve capture-keyed annotations.
         check_input_liveness (bool, optional): If ``True``, tracks external tensor inputs during graph capture and
             raises an error if any are deallocated before replay. This helps debug "use after free" errors
             where input tensors are garbage collected between capture and replay. Default: ``False``.
@@ -1331,16 +1334,23 @@ class graph:
         # against a key nothing will ever look up -- and leaves nothing armed behind, so
         # retrying the capture with key_by="exec" works.
         key_by = self._annotation_config["key_by"]
-        if self._enable_annotations and key_by == "source":
+        if self._enable_annotations and key_by in ("source", "auto"):
             from torch.cuda._graph_annotations import source_node_ids_available
 
-            if not source_node_ids_available():
+            supported = source_node_ids_available()
+            # "auto" takes what the stack can report; only an explicit "source" insists.
+            if key_by == "auto":
+                key_by = "source" if supported else "exec"
+            elif not supported:
                 raise RuntimeError(
                     "annotation_config={'key_by': 'source'} keeps annotations keyed to the "
                     "capture graph, which needs a consumer reading CUPTI's sourceGraphNodeId "
                     "(CUPTI >= 13.4) and a CUDA driver >= 13.4 or an equivalent cuda-compat. "
-                    "Use 'exec' to have them rekeyed to the exec graph instead."
+                    "Use 'auto' to fall back to the exec graph instead."
                 )
+        # "auto" is only resolved above, where annotations are on: a capture that records
+        # nothing should not pay for the probe, and nothing reads the stamp in that case.
+        key_by = "exec" if key_by == "auto" else key_by
         self.cuda_graph._annotation_key_by = key_by
         _set_annotation_key_by(key_by)
 
