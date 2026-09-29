@@ -63,8 +63,7 @@ def _get_default_gpu_device_type() -> str:
     avail_gpus = [
         device_type
         for device_type in get_gpu_benchmark_device_types()
-        if (mod := getattr(torch, device_type, None)) is not None
-        and mod.is_available()
+        if (mod := getattr(torch, device_type, None)) is not None and mod.is_available()
     ]
     if len(avail_gpus) > 1:
         raise AssertionError(

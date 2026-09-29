@@ -13,20 +13,20 @@ from torch._inductor.config import (
     inductor_default_autotune_warmup,
 )
 from torch._inductor.runtime.benchmarking import (
+    _get_default_gpu_device_type,
+    _GPU_BENCHMARK_DEVICE_TYPES,
     Benchmarker,
+    get_gpu_benchmark_device_types,
     InductorBenchmarker,
+    register_gpu_benchmark_device_type,
     TorchProfilerBenchmarker,
     TritonBenchmarker,
-    _GPU_BENCHMARK_DEVICE_TYPES,
-    _get_default_gpu_device_type,
-    get_gpu_benchmark_device_types,
-    register_gpu_benchmark_device_type,
     unregister_gpu_benchmark_device_type,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     decorateIf,
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -789,15 +789,20 @@ class TestGpuBenchmarkDeviceTypes(TestCase):
         self.assertEqual(
             list(_GPU_BENCHMARK_DEVICE_TYPES).count(self._SENTINEL_DEVICE), 1
         )
-        self.assertEqual(get_gpu_benchmark_device_types().count(self._SENTINEL_DEVICE), 1)
+        self.assertEqual(
+            get_gpu_benchmark_device_types().count(self._SENTINEL_DEVICE), 1
+        )
 
     def test_get_default_gpu_device_type_ignores_unloaded_module(self):
         register_gpu_benchmark_device_type(self._SENTINEL_DEVICE)
         self.assertFalse(hasattr(torch, self._SENTINEL_DEVICE))
-        with patch(
+        with (
+            patch(
             "torch._inductor.runtime.benchmarking.get_gpu_benchmark_device_types",
             return_value=[self._SENTINEL_DEVICE, "cuda"],
-        ), patch("torch.cuda.is_available", return_value=False):
+            ),
+            patch("torch.cuda.is_available", return_value=False),
+        ):
             self.assertEqual(_get_default_gpu_device_type(), "cuda")
 
     def test_get_default_gpu_device_type_multiple_available(self):
@@ -808,11 +813,13 @@ class TestGpuBenchmarkDeviceTypes(TestCase):
             def is_available():
                 return True
 
-        with patch(
+        with (
+            patch(
             "torch._inductor.runtime.benchmarking.get_gpu_benchmark_device_types",
             return_value=[self._SENTINEL_DEVICE, "cuda"],
-        ), patch.object(torch, self._SENTINEL_DEVICE, _FakeMod, create=True), patch(
-            "torch.cuda.is_available", return_value=True
+            ),
+            patch.object(torch, self._SENTINEL_DEVICE, _FakeMod, create=True),
+            patch("torch.cuda.is_available", return_value=True),
         ):
             with self.assertRaises(AssertionError):
                 _get_default_gpu_device_type()
@@ -823,9 +830,7 @@ class TestGpuBenchmarkDeviceTypes(TestCase):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             value = bench_mod.GPU_BENCHMARK_DEVICE_TYPES  # type: ignore[attr-defined]
-        self.assertTrue(
-            any(issubclass(w.category, DeprecationWarning) for w in caught)
-        )
+        self.assertTrue(any(issubclass(w.category, DeprecationWarning) for w in caught))
         self.assertIsInstance(value, tuple)
         self.assertIn("cuda", value)
 
