@@ -18176,6 +18176,36 @@ fn
 
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
+    def test_builtin_maketrans_mapping_keys_guard(self):
+        mapping = {"a": "x"}
+
+        def fn():
+            return str.maketrans(mapping)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), {97: "x"})
+        mapping["a"] = "y"
+        self.assertEqual(compiled(), {97: "y"})
+        mapping["b"] = "z"
+        self.assertEqual(compiled(), {97: "y", 98: "z"})
+        del mapping["a"]
+        self.assertEqual(compiled(), {98: "z"})
+
+    def test_builtin_maketrans_side_effecting_key_graph_break(self):
+        calls = [0]
+
+        class Key(str):
+            def __hash__(self):
+                calls[0] += 1
+                return super().__hash__()
+
+        def fn():
+            return str.maketrans({Key("a"): "x"}), calls[0]
+
+        self.assertEqual(fn(), ({97: "x"}, 1))
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
     @parametrize("kind", ["str", "bytes"])
     def test_builtin_maketrans_errors(self, kind):
         def fn():

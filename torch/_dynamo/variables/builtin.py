@@ -1887,6 +1887,16 @@ class BuiltinVariable(BaseBuiltinVariable):
             if all(a.is_python_constant() for a in args) and all(
                 v.is_python_constant() for v in kwargs.values()
             ):
+                if self.fn is str and name == "maketrans" and len(args) == 1:
+                    if isinstance(args[0], variables.ConstDictVariable):
+                        if not all(
+                            variables.ConstantVariable.is_base_literal(
+                                k.vt.as_python_constant()
+                            )
+                            for k in args[0].items
+                        ):
+                            return super().call_method(tx, name, args, kwargs)
+                        args[0].install_dict_keys_match_guard()
                 try:
                     fn = getattr(self.fn, name)
                     res = fn(
