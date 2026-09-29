@@ -3108,7 +3108,12 @@ class StaticTritonCompileResult(CompileResult[_T]):
                 cubin_location = binary_paths[0]
             else:
                 cubin_location = os.path.join(
-                    triton_cache_dir(cast(int, triton_meta.get("device", 0))),
+                    triton_cache_dir(
+                        _resolve_load_device(
+                            triton_meta.get("device"),
+                            triton_meta.get("device_type", "cuda"),
+                        )
+                    ),
                     triton_hash_to_path_key(kernel.hash),
                     f"{kernel.src.fn.__name__}{binary_ext}",
                 )

@@ -6073,28 +6073,9 @@ class TestPrecompileNoCompilation(TestCase):
         self.assertEqual(command.mock_calls, [])
 
 
-@contextlib.contextmanager
-def _producer_triton_cache(directory):
-    import triton
-
-    with (
-        triton.knobs.cache.scope(),
-        triton.knobs.autotuning.scope(),
-        mock.patch.dict(
-            os.environ,
-            {"TRITON_CACHE_AUTOTUNING": "1", "TRITON_CACHE_DIR": str(directory)},
-        ),
-    ):
-        triton.knobs.cache.dir = str(directory)
-        triton.knobs.cache.manager_class = None
-        triton.knobs.autotuning.cache = True
-        yield
-
-
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileRuntimeCache(TestCase):
-    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_finalize_seals_capture_and_prepare_skips_graph(self):
         from pathlib import Path
 
@@ -6106,44 +6087,38 @@ class TestPrecompileRuntimeCache(TestCase):
         pc = torch.compiler.precompile
         env = "TORCH_PRECOMPILE_NO_COMPILATION"
         previous = os.environ.get(env)
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            with _producer_triton_cache(root / "producer"):
+        with pc.capture_runtime():
+            with self.assertRaisesRegex(PrecompileError, "already active"):
                 with pc.capture_runtime():
-                    with self.assertRaisesRegex(PrecompileError, "already active"):
-                        with pc.capture_runtime():
-                            self.fail("Nested runtime capture was accepted")
-                    source, cache = _capture_files(
-                        self,
-                        _no_compilation_single_graph,
-                        [(torch.ones(4),)],
-                        backend="eager",
-                    )
-                    cache = Path(cache)
-                    pc.finalize_cache(artifact_path=source, cache_path=cache)
-                    frozen = cache.read_bytes()
-                    self.assertTrue(is_compilation_forbidden())
-                    with self.assertRaisesRegex(PrecompileError, "Could not finalize"):
-                        pc.finalize_cache(artifact_path=source, cache_path=cache)
-                    self.assertEqual(cache.read_bytes(), frozen)
-                    with self.assertRaisesRegex(
-                        PrecompileError, "forbids cleanup compiler"
-                    ):
-                        check_compilation_allowed("cleanup compiler")
-                self.assertEqual(os.environ.get(env), previous)
-                self.assertFalse(is_compilation_forbidden())
-            with (
-                _producer_triton_cache(root / "consumer"),
-                mock.patch(
-                    "torch._precompile._make_inlined_forward",
-                    side_effect=AssertionError("graph installed"),
-                ),
-                mock.patch(
-                    "torch.cuda.init", side_effect=AssertionError("CUDA initialized")
-                ),
-            ):
-                pc.prepare_runtime(artifact_path=source, cache_path=cache)
-                pc.prepare_runtime(artifact_path=source, cache_path=cache)
+                    self.fail("Nested runtime capture was accepted")
+            source, cache = _capture_files(
+                self,
+                _no_compilation_single_graph,
+                [(torch.ones(4),)],
+                backend="eager",
+            )
+            cache = Path(cache)
+            pc.finalize_cache(artifact_path=source, cache_path=cache)
+            frozen = cache.read_bytes()
+            self.assertTrue(is_compilation_forbidden())
+            with self.assertRaisesRegex(PrecompileError, "Could not finalize"):
+                pc.finalize_cache(artifact_path=source, cache_path=cache)
+            self.assertEqual(cache.read_bytes(), frozen)
+            with self.assertRaisesRegex(PrecompileError, "forbids cleanup compiler"):
+                check_compilation_allowed("cleanup compiler")
+        self.assertEqual(os.environ.get(env), previous)
+        self.assertFalse(is_compilation_forbidden())
+        with (
+            mock.patch(
+                "torch._precompile._make_inlined_forward",
+                side_effect=AssertionError("graph installed"),
+            ),
+            mock.patch(
+                "torch.cuda.init", side_effect=AssertionError("CUDA initialized")
+            ),
+        ):
+            pc.prepare_runtime(artifact_path=source, cache_path=cache)
+            pc.prepare_runtime(artifact_path=source, cache_path=cache)
 
     def test_capture_runtime_rejects_start_under_no_compilation(self):
         pc = torch.compiler.precompile

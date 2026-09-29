@@ -304,13 +304,15 @@ class AsyncCompile:
     def drain_pending(cls, timeout: float | None = 600) -> None:
         """Wait for all submitted compile work, then shut down the compile workers.
 
-        Call this only after submissions have stopped. It waits on every cached
-        Triton kernel future (running its result callback), joins the thread
-        pool, and waits on every job still queued in a subprocess pool.
-        ``timeout`` bounds the total time spent waiting on those futures and
-        jobs; exceeding it raises ``concurrent.futures.TimeoutError``. A failed
-        future re-raises its error. On either error the subprocess pools and
-        compile workers are left running.
+        Call this only after submissions have stopped. It first waits on every
+        cached Triton kernel future (running its result callback), the worker
+        warm-up future, and every job still queued in a subprocess pool.
+        ``timeout`` bounds the total time spent on those waits; exceeding it
+        raises ``concurrent.futures.TimeoutError``, and a failed future re-raises
+        its error. Either error propagates before anything is shut down, so the
+        pools and compile workers stay usable. Thread pools and a non-subprocess
+        process pool expose no pending work to wait on, so the shutdown that
+        follows joins them without the ``timeout`` bound.
         """
         deadline = None if timeout is None else time() + timeout
 
@@ -320,16 +322,14 @@ class AsyncCompile:
         for future in list(CompiledTritonKernels._cache.values()):
             if not isinstance(future, StaticAutotunerFuture):
                 future.result(timeout=remaining())
+        if cls._ready_future is not None:
+            cls._ready_future.result(timeout=remaining())
+        for pool in list(_pool_set):
+            if isinstance(pool, SubprocPool):
+                pool.drain_pending(timeout=remaining())
         if cls.pool.cache_info().currsize:
             cls.pool().shutdown(wait=True)
             cls.pool.cache_clear()
-        if cls._ready_future is not None:
-            cls._ready_future.result(timeout=remaining())
-        for pool in _pool_set:
-            if isinstance(pool, SubprocPool):
-                pool.drain_pending(timeout=remaining())
-            else:
-                pool.shutdown(wait=True)
         shutdown_compile_workers()
 
     @staticmethod
