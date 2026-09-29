@@ -2038,6 +2038,9 @@ class TestSDPAFailureModes(NNTestCase):
             expected = torch.nn.functional.scaled_dot_product_attention(q, k, v)
 
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
+            # ROCm does not apply the CUTLASS sm80 pointer-alignment gate
+            # (check_data_ptr_alignment_mem_efficient is a no-op). AOTriton/CK
+            # mem-efficient attention stays eligible for misaligned QKV.
             expected_backend = (
                 SDPBackend.EFFICIENT_ATTENTION if is_rocm else SDPBackend.MATH
             )
