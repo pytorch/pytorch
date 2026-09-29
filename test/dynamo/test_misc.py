@@ -11178,7 +11178,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
     @unittest.skipIf(sys.version_info >= (3, 13), "feature landed in 3.13")
     def test_get_instruction_source_311(self):
         def f():
-            # flake8: noqa
+            # flake8: noqa  # noqa: PGH004
             # fmt: off
             # test binary ops
             a = ( b   )   +   c
@@ -19370,7 +19370,9 @@ def forward(self, L_x_ : torch.Tensor):
             match payload:
                 case {"kind": "affine", "values": [weight, bias], "scale": scale}:
                     return x * weight * scale + bias
-                case {"kind": "shift", "value": value, **rest} if rest.get("enabled", False):
+                case {"kind": "shift", "value": value, **rest} if rest.get(
+                    "enabled", False
+                ):
                     return x + value
                 case {"kind": "shift", "value": value}:
                     return x - value
