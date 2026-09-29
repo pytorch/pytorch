@@ -1502,6 +1502,25 @@ def CppExtension(name, sources, *args, **kwargs):
     return setuptools.Extension(name, sources, *args, **kwargs)
 
 
+def _canonicalize_hip_source(source, build_dir):
+    """Return a canonical absolute path for a hipify source.
+
+    Only canonicalize sources that don't already live under ``build_dir``.
+    Realpath-ing every source would relocate a source that is legitimately
+    symlinked *into* the build dir to its real location outside it, which then
+    pushes the generated ``.hip`` file out of ``build_dir`` and breaks the
+    "paths relative to the setup.py directory" invariant. Restricting realpath
+    to sources outside ``build_dir`` still fixes the Windows ``subst`` drive /
+    symlinked-path case where a source resolves to a different spelling than
+    ``build_dir``. ``build_dir`` must already be resolved (``os.path.realpath``).
+    On POSIX with an already-resolved cwd this is effectively a no-op.
+    """
+    s_abs = os.path.abspath(source)
+    if s_abs.startswith(build_dir + os.sep):
+        return s_abs
+    return os.path.realpath(source)
+
+
 def CUDAExtension(name, sources, *args, **kwargs):
     """
     Create a :class:`setuptools.Extension` for CUDA/C++.
@@ -1655,25 +1674,12 @@ def CUDAExtension(name, sources, *args, **kwargs):
         # `os.getcwd()` is already fully resolved, so this is a no-op there.
         build_dir = os.path.realpath(os.getcwd())
 
-        def _canonical_source(s):
-            # Only canonicalize sources that don't already live under `build_dir`.
-            # Realpath-ing every source would relocate a source that is legitimately
-            # symlinked *into* the build dir to its real location outside it, which
-            # then pushes the generated `.hip` file out of `build_dir` and breaks the
-            # "paths relative to the setup.py directory" invariant below. Restricting
-            # realpath to sources outside `build_dir` still fixes the subst-drive case
-            # (source resolves to a different spelling than `build_dir`).
-            s_abs = os.path.abspath(s)
-            if s_abs.startswith(build_dir + os.sep):
-                return s_abs
-            return os.path.realpath(s)
-
         hipify_result = hipify_python.hipify(
             project_directory=build_dir,
             output_directory=build_dir,
             header_include_dirs=include_dirs,
             includes=[os.path.join(build_dir, '*')],  # limit scope to build_dir only
-            extra_files=[_canonical_source(s) for s in sources],
+            extra_files=[_canonicalize_hip_source(s, build_dir) for s in sources],
             show_detailed=True,
             is_pytorch_extension=True,
             hipify_extra_files_only=True,  # don't hipify everything in includes path
@@ -1681,7 +1687,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
 
         hipified_sources = set()
         for source in sources:
-            s_abs = _canonical_source(source)
+            s_abs = _canonicalize_hip_source(source, build_dir)
             if s_abs in hipify_result and hipify_result[s_abs].hipified_path is not None:
                 hipified_s_abs = hipify_result[s_abs].hipified_path
             else:
@@ -2473,17 +2479,11 @@ def _jit_compile(name,
                     # without relocating sources symlinked into the build directory.
                     build_dir_real = os.path.realpath(build_directory)
 
-                    def _canonical_source(s):
-                        s_abs = os.path.abspath(s)
-                        if s_abs.startswith(build_dir_real + os.sep):
-                            return s_abs
-                        return os.path.realpath(s)
-
                     hipify_result = hipify_python.hipify(
-                        project_directory=build_directory,
-                        output_directory=build_directory,
+                        project_directory=build_dir_real,
+                        output_directory=build_dir_real,
                         header_include_dirs=(extra_include_paths if extra_include_paths is not None else []),
-                        extra_files=[_canonical_source(s) for s in sources],
+                        extra_files=[_canonicalize_hip_source(s, build_dir_real) for s in sources],
                         ignores=[_join_rocm_home('*'), os.path.join(_TORCH_PATH, '*')],  # no need to hipify ROCm or PyTorch headers
                         show_detailed=verbose,
                         show_progress=verbose,
@@ -2493,7 +2493,7 @@ def _jit_compile(name,
 
                     hipified_sources = set()
                     for source in sources:
-                        s_abs = _canonical_source(source)
+                        s_abs = _canonicalize_hip_source(source, build_dir_real)
                         if s_abs in hipify_result and hipify_result[s_abs].hipified_path is not None:
                             hipified_s_abs = hipify_result[s_abs].hipified_path
                         else:
