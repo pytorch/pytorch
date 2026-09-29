@@ -1329,6 +1329,18 @@ class DecompOneOffTests(TestCase):
                 torch._decomp.decompositions._weight_norm_interface(v1d, g1d),
             )
 
+        # rank-2 reduced dtypes: the norm is kept in float. The decomposition
+        # rounds g / norm and the product separately, so allow a few ulps.
+        for dtype in (torch.half, torch.bfloat16):
+            v2d = torch.randn(30, 10, device=device, dtype=dtype)
+            g2d = torch.randn(30, 1, device=device, dtype=dtype)
+            self.assertEqual(
+                torch.ops.aten._weight_norm_interface(v2d, g2d),
+                torch._decomp.decompositions._weight_norm_interface(v2d, g2d),
+                atol=1e-2,
+                rtol=1e-2,
+            )
+
     @onlyCUDA
     @skipIfCrossRef
     def test_fused_dropout_decomposition_extreme_p(self, device):

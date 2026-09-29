@@ -5997,8 +5997,11 @@ def squeeze_default(self: Tensor, dim: int | None = None):
 def _weight_norm_interface(v, g, dim=0):
     # https://github.com/pytorch/pytorch/blob/852f8526c52190125446adc9a6ecbcc28fb66182/aten/src/ATen/native/WeightNorm.cpp#L58
     reduce_dims = tuple(i for i in range(len(v.shape)) if i != dim)
-    # match ATen: norm is kept in float when g is bfloat16/half
-    norm_dtype = torch.float if g.dtype in (torch.bfloat16, torch.half) else g.dtype
+    # match ATen: CPU/CUDA keep the norm in float when g is bfloat16/half, MPS keeps g.dtype
+    if g.dtype in (torch.bfloat16, torch.half) and v.device.type != "mps":
+        norm_dtype = torch.float
+    else:
+        norm_dtype = g.dtype
     if reduce_dims:
         norm = v.norm(2, reduce_dims, keepdim=True, dtype=norm_dtype)
     else:
