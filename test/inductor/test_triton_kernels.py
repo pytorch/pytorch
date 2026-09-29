@@ -1177,6 +1177,46 @@ def forward(self, x_1, output_1):
         self.assertEqual(len(scatter_buffers), 0)
 
     @requires_gpu
+    def test_triton_kernel_reinplace_view_copy_back_training(self):
+        from torch._inductor import compile_fx
+
+        def call_triton_inplace_view(x: torch.Tensor):
+            x_slice = x[2:]
+            n_elements = x_slice.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            mul2_inplace_kernel[grid](x_slice, n_elements, BLOCK_SIZE=16)
+            return x.sin().sum()
+
+        leaf = torch.rand(4, 4, device=GPU_TYPE, requires_grad=True)
+        # Keep the compiled input differentiable without mutating a leaf tensor.
+        x = leaf.clone()
+        expected = x.detach().clone()
+        expected[2:] *= 2
+        with mock.patch.object(
+            compile_fx,
+            "min_cut_rematerialization_partition",
+            wraps=compile_fx.min_cut_rematerialization_partition,
+        ) as partitioner:
+            result, (graph,) = run_and_get_graph_lowering(
+                torch.compile(call_triton_inplace_view, fullgraph=True), x
+            )
+        self.assertGreater(partitioner.call_count, 0)
+        self.assertEqual(x, expected)
+        result.backward()
+        self.assertIsNotNone(leaf.grad)
+
+        triton_kernels = [
+            op for op in graph.operations if isinstance(op, ir.UserDefinedTritonKernel)
+        ]
+        self.assertEqual(len(triton_kernels), 1)
+        kernel_mutations = {
+            name
+            for output in triton_kernels[0].mutation_outputs
+            for name in output.get_mutation_names()
+        }
+        self.assertEqual(kernel_mutations, set(graph.graph_inputs))
+
+    @requires_gpu
     def test_triton_kernel_reinplace_scatter_copy_back_with_additional_user(self):
         # Demonstrates that if there are multiple users of the scatter in the
         # scatter copy-back pattern, the pattern is still re-inplaced.

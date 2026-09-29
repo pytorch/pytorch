@@ -533,6 +533,8 @@ def canonicalized_root(
 def _match_functionalized_user_defined_triton_kernel(
     triton_kernel: torch.fx.Node,
     canonicalized_replacements: dict[torch.fx.Node, torch.fx.Node],
+    nodes_by_name: dict[str, torch.fx.Node],
+    view_replay_nodes_by_label: dict[str, list[torch.fx.Node]],
 ) -> dict[tuple[torch.fx.Node, torch.fx.Node], TritonKernelReinplacementPlan] | None:
     """
     Attempts to in-place all triton_kernel_wrapper_functional ops that were
@@ -551,9 +553,7 @@ def _match_functionalized_user_defined_triton_kernel(
 
     for user in triton_kernel.users:
         if user.target is not operator.getitem:
-            raise AssertionError(
-                f"found a user ({user}) of a Triton kernel ({triton_kernel}) that is not getitem"
-            )
+            continue
 
         key = cast(str, user.args[1])
         if key not in tensors_to_clone:
@@ -578,15 +578,19 @@ def _match_functionalized_user_defined_triton_kernel(
             redundant_ops = [user]
             redundant_ops.extend(
                 canonicalized_root(node, canonicalized_replacements)
-                for node in triton_reinplace_info.view_replay_nodes
+                for node in view_replay_nodes_by_label.get(
+                    triton_reinplace_info.view_replay_label, ()
+                )
             )
 
             plans[(mutated_arg, triton_kernel)] = TritonKernelReinplacementPlan(
                 canonicalized_root(
-                    triton_reinplace_info.logical_input_base, canonicalized_replacements
+                    nodes_by_name[triton_reinplace_info.logical_input_base_name],
+                    canonicalized_replacements,
                 ),
                 canonicalized_root(
-                    triton_reinplace_info.updated_base, canonicalized_replacements
+                    nodes_by_name[triton_reinplace_info.updated_base_name],
+                    canonicalized_replacements,
                 ),
                 redundant_ops,
             )
@@ -660,6 +664,15 @@ def reinplace_inplaceable_ops_core(
     mutated_inputs = OrderedSet[Any]()
     storage_to_nodes = defaultdict(list)
     node_order: dict[Any, int] = {}
+    nodes_by_name: dict[str, torch.fx.Node] = {}
+    view_replay_nodes_by_label: dict[str, list[torch.fx.Node]] = defaultdict(list)
+    # Canonicalization removes some replay nodes. Its replacement map still
+    # holds the originals, so visit both sets when resolving their labels.
+    for node in itertools.chain(graph.nodes, canonicalized_replacements):
+        nodes_by_name[node.name] = node
+        if label := node.meta.get("triton_view_replay"):
+            view_replay_nodes_by_label[label].append(node)
+
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
@@ -704,7 +717,10 @@ def reinplace_inplaceable_ops_core(
                             ] = node
 
         if plans := _match_functionalized_user_defined_triton_kernel(
-            node, canonicalized_replacements
+            node,
+            canonicalized_replacements,
+            nodes_by_name,
+            view_replay_nodes_by_label,
         ):
             copy_args_to_triton_kernel_reinplacement_plans.update(plans)
 

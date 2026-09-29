@@ -1754,10 +1754,10 @@ def get_mutated_tensors(
 
 @dataclass(frozen=True)
 class TritonReinplacementInfo:
-    logical_input_base: fx.Node
-    updated_base: fx.Node
+    logical_input_base_name: str
+    updated_base_name: str
     view_meta_sequence: ViewMetaSequence
-    view_replay_nodes: list[fx.Node]
+    view_replay_label: str
 
 
 @triton_kernel_wrapper_mutation.py_functionalize_impl
@@ -1831,9 +1831,11 @@ def triton_kernel_wrapper_mutation_functionalize(
         ctx.mark_mutation_hidden_from_autograd(input_arg)
         ctx.commit_update(input_arg)
 
-        replay_start = OrderedSet()
-        if proxy_mode is not None:
-            replay_start.update(proxy_mode.tracer.graph.nodes)
+        replay_start = None
+        if proxy_mode is not None and key in tensor_bases:
+            # Proxy tracing appends nodes, so the current tail marks where
+            # sync()'s view replay nodes will begin.
+            replay_start = next(reversed(proxy_mode.tracer.graph.nodes))
 
         ctx.sync(input_arg)
 
@@ -1847,14 +1849,20 @@ def triton_kernel_wrapper_mutation_functionalize(
             updated_base_val = ctx.unwrap_tensors(view_bases[key])  # unwrap AFTER calling sync()
             updated_base = get_proxy_slot(updated_base_val, proxy_mode.tracer).proxy.node
             view_meta_sequence = view_metas[key]
-            view_replay_nodes = [
-                node
-                for node in proxy_mode.tracer.graph.nodes
-                if node not in replay_start
-            ]
+            # Give the nodes emitted by sync() the same label so reinplace can
+            # find them even if a graph rewrite replaces some of the nodes.
+            view_replay_label = node.name
+            assert replay_start is not None
+            replay_node = next(reversed(proxy_mode.tracer.graph.nodes))
+            while replay_node is not replay_start:
+                replay_node.meta["triton_view_replay"] = view_replay_label
+                replay_node = replay_node.prev
 
             node.meta["triton_reinplace_info"] = TritonReinplacementInfo(
-                logical_input_base, updated_base, view_meta_sequence, view_replay_nodes
+                logical_input_base.name,
+                updated_base.name,
+                view_meta_sequence,
+                view_replay_label,
             )
 
     return None
