@@ -1,4 +1,5 @@
 # Owner(s): ["oncall: pt2"]
+import contextlib
 import copy
 import errno
 import functools
@@ -13,6 +14,7 @@ import sys
 import tempfile
 import textwrap
 import threading
+import types
 import typing
 import unittest
 import uuid
@@ -36,6 +38,8 @@ from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfCrossRef,
@@ -4598,6 +4602,32 @@ class TestPrecompileCapture(TestCase):
         self.assertFalse(os.path.exists(self.artifact))
 
 
+_EXTENSION_SOURCE = """
+#include <torch/extension.h>
+
+int add_one(int x) {
+  return x + 1;
+}
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+  m.def("add_one", &add_one);
+}
+"""
+
+_EXTENSION_LOADER = """
+import os
+import sys
+
+from torch.compiler import precompile
+from torch.utils import cpp_extension
+
+name, source = sys.argv[1:]
+with precompile.no_compilation():
+    ext = cpp_extension.load(name, [source], build_directory=os.path.dirname(source))
+print("loaded", ext.add_one(2))
+"""
+
+
 _GOLDEN_MODULE = """
 import types
 
@@ -5287,6 +5317,7 @@ class TestPrecompileDynamoCapture(TestCase):
 
 
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+@instantiate_parametrized_tests
 class TestPrecompileNoCompilation(TestCase):
     def test_no_compilation_covers_background_threads_and_restores(self):
         from concurrent.futures import ThreadPoolExecutor
@@ -5409,6 +5440,398 @@ class TestPrecompileNoCompilation(TestCase):
             with self.assertRaisesRegex(PrecompileError, "Triton kernel autotuning"):
                 CachingAutotuner.autotune_to_one_config(autotuner)
         self.assertEqual(autotuner.mock_calls, [])
+
+    def test_no_compilation_rejects_multi_kernel_autotuning(self):
+        from torch._inductor.codegen.multi_kernel import MultiKernelCall
+
+        multi_kernel = mock.Mock(spec=MultiKernelCall)
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch(
+                "torch._inductor.codegen.multi_kernel.benchmarker.benchmark"
+            ) as benchmark,
+            self.assertRaisesRegex(PrecompileError, "multi-kernel autotuning"),
+        ):
+            MultiKernelCall.benchmark_sub_kernels(multi_kernel)
+        benchmark.assert_not_called()
+        self.assertEqual(multi_kernel.mock_calls, [])
+
+    @parametrize("backend", ("cutedsl", "flydsl", "pallas", "nv_universal_gemm"))
+    def test_no_compilation_loads_alternate_runtime_kernel_in_process(self, backend):
+        from torch._inductor import async_compile
+        from torch._inductor.async_compile import AsyncCompile
+        from torch._inductor.codecache import PyCodeCache
+        from torch._inductor.codegen.flydsl import flydsl_utils
+
+        kernel = mock.Mock()
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch.object(AsyncCompile, "use_process_pool") as readiness,
+            mock.patch.object(AsyncCompile, "process_pool") as pool,
+            mock.patch.object(AsyncCompile, "submit") as submit,
+            mock.patch.object(async_compile, "get_compile_threads", return_value=1),
+            mock.patch.object(flydsl_utils, "runtime_available", return_value=True),
+            mock.patch.object(PyCodeCache, "write", return_value=("key", "path")),
+            mock.patch.object(
+                PyCodeCache,
+                "load_by_key_path",
+                return_value=types.SimpleNamespace(k_main=kernel),
+            ),
+        ):
+            # A compiled module calls these at import; loading its Python
+            # source is not compilation, the kernel's first run() is.
+            wrapper = getattr(AsyncCompile(), backend)("k", "source")
+            with self.assertRaisesRegex(PrecompileError, "runtime JIT"):
+                wrapper.run()
+        readiness.assert_not_called()
+        pool.assert_not_called()
+        submit.assert_not_called()
+        kernel.assert_not_called()
+
+    def test_no_compilation_rejects_halide_build_but_not_built_kernel(self):
+        from torch._inductor import codecache
+        from torch._inductor.utils import fresh_cache
+
+        halide = codecache.HalideCodeCache
+        meta = mock.Mock(argtypes=[], scheduler=None)
+        meta.is_cuda.return_value = False
+        meta.args.return_value = []
+        with (
+            fresh_cache(),
+            mock.patch.object(codecache, "write_atomic") as write,
+            mock.patch.object(halide, "load_pybinding_async") as load,
+            mock.patch.object(
+                halide, "build_standalone_runtime", return_value="runtime.so"
+            ),
+            mock.patch.object(halide, "_codegen_glue", return_value=""),
+            # Run only the final job, which marks the kernel as built.
+            mock.patch.object(
+                codecache,
+                "_worker_task_halide",
+                side_effect=lambda lock, jobs: jobs[-1](),
+            ),
+        ):
+            with (
+                torch.compiler.precompile.no_compilation(),
+                self.assertRaisesRegex(PrecompileError, "Halide kernel compilation"),
+            ):
+                halide.generate_halide_async(meta, "missing source")
+            write.assert_not_called()
+            load.assert_not_called()
+
+            halide.generate_halide_async(meta, "built source")
+            write.reset_mock()
+            load.reset_mock()
+            with torch.compiler.precompile.no_compilation():
+                halide.generate_halide_async(meta, "built source")
+            write.assert_not_called()
+            load.assert_called_once()
+
+    def test_no_compilation_rejects_metal_shader_compilation(self):
+        from torch._inductor.async_compile import AsyncCompile
+
+        async_compile = AsyncCompile()
+        async_compile.metal("missing_kernel", "missing source", [])
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch(
+                "torch._inductor.runtime.runtime_utils.compile_mps_shaders"
+            ) as compile_shaders,
+            self.assertRaisesRegex(PrecompileError, "Metal shader compilation"),
+        ):
+            async_compile.wait({})
+        compile_shaders.assert_not_called()
+
+    @parametrize("backend", ("cutedsl", "flydsl", "pallas", "nv_universal_gemm"))
+    def test_no_compilation_rejects_first_run_of_alternate_runtime_kernel(
+        self, backend
+    ):
+        modules = {
+            "cutedsl": ("cutedsl.cutedsl_kernel", "CuteDSLKernelWrapper"),
+            "flydsl": ("flydsl.flydsl_kernel", "FlyDSLKernelWrapper"),
+            "pallas": ("pallas", "PallasKernelWrapper"),
+            "nv_universal_gemm": (
+                "nv_universal_gemm.nv_universal_gemm_kernel",
+                "NVUniversalGemmKernelWrapper",
+            ),
+        }
+        module_name, class_name = modules[backend]
+        module = importlib.import_module(f"torch._inductor.codegen.{module_name}")
+        wrapper_cls = getattr(module, class_name)
+
+        cold_kernel = mock.Mock()
+        with (
+            torch.compiler.precompile.no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "runtime JIT"),
+        ):
+            wrapper_cls(cold_kernel).run()
+        cold_kernel.assert_not_called()
+
+        warm_kernel = mock.Mock()
+        warm = wrapper_cls(warm_kernel)
+        warm.run(1)
+        with torch.compiler.precompile.no_compilation():
+            warm.run(2)
+        self.assertEqual(
+            warm_kernel.mock_calls,
+            [mock.call(1, stream=None), mock.call(2, stream=None)],
+        )
+
+    @parametrize("up_to_date", (False, True))
+    @parametrize("inline", (False, True))
+    def test_no_compilation_gates_fresh_process_extension_load_on_ninja(
+        self, inline, up_to_date
+    ):
+        from torch.utils import cpp_extension
+        from torch.utils._cpp_extension_versioner import ExtensionVersioner
+
+        name = f"precompile_no_compilation_ext_{uuid.uuid4().hex}"
+        dry_run = subprocess.CompletedProcess(
+            ["ninja", "-n"],
+            0,
+            stdout=b"ninja: no work to do.\n"
+            if up_to_date
+            else b"[1/2] c++ main.cpp\n",
+        )
+
+        def build(**kwargs):
+            cpp_extension._run_ninja_build(
+                kwargs["build_directory"], kwargs["verbose"], "extension"
+            )
+
+        with (
+            tempfile.TemporaryDirectory() as build_directory,
+            # What a new process starts with, even when build_directory
+            # already holds an up-to-date library.
+            mock.patch.object(
+                cpp_extension, "JIT_EXTENSION_VERSIONER", ExtensionVersioner()
+            ),
+            mock.patch.object(
+                cpp_extension, "_write_ninja_file_and_build_library", side_effect=build
+            ),
+            mock.patch.object(
+                cpp_extension.subprocess, "run", return_value=dry_run
+            ) as run,
+            mock.patch.object(cpp_extension, "_import_module_from_library") as load,
+            torch.compiler.precompile.no_compilation(),
+        ):
+            with contextlib.ExitStack() as stack:
+                if not up_to_date:
+                    stack.enter_context(
+                        self.assertRaisesRegex(
+                            PrecompileError, r"C\+\+ extension compilation"
+                        )
+                    )
+                if inline:
+                    cpp_extension.load_inline(
+                        name, "int f() { return 0; }", build_directory=build_directory
+                    )
+                else:
+                    source = os.path.join(build_directory, "ext.cpp")
+                    with open(source, "w") as f:
+                        f.write("int f() { return 0; }\n")
+                    cpp_extension.load(name, [source], build_directory=build_directory)
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[0], ["ninja", "-n"])
+        self.assertEqual(load.call_count, int(up_to_date))
+
+    @unittest.skipIf(
+        IS_FBCODE or IS_WINDOWS, "needs a host compiler and the torch headers"
+    )
+    def test_no_compilation_loads_prebuilt_extension_in_a_fresh_process(self):
+        from torch.utils import cpp_extension
+
+        if not cpp_extension.is_ninja_available():
+            self.skipTest("requires ninja")
+        name = f"precompile_no_compilation_ext_{uuid.uuid4().hex}"
+        with tempfile.TemporaryDirectory() as build_directory:
+            source = os.path.join(build_directory, "ext.cpp")
+            with open(source, "w") as f:
+                f.write(_EXTENSION_SOURCE)
+            cpp_extension.load(name, [source], build_directory=build_directory)
+
+            def load_in_a_fresh_process():
+                return subprocess.run(
+                    [sys.executable, "-c", _EXTENSION_LOADER, name, source],
+                    capture_output=True,
+                    text=True,
+                    timeout=600,
+                )
+
+            # A new process's extension versioner is empty, so this reaches
+            # ninja, which must find the library up to date.
+            out = load_in_a_fresh_process()
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn("loaded 3", out.stdout)
+
+            with open(source, "a") as f:
+                f.write("// changed\n")
+            out = load_in_a_fresh_process()
+            self.assertNotEqual(out.returncode, 0, out.stdout)
+            self.assertIn("forbids C++ extension compilation", out.stderr)
+
+    def test_no_compilation_allows_unchanged_extension_reload(self):
+        from torch.utils import cpp_extension
+
+        name = f"precompile_no_compilation_ext_{uuid.uuid4().hex}"
+        with (
+            tempfile.TemporaryDirectory() as build_directory,
+            mock.patch.object(
+                cpp_extension, "_write_ninja_file_and_build_library"
+            ) as build,
+            mock.patch.object(cpp_extension, "_import_module_from_library") as load,
+        ):
+            source = os.path.join(build_directory, "ext.cpp")
+            with open(source, "w") as f:
+                f.write("int f() { return 0; }\n")
+            cpp_extension.load(name, [source], build_directory=build_directory)
+            with torch.compiler.precompile.no_compilation():
+                cpp_extension.load(name, [source], build_directory=build_directory)
+        build.assert_called_once()
+        self.assertEqual(load.call_count, 2)
+
+    @parametrize(
+        "returncode,output",
+        ((0, b"[1/1] c++ main.o\n"), (1, b"ninja: error: loading 'build.ninja'\n")),
+    )
+    def test_no_compilation_rejects_extension_build_before_subprocess(
+        self, returncode, output
+    ):
+        from torch.utils import cpp_extension
+
+        dry_run = subprocess.CompletedProcess(["ninja", "-n"], returncode, output)
+        with (
+            torch.compiler.precompile.no_compilation(),
+            mock.patch.object(
+                cpp_extension.subprocess, "run", return_value=dry_run
+            ) as run,
+            self.assertRaisesRegex(PrecompileError, r"C\+\+ extension compilation"),
+        ):
+            cpp_extension._run_ninja_build("missing", False, "extension")
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[0], ["ninja", "-n"])
+
+    def test_no_compilation_rejects_only_a_cpp_kernel_cache_miss(self):
+        from torch._inductor import codecache
+
+        cache = codecache.CppCodeCache
+        with (
+            tempfile.TemporaryDirectory() as d,
+            mock.patch.object(
+                codecache, "write", return_value=("key", os.path.join(d, "k.cpp"))
+            ),
+            mock.patch.object(codecache, "get_lock_dir", return_value=d),
+            mock.patch.object(cache, "cache", {}),
+        ):
+
+            def load(submit):
+                cache.cache.clear()
+                cache.load_async("int f();", submit_fn=submit, needs_vec_isa=False)
+
+            submit = mock.Mock()
+            load(submit)
+            ((worker_fn,), _) = submit.call_args
+            target = worker_fn.args[1][-1].get_target_file_path()
+            submit.reset_mock()
+            with torch.compiler.precompile.no_compilation():
+                with self.assertRaisesRegex(
+                    PrecompileError, r"C\+\+ kernel cache miss"
+                ):
+                    load(submit)
+                with open(target, "w"):
+                    pass
+                load(submit)
+        submit.assert_not_called()
+
+    @parametrize("linked", (False, True))
+    def test_no_compilation_cpp_worker_compiles_only_an_unlinked_kernel(self, linked):
+        from torch._inductor.codecache import _worker_compile_cpp
+
+        with tempfile.TemporaryDirectory() as d:
+            # A compile-only builder whose object file is gone, then the linker.
+            builders = [mock.Mock(), mock.Mock()]
+            for i, builder in enumerate(builders):
+                builder.get_target_file_path.return_value = os.path.join(d, str(i))
+            if linked:
+                with open(builders[-1].get_target_file_path(), "w"):
+                    pass
+            with torch.compiler.precompile.no_compilation():
+                if linked:
+                    _worker_compile_cpp(os.path.join(d, "lock"), builders)
+                else:
+                    with self.assertRaisesRegex(
+                        PrecompileError, r"C\+\+ kernel compilation"
+                    ):
+                        _worker_compile_cpp(os.path.join(d, "lock"), builders)
+        for builder in builders:
+            builder.build.assert_not_called()
+
+    @parametrize("cache_name", ("CUDACodeCache", "ROCmCodeCache"))
+    @parametrize("built", (False, True))
+    def test_no_compilation_rejects_only_a_gpu_kernel_cache_miss(
+        self, cache_name, built
+    ):
+        from torch._inductor import codecache
+
+        cache = getattr(codecache, cache_name)
+        with tempfile.TemporaryDirectory() as d:
+            source = os.path.join(d, f"k.{cache._SOURCE_CODE_SUFFIX}")
+            output = os.path.join(d, "k.o")
+            if built:
+                with open(output, "w"):
+                    pass
+            with (
+                mock.patch.object(cache, "cache", {}),
+                mock.patch.object(cache, "write", return_value=("key", source)),
+                mock.patch.object(codecache, "get_lock_dir", return_value=d),
+                mock.patch.object(codecache, "rocm_compile_command"),
+                mock.patch.object(cache, "_logged_compiler_version", True, create=True),
+                mock.patch.object(
+                    cache,
+                    "get_kernel_binary_remote_cache",
+                    return_value=None,
+                    create=True,
+                ),
+                mock.patch.object(cache, "_compile_command", create=True),
+                mock.patch.object(codecache.subprocess, "check_output") as run,
+                torch.compiler.precompile.no_compilation(),
+            ):
+                if built:
+                    self.assertEqual(cache.compile("", "o")[0], output)
+                else:
+                    with self.assertRaisesRegex(
+                        PrecompileError, "GPU kernel compilation"
+                    ):
+                        cache.compile("", "o")
+        run.assert_not_called()
+
+    def test_no_compilation_rejects_extension_precompiled_header_build(self):
+        from torch.utils import cpp_extension
+
+        with (
+            mock.patch.object(cpp_extension, "IS_LINUX", True),
+            mock.patch.object(cpp_extension, "get_cxx_compiler", return_value="g++"),
+            mock.patch.object(
+                cpp_extension, "check_compiler_is_gcc", return_value=True
+            ),
+            mock.patch.object(cpp_extension.os.path, "isfile", return_value=False),
+            mock.patch.object(cpp_extension.subprocess, "check_output") as build,
+            torch.compiler.precompile.no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "precompiled header compilation"),
+        ):
+            cpp_extension._check_and_build_extension_h_precompiler_headers([], [])
+        build.assert_not_called()
+
+    def test_no_compilation_rejects_setuptools_extension_build(self):
+        from torch.utils.cpp_extension import BuildExtension
+
+        command = mock.Mock(spec=BuildExtension)
+        with (
+            torch.compiler.precompile.no_compilation(),
+            self.assertRaisesRegex(PrecompileError, r"C\+\+ extension compilation"),
+        ):
+            BuildExtension.build_extensions(command)
+        self.assertEqual(command.mock_calls, [])
 
 
 if __name__ == "__main__":
