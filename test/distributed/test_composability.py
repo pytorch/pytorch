@@ -524,15 +524,13 @@ class ComposabilityTest(MultiProcContinuousTest):
             PipelineStage(model, stage_idx, 2, self.device, group=pp_group)
             for stage_idx, model in enumerate(models)
         ]
-        schedule = ScheduleLoopedBFS(
-            stages,
-            n_microbatches=2,
-            loss_fn=loss_fn,
-            defer_reduce_grad_wait=True,
-        )
-
         with self.assertRaisesRegex(ValueError, "Do not call share_comm_ctx"):
-            schedule.step(torch.randn(4, 8, device=self.device))
+            ScheduleLoopedBFS(
+                stages,
+                n_microbatches=2,
+                loss_fn=loss_fn,
+                defer_reduce_grad_wait=True,
+            )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
