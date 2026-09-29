@@ -7548,6 +7548,53 @@ def meta_quantize_tensor(
     ]
 
 
+@register_meta([aten._quantize_tensor_dual.default])
+def meta_quantize_tensor_dual(
+    input: torch.Tensor,
+    qdata_dtype: torch.dtype,
+    inner_scale_calc: int,
+    scaling_type: int,
+    swizzle_type: int,
+    scaling_type_square_block_and_expand: bool = False,
+) -> list[torch.Tensor]:
+    torch._check(input.dim() == 2, lambda: "quantize_tensor_dual requires a 2D input")
+    torch._check(
+        input.is_contiguous(), lambda: "dual quantization requires contiguous input"
+    )
+    torch._check(
+        input.dtype in (torch.float16, torch.bfloat16, torch.float32),
+        lambda: "quantize_tensor_dual supports only fp16, bf16, and fp32 input",
+    )
+    torch._check(
+        qdata_dtype == torch.float8_e4m3fn
+        and inner_scale_calc == 0
+        and scaling_type == 3,
+        lambda: "only MXFP8 RCEIL with BlockWise1x32 is supported",
+    )
+    torch._check(swizzle_type == 1, lambda: "dual quantization requires SWIZZLE_32_4_4")
+    torch._check(
+        not scaling_type_square_block_and_expand,
+        lambda: "dual quantization does not support 32x32 MXFP8 scaling",
+    )
+    rows, cols = input.shape
+    torch._check(rows % 32 == 0)
+    torch._check(cols % 32 == 0)
+    return [
+        torch.empty((rows, cols), device=input.device, dtype=qdata_dtype),
+        torch.empty(
+            ((rows + 127) // 128, (cols + 127) // 128, 32, 16),
+            device=input.device,
+            dtype=torch.float8_e8m0fnu,
+        ),
+        torch.empty((cols, rows), device=input.device, dtype=qdata_dtype),
+        torch.empty(
+            ((cols + 127) // 128, (rows + 127) // 128, 32, 16),
+            device=input.device,
+            dtype=torch.float8_e8m0fnu,
+        ),
+    ]
+
+
 @register_meta([aten._scaled_mm_v2.default])
 def meta_scaled_mm_v2(
     self: torch.Tensor,

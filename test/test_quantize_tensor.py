@@ -1,5 +1,6 @@
 # Owner(s): ["module: linear algebra"]
 
+import inspect
 from functools import cache
 
 import torch
@@ -46,14 +47,6 @@ def _quantize_mxfp8_reference(
     return qdata, scales
 
 
-def _quantize_mxfp8_dim_km(input: torch.Tensor):
-    from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
-        _blockscaled_tma_impl,
-    )
-
-    return _blockscaled_tma_impl(input, "dim_km", False, True)
-
-
 @cache
 def _nvidia_sm100_or_newer(device: str) -> bool:
     if torch.version.hip is not None:
@@ -69,6 +62,10 @@ _MXFP8_KWARGS = {
     "qdata_dtype": torch.float8_e4m3fn,
     "inner_scale_calc": F.InnerScaleCalc.RCEIL_E8M0,
     "scaling_type": F.ScalingType.BlockWise1x32,
+}
+_MXFP8_NO_SWIZZLE_KWARGS = {
+    **_MXFP8_KWARGS,
+    "swizzle_type": SwizzleType.NO_SWIZZLE,
 }
 
 
@@ -87,7 +84,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         # copied from
         # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/test/prototype/mx_formats/test_mx_tensor.py#L264
         cases = make_mxfp8_semantic_cases(input_dtype, "rceil", device=device)
-        qdata, scales = quantize_fn(cases.inputs, **_MXFP8_KWARGS)
+        qdata, scales = quantize_fn(cases.inputs, **_MXFP8_NO_SWIZZLE_KWARGS)
         assert_mxfp8_semantics(qdata, scales, cases)
 
     @parametrize(
@@ -212,7 +209,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
             **_MXFP8_KWARGS,
             swizzle_type=SwizzleType.SWIZZLE_32_4_4,
         )
-        qdata_k, scales_k, qdata_m, scales_m = _quantize_mxfp8_dim_km(data_hp)
+        qdata_k, scales_k, qdata_m, scales_m = F.quantize_tensor_dual(
+            data_hp, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
+        )
         self.assertEqual(qdata_k.view(torch.uint8), qdata_k_ref.view(torch.uint8))
         self.assertEqual(qdata_m.view(torch.uint8), qdata_m_ref.view(torch.uint8))
         scale_k_bytes = scales_k.view(torch.uint8).flatten()
@@ -330,7 +329,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         M, K = shape
         data_hp = torch.empty(shape, dtype=torch.bfloat16, device=device)
-        outputs = _quantize_mxfp8_dim_km(data_hp)
+        outputs = F.quantize_tensor_dual(
+            data_hp, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
+        )
         expected_shapes = (
             (M, K),
             ((M + 127) // 128, (K + 127) // 128, 32, 16),
@@ -352,11 +353,11 @@ class TestMXFP8ReferenceNumerics(TestCase):
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         data = torch.ones((64, 64), dtype=torch.bfloat16, device=device)
         with self.assertRaisesRegex(ValueError, "SWIZZLE_32_4_4"):
-            F.quantize_tensor(data.t(), **_MXFP8_KWARGS)
+            F.quantize_tensor(data.t(), **_MXFP8_NO_SWIZZLE_KWARGS)
         with self.assertRaisesRegex(ValueError, "32x32 MXFP8 scaling"):
             F.quantize_tensor(
                 data,
-                **_MXFP8_KWARGS,
+                **_MXFP8_NO_SWIZZLE_KWARGS,
                 scaling_type_square_block_and_expand=True,
             )
         with self.assertRaisesRegex(ValueError, "32x32 MXFP8 scaling"):
@@ -367,30 +368,74 @@ class TestMXFP8ReferenceNumerics(TestCase):
                 scaling_type_square_block_and_expand=True,
             )
         with self.assertRaisesRegex(ValueError, "float8_e4m3fn"):
-            F.quantize_tensor(data, **(_MXFP8_KWARGS | {"qdata_dtype": torch.float16}))
+            F.quantize_tensor(
+                data, **(_MXFP8_NO_SWIZZLE_KWARGS | {"qdata_dtype": torch.float16})
+            )
         with self.assertRaisesRegex(ValueError, "RCEIL_E8M0"):
-            F.quantize_tensor(data, **(_MXFP8_KWARGS | {"inner_scale_calc": "other"}))
+            F.quantize_tensor(
+                data, **(_MXFP8_NO_SWIZZLE_KWARGS | {"inner_scale_calc": "other"})
+            )
         with self.assertRaisesRegex(ValueError, "BlockWise1x32"):
             F.quantize_tensor(
                 data,
-                **(_MXFP8_KWARGS | {"scaling_type": F.ScalingType.BlockWise1x16}),
+                **(
+                    _MXFP8_NO_SWIZZLE_KWARGS
+                    | {"scaling_type": F.ScalingType.BlockWise1x16}
+                ),
             )
         with self.assertRaisesRegex(ValueError, "transpose of contiguous"):
-            F.quantize_tensor(data[:, ::2], **_MXFP8_KWARGS)
+            F.quantize_tensor(data[:, ::2], **_MXFP8_NO_SWIZZLE_KWARGS)
         with self.assertRaisesRegex(ValueError, "columns divisible by 32"):
-            F.quantize_tensor(data.new_ones(64, 48), **_MXFP8_KWARGS)
+            F.quantize_tensor(data.new_ones(64, 48), **_MXFP8_NO_SWIZZLE_KWARGS)
 
     def test_quantize_tensor_requires_grad(self, device):
         data = torch.ones(
             (64, 64), dtype=torch.bfloat16, device=device, requires_grad=True
         )
         with self.assertRaisesRegex(RuntimeError, "does not support autograd"):
-            F.quantize_tensor(data, **_MXFP8_KWARGS)
+            F.quantize_tensor(data, **_MXFP8_NO_SWIZZLE_KWARGS)
         if _nvidia_sm100_or_newer(device):
             with torch.no_grad():
-                qdata, scales = F.quantize_tensor(data, **_MXFP8_KWARGS)
+                qdata, scales = F.quantize_tensor(data, **_MXFP8_NO_SWIZZLE_KWARGS)
             self.assertFalse(qdata.requires_grad)
             self.assertFalse(scales.requires_grad)
+
+    def test_quantize_tensor_dual_invalid_configuration(self, device):
+        if not _nvidia_sm100_or_newer(device):
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        data = torch.ones((64, 96), dtype=torch.bfloat16, device=device)
+        kwargs = {
+            **_MXFP8_KWARGS,
+            "swizzle_type": SwizzleType.SWIZZLE_32_4_4,
+        }
+        with self.assertRaisesRegex(ValueError, "SWIZZLE_32_4_4"):
+            F.quantize_tensor_dual(data, **_MXFP8_NO_SWIZZLE_KWARGS)
+        with self.assertRaisesRegex(ValueError, "32x32 MXFP8 scaling"):
+            F.quantize_tensor_dual(
+                data, **kwargs, scaling_type_square_block_and_expand=True
+            )
+        with self.assertRaisesRegex(ValueError, "contiguous input"):
+            F.quantize_tensor_dual(data.t(), **kwargs)
+        with self.assertRaisesRegex(ValueError, "both dimensions divisible by 32"):
+            F.quantize_tensor_dual(data[:, :48], **kwargs)
+        with self.assertRaisesRegex(ValueError, "float8_e4m3fn"):
+            F.quantize_tensor_dual(data, **(kwargs | {"qdata_dtype": torch.float16}))
+
+    def test_quantize_tensor_dual_requires_grad(self, device):
+        data = torch.ones(
+            (64, 96), dtype=torch.bfloat16, device=device, requires_grad=True
+        )
+        kwargs = {
+            **_MXFP8_KWARGS,
+            "swizzle_type": SwizzleType.SWIZZLE_32_4_4,
+        }
+        with self.assertRaisesRegex(RuntimeError, "does not support autograd"):
+            F.quantize_tensor_dual(data, **kwargs)
+        if _nvidia_sm100_or_newer(device):
+            with torch.no_grad():
+                outputs = F.quantize_tensor_dual(data, **kwargs)
+            for output in outputs:
+                self.assertFalse(output.requires_grad)
 
     def test_quantize_tensor_dispatch_transposed(self, device):
         if not _nvidia_sm100_or_newer(device):
@@ -408,6 +453,23 @@ class TestMXFP8ReferenceNumerics(TestCase):
         )
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
         self.assertEqual(scales.view(torch.uint8), scales_ref.view(torch.uint8))
+
+    def test_quantize_tensor_dual_dispatch(self, device):
+        if not _nvidia_sm100_or_newer(device):
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        input = torch.randn((64, 96), dtype=torch.float16, device=device)
+        actual = torch.ops.aten._quantize_tensor_dual.default(
+            input,
+            qdata_dtype=torch.float8_e4m3fn,
+            inner_scale_calc=0,
+            scaling_type=F.ScalingType.BlockWise1x32.value,
+            swizzle_type=SwizzleType.SWIZZLE_32_4_4.value,
+        )
+        expected = F.quantize_tensor_dual(
+            input, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
+        )
+        for got, reference in zip(actual, expected, strict=True):
+            self.assertEqual(got.view(torch.uint8), reference.view(torch.uint8))
 
     @parametrize("transposed,square", ((False, False), (True, False), (False, True)))
     def test_quantize_tensor_compile(self, transposed, square, device):
@@ -452,6 +514,21 @@ class TestMXFP8ReferenceNumerics(TestCase):
             compute_error(mat_a.float() @ mat_b.float(), out.float()).item(), 15.0
         )
 
+    def test_quantize_tensor_dual_compile(self, device):
+        if not _nvidia_sm100_or_newer(device):
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
+        input = torch.randn((160, 192), dtype=torch.bfloat16, device=device)
+
+        def fn(x):
+            return F.quantize_tensor_dual(
+                x, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
+            )
+
+        expected = fn(input)
+        actual = torch.compile(fn, fullgraph=True)(input)
+        for got, reference in zip(actual, expected, strict=True):
+            self.assertEqual(got.view(torch.uint8), reference.view(torch.uint8))
+
     @parametrize("quantize_fn", _MXFP8_IMPLEMENTATIONS)
     def test_to_mx_rceil(self, quantize_fn, device):
         if quantize_fn is F.quantize_tensor and not _nvidia_sm100_or_newer(device):
@@ -475,7 +552,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
 
         # fmt: on
         data = data_hp.to(device).view(1, -1)
-        qdata, scales = quantize_fn(data, **_MXFP8_KWARGS)
+        qdata, scales = quantize_fn(data, **_MXFP8_NO_SWIZZLE_KWARGS)
         self.assertTrue(torch.isnan(scales))
         # When any element in block is NaN, entire quantized block becomes NaN
         self.assertTrue(torch.all(torch.isnan(qdata)))
@@ -508,7 +585,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         ).view(torch.float8_e4m3fn)
         # fmt: on
         data = data_hp.to(device).view(1, -1)
-        qdata, scales = quantize_fn(data, **_MXFP8_KWARGS)
+        qdata, scales = quantize_fn(data, **_MXFP8_NO_SWIZZLE_KWARGS)
         self.assertEqual(scales, ground_truth_scale.to(device).view(1, -1))
         self.assertEqual(qdata, ground_truth_fp8.to(device).view(1, -1))
         # bf16 denorm
@@ -538,7 +615,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         ).view(torch.float8_e4m3fn)
         # fmt: on
         data = data_hp.to(device).view(1, -1)
-        qdata, scales = quantize_fn(data, **_MXFP8_KWARGS)
+        qdata, scales = quantize_fn(data, **_MXFP8_NO_SWIZZLE_KWARGS)
         self.assertEqual(scales, ground_truth_scale.to(device).view(1, -1))
         self.assertEqual(qdata, ground_truth_fp8.to(device).view(1, -1))
         # fp32 some denorm
@@ -568,7 +645,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         ).view(torch.float8_e4m3fn)
         # fmt: on
         data = data_hp.to(device).view(1, -1)
-        qdata, scales = quantize_fn(data, **_MXFP8_KWARGS)
+        qdata, scales = quantize_fn(data, **_MXFP8_NO_SWIZZLE_KWARGS)
         self.assertEqual(scales, ground_truth_scale.to(device).view(1, -1))
         self.assertEqual(qdata, ground_truth_fp8.to(device).view(1, -1))
         # bf16 some denorm
@@ -598,7 +675,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         ).view(torch.float8_e4m3fn)
         # fmt: on
         data = data_hp.to(device).view(1, -1)
-        qdata, scales = quantize_fn(data, **_MXFP8_KWARGS)
+        qdata, scales = quantize_fn(data, **_MXFP8_NO_SWIZZLE_KWARGS)
         self.assertEqual(scales, ground_truth_scale.to(device).view(1, -1))
         self.assertEqual(qdata, ground_truth_fp8.to(device).view(1, -1))
         # zero
@@ -610,7 +687,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             torch.float8_e4m3fn
         )
         data = data_hp.to(device).view(1, -1)
-        qdata, scales = quantize_fn(data, **_MXFP8_KWARGS)
+        qdata, scales = quantize_fn(data, **_MXFP8_NO_SWIZZLE_KWARGS)
         self.assertEqual(scales, ground_truth_scale.to(device).view(1, -1))
         self.assertEqual(qdata, ground_truth_fp8.to(device).view(1, -1))
         # fp32 normal
@@ -640,7 +717,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         ).view(torch.float8_e4m3fn)
         # fmt: on
         data = data_hp.to(device).view(1, -1)
-        qdata, scales = quantize_fn(data, **_MXFP8_KWARGS)
+        qdata, scales = quantize_fn(data, **_MXFP8_NO_SWIZZLE_KWARGS)
         self.assertEqual(scales, ground_truth_scale.to(device).view(1, -1))
         self.assertEqual(qdata, ground_truth_fp8.to(device).view(1, -1))
         # bf16 normal
@@ -670,17 +747,42 @@ class TestMXFP8ReferenceNumerics(TestCase):
         ).view(torch.float8_e4m3fn)
         # fmt: on
         data = data_hp.to(device).view(1, -1)
-        qdata, scales = quantize_fn(data, **_MXFP8_KWARGS)
+        qdata, scales = quantize_fn(data, **_MXFP8_NO_SWIZZLE_KWARGS)
         self.assertEqual(scales, ground_truth_scale.to(device).view(1, -1))
         self.assertEqual(qdata, ground_truth_fp8.to(device).view(1, -1))
 
 
 @instantiate_parametrized_tests
 class TestQuantizeTensorMeta(TestCase):
+    def test_quantize_tensor_argument_names(self):
+        public_names = tuple(inspect.signature(F.quantize_tensor).parameters)
+        dual_names = tuple(inspect.signature(F.quantize_tensor_dual).parameters)
+        native = torch.ops.aten._quantize_tensor.default._schema.arguments
+        native_dual = torch.ops.aten._quantize_tensor_dual.default._schema.arguments
+        self.assertEqual(public_names, dual_names)
+        native_names = tuple(arg.name for arg in native)
+        self.assertEqual(native_names, tuple(arg.name for arg in native_dual))
+        self.assertEqual(public_names, native_names)
+        for fn in (F.quantize_tensor, F.quantize_tensor_dual):
+            params = tuple(inspect.signature(fn).parameters.values())
+            self.assertEqual(params[0].kind, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            for param in params[1:]:
+                self.assertEqual(param.kind, inspect.Parameter.KEYWORD_ONLY)
+            self.assertEqual(params[4].default, inspect.Parameter.empty)
+        for schema_args in (native, native_dual):
+            self.assertFalse(schema_args[0].kwarg_only)
+            for arg in schema_args[1:]:
+                self.assertTrue(arg.kwarg_only)
+            self.assertFalse(schema_args[4].has_default_value())
+
     def test_cpu_is_unsupported(self):
         data = torch.empty((32, 32), dtype=torch.float32)
         with self.assertRaisesRegex(RuntimeError, "NVIDIA CUDA"):
-            F.quantize_tensor(data, **_MXFP8_KWARGS)
+            F.quantize_tensor(data, **_MXFP8_NO_SWIZZLE_KWARGS)
+        with self.assertRaisesRegex(RuntimeError, "NVIDIA CUDA"):
+            F.quantize_tensor_dual(
+                data, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
+            )
 
     @parametrize(
         "shape,transposed,square,swizzle",
@@ -726,6 +828,16 @@ class TestQuantizeTensorMeta(TestCase):
             )
             self.assertEqual(tuple(qdata.shape), (160, 160))
             self.assertEqual(tuple(scales.shape), (2, 2, 32, 16))
+            dual_input = torch.empty((160, 288), dtype=torch.float16, device="cuda")
+            qk, sk, qm, sm = F.quantize_tensor_dual(
+                dual_input,
+                **_MXFP8_KWARGS,
+                swizzle_type=SwizzleType.SWIZZLE_32_4_4,
+            )
+            self.assertEqual(tuple(qk.shape), (160, 288))
+            self.assertEqual(tuple(sk.shape), (2, 3, 32, 16))
+            self.assertEqual(tuple(qm.shape), (288, 160))
+            self.assertEqual(tuple(sm.shape), (3, 2, 32, 16))
 
     def test_dispatch_transposed_shape(self):
         input = torch.empty((32, 160), dtype=torch.float16, device="meta").t()
@@ -738,6 +850,25 @@ class TestQuantizeTensorMeta(TestCase):
         )
         self.assertEqual(tuple(qdata.shape), (160, 32))
         self.assertEqual(tuple(scales.shape), (2, 1, 32, 16))
+
+    def test_dual_meta_shapes(self):
+        input = torch.empty((160, 288), dtype=torch.bfloat16, device="meta")
+        outputs = F.quantize_tensor_dual(
+            input, **_MXFP8_KWARGS, swizzle_type=SwizzleType.SWIZZLE_32_4_4
+        )
+        self.assertEqual(
+            tuple(tuple(output.shape) for output in outputs),
+            ((160, 288), (2, 3, 32, 16), (288, 160), (3, 2, 32, 16)),
+        )
+        self.assertEqual(
+            tuple(output.dtype for output in outputs),
+            (
+                torch.float8_e4m3fn,
+                torch.float8_e8m0fnu,
+                torch.float8_e4m3fn,
+                torch.float8_e8m0fnu,
+            ),
+        )
 
 
 instantiate_device_type_tests(TestMXFP8ReferenceNumerics, globals(), only_for="cuda")

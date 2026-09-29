@@ -67,30 +67,19 @@ def _benchmark_one(kernel, M, K, dtype):
     torch.manual_seed(0)
     input = torch.randn(M, K, dtype=dtype, device="cuda")
     orientation, square, swizzled = _KERNELS[kernel]
+    api_input = input.t() if orientation == "dim_m" else input
+    swizzle_type = SwizzleType.SWIZZLE_32_4_4 if swizzled else SwizzleType.NO_SWIZZLE
+    quantize = F.quantize_tensor_dual if orientation == "dim_km" else F.quantize_tensor
 
-    if orientation == "dim_km":
-        from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
-            _blockscaled_tma_impl,
+    def run():
+        return quantize(
+            api_input,
+            qdata_dtype=torch.float8_e4m3fn,
+            inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0,
+            scaling_type=F.ScalingType.BlockWise1x32,
+            swizzle_type=swizzle_type,
+            scaling_type_square_block_and_expand=square,
         )
-
-        def run():
-            return _blockscaled_tma_impl(input, orientation, square, swizzled)
-
-    else:
-        api_input = input.t() if orientation == "dim_m" else input
-        swizzle_type = (
-            SwizzleType.SWIZZLE_32_4_4 if swizzled else SwizzleType.NO_SWIZZLE
-        )
-
-        def run():
-            return F.quantize_tensor(
-                api_input,
-                qdata_dtype=torch.float8_e4m3fn,
-                inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0,
-                scaling_type=F.ScalingType.BlockWise1x32,
-                swizzle_type=swizzle_type,
-                scaling_type_square_block_and_expand=square,
-            )
 
     outputs = run()
     torch.cuda.synchronize()

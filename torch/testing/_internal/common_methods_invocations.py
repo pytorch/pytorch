@@ -7467,11 +7467,24 @@ def sample_inputs_cutedsl_quantize_tensor(op_info, device, dtype, requires_grad,
         "qdata_dtype": torch.float8_e4m3fn,
         "inner_scale_calc": F.InnerScaleCalc.RCEIL_E8M0,
         "scaling_type": F.ScalingType.BlockWise1x32,
+        "swizzle_type": F.SwizzleType.NO_SWIZZLE,
     }
     yield SampleInput(input, kwargs=recipe)
     yield SampleInput(input.t(), kwargs={**recipe, "swizzle_type": F.SwizzleType.SWIZZLE_32_4_4})
     yield SampleInput(input, kwargs={**recipe, "swizzle_type": F.SwizzleType.SWIZZLE_32_4_4,
                                      "scaling_type_square_block_and_expand": True})
+
+
+def sample_inputs_cutedsl_quantize_tensor_dual(op_info, device, dtype, requires_grad, **kwargs_unused):
+    from torch.nn import functional as F
+
+    input = make_tensor((160, 192), device=device, dtype=dtype, requires_grad=False)
+    yield SampleInput(input, kwargs={
+        "qdata_dtype": torch.float8_e4m3fn,
+        "inner_scale_calc": F.InnerScaleCalc.RCEIL_E8M0,
+        "scaling_type": F.ScalingType.BlockWise1x32,
+        "swizzle_type": F.SwizzleType.SWIZZLE_32_4_4,
+    })
 
 
 def _cutedsl_linear_cross_entropy_eligible(sample):
@@ -23171,6 +23184,34 @@ if "cutedsl" in dsl_ops_by_dsl:
             ],
             skips=(
                 DecorateInfo(unittest.skip("requires supported input layout"), "TestCommon", "test_noncontiguous_samples"),
+                DecorateInfo(unittest.skip("export is deferred"), "TestExportOpInfo"),
+                DecorateInfo(unittest.skip("export is deferred"), "TestExportOnFakeCuda"),
+            ),
+        )
+    )
+    dsl_ops_by_dsl["cutedsl"].append(
+        OpInfo(
+            "nn.functional.quantize_tensor_dual",
+            variant_test_name="cutedsl",
+            aten_name="_quantize_tensor_dual",
+            dtypes=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            dtypesIfCUDA=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            sample_inputs_func=sample_inputs_cutedsl_quantize_tensor_dual,
+            supports_autograd=False,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=False,
+            supports_out=False,
+            supports_cow_input_no_materialize_forward=False,
+            decorators=[
+                DecorateInfo(onlyCUDA),
+                DecorateInfo(skipIfNoCuteDSL),
+                DecorateInfo(skipIfRocm),
+                DecorateInfo(skipCUDAIf(not SM100OrLater, "requires NVIDIA SM100+")),
+            ],
+            skips=(
+                DecorateInfo(
+                    unittest.skip("requires contiguous input"), "TestCommon", "test_noncontiguous_samples"
+                ),
                 DecorateInfo(unittest.skip("export is deferred"), "TestExportOpInfo"),
                 DecorateInfo(unittest.skip("export is deferred"), "TestExportOnFakeCuda"),
             ),
