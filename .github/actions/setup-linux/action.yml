@@ -66,10 +66,15 @@ runs:
           sudo chmod -R 777 "$GITHUB_WORKSPACE"
         fi
 
-    - name: Prepare writable Python environment
+    - name: Prepare writable environment
       if: ${{ inputs.use-arc == 'true' }}
       shell: bash
       run: |
+        WRITABLE_HOME="${RUNNER_TEMP}/home"
+        mkdir -p "$WRITABLE_HOME"
+        export HOME="$WRITABLE_HOME"
+        echo "HOME=$WRITABLE_HOME" >> "$GITHUB_ENV"
+
         if [[ -z "${VIRTUAL_ENV:-}" ]]; then
           exit 0
         fi
