@@ -615,7 +615,12 @@ class ConstDictVariable(VariableTracker):
         if kwargs:
             args = _bind_ordered_dict_args(self, tx, "pop", args, kwargs)
         check_positional(tx, "pop", len(args), 1, 2)
-        if args[0] not in self:
+        missing = object()
+        if isinstance(self, DunderDictVariable) and args[0] not in self:
+            value = missing
+        else:
+            value = self.items.pop(HashableTracker(args[0]), missing)
+        if value is missing:
             # missing item, return the default value. Install no DICT_CONTAINS guard.
             self.install_dict_contains_guard(tx, args)
             if len(args) == 1:
@@ -624,7 +629,7 @@ class ConstDictVariable(VariableTracker):
             return args[1]
         self.should_reconstruct_all = True
         tx.output.side_effects.mutation(self)
-        return self.items.pop(HashableTracker(args[0]))
+        return value
 
     def dict_popitem(
         self,
