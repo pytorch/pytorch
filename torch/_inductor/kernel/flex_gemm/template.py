@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 @dataclasses.dataclass(frozen=True)
 class FlexGemmEpilogueLocalReduceConfig:
-    """Template-time local-reduce metadata for output and/or feed-main consumers."""
+    """Template-time local-reduce metadata; geometry is in physical accumulator columns."""
 
     geometry: FlexGemmLocalReduceGeometry
     out_index: int | None = None
@@ -46,6 +46,7 @@ class FlexGemmEpilogueLocalReduceConfig:
     combine: str | None = None
     finalize: str | None = None
     finalize_operands: tuple[str, ...] = ()
+    fragment_reduced: bool = False
     store_finalize: str | None = None
     binary_store_finalize: bool = False
     prepass_combine: str | None = None
@@ -62,13 +63,14 @@ class FlexGemmEpilogueLocalReduceConfig:
         if local_reduce is None:
             return None
         return FlexGemmEpilogueLocalReduceConfig(
-            local_reduce.match.geometry,
+            local_reduce.match.physical_geometry,
             out_index,
             (None if local_reduce.store is None else local_reduce.store.output_layout),
             local_reduce.feeds_main,
             source.local_reduce_combine,
             source.local_reduce_finalize,
             source.local_reduce_finalize_operands,
+            source.local_reduce_fragment_reduced,
             source.local_reduce_store_finalize,
             source.local_reduce_binary_store_finalize,
             source.local_reduce_prepass_combine,
@@ -97,6 +99,7 @@ class FlexGemmEpilogueLocalReduceConfig:
             combine=self.combine,
             finalize=callback(self.finalize),
             finalize_operands=self.finalize_operands,
+            fragment_reduced=self.fragment_reduced,
             store_finalize=callback(self.store_finalize),
             binary_store_finalize=self.binary_store_finalize,
             prepass=None if self.prepass_combine is None else resolve(prepass_name),
@@ -295,6 +298,8 @@ class FlexGemmEpilogueKernel(CuteDSLTemplateKernel):
             plan += f", finalize={self._callback_reference(local_reduce.finalize)}"
         if local_reduce.finalize_operands:
             plan += f", finalize_operands={local_reduce.finalize_operands!r}"
+        if local_reduce.fragment_reduced:
+            plan += ", fragment_reduced=True"
         if local_reduce.store_finalize is not None:
             plan += (
                 ", store_finalize="

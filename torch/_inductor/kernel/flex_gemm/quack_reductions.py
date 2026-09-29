@@ -21,7 +21,10 @@ import dataclasses
 from typing import Any
 
 import torch
-from torch._inductor.kernel.gemm_epilogue import iter_fx_node_inputs
+from torch._inductor.kernel.gemm_epilogue import (
+    GemmReductionGeometry,
+    iter_fx_node_inputs,
+)
 from torch._inductor.kernel.gemm_epilogue_codegen import _cute_op_name
 from torch._inductor.shape_propagation import get_broadcasted_shape
 from torch.fx.experimental.symbolic_shapes import (
@@ -53,6 +56,44 @@ class FlexGemmStructuralInt:
         """Install the specialization guard after semantic validation succeeds."""
         if self.symbolic is not None and guard_int(self.symbolic) != self.value:
             raise AssertionError("FlexGEMM structural hint changed before commit")
+
+
+@dataclasses.dataclass(frozen=True)
+class GroupedTensorSSALayout(GemmReductionGeometry):
+    """Describe a grouped M/N TensorSSA view inside the generated epilogue."""
+
+    def fragment_group_size_expr(self, source: Any) -> str:
+        """Return the grouped extent available in one TensorSSA fragment."""
+        return (
+            f"cutlass.const_expr(min({self.group}, "
+            f"cute.size({source}.shape, mode=[0])))"
+        )
+
+    def fragment_repeat_expr(self, source: Any) -> str:
+        """Return the number of grouped runs in one TensorSSA fragment."""
+        return (
+            f"cutlass.const_expr(cute.size({source}.shape, mode=[0]) "
+            f"// min({self.group}, cute.size({source}.shape, mode=[0])))"
+        )
+
+    def tensorssa_shape(self, source: Any) -> str:
+        """Return the grouped TensorSSA view for this logical axis."""
+        group = self.fragment_group_size_expr(source)
+        repeats = self.fragment_repeat_expr(source)
+        if self.axis == 1:
+            return f"((1, {group}, {repeats}), 1, 1)"
+        return f"(({group}, 1, {repeats}), 1, 1)"
+
+    def keepdim_shape(self, source: Any) -> str:
+        """Return the reduced TensorSSA shape before fragment broadcast."""
+        return f"((1, 1, {self.fragment_repeat_expr(source)}), 1, 1)"
+
+    @property
+    def reduction_profile(self) -> str:
+        """Return the CuTe reduction profile for the grouped dimension."""
+        return (
+            "((None, 1, None), 1, 1)" if self.axis == 1 else "((1, None, None), 1, 1)"
+        )
 
 
 FLEX_GEMM_POINTWISE_OP_NAMES = frozenset(
