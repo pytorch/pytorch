@@ -1499,6 +1499,14 @@ class TestReductions(TestCase):
             expect = np.prod(np.array(val))
             self.assertEqual(result, expect)
 
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32)
+    def test_prod_integer_accumulates_in_int64(self, device, dtype):
+        # 5**14 overflows int32 and float32's 24-bit mantissa; 200 elements spread the reduction over several simdgroups
+        x = torch.ones(2, 200, dtype=dtype, device=device)
+        x[:, :14] = 5
+        self.assertEqual(x[0].prod(), 5 ** 14)
+        self.assertEqual(x.prod(1), torch.full((2,), 5 ** 14, device=device))
+
     @onlyAccelerator
     @skipIfMPS
     def test_max_mixed_devices(self, device):
