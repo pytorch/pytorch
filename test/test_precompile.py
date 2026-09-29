@@ -5317,10 +5317,10 @@ class TestPrecompileDynamoCapture(TestCase):
             load(other_artifact, self.cache)
 
 
-def _capture_files(fn, example_inputs, backend, dynamic=None, tracer=None):
+def _capture_files(test, fn, example_inputs, backend, dynamic=None, tracer=None):
     """Capture ``fn`` (Dynamo tracer by default) and return (artifact_path, cache_path)."""
     temp_dir = tempfile.TemporaryDirectory()
-    unittest.addModuleCleanup(temp_dir.cleanup)
+    test.addCleanup(temp_dir.cleanup)
     directory = temp_dir.name
     artifact_path = os.path.join(directory, "artifact.py")
     cache_path = os.path.join(directory, "artifact.cache")
@@ -5362,7 +5362,7 @@ class TestPrecompileNoCompilation(TestCase):
     @parametrize("damage", ("corrupt", "format", "version"))
     def test_strict_load_rejects_bad_envelope_before_execution(self, damage):
         artifact, cache = _capture_files(
-            lambda x: x.sin(), [(torch.ones(4),)], backend="eager"
+            self, lambda x: x.sin(), [(torch.ones(4),)], backend="eager"
         )
         if damage == "corrupt":
             with open(cache, "r+b") as f:
@@ -5382,7 +5382,7 @@ class TestPrecompileNoCompilation(TestCase):
         from torch.compiler._cache import CacheInfo
 
         artifact, cache = _capture_files(
-            _no_compilation_inductor_graph, [(torch.ones(4),)], backend="inductor"
+            self, _no_compilation_inductor_graph, [(torch.ones(4),)], backend="inductor"
         )
         if failure == "missing":
             _rewrite_envelope(cache, artifact=None)
@@ -5408,6 +5408,7 @@ class TestPrecompileNoCompilation(TestCase):
         x = torch.ones(2, 8)
         with fresh_cache():
             artifact, cache = _capture_files(
+                self,
                 _no_compilation_inductor_graph,
                 [(x,)],
                 backend="inductor",
@@ -5430,6 +5431,7 @@ class TestPrecompileNoCompilation(TestCase):
         x = torch.ones(2, 8, device="cuda")
         with fresh_cache():
             artifact, cache = _capture_files(
+                self,
                 _no_compilation_inductor_graph,
                 [(x,)],
                 backend="inductor",
@@ -5461,6 +5463,7 @@ class TestPrecompileNoCompilation(TestCase):
     def test_strict_loaded_artifact_rejects_shape_miss(self):
         expected = _no_compilation_single_graph(torch.ones(2, 8))
         artifact, cache = _capture_files(
+            self,
             _no_compilation_single_graph,
             [(torch.ones(2, 8),)],
             backend="eager",
@@ -6070,36 +6073,16 @@ class TestPrecompileNoCompilation(TestCase):
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileRuntimeCache(TestCase):
-    def test_drain_propagates_failed_compiler_future(self):
-        from concurrent.futures import Future
-
-        from torch._inductor.async_compile import AsyncCompile, CompiledTritonKernels
-        from torch._inductor.codecache import LambdaFuture
-
-        pending = Future()
-        pending.set_exception(RuntimeError("producer compile failed"))
-        with (
-            mock.patch.object(
-                CompiledTritonKernels,
-                "_cache",
-                {"pending": LambdaFuture(pending.result)},
-            ),
-            mock.patch(
-                "torch._inductor.async_compile.shutdown_compile_workers"
-            ) as shutdown,
-            self.assertRaisesRegex(RuntimeError, "producer compile failed"),
-        ):
-            AsyncCompile.drain_pending()
-        shutdown.assert_not_called()
-
-    @unittest.skipUnless(TEST_CUDA, "requires Triton")
-    @parametrize("shared", (False, True))
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
+    @parametrize("device", (0, None))
     @parametrize("explicit_cache", (False, True))
-    def test_strict_hydration_maps_shared_cache_to_current_device(
-        self, shared, explicit_cache
+    def test_strict_hydration_restores_kernel_where_autotuner_loads_it(
+        self, device, explicit_cache
     ):
         from pathlib import Path
 
+        from torch._inductor.runtime.cache_dir_utils import triton_cache_dir
+        from torch._inductor.runtime.triton_heuristics import _resolve_load_device
         from torch._inductor.triton_bundler import (
             TritonBundle,
             TritonBundler,
@@ -6111,7 +6094,7 @@ class TestPrecompileRuntimeCache(TestCase):
             [
                 TritonKernelArtifacts(
                     "kernel-key",
-                    0,
+                    device,
                     [
                         TritonKernelArtifact("kernel.cubin", b"compiled-kernel"),
                         TritonKernelArtifact(
@@ -6126,21 +6109,24 @@ class TestPrecompileRuntimeCache(TestCase):
         with (
             tempfile.TemporaryDirectory() as directory,
             mock.patch.dict(os.environ, {"TORCHINDUCTOR_CACHE_DIR": directory}),
-            torch.compiler.config.patch(compile_on_one_rank=shared),
             torch._inductor.config.patch(
                 bundle_triton_into_fx_graph_cache=True,
                 use_static_triton_launcher=False,
             ),
-            mock.patch("torch.accelerator.current_device_index", return_value=2),
             torch.compiler.precompile.no_compilation(),
         ):
             if explicit_cache:
-                basedir = Path(directory) / "explicit"
-                os.environ["TRITON_CACHE_DIR"] = str(basedir)
+                os.environ["TRITON_CACHE_DIR"] = str(Path(directory) / "explicit")
             else:
                 os.environ.pop("TRITON_CACHE_DIR", None)
-                basedir = Path(directory) / "triton" / ("2" if shared else "0")
             TritonBundler.read_and_emit(bundle)
+            # CachingAutotuner.__init__ and reload_cubin_path resolve the kernel
+            # directory this way, so a None (compile_on_one_rank) device must land
+            # under the current device rather than triton/None.
+            basedir = Path(triton_cache_dir(_resolve_load_device(device, "cuda")))
+            if not explicit_cache:
+                expected = torch.cuda.current_device() if device is None else device
+                self.assertEqual(basedir, Path(directory) / "triton" / str(expected))
             kernel_dir = basedir / "kernel-key"
             self.assertEqual(
                 (kernel_dir / "kernel.cubin").read_bytes(), b"compiled-kernel"

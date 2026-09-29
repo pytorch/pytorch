@@ -214,7 +214,7 @@ class StaticallyLaunchedTritonKernel:
         If the cubin file triton generated gets deleted under us, we can
         reload it from the raw cubin file.
         """
-        if self.cubin_path != filepath or not os.path.exists(filepath):
+        if not os.path.exists(filepath):
             if self.cubin_raw is None:
                 raise AssertionError(
                     "cubin_raw must be set to restore a missing binary"
@@ -222,8 +222,8 @@ class StaticallyLaunchedTritonKernel:
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, "wb") as f:
                 f.write(self.cubin_raw)
-                self.cubin_path = filepath  # pyre-ignore
-        return self.cubin_path
+        self.cubin_path = filepath  # pyre-ignore
+        return filepath
 
     def _agnostic_cubin_path(self) -> str:
         # The cubin bytes are device-agnostic, so the same file loads onto any device.
