@@ -391,8 +391,11 @@ def canonicalize_view_scatter_ops(
                 src_src,
                 [scatter_view_op, *src_scatter_view_op],  # type: ignore[misc]
             )
+            replacements[node] = new_node
             node.replace_all_uses_with(new_node)
             graph.erase_node(node)
+
+            assert isinstance(src, torch.fx.Node)
 
             if src.users:  # type: ignore[union-attr]
                 new_src = graph_call_function(
@@ -403,6 +406,7 @@ def canonicalize_view_scatter_ops(
                     **node.kwargs,
                 )
 
+                replacements[src] = new_src
                 handle_views(new_src)
                 src.replace_all_uses_with(new_src)  # type: ignore[union-attr]
 
@@ -560,18 +564,18 @@ def _match_functionalized_user_defined_triton_kernel(
         ):
             mutated_arg = kwargs[key]
             logical_input_base = _get_view_base(mutated_arg)
+            if (base_val := logical_input_base.meta.get("val")) is None:
+                continue
+
+            replayed_val = apply_view_meta_sequence(
+                base_val, triton_reinplace_info.view_meta_sequence.sequence
+            )
+            if not _same_tensor_metadata_values(
+                mutated_arg.meta.get("val"), replayed_val
+            ):
+                continue
 
             redundant_ops = [user]
-
-            if (base_val := logical_input_base.meta.get("val")) is not None:
-                replayed_val = apply_view_meta_sequence(
-                    base_val, triton_reinplace_info.view_meta_sequence.sequence
-                )
-                if not _same_tensor_metadata_values(
-                    mutated_arg.meta.get("val"), replayed_val
-                ):
-                    continue
-
             redundant_ops.extend(
                 canonicalized_root(node, canonicalized_replacements)
                 for node in triton_reinplace_info.view_replay_nodes
