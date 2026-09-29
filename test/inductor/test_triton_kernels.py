@@ -1358,6 +1358,100 @@ def forward(self, x_1, output_1):
         self.assertEqual(actual_input, expected_input)
 
     @requires_gpu
+    def test_triton_kernel_does_not_reinplace_with_mismatched_view_replay(self):
+        from torch._C._functionalization import apply_view_meta_sequence
+        from torch._guards import detect_fake_mode
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._inductor.fx_passes.reinplace import (
+            _same_tensor_metadata_values,
+            reinplace_inplaceable_ops,
+        )
+        from torch._inductor.fx_utils import FakeTensorUpdater
+        from torch._inductor.virtualized import V
+        from torch._subclasses.functional_tensor import dispatch_functionalize
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        aten = torch.ops.aten
+        kernel_idx = kernel_side_table.add_kernel(mul2_inplace_kernel)
+        constant_args_idx = kernel_side_table.add_constant_args(
+            {"n_elements": 8, "BLOCK_SIZE": 16}
+        )
+
+        def mutation_graph(x: torch.Tensor):
+            view = aten.slice.Tensor(x, 0, 2, 4)
+            triton_kernel_wrapper_mutation(
+                kernel_idx=kernel_idx,
+                constant_args_idx=constant_args_idx,
+                grid=[(1,)],
+                tma_descriptor_metadata={},
+                kwargs={"ptr": view},
+            )
+            return x
+
+        original = torch.rand(4, 4, device=GPU_TYPE)
+        gm = make_fx(
+            dispatch_functionalize(mutation_graph, propagate_input_mutations=True),
+            tracing_mode="fake",
+        )(original)
+
+        input_node = next(node for node in gm.graph.nodes if node.op == "placeholder")
+        mutated_view = next(
+            node
+            for node in gm.graph.nodes
+            if node.target is aten.slice.Tensor and node.args[0] is input_node
+        )
+        getitem = next(
+            node for node in gm.graph.nodes if "triton_reinplace_info" in node.meta
+        )
+        info = getitem.meta["triton_reinplace_info"]
+
+        # Simulate a graph rewrite that changes the kernel's input view without
+        # updating the view replay recipe captured during functionalization.
+        mutated_view.args = (input_node, 0, 1, 3)
+        mutated_view.meta["val"] = input_node.meta["val"][1:3]
+        replayed_val = apply_view_meta_sequence(
+            input_node.meta["val"], info.view_meta_sequence.sequence
+        )
+        self.assertEqual(mutated_view.meta["val"].size(), replayed_val.size())
+        self.assertEqual(mutated_view.meta["val"].stride(), replayed_val.stride())
+        self.assertNotEqual(
+            mutated_view.meta["val"].storage_offset(), replayed_val.storage_offset()
+        )
+        self.assertFalse(
+            _same_tensor_metadata_values(mutated_view.meta["val"], replayed_val)
+        )
+
+        gm.graph.lint()
+        gm.recompile()
+        expected_input = original.clone()
+        expected = gm(expected_input)
+
+        fake_mode = detect_fake_mode(
+            tuple(node.meta.get("val") for node in gm.graph.nodes)
+        )
+        self.assertIsNotNone(fake_mode)
+        with mock.patch(
+            "torch._inductor.fx_passes.reinplace.apply_view_meta_sequence",
+            wraps=apply_view_meta_sequence,
+        ) as replay:
+            with V.set_fake_mode(fake_mode):
+                reinplace_inplaceable_ops(FakeTensorUpdater(gm), gm.graph)
+        self.assertGreater(replay.call_count, 0)
+
+        triton_nodes = gm.graph.find_nodes(
+            op="call_function", target=triton_kernel_wrapper_functional
+        )
+        self.assertEqual(len(triton_nodes), 1)
+        self.assertEqual(triton_nodes[0].kwargs["tensors_to_clone"], ["ptr"])
+
+        gm.graph.lint()
+        gm.recompile()
+        actual_input = original.clone()
+        actual = gm(actual_input)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_input, expected_input)
+
+    @requires_gpu
     def test_triton_kernel_reinplaces_scatter_before_later_mutation(self):
         def call_triton_inplace_view(x: torch.Tensor):
             x_slice = x[2:]
