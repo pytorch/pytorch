@@ -11619,6 +11619,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             "fsdp_copy_then_mutate",
             "foreach_reads_target_elsewhere",
             "foreach_reads_input_elsewhere",
+            "foreach_reads_sibling_target",
+            "foreach_reads_sibling_input",
+            "foreach_reads_sibling_across_groups",
             "copy_into_strided_empty",
         ),
     )
@@ -11658,6 +11661,24 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             torch._foreach_add_([x], [x.flip(0)])
             return (x + 0,)
 
+        def foreach_reads_sibling_target(x, w1, w2):
+            # Applied in list order, as eager does on CPU, so b adds the
+            # updated a.
+            a = x @ w1
+            b = x @ w2
+            torch._foreach_add_([a, b], [b, a])
+            return a, b
+
+        def foreach_reads_sibling_input(x, y):
+            torch._foreach_add_([x, y], [y, x])
+            return x + 0, y + 0
+
+        def foreach_reads_sibling_across_groups(a, b, c, d):
+            # c and d read b after it is written, so they start a second
+            # group, which must not fuse pairwise with the first.
+            torch._foreach_add_([a, b, c, d], [c, d, b, b])
+            return a + 0, b + 0, c + 0, d + 0
+
         def copy_into_strided_empty(x):
             # The view of e must read the copy through e's strides.
             e = torch.empty_strided((4, 8), (1, 4), device=x.device)
@@ -11667,6 +11688,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         if case == "fsdp_copy_then_mutate" and not hasattr(torch.ops.fsdp, "copy_"):
             self.skipTest("needs torch.ops.fsdp.copy_")
+        if case in (
+            "foreach_reads_sibling_input",
+            "foreach_reads_sibling_across_groups",
+        ) and is_halide_backend(self.device):
+            # Halide gets the inputs right but not x + 0, which misses x's
+            # in-place update.
+            self.skipTest("halide: an output misses its input's in-place update")
         fn = {
             f.__name__: f
             for f in (
@@ -11674,18 +11702,44 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 fsdp_copy_then_mutate,
                 foreach_reads_target_elsewhere,
                 foreach_reads_input_elsewhere,
+                foreach_reads_sibling_target,
+                foreach_reads_sibling_input,
+                foreach_reads_sibling_across_groups,
                 copy_into_strided_empty,
             )
         }[case]
         # A GPU kernel only reads a flipped row after another block wrote it
         # when there are many blocks.
         shape = (1024, 1024) if case.startswith("foreach") else (4, 8)
-        x = torch.randn(shape, device=self.device)
-        gm = make_fx(fn, decomposition_table=select_decomp_table())(x.clone())
-        x_eager, x_compiled = x.clone(), x.clone()
-        expected = fn(x_eager)
-        self.assertEqual(compile_fx_inner(gm, [x_compiled])([x_compiled]), expected)
-        self.assertEqual(x_compiled, x_eager)
+        num_inputs = {
+            "foreach_reads_sibling_target": 3,
+            "foreach_reads_sibling_input": 2,
+            "foreach_reads_sibling_across_groups": 4,
+        }
+        xs = [
+            torch.randn(shape, device=self.device)
+            for _ in range(num_inputs.get(case, 1))
+        ]
+        gm = make_fx(fn, decomposition_table=select_decomp_table())(
+            *[x.clone() for x in xs]
+        )
+        xs_eager = [x.clone() for x in xs]
+        xs_compiled = [x.clone() for x in xs]
+        in_order = contextlib.nullcontext()
+        if case.startswith("foreach_reads_sibling"):
+            # With aliased lists eager's GPU foreach kernel has no defined
+            # result (it reads and writes all the targets in one launch), so
+            # the reference applies the elements one after the other, as eager
+            # does on CPU.
+            def add_in_order(targets, values):
+                for t, v in zip(targets, values):
+                    t.add_(v)
+
+            in_order = patch.object(torch, "_foreach_add_", add_in_order)
+        with in_order:
+            expected = fn(*xs_eager)
+        self.assertEqual(compile_fx_inner(gm, xs_compiled)(list(xs_compiled)), expected)
+        self.assertEqual(xs_compiled, xs_eager)
 
     @config.patch(implicit_fallbacks=True)
     def test_mutable_op_layout_copy_written_back_in_place(self):
