@@ -1,7 +1,6 @@
 # Owner(s): ["module: inductor"]
 
 import unittest
-from unittest import mock
 
 import torch
 from torch._dynamo.device_interface import (
@@ -11,6 +10,7 @@ from torch._dynamo.device_interface import (
     register_interface_for_device,
     XpuInterface,
 )
+from torch._inductor.codecache import FxGraphHashDetails
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.template.triton import MMTemplateConfigMixin
 from torch._inductor.ir import Buffer, FixedLayout
@@ -63,7 +63,19 @@ class TestAllowTf32Interface(TestCase):
             torch.backends.cuda.matmul.fp32_precision = orig
 
     def test_xpu_allow_tf32_matches_mkldnn(self):
-        self.assertEqual(XpuInterface.allow_tf32(), torch.backends.mkldnn.allow_tf32)
+        # Without USE_XPU the raw flag is None. The interface still returns a bool.
+        self.assertEqual(
+            XpuInterface.allow_tf32(), bool(torch.backends.mkldnn.allow_tf32)
+        )
+
+    @unittest.skipUnless(
+        torch.xpu._is_compiled(), "oneDNN TF32 flag is a no-op without USE_XPU"
+    )
+    def test_xpu_allow_tf32_follows_mkldnn_flag(self):
+        with torch.backends.mkldnn.flags(allow_tf32=True):
+            self.assertTrue(XpuInterface.allow_tf32())
+        with torch.backends.mkldnn.flags(allow_tf32=False):
+            self.assertFalse(XpuInterface.allow_tf32())
 
 
 class TestAllowTf32ExtraKwargs(TestCase):
@@ -106,19 +118,14 @@ class TestAllowTf32ExtraKwargs(TestCase):
         self.assertTrue(extra["ALLOW_TF32"])
 
     def test_unregistered_device_allow_tf32_false(self):
-        kernel_inputs = self._mm_kernel_inputs("cpu")
-        with mock.patch(
-            "torch._inductor.heuristics.template.triton.get_interface_for_device",
-            side_effect=NotImplementedError,
-        ):
-            extra = self.mixin.get_extra_kwargs(kernel_inputs, "mm")
+        # meta is a real device type with no DeviceInterface. A name torch.device
+        # rejects never reaches get_interface_for_device.
+        kernel_inputs = self._mm_kernel_inputs("meta")
+        extra = self.mixin.get_extra_kwargs(kernel_inputs, "mm")
         self.assertFalse(extra["ALLOW_TF32"])
 
-    @mock.patch(
-        "torch._inductor.heuristics.template.triton.get_interface_for_device",
-        return_value=DeviceInterface,
-    )
-    def test_default_device_interface_allow_tf32_false(self, _mock_get_iface):
+    def test_default_device_interface_allow_tf32_false(self):
+        register_interface_for_device("privateuseone", DeviceInterface)
         kernel_inputs = self._mm_kernel_inputs("privateuseone")
         extra = self.mixin.get_extra_kwargs(kernel_inputs, "mm")
         self.assertFalse(extra["ALLOW_TF32"])
@@ -146,16 +153,38 @@ class TestAllowTf32ExtraKwargs(TestCase):
             torch.backends.cuda.matmul.fp32_precision = orig
 
     def test_xpu_unaffected_by_cuda_shape_threshold(self):
+        # CUDA would force ALLOW_TF32 off for these shapes. XPU follows the flag.
         kernel_inputs = self._mm_kernel_inputs("xpu", m=2, n=2, k=2)
-        with (
-            mock.patch.object(XpuInterface, "allow_tf32", return_value=True),
-            mock.patch(
-                "torch._inductor.heuristics.template.triton.get_interface_for_device",
-                return_value=XpuInterface,
-            ),
-        ):
-            extra = self.mixin.get_extra_kwargs(kernel_inputs, "mm")
-        self.assertTrue(extra["ALLOW_TF32"])
+        if torch.xpu._is_compiled():
+            with torch.backends.mkldnn.flags(allow_tf32=True):
+                extra = self.mixin.get_extra_kwargs(kernel_inputs, "mm")
+            self.assertTrue(extra["ALLOW_TF32"])
+            return
+        extra = self.mixin.get_extra_kwargs(kernel_inputs, "mm")
+        self.assertEqual(extra["ALLOW_TF32"], XpuInterface.allow_tf32())
+
+    def test_cache_key_records_registered_allow_tf32(self):
+        details = FxGraphHashDetails(None, [torch.zeros(2, 2)], {}, [])
+        self.assertIn(("cpu", False), details.mm_template_allow_tf32)
+
+    def test_cache_key_skips_unregistered_device(self):
+        details = FxGraphHashDetails(None, [torch.zeros(2, 2, device="meta")], {}, [])
+        recorded = [device for device, _flag in details.mm_template_allow_tf32]
+        self.assertNotIn("meta", recorded)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_cache_key_tracks_cuda_allow_tf32(self):
+        tensor = torch.zeros(2, 2, device="cuda")
+        orig = torch.backends.cuda.matmul.fp32_precision
+        try:
+            torch.backends.cuda.matmul.fp32_precision = "tf32"
+            enabled = FxGraphHashDetails(None, [tensor], {}, [])
+            torch.backends.cuda.matmul.fp32_precision = "ieee"
+            disabled = FxGraphHashDetails(None, [tensor], {}, [])
+        finally:
+            torch.backends.cuda.matmul.fp32_precision = orig
+        self.assertIn(("cuda", True), enabled.mm_template_allow_tf32)
+        self.assertIn(("cuda", False), disabled.mm_template_allow_tf32)
 
 
 if __name__ == "__main__":

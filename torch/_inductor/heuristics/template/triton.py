@@ -2417,11 +2417,14 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         if not isinstance(kernel_inputs, MMKernelInputs):
             raise AssertionError(f"Expected MMKernelInputs, got {type(kernel_inputs)}")
         device_type = kernel_inputs.device_type
-        try:
-            iface = get_interface_for_device(device_type)
-            allow_tf32 = iface.allow_tf32()
-        except NotImplementedError:
-            allow_tf32 = False
+        allow_tf32 = False
+        if isinstance(device_type, str):
+            try:
+                iface = get_interface_for_device(device_type)
+            except NotImplementedError:
+                iface = None
+            else:
+                allow_tf32 = bool(iface.allow_tf32())
 
         if device_type == "cuda":
             m, n, k = kernel_inputs.mnk_symbolic()

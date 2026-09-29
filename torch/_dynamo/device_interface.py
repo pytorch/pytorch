@@ -219,11 +219,10 @@ class DeviceInterface:
 
     @staticmethod
     def allow_tf32() -> bool:
-        """Whether the backend permits reduced-precision FP32 matmul in Triton.
+        """Whether the MM template should set ALLOW_TF32.
 
-        For third-party Triton backends this reflects the backend-specific
-        reduced-precision FP32 mode (not necessarily NVIDIA TF32). Inductor
-        may apply additional shape heuristics at the call site.
+        CUDA applies an additional shape threshold at the call site. bmm,
+        tl.dot input precision, and device TFLOPS do not use this method.
         """
         return False
 
@@ -602,7 +601,7 @@ class XpuInterface(DeviceInterface):
 
     @staticmethod
     def allow_tf32() -> bool:
-        return torch.backends.mkldnn.allow_tf32
+        return bool(torch.backends.mkldnn.allow_tf32)
 
     @staticmethod
     def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
