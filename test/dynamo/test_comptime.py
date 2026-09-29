@@ -69,7 +69,7 @@ Tensor(shape=(s77,), dtype=torch.float32)
 {'foo': Tensor(shape=(s77,), dtype=torch.float32)}
 range(1, 3)
 Employee(name='foo', id=2)
-[1, 2]
+UserDefinedListVariable(mylist)
 set()
 {'a', 'b'}
 s77""",

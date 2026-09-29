@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests, slowTest
+from torch.testing._internal.common_utils import run_tests
 
 __TestCase = CPythonTestCase
 
@@ -196,7 +196,6 @@ class PowTest(__TestCase):
             eq(pow(a, -fiveto), expected)
         eq(expected, 1.0)   # else we didn't push fiveto to evenness
 
-    @slowTest
     def test_negative_exponent(self):
         for a in range(-50, 50):
             for m in range(-50, 50):

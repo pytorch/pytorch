@@ -313,21 +313,17 @@ def list_cmp(
 
 
 def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
-    # dict_equal reads the C struct (ma_used, dk_entries, _Py_dict_lookup), so
-    # every access below goes through the unbound dict methods -- a dict
-    # subclass overriding __len__ / keys / __getitem__ must not be consulted.
-    # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
-    if (dict.__len__(d) != dict.__len__(other)) or (dict.keys(d) != dict.keys(other)):
+    if (len(d) != len(other)) or (d.keys() != other.keys()):
         return False
 
     if all(isinstance(a, OrderedDict) for a in (d, other)):
-        return list(dict.items(d)) == list(dict.items(other))
+        return list(d.items()) == list(other.items())
 
     # CPython's dict_equal uses PyObject_RichCompareBool for value
     # comparison, which has an identity shortcut (if v is w, eq is True).
     # This matters for NaN: {k: nan} == {k: nan} is True when same nan.
-    for k, v in dict.items(d):
-        ov = dict.__getitem__(other, k)
+    for k, v in d.items():
+        ov = other[k]
         if v is not ov and v != ov:
             return False
 
