@@ -8947,6 +8947,24 @@ class TestMemPool(TestCase):
         # increments the id
         self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
 
+    def test_memory_snapshot_preserves_argument_references(self):
+        # Run in a subprocess since a refcount underflow can corrupt the interpreter.
+        script = """
+import sys
+import torch
+
+a, b = int("1000000"), int("1000001")
+for args in ((a, b), (a, b, False)):
+    before = sys.getrefcount(a), sys.getrefcount(b)
+    torch._C._cuda_memorySnapshot(args)
+    after = sys.getrefcount(a), sys.getrefcount(b)
+    if after != before:
+        sys.exit(f"{len(args)}-tuple: refcounts changed from {before} to {after}")
+"""
+        cmd = [sys.executable, "-c", script]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+
     @unittest.skipIf(
         TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
     )
