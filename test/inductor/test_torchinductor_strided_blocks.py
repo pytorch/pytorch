@@ -1704,6 +1704,121 @@ class CommonTemplate:
             rtol=1e-2,
         )
 
+    # Reduced dims that are not adjacent cannot merge, so stage 1 keeps two
+    # reduction trees. Two things are only exercised here:
+    #
+    #   1. Axis selection. The split factor is sized from the *flattened* rnumel,
+    #      so binding it to r0_ when r0_ is short strands most programs -- e.g.
+    #      r0_numel=2 with split=25 leaves 23 programs with nothing to reduce.
+    #   2. The rewind. Partitioning an inner axis is only correct because the loop
+    #      suffix rewinds that axis by rsplit_num_iter instead of its full extent;
+    #      rewinding by the full extent overshoots and every later outer row reads
+    #      the wrong memory.
+    #
+    # Both assertions are on the generated code on purpose. A regression in (1)
+    # only costs parallelism, so numerics alone would not catch it, and (2) fails
+    # by producing silently wrong values rather than by raising.
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+            "force_red_split_dim_as_grid_dim": True,
+            "padding_stride_threshold": 0,
+            **tiled_reduction_config,
+        }
+    )
+    @parametrize(
+        "shape,dims,partitioned_prefix",
+        [
+            # Long axis is innermost -> split lands on r1_, which is nested inside
+            # the r0_ loop, so the rewind must use the partitioned trip count.
+            subtest(((2, 2, 100003), (0, 2), "r1_"), name="3d_inner_is_long"),
+            subtest(
+                ((32, 2, 100003), (0, 2), "r1_"),
+                name="3d_both_fit_inner_is_longer",
+            ),
+            subtest(((2, 4, 2, 100003), (1, 3), "r1_"), name="4d_inner_is_long"),
+            # Long axis is outermost -> split lands on r0_. Nothing is nested
+            # inside a partitioned loop, so the rewind must stay at full extent.
+            subtest(((2, 100003, 2, 4), (1, 3), "r0_"), name="4d_outer_is_long"),
+        ],
+    )
+    def test_grid_split_reduction_partitions_long_axis(
+        self, shape, dims, partitioned_prefix
+    ):
+        self._skip_if_host_side_tma()
+        x = torch.randn(*shape, device=self.device)
+        _, code = self._run_and_compare(
+            lambda t: t.sum(dims),
+            x,
+            expected_num_triton_kernels=2,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+        self._assert_grid_split_reduction(code)
+        if self.block_descriptor_constructor_str == "tl.make_block_ptr":
+            joined = "\n".join(code)
+            self.assertIn(f"num_rblocks = ({partitioned_prefix}numel", joined)
+            # Assert on the advance lines, not the whole kernel: rsplit_num_iter is
+            # always defined in the prologue, so its mere presence proves nothing.
+            advances = self._get_lines_containing_substr(joined, "tl.advance")
+            if partitioned_prefix == "r1_":
+                self.assertIn("rsplit_num_iter", advances)
+            else:
+                self.assertNotIn("rsplit_num_iter", advances)
+
+    @_grid_split_reduction_test
+    def test_grid_split_reduction_uses_choices_dimension(self):
+        class SelectFirstReductionDimension(InductorChoices):
+            def reduction_split_dimension(
+                self, reduction_numel_hints, split_factor
+            ):
+                return 0
+
+        x = torch.randn(2, 2, 100003, device=self.device)
+        with V.set_choices_handler(SelectFirstReductionDimension()):
+            code = self._run_grid_split_reduction(
+                lambda t: t.sum((0, 2)),
+                x,
+                atol=1e-2,
+                rtol=1e-2,
+            )
+        self.assertIn("num_rblocks = (r0_numel", "\n".join(code))
+
+    # Deliberately NOT tiled_reduction_config: keeping the reduced axes on separate
+    # trees is only reachable with tiled reductions, because
+    # select_tiling_with_memory returns the flat fallback for a reduction when
+    # triton.tile_reductions is off. That gate is load-bearing -- the separate-axis
+    # form measures as a large win on a block_ptr/DMA backend and a large regression
+    # on GPU, so it must stay opt-in rather than riding in with the split-grid flag.
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+            "force_red_split_dim_as_grid_dim": True,
+            "padding_stride_threshold": 0,
+            "triton.tile_reductions": False,
+            "triton.prefer_nd_tiling": False,
+        }
+    )
+    def test_grid_split_reduction_multi_dim_gated_by_tile_reductions(self):
+        self._skip_if_host_side_tma()
+        # Non-adjacent reduced dims: the pair cannot merge, so this is exactly the
+        # shape that would grow a second reduction tree if the gate were missing.
+        x = torch.randn(2, 2, 100003, device=self.device)
+        _, code = self._run_and_compare(
+            lambda t: t.sum((0, 2)),
+            x,
+            expected_num_triton_kernels=2,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+        self._assert_grid_split_reduction(code)
+        if self.block_descriptor_constructor_str == "tl.make_block_ptr":
+            # A second reduction tree would show up as r1_numel in stage 1; with the
+            # gate closed every kernel must stay single-axis.
+            self.assertNotIn("r1_numel", "\n".join(code))
+
     @_grid_split_reduction_test
     @parametrize(
         "shape,dim,expected_input_extent",

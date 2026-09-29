@@ -583,12 +583,17 @@ class BlockDescriptorOptions:
         return sympy_subs(expr, {roffset: replacement})
 
     def remove_roffsets(self, expr: sympy.Expr) -> sympy.Expr:
-        # Split-as-grid-dim: start the looped block_ptr at this program's partition
-        # offset (rsplit_start) instead of 0; other kernels zero the roffset.
-        replacement: sympy.Expr = sympy.Integer(0)
-        if getattr(V.kernel, "split_as_grid_reduction", 0):
-            replacement = sympy.Symbol("rsplit_start", integer=True, nonnegative=True)
+        # Split-as-grid-dim: the partitioned axis starts the looped block_ptr at this
+        # program's partition offset (rsplit_start). Every other reduction axis, and
+        # every other kernel, still zeroes the roffset.
+        split_tree = getattr(V.kernel, "split_reduction_tree", None)
+        split_symt = split_tree.symt if split_tree is not None else None
         for symt in TritonSymbols.reduction_types:
+            replacement: sympy.Expr = (
+                sympy.Symbol("rsplit_start", integer=True, nonnegative=True)
+                if symt == split_symt
+                else sympy.Integer(0)
+            )
             expr = self.replace_offset(expr, replacement, symt)
         return expr
 
@@ -825,12 +830,17 @@ class BlockPtrOptions(BlockDescriptorOptions):
         return sympy_subs(expr, {roffset: replacement})
 
     def remove_roffsets(self, expr: sympy.Expr) -> sympy.Expr:
-        # Split-as-grid-dim: start the looped block_ptr at this program's partition
-        # offset (rsplit_start) instead of 0; other kernels zero the roffset.
-        replacement: sympy.Expr = sympy.Integer(0)
-        if getattr(V.kernel, "split_as_grid_reduction", 0):
-            replacement = sympy.Symbol("rsplit_start", integer=True, nonnegative=True)
+        # Split-as-grid-dim: the partitioned axis starts the looped block_ptr at this
+        # program's partition offset (rsplit_start). Every other reduction axis, and
+        # every other kernel, still zeroes the roffset.
+        split_tree = getattr(V.kernel, "split_reduction_tree", None)
+        split_symt = split_tree.symt if split_tree is not None else None
         for symt in TritonSymbols.reduction_types:
+            replacement: sympy.Expr = (
+                sympy.Symbol("rsplit_start", integer=True, nonnegative=True)
+                if symt == split_symt
+                else sympy.Integer(0)
+            )
             expr = self.replace_offset(expr, replacement, symt)
         return expr
 
@@ -3885,27 +3895,33 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         XBLOCK == 1); each program reduces [rsplit_start, rsplit_end) of the true
         axis into buf0[..., program_id(0)] and stage-2 combines over the split axis.
         rsplit_chunk is a multiple of RBLOCK so partitions never overlap.
+
+        rsplit_num_iter is that program's trip count over the partitioned axis. It
+        is loop-invariant within a program (the bounds do not vary across outer
+        iterations), so the loop suffix uses it to rewind pointers when the
+        partitioned axis is nested inside another reduction loop. It clamps at 0 so
+        programs whose partition starts past the end rewind by nothing.
         """
         if not self.split_as_grid_reduction:
             raise AssertionError("expected split_as_grid_reduction")
         # The split count is the x dim extent (see get_tiling_and_scores).
         split = self.numels["x"]
-        # The flat [rsplit_start, rsplit_end) bounds assume a single reduction dim;
-        # more would silently misapply them, so fail loudly.
-        reduction_trees = [t for t in self.range_trees if t.is_reduction]
-        if len(reduction_trees) != 1:
-            raise AssertionError(
-                "split_as_grid_reduction requires exactly one reduction dimension, "
-                f"got {len(reduction_trees)}"
-            )
+        tree = self.split_reduction_tree
+        if tree is None:
+            raise AssertionError("split_as_grid_reduction requires a reduction dim")
+        # Bounds are per-axis: with several reduction dims, `rnumel`/`RBLOCK` are the
+        # flattened product, which would partition the wrong extent.
+        numel = f"{tree.prefix}numel"
+        block = f"{tree.prefix.upper()}BLOCK"
         self.body.splice(
             f"""\
             rsplit_id = tl.program_id(0)
-            num_rblocks = (rnumel + RBLOCK - 1) // RBLOCK
-            rsplit_chunk = (num_rblocks + {split} - 1) // {split} * RBLOCK
+            num_rblocks = ({numel} + {block} - 1) // {block}
+            rsplit_chunk = (num_rblocks + {split} - 1) // {split} * {block}
             rsplit_start = rsplit_chunk * rsplit_id
             rsplit_end = rsplit_chunk * (rsplit_id + 1)
-            rsplit_end = tl.where(rsplit_end < rnumel, rsplit_end, rnumel)
+            rsplit_end = tl.where(rsplit_end < {numel}, rsplit_end, {numel})
+            rsplit_num_iter = tl.maximum((rsplit_end - rsplit_start + {block} - 1) // {block}, 0)
             """,
         )
 
@@ -7231,8 +7247,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             for level, tree in enumerate(loop_trees):
                 with self.body.indent(offset=level):
                     prefix = tree.prefix
-                    partitioned = (
-                        self.cooperative_reduction or self.split_as_grid_reduction
+                    # Cooperative reduction partitions its single reduction axis;
+                    # split-as-grid partitions only the tree carrying the split, so
+                    # the other axes keep their full bounds.
+                    partitioned = self.cooperative_reduction or (
+                        self.split_as_grid_reduction
+                        and tree is self.split_reduction_tree
                     )
                     loop_start = "rsplit_start" if partitioned else "0"
                     loop_end = "rsplit_end" if partitioned else f"{prefix}numel"
@@ -7272,7 +7292,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                             if block_ptr in prev_advancements:
                                 prev_advancement = prev_advancements[block_ptr]
                                 prev_block = TritonSymbols.get_block_size(prev_tree)
-                                prev_num_iter = CeilDiv(prev_tree.numel, prev_block)
+                                if (
+                                    self.split_as_grid_reduction
+                                    and prev_tree is self.split_reduction_tree
+                                ):
+                                    # The inner loop only covered this program's
+                                    # partition, so rewinding by the full extent
+                                    # would overshoot.
+                                    prev_num_iter: sympy.Expr = sympy.Symbol(
+                                        "rsplit_num_iter",
+                                        integer=True,
+                                        nonnegative=True,
+                                    )
+                                else:
+                                    prev_num_iter = CeilDiv(prev_tree.numel, prev_block)
                                 advancement = [
                                     cur - prev * prev_num_iter
                                     for cur, prev in zip(advancement, prev_advancement)
