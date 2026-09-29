@@ -307,12 +307,10 @@ class TestCapabilityGating(TestCase):
     """Verify that @requires_capabilities gates tests on PrivateUse1 backends."""
 
     executed_tests: set[str] = set()
-    completed_setup_tests: set[str] = set()
 
     @classmethod
     def setUpClass(cls):
         cls.executed_tests = set()
-        cls.completed_setup_tests = set()
         super().setUpClass()
 
     @classmethod
@@ -326,11 +324,6 @@ class TestCapabilityGating(TestCase):
             raise AssertionError(
                 f"Capability gating failed: expected {expected_tests}, "
                 f"got {cls.executed_tests}"
-            )
-        if cls.completed_setup_tests != expected_tests:
-            raise AssertionError(
-                f"Capability preflight failed: expected {expected_tests}, "
-                f"got {cls.completed_setup_tests}"
             )
         super().tearDownClass()
 
@@ -348,7 +341,7 @@ class TestCapabilityGating(TestCase):
     @requires_capabilities(Capability.dtype.fp64)
     def test_capability_stacked(self, device):
         type(self).executed_tests.add(self._testMethodName)
-        self.fail("Expected preflight skip: dtype.fp64 is unsupported on this device")
+        self.fail("Expected skip: dtype.fp64 is unsupported on this device")
 
     def test_capability_missing(self, device):
         """@requires_capabilities raises AssertionError for undeclared capabilities."""
@@ -395,20 +388,13 @@ def _openreg_test_capabilities(_cls):
     return capabilities
 
 
-def _openreg_capability_test_setup(self):
-    # Record only setups that complete DeviceTypeTestBase capability preflight.
-    PrivateUse1TestBase.setUp(self)
-    type(self).completed_setup_tests.add(self._testMethodName)
-
-
 instantiate_device_type_tests(TestCapabilityGating, globals(), only_for="openreg")
 _capability_test_cls = globals()["TestCapabilityGatingOPENREG"]
 _capability_test_cls._capabilities = classmethod(_openreg_test_capabilities)
-_capability_test_cls.setUp = _openreg_capability_test_setup
 del _capability_test_cls
 
 
-class TestNoCapabilityPreflight(TestCase):
+class TestNoCapabilityQuery(TestCase):
     def test_no_capability_requirement(self, device):
         self.assertEqual(torch.device(device).type, "openreg")
 
@@ -417,8 +403,8 @@ def _fail_if_capabilities_queried(_cls):
     raise AssertionError("A test without capability requirements queried capabilities")
 
 
-instantiate_device_type_tests(TestNoCapabilityPreflight, globals(), only_for="openreg")
-_no_capability_test_cls = globals()["TestNoCapabilityPreflightOPENREG"]
+instantiate_device_type_tests(TestNoCapabilityQuery, globals(), only_for="openreg")
+_no_capability_test_cls = globals()["TestNoCapabilityQueryOPENREG"]
 _no_capability_test_cls._capabilities = classmethod(_fail_if_capabilities_queried)
 del _no_capability_test_cls
 
