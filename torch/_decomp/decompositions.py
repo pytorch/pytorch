@@ -5044,7 +5044,13 @@ def _grid_sampler_2d(
     int32_max = torch.iinfo(torch.int32).max
     # CUDA/XPU codegen can keep bounded coordinate indices in int32.  CPU keeps
     # the historical int64 path, and dynamic shapes fall back if we cannot guard.
-    use_32bit_indices = a.device.type in ("cuda", "xpu") and guard_or_false(
+    # Feature decoupling: also treat the registered privateuse1 backend
+    # (e.g. Ascend NPU) as an accelerator that can use bounded int32 indices,
+    # matching the CUDA/XPU path. CUDA/XPU behavior is unchanged.
+    private_backend = torch._C._get_privateuse1_backend_name()
+    use_32bit_indices = (
+        a.device.type in ("cuda", "xpu") or a.device.type == private_backend
+    ) and guard_or_false(
         sym_and(iH <= int32_max, iW <= int32_max)
     )
     index_dtype = torch.int32 if use_32bit_indices else torch.int64
