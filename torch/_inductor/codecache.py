@@ -4065,14 +4065,24 @@ class CppCodeCache:
             optimized_path = os.devnull
 
         if key not in cls.cache:
+            from torch.compiler._runtime_cache import (
+                has_frozen_cpp_kernel,
+                restore_cpp_kernel,
+            )
             from torch.utils._filelock import FileLock
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             future: Future[Any] | None = None
             lib = None
 
-            # if requested, pre-compile any headers
-            if config.cpp_cache_precompile_headers and not _IS_WINDOWS:
+            # if requested, pre-compile any headers. A frozen binary is restored
+            # below and never built, so it needs no header, and precompiling one
+            # on a host with an empty header cache fails under no_compilation().
+            if (
+                config.cpp_cache_precompile_headers
+                and not _IS_WINDOWS
+                and not has_frozen_cpp_kernel(key)
+            ):
                 if header := cls._get_uncompiled_header(device_type):
                     main_build_option.precompiled_header = _precompile_header(
                         header,
@@ -4135,8 +4145,6 @@ class CppCodeCache:
                 binary_path = normalize_path_separator(
                     main_builder.get_target_file_path()
                 )
-
-            from torch.compiler._runtime_cache import restore_cpp_kernel
 
             cls._binary_paths[key] = binary_path
             restore_cpp_kernel(key, binary_path)

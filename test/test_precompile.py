@@ -6425,32 +6425,57 @@ class TestPrecompileRuntimeCache(TestCase):
             _runtime_cache.InductorCppCacheArtifact(digest, payload).populate_cache()
         self.assertEqual(_runtime_cache._frozen_cpp_kernels, {})
 
-    def test_frozen_cpu_graph_serves_strict_load_from_empty_caches(self):
+    @parametrize("precompile_headers", (False, True))
+    def test_frozen_cpu_graph_serves_strict_load_from_empty_caches(
+        self, precompile_headers
+    ):
+        from torch._inductor import codecache, config as inductor_config
         from torch._inductor.utils import clear_caches
         from torch.compiler import _runtime_cache
+
+        @contextlib.contextmanager
+        def fresh_host(root):
+            # The precompiled-header directory is fixed at import time and
+            # _precompile_header memoizes its result, so neither follows
+            # TORCHINDUCTOR_CACHE_DIR.
+            headers = os.path.join(root, "precompiled_headers")
+            with (
+                mock.patch.dict(os.environ, {"TORCHINDUCTOR_CACHE_DIR": root}),
+                mock.patch.object(codecache, "_HEADER_DIR", headers),
+                mock.patch.object(
+                    codecache, "_HEADER_LOCK_DIR", os.path.join(headers, "locks")
+                ),
+                mock.patch.object(
+                    codecache,
+                    "_precompile_header",
+                    functools.cache(codecache._precompile_header.__wrapped__),
+                ),
+            ):
+                yield
 
         pc = torch.compiler.precompile
         fn = _no_compilation_inductor_graph
         x = torch.randn(8, 16)
-        with tempfile.TemporaryDirectory() as directory:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            inductor_config.patch(cpp_cache_precompile_headers=precompile_headers),
+        ):
             clear_caches()
             try:
                 with (
-                    mock.patch.dict(
-                        os.environ,
-                        {"TORCHINDUCTOR_CACHE_DIR": os.path.join(directory, "p")},
-                    ),
+                    fresh_host(os.path.join(directory, "p")),
                     pc.capture_runtime(),
                 ):
                     source, cache = _capture_files(self, fn, [(x,)], backend="inductor")
                     self.assertTrue(_runtime_cache._capture.cpp_kernels)
                     pc.finalize_cache(artifact_path=source, cache_path=cache)
+                self.assertEqual(
+                    os.path.isdir(os.path.join(directory, "p", "precompiled_headers")),
+                    precompile_headers,
+                )
                 clear_caches()
                 with (
-                    mock.patch.dict(
-                        os.environ,
-                        {"TORCHINDUCTOR_CACHE_DIR": os.path.join(directory, "c")},
-                    ),
+                    fresh_host(os.path.join(directory, "c")),
                     pc.no_compilation(),
                 ):
                     pc.prepare_runtime(artifact_path=source, cache_path=cache)
@@ -6619,12 +6644,17 @@ class TestPrecompileRuntimeCache(TestCase):
         _rewrite_envelope(cache, artifact=None)
         with (
             pc.capture_runtime(),
-            self.assertRaisesRegex(PrecompileError, "saved none"),
+            self.assertRaisesRegex(PrecompileError, "saved none") as failure,
         ):
             pc.finalize_cache(artifact_path=source, cache_path=cache)
+        self.assertIn(
+            f"(artifact_path={source!r}, cache_path={cache!r})", str(failure.exception)
+        )
 
     @parametrize("operation", ("finalize_cache", "prepare_runtime"))
     def test_runtime_cache_rejects_make_fx_capture(self, operation):
+        from pathlib import Path
+
         pc = torch.compiler.precompile
         source, cache = _capture_files(
             self,
@@ -6636,11 +6666,16 @@ class TestPrecompileRuntimeCache(TestCase):
         with (
             pc.capture_runtime(),
             self.assertRaisesRegex(
-                PrecompileError,
-                f"precompile.{operation} supports only Dynamo captures",
-            ),
+                PrecompileError, "supports only Dynamo captures"
+            ) as failure,
         ):
-            getattr(pc, operation)(artifact_path=source, cache_path=cache)
+            getattr(pc, operation)(artifact_path=Path(source), cache_path=Path(cache))
+        self.assertTrue(
+            str(failure.exception).startswith(
+                f"precompile.{operation} (artifact_path={source!r}, "
+                f"cache_path={cache!r})"
+            )
+        )
 
     @parametrize("operation", ("finalize_cache", "prepare_runtime"))
     @parametrize(

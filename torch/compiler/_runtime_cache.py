@@ -103,6 +103,11 @@ def record_cpp_kernel(key: str, binary_path: str, load: Callable[[], object]) ->
         owner.cpp_kernels[key] = (binary_path, load)
 
 
+def has_frozen_cpp_kernel(key: str) -> bool:
+    with _frozen_cpp_kernels_lock:
+        return key in _frozen_cpp_kernels
+
+
 def restore_cpp_kernel(key: str, binary_path: str) -> None:
     """Materialize a frozen C++ kernel binary at this host's cache path."""
     with _frozen_cpp_kernels_lock:
