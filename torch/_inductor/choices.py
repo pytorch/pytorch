@@ -664,6 +664,19 @@ class InductorChoices:
                 rvals_per_thread * split_size
             )
 
+    def reduction_split_dimension(
+        self,
+        reduction_numel_hints: typing.Sequence[int],
+        split_factor: int,
+    ) -> int:
+        """Choose the physical reduction dimension partitioned by a grid split."""
+        if not reduction_numel_hints:
+            raise AssertionError("expected at least one reduction dimension")
+        return max(
+            range(len(reduction_numel_hints)),
+            key=lambda dim: reduction_numel_hints[dim],
+        )
+
     @staticmethod
     def can_fuse(
         scheduler: Scheduler,

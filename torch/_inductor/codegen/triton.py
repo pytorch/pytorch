@@ -496,12 +496,17 @@ class BlockDescriptorOptions:
         # Compute the final shape, adjusting for special kernel types.
         final_shape = [TritonSymbols.get_block_size(tree) for tree in range_trees]
         if V.kernel.no_x_dim:
-            if range_trees[0].prefix != "x":
+            # x carries no tensor dim. It is not necessarily first: a split-as-grid
+            # kernel keeps y/z tensor dims for the dims it did not reduce.
+            x_positions = [
+                idx for idx, tree in enumerate(range_trees) if tree.prefix == "x"
+            ]
+            if len(x_positions) != 1:
                 raise AssertionError(
-                    f"expected first range tree prefix to be 'x', got "
-                    f"{range_trees[0].prefix!r}"
+                    f"expected exactly one 'x' range tree, got "
+                    f"{[tree.prefix for tree in range_trees]}"
                 )
-            final_shape.pop(0)
+            final_shape.pop(x_positions[0])
 
         # Check to see which of the final shape dimensions are included in this parameter
         # e.g. if block shape is [XBLOCK // 2, XBLOCK % 2], but the kernel shape
@@ -578,8 +583,18 @@ class BlockDescriptorOptions:
         return sympy_subs(expr, {roffset: replacement})
 
     def remove_roffsets(self, expr: sympy.Expr) -> sympy.Expr:
+        # Split-as-grid-dim: the partitioned axis starts the looped block_ptr at this
+        # program's partition offset (rsplit_start). Every other reduction axis, and
+        # every other kernel, still zeroes the roffset.
+        split_tree = getattr(V.kernel, "split_reduction_tree", None)
+        split_symt = split_tree.symt if split_tree is not None else None
         for symt in TritonSymbols.reduction_types:
-            expr = self.replace_offset(expr, sympy.Integer(0), symt)
+            replacement: sympy.Expr = (
+                sympy.Symbol("rsplit_start", integer=True, nonnegative=True)
+                if symt == split_symt
+                else sympy.Integer(0)
+            )
+            expr = self.replace_offset(expr, replacement, symt)
         return expr
 
     def compute_boundary_check(
@@ -815,8 +830,18 @@ class BlockPtrOptions(BlockDescriptorOptions):
         return sympy_subs(expr, {roffset: replacement})
 
     def remove_roffsets(self, expr: sympy.Expr) -> sympy.Expr:
+        # Split-as-grid-dim: the partitioned axis starts the looped block_ptr at this
+        # program's partition offset (rsplit_start). Every other reduction axis, and
+        # every other kernel, still zeroes the roffset.
+        split_tree = getattr(V.kernel, "split_reduction_tree", None)
+        split_symt = split_tree.symt if split_tree is not None else None
         for symt in TritonSymbols.reduction_types:
-            expr = self.replace_offset(expr, sympy.Integer(0), symt)
+            replacement: sympy.Expr = (
+                sympy.Symbol("rsplit_start", integer=True, nonnegative=True)
+                if symt == split_symt
+                else sympy.Integer(0)
+            )
+            expr = self.replace_offset(expr, replacement, symt)
         return expr
 
     def format(self, name: str, roffset=True) -> str:
@@ -3030,11 +3055,11 @@ class TMACompatibilityChecker:
             )
             return False
 
-        # Strict multirow reductions are forced persistent and can settle on
-        # XBLOCK=1 after the initial TMA probe. Their output store must therefore
-        # use the scalar fallback rather than a 16-byte tensor descriptor.
+        # These all settle on XBLOCK=1, so the store cannot reach TMA's 16-byte
+        # minimum and must fall back off the tensor descriptor.
         if self.for_store and (
-            self.kernel.no_x_dim or self.kernel.features.has_strict_multirow_reduction()
+            self.kernel.no_x_dim or self.kernel.split_as_grid_reduction
+            or self.kernel.features.has_strict_multirow_reduction()
         ):
             log.debug(
                 "%s stores with XBLOCK=1 cannot transfer 16 bytes.",
@@ -3481,6 +3506,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.cooperative_reduction:
             self.init_cooperative_reduction()
 
+        if self.split_as_grid_reduction:
+            self.init_split_as_grid_reduction()
+
         self.codegen_range_tree()
 
         if self.cooperative_reduction:
@@ -3859,6 +3887,43 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.body.writeline(
                 "rsplit_end = tl.where(rsplit_end < rnumel, rsplit_end, rnumel)"
             )
+
+    def init_split_as_grid_reduction(self):
+        """Emit per-partition reduction bounds for a split-as-grid-dim reduction.
+
+        The split is the x grid dim (one program per partition via program_id(0),
+        XBLOCK == 1); each program reduces [rsplit_start, rsplit_end) of the true
+        axis into buf0[..., program_id(0)] and stage-2 combines over the split axis.
+        rsplit_chunk is a multiple of RBLOCK so partitions never overlap.
+
+        rsplit_num_iter is that program's trip count over the partitioned axis. It
+        is loop-invariant within a program (the bounds do not vary across outer
+        iterations), so the loop suffix uses it to rewind pointers when the
+        partitioned axis is nested inside another reduction loop. It clamps at 0 so
+        programs whose partition starts past the end rewind by nothing.
+        """
+        if not self.split_as_grid_reduction:
+            raise AssertionError("expected split_as_grid_reduction")
+        # The split count is the x dim extent (see get_tiling_and_scores).
+        split = self.numels["x"]
+        tree = self.split_reduction_tree
+        if tree is None:
+            raise AssertionError("split_as_grid_reduction requires a reduction dim")
+        # Bounds are per-axis: with several reduction dims, `rnumel`/`RBLOCK` are the
+        # flattened product, which would partition the wrong extent.
+        numel = f"{tree.prefix}numel"
+        block = f"{tree.prefix.upper()}BLOCK"
+        self.body.splice(
+            f"""\
+            rsplit_id = tl.program_id(0)
+            num_rblocks = ({numel} + {block} - 1) // {block}
+            rsplit_chunk = (num_rblocks + {split} - 1) // {split} * {block}
+            rsplit_start = rsplit_chunk * rsplit_id
+            rsplit_end = rsplit_chunk * (rsplit_id + 1)
+            rsplit_end = tl.where(rsplit_end < {numel}, rsplit_end, {numel})
+            rsplit_num_iter = tl.maximum((rsplit_end - rsplit_start + {block} - 1) // {block}, 0)
+            """,
+        )
 
     def init_cooperative_reduction_mask(self):
         rsplit_arange = "tl.arange(0, RSPLIT_NEXT_POWER_OF_2)"
@@ -6618,6 +6683,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self._handle_pdl_before_access(self.post_loop_store, var)
 
         if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
+            if isinstance(indexing, TensorDescriptorOptions):
+                # store_reduction bypasses codegen_block_ptr, so without this
+                # codegen_kernel strips the >=16-byte floor and the store won't compile.
+                self._emitted_device_tma = True
             self.post_loop_store.writeline(
                 DeferredLine(
                     name,
@@ -7178,10 +7247,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             for level, tree in enumerate(loop_trees):
                 with self.body.indent(offset=level):
                     prefix = tree.prefix
-                    loop_start = "rsplit_start" if self.cooperative_reduction else "0"
-                    loop_end = (
-                        "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
+                    # Cooperative reduction partitions its single reduction axis;
+                    # split-as-grid partitions only the tree carrying the split, so
+                    # the other axes keep their full bounds.
+                    partitioned = self.cooperative_reduction or (
+                        self.split_as_grid_reduction
+                        and tree is self.split_reduction_tree
                     )
+                    loop_start = "rsplit_start" if partitioned else "0"
+                    loop_end = "rsplit_end" if partitioned else f"{prefix}numel"
                     # Conditionalize pipelining on HIP for Triton due to
                     # reports of numerical inaccuracies on older Triton
                     if torch.version.hip and get_triton_version() > (3, 2):
@@ -7218,7 +7292,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                             if block_ptr in prev_advancements:
                                 prev_advancement = prev_advancements[block_ptr]
                                 prev_block = TritonSymbols.get_block_size(prev_tree)
-                                prev_num_iter = CeilDiv(prev_tree.numel, prev_block)
+                                if (
+                                    self.split_as_grid_reduction
+                                    and prev_tree is self.split_reduction_tree
+                                ):
+                                    # The inner loop only covered this program's
+                                    # partition, so rewinding by the full extent
+                                    # would overshoot.
+                                    prev_num_iter: sympy.Expr = sympy.Symbol(
+                                        "rsplit_num_iter",
+                                        integer=True,
+                                        nonnegative=True,
+                                    )
+                                else:
+                                    prev_num_iter = CeilDiv(prev_tree.numel, prev_block)
                                 advancement = [
                                     cur - prev * prev_num_iter
                                     for cur, prev in zip(advancement, prev_advancement)
@@ -7563,6 +7650,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         }
         if self.mix_order_reduction:
             out["RSPLIT_SIZE"] = self.rsplit_size
+        if self.split_as_grid_reduction:
+            # Clamp the x (split) grid axis to XBLOCK == 1 so each program owns one
+            # partition; R0_BLOCK is still autotuned.
+            out["split_as_grid_reduction"] = True
         if config.deterministic or config.test_configs.force_filter_reduction_configs:
             out["has_loadstore_with_contiguous_rdim"] = (
                 self.has_load_with_contiguous_rdim
@@ -8937,9 +9028,15 @@ class TritonScheduling(SIMDScheduling):
 
         kernel_type.apply_feature_required_overrides(kernel_features, kernel_kwargs)
 
+        grid_split = bool(kernel_features.get_grid_split())
+
         kernel_kwargs = V.choices.triton_kernel_kwargs(
             kernel_type, kernel_features, kernel_args, kernel_kwargs
         )
+        if grid_split:
+            kernel_kwargs["split_as_grid_reduction"] = True
+            kernel_kwargs["override_cooperative_reduction"] = False
+            kernel_kwargs["override_persistent_reduction"] = False
         kernel = kernel_type(*kernel_args, **kernel_kwargs)
         return self.add_multi_kernel_choices(kernel, kernel_args, kernel_kwargs)
 

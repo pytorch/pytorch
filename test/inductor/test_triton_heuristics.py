@@ -67,6 +67,7 @@ from torch._inductor.runtime.triton_heuristics import (
     make_matmul_triton_config,
     template,
     triton_config,
+    triton_config_tiled_reduction,
 )
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_cache
@@ -151,6 +152,14 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+
+    def test_tiled_reduction_z_requires_size_hint(self):
+        with self.assertRaisesRegex(
+            AssertionError, "z block size requires a z size hint"
+        ):
+            triton_config_tiled_reduction(
+                {"x": 16, "y": 16, "r0_": 16}, 1, 1, 16, z=1
+            )
 
     def test_native_matmul_config_block_numel_limit(self):
         device = DeviceProperties(

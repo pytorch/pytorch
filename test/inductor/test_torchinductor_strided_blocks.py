@@ -106,6 +106,35 @@ def xfail_if_tensor_descriptor(fn):
     return fn
 
 
+def _reduce(t: torch.Tensor, op: Callable[..., Any], dim: Any) -> torch.Tensor:
+    return op(t) if dim is None else op(t, dim)
+
+
+def _reduction_subtests(*names: str) -> list[Any]:
+    reductions = {
+        "sum": (torch.Tensor.sum, 1e-2),
+        "amax": (torch.Tensor.amax, 0),
+        "amin": (torch.Tensor.amin, 0),
+        "prod": (torch.Tensor.prod, 1e-2),
+        "mean": (torch.Tensor.mean, 1e-3),
+    }
+    return [
+        subtest(reductions[name], name=name) for name in names or tuple(reductions)
+    ]
+
+
+def _grid_split_reduction_test(fn):
+    return config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+            "force_red_split_dim_as_grid_dim": True,
+            "padding_stride_threshold": 0,
+            **tiled_reduction_config,
+        }
+    )(fn)
+
+
 class BlockDescriptorTestBase(InductorTestCase):
     block_descriptor_constructor_str = "tl.make_block_ptr"
 
@@ -139,6 +168,45 @@ class BlockDescriptorTestBase(InductorTestCase):
 
     def _get_lines_containing_substr(self, code: str, substr: str) -> str:
         return "\n".join(line for line in code.split("\n") if substr in line)
+
+    def _assert_grid_split_reduction(self, code):
+        if self.block_descriptor_constructor_str == "tl.make_block_ptr":
+            joined = "\n".join(code)
+            self.assertIn("rsplit_start", joined)
+            self.assertIn("boundary_check", joined)
+
+    def _skip_if_host_side_tma(self):
+        if config.triton.enable_host_side_tma:
+            raise unittest.SkipTest(
+                "host-side TMA static-launcher arg mismatch (pre-existing, unrelated)"
+            )
+
+    def _run_grid_split_reduction(
+        self,
+        reduction_fn,
+        x,
+        *,
+        expected_grid_split=True,
+        expected_num_block_pointers=4,
+        atol=None,
+        rtol=None,
+    ):
+        if self.block_descriptor_constructor_str != "tl.make_block_ptr":
+            raise unittest.SkipTest("specific to block pointer reduction codegen")
+        self._skip_if_host_side_tma()
+        _, code = self._run_and_compare(
+            reduction_fn,
+            x,
+            expected_num_triton_kernels=2,
+            expected_num_block_pointers=expected_num_block_pointers,
+            atol=atol,
+            rtol=rtol,
+        )
+        if expected_grid_split:
+            self._assert_grid_split_reduction(code)
+        else:
+            self.assertNotIn("rsplit_start", "\n".join(code))
+        return code
 
     def _run_and_compare(
         self: InductorTestCase,
@@ -1596,6 +1664,347 @@ class CommonTemplate:
                 # Loading b
                 self.assertTrue("boundary_check=[0, 1]" in code)
 
+    @_grid_split_reduction_test
+    @parametrize(
+        "shape,dim,expected_num_block_pointers",
+        [
+            subtest(((100003,), 0, 3), name="1d"),
+            subtest(((8, 100003), 1, 4), name="2d_inner"),
+            subtest(((100003, 8), 0, 4), name="2d_outer"),
+            subtest(((8, 131072), 1, 4), name="2d_pow2"),
+            subtest(((4, 8, 20011), 2, 4), name="3d_inner"),
+            subtest(((4, 20011, 8), 1, 4), name="3d_middle"),
+            subtest(((20011, 4, 8), 0, 4), name="3d_outer"),
+            subtest(((2, 4, 8, 20011), 3, 4), name="4d_inner"),
+            subtest(((2, 4, 20011, 8), 2, 4), name="4d_middle2"),
+            subtest(((2, 20011, 4, 8), 1, 4), name="4d_middle1"),
+            subtest(((20011, 2, 4, 8), 0, 4), name="4d_outer"),
+        ],
+    )
+    def test_grid_split_reduction_shapes(
+        self, shape, dim, expected_num_block_pointers
+    ):
+        x = torch.randn(*shape, device=self.device)
+        self._run_grid_split_reduction(
+            lambda t: t.sum(dim),
+            x,
+            expected_num_block_pointers=expected_num_block_pointers,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+
+    @_grid_split_reduction_test
+    @parametrize("reduction_fn,atol", _reduction_subtests())
+    def test_grid_split_reduction_ops(self, reduction_fn, atol):
+        x = torch.randn(8, 100003, device=self.device)
+        self._run_grid_split_reduction(
+            lambda t: _reduce(t, reduction_fn, 1),
+            x,
+            atol=atol,
+            rtol=1e-2,
+        )
+
+    # Reduced dims that are not adjacent cannot merge, so stage 1 keeps two
+    # reduction trees. Two things are only exercised here:
+    #
+    #   1. Axis selection. The split factor is sized from the *flattened* rnumel,
+    #      so binding it to r0_ when r0_ is short strands most programs -- e.g.
+    #      r0_numel=2 with split=25 leaves 23 programs with nothing to reduce.
+    #   2. The rewind. Partitioning an inner axis is only correct because the loop
+    #      suffix rewinds that axis by rsplit_num_iter instead of its full extent;
+    #      rewinding by the full extent overshoots and every later outer row reads
+    #      the wrong memory.
+    #
+    # Both assertions are on the generated code on purpose. A regression in (1)
+    # only costs parallelism, so numerics alone would not catch it, and (2) fails
+    # by producing silently wrong values rather than by raising.
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+            "force_red_split_dim_as_grid_dim": True,
+            "padding_stride_threshold": 0,
+            **tiled_reduction_config,
+        }
+    )
+    @parametrize(
+        "shape,dims,partitioned_prefix",
+        [
+            # Long axis is innermost -> split lands on r1_, which is nested inside
+            # the r0_ loop, so the rewind must use the partitioned trip count.
+            subtest(((2, 2, 100003), (0, 2), "r1_"), name="3d_inner_is_long"),
+            subtest(
+                ((32, 2, 100003), (0, 2), "r1_"),
+                name="3d_both_fit_inner_is_longer",
+            ),
+            subtest(((2, 4, 2, 100003), (1, 3), "r1_"), name="4d_inner_is_long"),
+            # Long axis is outermost -> split lands on r0_. Nothing is nested
+            # inside a partitioned loop, so the rewind must stay at full extent.
+            subtest(((2, 100003, 2, 4), (1, 3), "r0_"), name="4d_outer_is_long"),
+        ],
+    )
+    def test_grid_split_reduction_partitions_long_axis(
+        self, shape, dims, partitioned_prefix
+    ):
+        self._skip_if_host_side_tma()
+        x = torch.randn(*shape, device=self.device)
+        _, code = self._run_and_compare(
+            lambda t: t.sum(dims),
+            x,
+            expected_num_triton_kernels=2,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+        self._assert_grid_split_reduction(code)
+        if self.block_descriptor_constructor_str == "tl.make_block_ptr":
+            joined = "\n".join(code)
+            self.assertIn(f"num_rblocks = ({partitioned_prefix}numel", joined)
+            # Assert on the advance lines, not the whole kernel: rsplit_num_iter is
+            # always defined in the prologue, so its mere presence proves nothing.
+            advances = self._get_lines_containing_substr(joined, "tl.advance")
+            if partitioned_prefix == "r1_":
+                self.assertIn("rsplit_num_iter", advances)
+            else:
+                self.assertNotIn("rsplit_num_iter", advances)
+
+    @_grid_split_reduction_test
+    def test_grid_split_reduction_uses_choices_dimension(self):
+        class SelectFirstReductionDimension(InductorChoices):
+            def reduction_split_dimension(
+                self, reduction_numel_hints, split_factor
+            ):
+                return 0
+
+        x = torch.randn(2, 2, 100003, device=self.device)
+        with V.set_choices_handler(SelectFirstReductionDimension()):
+            code = self._run_grid_split_reduction(
+                lambda t: t.sum((0, 2)),
+                x,
+                atol=1e-2,
+                rtol=1e-2,
+            )
+        self.assertIn("num_rblocks = (r0_numel", "\n".join(code))
+
+    # Deliberately NOT tiled_reduction_config: keeping the reduced axes on separate
+    # trees is only reachable with tiled reductions, because
+    # select_tiling_with_memory returns the flat fallback for a reduction when
+    # triton.tile_reductions is off. That gate is load-bearing -- the separate-axis
+    # form measures as a large win on a block_ptr/DMA backend and a large regression
+    # on GPU, so it must stay opt-in rather than riding in with the split-grid flag.
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+            "force_red_split_dim_as_grid_dim": True,
+            "padding_stride_threshold": 0,
+            "triton.tile_reductions": False,
+            "triton.prefer_nd_tiling": False,
+        }
+    )
+    def test_grid_split_reduction_multi_dim_gated_by_tile_reductions(self):
+        self._skip_if_host_side_tma()
+        # Non-adjacent reduced dims: the pair cannot merge, so this is exactly the
+        # shape that would grow a second reduction tree if the gate were missing.
+        x = torch.randn(2, 2, 100003, device=self.device)
+        _, code = self._run_and_compare(
+            lambda t: t.sum((0, 2)),
+            x,
+            expected_num_triton_kernels=2,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+        self._assert_grid_split_reduction(code)
+        if self.block_descriptor_constructor_str == "tl.make_block_ptr":
+            # A second reduction tree would show up as r1_numel in stage 1; with the
+            # gate closed every kernel must stay single-axis.
+            self.assertNotIn("r1_numel", "\n".join(code))
+
+    @_grid_split_reduction_test
+    @parametrize(
+        "shape,dim,expected_input_extent",
+        [
+            subtest(((4, 20011, 10), 1, None), name="non_pow2_kept_dim_3d"),
+            subtest(((2, 4, 20011, 10), 2, None), name="non_pow2_kept_dim_4d"),
+            subtest(((100003, 4, 8), 0, 100003), name="large_extent_3d_outer"),
+            subtest(((4, 100003, 8), 1, 100003), name="large_extent_3d_middle"),
+            subtest(
+                ((2, 100003, 4, 8), 1, 100003), name="large_extent_4d_middle1"
+            ),
+            subtest(
+                ((2, 4, 100003, 8), 2, 100003), name="large_extent_4d_middle2"
+            ),
+        ],
+    )
+    def test_grid_split_reduction_indexing(
+        self, shape, dim, expected_input_extent
+    ):
+        x = torch.randn(*shape, device=self.device)
+        code = self._run_grid_split_reduction(
+            lambda t: t.sum(dim),
+            x,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+        if (
+            expected_input_extent is not None
+            and self.block_descriptor_constructor_str == "tl.make_block_ptr"
+        ):
+            input_block_ptrs = self._get_lines_containing_substr(
+                "\n".join(code), "tl.make_block_ptr(in_ptr0"
+            )
+            self.assertIn(str(expected_input_extent), input_block_ptrs)
+
+    @_grid_split_reduction_test
+    @parametrize(
+        "reduction_fn,make_input,atol,rtol",
+        [
+            subtest(
+                (
+                    torch.Tensor.amax,
+                    lambda d: -torch.rand(8, 100003, device=d) - 1,
+                    0,
+                    0,
+                ),
+                name="amax_all_negative",
+            ),
+            subtest(
+                (
+                    torch.Tensor.amin,
+                    lambda d: torch.rand(8, 100003, device=d) + 1,
+                    0,
+                    0,
+                ),
+                name="amin_all_positive",
+            ),
+            subtest(
+                (
+                    torch.Tensor.prod,
+                    lambda d: torch.rand(8, 100003, device=d) * 2e-3 + 0.999,
+                    0,
+                    1e-3,
+                ),
+                name="prod_near_one",
+            ),
+        ],
+    )
+    def test_grid_split_reduction_zero_padding(
+        self, reduction_fn, make_input, atol, rtol
+    ):
+        self._run_grid_split_reduction(
+            lambda t: reduction_fn(t, 1),
+            make_input(self.device),
+            atol=atol,
+            rtol=rtol,
+        )
+
+    @_grid_split_reduction_test
+    @parametrize(
+        "make_input,reduction_fn,atol,rtol",
+        [
+            subtest(
+                (
+                    lambda d: torch.randn(8, 100003, device=d, dtype=torch.bfloat16),
+                    lambda t: t.sum(dim=1),
+                    1.0,
+                    1e-1,
+                ),
+                name="bfloat16",
+            ),
+            subtest(
+                (
+                    lambda d: torch.randn(8, 100003, device=d, dtype=torch.float16),
+                    lambda t: t.sum(dim=1),
+                    0.5,
+                    1e-1,
+                ),
+                name="float16",
+            ),
+            subtest(
+                (
+                    lambda d: torch.rand(8, 100003, device=d) > 0.5,
+                    lambda t: t.all(dim=1).to(torch.int32),
+                    None,
+                    None,
+                ),
+                name="bool_all",
+            ),
+            subtest(
+                (
+                    lambda d: torch.rand(8, 100003, device=d) > 0.5,
+                    lambda t: t.any(dim=1).to(torch.int32),
+                    None,
+                    None,
+                ),
+                name="bool_any",
+            ),
+            subtest(
+                (
+                    lambda d: torch.randint(
+                        -100,
+                        100,
+                        (8, 100003),
+                        device=d,
+                        dtype=torch.int32,
+                    ),
+                    lambda t: t.sum(dim=1),
+                    None,
+                    None,
+                ),
+                name="int32",
+            ),
+        ],
+    )
+    def test_grid_split_reduction_input_types(
+        self, make_input, reduction_fn, atol, rtol
+    ):
+        self._run_grid_split_reduction(
+            reduction_fn,
+            make_input(self.device),
+            atol=atol,
+            rtol=rtol,
+        )
+
+    @config.patch(
+        {
+            "triton.cooperative_reductions": False,
+            "split_reductions": True,
+            "force_red_split_dim_as_grid_dim": False,
+            "padding_stride_threshold": 0,
+            **tiled_reduction_config,
+        }
+    )
+    def test_grid_split_reduction_disabled_by_default(self):
+        x = torch.randn(8, 100003, device=self.device)
+        self._run_grid_split_reduction(
+            lambda t: t.sum(dim=1),
+            x,
+            expected_grid_split=False,
+            expected_num_block_pointers=3,
+            atol=1e-2,
+            rtol=1e-2,
+        )
+
+    @_grid_split_reduction_test
+    def test_grid_split_reduction_survives_choices_override(self):
+        if type(self).__name__ != "TritonBlockPointerTestGPU":
+            raise unittest.SkipTest("specific to block pointer kernel overrides")
+
+        class OverrideReductionMode(InductorChoices):
+            def triton_kernel_kwargs(
+                self, kernel_cls, features, groups, kernel_kwargs
+            ):
+                kernel_kwargs.pop("split_as_grid_reduction", None)
+                kernel_kwargs["override_persistent_reduction"] = True
+                return kernel_kwargs
+
+        x = torch.randn(8, 100003, device=self.device)
+        with V.set_choices_handler(OverrideReductionMode()):
+            self._run_grid_split_reduction(
+                lambda t: t.sum(dim=1),
+                x,
+                atol=1e-2,
+                rtol=1e-2,
+            )
 
 @unittest.skipIf(not HAS_GPU, "requires triton GPU backend")
 @requires_block_ptr
