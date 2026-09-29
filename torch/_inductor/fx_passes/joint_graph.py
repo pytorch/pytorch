@@ -15,11 +15,14 @@ from torch._dynamo.utils import counters
 from torch._higher_order_ops.flex_gemm import _PRESERVE_FLEX_GEMM_GEMM_OP
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
+from torch._inductor.fx_utils import get_node_storage
 from torch._inductor.utils import get_gpu_type
+from torch._library.utils import zip_schema
 from torch.fx.experimental.symbolic_shapes import (
     guard_or_false,
     guard_or_true,
     statically_known_true,
+    sym_eq,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
@@ -104,7 +107,14 @@ def remove_no_ops(
             if any(not isinstance(t, torch.Tensor) for t in (t1, t2)):
                 return False
             for field in fields:
-                if getattr(t1, field) != getattr(t2, field):
+                v1 = getattr(t1, field)
+                v2 = getattr(t2, field)
+                if field == "shape":
+                    # Shapes may contain unbacked SymInts; tuple `!=` would
+                    # force a guard. Conservatively treat unknown as "not equal".
+                    if not guard_or_false(sym_eq(v1, v2)):
+                        return False
+                elif v1 != v2:
                     return False
             return True
 
@@ -291,6 +301,11 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
                 break
             for unused in unused_views:
                 views.pop(unused)
+                if unused.op == "placeholder":
+                    # Placeholders are graph inputs; erasing one would silently
+                    # shrink the compiled function's arity while callers keep
+                    # passing the original argument count.
+                    continue
                 graph.erase_node(unused)
 
 
@@ -304,6 +319,7 @@ class UniformValueConstantFolder(ConstantFolder):
         super().__init__(gm, skip_constructors)
         self.node_storages_ptrs: dict[torch.fx.Node, int] = {}
         self.constant_data_ptrs: dict[torch.fx.Node, StorageWeakRef] = {}
+        self.mutated_storages = self._collect_mutated_storages()
         # we may constant fold a tensor which in the graph has a sym size
         # see: [constant folding refining of symints]
         self.node_replacements_shapes: dict[torch.fx.Node, list[int]] = {}
@@ -355,7 +371,7 @@ class UniformValueConstantFolder(ConstantFolder):
             if not isinstance(tensor_val, torch.Tensor):
                 continue
 
-            def is_zero_int(arg: Any) -> bool:
+            def is_zero_int(arg: object) -> bool:
                 return isinstance(arg, int) and arg == 0
 
             if not any(is_zero_int(a) for a in op.args):
@@ -376,6 +392,41 @@ class UniformValueConstantFolder(ConstantFolder):
                 pin_memory=False,
             )
             self.add_node_replacement(op, t)
+
+    def _collect_mutated_storages(self) -> OrderedSet[int]:
+        mutated_storages: OrderedSet[int] = OrderedSet()
+
+        def add_mutated_storage(arg: torch.fx.Node) -> None:
+            storage = get_node_storage(arg)
+            if storage is not None:
+                mutated_storages.add(storage)
+
+        graph = typing.cast(torch.fx.Graph, self.module.graph)
+        for op, target in graph._find_nodes_lookup_table.table:
+            if (
+                op != "call_function"
+                or not isinstance(target, torch._ops.OpOverload)
+                or not target._schema.is_mutable
+            ):
+                continue
+
+            for node in graph.find_nodes(op=op, target=target, sort=False):
+                for schema_arg, arg in zip_schema(
+                    target._schema, node.args, node.kwargs
+                ):
+                    if (
+                        schema_arg.alias_info is None
+                        or not schema_arg.alias_info.is_write
+                    ):
+                        continue
+
+                    pytree.tree_map_only(torch.fx.Node, add_mutated_storage, arg)
+
+        return mutated_storages
+
+    def _aliases_mutated_storage(self, node: torch.fx.Node) -> bool:
+        storage = get_node_storage(node)
+        return storage is not None and storage in self.mutated_storages
 
     def _support_dynamic_shape(self):
         return True
@@ -402,6 +453,11 @@ class UniformValueConstantFolder(ConstantFolder):
         # 3. for pointwise ops, run node to get the substitute value
         # 4. deal with some special ops
         # otherwise, stop deduce value and return unknown value
+
+        # Values read from a mutated storage must remain runtime reads. Folding
+        # them would make later calls reuse the compile-time value.
+        if self._aliases_mutated_storage(node):
+            return self.unknown_value
 
         # TODO: cat, more indexing
         # TODO - do on cpu to avoid syncs
@@ -498,8 +554,51 @@ def _has_self_referential_shape(
     return False
 
 
+# TODO: Investigate generalizing this to cuDNN, CPU Flash, and overrideable fused attention.
+def _remove_zero_bias_from_efficient_attention(
+    gm: torch.fx.GraphModule,
+    uniform_values: dict[torch.fx.Node, Any],
+) -> None:
+    if config.numerics == "strict":
+        return
+
+    targets = (
+        (aten._scaled_dot_product_efficient_attention.default, 3),
+        (aten._scaled_dot_product_efficient_attention_backward.default, 4),
+    )
+    for target, bias_index in targets:
+        for node in gm.graph.find_nodes(op="call_function", target=target):
+            bias = node.args[bias_index]
+            if not isinstance(bias, torch.fx.Node):
+                continue
+            if target is aten._scaled_dot_product_efficient_attention_backward.default:
+                # Backward positional argument 10 is a four-element bool sequence:
+                # [..., compute_grad_bias]. Thus grad_input_mask[3] says whether backward
+                # must produce grad_bias, which requires retaining the bias. This is
+                # rare for a proven-zero bias, but can occur for a differentiable
+                # expression such as parameter * 0.
+                grad_input_mask = node.args[10]
+                compute_bias_gradient = grad_input_mask[3]
+                if compute_bias_gradient:
+                    continue
+            value = uniform_values.get(bias)
+            fake_bias = bias.meta.get("val")
+            if (
+                not isinstance(fake_bias, torch.Tensor)
+                or not fake_bias.dtype.is_floating_point
+                or value != 0.0
+            ):
+                continue
+            args = list(node.args)
+            args[bias_index] = None
+            node.args = tuple(args)
+
+
 def constant_fold_uniform_value(gm: torch.fx.GraphModule):
-    """Runs constant folding and replaces constants which can be constructed with a single `full` call. Calls into remove_no_ops."""
+    """Fold uniform constants and algebraic no-ops.
+
+    This includes replacing an all-zero additive efficient-attention bias with no bias.
+    """
     with torch.utils._python_dispatch._disable_current_modes():
         aten = torch.ops.aten
 
@@ -509,6 +608,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
         cf.run()
 
         node_replacements = cf.node_replacements
+        _remove_zero_bias_from_efficient_attention(gm, node_replacements)
 
         # note: [constant folding refining of symints]
         # constant folding will partially evaluate a graph such that values which have dependencies which

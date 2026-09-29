@@ -467,30 +467,6 @@ operator==(const _Tp& __x, const complex<_Tp>& __y)
 template<class _Tp>
 inline constexpr
 bool
-operator!=(const complex<_Tp>& __x, const complex<_Tp>& __y)
-{
-    return !(__x == __y);
-}
-
-template<class _Tp>
-inline constexpr
-bool
-operator!=(const complex<_Tp>& __x, const _Tp& __y)
-{
-    return !(__x == __y);
-}
-
-template<class _Tp>
-inline constexpr
-bool
-operator!=(const _Tp& __x, const complex<_Tp>& __y)
-{
-    return !(__x == __y);
-}
-
-template<class _Tp>
-inline constexpr
-bool
 operator&&(const complex<_Tp>& __x, const complex<_Tp>& __y)
 {
     return bool(__x) && bool(__y);

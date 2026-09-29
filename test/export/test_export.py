@@ -11,6 +11,7 @@ import math
 import operator
 import os
 import re
+import subprocess
 import sys
 import traceback
 import unittest
@@ -74,6 +75,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    TEST_CUDA,
     xfailIfDistributedNotSupported,
 )
 from torch.testing._internal.common_utils import (
@@ -3094,6 +3096,27 @@ graph():
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
+    def test_torch_assert_tensor_condition(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                torch._assert(x.min() >= 0, "x must be positive")
+                return x
+
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                inp = torch.ones(1, 32, 64)
+                ep = export(Foo(), (inp,), strict=strict)
+                self.assertTrue(
+                    any(
+                        node.target == torch.ops.aten._assert_async.msg
+                        for node in ep.graph.nodes
+                    )
+                )
+                self.assertEqual(ep.module()(inp), inp)
+
+                with self.assertRaisesRegex(RuntimeError, "x must be positive"):
+                    ep.module()(-inp)
+
     def test_symint_item(self):
         class M(torch.nn.Module):
             def forward(self, tensor):
@@ -3867,6 +3890,117 @@ def forward(self, add_tensor):
         self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
 
+    def test_non_strict_export_distribution_validation(self):
+        class SquashedNormal(torch.distributions.TransformedDistribution):
+            def __init__(self, loc, scale, tanh_transform_clamp=(-0.99, 0.99)):
+                self.loc = loc
+                self.scale = scale
+                self.tanh_transform_clamp = tanh_transform_clamp
+                self.base_dist = torch.distributions.Normal(loc, scale)
+                super().__init__(self.base_dist, [])
+
+            @property
+            def mean(self):
+                mu = self.loc
+                for tr in self.transforms:
+                    mu = tr(mu)
+                return mu
+
+        def squashed_normal_flatten(t):
+            return [t.loc, t.scale], t.tanh_transform_clamp
+
+        def squashed_normal_unflatten(values, context):
+            return SquashedNormal(*values, context)
+
+        pytree.register_pytree_node(
+            SquashedNormal,
+            squashed_normal_flatten,
+            squashed_normal_unflatten,
+            serialized_type_name="test_export.SquashedNormalIssue135061",
+        )
+
+        class StochasticActor(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(4, 2)
+
+            def forward(self, state):
+                out = F.relu(self.fc(state))
+                mu, log_std = out.chunk(2, dim=1)
+                log_std = torch.tanh(log_std)
+                std = (-10 + 6 * (log_std + 1)).exp()
+                return SquashedNormal(mu, std)
+
+        model = StochasticActor()
+        inputs = (torch.randn(1, 4),)
+        ep = export(model, inputs, strict=False)
+
+        FileCheck().check("torch.ops.aten._assert_async.msg").run(ep.graph_module.code)
+        eager_dist = model(*inputs)
+        exported_dist = ep.module()(*inputs)
+        self.assertEqual(exported_dist.mean, eager_dist.mean)
+
+        class NormalMean(torch.nn.Module):
+            def forward(self, scale):
+                return torch.distributions.Normal(torch.zeros_like(scale), scale).mean
+
+        normal_inputs = (torch.ones(2, 3),)
+        normal_ep = export(NormalMean(), normal_inputs, strict=False)
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected parameter to satisfy its distribution constraint"
+        ):
+            normal_ep.module()(-normal_inputs[0])
+
+        class LogProb(torch.nn.Module):
+            def forward(self, value):
+                dist = torch.distributions.Normal(
+                    torch.zeros_like(value), torch.ones_like(value)
+                )
+                return dist.log_prob(value)
+
+        log_prob_inputs = (torch.randn(2, 3),)
+        log_prob_ep = export(LogProb(), log_prob_inputs, strict=False)
+        FileCheck().check("Expected value argument to be within the support").run(
+            log_prob_ep.graph_module.code
+        )
+        self.assertEqual(
+            log_prob_ep.module()(*log_prob_inputs), LogProb()(*log_prob_inputs)
+        )
+        invalid_log_prob_input = log_prob_inputs[0].clone()
+        invalid_log_prob_input[0, 0] = torch.nan
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected value argument to be within the support"
+        ):
+            log_prob_ep.module()(invalid_log_prob_input)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_non_strict_export_distribution_validation_cuda(self):
+        script = """\
+import torch
+
+
+class NormalMean(torch.nn.Module):
+    def forward(self, scale):
+        return torch.distributions.Normal(torch.zeros_like(scale), scale).mean
+
+
+scale = torch.ones(2, 3, device="cuda")
+ep = torch.export.export(NormalMean(), (scale,), strict=False)
+try:
+    ep.module()(-scale)
+except RuntimeError as exc:
+    if "Expected parameter to satisfy its distribution constraint" not in str(exc):
+        raise
+else:
+    raise AssertionError("invalid scale did not raise")
+torch.ones(1, device="cuda")
+torch.cuda.synchronize()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=60
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
+
     def test_draft_export_checks_mutation_with_nan(self):
         @torch.library.custom_op("export::foo", mutates_args={})
         def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -4236,6 +4370,44 @@ graph():
         self.assertTrue(torch.allclose(ep.module()(*inputs), Vmap()(*inputs)))
         ep = export(Vmap(), inputs, {}, dynamic_shapes=dynamic).run_decompositions({})
         self.assertTrue(torch.allclose(ep.module()(*inputs), Vmap()(*inputs)))
+
+    def test_non_strict_vmap_tensor_indexing(self):
+        class VmapTensorIndex(torch.nn.Module):
+            def forward(self, padding_mask):
+                batch = padding_mask.shape[0]
+                seq = padding_mask.shape[1]
+                batch_arange = torch.arange(batch, device=padding_mask.device)
+                seq_arange = torch.arange(seq, device=padding_mask.device)
+
+                def mask(batch_idx, seq_idx):
+                    return padding_mask[batch_idx, seq_idx]
+
+                return torch.vmap(
+                    torch.vmap(mask, in_dims=(None, 0)),
+                    in_dims=(0, None),
+                )(batch_arange, seq_arange)
+
+        mod = VmapTensorIndex()
+        padding_mask = torch.arange(32).reshape(2, 16) % 3 == 0
+        dynamic_shapes = {
+            "padding_mask": {
+                0: Dim("batch", min=1, max=4),
+                1: Dim("seq", min=1, max=1024),
+            }
+        }
+        ep = export(
+            mod,
+            (padding_mask,),
+            dynamic_shapes=dynamic_shapes,
+            strict=False,
+        )
+        FileCheck().check("torch.ops.aten.index.Tensor").run(str(ep.graph))
+
+        for test_padding_mask in (
+            padding_mask,
+            torch.arange(21).reshape(3, 7) % 2 == 0,
+        ):
+            self.assertEqual(ep.module()(test_padding_mask), mod(test_padding_mask))
 
     @testing.expectedFailureLegacyExportNonStrict  # Old export doesn't work with subclasses
     @testing.expectedFailureLegacyExportStrict  # Old export doesn't work with subclasses
@@ -7085,6 +7257,30 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             M2(),
             (torch.tensor(6), torch.tensor(6), torch.tensor(6), torch.randn(1)),
         )
+
+    def test_torch_check_symbool_python_not_strict(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                c = x.item()
+                torch._check(not (c * 2 == 0))
+                if c * 2 == 0:
+                    return x.sin()
+                return x + 1
+
+        export(M(), (torch.tensor(3, dtype=torch.int64),), strict=True)
+
+    def test_torch_check_symbool_python_not_nonstrict_error(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                c = x.item()
+                torch._check(not (c * 2 == 0))
+                return x + 1
+
+        with self.assertRaisesRegex(
+            torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
+            "Python `not` on a symbolic boolean",
+        ):
+            export(M(), (torch.tensor(3, dtype=torch.int64),), strict=False)
 
     def test_replaced_unbacked_bindings(self):
         import sympy
@@ -10171,6 +10367,44 @@ def forward(self, x):
                 "_dynamo_unbacked_indices",
             ]:
                 self.assertFalse(hasattr(tensor, attr))
+
+    def test_maybe_mark_dynamic_ranges(self) -> None:
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                return x.cos() * x.shape[0]
+
+        class Narrowing(torch.nn.Module):
+            def forward(self, x):
+                if x.shape[0] < 5:
+                    return x.sin()
+                return x.cos() * x.shape[0]
+
+        def exported_dim_range(mod, size, strict):
+            x = torch.randn(size)
+            torch._dynamo.maybe_mark_dynamic(x, 0, min=2, max=5)
+            ep = torch.export.export(mod, (x,), strict=strict)
+            placeholder = next(n for n in ep.graph.nodes if n.op == "placeholder")
+            sym_size = placeholder.meta["val"].shape[0]
+            vr = sym_size.node.shape_env.var_to_range[sym_size.node.expr]
+            return (vr.lower, vr.upper)
+
+        # Strict and non strict export raise different exception types.
+        range_errors = (
+            torch._dynamo.exc.UserError,
+            torch.fx.experimental.symbolic_shapes.ConstraintViolationError,
+        )
+
+        for strict in (True, False):
+            with self.subTest(strict=strict):
+                # The declared range is honored.
+                self.assertEqual(exported_dim_range(Foo(), 4, strict), (2, 5))
+
+                # A guard may narrow the declared range.
+                self.assertEqual(exported_dim_range(Narrowing(), 4, strict), (2, 4))
+
+                # The range is never extended to fit the input.
+                with self.assertRaisesRegex(range_errors, r"6 not in range \[2, 5\]"):
+                    exported_dim_range(Foo(), 6, strict)
 
     @testing.expectedFailureCppRuntime
     def test_while_loop_index_assertions(self):
@@ -14422,6 +14656,34 @@ def forward(self, c_submod_params, x):
         ufm = torch.export.unflatten(ep)
         self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
 
+    def test_cond_dynamic_shape_trunc_div_one_output_metadata(self):
+        class M(torch.nn.Module):
+            def forward(self, x, flag):
+                def true_fn(x):
+                    ori_size = (
+                        math.trunc(x.shape[-2] / 1),
+                        math.trunc(x.shape[-1] / 1),
+                    )
+                    new_size = (
+                        math.trunc(x.shape[-2] + 0.5),
+                        math.trunc(x.shape[-1] + 0.5),
+                    )
+                    x = F.interpolate(x, size=new_size, mode="bilinear")
+                    return F.interpolate(x, size=ori_size, mode="bilinear")
+
+                def false_fn(x):
+                    return x.clone()
+
+                return torch.cond(flag, true_fn, false_fn, [x])
+
+        inputs = (torch.rand(1, 3, 28, 28), torch.tensor([True]))
+        dynamic_shapes = {
+            "x": {2: Dim.DYNAMIC, 3: Dim.DYNAMIC},
+            "flag": None,
+        }
+        ep = export(M(), inputs, dynamic_shapes=dynamic_shapes, strict=False)
+        self.assertEqual(ep.module()(*inputs).shape, inputs[0].shape)
+
     @testing.expectedFailureStrictV2
     def test_unflatten_multiple_graphs_shared_submodule(self):
         class N(torch.nn.Module):
@@ -14795,6 +15057,34 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
         self.assertTrue(
             "test_cond_with_module_stack_export_with.<locals>.Bar"
             in str(cond_top_level_nn_module_stack)
+        )
+
+    def test_cond_with_shared_module_weak_key_dict(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/161053
+        class Bar(torch.nn.Module):
+            def forward(self, x):
+                states = weakref.WeakKeyDictionary({self: 1})
+                return torch.cond(
+                    x.sum() > 0,
+                    lambda x: x + states[self],
+                    lambda x: x - 1,
+                    (x,),
+                )
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+                self.alias = self.bar
+
+            def forward(self, x):
+                return self.bar(x)
+
+        x = torch.ones(2)
+        ep = export(M(), (x,), strict=False)
+        self.assertEqual(ep.module()(x), x + 1)
+        FileCheck().check_count("torch.ops.higher_order.cond", 1, exactly=True).run(
+            ep.graph_module.code
         )
 
     # TODO: See https://github.com/pytorch/pytorch/issues/115790

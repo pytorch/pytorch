@@ -411,6 +411,31 @@ class EnumTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, Color.RED)
         self.assertEqual(ref, res)
 
+    @skipIfNotPy312
+    def test_enum_member_shadows_property(self):
+        class Base(enum.Enum):
+            @enum.property
+            def first(self):
+                return self.name.upper()
+
+        class Shadow(Base):
+            first = 1
+            second = 2
+
+        def fn(x):
+            members = list(Shadow)
+            return (
+                x + Shadow.first.value,
+                members[0] is Shadow.first,
+                members == [Shadow.first, Shadow.second],
+                Shadow.second.first,
+            )
+
+        x = torch.randn(4)
+        ref = fn(x)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(ref, res)
+
     def test_int_enum_arithmetic(self):
         """Test IntEnum arithmetic operations."""
 

@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     get_cycles_per_ms,
     run_tests,
     TEST_CUDA,
+    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -185,7 +186,17 @@ class AbstractFaultToleranceTest:
             with self.assertRaisesRegex(dist.DistBackendError, "NCCL operation failed"):
                 work.wait()
         else:
+            # Revoke/abort is a local operation: NCCL does not notify peer
+            # ranks when rank 0 aborts its side of the communicator. If ranks
+            # 1 and 2 don't also abort and instead fall through to
+            # tearDown()'s ordinary destroy_process_group(), the communicator
+            # ends up in an inconsistent state across ranks -- NCCL's
+            # ncclCommDestroy() barrier waits for every rank to enter
+            # destroy, but rank 0 already exited via abort and never will, so
+            # ranks 1 and 2 hang until the test harness's timeout. All ranks
+            # must take the same (abort) path.
             time.sleep(1)
+            self.backend.abort()
 
     def test_shrink_exclude_last_rank(self):
         handles = self._create_reconfigured_pg("ft_shrink_last", 400)
@@ -332,10 +343,45 @@ class AbstractFaultToleranceTest:
 
     def test_reconfigure_rejects_reused_uuid(self):
         self._init_reconfigurable_pg()
-        uuid = 1100 + self.rank
-        self._reconfigure(uuid, [dist._get_reconfigure_handle()])
-        with self.assertRaisesRegex(RuntimeError, "already used"):
+        if self.backend_name != "nccl2":
+            uuid = 1100 + self.rank
             self._reconfigure(uuid, [dist._get_reconfigure_handle()])
+            with self.assertRaisesRegex(RuntimeError, "already used"):
+                self._reconfigure(uuid, [dist._get_reconfigure_handle()])
+            return
+
+        uuid = 1100
+        handles = self._collect_handles("ft_reused_uuid_initial")
+        self._reconfigure(uuid, handles)
+        handles = self._collect_handles("ft_reused_uuid_current")
+        error = "already used" if self.rank == 0 else "Wait timeout"
+        with self.assertRaisesRegex(RuntimeError, error):
+            dist._reconfigure(
+                uuid,
+                handles,
+                timeout=timedelta(milliseconds=500),
+            ).wait()
+        self._store_barrier("ft_reused_uuid_rejected")
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
+    def test_reconfigure_timeout_is_retryable(self):
+        if self.backend_name != "nccl2":
+            self.skipTest("nonblocking NCCL initialization behavior")
+        self._init_reconfigurable_pg()
+        handles = self._collect_handles("ft_timeout_retry_initial")
+
+        if self.rank == 0:
+            with self.assertRaisesRegex(RuntimeError, "timed out"):
+                dist._reconfigure(
+                    1400,
+                    handles[:2],
+                    timeout=timedelta(milliseconds=500),
+                ).wait()
+        self._store_barrier("ft_timeout_retry_observed")
+
+        handles = self._collect_handles("ft_timeout_retry_current")
+        self._reconfigure(1401, handles)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
 
 def _make_fault_tolerance_test_class(backend):
@@ -355,6 +401,11 @@ def _make_fault_tolerance_test_class(backend):
         cls = unittest.skipIf(
             not TEST_CUDA or torch.cuda.device_count() < 3,
             "fault tolerance CUDA tests require at least 3 GPUs",
+        )(cls)
+    if backend.name == "nccl2":
+        cls = unittest.skipIf(
+            TEST_WITH_ROCM,
+            "nccl2 reconfigure is not supported with RCCL",
         )(cls)
     return cls
 
