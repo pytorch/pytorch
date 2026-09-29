@@ -4,7 +4,7 @@ import copy
 import logging
 import os
 import weakref
-from contextlib import contextmanager, ExitStack
+from contextlib import contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from unittest import mock
 
@@ -321,6 +321,7 @@ def assert_explicit_forward_wait_ownership(test_case, stages):
     """Check that each explicit wait releases its forward-send storage."""
     storage_refs = {}
     released = set()
+    released_while_stage_owned = set()
     with ExitStack() as stack:
         for stage in stages:
             stage_index = stage.stage_index
@@ -342,12 +343,15 @@ def assert_explicit_forward_wait_ownership(test_case, stages):
             def release_fwd_send_outputs(
                 microbatch_index,
                 *,
+                _stage=stage,
                 _stage_index=stage_index,
                 _original=original_release_fwd_send_outputs,
             ):
                 key = (_stage_index, microbatch_index)
                 refs = storage_refs[key]
-                test_case.assertTrue(all(ref() is not None for ref in refs))
+                if microbatch_index in _stage._forward_chunk_states:
+                    test_case.assertTrue(all(ref() is not None for ref in refs))
+                    released_while_stage_owned.add(key)
                 _original(microbatch_index)
                 test_case.assertTrue(all(ref() is None for ref in refs))
                 released.add(key)
@@ -364,7 +368,7 @@ def assert_explicit_forward_wait_ownership(test_case, stages):
                     side_effect=release_fwd_send_outputs,
                 )
             )
-        yield released
+        yield released_while_stage_owned
 
     test_case.assertEqual(released, storage_refs.keys())
 
@@ -927,7 +931,15 @@ class ScheduleTest(MultiProcContinuousTest):
         # Run pipeline with tensor leak checking
         out = None
         losses = []
-        with check_leaked_tensors() as garbage_tensors:
+        send_ownership_context = (
+            assert_explicit_forward_wait_ownership(self, stages)
+            if max_outstanding_sends is not None
+            else nullcontext()
+        )
+        with (
+            check_leaked_tensors() as garbage_tensors,
+            send_ownership_context as released_while_stage_owned,
+        ):
             for _ in range(2):
                 zero_gradients(stage_modules)
                 if self.rank == 0:
@@ -951,6 +963,9 @@ class ScheduleTest(MultiProcContinuousTest):
                         num_microbatches,
                         pre_split=pre_split,
                     )
+
+        if max_outstanding_sends is not None:
+            self.assertTrue(released_while_stage_owned)
 
         self.assertEqual(
             len(garbage_tensors),
