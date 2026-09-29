@@ -2958,6 +2958,7 @@ class TestSparse(TestSparseBase):
         self.assertEqual(x2.get_device(), should_be_device.index)
 
     @onlyAccelerator
+    @skipIfMPS
     def test_new_device_single_device(self, device):
         self._test_new_device((), device)
         self._test_new_device((30, 20), device)
