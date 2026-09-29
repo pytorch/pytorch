@@ -5553,7 +5553,15 @@ def _reflection_or_replication_pad(
     if a.device.type in ("cuda", "mps", "xpu"):
         memory_format = torch.contiguous_format
     else:
-        memory_format = utils.suggest_memory_format(a)
+        # Feature decoupling: also treat the registered privateuse1 backend
+        # (e.g. Ascend NPU) as an accelerator that produces contiguous output,
+        # matching the eager behavior of CUDA/XPU/MPS. CPU behavior is unchanged.
+        private_backend = torch._C._get_privateuse1_backend_name()
+        is_accelerator = a.device.type == private_backend
+        if is_accelerator:
+            memory_format = torch.contiguous_format
+        else:
+            memory_format = utils.suggest_memory_format(a)
     result = result.contiguous(memory_format=memory_format)
     return result
 
