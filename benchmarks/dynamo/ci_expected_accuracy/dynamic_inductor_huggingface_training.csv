@@ -82,7 +82,7 @@ PegasusForCausalLM,pass,7
 
 
 
-Qwen/Qwen3-0.6B,eager_fail_to_run,5
+Qwen/Qwen3-0.6B,fail_accuracy,5
 
 
 
@@ -118,7 +118,7 @@ google/gemma-2-2b,eager_fail_to_run,0
 
 
 
-meta-llama/Llama-3.2-1B,eager_fail_to_run,5
+meta-llama/Llama-3.2-1B,fail_accuracy,5
 
 
 
