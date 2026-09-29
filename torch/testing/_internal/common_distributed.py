@@ -316,28 +316,16 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
     """
 
     def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if (
-                torch.accelerator.is_available()
-                and torch.accelerator.device_count() >= x
-            ):
-                return func(*args, **kwargs)
-            if allow_cpu and not torch.accelerator.is_available():
-                return func(*args, **kwargs)
-            test_skip = TEST_SKIPS[f"multi-device-{x}"]
-            if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
-                sys.exit(test_skip.exit_code)
+        decorated = unittest.skipUnless(
+            at_least_x_gpu(x)
+            or (allow_cpu and not torch.accelerator.is_available()),
+            TEST_SKIPS[f"multi-device-{x}"].message,
+        )(func)
 
         # Record the accelerator requirement so the collection-time GPU-count
         # resolver (test/conftest.py) can read it without running the test.
-        wrapper._min_gpus_required = x
-        if (
-            not allow_cpu
-            and torch.accelerator.current_accelerator(check_available=False) is None
-        ):
-            wrapper._skipped_reason = TEST_SKIPS[f"multi-device-{x}"].message
-        return wrapper
+        decorated._min_gpus_required = x
+        return decorated
 
     return decorator
 
