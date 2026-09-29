@@ -10935,10 +10935,12 @@ class Scheduler:
             relevant_reading_nodes = node1.snodes
         num_concurrent_reads = 0
         for reading_node in relevant_reading_nodes:
+            # A read of an earlier mutation of the same buffer (the output of an
+            # index_put_ into it, say) reads the same memory under another name.
             relevant_reads = [
                 read
                 for read in reading_node.read_writes.reads
-                if read.name == real_name
+                if self.mutation_real_name.get(read.name, read.name) == real_name
             ]
             if not relevant_reads:
                 continue

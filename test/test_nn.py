@@ -7300,6 +7300,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyAccelerator
     @largeTensorTest("20GB")
+    @expectedFailureMPS  # MPS pooling does not support 64-bit indexing
     def test_large_max_pool2d_ch_last(self, device):
         # https://github.com/pytorch/pytorch/issues/165297
         N, C, H, W = 70, 64, 512, 960  # dims to extend > int32
@@ -11115,7 +11116,6 @@ class TestNNDeviceType(NNTestCase):
                 self._test_batchnorm_eval(2, device, dtype)
                 self._test_batchnorm_eval(3, device, dtype)
 
-    @skipMPS  # aborts the process: MPSGraph broadcast-shape error in mps.normalization
     @onlyAccelerator
     @dtypes(torch.bfloat16, torch.half)
     def test_batchnorm_eval_mixed(self, device, dtype):
@@ -11165,7 +11165,6 @@ class TestNNDeviceType(NNTestCase):
                 self._test_batchnorm_affine(2, device, dtype)
                 self._test_batchnorm_affine(3, device, dtype)
 
-    @skipMPS  # backward gradient mismatches the CPU reference on MPS
     @onlyAccelerator
     @dtypes(torch.bfloat16, torch.half)
     def test_batchnorm_affine_mixed(self, device, dtype):
@@ -11242,7 +11241,6 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 self._test_batchnorm_simple_average(device, dtype, torch.float)
 
-    @skipMPS
     @onlyAccelerator
     def test_batchnorm_nhwc(self, device):
         for dtype in (torch.half, torch.float):
@@ -15216,7 +15214,6 @@ class TestNNDeviceType(NNTestCase):
         y.mean().backward()
         self.assertEqual(x.grad, None)
 
-    @skipMPS
     @onlyAccelerator
     def test_batchnorm_nonaffine_half_input(self, device):
         input = torch.randn(16, 3, 24, 24, dtype=torch.half, device=device)
@@ -15690,7 +15687,6 @@ class TestNNDeviceType(NNTestCase):
         torch.testing.assert_close(result, ref_output, rtol=1e-7, atol=1e-5)
 
     @onlyAccelerator
-    @skipMPS
     @parametrize_test("dims", [2, 3], name_fn=lambda x: f"{x}D")
     @parametrize_test("mode", ["train", "inference"], name_fn=lambda x: x)
     @parametrize_test(

@@ -1622,6 +1622,30 @@ def _codegen_list_mutation(ctx: SideEffectReplayContext) -> None:
 
 
 @register_side_effect_replay_handler(
+    name="bytearray_mutation",
+    matcher=lambda ctx: isinstance(ctx.var, variables.ByteArrayVariable),
+    priority=85,
+)
+def _codegen_bytearray_mutation(ctx: SideEffectReplayContext) -> None:
+    cg = ctx.codegen
+    var = ctx.var
+    if not isinstance(var, variables.ByteArrayVariable):
+        raise AssertionError(type(var))
+    # old[:] = new  (same pattern as list_mutation)
+    cg(var, allow_cache=False)
+    cg(var.source)  # type: ignore[attr-defined]
+    cg.extend_output(
+        [
+            cg.create_load_const(None),
+            cg.create_load_const(None),
+            create_instruction("BUILD_SLICE", arg=2),
+        ]
+    )
+    ctx.suffixes.append([create_instruction("STORE_SUBSCR")])
+    ctx.log(var)
+
+
+@register_side_effect_replay_handler(
     name="deque_mutation",
     matcher=lambda ctx: isinstance(ctx.var, variables.lists.DequeVariable),
     priority=80,

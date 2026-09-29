@@ -8525,6 +8525,16 @@ for dtype in (torch.int32, torch.int64):
         y = torch.randn(20, 1024 * 1024)
         self.common(f, (x, y), atol=1e-3, rtol=1e-3)
 
+    def test_inplace_flip_after_index_put(self):
+        # After index_put_ has mutated x, the flip reads x under the name of
+        # the index_put_ output, which the copy back into x must not fuse with.
+        def f(x):
+            x.index_put_((torch.arange(x.size(0), device=x.device),), x * 2.0)
+            x.add_(x.flip(0))
+            return x
+
+        self.common(f, (torch.randn(20, 1024),))
+
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
             src_node_feat = node_feat[edge_index[0]]
@@ -14826,6 +14836,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return F.interpolate(x, scale_factor=1 / 300, mode="linear")
 
         self.common(fn, [torch.randn(1, 8, 396 * 300)])
+
+    def test_broadcast_symbolic_size_one_dynamic_shapes(self):
+        # y has symbolic size trunc(s0 / 300) which the shape env knows is 1.
+        # Broadcasting it against padded (size 1 + trunc(s0 / 300)) must zero
+        # its index like a literal size 1 dim would.
+        @torch.compile(dynamic=True)
+        def fn(x):
+            y = F.interpolate(x, scale_factor=1 / 300, mode="linear")
+            padded = F.pad(y, (1, 0))
+            return padded - y, padded > y
+
+        self.common(fn, [torch.arange(2 * 396, dtype=torch.float32).view(1, 2, 396)])
 
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_pattern_matcher_unbacked(self):
