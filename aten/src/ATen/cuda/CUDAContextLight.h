@@ -122,6 +122,12 @@ class TORCH_CUDA_CPP_API CUDABlasHandleWithWorkspace {
 TORCH_CUDA_CPP_API CUDABlasHandleWithWorkspace
 getCurrentCUDABlasHandleWithWorkspace();
 TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
+#ifdef USE_ROCM
+// hipblaslt handles are pooled per (device, stream) and cannot be created
+// while stream capture is active. Pre-stock the shared free list so other
+// threads (e.g. autograd workers) can reserve one mid-capture.
+TORCH_CUDA_CPP_API void ensureCublasLtHandlesAvailable(size_t n);
+#endif
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();
 TORCH_CUDA_CPP_API void clearCublasWorkspacesForStream(cudaStream_t stream);

@@ -669,16 +669,15 @@ def sparse_compressed_constructors(
         # without an explicit size, it is inferred from plain_indices.max()
         raise DynamicOutputShapeException(func)
     out_device, _ = FakeTensor._find_common_device(func, list(new_kwargs.values()))
-    requested_device = new_kwargs.pop("device", None)
-    if requested_device is not None:
-        requested_device = torch.device(requested_device)
-        requested_device = FakeTensor._normalize_fake_device(requested_device)
-        torch._check(
-            requested_device.type == out_device.type
-            and (requested_device.index or 0) == (out_device.index or 0),
-            lambda: "Values and compressed tensor instance need to be on the same device.",
-        )
-        out_device = requested_device
+    # the op's TensorOptions default is cpu, not the values' device
+    requested_device = torch.device(new_kwargs.pop("device", None) or "cpu")
+    requested_device = FakeTensor._normalize_fake_device(requested_device)
+    torch._check(
+        requested_device.type == out_device.type
+        and (requested_device.index or 0) == (out_device.index or 0),
+        lambda: "Values and compressed tensor instance need to be on the same device.",
+    )
+    out_device = requested_device
     new_kwargs["device"] = torch.device("meta")
     new_kwargs["pin_memory"] = False
     # Invariant checks read index data, which meta tensors do not have.
