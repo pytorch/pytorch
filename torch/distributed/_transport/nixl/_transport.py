@@ -113,6 +113,7 @@ class NIXLTransport(Transport):
         self._transfers: dict[int, Any] = {}
         self._pending: dict[int, _NIXLWork] = {}
         self._operation_lock = RLock()
+        self._cuda_bridges: dict[tuple[int, int], Any] = {}
         self._closed = False
         self._closing = False
 
@@ -221,6 +222,10 @@ class NIXLTransport(Transport):
             registration = memory._registration
             if not registration.active:
                 return
+            if any(bridge.owns(registration) for bridge in self._cuda_bridges.values()):
+                raise RuntimeError(
+                    "memory is retained by CUDA operations or graphs; close before unregistering"
+                )
             if any(
                 work._buffers[0]._memory._registration is registration
                 for work in self._pending.values()
@@ -334,7 +339,50 @@ class NIXLTransport(Transport):
             work._error = error
         return work
 
+    def _cuda_bridge(self, stream):
+        from ._cuda_host import _CudaStreamBridge
+
+        key = (stream.device.index, stream.cuda_stream)
+        if key not in self._cuda_bridges:
+            self._cuda_bridges[key] = _CudaStreamBridge(self, stream)
+        return self._cuda_bridges[key]
+
+    def cuda_graph(self, stream=None):
+        """Capture automatic CUDA transfers; close resets the returned graphs.
+
+        Warm up and register buffers first. Use this context instead of external
+        capture so callbacks remain alive. Serialize replay and close. Captured
+        Work objects cannot be waited on; synchronize the replay stream instead.
+        """
+        return self._cuda_bridge(stream or torch.cuda.current_stream()).capture()
+
     def _start(
+        self, operation, local_buffer, remote_buffer, *, mutable, async_op, timeout
+    ):
+        if (
+            isinstance(local_buffer, NIXLMemoryView)
+            and local_buffer._memory._registration.tensor.is_cuda
+        ):
+            tensor = local_buffer._memory._registration.tensor
+            bridge = self._cuda_bridge(torch.cuda.current_stream(tensor.device))
+            work = bridge._enqueue(
+                operation.lower(),
+                local_buffer,
+                remote_buffer,
+                self._timeout if timeout is None else timeout,
+            )
+            # CUDA callers get stream ordering rather than a submitting-thread wait.
+            return work if async_op else 0
+        return self._start_unordered(
+            operation,
+            local_buffer,
+            remote_buffer,
+            mutable=mutable,
+            async_op=async_op,
+            timeout=timeout,
+        )
+
+    def _start_unordered(
         self,
         operation: str,
         local_buffer: MemoryView,
@@ -401,6 +449,20 @@ class NIXLTransport(Transport):
         mutable: bool,
         timeout: float | None,
     ) -> None:
+        if (
+            isinstance(local_buffer, NIXLMemoryView)
+            and local_buffer._memory._registration.tensor.is_cuda
+        ):
+            work = self._start(
+                operation,
+                local_buffer,
+                remote_buffer,
+                mutable=mutable,
+                async_op=True,
+                timeout=timeout,
+            )
+            await wait_all([work], timeout=timeout)
+            return
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
@@ -438,6 +500,9 @@ class NIXLTransport(Transport):
             return list(self._pending.values())
 
     def close(self, *, timeout: float | None = None) -> None:
+        for bridge in self._cuda_bridges.values():
+            bridge.close()
+        self._cuda_bridges.clear()
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
@@ -466,6 +531,9 @@ class NIXLTransport(Transport):
         Retry close after pending work completes. Native cleanup is not
         interruptible; peer access must already have been stopped externally.
         """
+        for bridge in self._cuda_bridges.values():
+            bridge.close()
+        self._cuda_bridges.clear()
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout

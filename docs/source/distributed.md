@@ -2271,8 +2271,8 @@ can use ``read_async``, ``write_async``, or ``wait_all``. Registration remains v
 until unregistration or close, and tensors must not be resized or have their storage replaced.
 
 The base API does not order operations on CUDA streams or provide tracing,
-batching, or remote slicing. The experimental NIXL stream adapter below provides
-pinned-host staging and graph capture. Descriptor classes define explicit
+batching, or remote slicing. The experimental NIXL CUDA path below provides
+automatic stream ordering and graph capture. Descriptor classes define explicit
 ``serialize()``/``deserialize()`` methods.
 The built-in backends declare their fields in a versioned JSON envelope; binary
 metadata is base64-encoded. Unknown fields, versions, backends, and invalid field
@@ -2347,52 +2347,71 @@ cannot interrupt a blocked native call, even when it releases the GIL.
 CUDA streams and graphs (prototype)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``torch.distributed._transport.nixl._cuda_host.CudaHostTransport`` queues
-``producer -> transfer -> consumer`` on a CUDA stream without explicit caller
-synchronization. This private Linux prototype supports the UCX plugin and pinned
-CPU buffers only. Direct VRAM transfers are rejected because UCX can call CUDA
-APIs, which CUDA forbids inside host callbacks.
-
-Connect and register buffers beforehand. Queue a nonblocking GPU-to-pinned-CPU
-copy, then call the bridge's ``write`` or ``read``. The host callback submits a
-fresh NIXL Work, checks completion with a 1 ms backoff, and returns before later
-stream operations, including pinned-CPU-to-GPU copies, execute. This still uses
-CPU progress; native calls may block and callbacks on different streams may
-serialize. Prewarm kernels and copies before enqueueing; lazy CUDA module loading
-and allocation can introduce synchronization.
-
-Eager calls return a ``threading.Event`` for optional host observation. Captured
-calls return ``None``: a one-shot event cannot represent repeated graph completion.
-Use ``bridge.capture()`` rather than an external graph-capture context:
+For a registered CUDA tensor, NIXL ``read`` and ``write`` automatically order the
+transfer on that device's current stream. Previous producer work finishes before
+native submission; subsequent consumers wait for transfer completion. CPU tensors
+use the existing direct path without CUDA events, gates, or progress threads.
+Remote readiness is still the application's responsibility.
 
 .. code-block:: python
 
-    from torch.distributed._transport.nixl._cuda_host import CudaHostTransport
+    with torch.cuda.stream(stream):
+        source_tensor.copy_(producer)
+        transport.write(source_view, remote_destination)
+        transport.read(destination_view, remote_source)
+        consume(destination_tensor)
 
-    bridge = CudaHostTransport(transport, stream)
-    with bridge.capture() as graph:
-        pinned_source.copy_(gpu_source, non_blocking=True)
-        bridge.write(source_view, remote_destination)
+CUDA calls return after enqueueing, not after a submitting-thread wait.
+``async_op=True`` returns a Work for optional host completion observation; the
+stream dependency is inserted regardless of that flag. ``read_async`` and
+``write_async`` await host completion as usual. CUDA transfer timeouts must be
+positive; zero-timeout polling is available on returned Work via
+``is_completed()``. CPU timeout and waiting behavior is unchanged.
+
+A short host callback hands submission to a per-stream progress thread and
+returns immediately. That thread may call CUDA through UCX, polls native Work
+with a 1 ms backoff, and signals a mapped completion word. A stream memory wait
+holds consumers until completion. The callback must not block waiting for the
+progress thread: native CUDA copies can otherwise deadlock with graph execution.
+This uses no Python executor, but does require a progress thread per used stream.
+
+This private prototype requires Linux/x86-64, ``cuda-bindings``, CUDA stream-memory
+operations, and native owner-device GPUDirect RDMA write ordering. CUDA 13/H100
+was tested with UCX CUDA transfers on one host; multihost RDMA is unvalidated.
+Register buffers and prewarm kernels, copies, and native transfers before capture.
+Construction and teardown may synchronize. Lazy loading or native allocation can
+introduce implicit synchronization even though enqueue adds no explicit CPU wait.
+
+Use ``transport.cuda_graph(stream)`` to retain callbacks and buffers across replay:
+
+.. code-block:: python
+
+    with transport.cuda_graph(stream) as graph:
+        source_tensor.copy_(producer)
+        transport.write(source_view, remote_destination)
     graph.replay()
 
-Capture records nodes without submitting transfers. Each replay submits new Work;
-producer copies precede transfers, and consumers wait for local completion.
-Buffers, views, and remote addresses stay fixed for the graph lifetime; contents
-may change between replays. Replays may use another stream but must be serialized.
-Do not clone graph executables or race capture/replay with close.
+Capture records producer, submission, completion-gate, and consumer nodes without
+submitting transfers. Each replay resets its gate and submits fresh native Work.
+Buffers and remote addresses remain fixed; contents may change between replays.
+Captured Work has no per-replay host completion and rejects ``wait`` or future
+observation: synchronize the replay stream instead. Serialize replays, do not
+clone graph executables, and do not race capture/replay with close. External graph
+capture is rejected; the transport must own the callback lifetimes.
 
-The bridge retains callbacks and operands across all replays. ``bridge.close()``
-synchronizes the device, resets its graphs, and releases resources; subsequent
-replay is invalid. Close the bridge before unregistering memory or closing the
-underlying transport. Do not reuse buffers while operations remain queued.
+Each stream has 64 completion slots. Eager slots are reclaimed after stream
+completion; captured slots remain reserved until close. Capacity exhaustion
+raises before enqueueing. Unregistration rejects memory retained by queued
+operations or captured graphs. ``close`` drains CUDA work, resets owned graphs,
+and releases slots before native cleanup. ``close_async`` also performs this
+synchronous CUDA teardown. Neither bounds a blocked CUDA device synchronization;
+use an external watchdog. Replay after close is invalid.
 
-Local write completion does not establish remote-consumer readiness. Coordinate
-with peers before consuming incoming data, modifying a remote read source, or
-unregistering exposed memory. The bridge adds no remote notification protocol.
-
-Callback failures and timeouts terminate the process so GPU consumers cannot run
-after failed DMA. Timeout starts when the callback runs, not when it is enqueued;
-native calls can block beyond it. Use an external watchdog. Recoverable errors,
-cancellation, tracing, and direct GPU DMA are unsupported.
+Coordinate with peers before consuming incoming writes, modifying a remote read
+source, or unregistering exposed memory. Local completion does not notify the
+remote application. Transfer failures or failure to install a completion gate
+terminate the process rather than allow consumers to observe incomplete data.
+Timeout starts with native submission, not producer execution. Recoverable CUDA
+errors, cancellation of submitted DMA, and tracing are unsupported.
 
 ```

@@ -1,32 +1,32 @@
 # Owner(s): ["oncall: distributed"]
 
+import asyncio
 import gc
 import multiprocessing
 import os
 import threading
 import unittest
-from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch
 from torch.distributed._transport.nixl import NIXLTransport
-from torch.distributed._transport.nixl._cuda_host import CudaHostTransport
 from torch.distributed._transport.nixl._memory import NIXLRemoteBuffer
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 def _worker(rank, pipe, capture=False):
     torch.cuda.set_device(rank)
-    transport = NIXLTransport("cpu")
+    transport = NIXLTransport()
     stream = torch.cuda.Stream()
-    source = torch.empty(1024, pin_memory=True)
-    destination = torch.zeros(1024, pin_memory=True)
+    source = torch.empty(1024, device="cuda")
+    destination = torch.zeros(1024, device="cuda")
     producer = torch.full((1024,), rank + 1.0, device="cuda")
     consumer = torch.zeros_like(producer)
     # Prewarm kernels and memory copies before queuing host callbacks.
     source.copy_(producer)
     consumer.copy_(destination)
+    torch.cuda._sleep(1_000_000)
     torch.cuda.synchronize()
     source.zero_()
     local_source = transport.register_memory(source)
@@ -37,24 +37,48 @@ def _worker(rank, pipe, capture=False):
         pipe.send_bytes(memory.to_remote_buffer().serialize())
     remote_source = NIXLRemoteBuffer.deserialize(pipe.recv_bytes())
     remote_destination = NIXLRemoteBuffer.deserialize(pipe.recv_bytes())
-    bridge = CudaHostTransport(transport, stream)
     if capture:
-        with bridge.capture() as write_graph:
+        # Initialize native UCX CUDA resources outside graph execution.
+        with torch.cuda.stream(stream):
+            warmup = transport.write(
+                local_source.to_view(), remote_destination, async_op=True
+            )
+        warmup.wait()
+        pipe.send_bytes(b"warm")
+        if pipe.recv_bytes() != b"warm":
+            raise AssertionError("warmup rendezvous")
+        with torch.cuda.stream(stream):
+            warmup = transport.read(
+                local_destination.to_mutable_view(), remote_source, async_op=True
+            )
+        warmup.wait()
+        with transport.cuda_graph(stream) as write_graph:
+            torch.cuda._sleep(1_000_000)
             source.copy_(producer, non_blocking=True)
-            if bridge.write(local_source.to_view(), remote_destination) is not None:
+            if transport.write(local_source.to_view(), remote_destination) != 0:
                 raise AssertionError("unexpected capture result or peer message")
-        with bridge.capture() as read_graph:
-            if (
-                bridge.read(local_destination.to_mutable_view(), remote_source)
-                is not None
-            ):
-                raise AssertionError("captured read returned a one-shot event")
+        with transport.cuda_graph(stream) as read_graph:
+            captured_work = transport.read(
+                local_destination.to_mutable_view(), remote_source, async_op=True
+            )
             consumer.copy_(destination, non_blocking=True)
+        try:
+            captured_work.is_completed()
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("captured Work exposed a stale completion")
         torch.testing.assert_close(source, torch.zeros_like(source))
         torch.testing.assert_close(destination, torch.zeros_like(destination))
         pipe.send_bytes(b"captured")
         if not (pipe.recv_bytes() == b"captured"):
             raise AssertionError("unexpected capture result or peer message")
+        try:
+            transport.unregister_memory(local_source)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("graph registration was unregistered")
         for iteration in range(3):
             producer.fill_(rank + 1.0 + 10 * iteration)
             # Replay on the default stream, not the original capture stream.
@@ -69,17 +93,20 @@ def _worker(rank, pipe, capture=False):
                 consumer, torch.full_like(consumer, 2 - rank + 10 * iteration)
             )
             # Eager completion/reaping and GC must not free graph callbacks.
-            bridge.read(local_destination.to_mutable_view(), remote_source)
-            stream.synchronize()
+            transport.read(local_destination.to_mutable_view(), remote_source)
+            torch.cuda.synchronize()
             gc.collect()
             pipe.send_bytes(b"iteration")
             if not (pipe.recv_bytes() == b"iteration"):
                 raise AssertionError("unexpected capture result or peer message")
     else:
         with torch.cuda.stream(stream):
+            torch.cuda._sleep(1_000_000)
             source.copy_(producer, non_blocking=True)
-            done = bridge.write(local_source.to_view(), remote_destination)
-        if not done.wait(15):
+            done = transport.write(
+                local_source.to_view(), remote_destination, async_op=True
+            )
+        if not done.wait():
             raise TimeoutError("callback completion")
         # Local write completion does not imply peer write completion.
         pipe.send_bytes(b"written")
@@ -87,32 +114,31 @@ def _worker(rank, pipe, capture=False):
             raise RuntimeError("unexpected control message")
         torch.testing.assert_close(destination, torch.full_like(destination, 2 - rank))
         with torch.cuda.stream(stream):
-            bridge.read(local_destination.to_mutable_view(), remote_source)
+            transport.read(local_destination.to_mutable_view(), remote_source)
             consumer.copy_(destination, non_blocking=True)
         stream.synchronize()  # Verify results only; no synchronization in enqueue.
         torch.testing.assert_close(consumer, torch.full_like(consumer, 2 - rank))
-    bridge.close()
-    if bridge._captured or bridge._graphs:
-        raise AssertionError("graph resources retained after close")
+    if not capture:
+        asyncio.run(
+            transport.read_async(local_destination.to_mutable_view(), remote_source)
+        )
+        torch.testing.assert_close(destination, torch.full_like(destination, 2 - rank))
+    # Stop peer accesses before closing local registrations.
     pipe.send_bytes(b"finished")
     pipe.recv_bytes()
     transport.close()
+    if any(b._captured or b._graphs for b in transport._cuda_bridges.values()):
+        raise AssertionError("graph resources retained after close")
 
 
 def _callback_worker(fail, capture=False):
     torch.cuda.set_device(0)
-    transport = NIXLTransport("cpu")
-    tensor = torch.zeros(8, pin_memory=True)
+    transport = NIXLTransport()
+    tensor = torch.zeros(8, device="cuda")
     memory = transport.register_memory(tensor)
     remote = memory.to_remote_buffer()
+    transport._peer_name = remote.agent_name
     stream = torch.cuda.Stream()
-    bridge = CudaHostTransport(transport, stream)
-    try:
-        bridge.write(memory.to_view(), replace(remote, memory_type="VRAM"))
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("VRAM transfer was not rejected before enqueue")
     entered, release = threading.Event(), threading.Event()
 
     def transfer(*args, **kwargs):
@@ -123,22 +149,31 @@ def _callback_worker(fail, capture=False):
             raise TimeoutError("enqueue blocked the submitting thread")
         return SimpleNamespace(is_completed=lambda: True, wait=lambda: None)
 
-    with patch.object(transport, "write", side_effect=transfer):
+    with (
+        patch.object(transport, "_start_unordered", side_effect=transfer),
+        torch.cuda.stream(stream),
+    ):
         if capture:
-            with bridge.capture() as graph:
-                bridge.write(memory.to_view(), remote)
+            with transport.cuda_graph(stream) as graph:
+                transport.write(memory.to_view(), remote)
             graph.replay()
             done = None
         else:
-            done = bridge.write(memory.to_view(), remote)
+            done = transport.write(memory.to_view(), remote, async_op=True)
         if fail:
             torch.cuda.synchronize()  # Includes graph replays on the default stream.
             raise AssertionError("failed callback returned successfully")
-        if not entered.wait(5) or done.is_set():
+        if not entered.wait(5) or done.is_completed():
             raise AssertionError("expected pending callback after enqueue returned")
+        try:
+            transport.unregister_memory(memory)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError("queued CUDA memory was unregistered")
         release.set()
-        bridge.close()
-        if not done.is_set():
+        transport.close()
+        if not done.is_completed():
             raise AssertionError("missing callback completion")
     transport.close()
 
@@ -170,7 +205,7 @@ class TestCudaHostTransport(TestCase):
                 process.kill()
             process.join()
 
-    def test_native_staged_write_and_read(self):
+    def test_native_automatic_write_and_read(self):
         self._check_native(False)
 
     def test_native_cuda_graph_replay(self):
