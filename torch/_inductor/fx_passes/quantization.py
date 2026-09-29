@@ -1136,12 +1136,24 @@ def _register_quantization_reshape():
 # Third-party backends that implement aten._weight_int8pack_mm can opt in
 # via the register_* functions below.
 _concat_linear_int8_woq_devices: OrderedSet[str] = OrderedSet(["cpu", "cuda"])
+# Device types explicitly registered via register_concat_linear_int8_woq_device:
+# registration is a complete opt-in that does not require
+# config.cpp.enable_concat_linear, which stays the profitability gate for the
+# default cpu/cuda device types (mirrors check_concat_weights in
+# freezing_patterns, which only applies the config gate to cpu).
+_concat_linear_int8_woq_optins: OrderedSet[str] = OrderedSet()
 _woq_int8pack_fusion_devices: OrderedSet[str] = OrderedSet(["cpu", "cuda", "xpu"])
 
 
 def register_concat_linear_int8_woq_device(device_type: str) -> None:
-    """Enable the concat-linear int8 WOQ fusion on ``device_type``."""
+    """Enable the concat-linear int8 WOQ fusion on ``device_type``.
+
+    Registration is an explicit opt-in and does not additionally require
+    ``config.cpp.enable_concat_linear``, which remains the profitability
+    gate for the default cpu/cuda device types.
+    """
     _concat_linear_int8_woq_devices.add(device_type)
+    _concat_linear_int8_woq_optins.add(device_type)
 
 
 def register_woq_int8pack_fusion_device(device_type: str) -> None:
@@ -1151,8 +1163,6 @@ def register_woq_int8pack_fusion_device(device_type: str) -> None:
 
 def _is_valid_concat_linear_int8_woq_optimization_pattern():
     def fn(match):
-        if not config.cpp.enable_concat_linear:
-            return False
         if not all(k in match.kwargs for k in ("x", "w1", "w2", "w3", "scales")):
             raise AssertionError("expected x, w1, w2, w3, scales in match kwargs")
         if not all(
@@ -1161,6 +1171,17 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
         ):
             return False
         x = match.kwargs["x"].meta["val"]
+        # config.cpp.enable_concat_linear is a CPU profitability gate (it
+        # defaults to False; see config.py) that additionally gates the int4
+        # concat-linear pass and the CPU concat-linear weight patterns.
+        # Device types registered via register_concat_linear_int8_woq_device()
+        # opt in explicitly and do not need it, so an out-of-tree backend
+        # does not have to flip a CPU-oriented global config option.
+        if (
+            x.device.type not in _concat_linear_int8_woq_optins
+            and not config.cpp.enable_concat_linear
+        ):
+            return False
         w1 = match.kwargs["w1"].meta["val"]
         w2 = match.kwargs["w2"].meta["val"]
         w3 = match.kwargs["w3"].meta["val"]
