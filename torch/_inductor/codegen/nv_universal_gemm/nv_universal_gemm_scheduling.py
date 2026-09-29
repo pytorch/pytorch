@@ -15,8 +15,11 @@ import torch
 from torch._inductor.utils import (
     get_fused_kernel_name,
     get_kernel_metadata,
+    GPU_ALIGN_BYTES,
     Placeholder,
 )
+from torch._prims_common import compute_required_storage_length
+from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._ordered_set import OrderedSet
 
 from ... import config
@@ -24,11 +27,15 @@ from ...codecache import code_hash, get_path
 from ...ir import (
     Buffer,
     ComputedBuffer,
+    InputBuffer,
     Layout,
     MultiTemplateBuffer,
+    MutableBox,
+    NonOwningLayout,
     NVUniversalGemmBuffer,
     Pointwise,
     Reduction,
+    ReinterpretView,
 )
 from ...kernel.gemm_epilogue import (
     GEMM_ACCUMULATOR_ARG_NAME,
@@ -55,6 +62,7 @@ if TYPE_CHECKING:
 
     from ...kernel.gemm_epilogue import GemmReductionPlan
     from .epilogue_lowering import NVGemmEpilogueProgram
+    from .nv_universal_gemm_kernel import NVUniversalGemmKernel
 
 
 log = logging.getLogger(__name__)
@@ -66,9 +74,214 @@ EPILOGUE_FN_NAME = "_epilogue_fn"
 
 @dataclasses.dataclass(frozen=True, kw_only=True)
 class NVGemmGeneratedSource:
+    r"""Rendered NVGEMM source and its finalized kernel."""
+
     source: str
-    epilogue_reads: tuple[str, ...]
-    output_buffers: tuple[str, ...]
+    kernel: NVUniversalGemmKernel
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _NVGemmBenchmarkTensorSpec:
+    size: tuple[int, ...]
+    stride: tuple[int, ...]
+    offset: int
+    device: torch.device
+    dtype: torch.dtype
+    storage_dtype: torch.dtype
+    storage_of: int
+    storage_size: int
+
+
+def _nvgemm_benchmark_tensor_specs(
+    generated: NVGemmGeneratedSource,
+) -> tuple[_NVGemmBenchmarkTensorSpec | None, ...]:
+    graph_input_examples = {}
+    if V.graph.example_inputs is not None:
+        graph_input_examples = dict(
+            zip(V.graph.graph_input_names, V.graph.example_inputs, strict=True)
+        )
+
+    tensor_specs = []
+    ranges_by_storage: dict[int | StorageWeakRef, list[tuple[int, int, int]]] = {}
+    for index, argument in enumerate(generated.kernel.ordered_arguments()):
+        if argument.kind == "workspace":
+            tensor_specs.append(None)
+            continue
+
+        node = argument.node
+        if node is None:
+            node = V.graph.get_buffer(cast(str, argument.buffer_name))
+        while isinstance(node, MutableBox):
+            node = node.data
+
+        layout = node.get_layout()
+        storage_node = node
+        while True:
+            if isinstance(storage_node, (MutableBox, ReinterpretView)):
+                storage_node = storage_node.data
+            elif isinstance(storage_node, Buffer) and isinstance(
+                storage_node.get_layout(), NonOwningLayout
+            ):
+                storage_node = storage_node.get_layout().view
+            else:
+                break
+
+        if isinstance(layout, NonOwningLayout):
+            layout = layout.view.get_layout()
+
+        storage_key: int | StorageWeakRef = id(storage_node)
+        storage_base_offset = 0
+        if isinstance(storage_node, InputBuffer):
+            name = storage_node.get_name()
+            example = graph_input_examples.get(name)
+            if name in V.graph.graph_inputs and isinstance(example, torch.Tensor):
+                storage_offset = V.graph.sizevars.optimization_hint(
+                    V.graph.graph_input_storage_offsets.get(name, 0)
+                )
+                storage_key = StorageWeakRef(example.untyped_storage())
+                storage_base_offset = storage_offset * example.element_size()
+
+        size = V.graph.sizevars.optimization_hints(node.get_size())
+        stride = V.graph.sizevars.optimization_hints(node.get_stride())
+        offset = V.graph.sizevars.optimization_hint(layout.offset)
+        dtype = node.get_dtype()
+        byte_offset = storage_base_offset + offset * dtype.itemsize
+        storage_length = compute_required_storage_length(size, stride, 0)
+        max_byte = byte_offset + storage_length * dtype.itemsize
+        ranges_by_storage.setdefault(storage_key, []).append(
+            (index, byte_offset, max_byte)
+        )
+        tensor_specs.append(
+            _NVGemmBenchmarkTensorSpec(
+                size=size,
+                stride=stride,
+                offset=byte_offset,
+                device=node.get_device(),
+                dtype=dtype,
+                storage_dtype=storage_node.get_dtype(),
+                storage_of=index,
+                storage_size=0,
+            )
+        )
+
+    storage_ranges = []
+    for ranges in ranges_by_storage.values():
+        ranges.sort(key=lambda item: item[1:])
+        current = []
+        current_end = -1
+        for item in ranges:
+            _, start, end = item
+            repeated_empty_range = bool(current) and (start, end) == current[-1][1:]
+            if current and start >= current_end and not repeated_empty_range:
+                storage_ranges.append(current)
+                current = []
+            current.append(item)
+            current_end = max(current_end, end)
+        storage_ranges.append(current)
+
+    for ranges in storage_ranges:
+        storage_of = min(index for index, _, _ in ranges)
+        min_byte = min(start for _, start, _ in ranges)
+        max_byte = max(end for _, _, end in ranges)
+        origin = min_byte // GPU_ALIGN_BYTES * GPU_ALIGN_BYTES
+        nbytes = max_byte - origin
+        nbytes = (nbytes + GPU_ALIGN_BYTES - 1) // GPU_ALIGN_BYTES * GPU_ALIGN_BYTES
+        storage_spec = tensor_specs[storage_of]
+        if storage_spec is None:
+            raise AssertionError("expected tensor storage metadata")
+        tensor_specs[storage_of] = dataclasses.replace(
+            storage_spec,
+            storage_size=nbytes // storage_spec.storage_dtype.itemsize,
+        )
+
+        for index, _, _ in ranges:
+            spec = tensor_specs[index]
+            if spec is None:
+                raise AssertionError("expected tensor argument metadata")
+            offset_bytes = spec.offset - origin
+            if offset_bytes % spec.dtype.itemsize != 0:
+                raise AssertionError("unaligned NVGEMM benchmark tensor offset")
+            tensor_specs[index] = dataclasses.replace(
+                spec,
+                offset=offset_bytes // spec.dtype.itemsize,
+                storage_of=storage_of,
+            )
+
+    return tuple(tensor_specs)
+
+
+def _render_nvgemm_benchmark_helpers(
+    generated: NVGemmGeneratedSource,
+) -> str:
+    arguments = generated.kernel.ordered_arguments()
+    tensor_specs = _nvgemm_benchmark_tensor_specs(generated)
+
+    args_code = IndentedBuffer()
+    args_code.writeline("")
+    args_code.writeline("is_nvgemm = True")
+    args_code.writeline("")
+    args_code.writeline("def get_args():")
+    with args_code.indent():
+        args_code.writeline("import torch")
+        args_code.writeline("from torch._dynamo.testing import rand_strided")
+        args_code.writeline("args = []")
+
+        storage_vars = {}
+        view_vars = {}
+        for index, (argument, spec) in enumerate(
+            zip(arguments, tensor_specs, strict=True)
+        ):
+            if argument.kind == "workspace":
+                args_code.writeline(
+                    f"args.append(torch.empty({generated.kernel.workspace_size}, "
+                    f"device='{generated.kernel.output_node.get_device()}', dtype=torch.int8))"
+                )
+                continue
+
+            if spec is None:
+                raise AssertionError("expected tensor argument metadata")
+            if spec.storage_of == index:
+                storage_var = f"storage_{len(storage_vars)}"
+                storage_vars[index] = storage_var
+                args_code.writeline(
+                    f"{storage_var} = rand_strided(({spec.storage_size},), (1,), "
+                    f"device='{spec.device}', dtype={spec.storage_dtype})"
+                )
+
+            view_key = (
+                spec.storage_of,
+                spec.size,
+                spec.stride,
+                spec.offset,
+                spec.dtype,
+            )
+            view_var = view_vars.get(view_key)
+            if view_var is None:
+                view_var = f"arg_{len(view_vars)}"
+                view_vars[view_key] = view_var
+                storage_expr = storage_vars[spec.storage_of]
+                storage_spec = tensor_specs[spec.storage_of]
+                if storage_spec is None:
+                    raise AssertionError("expected tensor storage metadata")
+                if spec.dtype != storage_spec.storage_dtype:
+                    storage_expr += f".view({spec.dtype})"
+                args_code.writeline(
+                    f"{view_var} = torch.as_strided("
+                    f"{storage_expr}, {spec.size}, {spec.stride}, {spec.offset})"
+                )
+            args_code.writeline(f"args.append({view_var})")
+
+        args_code.writeline("return args")
+
+    args_code.writeline("")
+    args_code.writeline("def call(args):")
+    with args_code.indent():
+        args_code.writeline("import torch")
+        args_code.writeline("stream = torch.cuda.current_stream().cuda_stream")
+        bench_fn_name = f"{_BENCHMARK_KERNEL_PREFIX}_{MAIN_SUFFIX}"
+        args_code.writeline(f"{bench_fn_name}(*args, stream=stream)")
+
+    return generated.source + args_code.getvalue()
 
 
 class NVGemmVerticalFusionDecision(enum.Enum):
@@ -1055,11 +1268,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         src_code = render()
 
         if only_gen_src_code:
-            return NVGemmGeneratedSource(
-                source=src_code,
-                epilogue_reads=lowered_epilogue.reads,
-                output_buffers=tuple(kernel.ordered_output_buffers()),
-            )
+            return NVGemmGeneratedSource(source=src_code, kernel=kernel)
 
         # Precompile only base (non-EFC) kernels. EFC kernels produce
         # closure-wrapped artifacts that can't be serialized to disk cache.
@@ -1188,112 +1397,14 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             raise AssertionError(
                 f"expected NVGemmGeneratedSource, got {type(generated)}"
             )
-        src_code = generated.source.replace(
-            str(Placeholder.KERNEL_NAME), _BENCHMARK_KERNEL_PREFIX
+        generated = dataclasses.replace(
+            generated,
+            source=generated.source.replace(
+                str(Placeholder.KERNEL_NAME), _BENCHMARK_KERNEL_PREFIX
+            ),
         )
 
         if benchmark_kernel:
-            src_code = self._add_benchmark_helpers(
-                src_code,
-                template,
-                epilogue,
-                list(generated.epilogue_reads),
-                list(generated.output_buffers),
-            )
+            return _render_nvgemm_benchmark_helpers(generated)
 
-        return src_code
-
-    def _add_benchmark_helpers(
-        self,
-        src_code: str,
-        template_node: BaseSchedulerNode,
-        epilogue_nodes: Sequence[BaseSchedulerNode],
-        epilogue_reads: list[str],
-        output_bufs: list[str] | None = None,
-    ) -> str:
-        template_node = cast(SchedulerNode, template_node)
-        ctb: NVUniversalGemmBuffer = self.get_nv_gemm_buffer_from_node(
-            template_node, require_epilogue_fusion=bool(epilogue_nodes)
-        )
-
-        input_nodes = cast(list[Buffer], ctb.inputs)
-        # Output store layouts in out_ptr order. A multi-store epilogue has one
-        # per graph output; otherwise a single output (the fused final node, or
-        # the plain GEMM layout).
-        output_layouts: list[Layout] = []
-        if output_bufs:
-            for b in output_bufs:
-                buf = V.graph.get_buffer(b)
-                # pyrefly: ignore [missing-attribute]
-                output_layouts.append(cast(Layout, buf.get_layout()))
-        elif epilogue_nodes:
-            final_node = cast(SchedulerNode, epilogue_nodes[-1])
-            # pyrefly: ignore [missing-attribute]
-            output_layouts.append(cast(Layout, final_node.node.get_layout()))
-        else:
-            output_layouts.append(cast(Layout, ctb.layout))
-
-        args_code = IndentedBuffer()
-        args_code.writeline("")
-        args_code.writeline("is_nvgemm = True")
-        args_code.writeline("")
-        args_code.writeline("def get_args():")
-        with args_code.indent():
-            args_code.writeline("import torch")
-            args_code.writeline("from torch._dynamo.testing import rand_strided")
-            args_code.writeline("args = []")
-
-            for inp in input_nodes:
-                size = V.graph.sizevars.optimization_hints(inp.get_size())
-                stride = V.graph.sizevars.optimization_hints(inp.get_stride())
-                dtype = inp.get_dtype()
-                device = inp.get_device()
-                args_code.writeline(
-                    f"args.append(rand_strided({size}, {stride}, device='{device}', dtype={dtype}))"
-                )
-
-            for ol in output_layouts:
-                out_size = V.graph.sizevars.optimization_hints(ol.size)
-                out_stride = V.graph.sizevars.optimization_hints(ol.stride)
-                args_code.writeline(
-                    f"args.append(rand_strided({out_size}, {out_stride}, device='{ol.device}', dtype={ol.dtype}))"
-                )
-
-            for read_name in epilogue_reads:
-                buf = V.graph.get_buffer(read_name)
-                size = V.graph.sizevars.optimization_hints(buf.get_size())
-                stride = V.graph.sizevars.optimization_hints(buf.get_stride())
-                dtype = buf.get_dtype()
-                device = buf.get_device()
-                args_code.writeline(
-                    f"args.append(rand_strided({size}, {stride}, device='{device}', dtype={dtype}))"
-                )
-
-            if ctb.workspace_size > 0:
-                args_code.writeline(
-                    f"args.append(torch.empty({ctb.workspace_size}, "
-                    f"device='{output_layouts[0].device}', dtype=torch.int8))"
-                )
-
-            args_code.writeline("return args")
-
-        args_code.writeline("")
-        args_code.writeline("def call(args):")
-        with args_code.indent():
-            args_code.writeline("import torch")
-            num_inputs = len(input_nodes)
-            n_fixed = num_inputs + len(output_layouts)
-            param_list = [f"args[{i}]" for i in range(n_fixed)]
-
-            for j in range(len(epilogue_reads)):
-                param_list.append(f"args[{n_fixed + j}]")
-
-            if ctb.workspace_size > 0:
-                param_list.append(f"args[{n_fixed + len(epilogue_reads)}]")
-
-            params_str = ", ".join(param_list)
-            args_code.writeline("stream = torch.cuda.current_stream().cuda_stream")
-            bench_fn_name = f"{_BENCHMARK_KERNEL_PREFIX}_{MAIN_SUFFIX}"
-            args_code.writeline(f"{bench_fn_name}({params_str}, stream=stream)")
-
-        return src_code + args_code.getvalue()
+        return generated.source

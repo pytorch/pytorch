@@ -10,15 +10,23 @@ import sympy
 
 import torch
 from torch._higher_order_ops import flex_gemm
-from torch._inductor import config
+from torch._inductor import config, ir
 from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
-from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
-    EPILOGUE_FN_NAME,
+from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm import GemmVariant
+from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+    NVUniversalGemmKernel,
 )
+from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+    _render_nvgemm_benchmark_helpers,
+    EPILOGUE_FN_NAME,
+    NVGemmGeneratedSource,
+)
+from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.template.nv_universal_gemm import (
     HeuristicConfig,
     NVUniversalGemmHeuristics,
 )
+from torch._inductor.kernel.gemm_epilogue import GemmEpiloguePlan
 from torch._inductor.scheduler import Scheduler
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import (
@@ -1034,6 +1042,162 @@ class TestNVUniversalGemm(TestCase):
             torch.testing.assert_close(result_2, expected_2)
 
             self.assertFalse(torch.allclose(result_1, result_2))
+
+
+@unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+class TestNVUniversalGemmScheduling(TestCase):
+    def test_benchmark_arguments(self):
+        def make_buffer(name, size, stride=None):
+            if stride is None:
+                stride = ir.FlexibleLayout.contiguous_strides(size)
+            layout = ir.FixedLayout(torch.device("cuda"), torch.bfloat16, size, stride)
+            return ir.InputBuffer(name=name, layout=layout)
+
+        storage = torch.empty(32768, device="cuda", dtype=torch.bfloat16)
+        bias_example = storage[30000:30016].view(4, 4)
+        shared_example = storage[:32]
+        fx_graph = torch.fx.Graph()
+        bias_input = fx_graph.placeholder("bias")
+        shared_input = fx_graph.placeholder("shared_storage")
+        fx_graph.output((bias_input, shared_input))
+        graph = GraphLowering(
+            torch.fx.GraphModule(torch.nn.Module(), fx_graph),
+            example_inputs=[bias_example, shared_example],
+        )
+        with V.set_graph_handler(graph):
+            graph.run(bias_example, shared_example)
+        bias = graph.graph_inputs["bias"].data.data
+        shared_storage = graph.graph_inputs["shared_storage"].data.data
+        self.assertEqual(graph.graph_input_storage_offsets["bias"], 30000)
+        b = ir.Buffer(
+            name="b",
+            layout=ir.NonOwningLayout(
+                ir.ReinterpretView(
+                    data=shared_storage,
+                    layout=ir.FixedLayout(
+                        torch.device("cuda"),
+                        torch.bfloat16,
+                        [4, 4],
+                        [1, 4],
+                        offset=1,
+                    ),
+                )
+            ),
+        )
+        out = make_buffer("out", [4, 4], [5, 1])
+        epilogue_input = ir.ReinterpretView(
+            data=shared_storage,
+            layout=ir.FixedLayout(
+                torch.device("cuda"), torch.bfloat16, [2], [1], offset=2
+            ),
+        )
+        graph.name_to_buffer.update(
+            {buf.get_name(): buf for buf in (bias, b, out, epilogue_input)}
+        )
+
+        with V.set_graph_handler(graph):
+            kernel = NVUniversalGemmKernel(
+                kernel_name="nv_gemm_",
+                input_nodes=[bias, b],
+                output_node=out,
+                kernel_metadata={"kernel_name": "fixture", "min_cc": 90},
+                accumulator_type=torch.float32,
+                variant=GemmVariant.GEMM,
+                workspace_size=4096,
+                bias_node=bias,
+                epilogue=GemmEpiloguePlan(
+                    source=f"def {EPILOGUE_FN_NAME}(accum):\n    return accum",
+                    reads=(epilogue_input.get_name(),),
+                    writes=(out.get_name(),),
+                    renames={"D": out.get_name()},
+                ),
+            )
+            arguments = kernel.ordered_arguments()
+            self.assertEqual(
+                [
+                    (argument.name, argument.buffer_name, argument.kind)
+                    for argument in arguments
+                ],
+                [
+                    ("in_ptr0", "bias", "input"),
+                    ("in_ptr1", "b", "input"),
+                    ("out_ptr0", "out", "output"),
+                    ("shared_storage", "shared_storage", "epilogue"),
+                    ("bias", "bias", "epilogue"),
+                    ("workspace", None, "workspace"),
+                ],
+            )
+            parameter_names = ", ".join(argument.name for argument in arguments)
+            generated = NVGemmGeneratedSource(source="", kernel=kernel)
+            kernel_source = kernel.render()
+            self.assertIn(
+                f"def {kernel.kernel_name}_main({parameter_names}, stream=None):",
+                kernel_source,
+            )
+            self.assertIn("stream=stream, workspace=workspace,", kernel_source)
+            source = _render_nvgemm_benchmark_helpers(generated)
+            self.assertIn("nv_gemm__main(*args, stream=stream)", source)
+        namespace = {}
+        exec(compile(source, "<nvgemm-benchmark>", "exec"), namespace)
+
+        args = namespace["get_args"]()
+
+        args_by_name = dict(
+            zip((argument.name for argument in arguments), args, strict=True)
+        )
+        expected_buffers = {
+            "in_ptr0": bias,
+            "in_ptr1": b,
+            "out_ptr0": out,
+            "shared_storage": epilogue_input,
+            "bias": bias,
+        }
+        expected_layouts = {
+            name: (
+                buffer.get_layout().view.get_layout()
+                if isinstance(buffer.get_layout(), ir.NonOwningLayout)
+                else buffer.get_layout()
+            )
+            for name, buffer in expected_buffers.items()
+        }
+        self.assertEqual(
+            {
+                name: (
+                    args_by_name[name].shape,
+                    args_by_name[name].stride(),
+                    args_by_name[name].storage_offset(),
+                )
+                for name in expected_buffers
+            },
+            {
+                name: (
+                    tuple(buffer.get_size()),
+                    tuple(buffer.get_stride()),
+                    expected_layouts[name].offset,
+                )
+                for name, buffer in expected_buffers.items()
+            },
+        )
+        self.assertEqual(len(args), len(expected_buffers) + 1)
+        self.assertTrue(
+            torch._C._is_alias_of(
+                args_by_name["in_ptr1"], args_by_name["shared_storage"]
+            )
+        )
+        self.assertEqual(args_by_name["in_ptr1"].data_ptr() % 16, 2)
+        self.assertEqual(args_by_name["shared_storage"].data_ptr() % 16, 4)
+        self.assertEqual(args_by_name["in_ptr0"].untyped_storage().nbytes(), 32)
+        self.assertEqual(args_by_name["in_ptr1"].untyped_storage().nbytes(), 48)
+        self.assertEqual(args_by_name["out_ptr0"].untyped_storage().nbytes(), 48)
+        self.assertIs(args_by_name["in_ptr0"], args_by_name["bias"])
+        self.assertFalse(
+            torch._C._is_alias_of(args_by_name["in_ptr0"], args_by_name["in_ptr1"])
+        )
+        self.assertFalse(
+            torch._C._is_alias_of(args_by_name["out_ptr0"], args_by_name["in_ptr1"])
+        )
+        self.assertEqual(args_by_name["workspace"].shape, (4096,))
+        self.assertEqual(args_by_name["workspace"].dtype, torch.int8)
 
 
 @instantiate_parametrized_tests
@@ -2065,8 +2229,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
     """Test cases for NVIDIA Universal GEMM epilogue fusion.
 
     Tests verify both correctness and that fusion actually occurs by examining
-    generated code for epilogue markers. Benchmarks are mocked to ensure
-    deterministic fusion decisions independent of GPU noise.
+    generated code for epilogue markers. Benchmarks are mocked to make fusion
+    decisions independent of GPU noise.
     """
 
     M, N, K = 512, 512, 512
@@ -3431,76 +3595,6 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch.cuda.synchronize()
         expected = a.float() @ b.float()
         torch.testing.assert_close(out2.float(), expected, atol=1e-2, rtol=1e-2)
-
-    @unittest.skip(
-        "Disabled due to CI failures; see "
-        "https://github.com/pytorch/pytorch/issues/190234"
-    )
-    def test_workspace_runtime_integration(self):
-        """End-to-end: mock the chosen kernel's workspace_size to non-zero and
-        actually let benchmark_codegened_module run, exercising the runtime
-        path that consumes the generated get_args()/call() helpers.
-
-        Without the workspace fix, the rendered call would TypeError on the
-        missing positional arg, _benchmark_nvgemm_module's broad except would
-        return inf, autotune would silently fall back to a non-EFC choice,
-        and a naive `assert_close` against eager would still pass. To actually
-        catch the regression we intercept _benchmark_nvgemm_module to record
-        every (ms, path) it returns and assert at least one finite-ms result —
-        i.e., at least one EFC choice with workspace did get benchmarked."""
-        import cutlass.operators
-        from cutlass.operators.workspace import AllocationRequirement
-
-        from torch._inductor.codegen.cuda_combined_scheduling import (
-            CUDACombinedScheduling,
-        )
-
-        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
-        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
-
-        def fn(a, b):
-            return torch.relu(a @ b)
-
-        bench_results: list[tuple[float, str]] = []
-        orig_bench = CUDACombinedScheduling._benchmark_nvgemm_module
-
-        def capturing_bench(self, module):
-            ms, path = orig_bench(self, module)
-            bench_results.append((ms, path))
-            return ms, path
-
-        torch._dynamo.reset()
-        with (
-            patch.object(
-                cutlass.operators.Operator,
-                "get_workspace_size",
-                lambda self, args: AllocationRequirement(
-                    size_bytes=4096, ptr_alignment=1
-                ),
-            ),
-            mock.patch.object(
-                CUDACombinedScheduling, "_benchmark_nvgemm_module", capturing_bench
-            ),
-            config.patch(
-                {
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": "NVGEMM",
-                    "nvgemm_max_profiling_configs": 2,
-                    "force_disable_caches": True,
-                }
-            ),
-        ):
-            result = torch.compile(fn)(a, b)
-        torch.testing.assert_close(result, fn(a, b), atol=1e-2, rtol=1e-2)
-        self.assertTrue(bench_results, "_benchmark_nvgemm_module never invoked")
-        finite = [(ms, p) for ms, p in bench_results if ms != float("inf")]
-        self.assertTrue(
-            finite,
-            lambda msg: (
-                f"{msg}\nAll NVGEMM benchmarks returned inf — workspace handling likely "
-                f"broken. Results: {bench_results}"
-            ),
-        )
 
 
 if __name__ == "__main__":
