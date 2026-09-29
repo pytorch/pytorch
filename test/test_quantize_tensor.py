@@ -1,7 +1,5 @@
 # Owner(s): ["module: linear algebra"]
 
-from unittest import SkipTest
-
 import torch
 from torch.nn.functional import SwizzleType
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -47,8 +45,6 @@ def _quantize_mxfp8_tma(
     is_square_scaling: bool,
     is_scale_swizzled: bool,
 ):
-    if torch.cuda.get_device_capability(input.device) < (10, 0):
-        raise SkipTest("MXFP8 TMA requires SM100 or newer")
     from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
         _blockscaled_tma_impl,
     )
@@ -74,6 +70,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
     @parametrize("quantize_fn", _MXFP8_IMPLEMENTATIONS)
     @parametrize("input_dtype", (torch.float32, torch.bfloat16))
     def test_mxfp8_corner_case_bytes(self, quantize_fn, input_dtype, device):
+        sm100_or_newer = torch.cuda.get_device_capability(device) >= (10, 0)
+        if quantize_fn is _quantize_mxfp8_tma and not sm100_or_newer:
+            self.skipTest("MXFP8 TMA requires SM100 or newer")
         # copied from
         # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/test/prototype/mx_formats/test_mx_tensor.py#L264
         cases = make_mxfp8_semantic_cases(input_dtype, "rceil", device=device)
@@ -92,6 +91,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
     )
     def test_to_mx_rceil_randn_sqnr(self, swizzle_type, input_dtype, shape, device):
+        if torch.cuda.get_device_capability(device) < (10, 0):
+            self.skipTest("MXFP8 TMA requires SM100 or newer")
         swizzled = swizzle_type == SwizzleType.SWIZZLE_32_4_4
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
         qdata_ref, scales_ref = _quantize_mxfp8_reference(
@@ -120,6 +121,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
     )
     def test_to_mx_rceil_dim_m(self, input_dtype, shape, device):
+        if torch.cuda.get_device_capability(device) < (10, 0):
+            self.skipTest("MXFP8 TMA requires SM100 or newer")
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
         qdata_ref, scales_ref = _quantize_mxfp8_reference(
             data_hp.t().contiguous(), "dim_k", False, True
@@ -136,6 +139,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
     )
     def test_to_mx_rceil_dim_km(self, input_dtype, shape, device):
+        if torch.cuda.get_device_capability(device) < (10, 0):
+            self.skipTest("MXFP8 TMA requires SM100 or newer")
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
         qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference(
             data_hp, "dim_k", False, True
@@ -160,6 +165,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
         name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
     )
     def test_to_mx_rceil_dim_k_square(self, input_dtype, shape, device):
+        if torch.cuda.get_device_capability(device) < (10, 0):
+            self.skipTest("MXFP8 TMA requires SM100 or newer")
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
         qdata_ref, scales_ref = mxfp8_32x32_swizzle_f(data_hp)
         qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_k", True, True)
@@ -170,6 +177,8 @@ class TestMXFP8ReferenceNumerics(TestCase):
 
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
     def test_to_mx_rceil_dim_k_square_nan(self, input_dtype, device):
+        if torch.cuda.get_device_capability(device) < (10, 0):
+            self.skipTest("MXFP8 TMA requires SM100 or newer")
         data_hp = torch.ones((32, 32), device=device, dtype=input_dtype)
         data_hp[0, 0] = float("nan")
         qdata_ref, scales_ref = mxfp8_32x32_swizzle_f(data_hp)
@@ -184,6 +193,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
 
     @parametrize("quantize_fn", _MXFP8_IMPLEMENTATIONS)
     def test_to_mx_rceil(self, quantize_fn, device):
+        sm100_or_newer = torch.cuda.get_device_capability(device) >= (10, 0)
+        if quantize_fn is _quantize_mxfp8_tma and not sm100_or_newer:
+            self.skipTest("MXFP8 TMA requires SM100 or newer")
         # copied from
         # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/test/prototype/mx_formats/test_mx_tensor.py#L276
         # TODO(future PR): refactor below to make it look more like
