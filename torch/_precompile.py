@@ -3319,7 +3319,11 @@ def load(
     artifact refuses to load with ``torch._dynamo.config.compiled_autograd``
     enabled, which would compile backward graphs outside it. A Dynamo artifact whose
     capture graph-broke cannot load beside the live compile that captured it
-    (the continuation names collide): load it in a fresh process.
+    (the continuation names collide), and an installed artifact is refused
+    wherever any frame it installs onto already has live Dynamo cache entries:
+    load it in a fresh process. That check runs only at load: compiling those
+    frames after load adds live entries that serve the calls the installed
+    ones miss.
 
     Raises ``PrecompileError`` if either file cannot be read, if ``python_code`` is
     not a ``torch.compiler.precompile`` artifact, or if the cache's ``backend``,

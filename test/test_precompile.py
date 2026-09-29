@@ -4813,8 +4813,43 @@ class TestPrecompileDynamoCapture(TestCase):
         cont = f"{self.module_name}.torch_dynamo_resume_in_breaking_helper_at_{line}"
         unreachable = f"\nUNREACHABLE_WITHOUT_INSTALL = {[helper, cont]!r}\n"
         self.assertIn(unreachable, python_code)
+        # The capture's live cache entries would serve any call the installed
+        # ones miss, so load refuses this process.
+        with self.assertRaisesRegex(PrecompileError, "fresh process"):
+            load(self.artifact, self.cache)
         calls = [((self.x2,), {}, y2), ((self.x3,), {}, y3)]
         self._serve_in_fresh_process(calls, mode="installed")
+
+    @skipIfCrossRef
+    @parametrize("compiled", ["calls_breaking_helper", "breaking_helper"])
+    def test_an_installed_artifact_refuses_frames_compiled_before_load(self, compiled):
+        # A fresh process that torch.compile'd the entry, or only a frame the
+        # entry calls, holds live entries that would serve uncovered calls.
+        fn = self.mod.calls_breaking_helper
+        with self._capture(fn, backend="eager") as cap:
+            cap(self.model, self.x2)
+        script = (
+            "import sys, torch\n"
+            "sys.path.insert(0, sys.argv[1])\n"
+            "mod = __import__(sys.argv[4])\n"
+            "x = torch.randn(2, 4)\n"
+            "if sys.argv[5] == 'breaking_helper':\n"
+            "    torch.compile(mod.breaking_helper, backend='eager')(x)\n"
+            "else:\n"
+            "    torch.compile(mod.calls_breaking_helper, backend='eager')(mod.Model(), x)\n"
+            "try:\n"
+            "    torch.compiler.precompile.load(sys.argv[2], sys.argv[3])\n"
+            "except torch.compiler.PrecompileError as e:\n"
+            "    assert 'fresh process' in str(e), e\n"
+            "    print('refused', e)\n"
+        )
+        argv = [self.dir, self.artifact, self.cache, self.module_name, compiled]
+        cmd = [sys.executable, "-c", script, *argv]
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("refused", out.stdout)
+        # \b keeps "breaking_helper" from matching inside "calls_breaking_helper".
+        self.assertRegex(out.stdout, rf"onto \([^)]*\b{compiled}\b")
 
     @skipIfCrossRef
     def test_an_installed_artifact_leaves_the_global_stance_alone(self):
