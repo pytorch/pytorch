@@ -6603,6 +6603,8 @@ class TestPrecompileRuntimeCache(TestCase):
             self, _no_compilation_single_graph, [(torch.ones(4),)], backend="eager"
         )
         os.chmod(cache, 0o640)
+        # Windows keeps only the read-only bit, so compare with what chmod left.
+        mode = stat.S_IMODE(os.stat(cache).st_mode)
         with open(cache, "rb") as f:
             original = f.read()
         with pc.capture_runtime():
@@ -6620,7 +6622,7 @@ class TestPrecompileRuntimeCache(TestCase):
             )
             pc.finalize_cache(artifact_path=source, cache_path=cache)
             self.assertTrue(is_compilation_forbidden())
-        self.assertEqual(stat.S_IMODE(os.stat(cache).st_mode), 0o640)
+        self.assertEqual(stat.S_IMODE(os.stat(cache).st_mode), mode)
 
     @parametrize("backend", ("eager", "inductor"))
     def test_strict_load_serves_finalized_pair(self, backend):
