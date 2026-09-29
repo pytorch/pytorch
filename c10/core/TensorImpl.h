@@ -286,6 +286,8 @@ struct C10_API ExtraMeta {
   // The real constant this fake was created from (via
   // FakeTensorMode::set_constant), or null.
   c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
+  // See TensorImpl::symbolic_wrapped_number.
+  c10::SymNode symbolic_wrapped_number_ = nullptr;
 
   ExtraMeta() = default;
   ~ExtraMeta();
@@ -302,6 +304,7 @@ struct C10_API ExtraMeta {
     fake_device_ = other.fake_device_;
     fake_tensor_mode_ = other.fake_tensor_mode_;
     real_tensor_ = other.real_tensor_;
+    symbolic_wrapped_number_ = other.symbolic_wrapped_number_;
   }
   ExtraMeta& operator=(const ExtraMeta& other) = delete;
   ExtraMeta(ExtraMeta&& other) = delete;
@@ -1413,17 +1416,21 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
-   * True if a wrapped number stands for a SymInt, SymFloat or SymBool. Its
-   * value is a placeholder; Python keeps the symbolic number as the
-   * `_wrapped_number` attribute.
+   * The SymInt, SymFloat or SymBool node a wrapped number stands for, or null.
+   * The wrapped number's value is a placeholder; Python also keeps the
+   * symbolic number as the `_wrapped_number` attribute.
    */
-  bool is_symbolic_wrapped_number() const {
-    return is_symbolic_wrapped_number_;
+  c10::SymNodeImpl* symbolic_wrapped_number() const {
+    return extra_meta_ ? extra_meta_->symbolic_wrapped_number_.get() : nullptr;
   }
 
-  void set_symbolic_wrapped_number(bool value) {
+  bool is_symbolic_wrapped_number() const {
+    return symbolic_wrapped_number() != nullptr;
+  }
+
+  void set_symbolic_wrapped_number(c10::SymNode node) {
     TORCH_INTERNAL_ASSERT(is_wrapped_number_);
-    is_symbolic_wrapped_number_ = value;
+    get_extra_meta().symbolic_wrapped_number_ = std::move(node);
   }
 
   /**
@@ -3062,8 +3069,6 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   bool is_non_overlapping_and_dense_ : 1 = true;
 
   bool is_wrapped_number_ : 1 = false;
-
-  bool is_symbolic_wrapped_number_ : 1 = false;
 
   // NOTE [ Metadata Change for a Detached Tensor ]
   //
