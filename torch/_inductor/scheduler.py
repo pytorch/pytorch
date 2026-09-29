@@ -3722,6 +3722,9 @@ def _prune_redundant_deps(
     if deps_to_prune:
         node.unmet_dependencies = node.unmet_dependencies - deps_to_prune
         node.set_read_writes(node.read_writes.remove_reads(deps_to_prune))
+        for dep in deps_to_prune:
+            if isinstance(dep, WeakDep):
+                node.scheduler.pruned_weak_deps[dep.mutating_buf].add(dep)
 
 
 class ExternKernelSchedulerNode(BaseSchedulerNode):
@@ -5919,6 +5922,10 @@ class Scheduler:
         # mutation_renames = {"buf1" : "buf0"}
         # in codegen we only use buf0, never buf1
         self.mutation_renames: dict[str, str] = {}
+
+        # Weak deps dropped by _prune_redundant_deps, by the buffer whose mutation
+        # they order (WeakDep.mutating_buf). can_fuse_vertical checks them again.
+        self.pruned_weak_deps: dict[str, OrderedSet[WeakDep]] = defaultdict(OrderedSet)
 
         self.seen_template_fusions: OrderedSet[
             tuple[BaseSchedulerNode, BaseSchedulerNode]
@@ -9634,24 +9641,6 @@ class Scheduler:
         fusion_log.info("Shared memory after inversion: %d", score)
         return score
 
-    def _mutates_what_other_reads(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> bool:
-        def real_name(name: str) -> str:
-            return self.mutation_real_name.get(name, name)
-
-        for writer, reader in ((node1, node2), (node2, node1)):
-            mutated = OrderedSet(
-                real_name(dep.name)
-                for dep in writer.read_writes.writes
-                if dep.name in self.mutation_real_name
-            )
-            if mutated and any(
-                real_name(dep.name) in mutated for dep in reader.read_writes.reads
-            ):
-                return True
-        return False
-
     def shared_data_after_reordering_loop(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
@@ -9669,14 +9658,6 @@ class Scheduler:
         # TODO Don't do loop reordering/reindexing for CPU for now.
         # Should debug more why it does not work for CPU codegen
         if any(n.is_cpu() for n in [node1, node2]):
-            return -1
-
-        # Reordering the loops of a node changes which element of a buffer it
-        # reads at each iteration. When the other node mutates that buffer, the
-        # weak dep that ordered the read before the mutation may already have been
-        # pruned because the indices matched in the old order, and the fused kernel
-        # would read elements it has already overwritten.
-        if self._mutates_what_other_reads(node1, node2):
             return -1
 
         # in some rare case, a template can be passed in.
@@ -10874,6 +10855,10 @@ class Scheduler:
                 continue
             remaining_deps_by_name[name].append(dep)
 
+        if (stale := self._stale_pruned_weak_dep(node1, node2)) is not None:
+            why("pruned weak dep on %s is no longer fusable", stale.name)
+            return False
+
         for cd in node1.read_writes.writes:
             if not isinstance(cd, MemoryDep) and not isinstance(cd, StarDep):
                 continue
@@ -10923,6 +10908,26 @@ class Scheduler:
                 return False
 
         return True
+
+    def _stale_pruned_weak_dep(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> WeakDep | None:
+        """
+        A weak dep dropped by _prune_redundant_deps was fusable for the loop
+        orders of that moment. Reordering, reindexing or inverting the loops of
+        either node since then can make node1 read another element of the
+        mutated buffer than the one node2 writes: return such a dep, if any.
+        """
+        if not self.pruned_weak_deps:
+            return None
+        node1_buf_names = node1.get_buffer_names()
+        for buf_name in node2.get_buffer_names():
+            for dep in self.pruned_weak_deps.get(buf_name, ()):
+                if dep.name in node1_buf_names and not self.fusable_weak_dep(
+                    dep, node1, node2
+                ):
+                    return dep
+        return None
 
     def fusable_weak_dep(
         self, weak_dep: WeakDep, node1: BaseSchedulerNode, node2: BaseSchedulerNode
