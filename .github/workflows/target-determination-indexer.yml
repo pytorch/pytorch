@@ -24,7 +24,6 @@ jobs:
 
   index:
     needs: get-label-type
-    # OSDC A10G GPU runner (equivalent of linux.g5.4xlarge.nvidia.gpu).
     runs-on: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g"
     environment: target-determinator-env
     # Run inside the CUDA CI image on OSDC (ARC has no host docker daemon). The
