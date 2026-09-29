@@ -1708,6 +1708,69 @@ class TestReductions(TestCase):
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
 
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    @skipIfMPS  # MPS only supports Long output
+    def test_count_nonzero_dtype(self, device, dtype):
+        x = torch.tensor([1, 2, 0, 3], device=device)
+        self.assertEqual(torch.count_nonzero(x, dtype=dtype).dtype, dtype)
+        self.assertEqual(
+            torch.count_nonzero(x, dim=0, dtype=dtype).dtype,
+            dtype,
+        )
+
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    @skipIfMPS  # MPS only supports Long output
+    def test_count_nonzero_out_dtype(self, device, dtype):
+        x = torch.tensor([[1, 2], [0, 3]], device=device)
+        self.assertEqual(
+            torch.count_nonzero(x, dtype=dtype),
+            torch.tensor(3, device=device, dtype=dtype),
+        )
+
+        self.assertEqual(
+            torch.count_nonzero(x, dim=0, dtype=dtype),
+            torch.count_nonzero(x, dim=0).to(dtype=dtype),
+        )
+
+    @dtypes(*all_types_and(torch.half))
+    @skipIfMPS  # MPS only supports Long output
+    def test_count_nonzero_dtype_vs_numpy(self, device, dtype):
+        x = torch.tensor([[1, 2], [0, 3]], device=device)
+
+        def np_nonzero_dtype(x, *, axis=None, dtype=None):
+            if axis is None:
+                return np.array(np.count_nonzero(x), dtype=dtype)
+            return np.count_nonzero(x, axis=axis).astype(dtype)
+
+
+        self.compare_with_numpy(
+            partial(torch.count_nonzero, dtype=dtype),
+            partial(np_nonzero_dtype, dtype=torch_to_numpy_dtype_dict[dtype]),
+            x,
+            device=None,
+            dtype=None,
+            atol=0.0,
+            rtol=0.0,
+        )
+
+        self.compare_with_numpy(
+            partial(torch.count_nonzero, dim=0, dtype=dtype),
+            partial(np_nonzero_dtype, axis=0, dtype=torch_to_numpy_dtype_dict[dtype]),
+            x,
+            device=None,
+            dtype=None,
+            atol=0.0,
+            rtol=0.0,
+        )
+
+    @dtypes(*all_types_and(torch.half))
+    @skipIfMPS
+    def test_count_nonzero_empty_tensor(self, device, dtype):
+        x = torch.empty(0, device=device)
+        ret = torch.count_nonzero(x, dtype=dtype)
+        self.assertEqual(ret.item(), 0)
+        self.assertEqual(ret.dtype, dtype)
+
     # TODO: Investigate why the output is not close to numpy.
     def _get_relaxed_tolerances_for(self, dtype):
         if dtype == torch.float16:

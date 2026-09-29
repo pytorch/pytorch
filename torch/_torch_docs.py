@@ -3593,7 +3593,7 @@ Example::
 add_docstr(
     torch.count_nonzero,
     r"""
-count_nonzero(input, dim=None) -> Tensor
+count_nonzero(input, dim=None, dtype=None) -> Tensor
 
 Counts the number of non-zero values in the tensor :attr:`input` along the given :attr:`dim`.
 If no dim is specified then all non-zeros in the tensor are counted.
@@ -3614,6 +3614,8 @@ Example::
     tensor(3)
     >>> torch.count_nonzero(x, dim=0)
     tensor([0, 1, 2])
+    >>> torch.count_nonzero(x, dtype=torch.half)
+    tensor(3., dtype=torch.float16)
 """.format(**reduceops_common_args),
 )
 
