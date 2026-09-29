@@ -10,10 +10,17 @@ from pathlib import Path
 
 import torch
 from torch._inductor import config, test_operators
+from torch._inductor.pretty_print_ir import (
+    format_post_lowering_ir,
+    format_pre_fusion_ir,
+)
 from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import skipIfWindows
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.logging_utils import multiple_logs_to_string
+from torch.testing._internal.logging_utils import (
+    logs_to_string,
+    multiple_logs_to_string,
+)
 
 
 try:
@@ -35,6 +42,152 @@ def filesize(filename: Path):
 
 @config.patch("trace.enabled", True)
 class TestDebugTrace(test_torchinductor.TestCase):
+    def test_ir_pre_fusion_pretty_unsupported(self):
+        class UnsupportedNode:
+            @staticmethod
+            def get_name():
+                return "op0"
+
+        self.assertEqual(
+            format_pre_fusion_ir([UnsupportedNode()]),
+            "kernel op0:\n    unimplemented UnsupportedNode",
+        )
+
+    def test_ir_pre_fusion_pretty(self):
+        def fn(a):
+            return torch.sin(a + 1), a.sum(dim=1)
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.debug", "ir_pre_fusion_pretty"
+        )
+        inp = torch.randn(4, 8)
+        with config.patch("force_disable_caches", True), ctx():
+            actual = torch.compile(fn, fullgraph=True)(inp)
+
+        self.assertEqual(actual, fn(inp))
+        output = log_stream.getvalue()
+        self.assertIn("PRE-FUSION PRETTY IR", output)
+        self.assertIn("kernel op0(", output)
+        self.assertIn("for p0 in [0, 32):", output)
+        self.assertIn("arg0_1[p0]", output)
+        self.assertIn("buf0[p0]", output)
+        self.assertIn("kernel op1(", output)
+        self.assertIn("for p0 in [0, 4):", output)
+        self.assertIn("for r0 in [0, 8):", output)
+        self.assertIn("arg0_1[r0 + 8*p0]", output)
+        self.assertIn("acc_0: f32 = 0", output)
+        self.assertIn("acc_0 +=", output)
+        self.assertIn("buf1[p0] = acc_0", output)
+        self.assertNotIn("unimplemented", output)
+
+    def test_ir_post_lowering_pretty_unsupported(self):
+        class UnsupportedOperation:
+            @staticmethod
+            def get_operation_name():
+                return "op0"
+
+        self.assertEqual(
+            format_post_lowering_ir([UnsupportedOperation()]),
+            "kernel op0:\n    unimplemented UnsupportedOperation",
+        )
+
+    def test_ir_post_lowering_pretty(self):
+        def fn(a):
+            return torch.sin(a + 1), a.sum(dim=1), a.unsqueeze(1) * 2
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.debug", "ir_post_lowering_pretty"
+        )
+        inp = torch.randn(4, 8)
+        with config.patch("force_disable_caches", True), ctx():
+            actual = torch.compile(fn, fullgraph=True)(inp)
+
+        self.assertEqual(actual, fn(inp))
+        output = log_stream.getvalue()
+        self.assertIn("POST-LOWERING PRETTY IR", output)
+        # Loops keep their lowered shape instead of being merged by the scheduler.
+        self.assertIn("kernel op0(", output)
+        self.assertIn("for p0 in [0, 4):", output)
+        self.assertIn("for p1 in [0, 8):", output)
+        self.assertIn("arg0_1[p1 + 8*p0]", output)
+        self.assertIn("buf0[p1 + 8*p0] = tmp3", output)
+        self.assertNotIn("[0, 32)", output)
+        self.assertIn("kernel op1(", output)
+        self.assertIn("for r0 in [0, 8):", output)
+        self.assertIn("arg0_1[r0 + 8*p0]", output)
+        self.assertIn("buf1[p0] = acc_0", output)
+        # Size-1 dims keep their loop.
+        self.assertIn("kernel op2(", output)
+        self.assertIn("for p1 in [0, 1):", output)
+        self.assertIn("buf2[p2 + 8*p0] = tmp2", output)
+        self.assertNotIn("unimplemented", output)
+
+    def test_ir_post_lowering_pretty_indirect(self):
+        def fn(idx, table):
+            return table[idx], torch.nn.functional.pad(table[idx], (1, 1))
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.debug", "ir_post_lowering_pretty"
+        )
+        inputs = (torch.tensor([2, -3, 1]), torch.randn(3, 8))
+        with config.patch("force_disable_caches", True), ctx():
+            actual = torch.compile(fn, fullgraph=True)(*inputs)
+
+        self.assertEqual(actual, fn(*inputs))
+        output = log_stream.getvalue()
+        self.assertIn("tmp0: i64 = arg0_1[p0]", output)
+        self.assertIn("arg1_1[p1 + 8*wrap_neg(tmp0)]", output)
+        # Inside masked(), the index is inlined into the where().
+        self.assertIn("arg1_1[(-1) + p1 + 8*wrap_neg(arg0_1[p0])]", output)
+        self.assertNotIn("unimplemented", output)
+
+    def test_ir_pretty_extern_kernel(self):
+        def fn(x, w):
+            return (x @ w).relu()
+
+        log_streams, ctx = multiple_logs_to_string(
+            "torch._inductor.debug", "ir_post_lowering_pretty", "ir_pre_fusion_pretty"
+        )
+        inputs = (torch.randn(4, 8), torch.randn(8, 8))
+        with config.patch("force_disable_caches", True), ctx():
+            actual = torch.compile(fn, fullgraph=True)(*inputs)
+
+        self.assertEqual(actual, fn(*inputs))
+        for stream in log_streams:
+            output = stream.getvalue()
+            self.assertRegex(
+                output,
+                r"extern_kernel op0\(  # extern_kernels\.mm\n    arg\d_1: f32\[4, 8\],\n    arg\d_1: f32\[8, 8\]\n\) -> buf0: f32\[4, 8\]\n",
+            )
+            self.assertNotIn("unimplemented", output)
+
+    def test_ir_pretty_extern_kernel_multi_output(self):
+        def fn(x):
+            values, indices = torch.sort(x)
+            return values + 1, indices
+
+        log_streams, ctx = multiple_logs_to_string(
+            "torch._inductor.debug", "ir_post_lowering_pretty", "ir_pre_fusion_pretty"
+        )
+        inputs = (torch.randn(5),)
+        with config.patch("force_disable_caches", True), ctx():
+            actual = torch.compile(fn, fullgraph=True)(*inputs)
+
+        self.assertEqual(actual, fn(*inputs))
+        for stream in log_streams:
+            output = stream.getvalue()
+            self.assertIn(
+                "extern_kernel op0(  # torch.ops.aten.sort.stable\n"
+                "    arg0_1: f32[5]\n"
+                ") -> (buf1: f32[5], buf2: i64[5])\n",
+                output,
+            )
+            # The MultiOutput selectors are folded into op0's outputs.
+            self.assertNotIn("extern_kernel op1", output)
+            self.assertNotIn("extern_kernel op2", output)
+            self.assertIn("buf1: f32[5]", output.split("kernel op3", 1)[1])
+            self.assertNotIn("unimplemented", output)
+
     def test_debug_trace(self):
         @torch.compile
         def fn(a, b):
