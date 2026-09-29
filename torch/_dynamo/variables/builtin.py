@@ -2108,12 +2108,14 @@ class BuiltinVariable(BaseBuiltinVariable):
         return variables.ConstantVariable.create(b"")
 
     def call___build_class__(self, tx, *args, **kwargs):
-        def fail(args, kwargs) -> NoReturn:
+        def fail(args, kwargs, *, skip_frame=False) -> NoReturn:
             unimplemented(
                 gb_type="Invalid call to __build_class__",
                 context=f"Non-constant args to __build_class__: {args} {kwargs}",
                 explanation="Cannot trace class definition: the class body function is unsupported or the base class argument are not compile-time constants",
                 hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=skip_frame,
+                preserve_skip_frame_after_inline=skip_frame,
             )
 
         if not torch._dynamo.config.enable_trace_load_build_class:
@@ -2121,6 +2123,14 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         try:
             if isinstance(args[0], variables.NestedUserFunctionVariable):
+                class_code = args[0].get_code()
+                # get_function copies these cells before later local writes.
+                if any(
+                    inst.opname in ("STORE_DEREF", "DELETE_DEREF")
+                    and inst.argval in class_code.co_freevars
+                    for inst in tx.instructions[tx.instruction_pointer :]
+                ):
+                    fail(args, kwargs, skip_frame=True)
                 fn = args[0].get_function(allow_sourced_cells=True)
             else:
                 fn = args[0].get_function()
@@ -2146,7 +2156,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 if isinstance(f := getattr(v, "__func__", v), types.FunctionType)
                 for name, cell in zip(f.__code__.co_freevars, f.__closure__ or ())
             ):
-                fail(args, kwargs)
+                fail(args, kwargs, skip_frame=True)
             if isinstance(meta, type) and any(
                 instruction.opname == "LOAD_GLOBAL"
                 and instruction.argval in f.__globals__
@@ -2155,7 +2165,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 if isinstance(f := getattr(v, "__func__", v), types.FunctionType)
                 for instruction in dis.get_instructions(f)
             ):
-                fail(args, kwargs)
+                fail(args, kwargs, skip_frame=True)
             try:
                 r = builtins.__build_class__(
                     fn,  # type: ignore[possibly-undefined]

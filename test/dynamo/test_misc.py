@@ -18081,6 +18081,30 @@ fn
         self.assertEqual(fn(torch.randn(2))[1], True)
         with self.assertRaisesRegex(Unsupported, "__build_class__"):
             torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+        self.assertEqual(torch.compile(fn, backend="eager")(torch.randn(2))[1], True)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___metaclass_closure_read_after_write(self):
+        def fn():
+            value = 1
+
+            class Meta(type):
+                def __new__(cls, name, bases, ns):
+                    ns["value"] = value
+                    return super().__new__(cls, name, bases, ns)
+
+            value = 2
+
+            class A(metaclass=Meta):
+                pass
+
+            return A.value
+
+        self.assertEqual(fn(), 2)
+        self.assertEqual(torch.compile(fn, backend="eager")(), 2)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "__build_class__"):
+            torch.compile(fn, backend="eager", fullgraph=True)()
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test___build_class__(self):
