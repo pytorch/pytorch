@@ -5473,6 +5473,67 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNot(d.attr, p.attr)  # deep copy clones __dict__ attr
         self.assertEqual(d.attr, p.attr)
 
+    def test_copy_user_defined_object_slots(self):
+        class Mixed:
+            __slots__ = ("foo", "__dict__")
+
+        class Base:
+            __slots__ = ("__base",)
+
+            def set_base(self, value):
+                self.__base = value
+
+            def get_base(self):
+                return self.__base
+
+        class Derived(Base):
+            __slots__ = ("child",)
+
+        class Custom:
+            __slots__ = ("foo", "state")
+
+            def __getstate__(self):
+                return {"foo": self.foo}
+
+            def __setstate__(self, state):
+                self.foo = state["foo"]
+                self.state = "custom"
+
+        def fn(obj):
+            return copy.copy(obj), copy.deepcopy(obj)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+
+        derived = Derived()
+        derived.set_base([1])
+        derived.child = [2]
+        shallow, deep = compiled(derived)
+        self.assertIs(shallow.get_base(), derived.get_base())
+        self.assertIs(shallow.child, derived.child)
+        self.assertEqual(deep.get_base(), derived.get_base())
+        self.assertEqual(deep.child, derived.child)
+        self.assertIsNot(deep.get_base(), derived.get_base())
+        self.assertIsNot(deep.child, derived.child)
+
+        mixed = Mixed()
+        mixed.foo = [3]
+        mixed.attr = [4]
+        shallow, deep = compiled(mixed)
+        self.assertIs(shallow.foo, mixed.foo)
+        self.assertIs(shallow.attr, mixed.attr)
+        self.assertEqual(deep.foo, mixed.foo)
+        self.assertEqual(deep.attr, mixed.attr)
+        self.assertIsNot(deep.foo, mixed.foo)
+        self.assertIsNot(deep.attr, mixed.attr)
+
+        custom = Custom()
+        custom.foo = [5]
+        shallow, deep = compiled(custom)
+        self.assertEqual(shallow.state, "custom")
+        self.assertEqual(deep.state, "custom")
+        self.assertIs(shallow.foo, custom.foo)
+        self.assertIsNot(deep.foo, custom.foo)
+
     def test_deepcopy_set(self):
         MY_SET = {1, 2, 3}
 
