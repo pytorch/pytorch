@@ -5,6 +5,8 @@ namespace {
     template <typename T>
     class Memory : public ::testing::Test {};
     template <typename T>
+    class Gather : public ::testing::Test {};
+    template <typename T>
     class Arithmetic : public ::testing::Test {};
     template <typename T>
     class Comparison : public ::testing::Test {};
@@ -92,6 +94,7 @@ namespace {
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
     using ReducedFloatTestedTypes = ::testing::Types<vBFloat16, vHalf>;
     TYPED_TEST_SUITE(Memory, ALLTestedTypes);
+    TYPED_TEST_SUITE(Gather, RealFloatTestedTypes);
     TYPED_TEST_SUITE(Arithmetic, FloatIntTestedTypes);
     TYPED_TEST_SUITE(Comparison, RealFloatIntReducedFloatTestedTypes);
     TYPED_TEST_SUITE(Bitwise, FloatIntTestedTypes);
@@ -177,6 +180,38 @@ namespace {
             }
             // clear storage
             std::memset(storage, 0, sizeof storage);
+        }
+    }
+    TYPED_TEST(Gather, MaskGatherUsesSignBit) {
+        using vec = TypeParam;
+        using VT = ValueType<vec>;
+        using int_t = at::vec::int_same_size_t<VT>;
+        using ivec = at::vec::Vectorized<int_t>;
+        constexpr auto size = vec::size();
+        CACHE_ALIGN VT base[size];
+        CACHE_ALIGN VT actual[size];
+        CACHE_ALIGN int_t index[size];
+        CACHE_ALIGN int_t mask_bits[size];
+        constexpr int_t masks[] = {
+            0,
+            1,
+            std::numeric_limits<int_t>::min(),
+            -1,
+        };
+        for (const auto i : c10::irange(size)) {
+            base[i] = static_cast<VT>(i + 1);
+            index[i] = static_cast<int_t>(i);
+            mask_bits[i] = masks[i % std::size(masks)];
+        }
+        auto mask = at::vec::cast<VT>(ivec::loadu(mask_bits));
+        at::vec::mask_gather<sizeof(VT)>(
+            vec(-1), base, ivec::loadu(index), mask).store(actual);
+        CACHE_ALIGN VT mask_after[size];
+        mask.store(mask_after);
+        for (const auto i : c10::irange(size)) {
+            const VT expected = mask_bits[i] < 0 ? base[i] : VT(-1);
+            ASSERT_EQ(expected, actual[i]);
+            ASSERT_EQ(mask_bits[i], c10::bit_cast<int_t>(mask_after[i]));
         }
     }
     TYPED_TEST(SignManipulation, Absolute) {
@@ -610,6 +645,41 @@ namespace {
           AssertVectorized<vec>(NAME_INFO(isnan), expected, actual).check();
         }
     }
+#if !defined(CPU_CAPABILITY_SVE256) && !defined(CPU_CAPABILITY_SVE128) && \
+    !defined(CPU_CAPABILITY_VSX) && !defined(CPU_CAPABILITY_ZVECTOR)
+    TYPED_TEST(Nan, ReduceMax) {
+        using vec = TypeParam;
+        using VT = ValueType<TypeParam>;
+        // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
+        CACHE_ALIGN VT test_vals[vec::size()];
+        // Every NaN placement, with the finite maximum rotated across lanes: an
+        // x86 max instruction returns its second operand for NaN, which can
+        // displace the true maximum rather than merely drop the NaN. All lanes
+        // are negative so that a zero-seeded reduction is caught too.
+        auto vals = 1 << (vec::size());
+        for (const auto val : c10::irange(vals)) {
+          VT expected = -std::numeric_limits<VT>::infinity();
+          bool has_nan = false;
+          for (int i = 0; i < vec::size(); ++i) {
+            if (val & (1 << i)) {
+              test_vals[i] = std::numeric_limits<VT>::quiet_NaN();
+              has_nan = true;
+            } else {
+              test_vals[i] = -(VT)((i + val) % vec::size() + 1);
+              expected = std::max(expected, test_vals[i]);
+            }
+          }
+          VT actual = vec::loadu(test_vals).reduce_max();
+          if (has_nan) {
+            ASSERT_TRUE(std::isnan(actual))
+                << "reduce_max dropped a NaN, NaN mask: " << val
+                << ", got: " << actual;
+          } else {
+            ASSERT_EQ(expected, actual) << "reduce_max, NaN mask: " << val;
+          }
+        }
+    }
+#endif
     TEST(NanFloat16, IsNan) {
       for (unsigned int ii = 0; ii < 0xFFFF; ++ii) {
         c10::Half val(ii, c10::Half::from_bits());
