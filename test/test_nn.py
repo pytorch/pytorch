@@ -15724,16 +15724,6 @@ class TestNNDeviceType(NNTestCase):
         name_fn=lambda f, b, m, t: f"{f}_vs_{b}{'_mixed' if m else ''}_{dtype_name(t)}"
     )
     def test_batchnorm(self, device, dims, mode, memory_format, ref_backend, mixed, dtype):
-        # skip conditions are expressed via the test parameters instead of
-        # self._testMethodName because instantiated names carry device/dtype suffixes
-        fmt_ref = (memory_format, ref_backend)
-        if torch.version.cuda:
-            if mode == "train" and mixed and dtype == torch.bfloat16 and fmt_ref in (("NCHW", "cpu"), ("NHWC", "NCHW")):
-                self.skipTest("Failed on CUDA")
-
-            if mode == "train" and mixed and dims == 3 and dtype == torch.half and fmt_ref == ("NCHW", "native"):
-                self.skipTest("Failed on CUDA")
-
         if dims == 3 and memory_format in ("NHWC", "NCHW"):
             memory_format = memory_format + "3D"
 
