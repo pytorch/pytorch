@@ -33,25 +33,14 @@ _RNG_TRACKER_REGISTRY: dict[str, RNGTrackerFactory] = {}
 
 
 def register_rng_tracker(device_type: str, factory: RNGTrackerFactory) -> None:
-    """Register a factory that builds the RNG tracker for ``device_type``.
+    """Register a factory that builds the DTensor RNG tracker for ``device_type``.
 
     Third-party backends whose RNG does not follow the CUDA philox
-    counter/offset semantics assumed by the default
-    :class:`OffsetBasedRNGTracker` can register a factory here. The factory is
-    called as ``factory(device_mesh, run_state_sync)`` and must return an
-    :class:`_RNGStateTracker` instance; every DTensor RNG tracker creation
-    point uses it in place of the default tracker.
-
-    This follows the same registration pattern as
+    counter/offset semantics of the default :class:`OffsetBasedRNGTracker`
+    can register a factory here. It is called as
+    ``factory(device_mesh, run_state_sync)`` at every DTensor RNG tracker
+    creation point. This follows the same registration pattern as
     ``register_graphsafe_rng_dispatch`` in ``torch/_prims/rng_prims.py``.
-
-    Args:
-        device_type (str): The device type the tracker handles (e.g. ``"npu"``).
-        factory (Callable[[DeviceMesh, bool], _RNGStateTracker]): Callable that
-            builds the tracker.
-
-    Returns:
-        None
     """
     _RNG_TRACKER_REGISTRY[device_type] = factory
 
@@ -61,11 +50,9 @@ def _get_or_create_rng_tracker(
 ) -> "_RNGStateTracker":
     """Return the active RNG tracker, creating it if it does not exist yet.
 
-    Centralizes every DTensor RNG tracker creation point (``manual_seed``,
-    ``torch/distributed/tensor/_dispatch.py`` and
-    ``torch/distributed/tensor/_api.py``): the tracker factory is looked up in
-    the registry populated by :func:`register_rng_tracker`; devices without an
-    entry fall back to the default :class:`OffsetBasedRNGTracker`.
+    Centralizes the DTensor RNG tracker creation points (``manual_seed``,
+    ``_dispatch.py`` and ``_api.py``): a device type without a registered
+    factory keeps the default :class:`OffsetBasedRNGTracker`.
     """
     global _rng_tracker
     if not _rng_tracker:
@@ -79,9 +66,8 @@ def _get_or_create_rng_tracker(
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
     """Checks if the current device of ``device_mesh`` supports DTensor's random APIs.
     A device type with a tracker registered via :func:`register_rng_tracker` is
-    considered supported. Otherwise we probe the device module for RNG state
-    APIs. We suggest users call this API to test the availability before using
-    our random APIs.
+    considered supported. We suggest users call this API to test the availability
+    before using our random APIs.
 
     Args:
         device_mesh (:class:`DeviceMesh`): The device mesh on which we check if the
@@ -201,25 +187,6 @@ class _PhiloxState:
         self._state[:8] = seed.view(torch.uint8)
 
 
-@contextlib.contextmanager
-def _maybe_philox_rng_context(device_handle):
-    """Enter the philox RNG context for backends that require one (e.g. hpu).
-
-    Backends without RNG context management yield without any effect. The
-    context is exited even when the wrapped region raises.
-    """
-    set_ctx = getattr(device_handle, "set_rng_ctx", None)
-    unset_ctx = getattr(device_handle, "unset_rng_ctx", None)
-    if callable(set_ctx) and callable(unset_ctx):
-        set_ctx("philox")
-        try:
-            yield
-        finally:
-            unset_ctx("philox")
-    else:
-        yield
-
-
 class _RNGStateTracker:
     """
     _RNGStateTracker stores Random Number Generator (RNG) state (a ByteTensor object)
@@ -254,23 +221,6 @@ class _RNGStateTracker:
 
     def _manual_seed(self, parallel_seed: int) -> None:
         pass
-
-    def _compute_rng_offsets(self, spec: DTensorSpec) -> tuple[int, int]:
-        """Compute the RNG offset increments for a distributed random op.
-
-        Optional contract for counter-based (offset-based) RNG trackers:
-        returns ``(start_offset_incr, end_offset_incr)`` for the DTensor
-        described by ``spec``. Trackers that implement this contract enable
-        the traceable HOP path in ``torch/distributed/tensor/_dispatch.py``.
-        Trackers whose RNG is not counter-based leave this unimplemented and
-        run random ops under ``_distribute_region`` instead.
-        """
-        raise NotImplementedError(
-            f"{self.__class__.__name__} does not implement the counter-based "
-            f"RNG offset contract (_compute_rng_offsets); random ops on this "
-            f"tracker run under _distribute_region instead of the "
-            f"run_dtensor_rng_op HOP path."
-        )
 
 
 class OffsetBasedRNGTracker(_RNGStateTracker):
@@ -313,15 +263,22 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             self._set_device_state(rng_state)
 
     def _get_device_state(self) -> torch.Tensor:
-        with _maybe_philox_rng_context(self._device_handle):
-            return self._device_handle.get_rng_state().to(self._device)
+        if self._device.type == "hpu":
+            self._device_handle.set_rng_ctx("philox")
+        rng_state = self._device_handle.get_rng_state().to(self._device)
+        if self._device.type == "hpu":
+            self._device_handle.unset_rng_ctx("philox")
+        return rng_state
 
     def _set_device_state(self, state: torch.Tensor):
         # It seems that the underlying generator wants a cpu tensor but the dtensor code expects `_get_device_state`
         # to convert to a 'device' tensor, probably because we may use it with our backend comms for sync/debug
         # for now, we just convert back to cpu here to make sure it always works.
-        with _maybe_philox_rng_context(self._device_handle):
-            self._device_handle.set_rng_state(state.to("cpu"))
+        if self._device.type == "hpu":
+            self._device_handle.set_rng_ctx("philox")
+        self._device_handle.set_rng_state(state.to("cpu"))
+        if self._device.type == "hpu":
+            self._device_handle.unset_rng_ctx("philox")
 
     @contextlib.contextmanager
     def _distribute_region(
@@ -346,20 +303,23 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             state = _PhiloxState(self._get_device_state())
 
         if self.distribute_region_enabled:
-            with _maybe_philox_rng_context(self._device_handle):
-                old_offset = state.offset.clone()
-                self._set_pre_op_offset(state, spec)
-                with torch.random.fork_rng(
-                    devices=[self._device], device_type=self._device.type
-                ):
-                    if self._device_handle is None:
-                        raise AssertionError
-                    self._device_handle.set_rng_state(state.state)
-                    try:
-                        yield  # execute the region code
-                    finally:
-                        # update offset to synchronize among ranks
-                        self._set_post_op_offset(state, spec, old_offset)
+            if self._device.type == "hpu":
+                self._device_handle.set_rng_ctx("philox")
+            old_offset = state.offset.clone()
+            self._set_pre_op_offset(state, spec)
+            with torch.random.fork_rng(
+                devices=[self._device], device_type=self._device.type
+            ):
+                if self._device_handle is None:
+                    raise AssertionError
+                self._device_handle.set_rng_state(state.state)
+                try:
+                    yield  # execute the region code
+                finally:
+                    # update offset to synchronize among ranks
+                    self._set_post_op_offset(state, spec, old_offset)
+            if self._device.type == "hpu":
+                self._device_handle.unset_rng_ctx("philox")
         else:
             yield
 

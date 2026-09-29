@@ -430,18 +430,13 @@ class OpDispatcher:
                                 )
                     else:
                         # Accelerator device without user generator, use HOP for traceability
-                        try:
-                            start_offset_incr, end_offset_incr = (
-                                random._rng_tracker._compute_rng_offsets(
-                                    first_arg._spec
-                                )
-                            )
-                        except NotImplementedError as e:
-                            raise AssertionError(
-                                "accelerator device without user generator requires "
-                                "an offset-based RNG tracker (implementing "
-                                "_compute_rng_offsets)"
-                            ) from e
+                        if not isinstance(
+                            random._rng_tracker, random.OffsetBasedRNGTracker
+                        ):
+                            raise AssertionError
+                        start_offset_incr, end_offset_incr = (
+                            random._rng_tracker._compute_rng_offsets(first_arg._spec)
+                        )
                         with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
                             output_sharding.output_spec
                         ):
