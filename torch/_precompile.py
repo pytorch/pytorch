@@ -3275,9 +3275,8 @@ def capture_runtime() -> contextlib.AbstractContextManager[None]:
     Raises :class:`~torch.compiler.PrecompileError` if entered while compilation
     is already forbidden, while this process already has an active scope, or,
     with such a Triton, without an explicit ``TRITON_CACHE_DIR`` or with Triton's
-    autotuning cache disabled. A
-    scope inherited across ``fork`` belongs to the parent and does not block the
-    child.
+    autotuning cache disabled. A scope inherited across ``fork`` belongs to the
+    parent and does not block the child.
     """
     from torch.compiler._runtime_cache import capture_runtime as _capture_runtime
 
@@ -3309,8 +3308,8 @@ def finalize_cache(
     :func:`capture_runtime` scope, when called a second time in one scope, for a
     make_fx capture, for an inductor capture that saved no compiled cache artifact
     (which strict :func:`load` could not serve either), when the pair cannot be
-    read or does not match, or when ``TRITON_CACHE_DIR`` changed since :func:`capture_runtime`
-    was entered.
+    read or does not match, or when ``TRITON_CACHE_DIR`` changed since
+    :func:`capture_runtime` was entered.
     """
     from torch.compiler._runtime_cache import finalize_runtime_cache
 
