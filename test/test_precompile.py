@@ -6713,9 +6713,11 @@ class TestPrecompileRuntimeCache(TestCase):
         )
         with open(cache, "rb") as f:
             original = f.read()
-        with self.assertRaisesRegex(PrecompileError, "Could not finalize") as failure:
+        with self.assertRaisesRegex(
+            PrecompileError, "^precompile\\.finalize_cache: Could not finalize"
+        ) as failure:
             pc.finalize_cache(artifact_path=source, cache_path=cache)
-        self.assertIn("capture_runtime scope", str(failure.exception.__cause__))
+        self.assertIn("capture_runtime scope", str(failure.exception))
 
         with pc.capture_runtime():
             # A forked child inherits the parent's scope object.
@@ -6805,8 +6807,10 @@ class TestPrecompileRuntimeCache(TestCase):
             getattr(pc, operation)(artifact_path=source, cache_path=cache)
 
     @parametrize("operation", ("finalize_cache", "prepare_runtime"))
-    @parametrize("damage", ("no_artifact", "no_cache", "corrupt", "format"))
-    def test_runtime_cache_names_operation_for_unreadable_pair(self, operation, damage):
+    @parametrize(
+        "damage", ("no_artifact", "no_cache", "corrupt", "format", "code_hash")
+    )
+    def test_runtime_cache_errors_name_operation_and_pair(self, operation, damage):
         pc = torch.compiler.precompile
         source, cache = _capture_files(
             self, _no_compilation_single_graph, [(torch.ones(4),)], backend="eager"
@@ -6819,12 +6823,17 @@ class TestPrecompileRuntimeCache(TestCase):
             with open(cache, "r+b") as f:
                 f.truncate(20)
         else:
-            _rewrite_envelope(cache, format="incompatible")
+            _rewrite_envelope(cache, **{damage: "incompatible"})
         with (
             pc.capture_runtime(),
-            self.assertRaisesRegex(PrecompileError, f"^precompile\\.{operation} "),
+            self.assertRaisesRegex(
+                PrecompileError, f"^precompile\\.{operation} "
+            ) as failure,
         ):
             getattr(pc, operation)(artifact_path=source, cache_path=cache)
+        self.assertIn(
+            f"(artifact_path={source!r}, cache_path={cache!r})", str(failure.exception)
+        )
 
     def test_envelope_reader_parses_emitted_dynamo_header(self):
         from torch._precompile import _read_runtime_cache_envelope
@@ -7402,6 +7411,49 @@ class TestPrecompileRuntimeCache(TestCase):
                 self.assertRaisesRegex(RuntimeError, "cannot import"),
             ):
                 artifact.populate_cache()
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @parametrize("missing", ("import", "autotuning"))
+    def test_prepare_runtime_is_strict_about_triton_runtime_cache(self, missing):
+        from pathlib import Path
+
+        import triton
+
+        from torch.compiler import _runtime_cache
+
+        pc = torch.compiler.precompile
+        x = torch.ones(4)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with _fake_triton_runtime_cache(root / "producer") as fake:
+                with pc.capture_runtime():
+                    source, cache = _capture_files(
+                        self, _no_compilation_single_graph, [(x,)], backend="eager"
+                    )
+                    pc.finalize_cache(artifact_path=source, cache_path=cache)
+                fake.root = root / "consumer"
+                with contextlib.ExitStack() as stack:
+                    if missing == "import":
+                        stack.enter_context(
+                            mock.patch.object(
+                                _runtime_cache,
+                                "_triton_runtime_cache",
+                                return_value=None,
+                            )
+                        )
+                        reason = "cannot import"
+                    else:
+                        triton.knobs.autotuning.cache = False
+                        reason = "autotuning cache is disabled"
+                    with self.assertRaisesRegex(PrecompileError, reason):
+                        pc.prepare_runtime(artifact_path=source, cache_path=cache)
+                    self.assertEqual(fake.imports, [])
+                    with self.assertLogs(_runtime_cache.log, "WARNING") as logs:
+                        runnable = pc.load(source, cache)
+                    self.assertIn(reason, "\n".join(logs.output))
+                    with torch.no_grad():
+                        self.assertEqual(runnable(x), _no_compilation_single_graph(x))
+                self.assertEqual(len(fake.imports), 0 if missing == "import" else 1)
 
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     @parametrize("device", (0, None))

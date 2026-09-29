@@ -98,22 +98,38 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
         return True
 
     def populate_cache(self) -> None:
-        if hashlib.sha256(self.content).hexdigest() != self.key:
-            raise RuntimeError("Corrupt Triton runtime-cache artifact")
+        self.import_into_triton(strict=is_compilation_forbidden())
+
+    def import_into_triton(self, *, strict: bool) -> None:
         cache = _triton_runtime_cache()
+        problem = None
         if cache is None:
+            problem = "the installed Triton cannot import one"
+        else:
+            from triton import knobs
+
+            if not knobs.autotuning.cache:
+                problem = (
+                    "Triton's autotuning cache is disabled (TRITON_CACHE_AUTOTUNING=1 "
+                    "enables it), so the captured autotuning decisions are ignored"
+                )
+        if problem is not None:
             message = (
-                "The precompile cache contains a Triton runtime cache, but the "
-                "installed Triton cannot import one"
+                f"The precompile cache contains a Triton runtime cache, but {problem}"
             )
-            if is_compilation_forbidden():
+            if strict:
                 raise RuntimeError(message)
-            log.warning("%s; Triton JIT kernels will compile on first use", message)
-            return
+            log.warning(
+                "%s; Triton JIT kernels will compile or autotune on first use", message
+            )
+            if cache is None:
+                return
         imported = (self.key, str(cache._runtime_cache_root()))
         with _imported_triton_runtime_lock:
             if imported in _imported_triton_runtime:
                 return
+            if hashlib.sha256(self.content).hexdigest() != self.key:
+                raise RuntimeError("Corrupt Triton runtime-cache artifact")
             cache.import_runtime_cache(self.content, context=_runtime_context())
             _imported_triton_runtime.add(imported)
 
@@ -601,14 +617,5 @@ def prepare_runtime_cache(artifact: bytes | None) -> None:
         raise RuntimeError(
             "precompile.prepare_runtime found more than one Triton runtime cache"
         )
-    if runtime and _triton_runtime_cache() is not None:
-        from triton import knobs
-
-        if not knobs.autotuning.cache:
-            raise RuntimeError(
-                "precompile.prepare_runtime requires Triton's autotuning cache "
-                "(TRITON_CACHE_AUTOTUNING=1) to replay the captured autotuning "
-                "decisions"
-            )
     for entry in runtime:
-        entry.populate_cache()
+        entry.import_into_triton(strict=True)
