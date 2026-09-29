@@ -143,8 +143,8 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
             log.warning(
                 "%s; Triton JIT kernels will compile or autotune on first use", message
             )
-            if root is None:
-                return
+        if cache is None or root is None:
+            return
         imported = (self.key, root)
         with _imported_triton_runtime_lock:
             if imported in _imported_triton_runtime:
@@ -656,4 +656,4 @@ def prepare_runtime_cache(artifact: bytes | None) -> None:
             "precompile.prepare_runtime found more than one Triton runtime cache"
         )
     for entry in runtime:
-        entry.import_into_triton(strict=True)
+        cast(TritonRuntimeCacheArtifact, entry).import_into_triton(strict=True)
