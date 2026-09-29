@@ -798,9 +798,10 @@ class EnumTests(torch._dynamo.test_case.TestCase):
             return Foo
 
         def fn(cls, x):
+            name = "a"
             # setattr() discards the hook's return value; super().__setattr__
             # (type.__setattr__) itself returns None.
-            return x + 1, setattr(cls, "a", 2), type(cls).__setattr__(cls, "b", 3)
+            return x + 1, setattr(cls, name, 2), type(cls).__setattr__(cls, "b", 3)
 
         x = torch.ones(2)
         ref_cls, res_cls = make_cls(), make_cls()
