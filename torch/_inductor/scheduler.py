@@ -7423,6 +7423,8 @@ class Scheduler:
             if self._has_layout_conflict_for_template(multi_node):
                 return FusionResult.fuse(False)
 
+            from torch._inductor.codegen.simd import CantSplit
+
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
             if not has_atomic_add:
                 for hint_override in config.multi_kernel_hints:
@@ -7436,16 +7438,19 @@ class Scheduler:
                             torch._inductor.select_algorithm.TritonTemplateCaller,
                         ):
                             continue
-                        with multi_node.swap_as_triton_caller(choice):
-                            future_choices.append(
-                                (
-                                    choice,
-                                    *self.compile_kernel(
-                                        node_list_fused,
-                                        hint_override=choice.hint_override,
-                                    ),
+                        try:
+                            with multi_node.swap_as_triton_caller(choice):
+                                future_choices.append(
+                                    (
+                                        choice,
+                                        *self.compile_kernel(
+                                            node_list_fused,
+                                            hint_override=choice.hint_override,
+                                        ),
+                                    )
                                 )
-                            )
+                        except CantSplit:
+                            continue
 
                     min_ms_fused = float("inf")
                     ms_fused_choice: TritonTemplateCallerBase | None = None
@@ -7508,8 +7513,6 @@ class Scheduler:
                 # Use 0 for unfused time, won't be used as bench_epilogue
                 # is guaranteed to be False here
                 choice_timings_iter = [(c, 0) for c in multi_node.choices]
-
-            from torch._inductor.codegen.simd import CantSplit
 
             def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
                 if not isinstance(
@@ -7635,8 +7638,7 @@ class Scheduler:
                 if bench_epilogue and unfused_time >= ms1 + ms2:
                     break
 
-                template_choices += 1
-                if template_choices > config.max_epilogue_benchmarked_choices:
+                if template_choices >= config.max_epilogue_benchmarked_choices:
                     break
 
                 try:
@@ -7662,6 +7664,7 @@ class Scheduler:
                             )
                 except CantSplit:
                     continue
+                template_choices += 1
 
             if len(future_choices) == 0:
                 return FusionResult.fuse(False)
@@ -10623,6 +10626,7 @@ class Scheduler:
                 or (
                     node2.is_reduction()
                     and not backend.can_fuse_reduction_epilogue(node1, node2)
+                    and not backend.can_fuse_template_reduction_epilogue(node1, node2)
                 )
                 or not _is_epilogue_fusion_enabled(node1)
             ):
@@ -12940,6 +12944,13 @@ class BaseScheduling:  # noqa: docstring_linter
     def can_fuse_reduction_epilogue(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
+        return False
+
+    def can_fuse_template_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        """Whether reductions in node2 may join template node1's epilogue,
+        subject to the ordinary vertical fusion checks."""
         return False
 
     def can_fuse_reduction_pair(

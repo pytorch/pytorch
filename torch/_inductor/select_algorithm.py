@@ -63,6 +63,7 @@ from .codegen.common import (
     WorkspaceArg,
     WorkspaceZeroMode,
 )
+from .codegen.simd import DerivedIterationRangesRoot
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
@@ -681,6 +682,12 @@ class TritonTemplateKernel(TritonKernel):
         self.template_out_shape: str | tuple[str] | None = None
         self.ops_handler: V.WrapperHandler | None = None  # type: ignore[name-defined]
         self.root_var_renames: dict[str, str] = {}
+        # Per store_output subgraph: scalar (row, col) tile origin and (rows, cols,
+        # subtiles) tile shape from block indexing, used to codegen reduction
+        # epilogues over the tile.
+        self.output_tiles: dict[
+            int, tuple[list[sympy.Symbol], tuple[int, int, int]]
+        ] = {}
 
         # When caching is enabled, the generated code is not dependent on the input nodes names, or
         # symbolic sizes names.
@@ -1550,6 +1557,16 @@ class TritonTemplateKernel(TritonKernel):
         """
         return f"{output_name} = {index_name} < {shape_val}"
 
+    def _config_supports_reduction_epilogue(self) -> bool:
+        """Whether this config may host a reduction epilogue."""
+        return not (
+            # Automatic warp specialization's data partitioning fails on
+            # reduction epilogues.
+            self.meta.get("DATA_PARTITION_FACTOR", 1) > 1
+            # Untested with reduction epilogues.
+            or self.meta.get("TWO_CTAS", False)
+        )
+
     def store_output(
         self,
         indices: list[Any] | tuple[Any],
@@ -1558,6 +1575,7 @@ class TritonTemplateKernel(TritonKernel):
         indent_width: int = 4,
         val_shape: tuple[str] | None = None,
         block_indexing: bool = False,
+        subtile_loop: tuple[str, str] | None = None,
     ):
         """Stores the final output and appends any epilogue fusions if the buffer hasn't been optimized away.
 
@@ -1571,6 +1589,9 @@ class TritonTemplateKernel(TritonKernel):
                 store_output is indented in the kernel definition.
             block_indexing (bool): Are the input indices presented as offsets for creating the block (e.g.
                 inputs to TMA) or are they tensors that should be passed in directly.
+            subtile_loop (Optional[Tuple[str, str]]): (index, count) of an enclosing unrolled
+                `tl.static_range` loop in which this call stores subtile `index` of `count`
+                subtiles that split the output tile's columns.
         """
         subgraph_idx = next(self.store_output_ctr)
         subgraph_name = self._get_store_output_subgraph_name(subgraph_idx)
@@ -1618,6 +1639,21 @@ class TritonTemplateKernel(TritonKernel):
                     )
                 if mask:
                     raise AssertionError("Mask is not supported with blocking indexing")
+                meta = {
+                    sympy.Symbol(k): v
+                    for k, v in self.meta.items()
+                    if isinstance(v, int)
+                }
+                subtiles = subtile_loop[1] if subtile_loop else 1
+                tile = [sympy.sympify(s).subs(meta) for s in (*val_shape, subtiles)]
+                if (
+                    all(isinstance(t, sympy.Integer) for t in tile)
+                    and self._config_supports_reduction_epilogue()
+                ):
+                    self.output_tiles[subgraph_idx] = (
+                        index_symbols,
+                        (int(tile[0]), int(tile[1]), int(tile[2])),
+                    )
                 intermediate_lines: list[str] = []
                 epilogue_index_symbols: list[sympy.Symbol] = []
                 if self.tma_store or self.tma_load_for_template_epilogue:
@@ -2068,8 +2104,14 @@ class TritonTemplateKernel(TritonKernel):
             for i in range(num_store_subgraphs):
                 subgraph_name = self._get_store_output_subgraph_name(i)
                 with self.set_subgraph_body(subgraph_name):
-                    for node in self._epilogue_nodes_by_subgraph[i]:
+                    nodes = self._epilogue_nodes_by_subgraph[i]
+                    first_red = next(
+                        (j for j, n in enumerate(nodes) if n.is_reduction()), len(nodes)
+                    )
+                    for node in nodes[:first_red]:
                         node.codegen(self.split_and_set_ranges(node.get_ranges()))
+                    if first_red < len(nodes):
+                        self.codegen_tile_reduction_epilogue(nodes[first_red:], i)
                     self.cse.invalidate(OrderedSet())
 
             self.codegen_prologues_in_subgraphs(
@@ -2110,6 +2152,58 @@ class TritonTemplateKernel(TritonKernel):
                 src_code = partial_code.finalize_remaining()
 
         return src_code
+
+    def codegen_tile_reduction_epilogue(self, nodes, subgraph_idx: int) -> None:
+        """Codegen row reductions of the output, and the nodes after them, as a
+        persistent reduction over the output tile: x spans the tile's rows and
+        r0_ its columns, so loads of the output buffer resolve to the
+        in-register tile."""
+        numels = dict(zip(("x", "r0_"), self.output_node.get_size()))
+        origin, (rows, cols, _) = self.output_tiles[subgraph_idx]
+        with patch.object(self, "persistent_reduction", True):
+            roots = self.construct_range_trees(None, True, True, numels, False)
+        range_trees = [
+            DerivedIterationRangesRoot(
+                root,
+                numel=root.numel,
+                block_size=sympy.Integer(size),
+                block_offset=offset,
+                name_suffix="tile",
+            )
+            for root, size, offset in zip(roots, (rows, cols), origin)
+        ]
+        # Stored tile values carry the template's symbolic shape; restate it as
+        # the concrete tile so they broadcast against loads in the tile space.
+        shape = (str(rows), str(cols))
+        store_cache = {
+            name: self.create_cse_var(str(v), v.bounds, v.dtype, shape)
+            for name, v in self.cse.store_cache.items()
+        }
+        with (
+            self.use_range_trees(range_trees),
+            patch.object(self.cse, "store_cache", store_cache),
+            patch.multiple(
+                self,
+                numels=numels,
+                range_tree_nodes={},
+                inside_reduction=True,
+                persistent_reduction=True,
+                template_mask=None,
+                template_out_shape=None,
+                features=SIMDKernelFeatures(nodes, numels["x"], numels["r0_"]),
+                # Tensor descriptors expect standard block symbols, not the tile's.
+                tma_store=False,
+                tma_load_for_template_epilogue=False,
+            ),
+        ):
+            for tree in range_trees:
+                self.iteration_ranges_codegen_header(tree, self.body)
+            self.body.writeline(f"rindex = {range_trees[1].name}")
+            for node in nodes:
+                # Nodes over rows only (e.g. mean's division) run outside the reduction.
+                self.inside_reduction = node.group[1] != (numels["x"], sympy.S.One)
+                node.codegen(self.split_and_set_ranges(node.get_ranges()))
+            self.codegen_body()
 
     def codegen_prologues_in_subgraphs(
         self, buf_name_to_prologue_group, prologue_preserves_zero_mask_fn
@@ -2610,12 +2704,14 @@ class GenerateAndLoadResult(NamedTuple):
     prologue_supported_inputs: OrderedSet[str]
     kernel_args_sizevars_keys: tuple[sympy.Expr, ...]
     kernel_options: dict[str, Any]
+    output_tile: tuple[int, int, int] | None
 
 
 class GeneratedCodeCacheEntry(NamedTuple):
     code: str
     extra: str
     events: list[Any]
+    output_tile: tuple[int, int, int] | None
 
 
 def template_subgraph_index_dtype_nodes(
@@ -2777,10 +2873,11 @@ class GeneratedCodeCache:
         code: str,
         extra: str,
         events: list[Any],
+        output_tile: tuple[int, int, int] | None,
     ) -> None:
         if cache_key is None:
             return
-        entry = GeneratedCodeCacheEntry(code, extra, events)
+        entry = GeneratedCodeCacheEntry(code, extra, events, output_tile)
         self._cache.update({cache_key: entry})
 
 
@@ -3049,7 +3146,7 @@ class TritonTemplate(KernelTemplate):
             cache_hit = False
 
             if cache_entry is not None:
-                code, extra, events = cache_entry
+                code, extra, events, output_tile = cache_entry
                 kernel.replay_cached_events(events)
                 cache_hit = True
 
@@ -3058,8 +3155,10 @@ class TritonTemplate(KernelTemplate):
                 if result is None:  # happens at ZeroDivisionError:
                     return None
                 code, extra = result
+                tiles = [tile for _, tile in kernel.output_tiles.values()]
+                output_tile = tiles[0] if len(tiles) == 1 else None
                 self._generated_code_cache.put_entry(
-                    cache_key, code, extra, kernel.cached_replay_events
+                    cache_key, code, extra, kernel.cached_replay_events, output_tile
                 )
 
         if not (code is not None and extra is not None):
@@ -3081,6 +3180,7 @@ class TritonTemplate(KernelTemplate):
             prologue_supported_inputs,
             kernel_args_sizevars_keys,
             kernel_options,
+            output_tile,
         )
 
     def generate(  # type: ignore[override]
@@ -3327,6 +3427,7 @@ class TritonTemplate(KernelTemplate):
             workspace_arg=workspace_arg,
             allowed_prologue_inps=result.prologue_supported_inputs,
             hint_override=hint_override,
+            output_tile=result.output_tile,
         )
 
 
@@ -3469,6 +3570,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         workspace_arg: WorkspaceArg | None = None,
         allowed_prologue_inps: OrderedSet[str] | None = None,
         hint_override: int | None = None,
+        output_tile: tuple[int, int, int] | None = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
@@ -3489,6 +3591,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             allowed_prologue_inps if allowed_prologue_inps is not None else OrderedSet()
         )
         self.hint_override = hint_override
+        self.output_tile = output_tile
 
         self.n_regs = None
 
@@ -3532,6 +3635,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             make_kernel_render=self.make_kernel_render,
             mutated_inputs=self.mutated_inputs,
             allowed_prologue_inps=self.allowed_prologue_inps,
+            output_tile=self.output_tile,
         )
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
