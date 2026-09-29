@@ -427,9 +427,9 @@ def _resolve_gpu_requirement(item: Any) -> int:
     """Accelerators a distributed test declares it needs, read at collection from
     its decorator stamps (see _decorator_gpu_requirement). 0 when undeclared.
 
-    Class ``world_size`` is deliberately not consulted: capacity-scaled bases
-    (FSDPTest, DTensorTestBase) resolve to whatever the runner exposes, so
-    treating that as a requirement selects 2-GPU-safe tests on a larger runner.
+    Class world_size is not consulted. On a 4-GPU runner a literal 4 is
+    indistinguishable from capacity-scaled NUM_DEVICES/DEVICE_COUNT values that
+    still run on 2 GPUs.
     """
     return _decorator_gpu_requirement(_safe_obj(item))
 
