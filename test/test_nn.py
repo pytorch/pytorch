@@ -16367,6 +16367,22 @@ class TestNNCUDA(NNTestCase):
         self.assertEqual(weight_data, all_vars[4].data)
 
     @skipCUDAIfNoCudnn
+    @parametrize_test("mode", ["LSTM", "GRU", "RNN"])
+    def test_cudnn_rnn_backward_saved_output_layout(self, device, mode):
+        # The saved batch_first output is a transposed view; saved-tensor hooks (or a
+        # compiler) may hand the backward a differently strided copy of it.
+        rnn = getattr(nn, mode)(8, 8, batch_first=True, device=device)
+        x = torch.randn(2, 4, 8, device=device, requires_grad=True)
+        rnn(x)[0].sum().backward()
+        ref = [t.grad for t in (x, *rnn.parameters())]
+        x.grad = None
+        rnn.zero_grad()
+        with torch.autograd.graph.saved_tensors_hooks(lambda t: t, lambda t: t.contiguous()):
+            out = rnn(x)[0]
+        out.sum().backward()
+        self.assertEqual([t.grad for t in (x, *rnn.parameters())], ref)
+
+    @skipCUDAIfNoCudnn
     @tf32_on_and_off(0.005)
     @parametrize_test('mode,proj_size', [('LSTM', 0), ('LSTM', 10), ('GRU', 0), ('RNN', 0)])
     def test_cudnn_weight_tying(self, device, mode, proj_size):

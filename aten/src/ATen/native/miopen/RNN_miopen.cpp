@@ -389,6 +389,7 @@ struct RNNDescriptors {
             rnn_desc = fn.rnn.descriptorWithDropout(dropout_desc);
         }
 
+        TORCH_INTERNAL_ASSERT(x.is_contiguous() && y.is_contiguous(), "rnn: RNN descriptors assume packed x/y");
         x_descs = fn.tensors.descriptors(x);
         y_descs = fn.tensors.descriptors(y);
         hx_desc.set(hx, 5);
@@ -819,7 +820,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> miopen_rnn_backward_input(
 
     auto x = input.contiguous();
     auto dy = grad_output.contiguous();
-    auto y = output;
+    auto y = output.contiguous();
     auto w = weight_buf;
     auto dx = at::empty(input.sizes(), input.options());
     auto dhy = grad_hy.contiguous().view(hidden_size);
@@ -948,7 +949,7 @@ std::vector<Tensor> miopen_rnn_backward_weight(
     TORCH_CHECK(!cx.defined() || cx.is_contiguous(), "rnn: cx is not contiguous");
 
     auto x = input.contiguous();
-    const auto& y = output;
+    auto y = output.contiguous();
     auto dw = at::zeros(weight_buf.sizes(), weight_buf.options());
 
     miopenRNNAlgo_t algo = miopenRNNdefault;
