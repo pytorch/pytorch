@@ -78,7 +78,7 @@ def _check_iterator_valid(datapipe, iterator_id, next_method_exists=False) -> No
         # The `_valid_iterator_id` should either be never set (`None`), or set by at most one
         # iterator (`0`). Otherwise, it means there are multiple iterators.
         if datapipe._valid_iterator_id is not None and datapipe._valid_iterator_id != 0:
-            extra_msg = "\nNote that this exception is raised inside your IterDataPipe's a `__next__` method"
+            extra_msg = "\nNote that this exception is raised inside your IterDataPipe's `__next__` method"
             raise RuntimeError(
                 _gen_invalid_iterdatapipe_msg(datapipe) + extra_msg + _feedback_msg
             )

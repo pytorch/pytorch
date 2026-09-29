@@ -40,6 +40,7 @@
 #include <memory>
 #include <string>
 #include <type_traits>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -240,6 +241,32 @@ struct C10_API FakeTensorMode {
       std::shared_ptr<c10::SafePyObject> converter)
       : shape_env_(std::move(shape_env)),
         fake_tensor_converter_(std::move(converter)) {}
+
+  // record the real constant a fake tensor was created from; the constant is
+  // stored on the fake's ExtraMeta so it dies with the tensor
+  // setting to nullptr to clear it
+  void set_constant(
+      c10::TensorImpl* fake_impl,
+      c10::intrusive_ptr<c10::TensorImpl> constant);
+  void clear_constant(c10::TensorImpl* fake_impl) noexcept;
+
+  // return the real constant a fake tensor was created from, or nullptr
+  const c10::intrusive_ptr<c10::TensorImpl>& get_constant(
+      c10::TensorImpl* fake_impl) const;
+  // drop constant tracking for fake tensors aliasing this mutated storage
+  void invalidate_constant_aliases(c10::StorageImpl* storage_impl);
+  // drop non-CPU constants, keeping cheap CPU ones for constant folding
+  void clear_non_cpu_constants();
+
+ private:
+  // key = constant storage, values = all fake tensors that share this storage
+  // (aliases)
+  struct ConstantAliases {
+    c10::weak_intrusive_ptr<c10::StorageImpl> storage;
+    std::vector<c10::weak_intrusive_ptr<c10::TensorImpl>> tensors;
+  };
+  std::unordered_map<c10::StorageImpl*, ConstantAliases>
+      constant_storage_mapping_;
 };
 
 struct C10_API ExtraMeta {
@@ -249,9 +276,12 @@ struct C10_API ExtraMeta {
   std::optional<std::string> custom_storage_error_msg_ = std::nullopt;
   std::optional<c10::Device> fake_device_ = std::nullopt;
   std::shared_ptr<FakeTensorMode> fake_tensor_mode_ = nullptr;
+  // The real constant this fake was created from (via
+  // FakeTensorMode::set_constant), or null.
+  c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
 
   ExtraMeta() = default;
-  ~ExtraMeta() = default;
+  ~ExtraMeta();
   ExtraMeta(const ExtraMeta& other) {
     if (other.symbolic_shape_meta_) {
       symbolic_shape_meta_ =
@@ -1449,6 +1479,14 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   // use when the device might lack an index ("cuda" vs "cuda:0").
   void set_and_normalize_fake_device(c10::Device fake_device);
 
+  // the fake device recorded for this tensor, or nullopt if none
+  std::optional<c10::Device> fake_device() const {
+    if (!extra_meta_) {
+      return std::nullopt;
+    }
+    return extra_meta_->fake_device_;
+  }
+
   void set_fake_tensor_mode(std::shared_ptr<FakeTensorMode> mode) {
     get_extra_meta().fake_tensor_mode_ = std::move(mode);
   }
@@ -1458,6 +1496,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return nullptr;
     }
     return extra_meta_->fake_tensor_mode_;
+  }
+
+  // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.
+  // Used as the identity key for FakeTensorMode constant tracking.
+  ExtraMeta* maybe_get_extra_meta() const {
+    return extra_meta_.get();
   }
 
   /**
@@ -2413,6 +2457,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         "If you are seeing this error, that means empty_tensor_restride was "
         "called before setting correct numel");
 #endif
+    // Set when the branch writes canonical row-major strides, so the trailing
+    // refresh can skip recomputing contiguity (see _refresh_contiguous).
+    bool assume_contiguous = false;
     switch (memory_format) {
       case MemoryFormat::Contiguous: {
         // dim_ is a virtual call, don't repeat it
@@ -2431,6 +2478,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
           }
           TORCH_CHECK(!overflowed, "Stride calculation overflowed");
         }
+        // Sparse tensors are never reported contiguous (compute_contiguous()
+        // returns false for them), so only claim contiguity otherwise.
+        assume_contiguous = !is_sparse();
         break;
       }
       case MemoryFormat::ChannelsLast: {
@@ -2455,8 +2505,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         TORCH_INTERNAL_ASSERT(false, "invalid memory format ", memory_format);
     }
     // recompute contiguous flag, as currently NHWC/NCHW flags are not mutually
-    // exclusive see #24090
-    refresh_contiguous();
+    // exclusive see #24090. has_symbolic_sizes_strides_ returned early above,
+    // so dispatch straight to the non-symbolic path with the contiguity hint.
+    _refresh_contiguous(assume_contiguous);
   }
 
   bool is_strides_like(at::MemoryFormat memory_format) const {
@@ -2715,7 +2766,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_contiguous_ || compute_non_overlapping_and_dense();
   }
 
-  void _refresh_contiguous() {
+  // assume_contiguous: the caller just wrote canonical row-major strides, so
+  // both (row-major) contiguity and non-overlapping-and-dense are already known
+  // true, independent of rank. Passing true skips the redundant O(dim) rescans
+  // in compute_contiguous()/compute_non_overlapping_and_dense() while still
+  // running the rank-dependent channels-last disambiguation below, so the
+  // single switch stays the source of truth.
+  void _refresh_contiguous(bool assume_contiguous = false) {
     // Note:
     // Dim 0, 1, 2 will never be a channels last 2d/3d format
     // Dim 3+ is possibly be a channels last 2d format (Dim 4 only at this
@@ -2723,24 +2780,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     // this point)
     switch (dim()) {
       case 4: {
-        _set_is_contiguous(compute_contiguous());
+        _set_is_contiguous(assume_contiguous || compute_contiguous());
         _set_is_channels_last_contiguous(compute_channels_last_contiguous_2d());
         _set_is_channels_last_3d_contiguous(false);
         _set_is_channels_last(compute_strides_like_channels_last_2d());
         _set_is_channels_last_3d(false);
         _set_is_non_overlapping_and_dense(
-            compute_is_non_overlapping_and_dense_dim4());
+            assume_contiguous || compute_is_non_overlapping_and_dense_dim4());
         break;
       }
       case 5: {
-        _set_is_contiguous(compute_contiguous());
+        _set_is_contiguous(assume_contiguous || compute_contiguous());
         _set_is_channels_last_contiguous(compute_channels_last_contiguous_2d());
         _set_is_channels_last_3d_contiguous(
             compute_channels_last_contiguous_3d_dim5());
         _set_is_channels_last(compute_channels_last_2d_dim5());
         _set_is_channels_last_3d(compute_channels_last_3d_dim5());
         _set_is_non_overlapping_and_dense(
-            compute_is_non_overlapping_and_dense_dim5());
+            assume_contiguous || compute_is_non_overlapping_and_dense_dim5());
         break;
       }
       default:
@@ -2749,13 +2806,13 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         // mean the tensor is strided like channels_last: for strides on channel
         // dimension could suggest desired memory_layout, but it doesn't affect
         // memory storage
-        _set_is_contiguous(compute_contiguous());
+        _set_is_contiguous(assume_contiguous || compute_contiguous());
         _set_is_channels_last_contiguous(false);
         _set_is_channels_last_3d_contiguous(false);
         _set_is_channels_last(false);
         _set_is_channels_last_3d(false);
         _set_is_non_overlapping_and_dense(
-            compute_is_non_overlapping_and_dense_anydim());
+            assume_contiguous || compute_is_non_overlapping_and_dense_anydim());
         break;
     }
   }

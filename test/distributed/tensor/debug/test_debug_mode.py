@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 import torch
+import torch._dynamo.config
 import torch.distributed as dist
 import torch.distributed._functional_collectives as _functional_collectives
 from torch._dynamo.testing import CompileCounterWithBackend
@@ -203,6 +204,16 @@ class TestDebugModeLogSerialization(TestCase):
 
 @requires_cuda
 class TestDTensorDebugMode(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        torch._dynamo.config.canonicalize_output_graph_node_order = True
+
+    @classmethod
+    def tearDownClass(cls):
+        torch._dynamo.config.canonicalize_output_graph_node_order = False
+        super().tearDownClass()
+
     def tearDown(self):
         super().tearDown()
         dist.destroy_process_group()
@@ -598,7 +609,7 @@ class TestDTensorDebugMode(TestCase):
       aten::view(t: f32[8, 8, 8], [64, 8])
       aten::t(t: f32[8, 8])
       aten::addmm(t: f32[8], t: f32[64, 8], t: f32[8, 8])
-      aten::view(t: f32[64, 8], [8, 8, 8])
+      aten::_unsafe_view(t: f32[64, 8], [8, 8, 8])
   <method 'sum' of 'torch._C.TensorBase' objects>(t: f32[8, 8, 8])
       aten::sum(t: f32[8, 8, 8])""",
         )
@@ -946,12 +957,12 @@ class TestDTensorDebugMode(TestCase):
         aten::view(t: f32[1, 4], [4])  ->  t: f32[4]
         aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
   [aot_eager region (compile)] exit
-    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
-    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::detach(t: f32[4])  ->  t: f32[4]
     aten::detach(t: f32[4])  ->  t: f32[4]
     aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
     aten::detach(t: f32[4])  ->  t: f32[4]
-    aten::detach(t: f32[4])  ->  t: f32[4]""",
+    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]""",
         )
 
     def test_record_function(self):

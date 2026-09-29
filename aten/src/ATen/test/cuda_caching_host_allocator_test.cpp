@@ -7,6 +7,9 @@
 #include <c10/core/ScalarType.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <bit>
+#include <cstdlib>
+
 constexpr int64_t N = 100;
 
 // NOTE: please leave this as the first test to ensure that
@@ -17,7 +20,7 @@ TEST(CachingHostAllocatorTest, check_stats) {
   }
 
   // Clear the stats and ensure they are zero.
-  size_t round_size = c10::llvm::PowerOf2Ceil(N);
+  size_t round_size = std::bit_ceil(static_cast<size_t>(N));
   auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
   ASSERT_EQ(stats.allocations.current, 0);
   ASSERT_EQ(stats.allocations.peak, 0);
@@ -54,7 +57,7 @@ TEST(CachingHostAllocatorTest, check_stats) {
   // Ensure we don't reuse the allocation, due to size mismatch.
   {
     int64_t new_size = N*2;
-    size_t new_round_size = c10::llvm::PowerOf2Ceil(new_size);
+    size_t new_round_size = std::bit_ceil(static_cast<size_t>(new_size));
     auto pinned_tensor = at::empty(
         {new_size}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
     auto stats = at::getHostAllocator(at::kCUDA)->get_stats();
@@ -252,6 +255,66 @@ TEST(CachingHostAllocatorTest, check_reuse) {
     ASSERT_EQ(ptr, pinned_tensor.data_ptr());
     ASSERT_EQ(ctx, pinned_tensor.storage().data_ptr().get_context());
   }
+}
+
+namespace {
+
+// Stand-ins so the allocator can be instantiated with no device present.
+struct TestStream {
+  TestStream() = default;
+  /* implicit */ TestStream(c10::Stream) {}
+  /* implicit */ operator c10::Stream() const {
+    return c10::Stream(c10::Stream::DEFAULT, c10::Device(c10::kCPU));
+  }
+  bool operator==(const TestStream&) const {
+    return true;
+  }
+};
+
+struct TestEvent {};
+
+} // namespace
+
+template <>
+struct std::hash<TestStream> {
+  std::size_t operator()(const TestStream&) const noexcept {
+    return 0;
+  }
+};
+
+namespace {
+
+struct ThrowingRecordAllocator
+    : at::CachingHostAllocatorImpl<TestStream, TestEvent> {
+  void allocate_host_memory(size_t size, void** ptr) override {
+    *ptr = std::malloc(size);
+  }
+
+  void free_block(at::HostBlock<TestStream>* block) override {
+    std::free(block->ptr_);
+  }
+
+  void record_stream(std::optional<std::vector<TestEvent>>&, TestStream)
+      override {
+    // @allow-raw-throw: tests catch(...) path in free() for non-std exceptions
+    throw 1;
+  }
+};
+
+} // namespace
+
+// On a real device every event record fails once the context is poisoned, and
+// free() is reached from ~StorageImpl, so an escaping throw would cross a
+// noexcept destructor and terminate the process.
+TEST(CachingHostAllocatorTest, free_does_not_propagate_record_failure) {
+  ThrowingRecordAllocator allocator;
+
+  auto [ptr, ctx] = allocator.allocate(N);
+  ASSERT_NE(ptr, nullptr);
+  ASSERT_TRUE(allocator.record_event(
+      ptr, ctx, c10::Stream(c10::Stream::DEFAULT, c10::Device(c10::kCPU))));
+
+  EXPECT_NO_THROW(allocator.free(ctx));
 }
 
 int main(int argc, char* argv[]) {

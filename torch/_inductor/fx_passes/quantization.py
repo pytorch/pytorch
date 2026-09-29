@@ -30,7 +30,7 @@ prims = torch.ops.prims
 quantized_decomposed = torch.ops.quantized_decomposed
 quantized = torch.ops.quantized
 
-# Only for per tensor quant since permute may changes the channel idx
+# Only for per tensor quant since permute may change the channel idx
 _PER_TENSOR_QUANTIZE_OPS = [
     quantized_decomposed.quantize_per_tensor.default,
     quantized_decomposed.quantize_per_tensor.tensor,
@@ -1100,9 +1100,14 @@ def _register_quantized_reshape_lowering(
     pattern,
     computation_op,
 ):
+    def qreshape_output_metadata(*args, **kwargs):
+        return aten.reshape.default(kwargs["x"], kwargs["shape"])
+
     @register_lowering_pattern(
         pattern,
         extra_check=_is_input_output_same_scale_zp(aten.reshape.default),
+        output_metadata_ignores_input_storage=False,
+        output_metadata_fn=qreshape_output_metadata,
     )
     def qreshape(match: Match, *args, **kwargs):
         qx = kwargs["x"]

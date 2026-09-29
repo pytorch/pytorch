@@ -52,7 +52,7 @@ def accumulate(
     *,
     initial: _T | None = None,
 ) -> Iterator[_T]:
-    # call iter outside of the generator to match cypthon behavior
+    # call iter outside of the generator to match cpython behavior
     iterator = iter(iterable)
     if func is None:
         func = operator.add

@@ -692,7 +692,7 @@ def to_copy_default(func, *args, **kwargs):
     if inp._lengths is not None:
         new_lengths = inp._lengths.to(device=new_values.device)
 
-    from torch._subclasses.fake_tensor import FakeTensor
+    from torch._subclasses.fake_tensor import is_fake_tensor
     from torch._subclasses.functional_tensor import (
         FunctionalTensor,
         mb_unwrap_functional_tensor,
@@ -700,7 +700,7 @@ def to_copy_default(func, *args, **kwargs):
 
     ragged_source = inp._offsets if inp._lengths is None else inp._lengths
     new_thing = new_offsets if new_lengths is None else new_lengths
-    if isinstance(new_thing, (FakeTensor, FunctionalTensor)):
+    if is_fake_tensor(new_thing) or isinstance(new_thing, FunctionalTensor):
         # Temporary hack until we have the union find
         tgt = mb_unwrap_functional_tensor(new_thing)
         src = mb_unwrap_functional_tensor(ragged_source)
@@ -764,6 +764,8 @@ register_jagged_func(torch.ops.aten.detach.default, "self: jt_all")(
     "self: jt_all",
 )
 def like_factory_default(func, *args, **kwargs):
+    from torch._subclasses.fake_tensor import is_fake_tensor
+
     _, new_kwargs = normalize_function(  # type: ignore[misc]
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
@@ -789,7 +791,6 @@ def like_factory_default(func, *args, **kwargs):
     if inp.device != new_values.device:
         # Update the nested int registry to indicate that the ragged structure is the same
         # between the two offsets / lengths on different devices.
-        from torch._subclasses.fake_tensor import FakeTensor
         from torch._subclasses.functional_tensor import (
             FunctionalTensor,
             mb_unwrap_functional_tensor,
@@ -799,7 +800,7 @@ def like_factory_default(func, *args, **kwargs):
 
         ragged_source = inp._offsets if inp._lengths is None else inp._lengths
         new_thing = new_offsets if new_lengths is None else new_lengths
-        if isinstance(new_thing, (FakeTensor, FunctionalTensor)):
+        if is_fake_tensor(new_thing) or isinstance(new_thing, FunctionalTensor):
             # Temporary hack until we have the union find
             tgt = mb_unwrap_functional_tensor(new_thing)
             src = mb_unwrap_functional_tensor(ragged_source)

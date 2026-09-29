@@ -72,12 +72,10 @@ if is_available():
     from torch._C._distributed_c10d import (
         _broadcast_coalesced,
         _compute_bucket_assignment_by_size,
-        _ControlCollectives,
         _DEFAULT_FIRST_BUCKET_BYTES,
         _make_nccl_premul_sum,
         _register_builtin_comm_hook,
         _register_comm_hook,
-        _StoreCollectives,
         _test_python_store,
         _verify_params_across_processes,
         Backend as _Backend,

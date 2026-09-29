@@ -170,7 +170,7 @@ class TORCH_API ProcessGroupUCC : public Backend {
   // Performs a health check by initializing dummy UCC & UCX communicators and
   // then destroying them. This will help indicate and signal any
   // UCC/UCX-related issues prior to the first collective. The actual
-  // initialization and subsequent destruction is ran on a separate thread and
+  // initialization and subsequent destruction is run on a separate thread and
   // the main thread is signalled about timeouts/errors to report to the
   // application.
   void runHealthCheck();
@@ -261,10 +261,6 @@ class TORCH_API ProcessGroupUCC : public Backend {
 
   // Counting for the sequential number of UCC collective_post call.
   uint64_t seq_{0};
-
-  // Agrees on an initial sequence number for the whole group by having rank 0
-  // create it and broadcast it to other ranks using the store.
-  void setSequenceNumberForGroup() override;
 
   // Retrieves the current sequence number for the whole group, which should be
   // in sync. If the returned number is not consistent across the group, it

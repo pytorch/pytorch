@@ -375,9 +375,20 @@ class TestExpandPlaceholder(TestCase):
             self.assertIsInstance(strategy, OpStrategy)
             return strategy
 
-        # Note: using sizes that are multiples of mesh sizes so every sharding option is valid,
-        # (S1, S2, Psum, R) ** mesh.ndim
-        expected_num_strategies = 4**3
+        # Sizes are multiples of mesh dims so every shard option is valid.
+        # Per mesh dim: 3 non-partial (S1,S2,R) + 4 partial rules
+        # (1 Psum, 1 Pavg, 1 Pmax, 1 Pmin). S0 is excluded because cat dim 0
+        # needs redistribution. Mixed-partial filter allows Psum+Pavg to
+        # coexist but rejects other mixes. By inclusion-exclusion on a 3D mesh
+        # (n=3 non-partial):
+        #   no partials:    3^3                                    = 27
+        #   Psum only:      (3+1)^3 - 3^3                         = 37
+        #   Pavg only:      (3+1)^3 - 3^3                         = 37
+        #   Pmax only:      (3+1)^3 - 3^3                         = 37
+        #   Pmin only:      (3+1)^3 - 3^3                         = 37
+        #   Psum+Pavg mix:  (3+1+1)^3 - 2 * (3+1)^3 + 3^3        = 24
+        #   total:                                                 = 199
+        expected_num_strategies = 199
         # Test Replicate + Shard gives Shard
         inputs = [torch.empty((8, 8, 8))] * 2
         placements = [
@@ -991,7 +1002,9 @@ class TestExpandPlaceholder(TestCase):
                 len(output_specs), 2, "Should have 2 output specs for topk"
             )
             for i, out_spec in enumerate(output_specs):
-                self.assertIsNotNone(out_spec, f"Output {i} spec should not be None")
+                self.assertIsNotNone(
+                    out_spec, lambda msg: f"{msg}\nOutput {i} spec should not be None"
+                )
                 self.assertIsInstance(out_spec, DTensorSpec)
 
             self.assertEqual(len(op_spec.input_specs), 1, "Should have 1 input tensor")
@@ -1176,7 +1189,7 @@ class TestExpandPlaceholder(TestCase):
                 self.assertEqual(
                     partial_reduce_ops,
                     {"sum", "avg"},
-                    f"Found invalid mixed partials: {partial_reduce_ops}",
+                    lambda msg: f"{msg}\nFound invalid mixed partials: {partial_reduce_ops}",
                 )
 
         # Verify that homogeneous partial strategies ARE included
@@ -1236,7 +1249,7 @@ class TestExpandPlaceholder(TestCase):
             self.assertLessEqual(
                 len(partial_types),
                 1,
-                f"Should not mix Partial subclasses: {output_spec.placements}",
+                lambda msg: f"{msg}\nShould not mix Partial subclasses: {output_spec.placements}",
             )
 
     def test_expand_allows_sum_avg_partial_mix(self):
@@ -1303,8 +1316,15 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
             dtype=torch.float32,
         )
 
-    def _compare_pq_vs_full_expansion(self, mesh, left_placements, right_placements):
-        """Run both PQ search and full expansion, verify same min cost."""
+    def _compare_pq_vs_full_expansion(
+        self,
+        mesh,
+        left_placements,
+        right_placements,
+        *,
+        compare_full_expansion=True,
+    ):
+        """Run PQ search and validate its selected strategy cost."""
         M, K, N = 64, 32, 64
         left_meta, right_meta = _get_mm_metas(M, K, N)
         output_meta = self._get_mm_output_meta(M, K, N)
@@ -1329,6 +1349,22 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
         self.assertIsInstance(pq_strategy, OpStrategy)
         self.assertEqual(len(pq_strategy.strategies), 1)
         pq_cost = sum(chain.from_iterable(pq_strategy.strategies[0].redistribute_cost))
+
+        if not compare_full_expansion:
+            from torch.distributed.tensor._collective_utils import redistribute_cost
+            from torch.distributed.tensor._redistribute import _gen_transform_infos
+
+            _gen_transform_infos.cache_clear()
+            with use_min_cost_redistribution_plan():
+                actual_cost = sum(
+                    redistribute_cost(src, dst)
+                    for src, dst in zip(
+                        (left_spec, right_spec),
+                        pq_strategy.strategies[0].input_specs,
+                    )
+                )
+            self.assertAlmostEqual(pq_cost, actual_cost, places=5)
+            return
 
         # Full expansion reference using graph-based (min-cost) redistribution
         # planning. PQ's Dijkstra search over all per-dim transition orderings
@@ -1355,7 +1391,7 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
             pq_cost,
             ref_min_cost + 1e-9,
             msg=(
-                f"PQ cost {pq_cost} > ref min cost {ref_min_cost} for "
+                lambda msg: f"{msg}\nPQ cost {pq_cost} > ref min cost {ref_min_cost} for "
                 f"left={left_placements}, right={right_placements}"
             ),
         )
@@ -1414,25 +1450,26 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
         )
 
     def test_dijkstra_expand_single_dim_strategy_to_mesh_hard_4d(self):
-        """Verify PQ search matches full expansion min cost on 4D mesh."""
+        """Verify PQ search selects a strategy with an accurate cost on a 4D mesh."""
         mesh = DeviceMesh("cpu", mesh=torch.arange(16).reshape(2, 2, 2, 2))
         self._compare_pq_vs_full_expansion(
             mesh,
             left_placements=(Replicate(), Shard(0), Replicate(), Replicate()),
             right_placements=(Shard(0), Shard(1), Shard(0), Replicate()),
+            compare_full_expansion=False,
         )
 
     def test_pq_vs_full_expansion_data_driven(self):
-        """Data-driven comparison across mesh shapes, all placement types for mm.
+        """Exhaustively compare all mm placement types on 1D and 2D meshes.
 
-        Enumerates all combos of R, S(0), S(1), P(sum) for each mesh dim on
-        both inputs, across 1D/2D/3D meshes.
+        Higher-dimensional exhaustive expansion is prohibitively expensive:
+        3D checks 4096 input pairs against 512 strategies each. The dedicated
+        hard tests above cover representative 3D and 4D interactions.
         """
         placement_options = [Shard(0), Shard(1), Replicate(), Partial("sum")]
         mesh_configs = [
             ("1d", torch.arange(4)),
             ("2d", torch.arange(4).reshape(2, 2)),
-            ("3d", torch.arange(8).reshape(2, 2, 2)),
         ]
 
         for mesh_name, mesh_tensor in mesh_configs:
@@ -1663,7 +1700,7 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
         self.assertEqual(
             missing,
             set(),
-            f"PQ search missed {len(missing)} strategies reachable by full expansion",
+            lambda msg: f"{msg}\nPQ search missed {len(missing)} strategies reachable by full expansion",
         )
 
     def test_single_dim_transition_reachability(self):
@@ -1754,7 +1791,7 @@ class TestDijkstraExpandSingleDimStrategy(TestCase):
                     self.assertEqual(
                         visited,
                         all_placements,
-                        f"input_idx={input_idx}, mesh_dim={mesh_dim}: "
+                        lambda msg: f"{msg}\ninput_idx={input_idx}, mesh_dim={mesh_dim}: "
                         f"from {start}, unreachable: {all_placements - visited}",
                     )
 

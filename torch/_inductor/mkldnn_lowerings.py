@@ -196,6 +196,7 @@ def grouped_gemm_lowering(
 
 
 grouped_gemm_lowering._inductor_lowering_function = True  # type: ignore[attr-defined]
+grouped_gemm_lowering._inductor_lowering_output_metadata_ignores_input_storage = True  # type: ignore[attr-defined]
 
 
 def _convert_to_0d_constant(

@@ -6,8 +6,6 @@ from torch.types import _bool
 class ViewMeta:
     has_symbolic_inputs: _bool
 
-    def as_tuple(self) -> tuple[object, ...]: ...
-
 # Returns the list of ViewMeta instances of the given functional tensor.
 #
 # Although we do have python bindings for their types, we won't

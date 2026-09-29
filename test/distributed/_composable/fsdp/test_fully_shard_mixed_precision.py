@@ -3,6 +3,7 @@
 import copy
 import dataclasses
 import functools
+import unittest
 from typing import Any, NamedTuple
 
 import torch
@@ -22,7 +23,9 @@ from torch.testing._internal.common_distributed import (
 )
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
+    DISTRIBUTED_BACKEND,
     FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     get_devtype,
     MLP,
@@ -34,7 +37,8 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfRocmArch,
     skipIfRocmVersionLessThan,
-    TEST_HPU,
+    TEST_CUDA,
+    TEST_XPU,
 )
 from torch.utils.checkpoint import checkpoint
 
@@ -42,10 +46,8 @@ from torch.utils.checkpoint import checkpoint
 device_type = torch.device(get_devtype())
 
 
-class TestFullyShardMixedPrecisionTraining(FSDPTest):
-    @property
-    def world_size(self) -> int:
-        return min(4, torch.get_device_module(device_type).device_count())
+class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
+    world_size = min(4, torch.get_device_module(device_type).device_count())
 
     def _init_models_and_optims(
         self,
@@ -99,6 +101,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
 
     @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(DISTRIBUTED_BACKEND != "nccl", "Requires NCCL backend")
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_compute_dtype(self):
         use_shard_placement_fn_vals = (
@@ -179,6 +182,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
 
     @skipIfRocmVersionLessThan((7, 0))
     @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(DISTRIBUTED_BACKEND != "nccl", "Requires NCCL backend")
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_reduce_dtype(self):
         self.run_subtests(
@@ -894,6 +898,7 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             )
 
     @skip_if_lt_x_gpu(1)
+    @unittest.skipIf(DISTRIBUTED_BACKEND != "nccl", "Requires NCCL backend")
     @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
     def test_norm_modules_bf16(self):
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
@@ -924,19 +929,21 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
             fully_shard(module, mp_policy=mp_policy)
         inner(model, torch.randn((4, 32)))
 
-        # Batch norm 2D: error in backward from buffer dtype mismatch
+        # Batch norm 2D: CUDA and XPU raise a dtype mismatch error in backward
+        # from buffer dtype mismatch; other hardware types do not. Preserve the
+        # original semantics for CUDA/XPU and default all other devices to the
+        # no-error path.
         model = nn.Sequential(nn.Conv2d(1, 5, 3), nn.BatchNorm2d(5), nn.Conv2d(5, 4, 3))
         for module in (model[0], model[1], model[2], model):
             fully_shard(module, mp_policy=mp_policy)
-        if TEST_HPU:
-            inner(model, torch.randn((3, 1, 9, 9)))
-        else:
+        if TEST_CUDA or TEST_XPU:
             with self.assertRaisesRegex(
                 RuntimeError,
-                "Expected running_mean to have type",  # Error not seen on HPUs and hence it can be skipped
+                "Expected running_mean to have type",
             ):
-                # Errors in batch norm 2D backward
                 inner(model, torch.randn((3, 1, 9, 9)))
+        else:
+            inner(model, torch.randn((3, 1, 9, 9)))
 
         # Batch norm 2D: cast buffers down to lower precision
         model = nn.Sequential(nn.Conv2d(1, 5, 3), nn.BatchNorm2d(5), nn.Conv2d(5, 4, 3))

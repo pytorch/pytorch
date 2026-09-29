@@ -960,9 +960,11 @@ struct TORCH_API Node {
     AT_ASSERT(name.is_attr());
     auto it = findAttr(name, true);
     auto* child = dynamic_cast<T*>(it->get());
-    if (child == nullptr) {
-      throw IRAttributeError(name, true);
-    }
+    TORCH_CHECK(
+        child != nullptr,
+        "required keyword attribute '",
+        name.toUnqualString(),
+        "' has the wrong type");
     return child->value();
   }
   using AVPtr = AttributeValue::Ptr;
@@ -975,9 +977,11 @@ struct TORCH_API Node {
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
     });
-    if (required && it == values_.end()) {
-      throw IRAttributeError(name, false);
-    }
+    TORCH_CHECK(
+        !required || it != values_.end(),
+        "required keyword attribute '",
+        name.toUnqualString(),
+        "' is undefined");
     AT_ASSERT(!required || it != values_.end());
     return it;
   }
@@ -987,9 +991,11 @@ struct TORCH_API Node {
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
     });
-    if (required && it == values_.end()) {
-      throw IRAttributeError(name, false);
-    }
+    TORCH_CHECK(
+        !required || it != values_.end(),
+        "required keyword attribute '",
+        name.toUnqualString(),
+        "' is undefined");
     AT_ASSERT(!required || it != values_.end());
     return it;
   }
@@ -1249,6 +1255,9 @@ struct Graph : std::enable_shared_from_this<Graph> {
   const_graph_node_list nodes() const {
     const Block& block = *block_;
     return block.nodes();
+  }
+  size_t numNodes() const {
+    return all_nodes.size();
   }
   Node* param_node() {
     return block_->param_node();
