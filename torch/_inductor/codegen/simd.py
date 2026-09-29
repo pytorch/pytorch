@@ -2132,59 +2132,66 @@ class _GroupedReductionLayout:
         family: _DerivedIterationFamily,
         value: CSEVariable,
         *,
+        access_stride: int,
+        base_offset: sympy.Expr,
+        extent: sympy.Expr,
         parent_shape: tuple[sympy.Expr, sympy.Expr],
         child_shape: tuple[sympy.Expr, sympy.Expr],
-        translation: tuple[sympy.Expr, sympy.Expr],
         output_lanes: int,
         output_lane: int,
         factor: int,
     ) -> CSEVariable:
-        """Project one proven contiguous child interval from a parent tile."""
+        """Project one proved contiguous child interval from a parent tile."""
         if value.dtype is None:
-            raise AssertionError("translated source must have a known dtype")
+            raise AssertionError("affine source must have a known dtype")
         if not self.local_reduction_in_r:
-            raise AssertionError("translated projection requires an R parent axis")
+            raise AssertionError("affine projection requires an R parent axis")
         if len(parent_shape) != 2 or len(child_shape) != 2:
             raise AssertionError(
-                "translated projection requires two-dimensional frames"
+                "affine projection requires two-dimensional frames"
             )
         if not V.graph.sizevars.statically_known_equals(
             parent_shape[0], child_shape[0]
         ):
-            raise AssertionError("translated projection changed the parent row extent")
-        if not V.graph.sizevars.statically_known_equals(translation[0], 0):
-            raise AssertionError("translated projection changed the parent row")
+            raise AssertionError("affine projection changed the parent row extent")
+        if access_stride != 1:
+            raise AssertionError("contiguous projection requires affine stride one")
         if output_lanes <= 0 or not 0 <= output_lane < output_lanes:
-            raise AssertionError("invalid translated output-lane metadata")
+            raise AssertionError("invalid affine output-lane metadata")
         if value.shape is None or len(value.shape) != 2:
-            raise AssertionError("translated source must be a two-dimensional tile")
+            raise AssertionError("affine source must be a two-dimensional tile")
         if str(value.shape[self.parent_axis]) != self.parent_block:
             raise AssertionError(
-                f"translated source is not parent resolution: {value.shape}"
+                f"affine source is not parent resolution: {value.shape}"
             )
 
         sizevars = V.graph.sizevars
         parent_width = sizevars.guard_int(parent_shape[1])
         if parent_width <= 0 or parent_width % factor != 0:
-            raise AssertionError("translated parent extent is not divisible by factor")
+            raise AssertionError("affine parent extent is not divisible by factor")
         child_width = parent_width // factor
-        consumer_width = sizevars.guard_int(child_shape[1])
+        consumer_width = sizevars.guard_int(extent)
+        if not sizevars.statically_known_equals(extent, child_shape[1]):
+            raise AssertionError("affine extent does not match the consumer frame")
         if (
             child_width <= 0
             or consumer_width <= 0
             or consumer_width != child_width * output_lanes
         ):
             raise AssertionError(
-                "translated child extent is incompatible with output lanes"
+                "affine child extent is incompatible with output lanes"
             )
-        translation_r = sizevars.guard_int(translation[1])
-        offset = translation_r + output_lane * child_width
-        if translation_r < 0 or offset < 0 or offset + child_width > parent_width:
-            raise AssertionError(
-                "translated child interval is outside its parent frame"
-            )
+        base_offset = sizevars.guard_int(base_offset)
+        offset = base_offset + output_lane * child_width
+        if (
+            base_offset < 0
+            or base_offset + consumer_width > parent_width
+            or offset < 0
+            or offset + child_width > parent_width
+        ):
+            raise AssertionError("affine child interval is outside its parent frame")
         if offset % child_width != 0:
-            raise AssertionError("translated child interval is not lane aligned")
+            raise AssertionError("affine child interval is not lane aligned")
 
         # Keep the replayed value's block shape in the derived family's
         # vocabulary.  The concrete relation width and the derived Triton
@@ -2201,9 +2208,9 @@ class _GroupedReductionLayout:
             value, reshape_shape, tuple(map(str, parts))
         )
         family.set_value_masks(kernel, parts)
-        part_index = translation_r // child_width + output_lane
+        part_index = base_offset // child_width + output_lane
         if part_index >= len(parts):
-            raise AssertionError("translated projection selected an unavailable part")
+            raise AssertionError("affine projection selected an unavailable part")
         return parts[part_index]
 
     def sub_parent_split_shapes(
@@ -2537,6 +2544,31 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
 class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
     """Use exhaustive access proofs as a per-name sub-parent replay contract."""
 
+    @staticmethod
+    def _accesses_match_in_child_frame(
+        left: MemoryDep,
+        right: MemoryDep,
+        parent_numel: sympy.Expr,
+        child_extent: sympy.Expr,
+    ) -> bool:
+        """Compare accesses after collapsing them into the proved X/R frame."""
+        if left.name != right.name or left.mode != right.mode:
+            return False
+        frame = (
+            sympy_index_symbol("_sub_parent_replay_x"),
+            sympy_index_symbol("_sub_parent_replay_r"),
+        )
+        sizes = (parent_numel, child_extent)
+        left_frame = left.normalize_with_ranges(frame, sizes)
+        right_frame = right.normalize_with_ranges(frame, sizes)
+        return (
+            left_frame is not None
+            and right_frame is not None
+            and V.graph.sizevars.statically_known_equals(
+                left_frame.index, right_frame.index
+            )
+        )
+
     def __init__(
         self,
         inner,
@@ -2555,131 +2587,159 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         self._layout = layout
         self._sub_parent_family = sub_parent_family
         self._sub_parent_factor = sub_parent_factor
-        has_translated_relations = any(
-            relation.translation is not None for relation in access_relations
+        has_dense_mappings = any(
+            relation.access_stride == 1
+            for relation in access_relations
         )
-        if has_translated_relations and (
-            parent_numel is None or parent_rnumel is None
-        ):
+        if has_dense_mappings and (parent_numel is None or parent_rnumel is None):
             raise AssertionError(
-                "translated sub-parent replay requires parent extents"
+                "dense affine replay requires parent extents"
             )
-        if has_translated_relations and layout.group_tree.is_loop:
+        if has_dense_mappings and layout.group_tree.is_loop:
             raise AssertionError(
-                "translated projection requires the complete logical parent tile"
+                "dense affine projection requires the complete logical parent tile"
             )
-        # Fusion checks each access. Replay only needs their consistent per-name
-        # consequences: capture role and any permitted parent lanes. Translated
-        # accesses retain their complete relation descriptor below.
+        # Fusion checks each access. Replay resolves every affine access from
+        # its proof record and retains per-name source ownership contracts.
         relations_by_name: dict[str, list[scheduler.SubParentAccessRelation]] = (
             collections.defaultdict(list)
         )
         consumer_lanes: dict[MemoryDep, int] = {}
         for relation in access_relations:
-            if relation.parent_lane is not None:
+            if relation.access_stride == sub_parent_factor:
                 consumer = relation.consumer_access.normalize()
-                prior_lane = consumer_lanes.setdefault(consumer, relation.parent_lane)
-                if prior_lane != relation.parent_lane:
+                lane = V.graph.sizevars.guard_int(
+                    cast("sympy.Expr", relation.base_offset)
+                )
+                prior_lane = consumer_lanes.setdefault(consumer, lane)
+                if prior_lane != lane:
                     raise AssertionError(
                         f"consumer access has multiple lanes: {consumer}"
                     )
             relations_by_name[relation.consumer_access.name].append(relation)
         self._relation_descriptors: list[_SubParentRelationDescriptor] = []
-        self._translated_descriptor_indices: dict[str, list[int]] = (
+        self._dense_descriptor_indices: dict[str, list[int]] = (
             collections.defaultdict(list)
         )
         for relation in access_relations:
-            if relation.translation is None:
+            access_stride = relation.access_stride
+            if access_stride is None:
                 continue
+            base_offset = cast("sympy.Expr", relation.base_offset)
+            extent = cast("sympy.Expr", relation.extent)
             if parent_numel is None or parent_rnumel is None:
-                raise AssertionError("translated relation is missing parent extents")
-            source_extent = sympy_product(relation.source_accesses[0].size)
-            parent_extent = parent_numel * parent_rnumel
-            if not V.graph.sizevars.statically_known_equals(
-                source_extent, parent_extent
-            ):
+                raise AssertionError("affine relation is missing parent extents")
+            if access_stride not in (1, sub_parent_factor):
                 raise AssertionError(
-                    "translated relation source does not cover the parent frame"
+                    f"unsupported sub-parent affine stride {access_stride}"
                 )
+            sizevars = V.graph.sizevars
+            if access_stride == 1:
+                source_extent = sympy_product(relation.source_accesses[0].size)
+                parent_extent = parent_numel * parent_rnumel
+                if not V.graph.sizevars.statically_known_equals(
+                    source_extent, parent_extent
+                ):
+                    raise AssertionError(
+                        "dense affine source does not cover the parent frame"
+                    )
             consumer_extent = sympy_product(relation.consumer_access.size)
             if not V.graph.sizevars.statically_known_multiple_of(
                 consumer_extent, parent_numel
             ):
                 raise AssertionError(
-                    "translated relation consumer does not have a row-major child frame"
+                    "affine consumer does not have a row-major child frame"
                 )
             child_feature = V.graph.sizevars.simplify(
                 FloorDiv(consumer_extent, parent_numel)
             )
+            if not V.graph.sizevars.statically_known_equals(child_feature, extent):
+                raise AssertionError("affine extent does not match the consumer frame")
+            if access_stride == sub_parent_factor:
+                continue
             replay_matches = [
                 (group_index, node)
                 for group_index, group in enumerate(output_groups)
                 for node in group.nodes
-                if relation.consumer_access in node.read_writes.reads
-            ]
-            if len(replay_matches) > 1:
-                raise AssertionError(
-                    "translated relation belongs to multiple output groups"
+                if any(
+                    isinstance(read, MemoryDep)
+                    and self._accesses_match_in_child_frame(
+                        relation.consumer_access,
+                        read,
+                        parent_numel,
+                        extent,
+                    )
+                    for read in node.read_writes.reads
                 )
-            if replay_matches:
-                group_index, replay_node = replay_matches[0]
-                output_lanes = output_groups[group_index].output_lanes
-            else:
-                group_index = None
-                replay_node = None
-                output_lanes = 1
-            descriptor = _SubParentRelationDescriptor(
-                relation=relation,
-                output_group=group_index,
-                output_lanes=output_lanes,
-                replay_node=replay_node,
-                parent_shape=(parent_numel, parent_rnumel),
-                child_shape=(parent_numel, child_feature),
-            )
-            descriptor_index = len(self._relation_descriptors)
-            self._relation_descriptors.append(descriptor)
-            self._translated_descriptor_indices[relation.consumer_access.name].append(
-                descriptor_index
-            )
+            ]
+            if access_stride == 1 and len(replay_matches) > 1:
+                raise AssertionError(
+                    "dense affine relation belongs to multiple output groups"
+                )
+            if not replay_matches:
+                replay_matches = [(None, None)]
+            for group_index, replay_node in replay_matches:
+                output_lanes = (
+                    output_groups[group_index].output_lanes
+                    if group_index is not None
+                    else 1
+                )
+                descriptor = _SubParentRelationDescriptor(
+                    relation=relation,
+                    output_group=group_index,
+                    output_lanes=output_lanes,
+                    replay_node=replay_node,
+                    parent_shape=(parent_numel, parent_rnumel),
+                    child_shape=(parent_numel, extent),
+                )
+                descriptor_index = len(self._relation_descriptors)
+                self._relation_descriptors.append(descriptor)
+                self._dense_descriptor_indices[relation.consumer_access.name].append(
+                    descriptor_index
+                )
         self._contracts: dict[str, _SubParentSourceContract] = {}
         for name, relations in relations_by_name.items():
-            translated_relations = [
-                relation for relation in relations if relation.translation is not None
-            ]
-            if translated_relations and len(translated_relations) != len(relations):
-                raise AssertionError(
-                    f"mixed translated and non-translated relations for {name}"
-                )
-            contract_relations = (
-                translated_relations if translated_relations else relations
+            mapping_kinds = OrderedSet(
+                [
+                    "direct"
+                    if relation.access_stride is None
+                    else (
+                        "dense"
+                        if relation.access_stride == 1
+                        else "interleaved"
+                    )
+                    for relation in relations
+                ]
             )
+            if len(mapping_kinds) != 1:
+                raise AssertionError(f"mixed affine relation kinds for {name}")
+            mapping_kind = next(iter(mapping_kinds))
             source_sets = OrderedSet(
-                [frozenset(relation.source_accesses) for relation in contract_relations]
+                [frozenset(relation.source_accesses) for relation in relations]
             )
             source_roles = OrderedSet(
-                [relation.requires_live_source for relation in contract_relations]
+                [relation.requires_live_source for relation in relations]
             )
             parent_lanes = OrderedSet(
-                [relation.parent_lane for relation in contract_relations]
+                [
+                    None
+                    if relation.access_stride is None or relation.access_stride == 1
+                    else V.graph.sizevars.guard_int(
+                        cast("sympy.Expr", relation.base_offset)
+                    )
+                    for relation in relations
+                ]
             )
-            if not translated_relations:
-                if len(source_sets) != 1:
-                    raise AssertionError(f"mixed source accesses for {name}")
+            if len(source_sets) != 1:
+                raise AssertionError(f"mixed source accesses for {name}")
+            if mapping_kind != "dense":
                 if len(source_roles) != 1:
                     raise AssertionError(f"mixed source roles for {name}")
                 if None in parent_lanes and len(parent_lanes) != 1:
                     raise AssertionError(f"mixed direct and lane relations for {name}")
-            else:
-                if len(source_sets) != 1:
-                    raise AssertionError(
-                        f"mixed translated source accesses for {name}"
-                    )
-                # Live-source status remains per relation.  In particular, a
-                # forwarded internal output and a graph-output view can share
-                # the same source name without sharing this role.
             allowed_lanes = (
                 None
-                if translated_relations or None in parent_lanes
+                if mapping_kind != "interleaved"
                 else cast("frozenset[int]", frozenset(parent_lanes))
             )
             self._contracts[name] = _SubParentSourceContract(
@@ -2690,7 +2750,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             )
         self._values: dict[str, OrderedSet[CSEVariable]] = {}
         self._materialized: dict[CSEVariable, MaterializedSubParentValue] = {}
-        self._translated_materialized: dict[tuple[int, int, int], CSEVariable] = {}
+        self._dense_materialized: dict[tuple[int, int, int], CSEVariable] = {}
         self._lane_projections: dict[CSEVariable, _LaneProjection] = {}
         # Pointwise results at parent resolution, recorded as they are
         # emitted, so a lane replay of the same op can fold onto them.
@@ -2866,7 +2926,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             self._materialized[value] = materialized
         return materialized
 
-    def _select_translated_descriptor(
+    def _select_dense_descriptor(
         self,
         name: str,
         index: sympy.Expr,
@@ -2875,7 +2935,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
     ) -> tuple[int, _SubParentRelationDescriptor] | None:
         candidates = [
             (descriptor_index, self._relation_descriptors[descriptor_index])
-            for descriptor_index in self._translated_descriptor_indices.get(name, ())
+            for descriptor_index in self._dense_descriptor_indices.get(name, ())
         ]
         if replay_context is not None:
             candidates = [
@@ -2897,16 +2957,17 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
                 for descriptor_index, descriptor in candidates
                 if descriptor.relation.consumer_access.index == index
             ]
-            candidates = exact
+            if exact:
+                candidates = exact
         if len(candidates) == 1:
             return candidates[0]
         if not candidates:
             return None
         raise AssertionError(
-            f"ambiguous translated sub-parent relation for {name!r} at {index}"
+            f"ambiguous dense sub-parent relation for {name!r} at {index}"
         )
 
-    def _materialize_translated_source(
+    def _materialize_dense_source(
         self,
         descriptor_index: int,
         descriptor: _SubParentRelationDescriptor,
@@ -2916,20 +2977,25 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         if not self._kernel.cse.contains_value(cast("TritonCSEVariable", source)):
             return None
         key = (id(source), descriptor_index, output_lane)
-        if key in self._translated_materialized:
-            return self._translated_materialized[key]
+        if key in self._dense_materialized:
+            return self._dense_materialized[key]
+        relation = descriptor.relation
+        if relation.access_stride != 1:
+            raise AssertionError("dense descriptor lost its stride-one mapping")
         value = self._layout.project_parent_value(
             self._kernel,
             self._sub_parent_family,
             source,
+            access_stride=relation.access_stride,
+            base_offset=cast("sympy.Expr", relation.base_offset),
+            extent=cast("sympy.Expr", relation.extent),
             parent_shape=descriptor.parent_shape,
             child_shape=descriptor.child_shape,
-            translation=descriptor.relation.translation or (),
             output_lanes=descriptor.output_lanes,
             output_lane=output_lane,
             factor=self._sub_parent_factor,
         )
-        self._translated_materialized[key] = value
+        self._dense_materialized[key] = value
         return value
 
     def is_group_width_shape(self, shape: Sequence[int | str] | None) -> bool:
@@ -2971,10 +3037,11 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
                 id(relation) not in required_relation_ids
                 or not relation.requires_live_source
                 or descriptor.output_group is None
+                or relation.access_stride != 1
             ):
                 continue
             materialized = any(
-                self._materialize_translated_source(
+                self._materialize_dense_source(
                     descriptor_index,
                     descriptor,
                     source,
@@ -2986,13 +3053,20 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             )
             if not materialized:
                 raise AssertionError(
-                    f"lost required translated sub-parent source "
+                    f"lost required dense sub-parent source "
                     f"{relation.consumer_access.name!r}"
                 )
 
         for relation in required_relations:
-            if relation.translation is not None:
+            if relation.access_stride == 1:
                 continue
+            if (
+                relation.access_stride is not None
+                and relation.access_stride != self._sub_parent_factor
+            ):
+                raise AssertionError(
+                    f"unsupported sub-parent affine stride {relation.access_stride}"
+                )
             name = relation.consumer_access.name
             if not self._contracts[name].source_is_internal:
                 continue
@@ -3097,14 +3171,14 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         replay_node: Any | None = None,
     ) -> CSEVariable | None:
         """Try each live source, requiring in-kernel values to resolve."""
-        if name in self._translated_descriptor_indices:
-            selected = self._select_translated_descriptor(
+        if name in self._dense_descriptor_indices:
+            selected = self._select_dense_descriptor(
                 name, index, replay_context, replay_node
             )
             if selected is None:
                 if self._contracts[name].source_is_internal:
                     raise AssertionError(
-                        f"no translated sub-parent relation for {name!r} at {index}"
+                        f"no dense sub-parent relation for {name!r} at {index}"
                     )
                 return None
             descriptor_index, descriptor = selected
@@ -3112,7 +3186,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
                 replay_context.output_lane if replay_context is not None else 0
             )
             for source in self.resolve_sources(name):
-                value = self._materialize_translated_source(
+                value = self._materialize_dense_source(
                     descriptor_index, descriptor, source, output_lane
                 )
                 if value is not None:
@@ -3471,23 +3545,23 @@ class SIMDScheduling(BaseScheduling):
     ) -> bool:
         if not self._sub_parent_tiling_is_2d(nodes, parent_numel, plan.parent_rnumel):
             return False
-        has_translated_relations = any(
-            relation.translation is not None
+        has_dense_mappings = any(
+            relation.access_stride == 1
             for stage in plan.sub_parent_stages
             for relation in stage.access_relations
         )
-        if has_translated_relations and any(
+        if has_dense_mappings and any(
             node.get_device() is None or node.get_device().type != "cuda"
             for node in nodes
         ):
             return False
         return not (
-            has_translated_relations
-            and not self._translated_projection_is_persistent(plan)
+            has_dense_mappings
+            and not self._dense_projection_is_persistent(plan)
         )
 
     @staticmethod
-    def _translated_group_extent_subs(
+    def _dense_group_extent_subs(
         plan: scheduler.StagedReductionPlan,
     ) -> dict[sympy.Expr, sympy.Expr]:
         # The final SchedulerNode groups may still spell the specialized
@@ -3510,13 +3584,13 @@ class SIMDScheduling(BaseScheduling):
                 break
         return group_extent_subs
 
-    def _translated_projection_is_persistent(
+    def _dense_projection_is_persistent(
         self, plan: scheduler.StagedReductionPlan
     ) -> bool:
-        """Whether the selected Triton reduction owns a complete parent tile."""
+        """Whether a dense affine projection owns a complete parent tile."""
         if not plan.parent_nodes:
             return True
-        group_extent_subs = self._translated_group_extent_subs(plan)
+        group_extent_subs = self._dense_group_extent_subs(plan)
         parent_schedule = self.generate_node_schedule(
             plan.parent_nodes,
             plan.parent_numel,
@@ -4225,8 +4299,7 @@ class SIMDScheduling(BaseScheduling):
                     value_resolver.materialize_sources(
                         relation
                         for relation in sub_parent_stage.access_relations
-                        if relation.parent_lane is not None
-                        or relation.translation is not None
+                        if relation.access_stride is not None
                     )
                     self._codegen_sub_parent_output_groups(
                         kernel,
@@ -4553,31 +4626,38 @@ class SIMDScheduling(BaseScheduling):
         nodes: Sequence[BaseSchedulerNode],
         plan: scheduler.StagedReductionPlan,
     ) -> None:
-        """Emit a reduction followed by its lane-resolution epilogue.
+        """Emit a parent reduction followed by its sub-parent epilogue.
 
-        Parent loads still live after reduction codegen are split in registers;
-        expired loads are reissued in the derived iteration space.
+        Live parent values can be projected or split into the child domain.
+        External sources that expire from CSE reload in the derived domain.
         """
         if plan.nested_stage is not None or len(plan.sub_parent_stages) != 1:
             raise AssertionError("expected one standalone sub-parent stage")
         stage = plan.sub_parent_stages[0]
-        has_translated_relations = any(
-            relation.translation is not None for relation in stage.access_relations
+        has_dense_mappings = any(
+            relation.access_stride == 1
+            for relation in stage.access_relations
         )
         numel = plan.parent_numel
         rnumel = plan.parent_rnumel
+        sub_parent_factor = stage.factor
         sub_parent_epilogue_nodes = stage.epilogue_nodes
         parent_nodes = list(plan.parent_nodes)
         group_extent_subs = (
-            self._translated_group_extent_subs(plan)
-            if has_translated_relations
+            self._dense_group_extent_subs(plan)
+            if has_dense_mappings
             else {}
         )
         required_replay_relations = tuple(
             relation
             for relation in stage.access_relations
-            if relation.parent_lane is not None
-            or relation.translation is not None
+            if relation.access_stride is not None
+        )
+        required_live_lane_relations = tuple(
+            relation
+            for relation in required_replay_relations
+            if relation.requires_live_source
+            and relation.access_stride == sub_parent_factor
         )
         parent_schedule = self.generate_node_schedule(
             parent_nodes,
@@ -4622,12 +4702,11 @@ class SIMDScheduling(BaseScheduling):
             self.create_kernel_choices(kernel_features, [tiling], kernel_kwargs),
         )
         metrics.codegen_nested_reduction += 1
-        sub_parent_factor = stage.factor
         parent_rnumel = plan.parent_rnumel
         for kernel in kernels:
             kernel.min_rblock = (
                 sub_parent_factor
-                if not has_translated_relations
+                if not has_dense_mappings
                 else V.graph.sizevars.guard_int(parent_rnumel)
             )
             if len(kernel.range_trees) != 2:
@@ -4654,11 +4733,11 @@ class SIMDScheduling(BaseScheduling):
                     self._codegen_node_schedule_body(parent_schedule, kernel)
                 if required_replay_relations:
                     value_resolver.materialize_sources(required_replay_relations)
-                # Materialize the outer reduction result before replaying the
-                # epilogue.  Keep reduction mode enabled: the epilogue needs a
-                # second reduction loop to cover every parent R tile, while
-                # the first loop produces the values it consumes.
-                kernel.codegen_body()
+                if has_dense_mappings or not required_live_lane_relations:
+                    # Dense projections need the completed parent tile. Lane
+                    # replay with a live source must run before body flush,
+                    # while the source value is still present in CSE.
+                    kernel.codegen_body()
                 self._codegen_sub_parent_output_groups(
                     kernel,
                     stage,

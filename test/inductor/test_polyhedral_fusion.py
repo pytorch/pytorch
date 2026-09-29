@@ -14,6 +14,7 @@ from torch._dynamo.testing import CompileCounterWithBackend
 from torch._inductor import metrics
 import torch._inductor.config as inductor_config
 from torch._inductor.choices import InductorChoices
+from torch._inductor.dependencies import MemoryDep
 from torch._inductor.scheduler import (
     FusedNestedReductions,
     FusedStagedReduction,
@@ -21,7 +22,7 @@ from torch._inductor.scheduler import (
     Scheduler,
 )
 from torch._inductor.test_case import TestCase, run_tests
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_inductor_cache, sympy_index_symbol
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -146,13 +147,14 @@ class _Observation:
     outputs: tuple[torch.Tensor, ...]
     generated_kernel_count: int
     staged_fusion_count: int
-    translations: tuple[tuple[object, ...], ...]
+    affine_mappings: tuple[tuple[int, int, int], ...]
     logical_factors: tuple[int, ...]
+    output_group_affine_mappings: tuple[tuple[int, int, int], ...]
     parent_widths: tuple[int, ...] = ()
     lifetime_signatures: tuple[tuple[str, int, int, int], ...] = ()
 
 
-def _capture_staged_plans(nodes, staged_plans):
+def _capture_staged_plans(nodes, staged_plans, output_group_mappings):
     for node in nodes:
         if not isinstance(node, FusedStagedReduction) or isinstance(
             node, FusedNestedReductions
@@ -169,6 +171,58 @@ def _capture_staged_plans(nodes, staged_plans):
         )
         if plan is not None:
             staged_plans.append(plan)
+            output_group_mappings.extend(
+                _plan_affine_mappings([plan], output_groups_only=True)
+            )
+
+
+def _plan_affine_mappings(staged_plans, *, output_groups_only=False):
+    def relation_matches_group(relation, plan, extent, group):
+        frame = (
+            sympy_index_symbol("_sub_parent_replay_x"),
+            sympy_index_symbol("_sub_parent_replay_r"),
+        )
+        sizes = (plan.parent_numel, extent)
+        for node in group.nodes:
+            for read in node.read_writes.reads:
+                if (
+                    not isinstance(read, MemoryDep)
+                    or relation.consumer_access.name != read.name
+                    or relation.consumer_access.mode != read.mode
+                ):
+                    continue
+                left = relation.consumer_access.normalize_with_ranges(frame, sizes)
+                right = read.normalize_with_ranges(frame, sizes)
+                if (
+                    left is not None
+                    and right is not None
+                    and V.graph.sizevars.statically_known_equals(
+                        left.index, right.index
+                    )
+                ):
+                    return True
+        return False
+
+    return tuple(
+        (
+            relation.access_stride,
+            relation.base_offset,
+            relation.extent,
+        )
+        for plan in staged_plans
+        for stage in plan.sub_parent_stages
+        for relation in stage.access_relations
+        if relation.access_stride is not None
+        and (
+            not output_groups_only
+            or any(
+                relation_matches_group(
+                    relation, plan, relation.extent, group
+                )
+                for group in stage.output_groups
+            )
+        )
+    )
 
 
 def _choices_context(force_persistent: bool | None):
@@ -201,11 +255,12 @@ def _observe(
     torch._dynamo.reset()
     metrics.reset()
     staged_plans = []
+    output_group_mappings = []
     lifetime_signatures = []
     original_compute_last_usage = Scheduler.compute_last_usage
 
     def capture(nodes):
-        _capture_staged_plans(nodes, staged_plans)
+        _capture_staged_plans(nodes, staged_plans, output_group_mappings)
         return nodes
 
     def capture_last_usage(scheduler):
@@ -244,12 +299,8 @@ def _observe(
 
     if not isinstance(outputs, tuple):
         raise AssertionError("translated MLA fixture must return a tuple")
-    translations = tuple(
-        relation.translation
-        for plan in staged_plans
-        for stage in plan.sub_parent_stages
-        for relation in stage.access_relations
-    )
+    affine_mappings = _plan_affine_mappings(staged_plans)
+    output_group_affine_mappings = tuple(output_group_mappings)
     logical_factors = tuple(
         stage.factor
         for plan in staged_plans
@@ -260,7 +311,8 @@ def _observe(
         outputs=tuple(outputs),
         generated_kernel_count=metrics.generated_kernel_count,
         staged_fusion_count=len(staged_plans),
-        translations=translations,
+        affine_mappings=affine_mappings,
+        output_group_affine_mappings=output_group_affine_mappings,
         logical_factors=logical_factors,
         parent_widths=parent_widths,
         lifetime_signatures=tuple(lifetime_signatures),
@@ -296,9 +348,10 @@ def _observe_dynamic(
     torch._dynamo.reset()
     metrics.reset()
     staged_plans = []
+    output_group_mappings = []
 
     def capture(nodes):
-        _capture_staged_plans(nodes, staged_plans)
+        _capture_staged_plans(nodes, staged_plans, output_group_mappings)
         return nodes
 
     _mark_dynamic_batch_sequence(
@@ -326,12 +379,8 @@ def _observe_dynamic(
                 raise AssertionError("dynamic MLA fixture must return a tuple")
             outputs.append(tuple(result))
 
-    translations = tuple(
-        relation.translation
-        for plan in staged_plans
-        for stage in plan.sub_parent_stages
-        for relation in stage.access_relations
-    )
+    affine_mappings = _plan_affine_mappings(staged_plans)
+    output_group_affine_mappings = tuple(output_group_mappings)
     logical_factors = tuple(
         stage.factor
         for plan in staged_plans
@@ -342,7 +391,8 @@ def _observe_dynamic(
         outputs=tuple(outputs[-1]),
         generated_kernel_count=metrics.generated_kernel_count,
         staged_fusion_count=len(staged_plans),
-        translations=translations,
+        affine_mappings=affine_mappings,
+        output_group_affine_mappings=output_group_affine_mappings,
         logical_factors=logical_factors,
         parent_widths=parent_widths,
     )
@@ -351,9 +401,19 @@ def _observe_dynamic(
 class PolyhedralMLAFusionTest(TestCase):
     __unittest_skip__ = not HAS_GPU
 
-    def assert_translated_plan(self, observation: _Observation) -> None:
+    def assert_affine_plan(self, observation: _Observation) -> None:
         self.assertGreaterEqual(observation.staged_fusion_count, 1)
-        self.assertEqual(set(observation.translations), {(0, 0), (0, QK_ROPE_A)})
+        self.assertEqual(
+            set(observation.affine_mappings),
+            {
+                (1, 0, QK_ROPE_A),
+                (1, QK_ROPE_A, HEAD_DIM - QK_ROPE_A),
+            },
+        )
+        self.assertEqual(
+            set(observation.output_group_affine_mappings),
+            {(1, 0, QK_ROPE_A)},
+        )
 
     def test_static_shape_matrix(self):
         for shape_name, batch_size, seq_len in (
@@ -381,7 +441,7 @@ class PolyhedralMLAFusionTest(TestCase):
                     enabled.outputs, eager, atol=6e-2, rtol=2e-2
                 )
                 self.assertEqual(disabled.staged_fusion_count, 0)
-                self.assert_translated_plan(enabled)
+                self.assert_affine_plan(enabled)
                 if shape_name == "smoke":
                     self.assertLess(
                         enabled.generated_kernel_count,
@@ -418,7 +478,7 @@ class PolyhedralMLAFusionTest(TestCase):
             )
             self.assertEqual(disabled.staged_fusion_count, 0)
             if force_persistent:
-                self.assert_translated_plan(enabled)
+                self.assert_affine_plan(enabled)
             else:
                 self.assertEqual(enabled.staged_fusion_count, 0)
 
@@ -436,7 +496,7 @@ class PolyhedralMLAFusionTest(TestCase):
             observation.outputs, eager, atol=6e-2, rtol=2e-2
         )
         self.assertEqual(observation.staged_fusion_count, 0)
-        self.assertEqual(observation.translations, ())
+        self.assertEqual(observation.affine_mappings, ())
 
     def test_dynamic_batch_and_sequence(self):
         inputs_by_shape = tuple(
@@ -463,7 +523,7 @@ class PolyhedralMLAFusionTest(TestCase):
             self.assertEqual(
                 enabled_result, expected, atol=6e-2, rtol=2e-2
             )
-        self.assert_translated_plan(enabled)
+        self.assert_affine_plan(enabled)
 
     def test_dynamic_feature_width_falls_back(self):
         inputs_by_shape = tuple(
@@ -505,8 +565,8 @@ class PolyhedralMLAFusionTest(TestCase):
 
         self.assertEqual(disabled.staged_fusion_count, 0)
         self.assertEqual(enabled.staged_fusion_count, 0)
-        self.assertEqual(disabled.translations, ())
-        self.assertEqual(enabled.translations, ())
+        self.assertEqual(disabled.affine_mappings, ())
+        self.assertEqual(enabled.affine_mappings, ())
 
     def test_dynamic_unsupported_width_reuses_fallback_graph(self):
         inputs_by_shape = tuple(
@@ -565,8 +625,8 @@ class PolyhedralMLAFusionTest(TestCase):
             )
         self.assertEqual(disabled.staged_fusion_count, 0)
         self.assertEqual(enabled.staged_fusion_count, 0)
-        self.assertEqual(disabled.translations, ())
-        self.assertEqual(enabled.translations, ())
+        self.assertEqual(disabled.affine_mappings, ())
+        self.assertEqual(enabled.affine_mappings, ())
         self.assertEqual(disabled_counter.frame_count, 1)
         self.assertEqual(enabled_counter.frame_count, disabled_counter.frame_count)
 
@@ -592,7 +652,7 @@ class PolyhedralMLAFusionTest(TestCase):
             enabled.outputs, eager, atol=6e-2, rtol=2e-2
         )
         self.assertEqual(enabled.staged_fusion_count, 0)
-        self.assertEqual(enabled.translations, ())
+        self.assertEqual(enabled.affine_mappings, ())
 
     def test_non_power_of_two_parent_width_falls_back(self):
         inputs = _make_mla_inputs(batch_size=2, seq_len=8, head_dim=192)
@@ -606,7 +666,7 @@ class PolyhedralMLAFusionTest(TestCase):
             observation.outputs, eager, atol=6e-2, rtol=2e-2
         )
         self.assertEqual(observation.staged_fusion_count, 0)
-        self.assertEqual(observation.translations, ())
+        self.assertEqual(observation.affine_mappings, ())
 
     def test_non_power_of_two_rate_falls_back(self):
         base_inputs = _make_mla_inputs(batch_size=2, seq_len=8, head_dim=192)
@@ -628,7 +688,7 @@ class PolyhedralMLAFusionTest(TestCase):
         self.assertEqual(enabled.outputs, eager, atol=6e-2, rtol=2e-2)
         self.assertEqual(disabled.staged_fusion_count, 0)
         self.assertEqual(enabled.staged_fusion_count, 0)
-        self.assertEqual(enabled.translations, ())
+        self.assertEqual(enabled.affine_mappings, ())
 
     def test_flinear_boundary(self):
         inputs = _make_flinear_inputs(batch_size=2, seq_len=8)
@@ -649,7 +709,7 @@ class PolyhedralMLAFusionTest(TestCase):
         self.assertEqual(
             enabled.outputs, eager, atol=6e-2, rtol=2e-2
         )
-        self.assert_translated_plan(enabled)
+        self.assert_affine_plan(enabled)
 
     def test_translated_lifetime_survives_external_consumer(self):
         inputs = _make_mla_inputs(batch_size=2, seq_len=8)
@@ -662,7 +722,7 @@ class PolyhedralMLAFusionTest(TestCase):
         self.assertEqual(
             observation.outputs, eager, atol=6e-2, rtol=2e-2
         )
-        self.assert_translated_plan(observation)
+        self.assert_affine_plan(observation)
         self.assertEqual(
             sum(
                 signature[0] == "FusedStagedReduction"
@@ -707,7 +767,7 @@ class PolyhedralMLAFusionTest(TestCase):
         self.assertEqual(
             enabled.outputs, eager, atol=6e-2, rtol=2e-2
         )
-        self.assert_translated_plan(enabled)
+        self.assert_affine_plan(enabled)
         self.assertTrue(
             all(
                 inner_nodes > 1 and outputs > 0 and last_usage > 0
@@ -744,7 +804,7 @@ class PolyhedralMLAFusionTest(TestCase):
                     atol=6e-2,
                     rtol=2e-2,
                 )
-                self.assert_translated_plan(observation)
+                self.assert_affine_plan(observation)
                 staged_lifetimes = [
                     signature
                     for signature in observation.lifetime_signatures
@@ -773,7 +833,7 @@ class PolyhedralMLAFusionTest(TestCase):
                     rtol=2e-2,
                 )
                 self.assertEqual(observation.staged_fusion_count, 0)
-                self.assertEqual(observation.translations, ())
+                self.assertEqual(observation.affine_mappings, ())
 
     def test_legal_but_unsupported_split_declines(self):
         inputs = _make_mla_inputs(batch_size=2, seq_len=8)[:3]
@@ -796,7 +856,7 @@ class PolyhedralMLAFusionTest(TestCase):
         )
         self.assertEqual(disabled.staged_fusion_count, 0)
         self.assertEqual(enabled.staged_fusion_count, 0)
-        self.assertEqual(enabled.translations, ())
+        self.assertEqual(enabled.affine_mappings, ())
 
 
 instantiate_parametrized_tests(PolyhedralMLAFusionTest)
