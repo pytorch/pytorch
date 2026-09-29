@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
     from torch.types import Device
 
+from . import profiler
 from ._utils import _get_device_index
 from .graphs import (
     graph,
