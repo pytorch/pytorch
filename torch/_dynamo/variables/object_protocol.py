@@ -51,9 +51,12 @@ from ..utils import specialize_symnode
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
+    GetSet,
     graph_break_on_untracked_vt,
     maybe_get_python_type,
     NO_SUCH_SUBOBJ,
+    readonly_setter,
+    type_qualified_name,
     VariableTracker,
 )
 from .constant import ConstantVariable
@@ -2580,12 +2583,17 @@ def object_generic_setattr_str(
             ],
         )
 
+    py_type = maybe_get_python_type(obj)
     getset = obj.lookup_tp_getset_member(name)
     if getset is not None:
-        if getset.setter is None:
+        # getset_set's wording; a READONLY tp_members entry keeps
+        # PyMember_SetOne's "readonly attribute" from readonly_setter itself.
+        if getset.setter is None or (
+            isinstance(getset, GetSet) and getset.setter is readonly_setter
+        ):
             raise_attribute_error(
                 tx,
-                f"attribute '{name}' of '{obj.python_type_name()}' objects is not writable",
+                f"attribute '{name}' of '{type_qualified_name(py_type)}' objects is not writable",
             )
         else:
             result = getset.setter(obj, tx, value)
@@ -2593,7 +2601,6 @@ def object_generic_setattr_str(
                 return result
 
     # Heap types can have data descriptors that override instance dict
-    py_type = maybe_get_python_type(obj)
     attr = mro_lookup(py_type, name)
 
     if attr is not NO_SUCH_SUBOBJ:
@@ -2616,22 +2623,22 @@ def object_generic_setattr_str(
     )
 
     if has_dict is False:
-        if isinstance(obj, variables.UserDefinedObjectVariable):
-            if obj.tp_setattro_impl is VariableTracker.tp_setattro_impl:
-                raise_attribute_error(
-                    tx,
-                    f"'{obj.python_type_name()}' object has no attribute '{name}' and no __dict__ for setting new attributes",
-                )
-            else:
-                raise_attribute_error(
-                    tx,
-                    f"'{obj.python_type_name()}' object has no attribute '{name}'",
-                )
-        else:
+        # _PyObject_GenericSetAttrWithDict: the message depends on whether
+        # _PyType_Lookup found anything, then on whether tp_setattro is generic.
+        if attr is not NO_SUCH_SUBOBJ:
             raise_attribute_error(
                 tx,
                 f"'{obj.python_type_name()}' object attribute '{name}' is read-only",
             )
+        if py_type.__setattr__ is object.__setattr__:
+            raise_attribute_error(
+                tx,
+                f"'{obj.python_type_name()}' object has no attribute '{name}' and no __dict__ for setting new attributes",
+            )
+        raise_attribute_error(
+            tx,
+            f"'{obj.python_type_name()}' object has no attribute '{name}'",
+        )
     else:
         se = tx.output.side_effects
         if not se.is_attribute_mutation(obj):

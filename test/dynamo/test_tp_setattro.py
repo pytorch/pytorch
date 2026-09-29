@@ -104,6 +104,24 @@ class _WithSetOnly:
     f = _SetOnly()
 
 
+class _SlottedUnset:
+    __slots__ = ("a",)
+
+
+class _WithMethodDefaults:
+    def m(self, a=1, *, b=2):
+        return "old"
+
+
+class _Meta(type):
+    def __setattr__(cls, name, value):
+        type.__setattr__(cls, name, ("meta", value))
+
+
+class _WithMeta(metaclass=_Meta):
+    pass
+
+
 _Point = collections.namedtuple("_Point", ["a", "b"])
 
 
@@ -205,7 +223,6 @@ class TpSetattroTests(TestCase):
 
         self._check(fn, torch.ones(3))
 
-    @unittest.expectedFailure
     def test_no_dict_message_depends_on_type_lookup(self):
         # CPython picks the message from whether _PyType_Lookup found anything:
         # a name resolving to a class attribute is "read-only", an unknown name
@@ -602,6 +619,339 @@ class TpSetattroTests(TestCase):
             p = functools.partial(pow, 2)
             p.__setstate__((pow, (3,), {}, {"attr": 1}))
             return p.attr
+
+        self._check(fn, torch.ones(3))
+
+    # Failures found by adversarial probing of the tp_setattro protocol.  Each
+    # is a compiled-vs-eager divergence; the comment names the responsible path.
+
+    def test_partial_input_attribute_write_replays(self):
+        # object_generic_setattr_str registers a sourced non-UDO object with
+        # track_attribute_mutation_new, so the write is never replayed.
+        def fn(x, p):
+            p.attr = 5
+            return x + 1, dict(p.__dict__)
+
+        p1, p2 = functools.partial(pow, 2), functools.partial(pow, 2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(torch.ones(3), p1), compiled(torch.ones(3), p2))
+        self.assertEqual(p1.__dict__, p2.__dict__)
+
+    def test_tensor_data_different_shape(self):
+        # TensorVariable._set_data dropped the shape check that used to graph
+        # break when requires_grad is set, so the fake tensor keeps the old shape.
+        def fn(t, u):
+            t.data = u
+            return t.shape[0], (t * 2).shape[0]
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        expected = fn(torch.ones(2, requires_grad=True), torch.zeros(3))
+        got = compiled(torch.ones(2, requires_grad=True), torch.zeros(3))
+        self.assertEqual(expected, got)
+
+    def test_tensor_data_non_tensor(self):
+        # _set_data reads value.dtype before checking the value is a tensor.
+        def fn(x):
+            y = x + 1
+            try:
+                y.data = 3
+            except TypeError as e:
+                return str(e)
+            return "no error"
+
+        self._check(fn, torch.ones(3))
+
+    def test_sourced_function_defaults_delete(self):
+        # `del f.__defaults__` stores a DeletedVariable that is never replayed;
+        # CPython sets the slot to None.
+        def fn(x):
+            del _slot_target.__defaults__
+            return x + 1
+
+        _slot_target.__defaults__ = (1,)
+        torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(3))
+        try:
+            self.assertIsNone(_slot_target.__defaults__)
+        finally:
+            _slot_target.__defaults__ = (1,)
+
+    def test_sourced_function_defaults_set_none(self):
+        # _set_defaults rejects ConstantVariable(None) with the tuple TypeError.
+        def fn(x):
+            _slot_target.__defaults__ = None
+            return x + 1, _slot_target.__defaults__
+
+        _slot_target.__defaults__ = (1,)
+        try:
+            self._check(fn, torch.ones(3))
+        finally:
+            _slot_target.__defaults__ = (1,)
+
+    def test_object_setattr_unbound_on_input(self):
+        # BuiltinVariable.call_method hands object_generic_setattr an unrealized
+        # LazyVariableTracker, which reports "sourced but untracked".
+        def fn(x, obj):
+            object.__setattr__(obj, "y", 2)
+            return obj.y + x
+
+        self._check(fn, torch.ones(3), _Plain(1))
+
+    def test_object_delattr_unbound_on_input(self):
+        def fn(x, obj):
+            object.__delattr__(obj, "x")
+            return hasattr(obj, "x"), x + 1
+
+        self._check(fn, torch.ones(3), _Plain(1))
+
+    def test_class_name_write(self):
+        # type.__name__ lives on the metaclass; get_source_by_walking_mro walks
+        # the class MRO and raises "not found in MRO".
+        class K:
+            pass
+
+        def fn(x):
+            K.__name__ = "KK"
+            return K.__name__, x + 1
+
+        self._check(fn, torch.ones(3))
+
+    def test_class_assignment_compatible_layout(self):
+        # __class__ hits the readonly_setter in UserDefinedObjectVariable.tp_getset
+        # and raises AttributeError('readonly attribute') instead of graph
+        # breaking, so a user except clause observes the wrong exception.
+        class A:
+            pass
+
+        class B(A):
+            pass
+
+        def fn(x, obj):
+            try:
+                obj.__class__ = B
+                return type(obj).__name__
+            except AttributeError as e:
+                return str(e)
+
+        self._check(fn, torch.ones(3), A())
+
+    def test_bound_method_func_slots_read(self):
+        # UserMethodVariable.read_func_slot was removed and tp_getset no longer
+        # forwards __defaults__/__kwdefaults__/__closure__ to __func__.
+        def fn(x):
+            obj = _WithMethodDefaults()
+            return obj.m.__defaults__, obj.m.__kwdefaults__, x + 1
+
+        self._check(fn, torch.ones(3))
+
+    def test_bound_method_doc_write(self):
+        # method.__doc__ is a readonly getset; UserMethodVariable.tp_members
+        # models it as writable and hits store_attr on an untracked VT.
+        def fn(x):
+            obj = _WithMethodDefaults()
+            try:
+                obj.m.__doc__ = "x"
+            except AttributeError as e:
+                return str(e)
+            return "no error"
+
+        self._check(fn, torch.ones(3))
+
+    def test_readonly_member_raises_inside_region(self):
+        # MemberDescriptorVariable.tp_descr_set_impl has no model for
+        # __globals__ and records the write for replay, so the AttributeError
+        # fires after the region instead of inside the user's try block.
+        def fn(x, f):
+            try:
+                f.__globals__ = {}
+            except AttributeError:
+                return "caught", x + 1
+            return "not raised", x + 1
+
+        self._check(fn, torch.ones(3), _slot_target)
+
+    def test_immutable_type_setattr(self):
+        # object_generic_setattr_str has no immutable-type check; eager raises
+        # "cannot set 'x' attribute of immutable type 'int'".
+        def fn(x):
+            try:
+                int.x = 1
+            except TypeError as e:
+                return str(e)
+            return "no error"
+
+        self._check(fn, torch.ones(3))
+
+    def test_object_setattr_on_class(self):
+        # eager: "can't apply this __setattr__ to type object".
+        class K:
+            pass
+
+        def fn(x):
+            try:
+                object.__setattr__(K, "y", 1)
+            except TypeError as e:
+                return str(e)
+            return "no error"
+
+        self._check(fn, torch.ones(3))
+
+    def test_type_setattr_unbound(self):
+        # _wrap_setattr counts the explicit class argument and reports
+        # "expected 2 arguments, got 3".
+        class K:
+            pass
+
+        def fn(x):
+            type.__setattr__(K, "y", 7)
+            got = K.y
+            type.__delattr__(K, "y")
+            return got, hasattr(K, "y"), x + 1
+
+        self._check(fn, torch.ones(3))
+
+    def test_no_dict_message_builtin_object(self):
+        # CPython: "'int' object has no attribute 'x' and no __dict__ for
+        # setting new attributes"; Dynamo reports the read-only message.
+        def fn(x):
+            try:
+                (1).x = 2
+            except AttributeError as e:
+                return str(e)
+            return "no error"
+
+        self._check(fn, torch.ones(3))
+
+    def test_readonly_getset_message(self):
+        # DequeVariable.call_method used to produce the exact C message
+        # "attribute 'maxlen' of 'collections.deque' objects is not writable".
+        def fn(x):
+            d = collections.deque([x], maxlen=2)
+            try:
+                d.maxlen = 10
+            except AttributeError as e:
+                return str(e)
+            return "no error"
+
+        self._check(fn, torch.ones(3))
+
+    def test_delete_unset_slot(self):
+        # MemberDescriptorVariable.tp_descr_set_impl stores DeletedVariable
+        # without checking that the slot holds a value.
+        def fn(x):
+            obj = _SlottedUnset()
+            try:
+                del obj.a
+            except AttributeError as e:
+                return str(e)
+            return "no error"
+
+        self._check(fn, torch.ones(3))
+
+    def test_module_delete_missing_attribute(self):
+        # nn.Module.__delattr__ ends in super().__delattr__, which still takes
+        # the legacy object.__delattr__ branch in SuperVariable with no
+        # existence check.
+        def fn(x, mod):
+            try:
+                del mod.zzz
+            except AttributeError as e:
+                return str(e), x + 1
+            return "no error", x + 1
+
+        self._check(fn, torch.ones(3), torch.nn.Linear(1, 1))
+
+    def test_setattr_added_to_class_recompiles(self):
+        # UserDefinedObjectVariable.tp_setattro_impl checks
+        # type(value).__setattr__ is object.__setattr__ without a guard.
+        class R:
+            def __init__(self):
+                self.x = 0
+
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(obj, x):
+            obj.x = 5
+            return obj.x + x
+
+        x = torch.ones(1)
+        self.assertEqual(fn(R(), x), torch.full((1,), 6.0))
+
+        R.__setattr__ = lambda self, k, v: object.__setattr__(self, k, v * 100)
+        obj = R()
+        self.assertEqual(fn(obj, x), torch.full((1,), 501.0))
+        self.assertEqual(obj.x, 500)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_metaclass_setattr(self):
+        # UserDefinedClassVariable.tp_setattro_impl goes straight to
+        # object_generic_setattr and never consults type(cls).__setattr__.
+        def fn(x):
+            _WithMeta.attr = 1
+            return _WithMeta.attr, x + 1
+
+        try:
+            self._check(fn, torch.ones(3))
+        finally:
+            type.__delattr__(_WithMeta, "attr")
+
+    def test_tensor_delete_missing_attribute(self):
+        # object_generic_setattr_str asks get_dict_vt for the tensor, which
+        # TensorVariable does not support.
+        def fn(x):
+            y = x + 1
+            try:
+                del y.meta
+            except AttributeError as e:
+                return str(e)
+            return "no error"
+
+        self._check(fn, torch.ones(3))
+
+    def test_tensor_grad_delete_then_read(self):
+        # _set_grad stores DeletedVariable, which the following read cannot
+        # resolve to None.
+        def fn(x):
+            y = x + 1
+            y.grad = x
+            del y.grad
+            return y.grad
+
+        self._check(fn, torch.ones(3))
+
+    def test_function_name_delete(self):
+        # _set_name only rejects non-None non-str; eager raises
+        # "__name__ must be set to a string object".
+        def fn(x):
+            def g():
+                pass
+
+            try:
+                del g.__name__
+            except TypeError as e:
+                return str(e)
+            return "no error"
+
+        self._check(fn, torch.ones(3))
+
+    def test_dict_order_after_attr_write_on_input(self):
+        # Pending writes are listed before the existing keys of a sourced
+        # instance dict.
+        def fn(x, obj):
+            obj.y = 5
+            return list(obj.__dict__), x + 1
+
+        self._check(fn, torch.ones(3), _Plain(1))
+
+    def test_exception_cause_class(self):
+        # eager: "exception cause must be None or derive from BaseException".
+        def fn(x):
+            e = ValueError("boom")
+            try:
+                e.__cause__ = KeyError
+            except TypeError as err:
+                return str(err)
+            return "no error"
 
         self._check(fn, torch.ones(3))
 
