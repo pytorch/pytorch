@@ -10,7 +10,6 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <nccl_ep.h>
 
-#include <exception>
 #include <string_view>
 
 namespace c10d::nccl_ep {
@@ -121,36 +120,18 @@ static void warn_destroy_result(ncclResult_t r, const char* what) {
 
 NcclEpGroup::~NcclEpGroup() {
     if (group) {
-        try {
-            warn_destroy_result(
-                ncclEpGroupDestroy(reinterpret_cast<ncclEpGroup_t>(group)),
-                "NcclEpGroup::~NcclEpGroup()");
-        } catch (const std::exception& e) {
-            TORCH_WARN(
-                "NcclEpGroup::~NcclEpGroup() ignoring error during teardown: ",
-                e.what());
-        } catch (...) {
-            TORCH_WARN(
-                "NcclEpGroup::~NcclEpGroup() ignoring unknown error during teardown");
-        }
+        warn_destroy_result(
+            ncclEpGroupDestroy(reinterpret_cast<ncclEpGroup_t>(group)),
+            "NcclEpGroup::~NcclEpGroup()");
         group = nullptr;
     }
 }
 
 NcclEpHandle::~NcclEpHandle() {
     if (handle) {
-        try {
-            warn_destroy_result(
-                ncclEpHandleDestroy(reinterpret_cast<ncclEpHandle_t>(handle)),
-                "NcclEpHandle::~NcclEpHandle()");
-        } catch (const std::exception& e) {
-            TORCH_WARN(
-                "NcclEpHandle::~NcclEpHandle() ignoring error during teardown: ",
-                e.what());
-        } catch (...) {
-            TORCH_WARN(
-                "NcclEpHandle::~NcclEpHandle() ignoring unknown error during teardown");
-        }
+        warn_destroy_result(
+            ncclEpHandleDestroy(reinterpret_cast<ncclEpHandle_t>(handle)),
+            "NcclEpHandle::~NcclEpHandle()");
         handle = nullptr;
     }
 }
@@ -161,6 +142,14 @@ c10::intrusive_ptr<NcclEpGroup> nccl_ep_create_group(
     int64_t max_dispatch_tokens_per_rank,
     int64_t max_recv_tokens_per_rank,
     int64_t max_token_bytes) {
+    const int64_t world_size = pg->getSize();
+    TORCH_CHECK(
+        world_size > 0 && num_experts % world_size == 0,
+        "nccl_ep: num_experts (",
+        num_experts,
+        ") must be divisible by world size (",
+        world_size,
+        ")");
     ncclComm_t comm = get_nccl_comm(pg);
 
     ncclEpGroupConfig_t config = NCCL_EP_GROUP_CONFIG_INIT;
@@ -181,14 +170,6 @@ c10::intrusive_ptr<NcclEpGroup> nccl_ep_create_group(
     auto result = c10::make_intrusive<NcclEpGroup>();
     result->group = ep_group;
     result->group_name = pg->getGroupName();
-    const int64_t world_size = pg->getSize();
-    TORCH_CHECK(
-        world_size > 0 && num_experts % world_size == 0,
-        "nccl_ep: num_experts (",
-        num_experts,
-        ") must be divisible by world size (",
-        world_size,
-        ")");
     result->num_local_experts = num_experts / world_size;
     return result;
 }
@@ -204,13 +185,28 @@ c10::intrusive_ptr<NcclEpHandle> nccl_ep_create_handle(
     auto recv_total_counter = at::empty(
         {1}, topk_idx.options().dtype(at::kInt));
 
-    // HT FLAT metadata writes per-expert recv counts. Always bind a live
-    // int32 buffer (caller-owned or internally allocated) so we stay on the
-    // pec scan kernel; mixing pec then nopec on a reused EP group has hit
-    // illegal-address in the nopec scan JIT.
+    // HT FLAT needs a live int32 counter to use the pec scan kernel; mixing
+    // pec then nopec on a reused group has hit illegal-address in the nopec JIT.
+    // Expert-major uses the library's internal counter; rank-major is LL-only.
     at::Tensor expert_counter;
     if (recv_expert_counter.has_value()) {
       expert_counter = *recv_expert_counter;
+      TORCH_CHECK(
+          expert_counter.dim() == 1 &&
+              expert_counter.scalar_type() == at::kInt &&
+              expert_counter.device() == topk_idx.device() &&
+              expert_counter.numel() == group->num_local_experts,
+          "nccl_ep_create_handle: recv_expert_counter must be a 1D int32 tensor on ",
+          topk_idx.device(),
+          " with ",
+          group->num_local_experts,
+          " elements; got ",
+          expert_counter.scalar_type(),
+          " on ",
+          expert_counter.device(),
+          " with ",
+          expert_counter.numel(),
+          " elements");
     } else if (layout == NcclEpLayout::Flat) {
       TORCH_CHECK(
           group->num_local_experts > 0,
