@@ -7259,7 +7259,8 @@ def quantize_tensor(
 
     Args:
         input (Tensor): Contiguous 2D tensor or a transposed view of one, with
-          dtype ``float16``, ``bfloat16``, or ``float32``.
+          dtype ``float16``, ``bfloat16``, or ``float32``. Its data pointer must
+          be 16-byte aligned.
         qdata_dtype (:class:`torch.dtype`): Must be ``torch.float8_e4m3fn``.
         inner_scale_calc (InnerScaleCalc): Must be ``InnerScaleCalc.RCEIL_E8M0``.
         scaling_type (ScalingType): Must be ``ScalingType.BlockWise1x32``.
@@ -7319,7 +7320,8 @@ def quantize_tensor_dual(
 
     Args:
         input (Tensor): Contiguous 2D tensor with dtype ``float16``,
-          ``bfloat16``, or ``float32``. Both dimensions must be divisible by 32.
+          ``bfloat16``, or ``float32``. Both dimensions must be divisible by 32,
+          and its data pointer must be 16-byte aligned.
         qdata_dtype (:class:`torch.dtype`): Must be ``torch.float8_e4m3fn``.
         inner_scale_calc (InnerScaleCalc): Must be ``InnerScaleCalc.RCEIL_E8M0``.
         scaling_type (ScalingType): Must be ``ScalingType.BlockWise1x32``.

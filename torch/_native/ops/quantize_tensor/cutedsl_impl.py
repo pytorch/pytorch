@@ -46,6 +46,8 @@ def _quantize_tensor_impl(
         raise RuntimeError("quantize_tensor requires an NVIDIA CUDA tensor")
     if torch.cuda.get_device_capability(input.device) < (10, 0):
         raise RuntimeError("quantize_tensor requires CUDA capability 10.0 or newer")
+    if source.data_ptr() % 16 != 0:
+        raise ValueError("quantize_tensor requires a 16-byte-aligned input")
 
     from .blockscaled_tma.blockscaled_tma_impl import _blockscaled_tma_impl
 
@@ -91,6 +93,8 @@ def _quantize_tensor_dual_impl(
         raise RuntimeError("quantize_tensor_dual requires an NVIDIA CUDA tensor")
     if torch.cuda.get_device_capability(input.device) < (10, 0):
         raise RuntimeError("dual quantization requires CUDA capability 10.0 or newer")
+    if input.data_ptr() % 16 != 0:
+        raise ValueError("quantize_tensor_dual requires a 16-byte-aligned input")
 
     from .blockscaled_tma.blockscaled_tma_impl import _blockscaled_tma_impl
 
