@@ -2839,6 +2839,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         "REDUCE_GRAD without WAIT_REDUCE_GRAD"
                     )
         elif format == "compute_only":
+            if self._defer_reduce_grad_wait:
+                self._validate_deferred_gradient_reduction()
+
             # Validate that the schedule does not have comms already added to it
             for rank, action_list in actions.items():
                 for i, action in enumerate(action_list):
@@ -2946,8 +2949,6 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 raise AssertionError(f"Attempted to compute on sharded {stage_idx=}")
 
     def _validate_deferred_gradient_reduction(self) -> None:
-        if not self._defer_reduce_grad_wait:
-            return
         comm_ctx_to_stage: dict[int, int] = {}
         for stage in self._stages:
             if not isinstance(stage.submod, FSDPModule):
@@ -2978,7 +2979,6 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         TODO: Does not use sorted_batch_isend_irecv(). As a result, this schedule does
         not support models with skip connections.
         """
-        self._validate_deferred_gradient_reduction()
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
         maybe_first_target = target_mbs[0] if target_mbs is not None else None
         self._initialize_stages(
