@@ -83,12 +83,7 @@ if(WIN32 AND BUILD_PYTHON)
 
   # CUDA runtime DLLs - only for CUDA builds.
   if(USE_CUDA AND CUDA_TOOLKIT_ROOT_DIR)
-    # Same processor-to-directory mapping as FindCUDAToolkit.cmake. CUDA 13.4
-    # ships both x64 and arm64 trees, so the copy must name the target arch
-    # instead of searching both. Older toolkits keep runtime DLLs in bin/ and
-    # CUPTI DLLs in extras/CUPTI/lib64; those are used only when the arch
-    # location has no matches. lib64 holds x64 CUPTI binaries, so it must not
-    # be copied into an Arm64 wheel alongside lib/arm64.
+    # Pick CUPTI DLLs from the correct path.
     string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _cuda_lib_arch)
     string(REGEX REPLACE "^(amd64|x86_64)$" "x64" _cuda_lib_arch "${_cuda_lib_arch}")
     string(REGEX REPLACE "^aarch64$" "arm64" _cuda_lib_arch "${_cuda_lib_arch}")
@@ -98,13 +93,6 @@ if(WIN32 AND BUILD_PYTHON)
       set(_cuda_bin "${CUDA_TOOLKIT_ROOT_DIR}/bin/${_cuda_lib_arch}")
     endif()
 
-    set(_cupti_dir "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64")
-    file(GLOB _cupti_arch_dlls
-      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib/${_cuda_lib_arch}/cupti64_*.dll"
-      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib/${_cuda_lib_arch}/nvperf_host*.dll")
-    if(_cupti_arch_dlls)
-      set(_cupti_dir "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib/${_cuda_lib_arch}")
-    endif()
     set(_cuda_dll_patterns
       "${_cuda_bin}/cusparse*64_*.dll"
       "${_cuda_bin}/cublas*64_*.dll"
@@ -115,8 +103,10 @@ if(WIN32 AND BUILD_PYTHON)
       "${_cuda_bin}/nvrtc*64_*.dll"
       "${_cuda_bin}/nvJitLink_*.dll"
       "${CUDA_TOOLKIT_ROOT_DIR}/bin/cudnn*64_*.dll"
-      "${_cupti_dir}/cupti64_*.dll"
-      "${_cupti_dir}/nvperf_host*.dll"
+      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib/${_cuda_lib_arch}/cupti64_*.dll"
+      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib/${_cuda_lib_arch}/nvperf_host*.dll"
+      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64/cupti64_*.dll"
+      "${CUDA_TOOLKIT_ROOT_DIR}/extras/CUPTI/lib64/nvperf_host*.dll"
     )
     foreach(_pattern ${_cuda_dll_patterns})
       file(GLOB _dlls "${_pattern}")
