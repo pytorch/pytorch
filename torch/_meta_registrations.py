@@ -376,10 +376,7 @@ def meta_fft_c2c(self, dim, normalization, forward):
     if not dim:
         return self.clone()
 
-    # MPS and PocketFFT (CPU without MKL) return contiguous outputs
-    if device_hint(self) == "mps" or (
-        device_hint(self) == "cpu" and not torch.backends.mkl.is_available()
-    ):
+    if device_hint(self) == "cpu" and not torch.backends.mkl.is_available():
         return self.new_empty(self.size())
 
     out_sizes = self.size()
@@ -485,7 +482,7 @@ def meta_fft_r2c(self, dim, normalization, onesided):
 
         return output
 
-    elif device_hint(self) != "mps" and torch.backends.mkl.is_available():
+    elif torch.backends.mkl.is_available():
         # _fft_r2c_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
         sorted_dims = _sort_dims(self, dim, exclude_last=True)
         output = self.new_empty(
@@ -742,7 +739,7 @@ def meta_fft_c2r(self: Tensor, dim: list[int], normalization: int, lastdim: int)
                 temp = self.clone(memory_format=torch.contiguous_format)
             return _exec_fft(output, temp, out_sizes, [dim[-1]], forward=False)
 
-    elif device_hint(self) != "mps" and torch.backends.mkl.is_available():
+    elif torch.backends.mkl.is_available():
         # _fft_c2r_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
         input = self
         if len(dim) > 1:
