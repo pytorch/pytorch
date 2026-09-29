@@ -141,11 +141,18 @@ def _nvgemm_benchmark_tensor_specs(
         storage_base_offset = 0
         if isinstance(storage_node, InputBuffer):
             name = storage_node.get_name()
-            example = graph_input_examples.get(name)
-            if name in V.graph.graph_inputs and isinstance(example, torch.Tensor):
+            if name in V.graph.constants:
+                example = V.graph.constants[name]
+                storage_offset = example.storage_offset()
+            elif name in V.graph.graph_inputs:
+                example = graph_input_examples.get(name)
                 storage_offset = V.graph.sizevars.optimization_hint(
                     V.graph.graph_input_storage_offsets.get(name, 0)
                 )
+            else:
+                example = None
+                storage_offset = 0
+            if isinstance(example, torch.Tensor):
                 storage_key = StorageWeakRef(example.untyped_storage())
                 storage_base_offset = storage_offset * example.element_size()
 

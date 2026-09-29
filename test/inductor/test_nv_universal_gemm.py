@@ -1066,9 +1066,18 @@ class TestNVUniversalGemmScheduling(TestCase):
         )
         with V.set_graph_handler(graph):
             graph.run(bias_example, shared_example)
+            constant_storage = torch.empty(64, device="cuda", dtype=torch.bfloat16)
+            constant_input = graph.add_tensor_constant(
+                constant_storage[1:17], name="constant_input"
+            ).data.data
+            constant_epilogue = graph.add_tensor_constant(
+                constant_storage[2:18], name="constant_epilogue"
+            ).data.data
         bias = graph.graph_inputs["bias"].data.data
         shared_storage = graph.graph_inputs["shared_storage"].data.data
         self.assertEqual(graph.graph_input_storage_offsets["bias"], 30000)
+        self.assertEqual(graph.constants["constant_input"].storage_offset(), 1)
+        self.assertEqual(graph.constants["constant_epilogue"].storage_offset(), 2)
         b = ir.Buffer(
             name="b",
             layout=ir.NonOwningLayout(
@@ -1109,7 +1118,7 @@ class TestNVUniversalGemmScheduling(TestCase):
         with V.set_graph_handler(graph):
             kernel = NVUniversalGemmKernel(
                 kernel_name="nv_gemm_",
-                input_nodes=[bias, b],
+                input_nodes=[bias, b, constant_input],
                 output_node=out,
                 kernel_metadata={"kernel_name": "fixture", "min_cc": 90},
                 accumulator_type=torch.float32,
@@ -1118,7 +1127,12 @@ class TestNVUniversalGemmScheduling(TestCase):
                 bias_node=bias,
                 epilogue=GemmEpiloguePlan(
                     source=f"def {EPILOGUE_FN_NAME}(accum):\n    return accum",
-                    reads=(nested.get_name(), epilogue_input.get_name()),
+                    reads=(
+                        nested.get_name(),
+                        epilogue_input.get_name(),
+                        constant_input.get_name(),
+                        constant_epilogue.get_name(),
+                    ),
                     writes=(out.get_name(),),
                     renames={"D": out.get_name()},
                 ),
@@ -1132,9 +1146,12 @@ class TestNVUniversalGemmScheduling(TestCase):
                 [
                     ("in_ptr0", "bias", "input"),
                     ("in_ptr1", "b", "input"),
+                    ("in_ptr2", "constant_input", "input"),
                     ("out_ptr0", "out", "output"),
                     ("nested", "nested", "epilogue"),
                     ("shared_storage", "shared_storage", "epilogue"),
+                    ("constant_input", "constant_input", "epilogue"),
+                    ("constant_epilogue", "constant_epilogue", "epilogue"),
                     ("bias", "bias", "epilogue"),
                     ("workspace", None, "workspace"),
                 ],
@@ -1160,9 +1177,12 @@ class TestNVUniversalGemmScheduling(TestCase):
         expected_buffers = {
             "in_ptr0": bias,
             "in_ptr1": b,
+            "in_ptr2": constant_input,
             "out_ptr0": out,
             "nested": nested,
             "shared_storage": epilogue_input,
+            "constant_input": constant_input,
+            "constant_epilogue": constant_epilogue,
             "bias": bias,
         }
         expected_layouts = {
@@ -1177,6 +1197,9 @@ class TestNVUniversalGemmScheduling(TestCase):
             name: layout.offset for name, layout in expected_layouts.items()
         }
         expected_offsets["nested"] = 3
+        expected_offsets["in_ptr2"] = 1
+        expected_offsets["constant_input"] = 1
+        expected_offsets["constant_epilogue"] = 2
         self.assertEqual(
             {
                 name: (
@@ -1210,8 +1233,17 @@ class TestNVUniversalGemmScheduling(TestCase):
             args_by_name["nested"].data_ptr() - args_by_name["in_ptr1"].data_ptr(), 4
         )
         self.assertEqual(args_by_name["shared_storage"].data_ptr() % 16, 4)
+        self.assertEqual(args_by_name["in_ptr2"].data_ptr() % 16, 2)
+        self.assertEqual(args_by_name["constant_epilogue"].data_ptr() % 16, 4)
+        self.assertTrue(
+            torch._C._is_alias_of(
+                args_by_name["in_ptr2"], args_by_name["constant_epilogue"]
+            )
+        )
+        self.assertIs(args_by_name["in_ptr2"], args_by_name["constant_input"])
         self.assertEqual(args_by_name["in_ptr0"].untyped_storage().nbytes(), 32)
         self.assertEqual(args_by_name["in_ptr1"].untyped_storage().nbytes(), 48)
+        self.assertEqual(args_by_name["in_ptr2"].untyped_storage().nbytes(), 48)
         self.assertEqual(args_by_name["out_ptr0"].untyped_storage().nbytes(), 48)
         self.assertIs(args_by_name["in_ptr0"], args_by_name["bias"])
         self.assertFalse(
