@@ -7016,6 +7016,7 @@ class TestTorchDeviceType(TestCase):
         self.assertIs(pinned, pinned.pin_memory())
         self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
+    @onlyAccelerator
     def test_bmm_matmul_mixed_dtype_error(self, device):
         a = torch.randn(2, 8, 8, device=device, dtype=torch.float16)
         b = torch.randn(2, 8, 64, device=device, dtype=torch.float32)
