@@ -574,6 +574,23 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
             AsyncCompile.drain_pending(timeout=0.01)
         shutdown.assert_not_called()
 
+    def test_drain_pending_runs_each_kernel_callback_once(self):
+        from torch._inductor.async_compile import CompiledTritonKernels
+        from torch._inductor.codecache import LambdaFuture
+
+        done = Future()
+        done.set_result(None)
+        get_result = Mock(return_value="kernel")
+        future = LambdaFuture(get_result, future=done)
+        with (
+            patch.object(CompiledTritonKernels, "_cache", {"pending": future}),
+            patch("torch._inductor.async_compile.shutdown_compile_workers"),
+        ):
+            AsyncCompile.drain_pending()
+        # The generated module holding the same future consumes it afterwards.
+        self.assertEqual(future.result(), "kernel")
+        get_result.assert_called_once()
+
     @skipIfWindows(msg="SubprocPool uses pass_fds, which is not supported on Windows.")
     def test_drain_pending_finishes_subprocess_jobs_then_shuts_down(self):
         import time
