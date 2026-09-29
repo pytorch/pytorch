@@ -108,6 +108,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .functions import UserFunctionVariable
+    from .lists import SliceVariable
     from .torch_function import TensorWithTFOverrideVariable
 
 
@@ -219,6 +220,62 @@ class TensorSpecializedProps(TypedDict):
     _size: NotRequired[tuple[Any, ...]]
     stride: NotRequired[tuple[Any, ...]]
     is_contiguous: NotRequired[tuple[torch.memory_format, ...] | None]
+
+
+def _coerce_slice_bound(
+    tx: "InstructionTranslatorBase", bound: VariableTracker
+) -> VariableTracker:
+    from .object_protocol import maybe_get_python_type, pyindex_check, pynumber_index
+    from .tensor import SymNodeVariable
+
+    if isinstance(bound, ConstantVariable) and bound.value is None:
+        return bound
+    if isinstance(bound, SymNodeVariable):
+        return bound
+    if bound.is_tensor():
+        return bound
+    if not pyindex_check(maybe_get_python_type(bound)):
+        raise_type_error(
+            tx,
+            "slice indices must be integers or None or have an __index__ method",
+        )
+    if isinstance(bound, ConstantVariable) and isinstance(bound.value, int):
+        return bound
+    return pynumber_index(tx, bound)
+
+
+def _coerce_slice(
+    tx: "InstructionTranslatorBase", slice_var: "SliceVariable"
+) -> "SliceVariable":
+    from .lists import SliceVariable
+
+    new_items = [_coerce_slice_bound(tx, b) for b in slice_var.items]
+    if all(a is b for a, b in zip(new_items, slice_var.items)):
+        return slice_var
+    return SliceVariable(new_items, tx=tx)
+
+
+def _coerce_tensor_index(
+    tx: "InstructionTranslatorBase", key: VariableTracker
+) -> VariableTracker:
+    from .lists import ListVariable, SliceVariable, TupleVariable
+    from .object_protocol import maybe_get_python_type, pyindex_check, pynumber_index
+    from .tensor import SymNodeVariable
+
+    if isinstance(key, SliceVariable):
+        return _coerce_slice(tx, key)
+    elif isinstance(key, (TupleVariable, ListVariable)):
+        new_items = [_coerce_tensor_index(tx, item) for item in key.items]
+        if any(a is not b for a, b in zip(new_items, key.items)):
+            return type(key)(new_items)
+        return key
+    elif (
+        not isinstance(key, (ConstantVariable, SymNodeVariable))
+        and not key.is_tensor()
+        and pyindex_check(maybe_get_python_type(key))
+    ):
+        return pynumber_index(tx, key)
+    return key
 
 
 class TensorVariable(VariableTracker):
@@ -1850,6 +1907,9 @@ class TensorVariable(VariableTracker):
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 
+        if args:
+            args = (_coerce_tensor_index(tx, args[0]), *args[1:])
+
         if isinstance(args[0], SymNodeVariable):
             # Standard indexing will force specialization due to
             # __index__.  Rewrite as a regular torch op which will
@@ -1942,6 +2002,7 @@ class TensorVariable(VariableTracker):
         key: VariableTracker,
         value: VariableTracker,
     ) -> VariableTracker:
+        key = _coerce_tensor_index(tx, key)
         proxy = tx.output.create_proxy(
             "call_function",
             operator.setitem,

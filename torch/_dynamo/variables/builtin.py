@@ -1686,6 +1686,8 @@ class BuiltinVariable(BaseBuiltinVariable):
                     raise_type_error(
                         tx, f"getitem expected 2 arguments, got {len(args)}"
                     )
+                if isinstance(args[0], variables.TensorVariable):
+                    return args[0].method___getitem__(tx, args[1])
                 if isinstance(args[1], SymNodeVariable):
                     # Standard indexing will force specialization due to
                     # __index__.  Rewrite as a regular torch op which will

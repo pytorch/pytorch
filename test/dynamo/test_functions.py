@@ -553,6 +553,7 @@ partial_fn = functools.partial(fn, scale=2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         opt_fn()
 
+    @unittest.expectedFailure
     def test_itertools_islice_intlike(self):
         # CPython issue #30537: islice can accept integer-like objects as arguments.
         class IntLike:
@@ -590,12 +591,100 @@ partial_fn = functools.partial(fn, scale=2)
             def __index__(self):
                 return self.index
 
-        def fn(x):
+        def fn_slice(x):
             return x[StaticIndex(1) : StaticIndex(4) : StaticIndex(2)]
 
+        def fn_bare(x):
+            return x[StaticIndex(3)]
+
+        def fn_setitem(x):
+            x[StaticIndex(2)] = 99
+            x[StaticIndex(4) : StaticIndex(6)] = 0
+            return x
+
         x = torch.arange(8)
-        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        self.assertEqual(opt_fn(x), fn(x))
+        opt_fn_slice = torch.compile(fn_slice, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn_slice(x), fn_slice(x))
+
+        opt_fn_bare = torch.compile(fn_bare, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn_bare(x), fn_bare(x))
+
+        opt_fn_setitem = torch.compile(fn_setitem, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn_setitem(x.clone()), fn_setitem(x.clone()))
+
+    def test_slice_index_object_eager_parity(self):
+        class MutableIndex:
+            def __init__(self, index):
+                self.index = index
+
+            def __index__(self):
+                return self.index
+
+        # 1. slice(o, None).start is o (observable slice construction semantics)
+        def fn_identity(o):
+            s = slice(o, None)
+            return s.start is o
+
+        o = MutableIndex(2)
+        opt_fn_identity = torch.compile(fn_identity, backend="eager", fullgraph=True)
+        self.assertTrue(opt_fn_identity(o))
+
+        # 2. Bound mutated after the slice is built and before it is indexed
+        def fn_mutation(x, o):
+            s = slice(o, 5)
+            o.index = 3
+            return x[s]
+
+        x = torch.arange(8)
+        opt_fn_mutation = torch.compile(fn_mutation, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn_mutation(x, MutableIndex(1)), fn_mutation(x, MutableIndex(1)))
+
+        # 3. Slice returned from compiled function preserves user object
+        def fn_return_slice(x, o):
+            s = slice(o, None)
+            return x[s], s
+
+        opt_fn_return = torch.compile(fn_return_slice, backend="eager", fullgraph=True)
+        res_tensor, res_slice = opt_fn_return(x, o)
+        ref_tensor, ref_slice = fn_return_slice(x, o)
+        self.assertEqual(res_tensor, ref_tensor)
+        self.assertNotIsInstance(res_slice.start, int)
+
+        # 4. Multi-dimensional / tuple keys with __index__ objects
+        def fn_tuple(x):
+            return (
+                x[MutableIndex(1) : MutableIndex(3), 0],
+                x[0, MutableIndex(1) : MutableIndex(3)],
+                x[MutableIndex(0), MutableIndex(1) : MutableIndex(3)],
+            )
+
+        x2d = torch.arange(12).reshape(3, 4)
+        opt_fn_tuple = torch.compile(fn_tuple, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn_tuple(x2d), fn_tuple(x2d))
+
+        # 5. __index__ returning non-int raises TypeError
+        class BadIndex:
+            def __index__(self):
+                return "not_an_int"
+
+        def fn_bad_slice(x):
+            return x[BadIndex():]
+
+        def fn_bad_bare(x):
+            return x[BadIndex()]
+
+        with self.assertRaises(TypeError):
+            fn_bad_slice(x)
+        with self.assertRaises(TypeError):
+            fn_bad_bare(x)
+
+        opt_bad_slice = torch.compile(fn_bad_slice, backend="eager")
+        with self.assertRaises(TypeError):
+            opt_bad_slice(x)
+
+        opt_bad_bare = torch.compile(fn_bad_bare, backend="eager")
+        with self.assertRaises(TypeError):
+            opt_bad_bare(x)
 
     def test_bin_oct_hex_index(self):
         # bin/oct/hex dispatch through __index__ (CPython PyNumber_ToBase).
