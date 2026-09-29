@@ -3830,6 +3830,7 @@ class TestRandomTensorCreationCpuOnly(TestCase):
 
 # Class for testing *like ops, like torch.ones_like
 class TestLikeTensorCreation(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     exact_dtype = True
 
     # TODO: this test should be updated
@@ -3845,11 +3846,10 @@ class TestLikeTensorCreation(TestCase):
         self.assertEqual(res1, expected)
 
     # TODO: this test should be updated
-    @onlyCPU
     def test_empty_like(self, device):
-        x = torch.autograd.Variable(torch.tensor([]))
-        y = torch.autograd.Variable(torch.randn(4, 4))
-        z = torch.autograd.Variable(torch.IntTensor([1, 2, 3]))
+        x = torch.autograd.Variable(torch.tensor([]).to(device))
+        y = torch.autograd.Variable(torch.randn(4, 4).to(device))
+        z = torch.autograd.Variable(torch.IntTensor([1, 2, 3]).to(device))
         for a in (x, y, z):
             self.assertEqual(torch.empty_like(a).shape, a.shape)
             self.assertEqualTypeString(torch.empty_like(a), a)
@@ -4015,6 +4015,7 @@ class TestLikeTensorCreation(TestCase):
         self.assertNotEqual(tensor0, tensor1)
 
 
+
 # Tests for the `frombuffer` function (only work on CPU):
 #   Constructs tensors from Python objects that implement the buffer protocol,
 #   without copying data.
@@ -4042,6 +4043,8 @@ class _BufferAndSequence:
         return self._array[index].item()
 
 class TestBufferProtocol(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def _run_test(self, shape, dtype, count=-1, first=0, offset=None, **kwargs):
         numpy_dtype = torch_to_numpy_dtype_dict[dtype]
 
@@ -4297,6 +4300,8 @@ class TestBufferProtocol(TestCase):
             self.assertEqual(torch.tensor(_BufferAndSequence(arr)), torch.tensor(values))
 
 class TestFromBlob(TestCase):
+    hw_classification = HardwareClassification.CPU
+
     def _make_data(self, dtype, numel):
         numpy_dtype = torch_to_numpy_dtype_dict[dtype]
         arr = np.arange(1, numel + 1, dtype=numpy_dtype)
