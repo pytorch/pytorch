@@ -115,7 +115,7 @@ def select_blockscaled_tma_plan(
             if grid_m * grid_k <= 512
             else 1
         )
-        needs_boundary_masking = M != ncb_m * 128 or K != nrb_m * 128
+        needs_boundary_masking = M != padded_M or K != padded_K
     else:
         if nrb_m is None:
             raise AssertionError(f"expected nrb_m, got {nrb_m}")

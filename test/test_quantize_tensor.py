@@ -132,6 +132,25 @@ class TestMXFP8ReferenceNumerics(TestCase):
         scale_bytes = scales.view(torch.uint8).flatten()
         self.assertEqual(scale_bytes, scales_ref.view(torch.uint8))
 
+    @parametrize("input_dtype", (torch.bfloat16, torch.float16))
+    @parametrize(
+        "shape",
+        ((32896, 128), (11008, 384)),
+        name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
+    )
+    def test_to_mx_rceil_dim_m_large_k_tile_boundary(self, input_dtype, shape, device):
+        if torch.cuda.get_device_capability(device) < (10, 0):
+            self.skipTest("MXFP8 TMA requires SM100 or newer")
+        data_hp = torch.ones(shape, device=device, dtype=input_dtype)
+        qdata_ref, scales_ref = _quantize_mxfp8_reference(
+            data_hp.t().contiguous(), "dim_k", False, True
+        )
+        qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_m", False, True)
+        self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
+        self.assertEqual(
+            scales.view(torch.uint8).flatten(), scales_ref.view(torch.uint8)
+        )
+
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
     @parametrize(
         "shape",
