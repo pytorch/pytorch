@@ -225,6 +225,23 @@ class ForeachTests(TestCase):
         super().tearDown()
         torch._inductor.metrics.reset()
 
+    @parametrize("device", ("cpu", GPU_TYPE))
+    def test_foreach_copy_cross_aliasing(self, device):
+        if device == GPU_TYPE and not HAS_GPU:
+            self.skipTest("requires GPU")
+
+        def fn(x, y):
+            torch._foreach_copy_([x, y], [y, x])
+            return x, y
+
+        x = torch.tensor([1.0], device=device)
+        y = torch.tensor([2.0], device=device)
+
+        expected = fn(x.clone(), y.clone())
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), y.clone())
+        self.assertEqual(actual, expected)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
+
     def _test_single_list(self, op):
         if op in un_ops_under_test:
 
