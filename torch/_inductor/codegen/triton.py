@@ -129,6 +129,7 @@ from .simd import (
     PartialAccumulate,
     SIMDKernel,
     SIMDScheduling,
+    tile_fits_reduction_epilogue,
 )
 from .simd_kernel_features import tiling_scores_suggest_inner_reduction
 from .triton_utils import (
@@ -7386,6 +7387,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 result.writeline(
                     f"{str(Placeholder.KERNEL_NAME)}.run(*args, stream={stream_name})"
                 )
+                self.codegen_benchmark_post_call(result, call_args, signature)
 
         # benchmark all configs
         result.writelines(["\n", "\n", "def benchmark_all_configs(args):"])
@@ -7419,6 +7421,29 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
 
         return result
+
+    def codegen_benchmark_post_call(
+        self, result: IndentedBuffer, call_args: list[str], signature: list[Any]
+    ) -> None:
+        """Hook to emit code the benchmark times along with the kernel launch."""
+        if not (self.mix_order_reduction and self.saved_partial_accumulate):
+            return
+        # Also time the wrapper's finish of the mix-order partials.
+        idx = next(
+            i for i, sig in enumerate(signature) if isinstance(sig, WorkspaceArg)
+        )
+        numel, rnumel = (
+            V.graph.sizevars.optimization_hint(self.numels[prefix])
+            for prefix in ("x", "r0_")
+        )
+        nsplit = (numel + self.rsplit_size - 1) // self.rsplit_size
+        ops = {"min": "amin", "max": "amax"}
+        for i, partial_accum in enumerate(self.saved_partial_accumulate):
+            op = ops.get(partial_accum.reduction_type, partial_accum.reduction_type)
+            start, end = i * nsplit * rnumel, (i + 1) * nsplit * rnumel
+            result.writeline(
+                f"args[{idx}][{start}:{end}].view({nsplit}, {rnumel}).{op}(dim=0)"
+            )
 
     def imports_for_benchmark_kernel(self):
         # Dedent BEFORE substituting get_raw_stream: a multi-line override would
@@ -8656,6 +8681,60 @@ class TritonScheduling(SIMDScheduling):
                 [*cls.backend_features, BackendFeature.REDUCE_TO_SINGLE_ELEMENT]
             )
         return cls.backend_features
+
+    def can_fuse_template_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        """Row or column reductions over a row-major template output, when some
+        template choice stores output tiles they fit. See
+        TritonTemplateKernel.codegen_tile_reduction_epilogue."""
+        template = node1.get_template_node()
+        if not (
+            config.triton.template_reduction_epilogue
+            and isinstance(template, ir.TritonTemplateBuffer)
+            and len(template.get_size()) == 2
+            # Only bf16 and fp16 outputs are tested.
+            and template.get_dtype() in (torch.bfloat16, torch.float16)
+            # The JIT cpp wrapper can't import the Blackwell template's source
+            # (its docstring ends the wrapper's string literal).
+            and not V.graph.cpp_wrapper
+        ):
+            return False
+        m, n = template.get_size()
+        # Static shapes only: the Blackwell template specializes dynamic sizes.
+        if not (isinstance(m, sympy.Integer) and isinstance(n, sympy.Integer)):
+            return False
+        if template.get_stride() != [n, 1]:
+            return False
+        # Arg reductions can lower to a multi-result tl.reduce, which
+        # automatic warp specialization rejects.
+        if any(
+            isinstance(node.node, ir.ComputedBuffer)
+            and node.node.get_reduction_type() in ARG_REDUCTION_TYPES
+            for node in node2.get_nodes()
+            if node.is_reduction()
+        ):
+            return False
+        if (
+            isinstance(template, ir.MultiTemplateBuffer)
+            and template.make_kernel_render is None
+        ):
+            tiles = [
+                c.output_tile
+                for c in template.choices
+                if isinstance(c, ir.TritonTemplateCallerBase)
+            ]
+        else:
+            tiles = [template.output_tile]
+        epilogue = [
+            node
+            for node in (*node1.get_nodes(), *node2.get_nodes())
+            if not node.is_template()
+        ]
+        return any(
+            tile_fits_reduction_epilogue(tile, template, epilogue)
+            for tile in OrderedSet(tiles)
+        )
 
     def codegen_comment(self, node_schedule, kernel_name=None):
         wrapper = V.graph.wrapper_code

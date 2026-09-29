@@ -69,6 +69,7 @@ from ..utils import (
     IndentedBuffer,
     Placeholder,
     prefix_is_reduction,
+    sympy_dot,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
@@ -412,6 +413,158 @@ class IterationRangesEntry(IterationRanges):
         if not isinstance(other, IterationRangesEntry):
             raise AssertionError(f"expected IterationRangesEntry, got {type(other)}")
         return self.name == other.name
+
+
+def codegen_reduced_buffer(buffer_name: str, reduced: str) -> None:
+    """Write the wrapper expression reduced, an fp32 tensor, to buffer_name,
+    whose kernel left it unwritten."""
+    buffer = V.graph.get_buffer(buffer_name)
+    if not isinstance(buffer, ir.Buffer):
+        raise AssertionError(type(buffer))
+
+    # Restore the exact original shape via .view() to handle keepdim
+    # and multi-dimensional reductions correctly.
+    final_shape = [
+        V.graph.wrapper_code.codegen_python_sizevar(s) for s in buffer.get_layout().size
+    ]
+    reduced += f".view([{', '.join(final_shape)}])"
+
+    spec = buffer.get_output_spec()
+    if isinstance(spec, ir.NonOwningLayout):
+        # The buffer is a view into another buffer's storage (e.g. a
+        # cat destination). Rebinding the name would leave the
+        # underlying region never written; write through the view
+        # instead. copy_() also handles any dtype conversion from the
+        # torch.float workspace.
+        # See https://github.com/pytorch/pytorch/issues/193061
+        V.graph.wrapper_code.codegen_allocation(buffer)
+        V.graph.wrapper_code.writeline(f"{buffer_name}.copy_({reduced})")
+    elif type(spec) in (ir.FixedLayout, ir.FlexibleLayout):
+        # The workspace tensor is in torch.float, need a cast if the
+        # buffer is not.
+        if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:
+            reduced += f".to({buffer_dtype})"
+        V.graph.wrapper_code.writeline(f"{buffer_name} = {reduced}")
+        # mark the buffer as allocated, so we don't try to allocate
+        # it again when it's later used
+        V.graph.wrapper_code.allocated.add(buffer_name)
+    else:
+        # Rebinding the name silently drops the write for any spec
+        # that must be written through rather than bound (e.g.
+        # MutationLayoutSHOULDREMOVE, CommBufferLayout). Fail loudly
+        # rather than producing wrong results.
+        raise AssertionError(
+            f"unsupported workspace reduction output spec "
+            f"{type(spec).__name__} for {buffer_name}"
+        )
+
+
+# Column reductions finish in the wrapper by reducing per-tile partials with
+# these torch ops.
+COLUMN_REDUCTION_OPS = {"sum": "sum", "max": "amax", "min": "amin"}
+
+
+def template_reduction_axis(
+    node: scheduler.BaseSchedulerNode,
+    template: ir.Buffer,
+    produced: OrderedSet[str],
+) -> int | None:
+    """The dim of the row-major (M, N) template output that reduction node
+    keeps: 0 for a row reduction, 1 for a column reduction (possibly split), or
+    None. produced are the template and epilogue buffers, which node must read
+    in place. See TritonTemplateKernel.codegen_tile_reduction_epilogue."""
+    m, n = template.get_size()
+
+    def reads(node, is_valid):
+        return all(
+            isinstance(dep, MemoryDep) and is_valid(dep)
+            for dep in node.read_writes.reads
+            if dep.name in produced
+        )
+
+    # Loop merging may have collapsed a contiguous read to a single var.
+    def row_major(dep):
+        dep = dep.normalize()
+        return dep.is_contiguous() and dep.get_numel() == m * n
+
+    def col_major(dep):
+        return len(dep.var_names) == 2 and dep.index == sympy_dot(
+            (1, dep.size[0]), dep.var_names
+        )
+
+    if node.group[1] == (m, n) and reads(node, row_major):
+        return 0
+    if not (isinstance(node, scheduler.SchedulerNode) and node.is_reduction()):
+        return None
+    unsplit = node.unsplit_reduction()
+    if unsplit is not node:
+        # The whole reduction replaces both stages of the split.
+        users = node.get_outputs()[0].users
+        if not (len(users) == 1 and users[0].node.is_reduction()):
+            return None
+    # The partials are fp32 and are finished by Python wrapper code, whose
+    # buffer sizes must be static.
+    if (
+        not V.graph.cpp_wrapper
+        and isinstance(m, sympy.Integer)
+        and isinstance(n, sympy.Integer)
+        and unsplit.group[1] == (n, m)
+        and isinstance(unsplit.node, ir.ComputedBuffer)
+        and unsplit.node.get_reduction_type() in COLUMN_REDUCTION_OPS
+        and unsplit.node.get_dtype() in (torch.float32, torch.bfloat16, torch.float16)
+        and reads(unsplit, col_major)
+    ):
+        return 1
+    return None
+
+
+def tile_fits_reduction_epilogue(
+    tile: tuple[int, int, int] | None,
+    template: ir.Buffer,
+    epilogue_nodes: Sequence[scheduler.BaseSchedulerNode],
+) -> bool:
+    """Whether epilogue_nodes, including row or column reductions, can be
+    generated over template output tiles of shape tile (rows, cols, subtiles).
+    See TritonTemplateKernel.codegen_tile_reduction_epilogue."""
+    # Reducing across epilogue subtiles isn't supported yet.
+    if tile is None or tile[2] > 1:
+        return False
+    m, n = template.get_size()
+    produced = OrderedSet([template.get_name()])
+    for node in epilogue_nodes:
+        produced |= node.get_buffer_names()
+    reductions = [node for node in epilogue_nodes if node.is_reduction()]
+    axes = [template_reduction_axis(node, template, produced) for node in reductions]
+    columns = [node for node, axis in zip(reductions, axes) if axis == 1]
+    if columns:
+        # Column results are only complete after the wrapper reduces the
+        # partials, so no epilogue node may read them.
+        results = OrderedSet().union(*(node.get_buffer_names() for node in columns))
+        epilogue_nodes = [node for node in epilogue_nodes if node not in columns]
+        if any(node.used_buffer_names() & results for node in epilogue_nodes):
+            return False
+        # Column reductions run after the row ones and read only the template
+        # output and the nodes before the first row reduction.
+        first_row = next(
+            (i for i, node in enumerate(epilogue_nodes) if node.is_reduction()),
+            len(epilogue_nodes),
+        )
+        available = OrderedSet([template.get_name()]).union(
+            *(node.get_buffer_names() for node in epilogue_nodes[:first_row])
+        )
+        if any(
+            dep.name in produced and dep.name not in available
+            for node in columns
+            for dep in node.read_writes.reads
+        ) or any(node.group[1] != (m * n, 1) for node in epilogue_nodes[:first_row]):
+            return False
+        if first_row == len(epilogue_nodes):
+            return True
+    # A row reduction must see whole rows in one store. Reducing across column
+    # tiles isn't supported yet.
+    return not OrderedSet(axes) - OrderedSet([0, 1]) and (
+        V.graph.sizevars.statically_known_geq(tile[1], n)
+    )
 
 
 class DerivedIterationRangesRoot(IterationRangesRoot):
@@ -2828,6 +2981,28 @@ class SIMDScheduling(BaseScheduling):
         _, (numel2, rnumel2) = node2.group
         why = WhyNoFuse(node1, node2)
 
+        if (
+            config.triton.template_reduction_epilogue
+            and node1.is_template()
+            and node1.is_reduction()
+            and not self.can_fuse_template_reduction_epilogue(node1, node2)
+        ):
+            why("template reduction epilogue not satisfied")
+            return False
+        if config.triton.template_reduction_epilogue and node1.is_template():
+            template = node1.get_template_node()
+            nodes = (*node1.get_nodes(), *node2.get_nodes())
+            produced = OrderedSet().union(*(node.get_buffer_names() for node in nodes))
+            # A column reduction of the template output, which the tiling
+            # checks below can't express. Its group can't identify it: a split
+            # column reduction's can equal the output's (M, N).
+            if any(
+                node.is_reduction()
+                and template_reduction_axis(node, template, produced) == 1
+                for node in nodes
+            ) and self.can_fuse_template_reduction_epilogue(node1, node2):
+                return True
+
         if isinstance(node1, scheduler.FusedNestedReductions):
             # The scheduler already validated this vertical append. The normal
             # SIMD ladder cannot represent its two iteration spaces.
@@ -3389,37 +3564,26 @@ class SIMDScheduling(BaseScheduling):
     ) -> tuple[float, str]:
         raise NotImplementedError
 
-    def _codegen_mix_order_reduction(self, node1, node2):
-        numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
+    def _mix_order_split_size(self, node1, numel):
+        # the overridden has highest priority
+        if config.triton.mix_order_reduction_split_size is not None:
+            return config.triton.mix_order_reduction_split_size
 
-        def _pick_split_size():
-            # the overridden has highest priority
-            if config.triton.mix_order_reduction_split_size is not None:
-                return config.triton.mix_order_reduction_split_size
+        # heuristics based on number of SMs
+        device_prop = DeviceProperties.create(node1.get_device())
+        num_sm = device_prop.multi_processor_count
+        estimated_num_splits = num_sm * 8
 
-            # heuristics based on number of SMs
-            device_prop = DeviceProperties.create(node1.get_device())
-            num_sm = device_prop.multi_processor_count
-            estimated_num_splits = num_sm * 8
+        # split_size is decided based on hint.
+        # optimization_hint is fine here: the result is clamped to [16, 128],
+        # so any fallback value still produces a valid split size.
+        numel_hint = V.graph.sizevars.optimization_hint(numel)
+        split_size = max(last_power_of_2(numel_hint // estimated_num_splits), 16)
+        split_size = min(split_size, 128)
+        return split_size
 
-            # split_size is decided based on hint.
-            # optimization_hint is fine here: the result is clamped to [16, 128],
-            # so any fallback value still produces a valid split size.
-            numel_hint = V.graph.sizevars.optimization_hint(numel)
-            split_size = max(last_power_of_2(numel_hint // estimated_num_splits), 16)
-            split_size = min(split_size, 128)
-            return split_size
-
-        split_size = _pick_split_size()
-
-        # pyrefly: ignore [bad-assignment]
-        metrics.codegen_mix_order_reduction += 1
-
-        # split epilogue out of node2
-        node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
-            node2
-        )
-
+    def _mix_order_kernel_features(self, node1, node2_reductions, numel, rnumel):
+        """Convert node2's reductions in place for the mix-order kernel."""
         converted_nodes = []
         for subnode in node2_reductions:
             subnode.cancel_reduction_split()
@@ -3429,7 +3593,51 @@ class SIMDScheduling(BaseScheduling):
         node_schedule = self.generate_node_schedule(
             node1.get_nodes() + converted_nodes, numel, rnumel
         )
-        kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel)
+        return converted_nodes, SIMDKernelFeatures(node_schedule, numel, rnumel)
+
+    def benchmark_mix_order_reduction(self, node) -> tuple[float, str] | None:
+        """Time the kernel codegen_mix_order_reduction would emit for node,
+        leaving node's loops unchanged. None if node2 has epilogue nodes."""
+        node1, node2 = node.node1, node.node2
+        numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
+        node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
+            node2
+        )
+        if node2_epilogue:
+            return None
+        snapshot = scheduler._LoopStateSnapshot.create(tuple(node2_reductions))
+        try:
+            _, kernel_features = self._mix_order_kernel_features(
+                node1, node2_reductions, numel, rnumel
+            )
+            _, _, src_code = self._generate_kernel_code_for_mix_order_reduction(
+                kernel_features,
+                split_size=self._mix_order_split_size(node1, numel),
+                for_benchmark=True,
+            )
+        finally:
+            snapshot.restore()
+            for subnode in node2_reductions:
+                # cancel_reduction_split caches the unsplit body.
+                subnode.node.get_default_sizes_body.clear_cache(subnode.node)
+        return self.benchmark_codegened_module(PyCodeCache.load(src_code))
+
+    def _codegen_mix_order_reduction(self, node1, node2):
+        numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
+        split_size = self._mix_order_split_size(node1, numel)
+
+        # pyrefly: ignore [bad-assignment]
+        metrics.codegen_mix_order_reduction += 1
+
+        # split epilogue out of node2
+        node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
+            node2
+        )
+
+        converted_nodes, kernel_features = self._mix_order_kernel_features(
+            node1, node2_reductions, numel, rnumel
+        )
+        node_schedule = kernel_features.node_schedule
 
         # The autotuning is skipped in deterministic mode
         if (
@@ -3538,46 +3746,7 @@ class SIMDScheduling(BaseScheduling):
                 f"{ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
             )
 
-            buffer = V.graph.get_buffer(buffer_name)
-            if not isinstance(buffer, ir.Buffer):
-                raise AssertionError(type(buffer))
-
-            # Restore the exact original shape via .view() to handle keepdim
-            # and multi-dimensional reductions correctly.
-            final_shape = [
-                V.graph.wrapper_code.codegen_python_sizevar(s)
-                for s in buffer.get_layout().size
-            ]
-            reduced += f".view([{', '.join(final_shape)}])"
-
-            spec = buffer.get_output_spec()
-            if isinstance(spec, ir.NonOwningLayout):
-                # The buffer is a view into another buffer's storage (e.g. a
-                # cat destination). Rebinding the name would leave the
-                # underlying region never written; write through the view
-                # instead. copy_() also handles any dtype conversion from the
-                # torch.float workspace.
-                # See https://github.com/pytorch/pytorch/issues/193061
-                V.graph.wrapper_code.codegen_allocation(buffer)
-                V.graph.wrapper_code.writeline(f"{buffer_name}.copy_({reduced})")
-            elif type(spec) in (ir.FixedLayout, ir.FlexibleLayout):
-                # The workspace tensor is in torch.float, need a cast if the
-                # buffer is not.
-                if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:
-                    reduced += f".to({buffer_dtype})"
-                V.graph.wrapper_code.writeline(f"{buffer_name} = {reduced}")
-                # mark the buffer as allocated, so we don't try to allocate
-                # it again when it's later used
-                V.graph.wrapper_code.allocated.add(buffer_name)
-            else:
-                # Rebinding the name silently drops the write for any spec
-                # that must be written through rather than bound (e.g.
-                # MutationLayoutSHOULDREMOVE, CommBufferLayout). Fail loudly
-                # rather than producing wrong results.
-                raise AssertionError(
-                    f"unsupported mix-order reduction output spec "
-                    f"{type(spec).__name__} for {buffer_name}"
-                )
+            codegen_reduced_buffer(buffer_name, reduced)
 
         kernel.deallocate_workspaces()
 
@@ -4472,6 +4641,20 @@ class SIMDScheduling(BaseScheduling):
         """
         Helper method to codegen a single template kernel variant
         """
+        # Epilogue reductions need the output tile to span full rows (see
+        # TritonTemplateKernel.codegen_tile_reduction_epilogue). Check before
+        # rendering, since some templates codegen their epilogues themselves.
+        if any(node.is_reduction() for node in epilogue_nodes):
+            template = template_node.node
+            n = template.get_size()[-1]
+            tile = (
+                template.output_tile
+                if isinstance(template, ir.TritonTemplateBuffer)
+                else None
+            )
+            if not tile_fits_reduction_epilogue(tile, template, epilogue_nodes):
+                raise CantSplit(n, tile or ())
+
         buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()
         prologue_group = []
@@ -4523,9 +4706,18 @@ class SIMDScheduling(BaseScheduling):
         if only_gen_src_code:
             return src_code
 
-        # Unfused epilogues are codegen'd separately in call_kernel;
-        # exclude them from mark_run.
+        # Unfused epilogues are codegen'd separately in call_kernel, and column
+        # reduction outputs are written after it; exclude them from mark_run.
         unfused_set = OrderedSet([id(n) for n in kernel.get_unfused_epilogues()])
+        for node, *_ in kernel.column_reductions:
+            unfused_set.add(id(node))
+            if node.node._split_size is not None:
+                if not self.scheduler:
+                    raise AssertionError("expected self.scheduler to be set")
+                self.scheduler.removed_ops.add(
+                    node.get_outputs()[0].users[0].node.get_name()
+                )
+                V.graph.removed_buffers.add(node.node.get_name())
         with V.set_kernel_handler(kernel):
             template_node.mark_run()
             for node in epilogue_nodes:

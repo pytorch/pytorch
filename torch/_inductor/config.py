@@ -2418,6 +2418,9 @@ class triton:
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
+    # Fuse row reductions of a Triton template's output into its epilogue, for
+    # template configs whose output tile spans full rows.
+    template_reduction_epilogue = False
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
