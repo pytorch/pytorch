@@ -190,10 +190,11 @@ def _detached_copy(fn: object) -> object:
             setattr(saved, name, types.MethodType(value.__func__, saved))
         elif (
             isinstance(value, collections.defaultdict)
-            and getattr(value.default_factory, "__self__", None) is fn
+            and isinstance(factory := value.default_factory, types.MethodType)
+            and factory.__self__ is fn
         ):
-            factory = types.MethodType(value.default_factory.__func__, saved)
-            setattr(saved, name, collections.defaultdict(factory, value))
+            rebound = types.MethodType(factory.__func__, saved)
+            setattr(saved, name, collections.defaultdict(rebound, value))
     return saved
 
 
