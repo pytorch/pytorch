@@ -305,24 +305,10 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
         allow_cpu: If True, run the test on CPU-only machines (no accelerators).
     """
 
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            if (
-                torch.accelerator.is_available()
-                and torch.accelerator.device_count() >= x
-            ):
-                return func(*args, **kwargs)
-            if allow_cpu and not torch.accelerator.is_available():
-                return func(*args, **kwargs)
-            test_skip = TEST_SKIPS[f"multi-device-{x}"]
-            if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
-                sys.exit(test_skip.exit_code)
-
-        return wrapper
-
-    return decorator
-
+    return unittest.skipUnless(
+        at_least_x_gpu(x) or (allow_cpu and not torch.accelerator.is_available()),
+        TEST_SKIPS[f"multi-device-{x}"].message,
+    )
 
 def requires_world_size(n: int):
     """
