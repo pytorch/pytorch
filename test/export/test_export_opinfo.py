@@ -174,14 +174,14 @@ selected_op_db = [op for op in op_db if op.name in selected_ops]
 
 
 def _get_env_by_device(device):
-    env = {}
     device_type = torch.device(device).type
     if device_type == "cuda":
-        env = {"CUDA_VISIBLE_DEVICES": ""}
+        return {"CUDA_VISIBLE_DEVICES": ""}
     elif device_type == "xpu":
-        env = os.environ.copy()
-        env["ONEAPI_DEVICE_SELECTOR"] = "*:cpu"
-    return env
+        return {**os.environ, "ONEAPI_DEVICE_SELECTOR": "*:cpu", "ZE_AFFINITY_MASK": ""}
+    raise AssertionError(
+        f"don't know how to hide {device_type} devices in a subprocess"
+    )
 
 
 class TestExportOnFakeDevice(TestCase):
