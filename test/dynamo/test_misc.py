@@ -1721,6 +1721,15 @@ graph():
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(opt_fn(), fn())
 
+    def test_builtin_eval_source_keyword_does_not_fold(self):
+        def fn():
+            return eval(source="0 or 5")
+
+        with self.assertRaisesRegex(TypeError, "at least 1 positional argument"):
+            fn()
+        with self.assertRaisesRegex(Unsupported, "Failed to trace builtin operator"):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
     def test_builtin_eval_rejects_non_constant_expr(self):
         def fn(x):
             return x + eval("len([1])")

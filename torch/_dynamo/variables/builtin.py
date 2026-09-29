@@ -1542,12 +1542,12 @@ class BuiltinVariable(BaseBuiltinVariable):
     def call_eval(
         self,
         tx: "InstructionTranslatorBase",
-        source: VariableTracker,
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
-        if args or kwargs:
+        if len(args) != 1 or kwargs:
             return None
+        source = args[0]
         if not source.is_python_constant():
             return None
         source_str = source.as_python_constant()
