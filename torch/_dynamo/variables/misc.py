@@ -23,6 +23,7 @@ import functools
 import inspect
 import itertools
 import logging
+import os
 import random
 import re
 import sys
@@ -900,6 +901,10 @@ class ExceptionVariable(VariableTracker):
         if exc_str is KeyError.__str__ and len(self.args) == 1:
             # KeyError_str reprs a single arg, otherwise falls back to BaseException_str
             return generic_repr(tx, self.args[0])
+        if exc_str is SyntaxError.__str__:
+            result = self._syntax_error_str(tx)
+            if result is not None:
+                return VariableTracker.build(tx, result)
         # AttributeError and NameError set tp_str to BaseException_str explicitly.
         # A Python-level __str__ means a user subclass reached here through
         # super().__str__(), which already resolved to BaseException.__str__.
@@ -925,6 +930,43 @@ class ExceptionVariable(VariableTracker):
 
             tuple_var = TupleVariable(list(self.args))
             return generic_str(tx, tuple_var)
+
+    def _syntax_error_str(self, tx: "InstructionTranslatorBase") -> str | None:
+        """
+        SyntaxError_str, with msg/filename/lineno as SyntaxError_init unpacks
+        them from args. Returns None when they cannot be known at trace time.
+        https://github.com/python/cpython/blob/v3.13.0/Objects/exceptions.c#L2742-L2790
+        """
+        side_effects = tx.output.side_effects
+        if any(
+            side_effects.has_pending_mutation_of_attr(self, name)
+            for name in ("msg", "filename", "lineno")
+        ) or not all(arg.is_python_constant() for arg in self.args):
+            return None
+        args = [arg.as_python_constant() for arg in self.args]
+        msg = args[0] if args else None
+        filename = lineno = None
+        if len(args) == 2:
+            try:
+                info = tuple(args[1])
+            except TypeError:
+                return None
+            if not 4 <= len(info) <= 6:
+                return None
+            filename, lineno = info[:2]
+        if isinstance(filename, str):
+            filename = filename.rpartition(os.sep)[2]
+        else:
+            filename = None
+        if type(lineno) is not int:
+            lineno = None
+        if filename is not None and lineno is not None:
+            return f"{msg} ({filename}, line {lineno})"
+        if filename is not None:
+            return f"{msg} ({filename})"
+        if lineno is not None:
+            return f"{msg} (line {lineno})"
+        return str(msg)
 
     def __str__(self) -> str:
         return f"{self.__class__.__name__}({self.exc_type})"
