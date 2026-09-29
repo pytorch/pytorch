@@ -590,20 +590,27 @@ def user_defined_kernel_grid_fn_code(
     return fn_name, output.getvalue()
 
 
-def user_defined_triton_kernel_transitive_closure_source_code(
+@dataclasses.dataclass(frozen=True)
+class TritonKernelSource:
+    """A source fragment and the kernel-global names that refer to its symbols.
+
+    symbol_map maps names used by the kernel to names defined by source.
+    """
+
+    module_name: str | None
+    source: str
+    symbol_map: dict[str, str]
+
+
+def user_defined_triton_kernel_transitive_closure(
     kernel, epilogue_fusion: tuple[ir.ComputedBuffer, str] | None = None
-) -> str:
+) -> list[TritonKernelSource]:
     """
     Given a triton kernel function pointer collect the transitive closure of
-    its dependencies
+    its dependencies.
 
-    epilogue_fusion: Optional[(fused epilogue node, modified kerel src code)]
+    epilogue_fusion: Optional[(fused epilogue node, modified kernel src code)]
     """
-    compile_wrapper = IndentedBuffer()
-    kernel_src = kernel.src
-    if epilogue_fusion:
-        kernel_src = epilogue_fusion[1]
-    compile_wrapper.splice(kernel_src, strip=True)
 
     # Also include any possible kernel being called indirectly
     import triton
@@ -611,10 +618,41 @@ def user_defined_triton_kernel_transitive_closure_source_code(
     from triton.language import constexpr  # type: ignore[name-defined]
     from triton.language.core import dtype as triton_dtype
 
+    compile_wrapper = IndentedBuffer()
+    source_modules: list[TritonKernelSource] = []
+
+    def add_source_module(
+        source_owner: Any,
+        start: int,
+        symbol_name: str | None = None,
+    ) -> None:
+        source = IndentedBuffer()
+        source.get_lines_ref().extend(compile_wrapper.get_lines_ref()[start:])
+        source_owner = getattr(source_owner, "fn", source_owner)
+        source_name = getattr(source_owner, "__name__", None)
+        source_modules.append(
+            TritonKernelSource(
+                module_name=getattr(source_owner, "__module__", None),
+                source=source.getvalue(),
+                symbol_map=(
+                    {symbol_name: source_name}
+                    if symbol_name is not None
+                    and source_name is not None
+                    and symbol_name != source_name
+                    else {}
+                ),
+            )
+        )
+
+    kernel_src = kernel.src
+    if epilogue_fusion:
+        kernel_src = epilogue_fusion[1]
+    compile_wrapper.splice(kernel_src, strip=True)
+    add_source_module(None, 0)
     # global constexpr vars handled above
     symbols_included = OrderedSet([kernel.__name__])
 
-    def traverse(cur_kernel):
+    def traverse(cur_kernel) -> None:
         # here we extract the unqualified names (i.e., not attributes and
         # without prepended module name) loaded in the kernel code, which
         # are matched with the co_names and __globals__ below to codegen
@@ -631,9 +669,11 @@ def user_defined_triton_kernel_transitive_closure_source_code(
             if symbol_name in cur_kernel.fn.__globals__:
                 symbol = cur_kernel.fn.__globals__[symbol_name]
                 if isinstance(symbol, JITFunction):
+                    start = len(compile_wrapper.get_lines_ref())
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.jit")
                     compile_wrapper.splice(symbol.src, strip=True)
+                    add_source_module(symbol, start, symbol_name)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
                 elif hasattr(triton, "constexpr_function") and isinstance(
@@ -648,20 +688,21 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                             and hasattr(dtype_symbol, "__module__")
                             and dtype_symbol.__module__.startswith("triton")
                         ):
+                            start = len(compile_wrapper.get_lines_ref())
                             compile_wrapper.writeline(
                                 f"from {dtype_symbol.__module__} import dtype as dtype"
                             )
+                            add_source_module(dtype_symbol, start)
                             symbols_included.add("dtype")
+                    start = len(compile_wrapper.get_lines_ref())
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.constexpr_function")
                     compile_wrapper.splice(symbol.src, strip=True)
-                    if symbol_name != symbol.fn.__name__:
-                        compile_wrapper.writeline(
-                            f"{symbol_name} = {symbol.fn.__name__}"
-                        )
+                    add_source_module(symbol, start, symbol_name)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
                 elif isinstance(symbol, (int, str, bool, constexpr)):
+                    start = len(compile_wrapper.get_lines_ref())
                     compile_wrapper.newline()
                     if isinstance(symbol, constexpr):
                         symbol_str = f"tl.constexpr({symbol.value!r})"
@@ -679,6 +720,7 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                         )
                     else:
                         compile_wrapper.writeline(f"{symbol_name} = {symbol_str}")
+                    add_source_module(cur_kernel, start)
                     symbols_included.add(symbol_name)
                 elif (
                     symbol_name in unqualified_loads
@@ -694,16 +736,45 @@ def user_defined_triton_kernel_transitive_closure_source_code(
                     # of `tl.store`): need to codegen an import
 
                     # Triton dtype instances have .name instead of .__name__
+                    start = len(compile_wrapper.get_lines_ref())
                     if isinstance(symbol, triton_dtype):
                         compile_wrapper.writeline(f"{symbol_name} = tl.{symbol.name}")
                     elif hasattr(symbol, "__name__"):
                         compile_wrapper.writeline(
-                            f"from {symbol.__module__} import {symbol.__name__} as {symbol_name}"
+                            f"from {symbol.__module__} import "
+                            f"{symbol.__name__} as {symbol_name}"
                         )
+                    add_source_module(symbol, start)
                     symbols_included.add(symbol_name)
 
     traverse(kernel)
-    return compile_wrapper.getvalue()
+    return source_modules
+
+
+def render_user_defined_triton_kernel_transitive_closure(
+    source_modules: Sequence[TritonKernelSource],
+) -> str:
+    """Render collected Triton sources and their required global bindings."""
+
+    rendered: list[str] = []
+    for source_module in source_modules:
+        rendered.append(source_module.source)
+        rendered.extend(
+            f"{symbol_name} = {source_name}\n"
+            for symbol_name, source_name in source_module.symbol_map.items()
+        )
+    return "".join(rendered)
+
+
+def user_defined_triton_kernel_transitive_closure_source_code(
+    kernel, epilogue_fusion: tuple[ir.ComputedBuffer, str] | None = None
+) -> str:
+    """Collect and render a Triton kernel's transitive closure."""
+
+    source_modules = user_defined_triton_kernel_transitive_closure(
+        kernel, epilogue_fusion
+    )
+    return render_user_defined_triton_kernel_transitive_closure(source_modules)
 
 
 def _escape_triton_kernel_source_for_wrapper(src: str) -> str:
