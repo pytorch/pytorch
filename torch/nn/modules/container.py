@@ -1054,16 +1054,17 @@ class BufferDict(Module):
     by :meth:`~torch.nn.Module.to` and appear in :meth:`~torch.nn.Module.buffers`.
     Persistent buffers are included in :meth:`~torch.nn.Module.state_dict`.
 
-    The constructor, item assignment, and :meth:`update` convert tensors into
-    :class:`~torch.nn.Buffer` objects. Copying or updating from another
-    ``BufferDict`` reuses its buffers and preserves their persistence. Pass a
-    ``Buffer(tensor, persistent=False)`` to exclude an entry from the state dict.
+    Tensors are registered without copying or detaching them. New entries are
+    persistent by default. Assigning a tensor or ``None`` to an existing entry
+    preserves its persistence. Pass a ``Buffer(tensor, persistent=False)`` to
+    exclude an entry from the state dict. Copying or updating from another
+    ``BufferDict`` reuses its buffers and preserves their persistence.
     Entries can also be ``None``, which are ignored by operations on buffers and
     are not included in the state dict.
 
-    Like :class:`~torch.nn.ParameterDict`, this is an **ordered** dictionary.
-    The order of an ``OrderedDict``, another ``BufferDict``, or an iterable of
-    key-value pairs is preserved. Other mappings are sorted by key.
+    This is an **ordered** dictionary. Like :class:`~torch.nn.ModuleDict`, it
+    preserves the insertion order and the order of the mapping or iterable
+    passed to :meth:`update`.
 
     Args:
         buffers (iterable, optional): a mapping from strings to tensors or
@@ -1100,9 +1101,11 @@ class BufferDict(Module):
         return self._buffers[key]
 
     def __setitem__(self, key: str, value: torch.Tensor | None) -> None:
-        if isinstance(value, torch.Tensor) and not isinstance(value, Buffer):
-            value = Buffer(value)
-        persistent = value.persistent if isinstance(value, Buffer) else True
+        persistent = (
+            value.persistent
+            if isinstance(value, Buffer)
+            else key not in self._non_persistent_buffers_set
+        )
         self.register_buffer(key, value, persistent=persistent)
 
     def __delitem__(self, key: str) -> None:
@@ -1181,8 +1184,8 @@ class BufferDict(Module):
     ) -> None:
         """Add key-buffer pairs, overwriting existing keys.
 
-        An ``OrderedDict``, ``BufferDict``, or iterable of key-value pairs
-        preserves the order of new entries. Other mappings are sorted by key.
+        The order of the supplied mapping or iterable of key-value pairs is
+        preserved. Replacing an existing entry does not change its position.
         Updating from another ``BufferDict`` also preserves persistence after
         device or dtype conversions.
         """
@@ -1198,8 +1201,6 @@ class BufferDict(Module):
             entries: Iterable[tuple[str, torch.Tensor | None]] = cast(
                 "Mapping[str, torch.Tensor | None]", buffers
             ).items()
-            if not isinstance(buffers, OrderedDict):
-                entries = sorted(entries)
             for key, value in entries:
                 self[key] = value
         else:

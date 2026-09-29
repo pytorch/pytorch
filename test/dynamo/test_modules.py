@@ -1533,6 +1533,73 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         del model.offsets["a"]
         self.assertEqual(compiled(x), model(x))
 
+    @parametrize("key", ["present", "missing", "empty"])
+    def test_bufferdict_contains_and_getitem(self, key):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.offsets = torch.nn.BufferDict(
+                    {"present": torch.ones(3), "empty": None}
+                )
+
+            def forward(self, x, key):
+                x = x + 1
+                if key in self.offsets:
+                    x = x * 2
+                    if self.offsets[key] is not None:
+                        x = x + self.offsets[key]
+                return x
+
+        model = Model()
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(model, backend=counter, fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(compiled(x, key), model(x, key))
+        self.assertEqual(
+            counter.op_count, {"present": 3, "empty": 2, "missing": 1}[key]
+        )
+        if key in model.offsets:
+            del model.offsets[key]
+        else:
+            model.offsets[key] = torch.ones(3)
+        self.assertEqual(compiled(x, key), model(x, key))
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("requires_grad", [False, True])
+    def test_bufferdict_mutation_in_forward(self, backend, requires_grad):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.stats = torch.nn.BufferDict(
+                    {
+                        "temporary": torch.nn.Buffer(torch.zeros(3), persistent=False),
+                        "persistent": torch.ones(3),
+                    }
+                )
+
+            def forward(self, x):
+                self.stats["temporary"] = self.stats["temporary"].detach() * 0.9 + x
+                self.stats["persistent"] = self.stats["persistent"].detach() + x
+                return self.stats["temporary"] + self.stats["persistent"]
+
+        eager = Model()
+        model = Model()
+        compiled = torch.compile(model, backend=backend, fullgraph=True)
+        for _ in range(3):
+            x = torch.randn(3, requires_grad=requires_grad)
+            actual = compiled(x)
+            expected = eager(x)
+            self.assertEqual(actual, expected)
+            self.assertEqual(model.stats["temporary"], eager.stats["temporary"])
+            self.assertEqual(model.stats["persistent"], eager.stats["persistent"])
+            self.assertEqual(list(model.state_dict()), ["stats.persistent"])
+            if requires_grad:
+                self.assertEqual(
+                    torch.autograd.grad(actual.sum(), x),
+                    torch.autograd.grad(expected.sum(), x),
+                )
+            model.load_state_dict(eager.state_dict(), strict=True)
+
     def test_nn_moduledict_contains(self):
         class M(torch.nn.Module):
             def __init__(self, module_dict):
@@ -3985,6 +4052,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager, compiled)
 
 
+instantiate_parametrized_tests(NNModuleTests)
 instantiate_parametrized_tests(OptimizedModuleTest)
 
 instantiate_device_type_tests(

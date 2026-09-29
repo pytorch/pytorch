@@ -1241,7 +1241,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         ]))
         self.assertIs(buffers["persistent"], persistent)
         self.assertIs(buffers["temporary"], temporary)
-        self.assertIsInstance(buffers["tensor"], Buffer)
+        self.assertIs(buffers["tensor"], tensor)
         self.assertEqual(buffers["tensor"], tensor)
         self.assertIsNone(buffers["empty"])
         self.assertEqual(list(buffers), ["persistent", "temporary", "tensor", "empty"])
@@ -1268,7 +1268,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertIsNone(buffers.get("missing"))
         self.assertEqual(buffers.get("missing", 123), 123)
         self.assertIsNone(buffers.setdefault("empty"))
-        self.assertIsInstance(buffers.setdefault("other", torch.zeros(2)), Buffer)
+        other = torch.zeros(2)
+        self.assertIs(buffers.setdefault("other", other), other)
         buffers["value"] = Buffer(torch.zeros(2))
         self.assertIn("value", buffers.state_dict())
         buffers["value"] = value
@@ -1316,17 +1317,49 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         result["new"] = torch.ones(2)
         self.assertNotIn("new", source)
 
-    def test_BufferDict_update_order(self):
+    @parametrize_test("operation", ["setitem", "update"])
+    @parametrize_test("converted", [False, True])
+    def test_BufferDict_reassignment_persistence(self, operation, converted):
+        buffers = nn.BufferDict({
+            "temporary": Buffer(torch.ones(2), persistent=False),
+            "persistent": torch.zeros(2),
+        })
+        if converted:
+            buffers.double()
+        checkpoint = buffers.state_dict()
+        replacement = torch.zeros_like(buffers["temporary"])
+        if operation == "setitem":
+            buffers["temporary"] = replacement
+        else:
+            buffers.update({"temporary": replacement})
+        self.assertNotIn("temporary", buffers.state_dict())
+        self.assertIs(buffers["temporary"], replacement)
+        buffers.load_state_dict(checkpoint, strict=True)
+
+        buffers["temporary"] = None
+        self.assertIn("temporary", buffers._non_persistent_buffers_set)
+        buffers["temporary"] = replacement
+        self.assertNotIn("temporary", buffers.state_dict())
+        buffers["temporary"] = Buffer(replacement, persistent=True)
+        self.assertIn("temporary", buffers.state_dict())
+        buffers["temporary"] = Buffer(replacement, persistent=False)
+        self.assertNotIn("temporary", buffers.state_dict())
+        del buffers["temporary"]
+        buffers["temporary"] = replacement
+        self.assertIn("temporary", buffers.state_dict())
+
+    @parametrize_test("mapping_cls", [dict, OrderedDict])
+    def test_BufferDict_update_order(self, mapping_cls):
         a, b, c = (Buffer(torch.tensor(i)) for i in range(3))
-        buffers = nn.BufferDict({"b": b, "a": a})
-        self.assertEqual(list(buffers), ["a", "b"])
-        buffers.update(OrderedDict([("d", c), ("c", a), ("a", b)]))
-        self.assertEqual(list(buffers), ["a", "b", "d", "c"])
+        buffers = nn.BufferDict(mapping_cls([("b", b), ("a", a)]))
+        self.assertEqual(list(buffers), ["b", "a"])
+        buffers.update(mapping_cls([("d", c), ("c", a), ("a", b)]))
+        self.assertEqual(list(buffers), ["b", "a", "d", "c"])
         self.assertIs(buffers["a"], b)
         buffers.update(item for item in [("f", a), ("e", b)])
-        self.assertEqual(list(buffers), ["a", "b", "d", "c", "f", "e"])
+        self.assertEqual(list(buffers), ["b", "a", "d", "c", "f", "e"])
         buffers.update(buffers)
-        self.assertEqual(list(buffers), ["a", "b", "d", "c", "f", "e"])
+        self.assertEqual(list(buffers), ["b", "a", "d", "c", "f", "e"])
         result = buffers.fromkeys(["z", "a"], a)
         self.assertEqual(list(result), ["z", "a"])
         self.assertIs(result["z"], result["a"])
@@ -1395,8 +1428,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         parameter = Parameter(torch.ones(2))
         buffer = Buffer(torch.ones(2), persistent=False)
         buffers = nn.BufferDict({"parameter": parameter, "a": buffer, "b": buffer})
-        self.assertIsInstance(buffers["parameter"], Buffer)
-        self.assertNotIsInstance(buffers["parameter"], Parameter)
+        self.assertIs(buffers["parameter"], parameter)
         self.assertTrue(buffers["parameter"].requires_grad)
         self.assertEqual(list(buffers.parameters()), [])
         self.assertIs(buffers["a"], buffers["b"])
@@ -7270,6 +7302,7 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 class TestNNDeviceType(NNTestCase):
 
     @dtypes(torch.float32, torch.float64, torch.int64, torch.bool)
+    @dtypesIfMPS(torch.float32, torch.int64, torch.bool)
     def test_BufferDict_device(self, device, dtype):
         tensor = torch.arange(6).reshape(2, 3).to(dtype=dtype)
         module = nn.Module()
@@ -7286,6 +7319,25 @@ class TestNNDeviceType(NNTestCase):
         module.cpu()
         for value in module.data.values():
             self.assertEqual(value, tensor)
+
+    @parametrize_test("operation", ["construct", "setitem", "update"])
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)
+    def test_BufferDict_preserves_autograd(self, device, dtype, operation):
+        leaf = torch.randn(2, 3, device=device, dtype=dtype, requires_grad=True)
+        value = leaf.sin()
+        buffers = nn.BufferDict()
+        if operation == "construct":
+            buffers = nn.BufferDict({"value": value})
+        elif operation == "setitem":
+            buffers["value"] = value
+        else:
+            buffers.update({"value": value})
+        self.assertIs(buffers["value"], value)
+        self.assertIs(buffers["value"].grad_fn, value.grad_fn)
+        (gradient,) = torch.autograd.grad(buffers["value"].sum(), leaf)
+        self.assertEqual(gradient, leaf.cos())
+        self.assertEqual(list(buffers.parameters()), [])
 
     def test_grid_sample_backward_error_checking(self, device):
         input = torch.empty(1, 1, 2, 2, device=device)
