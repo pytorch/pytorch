@@ -1177,7 +1177,8 @@ class CellVariable(VariableTracker):
             )
         else:
             contents = self.pre_existing_contents
-        if contents is None or isinstance(contents, DeletedVariable):
+        # type.__instancecheck__ so a LazyVariableTracker is not realized
+        if contents is None or type.__instancecheck__(DeletedVariable, contents):
             return None
         return contents
 
@@ -1228,14 +1229,10 @@ class CellVariable(VariableTracker):
             attr_name = args[0].as_python_constant()
             getset = self.lookup_tp_getset_member(attr_name)
             if getset is None:
-                raise_observed_exception(
-                    AttributeError,
-                    tx,
-                    args=[
-                        f"'cell' object has no attribute '{attr_name}' "
-                        "and no __dict__ for setting new attributes"
-                    ],
-                )
+                msg = f"'cell' object has no attribute '{attr_name}'"
+                if sys.version_info >= (3, 13):
+                    msg += " and no __dict__ for setting new attributes"
+                raise_observed_exception(AttributeError, tx, args=[msg])
             getset.setter(self, tx, args[1] if nargs == 2 else None)
             return ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)
