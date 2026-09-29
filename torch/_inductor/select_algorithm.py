@@ -1619,7 +1619,7 @@ class TritonTemplateKernel(TritonKernel):
         val_shape: tuple[str] | None = None,
         block_indexing: bool = False,
     ):
-        """Generates store-output input producers, applies output epilogue fusions,
+        """Generates store-output input producers fusion, applies output epilogue fusions,
         and stores the final output unless it has been optimized away.
 
         Args:
@@ -1804,15 +1804,17 @@ class TritonTemplateKernel(TritonKernel):
             for input_index in self.prefix_inputs_fusion_indices:
                 input_node = self.input_nodes[input_index]
                 input_name = input_node.get_name()
-                producer_group = self.store_output_input_producer_groups.get(input_name)
-                if not producer_group:
+                fused_producer_group = self.store_output_input_producer_groups.get(
+                    input_name
+                )
+                if not fused_producer_group:
                     continue
 
                 # Preserve standalone pointwise numerics by upcasting low-precision
                 # arithmetic unless every producer is safe without upcasts.
                 # Load-input prologue fusion uses the same policy below.
                 can_codegen_without_upcast = all(
-                    node.can_codegen_without_upcasts() for node in producer_group
+                    node.can_codegen_without_upcasts() for node in fused_producer_group
                 )
                 with (
                     config.patch(
@@ -1821,7 +1823,7 @@ class TritonTemplateKernel(TritonKernel):
                     ),
                     V.set_ops_handler(store_output_capture),
                 ):
-                    for producer_node in producer_group:
+                    for producer_node in fused_producer_group:
                         producer_node.codegen(
                             self.split_and_set_ranges(producer_node.get_ranges())
                         )
@@ -1848,7 +1850,7 @@ class TritonTemplateKernel(TritonKernel):
             ):
                 input_node.freeze_layout()
                 input_name = input_node.get_name()
-                if input_name in store_output_capture.captured_values:
+                if input_name in self.store_output_input_producer_groups:
                     input_value = store_output_capture.captured_values[input_name]
                 else:
                     input_value = input_node.make_loader()(index_symbols)
@@ -2133,19 +2135,21 @@ class TritonTemplateKernel(TritonKernel):
         return node.get_stride()
 
     def _compute_fusion_metadata(
-        self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
+        self, scheduling, consumer_nodes, producer_nodes, buf_name_to_prologue_group
     ):
-        """Prepare epilogue/prologue routing before render().
+        """Prepare consumer/producer fusion routing before render().
 
-        ``prologue_nodes`` are upstream of the template node. Their code may be
-        emitted in either the template's load-input or store-output region.
+        ``producer_nodes`` are upstream of the template. Their code may be emitted
+        in either the template's load-input prologue or store-output epilogue region.
+        ``consumer_nodes`` are downstream of the template and are emitted in its
+        output epilogue.
 
-        Default: trivial routing — all epilogues broadcast to every subgraph,
-        none unfused, no prologue source tracking.  Override in subclasses
-        for per-output routing.
+        Default: trivial routing — all consumers broadcast to every subgraph,
+        none unfused, no producer source tracking. Override in subclasses for
+        per-output routing.
         """
         self._epilogue_nodes_by_subgraph: defaultdict[int, list[Any]] = defaultdict(
-            lambda: epilogue_nodes
+            lambda: consumer_nodes
         )
         self._unfused_epilogues: list[Any] = []
         self._prologue_sources: dict[str, frozenset[str]] = {}
@@ -2168,7 +2172,10 @@ class TritonTemplateKernel(TritonKernel):
         Returns the final source code string.
         """
         self._compute_fusion_metadata(
-            scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
+            scheduling,
+            consumer_nodes=epilogue_nodes,
+            producer_nodes=prologue_nodes,
+            buf_name_to_prologue_group=buf_name_to_prologue_group,
         )
         with self:
             partial_code = render()
@@ -2367,15 +2374,17 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         return self._unfused_epilogues
 
     def _compute_fusion_metadata(
-        self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
+        self, scheduling, consumer_nodes, producer_nodes, buf_name_to_prologue_group
     ):
         """Compute fusion metadata for external backends.
 
-        ``prologue_nodes`` are upstream of the template node. Their code may be
-        emitted in either the template's load-input or store-output region.
+        ``producer_nodes`` are upstream of the template. Their code may be emitted
+        in either the template's load-input prologue or store-output epilogue region.
+        ``consumer_nodes`` are downstream of the template and are emitted in its
+        output epilogue.
 
-        Determines eligible epilogues/prologues, builds epilogue specs,
-        and computes prologue sources — all before render().
+        Determines eligible consumers/producers, builds epilogue specs,
+        and computes producer sources — all before render().
 
         Hook setup (_setup_epilogue_hook / _setup_prologue_hook) cannot
         happen here because it requires V.kernel context, which is only
@@ -2386,7 +2395,7 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
 
         tb = self._template_buffer
         self._eligible_epilogues = self._find_eligible_epilogues(
-            epilogue_nodes, tb.epilogue_fusable_outputs
+            consumer_nodes, tb.epilogue_fusable_outputs
         )
         self._epilogue_nodes_by_subgraph = defaultdict(
             list,
@@ -2395,7 +2404,7 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         fused_ids = OrderedSet(id(sn) for sn, _, _, _ in self._eligible_epilogues)
         self._unfused_epilogues = [
             n
-            for n in epilogue_nodes
+            for n in consumer_nodes
             if id(n) not in fused_ids and not isinstance(n.node, ir.MultiOutput)
         ]
         self._prologue_sources = {
