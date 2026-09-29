@@ -5323,9 +5323,18 @@ def _capture_files(test, fn, example_inputs, backend, dynamic=None, tracer=None)
     directory = temp_dir.name
     artifact_path = os.path.join(directory, "artifact.py")
     cache_path = os.path.join(directory, "artifact.cache")
+    renamed = contextlib.nullcontext()
     if tracer is None:
         tracer = DynamoTracer(dynamic=dynamic, require_no_risky_drops=False)
+        if fn.__module__ == "__main__":
+            # The records name fn's module, which is __main__ under a script run
+            # and the driver refuses that; capture it from an importable alias.
+            module = "precompile_test_captured_module"
+            sys.modules[module] = sys.modules["__main__"]
+            test.addCleanup(sys.modules.pop, module, None)
+            renamed = mock.patch.object(fn, "__module__", module)
     with (
+        renamed,
         torch.no_grad(),
         capture(
             fn,
