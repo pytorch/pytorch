@@ -245,6 +245,7 @@ def set_logs(
     pre_grad_graphs: bool = False,
     post_grad_graphs: bool = False,
     ir_pre_fusion: bool = False,
+    ir_post_lowering_pretty: bool = False,
     ir_pre_fusion_pretty: bool = False,
     ir_post_fusion: bool = False,
     onnx_diagnostics: bool = False,
@@ -425,6 +426,9 @@ def set_logs(
         ir_pre_fusion (:class:`bool`):
             Whether to emit the graphs before inductor fusion passes. Default: ``False``
 
+        ir_post_lowering_pretty (:class:`bool`):
+            Whether to emit readable loop IR after inductor lowering, before scheduling. Default: ``False``
+
         ir_pre_fusion_pretty (:class:`bool`):
             Whether to emit readable loop IR before inductor fusion passes. Default: ``False``
 
@@ -599,6 +603,7 @@ def set_logs(
         pre_grad_graphs=pre_grad_graphs,
         post_grad_graphs=post_grad_graphs,
         ir_pre_fusion=ir_pre_fusion,
+        ir_post_lowering_pretty=ir_post_lowering_pretty,
         ir_pre_fusion_pretty=ir_pre_fusion_pretty,
         ir_post_fusion=ir_post_fusion,
         onnx=onnx,

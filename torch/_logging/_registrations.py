@@ -131,6 +131,11 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "ir_post_lowering_pretty",
+    "Prints readable loop IR after inductor lowering, before scheduling.",
+    off_by_default=True,
+)
+register_artifact(
     "ir_pre_fusion_pretty",
     "Prints readable loop IR before inductor fusion passes.",
     off_by_default=True,
