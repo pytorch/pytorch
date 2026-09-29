@@ -267,9 +267,7 @@ class TestStaticTritonLauncherUnit(TestCase):
             statically_launched_kernel_by_device(object(), "nope")
         with self.assertRaisesRegex(ValueError, "already registered"):
             # cuda is registered by default.
-            register_statically_launched_kernel(
-                "cuda", StaticallyLaunchedCudaKernel
-            )
+            register_statically_launched_kernel("cuda", StaticallyLaunchedCudaKernel)
         # Non-class inputs (the per-device launcher argument) must raise a clear
         # TypeError before issubclass can produce its native "must be a class".
         for bad in (None, object(), object):
