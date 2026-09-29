@@ -2595,15 +2595,8 @@ class VariableBuilder:
         backing_list = list_reverseiterator_backing_list(value)
         backing_source = ListReverseIteratorBackingListSource(self.get_source())
         backing_vt = VariableBuilder(self.tx, backing_source)(backing_list)
-        source_seq = (
-            backing_vt._base_vt
-            if isinstance(backing_vt, UserDefinedListVariable)
-            else backing_vt
-        )
-        if source_seq is None:
-            raise AssertionError("_base_vt must not be None")
         result = ListReverseIteratorVariable(
-            source_seq=source_seq,
+            source_seq=backing_vt,
             it_index=length - 1,
             source=self.source,
         )
