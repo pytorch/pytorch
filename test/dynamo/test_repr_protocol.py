@@ -3,6 +3,7 @@
 
 import collections
 import enum
+import sys
 import typing
 import unittest
 
@@ -32,6 +33,13 @@ class _SetSubclass(set):
 
 class _FrozenSetSubclass(frozenset):
     pass
+
+
+_NESTERS = {
+    "list": lambda x: [x],
+    "tuple": lambda x: (x,),
+    "dict": lambda x: {1: x},
+}
 
 
 @instantiate_parametrized_tests
@@ -496,6 +504,75 @@ class TpReprTests(TestCase):
 
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(), fn())
+
+    def test_nested_containers_repr(self):
+        def fn():
+            od = collections.OrderedDict(a=[1, (2,)])
+            return repr([torch.Size([2, 3]), od, {"k": (1,)}, ((),), [[]]])
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
+    @parametrize("kind", tuple(_NESTERS))
+    def test_deeply_nested_container_repr(self, kind):
+        # Deeper than Dynamo could recurse per nesting level, well within
+        # CPython's repr recursion limit.
+        nest = _NESTERS[kind]
+
+        def fn():
+            a = nest(None)
+            for _ in range(450):
+                a = nest(a)
+            return repr(a)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
+    @unittest.skipIf(
+        sys.version_info >= (3, 14),
+        "CPython 3.14 bounds repr recursion by stack size rather than a count",
+    )
+    @parametrize("kind", tuple(_NESTERS))
+    def test_too_deeply_nested_container_repr_raises(self, kind):
+        nest = _NESTERS[kind]
+
+        def call(f, *args):
+            # Branches on args like unittest's assertRaises does.
+            if not args:
+                return None
+            return f(*args)
+
+        def fn():
+            a = nest(None)
+            for _ in range(10_001):
+                a = nest(a)
+            try:
+                return call(repr, a)
+            except RecursionError as e:
+                return str(e)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(
+            compiled(),
+            "maximum recursion depth exceeded while getting the repr of an object",
+        )
+        self.assertEqual(compiled(), fn())
+
+    @parametrize("kind", tuple(_NESTERS))
+    def test_truthiness_of_deeply_nested_container(self, kind):
+        nest = _NESTERS[kind]
+
+        def fn(t):
+            a = nest(None)
+            for _ in range(1500):
+                a = nest(a)
+            # OrderedDict.__init__ branches on its kwargs dict.
+            od = collections.OrderedDict(t=t, a=a)
+            return t + len(od) if a else t
+
+        t = torch.zeros(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
 
     def test_str_of_id_of_compile_time_object(self):
         # id() on a sourceless object minted inside the region yields a

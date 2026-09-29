@@ -957,12 +957,20 @@ def generic_jump(
             self.jump(inst)
             return
 
-        if value.is_python_constant():
-            # ConstDictVariable is optimized to be very lazy about insertion of
-            # guards, so we have to manually insert a SEQUENCE_LENGTH guard
-            # here.
+        if isinstance(value, (ListVariable, TupleVariable, ConstDictVariable)):
+            # Truthiness is just non-emptiness. is_python_constant() would
+            # recursively convert every nested element, overflowing the stack
+            # for deeply nested contents.
             if isinstance(value, ConstDictVariable) and value.source:
+                # ConstDictVariable is optimized to be very lazy about insertion
+                # of guards, so we have to manually insert a SEQUENCE_LENGTH
+                # guard here.
                 install_guard(value.source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            if truth_fn(bool(value.items)):
+                if push:
+                    self.push(value)
+                self.jump(inst)
+        elif value.is_python_constant():
             if truth_fn(value.as_python_constant()):
                 if push:
                     self.push(value)
