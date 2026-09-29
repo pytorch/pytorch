@@ -1596,9 +1596,10 @@ class PrecompileSession:
 
     The artifact is STANDALONE: it rebuilds each captured frame from its code
     object and guard trees (see ``torch._precompile_driver._build_multigraph_forward``)
-    and installs nothing, so a frame the entry cannot reach through a graph-break
-    continuation -- one entered by an ordinary call, such as a child module's
-    forward that graph-breaks -- is refused at render rather than served eager.
+    and installs nothing, unless the entry cannot reach a frame through a
+    graph-break continuation -- one entered by an ordinary call, such as a child
+    module's forward that graph-breaks. That artifact is rendered installed-mode
+    instead (see ``torch._precompile_driver._build_installed_forward``).
     """
 
     def __init__(
