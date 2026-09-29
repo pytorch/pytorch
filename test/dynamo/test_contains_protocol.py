@@ -848,6 +848,10 @@ class ContainsNonBool:
         return 2
 
 
+class DictSubclassInheritedContains(dict):
+    pass
+
+
 @torch._dynamo.config.patch(enable_trace_unittest=True)
 class TestSpecialMethodContainsRegressions(torch._dynamo.test_case.TestCase):
     """slot_sq_contains lookup semantics (Objects/typeobject.c)."""
@@ -874,6 +878,19 @@ class TestSpecialMethodContainsRegressions(torch._dynamo.test_case.TestCase):
             TypeError, r"^dict\.__contains__\(\) takes no keyword arguments$"
         ):
             {}.__contains__(x=2, y=2)
+
+    @make_dynamo_test
+    def test_bound_contains_subclass_argument_errors(self):
+        d = DictSubclassInheritedContains()
+        with self.assertRaisesRegex(
+            TypeError,
+            r"^dict\.__contains__\(\) takes exactly one argument \(0 given\)$",
+        ):
+            d.__contains__()
+        with self.assertRaisesRegex(
+            TypeError, r"^dict\.__contains__\(\) takes no keyword arguments$"
+        ):
+            d.__contains__(x=2)
 
     @make_dynamo_test
     def test_contains_none_is_not_a_container(self):
