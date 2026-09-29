@@ -1488,6 +1488,8 @@ def remove_noop_ops(graph: torch.fx.Graph):
     """
     Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
     """
+    from torch.utils.checkpoint import CheckpointPolicy
+
     inputs = OrderedSet[torch.fx.Node]()
     input_storages = OrderedSet[int | None]()
     output_storages = OrderedSet[int | None]()
@@ -1508,6 +1510,8 @@ def remove_noop_ops(graph: torch.fx.Graph):
             output_storages.add(get_node_storage(out))
 
     for node in graph.nodes:
+        if node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE:
+            continue
         if node.target in noop_registry:
             cond, src_index = noop_registry[node.target]
             if isinstance(src_index, int):

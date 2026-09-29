@@ -1088,6 +1088,97 @@ def forward(self, primals_1):
             self.assertEqual(out.data_ptr(), x.data_ptr())
             self.assertEqual(out, torch.full_like(x, 4))
 
+    def test_detached_input_alias_view_preserves_grad_history(self):
+        def f(a):
+            out = a.detach().view(-1)
+            out.add_(a)
+            return out
+
+        for backend in ("aot_eager", "inductor"):
+            torchdynamo.reset()
+            compiled_f = torch.compile(f, backend=backend)
+            x = torch.arange(1.0, 4.0, requires_grad=True)
+            out = compiled_f(x)
+            self.assertEqual(out.data_ptr(), x.data_ptr())
+            out.sum().backward()
+            self.assertEqual(x.grad, torch.ones_like(x))
+
+    def test_detached_input_alias_grad_without_input_grad(self):
+        def f(a, p):
+            out = a.detach()
+            out.add_(p)
+            return out
+
+        for backend in ("aot_eager", "inductor"):
+            torchdynamo.reset()
+            compiled_f = torch.compile(f, backend=backend)
+            x = torch.ones(3)
+            p = torch.arange(1.0, 4.0, requires_grad=True)
+            out = compiled_f(x, p)
+            out.sum().backward()
+            self.assertEqual(p.grad, torch.ones_like(p))
+
+    def test_detached_input_alias_grad_without_view_replay(self):
+        from torch._functorch import config as functorch_config
+
+        def f(a):
+            out = a.detach()
+            out.add_(a * 2)
+            return out
+
+        with functorch_config.patch(view_replay_for_aliased_outputs=False):
+            for backend in ("aot_eager", "inductor"):
+                torchdynamo.reset()
+                compiled_f = torch.compile(f, backend=backend)
+                x = torch.ones(3, requires_grad=True)
+                out = compiled_f(x)
+                out.sum().backward()
+                self.assertEqual(x.grad, torch.full_like(x, 2))
+
+    def test_detached_input_alias_non_grad_input_saves_old_value(self):
+        def f(x, w):
+            y = x.detach()
+            y.mul_(w)
+            return y
+
+        for backend in ("aot_eager", "inductor"):
+            torchdynamo.reset()
+            x = torch.arange(1.0, 4.0)
+            w = torch.tensor([2.0, 3.0, 4.0], requires_grad=True)
+            out = torch.compile(f, backend=backend)(x, w)
+            out.sum().backward()
+            self.assertEqual(w.grad, torch.arange(1.0, 4.0))
+            self.assertEqual(
+                out.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+            )
+
+    def test_detached_input_alias_inductor_distinct_grad_slots(self):
+        def f(x, w):
+            y = x.detach()
+            y.mul_(w)
+            return y
+
+        x0 = torch.arange(1.0, 4.0, requires_grad=True)
+        x = x0 * 1
+        w = torch.tensor([2.0, 3.0, 4.0], requires_grad=True)
+        out = torch.compile(f, backend="inductor")(x, w)
+        (out + x).sum().backward()
+        self.assertEqual(x0.grad, torch.ones_like(x0))
+        self.assertEqual(w.grad, torch.arange(1.0, 4.0))
+
+    def test_detached_input_alias_inductor_saves_pre_mutation_clone(self):
+        def f(x, w):
+            y = x.detach()
+            y.mul_(w)
+            return y, (w * 2).sum()
+
+        x0 = torch.arange(1.0, 4.0, requires_grad=True)
+        x = x0 * 1
+        w = torch.tensor([2.0, 3.0, 4.0], requires_grad=True)
+        _, s = torch.compile(f, backend="inductor")(x, w)
+        s.backward()
+        self.assertEqual(w.grad, torch.full_like(w, 2))
+
     def test_nested_subclasses(self):
         @torch.compile(backend="aot_eager")
         def f(x):

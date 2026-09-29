@@ -4143,6 +4143,19 @@ def classify_nodes(
         for node in forward_only_graph.nodes
         if node.op != "output" and node.name in name_to_node
     )
+    # A forward clone may be needed only by backward to retain a value from
+    # before a runtime input mutation.  Without making it a forward node, the
+    # min-cut partitioner can recompute even a MUST_SAVE clone in backward.
+    required_fw_nodes.update(
+        node
+        for node in joint_module.graph.nodes
+        if node.target is torch.ops.aten.clone.default
+        and node.meta.get("partitioner_tag") == "is_forward"
+        and node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE
+        and any(
+            user.meta.get("partitioner_tag") == "is_backward" for user in node.users
+        )
+    )
     unclaimed_nodes: OrderedSet[fx.Node] = OrderedSet(
         node
         for node in joint_module.graph.nodes

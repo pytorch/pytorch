@@ -822,6 +822,18 @@ def joint_graph_passes(
 
     from .post_grad import remove_noop_ops
 
+    # A forward clone consumed directly by backward must keep its pre-mutation
+    # value. The runtime epilogue can mutate the primal before backward runs;
+    # folding the clone into that primal or recomputing it gives wrong gradients
+    # (or a version-counter error) for detached aliases mutated in-place.
+    from torch.utils.checkpoint import CheckpointPolicy
+
+    for node in graph.graph.nodes:
+        if node.target is torch.ops.aten.clone.default and any(
+            user.meta.get("partitioner_tag") == "is_backward" for user in node.users
+        ):
+            node.meta["recompute"] = CheckpointPolicy.MUST_SAVE
+
     GraphTransformObserver(graph, "remove_noop_ops").apply_graph_pass(remove_noop_ops)
 
     if config.joint_graph_constant_folding:

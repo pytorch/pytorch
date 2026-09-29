@@ -130,6 +130,24 @@ class OutputAliasInfo:
     # the elements returned by the `as_tuple()` call.
     view_meta_sequence: ViewMetaSequence | None = None
 
+    @property
+    def participates_in_backward(self) -> bool:
+        # Keep tangent selection, the joint-graph output mask, and the runtime
+        # backward prologue in sync for aliases with independent history.
+        return (
+            self.requires_grad_for_backward
+            and issubclass(self.raw_type, Tensor)
+            and (
+                self.output_type
+                in (
+                    OutputType.non_alias,
+                    OutputType.unsafe_view_alias,
+                    OutputType.custom_function_view,
+                )
+                or self.needs_alias_grad
+            )
+        )
+
 
 class MutationType(Enum):
     NOT_MUTATED = 1
@@ -636,7 +654,7 @@ class ViewAndMutationMeta:
         unsafe_view_out_indices = [
             i
             for i, m in enumerate(self.output_info)
-            if m.output_type is OutputType.unsafe_view_alias
+            if m.output_type is OutputType.unsafe_view_alias or m.needs_alias_grad
         ]
 
         # This is pre-computed in post_init for perf.

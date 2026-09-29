@@ -268,19 +268,14 @@ class AliasOfInputHandler:
         regenerated = gen_alias_from_base(
             aliased_base_tensor,
             target_meta_tensor,
-            self.requires_grad,
+            self.requires_grad and not self.needs_alias_grad,
             self.view_meta_sequence,
             replay_views=self.replay_views,
         )
-        if (
-            self.needs_alias_grad
-            and target_meta_tensor.requires_grad
-            and not regenerated.requires_grad
-        ):
-            # Replaying a detach view preserves storage aliasing but drops the
-            # in-place update's autograd history. Copying from the compiled
-            # output reattaches that history through ordinary CopyBackwards,
-            # while keeping the regenerated output aliased to the input.
+        if self.needs_alias_grad and target_meta_tensor.requires_grad:
+            # Regenerate a non-differentiable alias regardless of whether view
+            # replay or as_strided was used, then attach only the compiled
+            # output's history. This costs an extra copy for this rare case.
             with torch.enable_grad():
                 regenerated.copy_(target_meta_tensor)
         return regenerated
@@ -1050,13 +1045,11 @@ def _create_runtime_wrapper(
                     buf.writeline(
                         f"ret_outs.append(gen_alias_from_base("
                         f"orig_inputs[{handler.base_idx}], {out_expr}, "
-                        f"{handler.requires_grad!r}, {vms_name}, "
+                        f"{(handler.requires_grad and not handler.needs_alias_grad)!r}, {vms_name}, "
                         f"replay_views={handler.replay_views!r}))"
                     )
                     if handler.needs_alias_grad:
-                        buf.writeline(
-                            f"if {out_expr}.requires_grad and not ret_outs[-1].requires_grad:"
-                        )
+                        buf.writeline(f"if {out_expr}.requires_grad:")
                         with buf.indent():
                             buf.writeline("with torch.enable_grad():")
                             with buf.indent():
@@ -2770,6 +2763,8 @@ class _AutogradForwardEpilogue:
 
         if num_outputs_aliased > 0:
             for idx in self.metadata.aliased_out_indices:
+                if self.metadata.output_info[idx].needs_alias_grad:
+                    continue
                 raw_return_idx = num_mutated_runtime_inps + idx
                 raw_returns[raw_return_idx] = TensorAlias(raw_returns[raw_return_idx])
 
@@ -3054,19 +3049,7 @@ def _codegen_backward_prologue(
 
     out_surviving: list[int] = []
     for i, info in enumerate(fw_metadata.output_info):
-        if (
-            (
-                info.output_type
-                in [
-                    OutputType.non_alias,
-                    OutputType.unsafe_view_alias,
-                    OutputType.custom_function_view,
-                ]
-                or info.needs_alias_grad
-            )
-            and issubclass(info.raw_type, torch.Tensor)
-            and info.requires_grad_for_backward
-        ):
+        if info.participates_in_backward:
             out_surviving.append(num_mutated_runtime_inps + i)
 
     intermediate_start = num_mutated_runtime_inps + num_outputs

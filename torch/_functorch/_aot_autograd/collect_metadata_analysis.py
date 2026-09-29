@@ -718,6 +718,23 @@ from a multi-output view call"
                     view_meta_sequence = ViewMetaSequence(o)
 
             requires_grad = isinstance(o, torch.Tensor) and o.requires_grad
+            # An in-place update can give a detached alias its own grad_fn.
+            # A view of that alias has a _base, but its view chain still does
+            # not reach the input whose storage it aliases.
+            view_root = o
+            if (
+                output_type == OutputType.alias_of_input
+                and requires_grad
+                and grad_fn is not None
+            ):
+                while view_root._base is not None:
+                    view_root = view_root._base
+            needs_alias_grad = (
+                output_type == OutputType.alias_of_input
+                and requires_grad
+                and grad_fn is not None
+                and id(view_root) not in inp_tensor_ids
+            )
             out_info = OutputAliasInfo(
                 output_type=output_type,
                 raw_type=type(o),
@@ -729,12 +746,7 @@ from a multi-output view call"
                 # differentiation.
                 requires_grad_for_backward=requires_grad
                 and (o._base is None or grad_fn is not None),
-                needs_alias_grad=(
-                    output_type == OutputType.alias_of_input
-                    and requires_grad
-                    and o._base is None
-                    and grad_fn is not None
-                ),
+                needs_alias_grad=needs_alias_grad,
                 view_meta_sequence=view_meta_sequence,
             )
             output_info.append(out_info)
@@ -816,17 +828,7 @@ from a multi-output view call"
         f_output_tangents_pairs = [
             (o, TangentAOTInput(desc))
             for o, info, desc in zip(flat_f_outs, output_info, flat_f_outs_descs)
-            if (
-                info.output_type
-                in [
-                    OutputType.non_alias,
-                    OutputType.unsafe_view_alias,
-                    OutputType.custom_function_view,
-                ]
-                or info.needs_alias_grad
-            )
-            and issubclass(info.raw_type, torch.Tensor)
-            and info.requires_grad_for_backward
+            if info.participates_in_backward
         ]
         f_output_tangents, f_output_tangents_descs = (
             [x[0] for x in f_output_tangents_pairs],

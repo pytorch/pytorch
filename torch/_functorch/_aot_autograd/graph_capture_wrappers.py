@@ -232,22 +232,7 @@ def fn_prepped_for_autograd(
         # Pass any (non-aliased) outputs in as tangents, since they'll be returned as outputs in the fw
         # For outputs that are aliases of intermediates, we will have returned the output's _base as an output in the graph instead,
         # which we *should* send to grad()
-        output_grad_mask = [
-            (
-                meta.output_info[i].output_type
-                in [
-                    OutputType.non_alias,
-                    OutputType.unsafe_view_alias,
-                    OutputType.custom_function_view,
-                ]
-                or meta.output_info[i].needs_alias_grad
-            )
-            # Also, only tensor outputs should participate in the backward
-            # (in particular, Symint outputs in the forward graph shouldn't get tangents)
-            and issubclass(meta.output_info[i].raw_type, Tensor)
-            and meta.output_info[i].requires_grad_for_backward
-            for (i, x) in enumerate(outs)
-        ]
+        output_grad_mask = [info.participates_in_backward for info in meta.output_info]
 
         intermediate_base_grad_mask = [True for _ in range(len(intermediate_bases))]
 

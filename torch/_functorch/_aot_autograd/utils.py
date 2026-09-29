@@ -255,6 +255,18 @@ def create_tree_flattened_fn(
 def maybe_to_fresh_input(idx: int, t: Any, meta: "ViewAndMutationMeta") -> Any:
     if not isinstance(t, torch.Tensor):
         return t
+    # A mutated input without requires_grad can still be needed by backward
+    # when an alias of it gains its own gradient history.  Keep its original
+    # value separate from the mutation replayed onto the caller's input.
+    if (
+        meta.input_info[idx].mutates_data
+        and not meta.input_info[idx].requires_grad
+        and any(
+            output.base_idx == idx and output.needs_alias_grad
+            for output in meta.output_info
+        )
+    ):
+        return t.clone()
     if idx in meta.mutated_inp_runtime_indices:
         # We only need to bother cloning mutated inputs that participate in autograd.
         if meta.input_info[idx].requires_grad and meta.input_info[idx].mutates_data:
