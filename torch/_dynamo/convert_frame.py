@@ -1721,11 +1721,11 @@ def _compile(
     # in the case of normal and exception code paths
     convert_frame_box: ConvertFrameBox | None = None,
 ) -> ConvertFrameReturn:
+    from torch.compiler._no_compile import check_compilation_allowed
     from torch.fx.experimental.validator import (
         BisectValidationException,
         ValidationException,
     )
-    from torch.compiler._no_compile import check_compilation_allowed
 
     check_compilation_allowed("Dynamo graph compilation")
 
