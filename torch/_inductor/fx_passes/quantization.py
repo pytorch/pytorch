@@ -8,6 +8,7 @@ import operator
 import torch
 from torch._dynamo.utils import counters
 from torch.fx.node import map_arg
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..lowering import lowerings as L, require_channels_last
@@ -1134,8 +1135,8 @@ def _register_quantization_reshape():
 # Device types on which the weight-only-quant (WOQ) int8 fusions may fire.
 # Third-party backends that implement aten._weight_int8pack_mm can opt in
 # via the register_* functions below.
-_concat_linear_int8_woq_devices: set[str] = {"cpu", "cuda"}
-_woq_int8pack_fusion_devices: set[str] = {"cpu", "cuda", "xpu"}
+_concat_linear_int8_woq_devices: OrderedSet[str] = OrderedSet(["cpu", "cuda"])
+_woq_int8pack_fusion_devices: OrderedSet[str] = OrderedSet(["cpu", "cuda", "xpu"])
 
 
 def register_concat_linear_int8_woq_device(device_type: str) -> None:
