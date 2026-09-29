@@ -5,7 +5,6 @@ import json
 import os
 import random
 import re
-import signal
 import subprocess
 import sys
 import tempfile
@@ -2115,17 +2114,6 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
 class SymmMemNegativeTest(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
-        # On ROCm the device-side timeout calls abort() (see trap() in
-        # CUDASymmetricMemory-inl.cuh), which raises SIGABRT and kills the
-        # process rather than surfacing a catchable RuntimeError like CUDA's
-        # __trap(). Register the resulting exit code (-SIGABRT) as expected for
-        # the timeout tests. Set after super().setUp(), which resets the dict.
-        if torch.version.hip:
-            self.special_return_code_checks = {
-                self.test_barrier_timeout.__wrapped__: -signal.SIGABRT,
-                self.test_put_signal_timeout.__wrapped__: -signal.SIGABRT,
-                self.test_wait_signal_timeout.__wrapped__: -signal.SIGABRT,
-            }
         self._spawn_processes()
 
     @property
@@ -2147,9 +2135,9 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         )
         torch.manual_seed(42 + self.rank)
 
-    # On CUDA the device-side timeout triggers __trap(), surfaced as a catchable
-    # RuntimeError. On ROCm it calls abort() -> SIGABRT, which kills the process;
-    # the expected -SIGABRT exit code is registered in setUp.
+    # The device-side timeout calls trap(), which surfaces as a catchable
+    # RuntimeError at the next synchronize() on both CUDA (__trap) and ROCm
+    # (abort() -> hipErrorLaunchFailure).
     @skip_if_lt_x_gpu(2)
     def test_barrier_timeout(self) -> None:
         self._init_process()
@@ -2158,13 +2146,9 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
 
         if self.rank == 0:
-            if torch.version.hip:
+            with self.assertRaises(RuntimeError):
                 symm_mem_hdl.barrier(timeout_ms=1000)
                 torch.cuda.synchronize()
-            else:
-                with self.assertRaises(RuntimeError):
-                    symm_mem_hdl.barrier(timeout_ms=1000)
-                    torch.cuda.synchronize()
         else:
             torch.cuda.synchronize()
 
@@ -2174,9 +2158,9 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         # impossible to terminate the process in this state.
         os._exit(0)
 
-    # On CUDA the device-side timeout triggers __trap(), surfaced as a catchable
-    # RuntimeError. On ROCm it calls abort() -> SIGABRT, which kills the process;
-    # the expected -SIGABRT exit code is registered in setUp.
+    # The device-side timeout calls trap(), which surfaces as a catchable
+    # RuntimeError at the next synchronize() on both CUDA (__trap) and ROCm
+    # (abort() -> hipErrorLaunchFailure).
     @skip_if_lt_x_gpu(2)
     def test_put_signal_timeout(self) -> None:
         self._init_process()
@@ -2185,19 +2169,12 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
 
         if self.rank == 0:
-            if torch.version.hip:
+            with self.assertRaises(RuntimeError):
                 # First, put a signal into rank 1's signal pad. Since rank 1
                 # doesn't wait on this signal, the subsequent put will timeout.
                 symm_mem_hdl.put_signal(dst_rank=1)
                 symm_mem_hdl.put_signal(dst_rank=1, timeout_ms=1000)
                 torch.cuda.synchronize()
-            else:
-                with self.assertRaises(RuntimeError):
-                    # First, put a signal into rank 1's signal pad. Since rank 1
-                    # doesn't wait on this signal, the subsequent put will timeout.
-                    symm_mem_hdl.put_signal(dst_rank=1)
-                    symm_mem_hdl.put_signal(dst_rank=1, timeout_ms=1000)
-                    torch.cuda.synchronize()
         else:
             torch.cuda.synchronize()
 
@@ -2207,9 +2184,9 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         # impossible to terminate the process in this state.
         os._exit(0)
 
-    # On CUDA the device-side timeout triggers __trap(), surfaced as a catchable
-    # RuntimeError. On ROCm it calls abort() -> SIGABRT, which kills the process;
-    # the expected -SIGABRT exit code is registered in setUp.
+    # The device-side timeout calls trap(), which surfaces as a catchable
+    # RuntimeError at the next synchronize() on both CUDA (__trap) and ROCm
+    # (abort() -> hipErrorLaunchFailure).
     @skip_if_lt_x_gpu(2)
     def test_wait_signal_timeout(self) -> None:
         self._init_process()
@@ -2218,13 +2195,9 @@ class SymmMemNegativeTest(MultiProcessTestCase):
         symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
 
         if self.rank == 0:
-            if torch.version.hip:
+            with self.assertRaises(RuntimeError):
                 symm_mem_hdl.wait_signal(src_rank=1, timeout_ms=1000)
                 torch.cuda.synchronize()
-            else:
-                with self.assertRaises(RuntimeError):
-                    symm_mem_hdl.wait_signal(src_rank=1, timeout_ms=1000)
-                    torch.cuda.synchronize()
         else:
             torch.cuda.synchronize()
 
