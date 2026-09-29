@@ -166,6 +166,9 @@ class TritonBundler:
         Lazily observes that we have seen a Triton kernel compilation. Remembers
         it for when collect is later called.
         """
+        from torch.compiler._runtime_cache import record_inductor_triton_binary
+
+        record_inductor_triton_binary(kernel_hash)
         if (entries := cls._entries) is not None:
             entries.append(
                 TritonBundleEntry(kernel_hash, device, triton_cache_dir(device))

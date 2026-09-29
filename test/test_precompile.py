@@ -6152,13 +6152,15 @@ class _FakeTritonRuntimeCache:
         self.explicit = True
         self.waits = 0
         self.imports = []
+        self.exclusions = []
 
     def _runtime_cache_root(self, require_explicit=False):
         if require_explicit and not self.explicit:
             raise RuntimeError("TRITON_CACHE_DIR is not set")
         return self.root
 
-    def export_runtime_cache(self, context):
+    def export_runtime_cache(self, context, exclude=()):
+        self.exclusions.append(frozenset(exclude))
         return f"runtime cache from {self.root}".encode()
 
     def import_runtime_cache(self, payload, context):
@@ -7517,6 +7519,82 @@ class TestPrecompileRuntimeCache(TestCase):
                         self.assertEqual(runnable(x), _no_compilation_single_graph(x))
                 self.assertEqual(len(fake.imports), int(missing == "autotuning"))
 
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
+    @parametrize("loaded", (False, True))
+    def test_triton_runtime_cache_excludes_inductor_kernels(self, loaded):
+        from pathlib import Path
+
+        import triton
+        import triton.language as tl
+
+        from torch._inductor import config as inductor_config
+        from torch._inductor.async_compile import CompiledTritonKernels
+        from torch._inductor.utils import clear_caches
+
+        @triton.jit
+        def user_add_one(x_ptr, n, BLOCK: tl.constexpr):
+            offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+            mask = offsets < n
+            tl.store(
+                x_ptr + offsets, tl.load(x_ptr + offsets, mask=mask) + 1, mask=mask
+            )
+
+        def fn(x):
+            return (x.sin() * 2).sum(dim=-1)
+
+        pc = torch.compiler.precompile
+        x = torch.randn(64, 1024, device="cuda")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "triton"
+            inductor_cache = {
+                "TORCHINDUCTOR_CACHE_DIR": os.path.join(directory, "inductor")
+            }
+            clear_caches()
+            try:
+                if loaded:
+                    with (
+                        mock.patch.dict(os.environ, inductor_cache),
+                        _producer_triton_cache(Path(directory) / "elsewhere"),
+                        inductor_config.patch(max_autotune=True),
+                    ):
+                        source, cache = _capture_files(
+                            self, fn, [(x,)], backend="inductor"
+                        )
+                    clear_caches()
+                with (
+                    mock.patch.dict(os.environ, inductor_cache),
+                    _producer_triton_cache(root),
+                    _fake_triton_runtime_cache(root) as fake,
+                    inductor_config.patch(max_autotune=True),
+                ):
+                    with pc.capture_runtime():
+                        if loaded:
+                            # A loaded artifact's kernels land in the capture
+                            # root too, though no capture compiled them.
+                            with torch.no_grad():
+                                pc.load(source, cache)(x)
+                        else:
+                            source, cache = _capture_files(
+                                self, fn, [(x,)], backend="inductor"
+                            )
+                        user_add_one[(1,)](x, 64, BLOCK=64)
+                        pc.finalize_cache(artifact_path=source, cache_path=cache)
+            finally:
+                CompiledTritonKernels.cache_clear()
+                clear_caches()
+            binaries = {
+                path.parent.name: path.stem
+                for path in root.glob("*/*")
+                if path.suffix in (".cubin", ".hsaco")
+            }
+            [excluded] = fake.exclusions
+            self.assertIn("user_add_one", binaries.values())
+            self.assertTrue(excluded)
+            self.assertEqual(
+                excluded,
+                {key for key, name in binaries.items() if name != "user_add_one"},
+            )
+
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     @parametrize("failure", ("_runtime_cache_root", "import_runtime_cache"))
     def test_failed_triton_runtime_import_keeps_other_artifacts_when_not_strict(
@@ -7570,6 +7648,7 @@ class TestPrecompileRuntimeCache(TestCase):
             "expected": ({}, True),
             "missing": ({"import_runtime_cache": None}, False),
             "renamed_keyword": ({"export_runtime_cache": lambda *, ctx: b""}, False),
+            "no_exclude": ({"export_runtime_cache": lambda *, context: b""}, False),
             "positional_only": (
                 {"import_runtime_cache": lambda payload, context, /: None},
                 False,

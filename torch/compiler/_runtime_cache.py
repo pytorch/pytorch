@@ -72,18 +72,23 @@ def _triton_runtime_cache() -> ModuleType | None:
     except ImportError:
         return None
     required = {
-        "export_runtime_cache": "context",
-        "import_runtime_cache": "context",
-        "_runtime_cache_root": "require_explicit",
+        "export_runtime_cache": ("context", "exclude"),
+        "import_runtime_cache": ("context",),
+        "_runtime_cache_root": ("require_explicit",),
     }
-    for name, keyword in required.items():
+    for name, keywords in required.items():
         try:
-            parameter = inspect.signature(getattr(cache, name)).parameters[keyword]
+            parameters = inspect.signature(getattr(cache, name)).parameters
+            kinds = [parameters[keyword].kind for keyword in keywords]
         except (AttributeError, KeyError, TypeError, ValueError):
             return None
-        if parameter.kind not in (
-            inspect.Parameter.KEYWORD_ONLY,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        if any(
+            kind
+            not in (
+                inspect.Parameter.KEYWORD_ONLY,
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            )
+            for kind in kinds
         ):
             return None
     return cache
@@ -261,6 +266,16 @@ def record_triton_kernel(key: str, kernel: CachingAutotuner) -> None:
         instances = owner.triton_kernels.setdefault(key, [])
         if not any(instance is kernel for instance in instances):
             instances.append(kernel)
+
+
+def record_inductor_triton_binary(cache_key: str) -> None:
+    # Inductor's binaries, including losing autotune candidates, share the
+    # Triton cache with JIT kernels; inductor_triton already ships the ones
+    # replay needs, so triton_runtime excludes these keys.
+    with _capture_lock:
+        owner = _capture
+        if owner is not None and owner.pid == os.getpid() and not owner.sealed:
+            owner.inductor_triton_keys.add(cache_key)
 
 
 def clear_triton_kernels() -> None:
@@ -445,6 +460,7 @@ class _RuntimeCapture:
         self.finalize_lock = threading.Lock()
         self.triton_kernels: dict[str, list[CachingAutotuner]] = {}
         self.cpp_kernels: dict[str, tuple[str, Callable[[], object]]] = {}
+        self.inductor_triton_keys: set[str] = set()
 
     def seal(self) -> None:
         if self.sealed:
@@ -519,6 +535,7 @@ def capture_runtime() -> Iterator[None]:
             with _capture_lock:
                 owner.triton_kernels.clear()
                 owner.cpp_kernels.clear()
+                owner.inductor_triton_keys.clear()
                 if _capture is owner:
                     _capture = None
 
@@ -589,6 +606,7 @@ def finalize_runtime_cache(
             owner.seal()
             kernels = dict(owner.triton_kernels)
             cpp_kernels = {key: path for key, (path, _) in owner.cpp_kernels.items()}
+            inductor_triton_keys = frozenset(owner.inductor_triton_keys)
         try:
             static_kernels: dict[str, bytes] = {}
             rejected_sources: list[dict[str, object]] = []
@@ -613,7 +631,9 @@ def finalize_runtime_cache(
             static_payload = pickle.dumps(static_kernels)
             cpp_payload = _freeze_cpp_kernels(cpp_kernels)
             if cache is not None:
-                payload = cache.export_runtime_cache(context=_runtime_context())
+                payload = cache.export_runtime_cache(
+                    context=_runtime_context(), exclude=inductor_triton_keys
+                )
                 artifacts[TritonRuntimeCacheArtifact.type()] = [
                     TritonRuntimeCacheArtifact(
                         hashlib.sha256(payload).hexdigest(), payload
