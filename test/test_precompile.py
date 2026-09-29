@@ -6166,6 +6166,21 @@ class _FakeTritonRuntimeCache:
 
 
 @contextlib.contextmanager
+def _replace_module(name, module):
+    # mock.patch.dict(sys.modules) restores the whole dict on exit, dropping modules
+    # first imported inside it; re-importing those can re-run registrations.
+    previous = sys.modules.get(name)
+    sys.modules[name] = module
+    try:
+        yield
+    finally:
+        if previous is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = previous
+
+
+@contextlib.contextmanager
 def _fake_triton_runtime_cache(root):
     import triton
 
@@ -6179,7 +6194,7 @@ def _fake_triton_runtime_cache(root):
         triton.knobs.autotuning.scope(),
         mock.patch.object(_runtime_cache, "_triton_runtime_cache", return_value=fake),
         mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()),
-        mock.patch.dict(sys.modules, {"triton.runtime._async_compile": async_compile}),
+        _replace_module("triton.runtime._async_compile", async_compile),
     ):
         triton.knobs.autotuning.cache = True
         yield fake
@@ -6572,32 +6587,57 @@ class TestPrecompileRuntimeCache(TestCase):
             _runtime_cache.InductorCppCacheArtifact(digest, payload).populate_cache()
         self.assertEqual(_runtime_cache._frozen_cpp_kernels, {})
 
-    def test_frozen_cpu_graph_serves_strict_load_from_empty_caches(self):
+    @parametrize("precompile_headers", (False, True))
+    def test_frozen_cpu_graph_serves_strict_load_from_empty_caches(
+        self, precompile_headers
+    ):
+        from torch._inductor import codecache, config as inductor_config
         from torch._inductor.utils import clear_caches
         from torch.compiler import _runtime_cache
+
+        @contextlib.contextmanager
+        def fresh_host(root):
+            # The precompiled-header directory is fixed at import time and
+            # _precompile_header memoizes its result, so neither follows
+            # TORCHINDUCTOR_CACHE_DIR.
+            headers = os.path.join(root, "precompiled_headers")
+            with (
+                mock.patch.dict(os.environ, {"TORCHINDUCTOR_CACHE_DIR": root}),
+                mock.patch.object(codecache, "_HEADER_DIR", headers),
+                mock.patch.object(
+                    codecache, "_HEADER_LOCK_DIR", os.path.join(headers, "locks")
+                ),
+                mock.patch.object(
+                    codecache,
+                    "_precompile_header",
+                    functools.cache(codecache._precompile_header.__wrapped__),
+                ),
+            ):
+                yield
 
         pc = torch.compiler.precompile
         fn = _no_compilation_inductor_graph
         x = torch.randn(8, 16)
-        with tempfile.TemporaryDirectory() as directory:
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            inductor_config.patch(cpp_cache_precompile_headers=precompile_headers),
+        ):
             clear_caches()
             try:
                 with (
-                    mock.patch.dict(
-                        os.environ,
-                        {"TORCHINDUCTOR_CACHE_DIR": os.path.join(directory, "p")},
-                    ),
+                    fresh_host(os.path.join(directory, "p")),
                     pc.capture_runtime(),
                 ):
                     source, cache = _capture_files(self, fn, [(x,)], backend="inductor")
                     self.assertTrue(_runtime_cache._capture.cpp_kernels)
                     pc.finalize_cache(artifact_path=source, cache_path=cache)
+                self.assertEqual(
+                    os.path.isdir(os.path.join(directory, "p", "precompiled_headers")),
+                    precompile_headers,
+                )
                 clear_caches()
                 with (
-                    mock.patch.dict(
-                        os.environ,
-                        {"TORCHINDUCTOR_CACHE_DIR": os.path.join(directory, "c")},
-                    ),
+                    fresh_host(os.path.join(directory, "c")),
                     pc.no_compilation(),
                 ):
                     pc.prepare_runtime(artifact_path=source, cache_path=cache)
@@ -6783,12 +6823,17 @@ class TestPrecompileRuntimeCache(TestCase):
         _rewrite_envelope(cache, artifact=None)
         with (
             pc.capture_runtime(),
-            self.assertRaisesRegex(PrecompileError, "saved none"),
+            self.assertRaisesRegex(PrecompileError, "saved none") as failure,
         ):
             pc.finalize_cache(artifact_path=source, cache_path=cache)
+        self.assertIn(
+            f"(artifact_path={source!r}, cache_path={cache!r})", str(failure.exception)
+        )
 
     @parametrize("operation", ("finalize_cache", "prepare_runtime"))
     def test_runtime_cache_rejects_make_fx_capture(self, operation):
+        from pathlib import Path
+
         pc = torch.compiler.precompile
         source, cache = _capture_files(
             self,
@@ -6800,11 +6845,16 @@ class TestPrecompileRuntimeCache(TestCase):
         with (
             pc.capture_runtime(),
             self.assertRaisesRegex(
-                PrecompileError,
-                f"precompile.{operation} supports only Dynamo captures",
-            ),
+                PrecompileError, "supports only Dynamo captures"
+            ) as failure,
         ):
-            getattr(pc, operation)(artifact_path=source, cache_path=cache)
+            getattr(pc, operation)(artifact_path=Path(source), cache_path=Path(cache))
+        self.assertTrue(
+            str(failure.exception).startswith(
+                f"precompile.{operation} (artifact_path={source!r}, "
+                f"cache_path={cache!r})"
+            )
+        )
 
     @parametrize("operation", ("finalize_cache", "prepare_runtime"))
     @parametrize(
@@ -7413,7 +7463,7 @@ class TestPrecompileRuntimeCache(TestCase):
                 artifact.populate_cache()
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
-    @parametrize("missing", ("import", "autotuning"))
+    @parametrize("missing", ("import", "cache_dir", "autotuning"))
     def test_prepare_runtime_is_strict_about_triton_runtime_cache(self, missing):
         from pathlib import Path
 
@@ -7442,6 +7492,15 @@ class TestPrecompileRuntimeCache(TestCase):
                             )
                         )
                         reason = "cannot import"
+                    elif missing == "cache_dir":
+                        stack.enter_context(
+                            mock.patch.object(
+                                fake,
+                                "_runtime_cache_root",
+                                side_effect=RuntimeError("TRITON_CACHE_DIR is not set"),
+                            )
+                        )
+                        reason = "no cache directory"
                     else:
                         triton.knobs.autotuning.cache = False
                         reason = "autotuning cache is disabled"
@@ -7453,7 +7512,44 @@ class TestPrecompileRuntimeCache(TestCase):
                     self.assertIn(reason, "\n".join(logs.output))
                     with torch.no_grad():
                         self.assertEqual(runnable(x), _no_compilation_single_graph(x))
-                self.assertEqual(len(fake.imports), 0 if missing == "import" else 1)
+                self.assertEqual(len(fake.imports), int(missing == "autotuning"))
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_triton_runtime_cache_requires_the_expected_api(self):
+        import triton.runtime
+
+        from torch.compiler import _runtime_cache
+
+        fake = _FakeTritonRuntimeCache(None)
+        expected = {
+            "export_runtime_cache": fake.export_runtime_cache,
+            "import_runtime_cache": fake.import_runtime_cache,
+            "_runtime_cache_root": fake._runtime_cache_root,
+        }
+        cases = {
+            "expected": ({}, True),
+            "missing": ({"import_runtime_cache": None}, False),
+            "renamed_keyword": ({"export_runtime_cache": lambda *, ctx: b""}, False),
+            "positional_only": (
+                {"import_runtime_cache": lambda payload, context, /: None},
+                False,
+            ),
+            "no_require_explicit": ({"_runtime_cache_root": lambda: None}, False),
+        }
+        async_compile = types.SimpleNamespace(wait_for_pending_compiles=lambda: None)
+        for name, (overrides, supported) in cases.items():
+            api = {**expected, **overrides}
+            cache = types.SimpleNamespace(
+                **{key: value for key, value in api.items() if value is not None}
+            )
+            with (
+                self.subTest(name),
+                mock.patch.object(triton.runtime, "cache", cache, create=True),
+                _replace_module("triton.runtime._async_compile", async_compile),
+            ):
+                self.assertEqual(
+                    _runtime_cache._triton_runtime_cache() is cache, supported
+                )
 
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     @parametrize("device", (0, None))

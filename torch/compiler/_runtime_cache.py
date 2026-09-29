@@ -6,6 +6,7 @@ import collections
 import contextlib
 import copy
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -60,7 +61,8 @@ def _triton_runtime_cache() -> ModuleType | None:
 
     Without it, finalization still freezes Inductor's static Triton launchers and
     C++ kernels, but kernels launched directly through Triton's JIT are not captured
-    and compile again on first use in the serving process.
+    and compile again on first use in the serving process. The API is matched by
+    signature, so a Triton whose runtime-cache API differs counts as one without it.
     """
     try:
         from triton.runtime import cache
@@ -69,8 +71,22 @@ def _triton_runtime_cache() -> ModuleType | None:
         )
     except ImportError:
         return None
-    required = ("export_runtime_cache", "import_runtime_cache", "_runtime_cache_root")
-    return cache if all(hasattr(cache, name) for name in required) else None
+    required = {
+        "export_runtime_cache": "context",
+        "import_runtime_cache": "context",
+        "_runtime_cache_root": "require_explicit",
+    }
+    for name, keyword in required.items():
+        try:
+            parameter = inspect.signature(getattr(cache, name)).parameters[keyword]
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return None
+        if parameter.kind not in (
+            inspect.Parameter.KEYWORD_ONLY,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+        ):
+            return None
+    return cache
 
 
 def _runtime_context() -> dict[str, str | None]:
@@ -103,12 +119,17 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
     def import_into_triton(self, *, strict: bool) -> None:
         cache = _triton_runtime_cache()
         problem = None
+        root = None
         if cache is None:
             problem = "the installed Triton cannot import one"
         else:
             from triton import knobs
 
-            if not knobs.autotuning.cache:
+            try:
+                root = str(cache._runtime_cache_root())
+            except RuntimeError as exc:
+                problem = f"Triton has no cache directory to import it into ({exc})"
+            if root is not None and not knobs.autotuning.cache:
                 problem = (
                     "Triton's autotuning cache is disabled (TRITON_CACHE_AUTOTUNING=1 "
                     "enables it), so the captured autotuning decisions are ignored"
@@ -122,9 +143,9 @@ class TritonRuntimeCacheArtifact(CacheArtifact):
             log.warning(
                 "%s; Triton JIT kernels will compile or autotune on first use", message
             )
-            if cache is None:
+            if root is None:
                 return
-        imported = (self.key, str(cache._runtime_cache_root()))
+        imported = (self.key, root)
         with _imported_triton_runtime_lock:
             if imported in _imported_triton_runtime:
                 return
@@ -185,6 +206,11 @@ def record_cpp_kernel(key: str, binary_path: str, load: Callable[[], object]) ->
         if owner is None or owner.pid != os.getpid() or owner.sealed:
             return
         owner.cpp_kernels[key] = (binary_path, load)
+
+
+def has_frozen_cpp_kernel(key: str) -> bool:
+    with _frozen_cpp_kernels_lock:
+        return key in _frozen_cpp_kernels
 
 
 def restore_cpp_kernel(key: str, binary_path: str) -> None:
