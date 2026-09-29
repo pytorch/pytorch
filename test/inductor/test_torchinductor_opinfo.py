@@ -786,6 +786,19 @@ inductor_override_kwargs["xpu"] = {
         "grad_rtol": 1e-3,
     },
 }
+
+# Ascend NPU (PrivateUse1): the return value of empty is undefined. Mirror
+# the existing cpu/cuda/xpu assert_equal exemptions: the NPU variants are
+# derived via hw_classification, but this table was never keyed for "npu".
+# https://gitcode.com/Ascend/pytorch/issues/4940
+inductor_override_kwargs["npu"] = {
+    "empty": {"assert_equal": False},
+    "empty_permuted": {"assert_equal": False},
+    "empty_like": {"assert_equal": False},
+    "new_empty": {"assert_equal": False},
+    "empty_strided": {"assert_equal": False},
+    "new_empty_strided": {"assert_equal": False},
+}
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
         {
