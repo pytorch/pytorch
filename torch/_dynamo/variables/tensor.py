@@ -107,6 +107,7 @@ if TYPE_CHECKING:
     from torch._dynamo.output_graph import OutputGraph
     from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._guards import Source
 
     from .functions import UserFunctionVariable
     from .torch_function import TensorWithTFOverrideVariable
@@ -456,6 +457,24 @@ class TensorVariable(VariableTracker):
         """Get the current version of self's fake tensor, or None if unavailable."""
         self_fake = self.proxy.node.meta.get("example_value")
         return self_fake._version if self_fake is not None else None
+
+    def graph_input_source(self, tx: "InstructionTranslatorBase") -> "Source | None":
+        """The source of the graph input that self is, or None.
+
+        Besides a tensor with a source, this covers the result of an op that
+        returns its input itself (x.contiguous() on a contiguous x,
+        x.to(x.dtype), x.mul_(1), ...): it has no source but is the very same
+        tensor as the input, so a metadata mutation of it mutates the input.
+        """
+        if self.source is not None:
+            return self.source
+        self_fake = self.proxy.node.meta.get("example_value")
+        if self_fake is None:
+            return None
+        for arg in tx.output.graphargs:
+            if arg.fake_tensor is self_fake:
+                return arg.source
+        return None
 
     def _sync_if_inplace_mutation(
         self,
@@ -932,17 +951,21 @@ class TensorVariable(VariableTracker):
                 result.source = AttrSource(self.source, name)
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
-        # dynamo/aot/inductor, just fall back.
-        if self.source is not None and hasattr(torch.ops.aten, name):
+        # dynamo/aot/inductor, just fall back. A tensor without a source can still be a
+        # graph input (see graph_input_source); in-place view ops all end with "_".
+        if (self.source is not None or name.endswith("_")) and hasattr(
+            torch.ops.aten, name
+        ):
             fn = getattr(torch.ops.aten, name)
             if (
                 hasattr(fn, "overloads")
                 and hasattr(fn, fn.overloads()[0])
                 and torch.Tag.inplace_view in getattr(fn, fn.overloads()[0]).tags
+                and (input_source := self.graph_input_source(tx)) is not None
             ):
                 # Delay the graph break to the actual call of unsqueeze_/resize_/resize_as_ etc.
                 return variables.misc.DelayGraphBreakVariable(
-                    source=AttrSource(self.source, name),
+                    source=AttrSource(input_source, name),
                     msg="Getting an inplace view on a graph input is not supported",
                     hints=[
                         "Avoid mutating a graph input's tensor metadata with in-place view ops. "
@@ -1265,24 +1288,6 @@ class TensorVariable(VariableTracker):
         with ctx():
             result = wrap_fx_proxy(tx, proxy)
         self._sync_if_inplace_mutation(tx, version_before)
-
-        # Non-mutating methods that are no-ops in eager return `self` itself
-        # (x.contiguous() on a contiguous tensor, x.to(x.dtype), x.to(x.device),
-        # x.type(x.dtype), ...). Keep tracking such a result as the very same
-        # variable, so it is still recognised as the graph input downstream:
-        # otherwise an in-place view op on the result
-        # (v = x.contiguous(); v.unsqueeze_(0)) bypasses the "inplace view on a
-        # graph input" graph break above, mutates the input's fake tensor behind
-        # the recorded guards and guard creation fails with
-        # "IndexError: list index out of range" in produce_guards.
-        if (
-            not name.endswith("_")
-            and isinstance(result, TensorVariable)
-            and result.proxy.node.meta.get("example_value") is not None
-            and result.proxy.node.meta.get("example_value")
-            is self.proxy.node.meta.get("example_value")
-        ):
-            return self
 
         return result
 
