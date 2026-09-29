@@ -2324,9 +2324,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                 )
             for name in kwargs:
                 if name != "ndigits":
-                    raise_type_error(
-                        tx, f"round() got an unexpected keyword argument '{name}'"
-                    )
+                    if sys.version_info >= (3, 13):
+                        msg = f"round() got an unexpected keyword argument '{name}'"
+                    else:
+                        msg = f"'{name}' is an invalid keyword argument for round()"
+                    raise_type_error(tx, msg)
             round_method = arg._maybe_lookup_method(tx, "__round__")
             if round_method is None:
                 raise_type_error(
