@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import json
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -12,7 +13,6 @@ from torch.distributed._transport import (
     register_transport,
     Transport,
 )
-from torch.distributed._transport._bootstrap import _RankBootstrap
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -74,9 +74,24 @@ class TestRankBootstrap(TestCase):
         transports = [Mock(spec=Transport), Mock(spec=Transport)]
         for rank, transport in enumerate(transports):
             transport.bind.return_value = bytes([rank, 0, 255])
-        with ThreadPoolExecutor(2) as pool:
+        with (
+            patch(
+                "torch.distributed._transport._bootstrap.new_transport",
+                side_effect=lambda backend, device, fixture: fixture,
+            ),
+            ThreadPoolExecutor(2) as pool,
+        ):
             futures = [
-                pool.submit(_RankBootstrap(store, rank, 1 - rank, 2).connect, transport)
+                pool.submit(
+                    new_transport_rank,
+                    "test",
+                    store=store,
+                    rank=rank,
+                    peer_rank=1 - rank,
+                    bootstrap_tag="pair",
+                    bootstrap_timeout=2,
+                    fixture=transport,
+                )
                 for rank, transport in enumerate(transports)
             ]
             for future in futures:
@@ -91,12 +106,28 @@ class TestRankBootstrap(TestCase):
 
     def test_stale_peer_times_out_and_closes(self):
         store = dist.HashStore()
-        store.set("1", "old")
-        store.set("endpoint/old", "b2xkIGVuZHBvaW50")
+        prefixed = dist.PrefixStore(
+            json.dumps(["transport", "test", "pair", 0, 1]), store
+        )
+        prefixed.set("1", "old")
+        prefixed.set("endpoint/old", "b2xkIGVuZHBvaW50")
         transport = Mock(spec=Transport)
         transport.bind.return_value = b"new endpoint"
-        with self.assertRaises(dist.DistStoreError):
-            _RankBootstrap(store, 0, 1, 0.05).connect(transport)
+        with (
+            patch(
+                "torch.distributed._transport._bootstrap.new_transport",
+                return_value=transport,
+            ),
+            self.assertRaises(dist.DistStoreError),
+        ):
+            new_transport_rank(
+                "test",
+                store=store,
+                rank=0,
+                peer_rank=1,
+                bootstrap_tag="pair",
+                bootstrap_timeout=0.05,
+            )
         transport.connect.assert_not_called()
         transport.close.assert_called_once()
 
@@ -104,30 +135,69 @@ class TestRankBootstrap(TestCase):
         transport = Mock(spec=Transport)
         transport.bind.side_effect = ValueError("bind failed")
         transport.close.side_effect = RuntimeError("close failed")
-        with self.assertRaisesRegex(ValueError, "bind failed") as error:
-            _RankBootstrap(dist.HashStore(), 0, 1, 1).connect(transport)
+        with (
+            patch(
+                "torch.distributed._transport._bootstrap.new_transport",
+                return_value=transport,
+            ),
+            self.assertRaisesRegex(ValueError, "bind failed") as error,
+        ):
+            new_transport_rank(
+                "test",
+                store=dist.HashStore(),
+                rank=0,
+                peer_rank=1,
+                bootstrap_tag="pair",
+                bootstrap_timeout=1,
+            )
         self.assertIn("close failed", error.exception.__notes__[0])
 
     def test_rank_override_and_duplicate_tag(self):
         store = dist.HashStore()
-        with patch(
-            "torch.distributed.get_rank", side_effect=AssertionError("unexpected")
+        with (
+            patch(
+                "torch.distributed.get_rank", side_effect=AssertionError("unexpected")
+            ),
+            patch(
+                "torch.distributed._transport._bootstrap.new_transport",
+                side_effect=RuntimeError("construction stopped"),
+            ) as factory,
         ):
-            bootstrap = _RankBootstrap.create("test", 5, store, 10, "pair", 1)
-            self.assertEqual((bootstrap.rank, bootstrap.peer_rank), (10, 5))
+            with self.assertRaisesRegex(RuntimeError, "construction stopped"):
+                new_transport_rank(
+                    "test", store=store, rank=10, peer_rank=5, bootstrap_tag="pair"
+                )
             with self.assertRaisesRegex(ValueError, "already used"):
-                _RankBootstrap.create("test", 5, store, 10, "pair", 1)
+                new_transport_rank(
+                    "test", store=store, rank=10, peer_rank=5, bootstrap_tag="pair"
+                )
             for rank, peer in ((-1, 0), (True, 0), (0, -1), (0, True), (0, 0)):
                 with self.assertRaises(ValueError):
-                    _RankBootstrap.create("test", peer, store, rank, "other", 1)
+                    new_transport_rank(
+                        "test",
+                        store=store,
+                        rank=rank,
+                        peer_rank=peer,
+                        bootstrap_tag="other",
+                    )
+            factory.assert_called_once()
 
     def test_implicit_rank_lookup(self):
-        with patch("torch.distributed.get_rank", return_value=4) as get_rank:
-            bootstrap = _RankBootstrap.create(
-                "test", 8, dist.HashStore(), None, "pair", 1
-            )
-            self.assertEqual(bootstrap.rank, 4)
-            get_rank.assert_called_once_with()
+        store = dist.HashStore()
+        with (
+            patch("torch.distributed.get_rank", return_value=4) as get_rank,
+            patch(
+                "torch.distributed._transport._bootstrap.new_transport",
+                side_effect=RuntimeError("construction stopped"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "construction stopped"),
+        ):
+            new_transport_rank("test", store=store, peer_rank=8, bootstrap_tag="pair")
+        get_rank.assert_called_once_with()
+        prefixed = dist.PrefixStore(
+            json.dumps(["transport", "test", "pair", 4, 8]), store
+        )
+        self.assertEqual(prefixed.get("claim/4"), b"1")
 
 
 if __name__ == "__main__":
