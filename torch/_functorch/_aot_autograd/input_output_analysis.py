@@ -268,15 +268,19 @@ def create_synthetic_base_metadata(
                 if o.output_type == OutputType.is_input and input_merged
                 else o.output_type
             )
-            if input_merged:
+            if input_merged and outer_args[o.base_idx] is not inner_args[new_base_idx]:
                 # The ViewMeta sequence was recorded relative to the *original*
                 # (outer) input, e.g. `ta[0]` with `ta = t0[1:]`. base_idx now
                 # points at the synthetic base instead, and replaying the
                 # sequence on it would drop the outer input's storage offset /
                 # shape (returning `t0[0]`, or asserting on a shape mismatch).
                 # Drop the sequence so gen_alias_from_base regenerates the
-                # alias with as_strided from the output's own metadata, which
-                # is expressed relative to the shared storage.
+                # alias from the output's own metadata, which is expressed
+                # relative to the shared storage.
+                # If the outer input *is* the synthetic base (merge_view_inputs
+                # reuses the common ._base, which is often one of the inputs),
+                # the sequence is still valid relative to it: keep it, so those
+                # outputs keep view replay instead of falling back to as_strided.
                 new_view_meta_sequence = None
         existing_output_infos.append(
             OutputAliasInfo(
