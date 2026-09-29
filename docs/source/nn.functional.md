@@ -241,6 +241,8 @@ scaled_dot_product_attention.
 
     ScalingType
     SwizzleType
+    InnerScaleCalc
+    quantize_tensor
     grouped_mm
     scaled_mm
     scaled_addmm

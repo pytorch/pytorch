@@ -7492,6 +7492,62 @@ def meta_scaled_mm(
     )
 
 
+@register_meta([aten._quantize_tensor.default])
+def meta_quantize_tensor(
+    input: torch.Tensor,
+    qdata_dtype: torch.dtype,
+    inner_scale_calc: int,
+    scaling_type: int,
+    swizzle_type: int,
+    scaling_type_square_block_and_expand: bool = False,
+) -> list[torch.Tensor]:
+    torch._check(input.dim() == 2, lambda: "quantize_tensor requires a 2D input")
+    is_dim_k = input.is_contiguous()
+    if not is_dim_k:
+        torch._check(
+            input.t().is_contiguous(),
+            lambda: "input must be contiguous or a transpose of contiguous",
+        )
+    torch._check(
+        input.dtype in (torch.float16, torch.bfloat16, torch.float32),
+        lambda: "quantize_tensor supports only fp16, bf16, and fp32 input",
+    )
+    torch._check(
+        qdata_dtype == torch.float8_e4m3fn
+        and inner_scale_calc == 0
+        and scaling_type == 3,
+        lambda: "only MXFP8 RCEIL with BlockWise1x32 is supported",
+    )
+    torch._check(
+        swizzle_type in (0, 1),
+        lambda: "unsupported swizzle type",
+    )
+    torch._check(
+        is_dim_k or swizzle_type == 1,
+        lambda: "dim-m quantization requires SWIZZLE_32_4_4",
+    )
+    torch._check(
+        not scaling_type_square_block_and_expand or (is_dim_k and swizzle_type == 1),
+        lambda: "32x32 MXFP8 scaling requires dim-k and SWIZZLE_32_4_4",
+    )
+    rows, cols = input.shape
+    torch._check(cols % 32 == 0)
+    if not is_dim_k:
+        torch._check(rows % 16 == 0)
+    if scaling_type_square_block_and_expand:
+        torch._check(rows % 32 == 0)
+
+    scale_shape = (
+        ((rows + 127) // 128, (cols + 127) // 128, 32, 16)
+        if swizzle_type == 1
+        else (rows, cols // 32)
+    )
+    return [
+        torch.empty((rows, cols), device=input.device, dtype=qdata_dtype),
+        torch.empty(scale_shape, device=input.device, dtype=torch.float8_e8m0fnu),
+    ]
+
+
 @register_meta([aten._scaled_mm_v2.default])
 def meta_scaled_mm_v2(
     self: torch.Tensor,

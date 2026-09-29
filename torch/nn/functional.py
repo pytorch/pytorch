@@ -5,6 +5,7 @@ import importlib
 import math
 import warnings
 from collections.abc import Callable
+from enum import Enum
 from typing import Any as _Any, Optional, TYPE_CHECKING
 
 import torch
@@ -36,6 +37,13 @@ from torch.overrides import (
 # Set visibility of the bound enums to this module
 ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
+
+
+class InnerScaleCalc(str, Enum):
+    r"""Method used to calculate block scales for :func:`quantize_tensor`."""
+
+    RCEIL_E8M0 = "rceil_e8m0"
+
 
 if TYPE_CHECKING:
     from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
@@ -7227,6 +7235,90 @@ def _enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
     if not isinstance(l, list):
         l = [l]
     return [li.value for li in l]
+
+
+def quantize_tensor(
+    input: Tensor,
+    *,
+    qdata_dtype: torch.dtype,
+    inner_scale_calc: InnerScaleCalc,
+    scaling_type: ScalingType,
+    swizzle_type: SwizzleType = SwizzleType.NO_SWIZZLE,
+    scaling_type_square_block_and_expand: bool = False,
+) -> tuple[Tensor, Tensor]:
+    r"""quantize_tensor(input, *, qdata_dtype, inner_scale_calc, scaling_type, swizzle_type=SwizzleType.NO_SWIZZLE, scaling_type_square_block_and_expand=False) -> tuple[Tensor, Tensor]
+
+    Quantize a 2D tensor to MXFP8 using one scale per 1x32 block and
+    round-to-nearest-even conversion. Returns ``(qdata, scale)`` for use with
+    :func:`scaled_mm`.
+
+    A contiguous input is quantized along its last dimension (dim-k). Pass a
+    transposed view of a contiguous tensor to quantize along its last dimension
+    using the dim-m kernel. This first implementation requires NVIDIA SM100 or
+    newer and does not support automatic differentiation.
+
+    Args:
+        input (Tensor): Contiguous 2D tensor or a transposed view of one, with
+          dtype ``float16``, ``bfloat16``, or ``float32``.
+        qdata_dtype (:class:`torch.dtype`): Must be ``torch.float8_e4m3fn``.
+        inner_scale_calc (InnerScaleCalc): Must be ``InnerScaleCalc.RCEIL_E8M0``.
+        scaling_type (ScalingType): Must be ``ScalingType.BlockWise1x32``.
+        swizzle_type (SwizzleType, optional): ``NO_SWIZZLE`` or ``SWIZZLE_32_4_4``.
+          Dim-m and square-block scaling require ``SWIZZLE_32_4_4``.
+          Default: ``SwizzleType.NO_SWIZZLE``.
+        scaling_type_square_block_and_expand (bool, optional): When ``True``,
+          compute one scale for each 32x32 block, then expand it into the
+          GEMM-facing 1x32 swizzled layout. Only supported for dim-k with
+          both dimensions divisible by 32. Default: ``False``.
+
+    Returns:
+        tuple[Tensor, Tensor]: Quantized data in the logical input shape and
+        E8M0 scales. Compact dim-k scales have shape ``(rows, cols // 32)``;
+        swizzled scales have shape ``(ceil(rows / 128), ceil(cols / 128), 32, 16)``.
+
+    Examples::
+
+        >>> import torch.nn.functional as F
+        >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        >>> qdata, scale = F.quantize_tensor(
+        ...     x,
+        ...     qdata_dtype=torch.float8_e4m3fn,
+        ...     inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0,
+        ...     scaling_type=F.ScalingType.BlockWise1x32,
+        ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
+        ... )
+    """
+    if input.dim() != 2:
+        raise ValueError("quantize_tensor requires a 2D input")
+    if input.size(1) % 32 != 0:
+        raise ValueError("quantize_tensor requires columns divisible by 32")
+    if input.dtype not in (torch.float16, torch.bfloat16, torch.float32):
+        raise ValueError("quantize_tensor supports only fp16, bf16, and fp32 input")
+    if qdata_dtype != torch.float8_e4m3fn:
+        raise ValueError("quantize_tensor supports only float8_e4m3fn qdata")
+    if inner_scale_calc != InnerScaleCalc.RCEIL_E8M0:
+        raise ValueError("quantize_tensor supports only RCEIL_E8M0 inner scales")
+    if scaling_type != ScalingType.BlockWise1x32:
+        raise ValueError("quantize_tensor supports only BlockWise1x32 scaling")
+    if swizzle_type not in (SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_32_4_4):
+        raise ValueError("unsupported quantize_tensor swizzle type")
+    if input.requires_grad and torch.is_grad_enabled():
+        raise RuntimeError("quantize_tensor does not support autograd")
+    if input.device.type not in ("cuda", "meta") or (
+        input.device.type == "cuda" and torch.version.hip is not None
+    ):
+        raise RuntimeError("quantize_tensor requires an NVIDIA CUDA tensor")
+
+    # TODO(future PR): add torch.export support for the native quantization op.
+    outputs = torch.ops.aten._quantize_tensor.default(
+        input,
+        qdata_dtype=qdata_dtype,
+        inner_scale_calc=0,
+        scaling_type=scaling_type.value,
+        swizzle_type=swizzle_type.value,
+        scaling_type_square_block_and_expand=scaling_type_square_block_and_expand,
+    )
+    return outputs[0], outputs[1]
 
 
 def scaled_mm(
