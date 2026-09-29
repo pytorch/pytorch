@@ -1351,6 +1351,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
             try:
                 res = constant_fn(*const_args, **const_kwargs)  # type: ignore[operator]
             except Exception as exc:
+                # Only enum lookups (Color(7)) become observed exceptions. Making
+                # torch.iinfo/finfo/device errors catchable removes a graph break
+                # that hides an inductor out= stride mismatch in test_ops test_out.
+                if not issubclass(self.value, enum.Enum):
+                    raise
                 raise_observed_exception(type(exc), tx, args=list(exc.args))
             return VariableTracker.build(tx, res)
         elif self.value is torch.nn.CrossEntropyLoss:
