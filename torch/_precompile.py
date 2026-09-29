@@ -405,9 +405,10 @@ class DynamoTracer:
     ``torch.compiler.precompile`` API, so it may change without a deprecation cycle.
 
     ``guard_filter_fn`` takes the ``GuardFilterEntry`` records (``guard_type``,
-    ``name``, ...) and returns one keep flag per entry, filtering the guards kept
-    in the SERIALIZED artifact (runtime capture guards are always retained; the
-    default drops only what cannot be serialized); ``recompile_limit`` caps
+    ``name``, ...) and returns one keep flag per entry. It filters the runtime
+    guards during capture as well as the serialized ones, so a dropped guard never
+    triggers a recompile during capture (the default drops only what cannot be
+    serialized); ``recompile_limit`` caps
     recompilations per frame, and a call past it runs eager and is absent from
     the artifact without any gate refusing it; ``dynamic`` forces dynamic shapes
     as ``torch.compile(dynamic=)`` does. The ``require_*`` gates refuse, at write
