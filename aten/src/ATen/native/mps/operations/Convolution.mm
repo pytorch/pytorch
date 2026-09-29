@@ -507,7 +507,7 @@ static Conv1dKernel conv1d_pick_kernel(const Tensor& input,
                                        const Tensor& weight,
                                        const Tensor& output,
                                        int64_t padding,
-                                       int64_t stride,
+                                       int64_t conv_stride,
                                        int64_t dilation,
                                        int64_t groups) {
   using namespace mps;
@@ -532,14 +532,15 @@ static Conv1dKernel conv1d_pick_kernel(const Tensor& input,
   if (channels_per_group == 0 || !has_mpp()) {
     return Conv1dKernel::Conv3d;
   }
-  // Read an NLC copy of the input: required for stride > 1, free if channels-last, faster for wide outputs.
-  const bool nlc = stride > 1 || input.is_contiguous(MemoryFormat::ChannelsLast) ||
+  // NLC is required for conv_stride > 1 and avoids a transpose for channels-last input.
+  // Dilation > 1 or groups > 1 leave gaps between taps. merging into one matmul would need im2col.
+  // With both 1, windows are contiguous, the 8x heuristic aims to offset the transpose cost.
+  const bool nlc = conv_stride > 1 || input.is_contiguous(MemoryFormat::ChannelsLast) ||
       (dilation == 1 && groups == 1 && out_channels >= 8 * channels);
-  // NLC windows are contiguous when dilation and groups are 1, so all taps run as one matmul.
   const bool merged = nlc && dilation == 1 && groups == 1;
   // Largest operand row stride: input (NCL row or NLC position step) versus weight row.
   const auto operand_stride =
-      std::max(nlc ? stride * channels : length + padding, (merged ? kernel_size : 1) * channels_per_group);
+      std::max(nlc ? conv_stride * channels : length + padding, (merged ? kernel_size : 1) * channels_per_group);
   if (!is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS) && operand_stride > kPreApple9MppMaxStride) {
     return Conv1dKernel::Conv3d;
   }
