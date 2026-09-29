@@ -3060,7 +3060,7 @@ def _verified_cache_envelope(
     tracer: str,
     code_hash: str,
     strict: bool,
-    caller: str = "strict precompile.load",
+    caller: str | None = None,
 ) -> dict[str, Any] | None:
     # weights_only=True is safe (plain str/int/bytes dict). Outside strict mode the
     # cache is acceleration only, so an unreadable envelope or a FORMAT / VERSION
@@ -3068,6 +3068,8 @@ def _verified_cache_envelope(
     # is forbidden, so the same conditions raise instead. A BACKEND, TRACER or
     # CODE_HASH mismatch signals a wrong (python_code, cache) pairing and always
     # raises; see Note [precompile programming model], invariant 7.
+    mismatch = f"{caller}: " if caller else ""
+    caller = caller or "strict precompile.load"
     try:
         blob = torch.load(io.BytesIO(cache), weights_only=True)
         if blob.get("format") != _CACHE_FORMAT or blob.get("version") != _CACHE_VERSION:
@@ -3090,19 +3092,19 @@ def _verified_cache_envelope(
             return None
         if blob.get("backend") != backend:
             raise PrecompileError(
-                f"cache backend {blob.get('backend')!r} does not match the "
+                f"{mismatch}cache backend {blob.get('backend')!r} does not match the "
                 f"python_code backend {backend!r}; the cache and python_code "
                 "came from different precompile captures."
             )
         if blob.get("tracer", "make_fx") != tracer:
             raise PrecompileError(
-                f"cache tracer {blob.get('tracer', 'make_fx')!r} does not match "
+                f"{mismatch}cache tracer {blob.get('tracer', 'make_fx')!r} does not match "
                 f"the python_code tracer {tracer!r}; the cache and python_code "
                 "came from different precompile captures."
             )
         if blob.get("code_hash") != code_hash:
             raise PrecompileError(
-                "cache does not match python_code (its code_hash "
+                f"{mismatch}cache does not match python_code (its code_hash "
                 f"{blob.get('code_hash')!r} != sha256(python_code) "
                 f"{code_hash!r}); the cache and python_code came from "
                 "different precompile captures. Pair each cache with the "
@@ -3143,6 +3145,7 @@ def _read_runtime_cache_envelope(
             "Dynamo artifact header"
         )
 
+    pair = f"(artifact_path={artifact_path!r}, cache_path={cache_path!r})"
     digest = hashlib.sha256()
     metadata = {}
     header_size = 0
@@ -3188,8 +3191,7 @@ def _read_runtime_cache_envelope(
             cache = f.read()
     except OSError as e:
         raise PrecompileError(
-            f"precompile.{operation} could not read the artifact pair (artifact_path="
-            f"{artifact_path!r}, cache_path={cache_path!r}): {e}"
+            f"precompile.{operation} could not read the artifact pair {pair}: {e}"
         ) from e
     blob = _verified_cache_envelope(
         cache,
@@ -3197,7 +3199,7 @@ def _read_runtime_cache_envelope(
         tracer=metadata["TRACER"],
         code_hash=digest.hexdigest(),
         strict=True,
-        caller=f"precompile.{operation}",
+        caller=f"precompile.{operation} {pair}",
     )
     if blob is None:
         raise AssertionError("a strict envelope read returns the envelope or raises")
@@ -3307,7 +3309,8 @@ def finalize_cache(
         finalize_runtime_cache(blob.get("artifact"), write)
     except Exception as exc:
         raise PrecompileError(
-            "Could not finalize precompile runtime dependencies"
+            "precompile.finalize_cache: Could not finalize precompile runtime "
+            f"dependencies for cache_path={cache_path!r}: {exc}"
         ) from exc
 
 
@@ -3349,7 +3352,8 @@ def prepare_runtime(
             prepare_runtime_cache(blob.get("artifact"))
         except Exception as exc:
             raise PrecompileError(
-                "Could not prepare precompile runtime dependencies"
+                "precompile.prepare_runtime: Could not prepare precompile runtime "
+                f"dependencies for cache_path={cache_path!r}: {exc}"
             ) from exc
 
 
