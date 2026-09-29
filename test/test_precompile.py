@@ -6235,7 +6235,7 @@ def _(x):
 
 def fn(x, w):
     y = (x.sin() * 2 + x.cos()).relu()
-    return scale((y @ w).softmax(-1))
+    return torch.ops.precompile_runtime_test.scale.default((y @ w).softmax(-1))
 """
 
 
@@ -6278,21 +6278,21 @@ if phase == "capture":
         torch.save([fn(*inputs(seed)) for seed in range(2, 4)], expected_path)
         pc.finalize_cache(artifact_path=artifact, cache_path=cache)
 else:
-    from triton import knobs
     from triton.runtime.cache import FileCacheManager
 
     # A Triton JIT compile or autotuning benchmark writes through the cache
-    # manager; replaying from the imported runtime cache writes nothing.
+    # manager; replaying from the imported runtime cache writes nothing. The
+    # runtime-cache transport refuses a custom manager_class, so record in place.
     writes = []
+    put = FileCacheManager.put
 
-    class RecordingCacheManager(FileCacheManager):
-        def put(self, data, filename, binary=True):
-            writes.append(filename)
-            return super().put(data, filename, binary=binary)
+    def recording_put(self, data, filename, binary=True):
+        writes.append(filename)
+        return put(self, data, filename, binary=binary)
 
     expected = torch.load(expected_path)
     pc.prepare_runtime(artifact_path=artifact, cache_path=cache)
-    knobs.cache.manager_class = RecordingCacheManager
+    FileCacheManager.put = recording_put
     with pc.no_compilation():
         loaded = pc.load(artifact, cache)
         for seed, reference in zip(range(2, 4), expected):
