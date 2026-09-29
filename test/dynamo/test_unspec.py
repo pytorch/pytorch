@@ -245,6 +245,19 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         for i in range(1, 5):
             self.assertFalse(same(res[i - 1], res[i]))
 
+    def test_random_float_draws_inductor(self):
+        # Float draws reach the graph as float64 tensors, so the graph input must
+        # be traced as float64 too; otherwise Inductor reads them as float32.
+        def fn(x, rng):
+            return x * rng.random() + x * rng.uniform(0, 1) + x * random.random()
+
+        x = torch.arange(4.0)
+        random.seed(0)
+        expected = fn(x, random.Random(0))
+        random.seed(0)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        self.assertEqual(opt_fn(x, random.Random(0)), expected)
+
     @parametrize("clock_name,clock_args", _TIME_FUNCTION_TEST_CASES)
     def test_time_function_unused_no_warning(self, clock_name, clock_args):
         torch._dynamo.reset()
