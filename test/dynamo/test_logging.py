@@ -33,11 +33,7 @@ from torch.testing._internal.logging_utils import (
     make_logging_test,
     make_settings_test,
 )
-from torch.testing._internal.triton_utils import (
-    requires_cuda_and_triton,
-    requires_gpu_and_triton,
-)
-
+from torch.testing._internal.inductor_utils import requires_triton
 
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
@@ -196,13 +192,13 @@ class TestLogging(LoggingTestCase):
         self.assertIn(
             """\
     - User stack trace:
-    -   File [file_path], line 170, in outmost_fn
+    -   File [file_path], line 166, in outmost_fn
     -     return outer_fn(x, ys, zs)
-    -   File [file_path], line 173, in outer_fn
+    -   File [file_path], line 169, in outer_fn
     -     return fn(x, ys, zs)
-    -   File [file_path], line 176, in fn
+    -   File [file_path], line 172, in fn
     -     return inner(x, ys, zs)
-    -   File [file_path], line 179, in inner
+    -   File [file_path], line 175, in inner
     -     for y, z in zip(ys, zs):""",
             record_str,
         )
@@ -1466,11 +1462,11 @@ TorchDynamo attempted to trace the following frames: [
         self.assertIn("fn", msg)
 
 
-class TestLoggingCUDA(LoggingTestCase):
-    hw_classification = HardwareClassification.CUDA
+class TestLoggingDevice(LoggingTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @requires_distributed()
-    @requires_cuda_and_triton
+    @requires_triton()
     @make_logging_test(ddp_graphs=True)
     def test_ddp_graphs(self, records):
         class ToyModel(torch.nn.Module):
@@ -1488,19 +1484,15 @@ class TestLoggingCUDA(LoggingTestCase):
         os.environ["MASTER_PORT"] = str(find_free_port())
         dist.init_process_group("gloo", rank=0, world_size=1)
 
-        model = DDP(ToyModel().to("cuda:0"), device_ids=[0], bucket_cap_mb=4)
+        model = DDP(ToyModel().to(f"{self.device_type}:0"), device_ids=[0], bucket_cap_mb=4)
         ddp_model = torch.compile(model, backend="inductor")
 
-        ddp_model(torch.randn(1024, 1024, device="cuda:0"))
+        ddp_model(torch.randn(1024, 1024, device=f"{self.device_type}:0"))
 
         dist.destroy_process_group()
         self.assertEqual(len([r for r in records if "__ddp_graphs" in r.name]), 4)
 
-
-class TestLoggingDevice(LoggingTestCase):
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    @requires_gpu_and_triton
+    @requires_triton()
     @make_logging_test(schedule=True)
     def test_schedule(self, records):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
@@ -1508,7 +1500,7 @@ class TestLoggingDevice(LoggingTestCase):
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 5)
 
-    @requires_gpu_and_triton
+    @requires_triton()
     @make_logging_test(fusion=True)
     def test_fusion(self, records):
         fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
@@ -1520,7 +1512,7 @@ class TestLoggingDevice(LoggingTestCase):
             len(records), 8 * (1 + torch._inductor.config.loop_ordering_after_fusion)
         )
 
-    @requires_gpu_and_triton
+    @requires_triton()
     @make_logging_test(cudagraphs=True)
     def test_cudagraphs(self, records):
         fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)  # noqa: UNSPECIFIED_BACKEND
@@ -1528,7 +1520,7 @@ class TestLoggingDevice(LoggingTestCase):
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 8)
 
-    @requires_gpu_and_triton
+    @requires_triton()
     @make_logging_test(perf_hints=True)
     def test_optimizer_non_static_param(self, records):
         params = [torch.randn(10, 10, device=self.device_type) for _ in range(2)]
@@ -1540,7 +1532,7 @@ class TestLoggingDevice(LoggingTestCase):
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 3)
 
-    @requires_gpu_and_triton
+    @requires_triton()
     @make_logging_test(autotuning=True)
     def test_autotuning(self, records):
         if self.device_type == "cuda" and not SM90OrLater:
@@ -1559,7 +1551,7 @@ class TestLoggingDevice(LoggingTestCase):
             self.assertGreater(len(records), 0)
             self.assertLess(len(records), 40)
 
-    @requires_gpu_and_triton
+    @requires_triton()
     @torch._inductor.config.patch("force_disable_caches", True)
     @make_logging_test(autotuning_inputs=True)
     def test_autotuning_inputs(self, records):
@@ -1577,7 +1569,7 @@ class TestLoggingDevice(LoggingTestCase):
         self.assertIn("dtype=torch.float32", msg)
         self.assertIn("stride=(", msg)
 
-    @requires_gpu_and_triton
+    @requires_triton()
     @torch._inductor.config.patch("force_disable_caches", True)
     @make_logging_test(inductor=logging.DEBUG)
     def test_autotuning_inputs_off_by_default(self, records):
