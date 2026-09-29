@@ -410,20 +410,10 @@ class _StoreOutputCapture(V.WrapperHandler):  # type: ignore[name-defined]
       - records buf0 -> tmp3 in cse.store_cache, so the template's later load
         of buf0 returns tmp3 instead of emitting a tl.load. This is required:
         with the store skipped, that load would read memory never written.
-      - calls on_store(name, value), if given (e.g. to assign it to a variable).
 
-    If capture_names is set, only those buffers are handled this way; stores to
-    other buffers go through normally.
+    Only install it while generating the fused producer group: every store in
+    that window is to a kernel-local buffer (can_fuse guarantees this).
     """
-
-    def __init__(
-        self,
-        inner,
-        *,
-        on_store: Callable[[str, CSEVariable], None] | None = None,
-    ) -> None:
-        super().__init__(inner)
-        self.on_store = on_store
 
     def store(
         self,
@@ -434,9 +424,6 @@ class _StoreOutputCapture(V.WrapperHandler):  # type: ignore[name-defined]
     ):
         V.kernel.store_buffer_names.add(name)
         V.kernel.cse.store_cache[name] = value
-        if self.on_store is not None:
-            self.on_store(name, value)
-        return None
 
 
 class ModificationWrapper(V.WrapperHandler):  # type: ignore[name-defined]
@@ -1451,34 +1438,42 @@ class TritonTemplateKernel(TritonKernel):
 
             template_mask = self.template_mask
 
-            def capture_prologue_output(name: str, value: CSEVariable) -> None:
-                if name not in V.kernel.load_input_fused_inputs:
-                    return
+            class StoreOutputSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
+                name = "StoreOutputSubstitution"
 
-                # We load masked out values with 0, then apply a prologue. The
-                # transformed values may no longer be 0, so reapply the mask.
-                value_dtype = value.dtype
-                value_str = str(value)
-                if template_mask != "None" and (
-                    name not in V.kernel.prologue_fused_inputs_preserve_zero
-                    or other != 0
+                def store(
+                    self,
+                    name: str,
+                    index: sympy.Expr,
+                    value: "CSEVariable",
+                    mode: "StoreMode" = None,
                 ):
-                    value_str = f"tl.where({template_mask}, {value_str}, {other})"
+                    V.kernel.store_buffer_names.add(name)
+                    V.kernel.cse.store_cache[name] = value
+                    if name in V.kernel.load_input_fused_inputs:
+                        # We load masked out values with 0, then apply a prologue.
+                        # The masked out values may not necessarily be 0 any more
+                        # so we need to reapply the mask.
+                        value_dtype = value.dtype
+                        value_str = str(value)
+                        if template_mask != "None" and (
+                            name not in V.kernel.prologue_fused_inputs_preserve_zero
+                            or other != 0
+                        ):
+                            value_str = (
+                                f"tl.where({template_mask}, {value_str}, {other})"
+                            )
 
-                if value_dtype != V.graph.get_buffer(name).dtype:
-                    value_str = (
-                        f"{value_str}.to({triton_type(V.graph.get_buffer(name).dtype)})"
-                    )
+                        if value_dtype != V.graph.get_buffer(name).dtype:
+                            value_str = f"{value_str}.to({triton_type(V.graph.get_buffer(name).dtype)})"
 
-                # TODO: we should have intermediary var shapes
-                V.kernel.compute.writeline(
-                    f"{output_name} = {value_str}.broadcast_to(xindex.shape)"
-                )
+                        # TODO: we should have intermediary var shapes
+                        V.kernel.compute.writeline(
+                            f"{output_name} = {value_str}.broadcast_to(xindex.shape)"
+                        )
 
             # pyrefly: ignore [bad-assignment]
-            self.ops_handler = functools.partial(
-                _StoreOutputCapture, on_store=capture_prologue_output
-            )
+            self.ops_handler = StoreOutputSubstitution
 
             input_node = self.named_input_nodes[input_name]
             if isinstance(input_node.layout, ir.FlexibleLayout):
@@ -2619,13 +2614,16 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             "result": result_var,
         }
 
-        def write_result(name: str, value: CSEVariable) -> None:
-            V.kernel.compute.writeline(f"{result_var} = {value}")
+        class _CaptureStoreHandler(V.WrapperHandler):  # type: ignore[name-defined]
+            def store(self, name, index, value, mode=None):
+                V.kernel.store_buffer_names.add(name)
+                V.kernel.cse.store_cache[name] = value
+                V.kernel.compute.writeline(f"{result_var} = {value}")
 
         self._make_independent_subgraph(
             subgraph_name,
             sympy_product(ir_node.get_size()),
-            ops_handler=functools.partial(_StoreOutputCapture, on_store=write_result),
+            ops_handler=_CaptureStoreHandler,
             root_var_renames=renames,
         )
 
