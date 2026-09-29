@@ -190,18 +190,43 @@ class TestCollectiveCostEstimatorRegistry(TestCase):
             register_collective_cost_estimator("cuda", None)
         self.assertEqual(calls, [])
 
-    def test_unregistered_non_cuda_falls_back_to_analytical_model(self):
-        # Device types without a registered estimator fall back to the
-        # built-in analytical model.
+    def test_unregistered_non_cuda_is_unsupported(self):
+        # Device types without a registered estimator have no calibrated cost
+        # model: estimation returns None so callers can disable cost-based
+        # optimizations until a backend-specific estimator is registered.
         from torch._inductor.comm_analysis import (
             NCCL_COLL,
             estimate_nccl_collective_runtime_impl,
+            has_collective_cost_model,
         )
 
-        est_ms = estimate_nccl_collective_runtime_impl(
-            1024, 8, NCCL_COLL.ALL_REDUCE, device_type="npu"
+        self.assertIsNone(
+            estimate_nccl_collective_runtime_impl(
+                1024, 8, NCCL_COLL.ALL_REDUCE, device_type="npu"
+            )
         )
-        self.assertGreater(est_ms, 0)
+        self.assertFalse(has_collective_cost_model("npu"))
+        # CUDA keeps the built-in NCCL-calibrated analytical model.
+        self.assertTrue(has_collective_cost_model("cuda"))
+        self.assertIsNotNone(
+            estimate_nccl_collective_runtime_impl(
+                1024, 8, NCCL_COLL.ALL_REDUCE, device_type="cuda"
+            )
+        )
+
+    def test_has_collective_cost_model_with_registered_estimator(self):
+        from torch._inductor.comm_analysis import (
+            has_collective_cost_model,
+            register_collective_cost_estimator,
+        )
+
+        self.assertFalse(has_collective_cost_model("npu"))
+        register_collective_cost_estimator("npu", lambda *args: 1.0)
+        try:
+            self.assertTrue(has_collective_cost_model("npu"))
+        finally:
+            register_collective_cost_estimator("npu", None)
+        self.assertFalse(has_collective_cost_model("npu"))
 
 
 if __name__ == "__main__":
