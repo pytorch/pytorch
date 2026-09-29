@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     retry,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
 )
 
@@ -239,6 +240,7 @@ class TestHub(TestCase):
         self._assert_trusted_list_is_empty()
         patched_input.assert_called_once()
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/159627")
     @retry(Exception, tries=3)
     @patch("builtins.input", return_value="y")
     def test_trusted_repo_false_yes(self, patched_input):
@@ -273,6 +275,7 @@ class TestHub(TestCase):
             )
         patched_input.assert_called_once()
 
+    @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/155617")
     @retry(Exception, tries=3)
     @patch("builtins.input", return_value="y")
     def test_trust_repo_check_yes(self, patched_input):

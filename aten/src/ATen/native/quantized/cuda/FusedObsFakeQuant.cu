@@ -18,6 +18,7 @@
 #endif
 
 #include <cmath>
+#include <utility>
 
 namespace at::native {
 
@@ -348,7 +349,7 @@ std::tuple<at::Tensor, at::Tensor> fused_moving_avg_obs_fake_quant_cuda(
           x, scale, zero_point, 0, qmin, qmax);
     } else {
       auto mask = at::ones_like(x, at::kBool, MemoryFormat::Preserve);
-      return std::make_tuple(x.clone(), mask);
+      return std::make_tuple(x.clone(), std::move(mask));
     }
   } else {
     return at::_fake_quantize_per_tensor_affine_cachemask_tensor_qparams(

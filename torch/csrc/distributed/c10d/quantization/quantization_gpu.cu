@@ -42,9 +42,7 @@ __global__ void _bfloat16_to_float_cuda_kernel(
          col += col_incre) {
       const uint16_t* input_row = input + row * ncols;
       float* output_row = output + row * ncols;
-      uint32_t val_fp32 = static_cast<uint32_t>(
-                              reinterpret_cast<const uint16_t*>(input_row)[col])
-          << 16;
+      uint32_t val_fp32 = static_cast<uint32_t>(input_row[col]) << 16;
       reinterpret_cast<uint32_t*>(output_row)[col] = val_fp32;
     }
   }

@@ -89,7 +89,7 @@ std::vector<char> CallStackDebugInfoPickler::pickle(
     int64_t debug_handle = it.first;
     std::vector<c10::IValue> elements;
     /*
-     * Debug handles and debug info (source range + inlinded callstack)
+     * Debug handles and debug info (source range + inlined callstack)
      * are serialized as a tuple of 3 elements
      * {debug_handle, source_range_tag, serialized_callstack}
      */

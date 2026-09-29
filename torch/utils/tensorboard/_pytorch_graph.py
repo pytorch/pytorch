@@ -21,7 +21,7 @@ methods_OP = [
     "outputsSize",
     "scopeName",
 ]
-# Some additional methods to explure for methods_IO are
+# Some additional methods to explore for methods_IO are
 #
 #   'unique' (type int)
 #   'type' (type <Tensor<class 'torch._C.Type'>>)

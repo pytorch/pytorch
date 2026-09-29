@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 from collections.abc import Callable
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import torch
 import torch.distributed as dist
@@ -42,20 +42,26 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _init_default_fully_shard_mesh,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
-from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
+    AllGatherState,
+    FSDPCommContext,
+    FSDPParamGroup,
+)
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
-from torch.testing._internal.common_cuda import SM90OrLater, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
+    requires_nccl_version,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     DoubleLinear,
     FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     patch_post_backward,
@@ -68,8 +74,10 @@ from torch.testing._internal.common_utils import (
     requires_cuda_p2p_access,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    skipIfTorchInductor,
     TEST_WITH_ROCM,
     TEST_XPU,
+    TestCase,
     xfailIf,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -79,6 +87,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     TransformerBlock,
 )
 from torch.testing._internal.inductor_utils import skipCUDAIf
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 c10d_ops = torch.ops.c10d
@@ -91,6 +100,57 @@ from torch.testing._internal.common_fsdp import get_devtype
 
 device_type = torch.device(get_devtype())
 device_module = torch.get_device_module(device_type)
+
+
+class TestFSDPCommContext(TestCase):
+    def test_release_all_gather_state_for_comm_reuse_before_lazy_init(self):
+        comm_ctx = FSDPCommContext()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), MagicMock())
+
+        comm_ctx.release_all_gather_state_for_comm_reuse()
+
+        self.assertIsNone(comm_ctx.all_gather_state)
+
+    def test_release_all_gather_state_on_current_stream_before_lazy_init(self):
+        comm_ctx = FSDPCommContext()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), MagicMock())
+
+        comm_ctx.release_all_gather_state_on_current_stream()
+
+        self.assertIsNone(comm_ctx.all_gather_state)
+
+    def test_release_all_gather_state_for_comm_reuse_orders_comm_streams(self):
+        comm_ctx = FSDPCommContext()
+        event = MagicMock()
+        comm_ctx.all_gather_copy_in_stream = MagicMock()
+        comm_ctx.all_gather_stream = MagicMock()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), event)
+
+        comm_ctx.release_all_gather_state_for_comm_reuse()
+
+        for stream in (
+            comm_ctx.all_gather_copy_in_stream,
+            comm_ctx.all_gather_stream,
+        ):
+            stream.wait_event.assert_called_once_with(event)
+        self.assertIsNone(comm_ctx.all_gather_state)
+
+    def test_release_all_gather_state_on_current_stream(self):
+        comm_ctx = FSDPCommContext()
+        event = MagicMock()
+        current_stream = MagicMock()
+        comm_ctx.device_handle = MagicMock()
+        comm_ctx.device_handle.current_stream.return_value = current_stream
+        comm_ctx.all_gather_copy_in_stream = MagicMock()
+        comm_ctx.all_gather_stream = MagicMock()
+        comm_ctx.all_gather_state = AllGatherState(MagicMock(), event)
+
+        comm_ctx.release_all_gather_state_on_current_stream()
+
+        current_stream.wait_event.assert_called_once_with(event)
+        comm_ctx.all_gather_copy_in_stream.wait_event.assert_not_called()
+        comm_ctx.all_gather_stream.wait_event.assert_not_called()
+        self.assertIsNone(comm_ctx.all_gather_state)
 
 
 class TestFullyShardCollectiveOps(FSDPTestMultiThread):
@@ -233,6 +293,11 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         if type(reshard_after_forward) is not int:
             return
         fsdp_param_group._to_sharded_post_forward()
+        # The post-forward shards were just cloned on the current stream; the
+        # all-gather streams must wait for them, as unshard() does after reshard().
+        current_stream = device_module.current_stream()
+        all_gather_copy_in_stream.wait_stream(current_stream)
+        all_gather_stream.wait_stream(current_stream)
         all_gather(
             fsdp_param_group,
             fsdp_param_group.post_forward_mesh_info.shard_process_group,
@@ -282,12 +347,17 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
 
         # Run the foreach reduce-scatter (including copy-in and view-out)
         torch.manual_seed(42)
-        unsharded_grads = [torch.ones_like(param) * self.rank for param in orig_params]
+        # Keep sequential fp16 sums exactly representable in the threaded PG.
+        unsharded_grads = [
+            torch.ones_like(param) * (self.rank % 8) for param in orig_params
+        ]
+        reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = device_module.Stream()
         comm = DefaultReduceScatter()
         (
+            _,
             _,
             _,
             post_reduce_event,
@@ -321,7 +391,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             _,
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, reduce_scatter_dtype)
-        reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         for grad in reduced_grads:
             _div_if_needed(grad, predivide_factor)
             dist.all_reduce(
@@ -336,7 +405,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
 
 
-class TestFullyShardCommunication(FSDPTest):
+class TestFullyShardCommunication(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
@@ -545,6 +614,124 @@ class TestFullyShardCommunication(FSDPTest):
 
             self.assertEqual(ref_loss, loss)
             check_sharded_parity(self, ref_model, model)
+
+    @skip_if_lt_x_gpu(2)
+    def test_set_reduce_scatter_max_input_buffers(self):
+        """
+        Tests that ``set_reduce_scatter_max_input_buffers`` is a pure
+        scheduling change: changing the in-flight reduce-scatter copy-in buffer
+        cap (``2``, or an explicit ``1`` that matches the default) produces
+        identical parameters and gradients to the default single-buffer
+        behavior, across FSDP/HSDP and reshard-after-forward (under bf16 mixed
+        precision, where the retained buffer is in the reduce dtype).
+        """
+        self.run_subtests(
+            {
+                "mesh_shape": [(self.world_size,), (self.world_size // 2, 2)],
+                "reshard_after_forward": [True, False],
+                "max_input_buffers": [1, 2],
+            },
+            self._test_set_reduce_scatter_max_input_buffers,
+        )
+
+    def _test_set_reduce_scatter_max_input_buffers(
+        self,
+        mesh_shape: tuple[int] | tuple[int, int],
+        reshard_after_forward: bool,
+        max_input_buffers: int,
+    ):
+        torch.manual_seed(42)
+        model_args = ModelArgs(dropout_p=0.0, weight_tying=False)
+        ref_model = Transformer(model_args)
+        model = copy.deepcopy(ref_model)
+        mesh_dim_names = ("outer",) if len(mesh_shape) == 1 else ("outer", "inner")
+        mesh = init_device_mesh(
+            device_type.type, mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+        )
+        fsdp_kwargs = {
+            "reshard_after_forward": reshard_after_forward,
+            "mesh": mesh,
+            "mp_policy": mp_policy,
+        }
+        # Reference model keeps the default (copy-in on the compute stream)
+        for module in ref_model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, **fsdp_kwargs)
+        ref_model = fully_shard(ref_model, **fsdp_kwargs)
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+        # Test model retains multiple reduce-scatter copy-in buffers in flight
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, **fsdp_kwargs)
+        model = fully_shard(model, **fsdp_kwargs)
+        model.set_reduce_scatter_max_input_buffers(max_input_buffers)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
+        for _ in range(3):
+            ref_loss = ref_model(inp).sum()
+            ref_loss.backward()
+            ref_optim.step()
+            loss = model(inp).sum()
+            loss.backward()
+            optim.step()
+            self.assertEqual(ref_loss, loss)
+            # Check parity before zero_grad so gradients are compared too
+            check_sharded_parity(self, ref_model, model)
+            ref_optim.zero_grad()
+            optim.zero_grad()
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_max_input_buffers_resolves_to_max(self):
+        """
+        Per-module reduce-scatter input-buffer caps share one pipeline (a single
+        ``comm_ctx.reduce_scatter_states`` list), so mixed caps must resolve to
+        the max on the shared comm context: a lower-cap module cannot silently
+        undo a higher-cap module's retention. The per-group values stay as set.
+        """
+        torch.manual_seed(42)
+        model_args = ModelArgs(dropout_p=0.0)
+        model = Transformer(model_args)
+        blocks = [m for m in model.modules() if isinstance(m, TransformerBlock)]
+        self.assertGreaterEqual(len(blocks), 2)
+        for block in blocks:
+            fully_shard(block)
+        model = fully_shard(model)
+        # Set a non-default cap on a single block only (recurse=False); every
+        # other group (including the root) keeps the default of 1.
+        expected_max = 3
+        blocks[0].set_reduce_scatter_max_input_buffers(expected_max, recurse=False)
+
+        # Resolution runs in lazy init on the first forward.
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
+        model(inp).sum().backward()
+
+        comm_ctx = model._get_fsdp_state()._comm_ctx
+        self.assertEqual(comm_ctx.reduce_scatter_max_input_buffers, expected_max)
+        # Resolution leaves the per-group input values untouched.
+        block0_pg = blocks[0]._get_fsdp_state()._fsdp_param_groups[0]
+        block1_pg = blocks[1]._get_fsdp_state()._fsdp_param_groups[0]
+        self.assertEqual(block0_pg.reduce_scatter_max_input_buffers, expected_max)
+        self.assertEqual(block1_pg.reduce_scatter_max_input_buffers, 1)
+
+    @skip_if_lt_x_gpu(2)
+    def test_set_reduce_scatter_max_input_buffers_validation(self):
+        model = fully_shard(nn.Linear(16, 16))
+        # Non-positive -> ValueError
+        with self.assertRaises(ValueError):
+            model.set_reduce_scatter_max_input_buffers(0)
+        # Non-int -> TypeError, even though 2.5 >= 1 numerically
+        with self.assertRaises(TypeError):
+            model.set_reduce_scatter_max_input_buffers(2.5)
+        # bool is an int subclass but is not a valid count -> TypeError
+        with self.assertRaises(TypeError):
+            model.set_reduce_scatter_max_input_buffers(True)
+        # A valid value is accepted
+        model.set_reduce_scatter_max_input_buffers(2)
 
     @skip_if_lt_x_gpu(2)
     def test_set_reshard_after_forward(self):
@@ -1531,6 +1718,7 @@ class TestFullyShardUnshardMultiProcess(FSDPTest):
     def world_size(self) -> int:
         return min(torch.get_device_module(device_type).device_count(), 2)
 
+    @skipIfTorchInductor(msg="https://github.com/pytorch/pytorch/issues/149349")
     @skip_if_lt_x_gpu(2)
     def test_unshard_async(self):
         class ReduceModule(nn.Module):
@@ -1719,7 +1907,7 @@ class TestFullyShardAllocFromPG(FSDPTest):
 @unittest.skipIf(
     not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this platform"
 )
-@skipCUDAIf(TEST_WITH_ROCM, "requires NVIDIA GPUs")
+@requires_nccl_version((2, 28), "Need NCCL 2.28+ for CE collectives")
 @skipCUDAIf(not SM90OrLater, "requires sm90+")
 class TestFullyShardSymmMem(MultiProcContinuousTest):
     @classmethod
@@ -1800,9 +1988,10 @@ class TestFullyShardForceSumReduction(FSDPTest):
         super()._run(*args, **kwargs)
 
     # Test reduce-scatter only on plain FSDP on 2 GPUs
+    # This test verifies NCCL debug logs and is CUDA-specific.
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(
-        TEST_XPU, "Related environment variable is not supported with XCCL"
+        not TEST_CUDA, "This test verifies NCCL debug logs and is CUDA-specific"
     )
     def test_fully_shard_force_sum_reduce_scatter(self):
         torch.manual_seed(42)
@@ -1855,9 +2044,10 @@ class TestFullyShardForceSumReduction(FSDPTest):
         self.assertRegex(logs, reduce_scatter_sum_re)
 
     # Test both reduce-scatter and all-reduce on HSDP (DDP+FSDP) on 4 GPUs
+    # This test verifies NCCL debug logs and is CUDA-specific.
     @skip_if_lt_x_gpu(4)
     @unittest.skipIf(
-        TEST_XPU, "Related environment variable is not supported with XCCL"
+        not TEST_CUDA, "This test verifies NCCL debug logs and is CUDA-specific"
     )
     def test_fully_shard_force_sum_both_reductions(self):
         mesh = init_device_mesh(
@@ -1923,10 +2113,33 @@ class TestFullyShardForceSumReduction(FSDPTest):
         self.assertRegex(logs, all_reduce_sum_re)
 
 
-class TestFullyShardReduceOpWorldSize1(FSDPTest):
+@instantiate_parametrized_tests
+class TestFullyShardReduceOpWorldSize1(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return 1
+
+    @parametrize("divide_factor", [None, 1.0, 2.0])
+    def test_singleton_copy_division(self, divide_factor):
+        divisions = []
+
+        class RecordDivisions(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func == torch.ops.aten.div.Tensor:
+                    divisions.append(func)
+                return func(*args, **(kwargs or {}))
+
+        model = nn.Linear(8, 4, bias=False, device=device_type)
+        fully_shard(model, mesh=init_device_mesh(device_type.type, (1,)))
+        if divide_factor is not None:
+            model.set_gradient_divide_factor(divide_factor)
+        inp = torch.ones(3, 8, device=device_type)
+        loss = model(inp).sum()
+        with RecordDivisions():
+            loss.backward()
+        self.assertEqual(len(divisions), int(divide_factor not in (None, 1)))
+        expected = torch.full_like(inp[:1].expand(4, -1), 3 / (divide_factor or 1))
+        self.assertEqual(model.weight.grad.to_local(), expected)
 
     def test_size1_reduceop(self):
         from torch.distributed.distributed_c10d import ReduceOp
@@ -1970,6 +2183,120 @@ class TestFullyShardReduceOpWorldSize1(FSDPTest):
             all_reduce_op,
         ) = _get_gradient_divide_factors(group, None, torch.float32)
         self.assertEqual(all_reduce_op, ReduceOp.SUM)
+
+
+class TestFullyShardReduceScatterRecordStream(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(2, device_module.device_count())
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_records_consumer_stream(self):
+        # A backend can register a device impl of fsdp::record_grad_output_stream at
+        # import time. Then the op is not a no-op on that device, so the not-opted-in
+        # case is not testable there. Run only the opted-in case on such a device.
+        import torch.distributed.fsdp._fully_shard._fsdp_collectives
+
+        backend_has_impl = torch._C._dispatch_has_kernel_for_dispatch_key(
+            "fsdp::record_grad_output_stream",
+            torch._C._dispatch_key_for_device(device_type.type),
+        )
+        needs_record_stream = [True] if backend_has_impl else [True, False]
+        self.run_subtests(
+            {
+                "needs_record_stream": needs_record_stream,
+                "mixed_precision": [False, True],
+            },
+            self._test_reduce_scatter_records_consumer_stream,
+        )
+
+    def _test_reduce_scatter_records_consumer_stream(
+        self, needs_record_stream: bool, mixed_precision: bool
+    ):
+        torch.manual_seed(42)
+        model = nn.Sequential(*[nn.Linear(1024, 1024) for _ in range(3)]).to(
+            device_type
+        )
+        if mixed_precision:
+            model = model.to(torch.bfloat16)
+        for param in model.parameters():
+            dist.broadcast(param.detach(), src=0)
+        mp_policy = (
+            MixedPrecisionPolicy(param_dtype=torch.bfloat16, reduce_dtype=torch.float32)
+            if mixed_precision
+            else None
+        )
+        for module in model:
+            if mp_policy is not None:
+                fully_shard(module, mp_policy=mp_policy)
+            else:
+                fully_shard(module)
+        if mp_policy is not None:
+            fully_shard(model, mp_policy=mp_policy)
+        else:
+            fully_shard(model)
+
+        recorded_dtypes = []
+        orig_record_stream = torch.Tensor.record_stream
+
+        def _record_stream_spy(tensor, stream):
+            recorded_dtypes.append(tensor.dtype)
+            return orig_record_stream(tensor, stream)
+
+        from torch.library import _scoped_library
+
+        inp_dtype = torch.bfloat16 if mixed_precision else torch.float32
+
+        def _run_backward():
+            with patch.object(torch.Tensor, "record_stream", _record_stream_spy):
+                for _ in range(2):
+                    inp = torch.randn(8, 1024, device=device_type, dtype=inp_dtype)
+                    model(inp).sum().backward()
+                device_module.synchronize()
+
+        if needs_record_stream:
+            # Model a backend that opts in: register an impl of the
+            # fsdp::record_grad_output_stream op for this device. The impl records
+            # the consumer stream on the reduce-scatter output, exactly as a
+            # backend whose free releases device memory must.
+            with _scoped_library("fsdp", "FRAGMENT") as test_lib:
+
+                @torch.library.impl(
+                    "fsdp::record_grad_output_stream", device_type.type, lib=test_lib
+                )
+                def _record(buffer, stream_id, device_index, device_type_enum):
+                    buffer.record_stream(
+                        torch.Stream(
+                            stream_id=stream_id,
+                            device_index=device_index,
+                            device_type=device_type_enum,
+                        )
+                    )
+
+                _run_backward()
+        else:
+            # No impl registered: the op is the default no-op, so FSDP2 must not
+            # record any stream.
+            _run_backward()
+
+        if needs_record_stream:
+            # The reduce-scatter output that backs the sharded gradient is the POST-cast
+            # tensor (orig_dtype). In mixed precision that is bf16, not the reduce_dtype
+            # (fp32) buffer, so record_stream must land on the orig_dtype tensor.
+            expected_dtype = torch.bfloat16 if mixed_precision else torch.float32
+            self.assertIn(
+                expected_dtype,
+                recorded_dtypes,
+                f"expected record_stream on the post-cast (orig_dtype={expected_dtype}) "
+                f"reduce-scatter output; got {recorded_dtypes}",
+            )
+        else:
+            self.assertEqual(
+                recorded_dtypes,
+                [],
+                "record_stream must not be called when the backend does not advertise "
+                "_needs_record_stream_on_free",
+            )
 
 
 if __name__ == "__main__":

@@ -1,3 +1,4 @@
+#include <ATen/native/mps/kernels/UnaryKernel.h>
 #include <c10/metal/indexing.h>
 #include <c10/metal/special_math.h>
 #include <c10/metal/utils.h>
@@ -28,9 +29,17 @@ inline T exp_(const T x) {
 
 template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
 inline T exp_(const T x) {
+  auto ex = precise::exp(x.x);
+  // y == 0: avoid inf*0 / nan*0 = NaN in imag (matches C99 cexp).
+  if (x.y == 0) {
+    return T(ex, 0);
+  }
+  // Metal lacks a half sincos; do it in float (free for float complex, more
+  // accurate for half complex).
+  float c;
+  float s = precise::sincos(static_cast<float>(x.y), c);
   return T(
-      precise::exp(x.x) * precise::cos(x.y),
-      precise::exp(x.x) * precise::sin(x.y));
+      ex * static_cast<decltype(ex)>(c), ex * static_cast<decltype(ex)>(s));
 }
 
 struct exp_functor {
@@ -47,7 +56,7 @@ struct exp_functor {
 struct expm1_functor {
   template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
   inline T operator()(const T x) {
-    if (::metal::fabs(x) < 1e-5f) {
+    if (::metal::fabs(x) < 1e-1f) {
       return static_cast<T>(c10::metal::expm1f(static_cast<float>(x)));
     } else {
       return static_cast<T>(exp_(static_cast<float>(x)) - 1.0f);
@@ -59,10 +68,17 @@ struct expm1_functor {
   }
   template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {
+    // y == 0: same rationale as exp_ short-circuit above.
+    if (x.y == 0) {
+      return T(c10::metal::expm1f(x.x), 0);
+    }
     if (::precise::sqrt(dot(x, x)) < 1e-2) {
+      float c;
+      float s = precise::sincos(static_cast<float>(x.y), c);
+      using elem_t = decltype(x.x + x.x); // unwrapped value type
       return T(
-          c10::metal::expm1f(x.x + ::precise::log(precise::cos(x.y))),
-          exp_(x.x) * precise::sin(x.y));
+          c10::metal::expm1f(x.x + ::precise::log(static_cast<elem_t>(c))),
+          exp_(x.x) * static_cast<elem_t>(s));
     } else {
       return exp_(x) - T(1.0f, 0.0f);
     }
@@ -85,9 +101,19 @@ struct sigmoid_functor {
 };
 
 struct abs_functor {
-  template <typename T, enable_if_t<!is_complex_v<T>, bool> = true>
+  // precise:: has only float candidates, so bfloat converts unambiguously
+  // (unqualified abs is ambiguous for bfloat: float vs half), and abs is
+  // exact under the round trip. Integers must not take this path: the float
+  // conversion rounds above 2^24.
+  template <
+      typename T,
+      enable_if_t<!is_complex_v<T> && !is_scalar_integral_v<T>, bool> = true>
   inline T operator()(const T x) {
     return static_cast<T>(precise::abs(x));
+  }
+  template <typename T, enable_if_t<is_scalar_integral_v<T>, bool> = true>
+  inline T operator()(const T x) {
+    return ::metal::abs(x);
   }
   template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
   inline T operator()(const T x) {
@@ -107,12 +133,13 @@ struct sin_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // sin(x+yi)=sin(x)cosh(y)+icos(x)sinh(y);
-    auto sin_x = precise::sin(x.x);
-    auto cosh_y = precise::cosh(x.y);
-    auto cos_x = precise::cos(x.x);
-    auto sinh_y = precise::sinh(x.y);
-    return T(sin_x * cosh_y, cos_x * sinh_y);
+    // sin(x+yi)=sin(x)cosh(y)+icos(x)sinh(y); float sincos covers half too.
+    float cos_x;
+    float sin_x = precise::sincos(static_cast<float>(x.x), cos_x);
+    using elem_t = decltype(x.x + x.x);
+    return T(
+        static_cast<elem_t>(sin_x) * precise::cosh(x.y),
+        static_cast<elem_t>(cos_x) * precise::sinh(x.y));
   }
 };
 
@@ -127,12 +154,13 @@ struct cos_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // cos(x+yi)=cos(x)cosh(y)-isin(x)sinh(y);
-    auto sin_x = precise::sin(x.x);
-    auto cosh_y = precise::cosh(x.y);
-    auto cos_x = precise::cos(x.x);
-    auto sinh_y = precise::sinh(x.y);
-    return T(cos_x * cosh_y, -1 * sin_x * sinh_y);
+    // cos(x+yi)=cos(x)cosh(y)-isin(x)sinh(y); float sincos covers half too.
+    float cos_x;
+    float sin_x = precise::sincos(static_cast<float>(x.x), cos_x);
+    using elem_t = decltype(x.x + x.x);
+    return T(
+        static_cast<elem_t>(cos_x) * precise::cosh(x.y),
+        -static_cast<elem_t>(sin_x) * precise::sinh(x.y));
   }
 };
 
@@ -165,14 +193,8 @@ struct sinh_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // sinh(x) = (e^x - e^(-x)) / 2
-    auto exp_1 =
-        T(precise::exp(x.x) * precise::cos(x.y),
-          precise::exp(x.x) * precise::sin(x.y));
-    auto exp_2 =
-        T(precise::exp(-x.x) * precise::cos(-x.y),
-          precise::exp(-x.x) * precise::sin(-x.y));
-    return div(exp_1 - exp_2, T(2, 0));
+    // sinh(x) = (e^x - e^(-x)) / 2; delegate to exp_ to inherit y==0 fix.
+    return div(exp_(x) - exp_(T(-x.x, -x.y)), T(2, 0));
   }
 };
 
@@ -187,14 +209,8 @@ struct cosh_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // cosh(x+iy)=(e^x + e^(-x)) / 2
-    auto exp_1 =
-        T(precise::exp(x.x) * precise::cos(x.y),
-          precise::exp(x.x) * precise::sin(x.y));
-    auto exp_2 =
-        T(precise::exp(-x.x) * precise::cos(-x.y),
-          precise::exp(-x.x) * precise::sin(-x.y));
-    return div(exp_1 + exp_2, T(2, 0));
+    // cosh(x+iy) = (e^x + e^(-x)) / 2; delegate to exp_ to inherit y==0 fix.
+    return div(exp_(x) + exp_(T(-x.x, -x.y)), T(2, 0));
   }
 };
 
@@ -368,9 +384,10 @@ struct log10_functor {
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // Base 10 complex log = ln(x+yi)/ln(10)
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    return div(T(real, imag), T(::precise::log(10), 0));
+    auto real = ::precise::log10(magnitude);
+    auto imag =
+        (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x) * M_LOG10E_F;
+    return T(real, imag);
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
@@ -395,7 +412,7 @@ struct log1p_functor {
     return T(real, imag);
   }
   inline float operator()(const bool x) {
-    return x ? ::precise::log(2.0) : 0;
+    return x ? M_LN2_F : 0;
   }
 };
 
@@ -410,11 +427,12 @@ struct log2_functor {
   }
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
-    // Base 10 complex log = ln(x+yi)/ln(2)
+    // Base 2 complex log = ln(x+yi)/ln(2)
     auto magnitude = ::precise::sqrt(x.x * x.x + x.y * x.y);
-    auto real = ::precise::log(magnitude);
-    auto imag = (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x);
-    return div(T(real, imag), T(::precise::log(2), 0));
+    auto real = ::precise::log2(magnitude);
+    auto imag =
+        (x.x == 0 && x.y == 0) ? 0 : ::precise::atan2(x.y, x.x) * M_LOG2E_F;
+    return T(real, imag);
   }
   inline float operator()(const bool x) {
     return x ? 0 : -INFINITY;
@@ -493,11 +511,16 @@ struct exp2_functor {
   template <typename T>
   inline enable_if_t<is_complex_v<T>, T> operator()(const T x) {
     // based on https://mathworld.wolfram.com/ComplexExponentiation.html
-    auto coef = ::precise::pow(4, x.x / 2);
-    auto ln = ::precise::log(4);
-    auto real = ::precise::cos(0.5 * x.y * ln);
-    auto imag = ::precise::sin(0.5 * x.y * ln);
-    return T(coef * real, coef * imag);
+    auto coef = ::precise::pow(2, x.x);
+    // y == 0: same rationale as exp_ short-circuit (avoid coef*0 = NaN).
+    if (x.y == 0) {
+      return T(coef, 0);
+    }
+    float real;
+    float imag = ::precise::sincos(static_cast<float>(x.y) * M_LN2_F, real);
+    using elem_t = decltype(x.x + x.x);
+    return T(
+        coef * static_cast<elem_t>(real), coef * static_cast<elem_t>(imag));
   }
 };
 
@@ -619,6 +642,9 @@ DEFINE_UNARY_FLOATING_FUNCTOR(erfc);
 DEFINE_UNARY_FLOATING_FUNCTOR(erfcx);
 DEFINE_UNARY_FLOATING_FUNCTOR(erfinv);
 DEFINE_UNARY_FLOATING_FUNCTOR(sinc);
+DEFINE_UNARY_FLOATING_FUNCTOR(floor);
+DEFINE_UNARY_FLOATING_FUNCTOR(ceil);
+DEFINE_UNARY_FLOATING_FUNCTOR(trunc);
 
 REGISTER_UNARY_OP(neg, int, int);
 REGISTER_UNARY_OP(neg, long, long);
@@ -634,6 +660,15 @@ REGISTER_UNARY_OP(round, char, char);
 REGISTER_UNARY_OP(round, uchar, uchar);
 REGISTER_UNARY_OP(round, float, float);
 REGISTER_UNARY_OP(round, half, half);
+
+#define REGISTER_ROUNDING_OPS(DTYPE)      \
+  REGISTER_UNARY_OP(floor, DTYPE, DTYPE); \
+  REGISTER_UNARY_OP(ceil, DTYPE, DTYPE);  \
+  REGISTER_UNARY_OP(trunc, DTYPE, DTYPE)
+
+REGISTER_ROUNDING_OPS(float);
+REGISTER_ROUNDING_OPS(half);
+REGISTER_ROUNDING_OPS(bfloat);
 
 REGISTER_UNARY_OP(sqr, char, char);
 REGISTER_UNARY_OP(sqr, uchar, uchar);
@@ -652,6 +687,25 @@ REGISTER_UNARY_OP(bitwise_not, short, short);
 REGISTER_UNARY_OP(bitwise_not, char, char);
 REGISTER_UNARY_OP(bitwise_not, uchar, uchar);
 REGISTER_UNARY_OP(bitwise_not, bool, bool);
+
+struct logical_not_functor {
+  template <typename T>
+  inline bool operator()(const T x) {
+    return !c10::metal::cast_to<bool>(x);
+  }
+};
+
+REGISTER_UNARY_OP(logical_not, bool, bool);
+REGISTER_UNARY_OP(logical_not, uchar, bool);
+REGISTER_UNARY_OP(logical_not, char, bool);
+REGISTER_UNARY_OP(logical_not, short, bool);
+REGISTER_UNARY_OP(logical_not, int, bool);
+REGISTER_UNARY_OP(logical_not, long, bool);
+REGISTER_UNARY_OP(logical_not, half, bool);
+REGISTER_UNARY_OP(logical_not, float, bool);
+REGISTER_UNARY_OP(logical_not, bfloat, bool);
+REGISTER_UNARY_OP(logical_not, float2, bool);
+REGISTER_UNARY_OP(logical_not, half2, bool);
 
 REGISTER_UNARY_OP(abs, int, int);
 REGISTER_UNARY_OP(abs, long, long);
@@ -759,3 +813,142 @@ REGISTER_UNARY_ALPHA_OP(polygamma, char, int, float);
 REGISTER_UNARY_ALPHA_OP(polygamma, short, int, float);
 REGISTER_UNARY_ALPHA_OP(polygamma, int, int, float);
 REGISTER_UNARY_ALPHA_OP(polygamma, long, int, float);
+
+// Replacement values are computed per-dtype on the host and ride at float
+// (exact for half/bfloat extrema), mirroring the CUDA kernel's
+// Scalar-to-scalar_t conversion.
+inline float nan_to_num_replace(float x, NanToNumParams<float> params) {
+  return ::metal::isnan(x)
+      ? params.nan
+      : (::metal::isinf(x) ? (x > 0.0f ? params.posinf : params.neginf) : x);
+}
+
+struct nan_to_num_functor {
+  template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+  inline T operator()(const T x, const NanToNumParams<float> params) {
+    return static_cast<T>(nan_to_num_replace(float(x), params));
+  }
+  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
+  inline T operator()(const T x, const NanToNumParams<float> params) {
+    // per-component, matching CPU/CUDA
+    return T(
+        nan_to_num_replace(float(x.x), params),
+        nan_to_num_replace(float(x.y), params));
+  }
+};
+
+typedef NanToNumParams<float> NanToNumParams_float;
+REGISTER_UNARY_ALPHA_OP(nan_to_num, float, NanToNumParams_float, float);
+REGISTER_UNARY_ALPHA_OP(nan_to_num, half, NanToNumParams_float, half);
+REGISTER_UNARY_ALPHA_OP(nan_to_num, bfloat, NanToNumParams_float, bfloat);
+REGISTER_UNARY_ALPHA_OP(nan_to_num, float2, NanToNumParams_float, float2);
+REGISTER_UNARY_ALPHA_OP(nan_to_num, half2, NanToNumParams_float, half2);
+
+// Metal's frexp() computes in float32 and Apple GPUs flush float32 subnormals
+// to zero; bfloat16 shares float32's exponent range, so its subnormals are lost
+// the same way. Decompose the bit pattern instead -- integer ops are not
+// subject to flush-to-zero. U is T's unsigned twin.
+template <typename T, typename U>
+inline T frexp_bits(const T x, thread int& exponent) {
+  constexpr int MANT = numeric_limits<T>::digits - 1;
+  constexpr int EXP = int(sizeof(T)) * 8 - MANT - 1;
+  constexpr U mant_mask = (U(1) << MANT) - 1;
+  constexpr U exp_all = (U(1) << EXP) - 1;
+  constexpr int bias = (1 << (EXP - 1)) - 1;
+
+  const U bits = as_type<U>(x);
+  const U sign = bits & (U(1) << (MANT + EXP));
+  const U exp_field = (bits >> MANT) & exp_all;
+  U frac = bits & mant_mask;
+
+  // inf, nan and +-0 are returned unchanged with a zero exponent
+  if (exp_field == exp_all || (exp_field == 0 && frac == 0)) {
+    exponent = 0;
+    return x;
+  }
+
+  if (exp_field == 0) {
+    // Subnormal: value = frac * 2^(1 - bias - MANT). With lead the index of
+    // frac's highest set bit, frac = 2^lead * 1.g, so the value is
+    // 1.g * 2^(lead + 1 - bias - MANT) and the [0.5, 1) form is
+    // (1.g / 2) * 2^(lead + 2 - bias - MANT). Shifting the leading one up to
+    // the implicit-bit position leaves g in the significand field. frac is
+    // nonzero here: the exp_field == 0 && frac == 0 case returned above, and
+    // MANT + EXP is the index of U's top bit, so clz gives lead directly.
+    const int lead = MANT + EXP - int(clz(frac));
+    frac = (frac << (MANT - lead)) & mant_mask;
+    exponent = lead + 2 - bias - MANT;
+  } else {
+    // Normal: value = 1.f * 2^(exp_field - bias), i.e.
+    // (1.f / 2) * 2^(exp_field - bias + 1).
+    exponent = int(exp_field) - bias + 1;
+  }
+  // An exponent field of bias-1 is 2^-1, scaling the significand into [0.5, 1).
+  return as_type<T>(U(sign | (U(bias - 1) << MANT) | frac));
+}
+
+// Overload set so the kernels can stay dtype-generic, mirroring exp_ above.
+inline float frexp_(const float x, thread int& e) {
+  return frexp_bits<float, uint>(x, e);
+}
+inline half frexp_(const half x, thread int& e) {
+  return frexp_bits<half, ushort>(x, e);
+}
+inline bfloat frexp_(const bfloat x, thread int& e) {
+  return frexp_bits<bfloat, ushort>(x, e);
+}
+
+// frexp writes a mantissa and an exponent, so it cannot use the shared
+// single-output unary functor path.
+template <typename T>
+kernel void frexp_dense(
+    device T* mantissa [[buffer(0)]],
+    device int* exponent [[buffer(1)]],
+    constant T* input [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  int exp = 0;
+  mantissa[index] = frexp_(input[index], exp);
+  exponent[index] = exp;
+}
+
+// Byte strides come straight from the TensorIterator, indexed with the shared
+// long-offset primitives, so nothing is downcast and arbitrarily large offsets
+// are addressed the same way every other strided MPS kernel does.
+template <typename T>
+kernel void frexp_strided(
+    device void* mantissa [[buffer(0)]],
+    device void* exponent [[buffer(1)]],
+    constant void* input [[buffer(2)]],
+    constant long* sizes [[buffer(3)]],
+    constant long* mantissa_strides [[buffer(4)]],
+    constant long* exponent_strides [[buffer(5)]],
+    constant long* input_strides [[buffer(6)]],
+    constant uint& ndim [[buffer(7)]],
+    uint index [[thread_position_in_grid]]) {
+  long pos[max_ndim];
+  pos_from_thread_index(long(index), pos, sizes, ndim);
+  int exp = 0;
+  const auto m = frexp_(
+      val_at_offs<T>(input, offset_from_coord(pos, input_strides, ndim)), exp);
+  ref_at_offs<T>(mantissa, offset_from_coord(pos, mantissa_strides, ndim)) = m;
+  ref_at_offs<int>(exponent, offset_from_coord(pos, exponent_strides, ndim)) =
+      exp;
+}
+
+#define REGISTER_FREXP_OP(T)                                                \
+  template [[host_name("frexp_dense_" #T)]] kernel void frexp_dense<T>(     \
+      device T*, device int*, constant T*, uint);                           \
+  template [[host_name("frexp_strided_" #T)]] kernel void frexp_strided<T>( \
+      device void*,                                                         \
+      device void*,                                                         \
+      constant void*,                                                       \
+      constant long*,                                                       \
+      constant long*,                                                       \
+      constant long*,                                                       \
+      constant long*,                                                       \
+      constant uint&,                                                       \
+      uint)
+
+REGISTER_FREXP_OP(float);
+REGISTER_FREXP_OP(half);
+REGISTER_FREXP_OP(bfloat);

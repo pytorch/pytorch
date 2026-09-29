@@ -9,24 +9,66 @@ and finalize into a single generated function with all branches resolved
 at compile time: trace_joint, detach indices, epilogue_args_idx, number
 of mutated inputs, output arity, and dynamic dims are all baked in.
 
-Tests verify that a "runtime_wrapper_orchestration" artifact is emitted
-via trace_structured.
+Tests inspect the generated "runtime_wrapper_orchestration" source section.
 """
 
 import warnings
+from unittest.mock import patch
 
 from common_utils import capture_codegen_source
 
 import torch
 import torch._dynamo
 import torch._functorch.config as functorch_config
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 class TestCodegenRuntimeWrapper(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         torch._dynamo.reset()
+
+    def test_structured_trace_combines_runtime_wrappers(self):
+        with patch.object(torch._logging, "trace_structured") as trace_structured:
+
+            @torch.compile(backend="aot_eager")
+            def f(x):
+                return x * 2
+
+            x = torch.randn(4, requires_grad=True)
+            f(x).sum().backward()
+
+        artifacts = []
+        for call in trace_structured.call_args_list:
+            metadata_fn = call.kwargs.get("metadata_fn")
+            if call.args == ("artifact",) and metadata_fn is not None:
+                artifacts.append((metadata_fn()["name"], call.kwargs["payload_fn"]))
+
+        wrappers = [
+            payload_fn
+            for name, payload_fn in artifacts
+            if name == "aot_autograd_runtime_wrappers"
+        ]
+        self.assertEqual(len(wrappers), 1)
+        source = wrappers[0]()
+        section_names = (
+            "backward_prologue",
+            "backward_epilogue",
+            "compiled_function_forward",
+            "compiled_function_backward",
+            "compiled_fn_wrapper",
+            "runtime_wrapper_orchestration",
+        )
+        section_offsets = [source.index(f"# {name}\n") for name in section_names]
+        self.assertEqual(section_offsets, sorted(section_offsets))
+        self.assertTrue(set(section_names).isdisjoint(name for name, _ in artifacts))
 
     def test_inference_simple(self):
         """
@@ -48,11 +90,13 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertIn("orig_inputs = {}", source)
         self.assertIn("torch._C._set_grad_enabled(False)", source)
         self.assertNotIn("_force_view_tracking_", source)
+        self.assertNotIn("_is_view_replay_enabled", source)
+        self.assertNotIn("_set_view_replay_enabled", source)
 
     def test_training_simple(self):
         """
         Simple training path: no mutations. Generated code should use
-        the training path (enable_grad + force_view_tracking).
+        the training path (enable_grad + view replay tracking).
         """
         with capture_codegen_source("runtime_wrapper_orchestration") as captured:
 
@@ -69,7 +113,8 @@ class TestCodegenRuntimeWrapper(TestCase):
 
         self.assertEqual(len(captured), 1)
         source = captured[0]
-        self.assertIn("_force_view_tracking_", source)
+        self.assertIn("torch._C._set_view_replay_enabled(True)", source)
+        self.assertIn("if not prev_view_replay_enabled:", source)
         self.assertIn("torch.enable_grad()", source)
 
     def test_training_with_detach_indices(self):
@@ -96,7 +141,7 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn(".detach()", source)
-        self.assertIn("_force_view_tracking_", source)
+        self.assertIn("torch._C._set_view_replay_enabled(True)", source)
 
     def test_inference_with_mutation(self):
         """
@@ -305,7 +350,7 @@ class TestCodegenRuntimeWrapper(TestCase):
     def test_training_disable_amp(self):
         """
         Training path with autocast active at compile time. Generated code
-        should use _DisableAutocast_ alongside force_view_tracking and
+        should use _DisableAutocast_ alongside view replay tracking and
         enable_grad.
         """
         with capture_codegen_source("runtime_wrapper_orchestration") as captured:
@@ -323,7 +368,7 @@ class TestCodegenRuntimeWrapper(TestCase):
         self.assertEqual(len(captured), 1)
         source = captured[0]
         self.assertIn("_DisableAutocast_", source)
-        self.assertIn("_force_view_tracking_", source)
+        self.assertIn("torch._C._set_view_replay_enabled(True)", source)
 
     def test_dynamic_dims(self):
         """

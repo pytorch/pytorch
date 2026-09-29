@@ -4,11 +4,13 @@ import collections
 import re
 import sys
 import time
+import typing
 from io import StringIO
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.comptime import comptime
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 # Because we don't support free variables in comptime at the moment,
@@ -20,6 +22,8 @@ SELF = None
 
 
 class ComptimeTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_print_single(self):
         global FILE
         FILE = StringIO()
@@ -30,7 +34,9 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
             def _(ctx):
                 ctx.print(ctx.get_local("e"), file=FILE)
 
-        Employee = collections.namedtuple("Employee", ["name", "id"])
+        class Employee(typing.NamedTuple):
+            name: object
+            id: object
 
         class mylist(list):
             pass
@@ -56,16 +62,16 @@ class ComptimeTests(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             FILE.getvalue().strip(),
             """\
-FakeTensor(..., size=(s77,))
+Tensor(shape=(s77,), dtype=torch.float32)
 2
-[FakeTensor(..., size=(s77,)), 2]
-(FakeTensor(..., size=(s77,)), 2)
-{'foo': FakeTensor(..., size=(s77,))}
+[Tensor(shape=(s77,), dtype=torch.float32), 2]
+(Tensor(shape=(s77,), dtype=torch.float32), 2)
+{'foo': Tensor(shape=(s77,), dtype=torch.float32)}
 range(1, 3)
 Employee(name='foo', id=2)
 UserDefinedListVariable(mylist)
 set()
-{'a','b'}
+{'a', 'b'}
 s77""",
         )
 
@@ -131,14 +137,6 @@ def forward(self, L_x_ : torch.Tensor):
 
             return y + 3
 
-        def munge_disas(s):
-            re.sub(
-                r"^(?: +\d+)?(?: +(-->)) \+\d+ ([A-Za-z0-9_]+)",
-                "\1 \3",
-                s,
-                flags=re.MULTILINE,
-            )
-
         f(torch.randn(2))
         self.assertEqual(cnt.frame_count, 1)
         out = FILE.getvalue()
@@ -174,7 +172,7 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-- FakeTensor(..., size=(2,))
+- Tensor(shape=(2,), dtype=torch.float32)
 """,
         )
 
@@ -200,8 +198,8 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertExpectedInline(
             FILE.getvalue(),
             """\
-x = FakeTensor(..., size=(2,))
-y = FakeTensor(..., size=(2,))
+x = Tensor(shape=(2,), dtype=torch.float32)
+y = Tensor(shape=(2,), dtype=torch.float32)
 """,
         )
 
@@ -446,6 +444,31 @@ def forward(self, L_x_ : torch.Tensor):
     y = l_x_ * 2;  l_x_ = None
     add = y + 4;  y = add = None""",
         )
+
+    def test_comptime_bound_method(self):
+        # A bound method must be called with its receiver bound. Calling the
+        # underlying function instead would pass the ComptimeContext as `self`.
+        class Probe:
+            def __init__(self):
+                self.calls = 0
+                self.ctx_type = None
+
+            def cb(self, ctx):
+                self.calls += 1
+                self.ctx_type = type(ctx).__name__
+
+        probe = Probe()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            comptime(probe.cb)
+            return x + 1
+
+        f(torch.randn(3))
+        # The mutation landed on `probe`, so `self` was bound correctly, and
+        # the context arrived as the argument rather than as `self`.
+        self.assertEqual(probe.calls, 1)
+        self.assertEqual(probe.ctx_type, "ComptimeContext")
 
 
 if __name__ == "__main__":

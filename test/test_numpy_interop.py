@@ -317,7 +317,7 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(
             final_refcount,
             initial_refcount,
-            f"Memory leak detected: refcount increased from {initial_refcount} to {final_refcount}",
+            lambda msg: f"{msg}\nMemory leak detected: refcount increased from {initial_refcount} to {final_refcount}",
         )
 
     @skipIfTorchDynamo("No need to test invalid dtypes that should fail by design.")

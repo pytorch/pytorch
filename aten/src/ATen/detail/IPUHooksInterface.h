@@ -31,9 +31,10 @@ struct TORCH_API IPUHooksInterface : AcceleratorHooksInterface {
   }
 };
 
+// Deprecated: no longer used internally, kept for ABI compatibility.
 struct TORCH_API IPUHooksArgs {};
 
-TORCH_DECLARE_REGISTRY(IPUHooksRegistry, IPUHooksInterface, IPUHooksArgs);
+TORCH_DECLARE_REGISTRY(IPUHooksRegistry, IPUHooksInterface);
 #define REGISTER_IPU_HOOKS(clsname) \
   C10_REGISTER_CLASS(IPUHooksRegistry, clsname, clsname)
 

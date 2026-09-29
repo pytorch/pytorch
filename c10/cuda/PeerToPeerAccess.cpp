@@ -188,10 +188,15 @@ bool get_fabric_access(c10::DeviceIndex dev) {
       fabricCliqueId_[dev] = kCliqueIdUnsupported;
       return false;
     }
-    TORCH_CHECK(
-        NVML_SUCCESS ==
-        DriverAPI::get()->nvmlDeviceGetGpuFabricInfoV_(
-            nvml_device, &fabricInfo));
+    auto nvml_fabric_result = DriverAPI::get()->nvmlDeviceGetGpuFabricInfoV_(
+        nvml_device, &fabricInfo);
+    if (nvml_fabric_result != NVML_SUCCESS) {
+      TORCH_WARN_ONCE(
+          "nvmlDeviceGetGpuFabricInfoV failed. This function is only supported on sm90+");
+      cache = 0;
+      fabricCliqueId_[dev] = kCliqueIdUnsupported;
+      return false;
+    }
     auto state = fabricInfo.state != NVML_GPU_FABRIC_STATE_NOT_SUPPORTED;
     if (state) {
       fabricCliqueId_[dev] = static_cast<int>(fabricInfo.cliqueId);
@@ -288,7 +293,7 @@ std::string get_nvml_fabric_info([[maybe_unused]] c10::DeviceIndex dev) {
         << static_cast<int>(info.healthSummary);
   }
 #endif
-  return oss.str();
+  return std::move(oss).str();
 #else
   return "fabric info unsupported (requires CUDA >= 12.4)";
 #endif

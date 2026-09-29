@@ -60,7 +60,7 @@ def _validate_pass_schedule_constraint(
                 continue
             raise RuntimeError(
                 f"pass schedule constraint violated. Expected {a} before {b}"
-                f" but found {a} at index {i} and {b} at index{j} in pass"
+                f" but found {a} at index {i} and {b} at index {j} in pass"
                 f" list."
             )
 

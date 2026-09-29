@@ -42,6 +42,23 @@ class TestInplaceTag(TestCase):
     def test_basic_inplace(self):
         self.assertTrue(is_inplace(torch.ops._TestInplaceTag.add_.default))
 
+    def test_auto_fake_kernel_inplace(self):
+        self.lib.define(
+            "auto_fake_add_(Tensor(a!) self, Tensor other) -> Tensor(a!)",
+            tags=[torch.Tag.inplace],
+        )
+        self.lib.impl(
+            "auto_fake_add_",
+            lambda self_, other: self_.add_(other),
+            "CPU",
+        )
+
+        with torch._subclasses.fake_tensor.FakeTensorMode():
+            x = torch.randn(3, 4)
+            y = torch.randn(3, 4)
+            result = torch.ops._TestInplaceTag.auto_fake_add_(x, y)
+            self.assertIs(result, x)
+
     def test_is_inplace_native(self):
         # Hand-written inplace op
         self.assertTrue(is_inplace(torch.ops.aten.abs_.default))
@@ -94,6 +111,20 @@ class TestInplaceTag(TestCase):
         with self.assertRaisesRegex(ValueError, "return the first mutable argument"):
             self.lib.define(
                 "bad_alias(Tensor(a!) self) -> Tensor",
+                tags=[torch.Tag.inplace],
+            )
+
+    def test_return_not_tensor(self):
+        with self.assertRaisesRegex(ValueError, "return must be a Tensor"):
+            self.lib.define(
+                "bad_return_type(Tensor(a!) self) -> int(a!)",
+                tags=[torch.Tag.inplace],
+            )
+
+    def test_return_not_mutable_alias(self):
+        with self.assertRaisesRegex(ValueError, "return must be a mutable alias"):
+            self.lib.define(
+                "bad_return_mutability(Tensor(a!) self) -> Tensor(a)",
                 tags=[torch.Tag.inplace],
             )
 
