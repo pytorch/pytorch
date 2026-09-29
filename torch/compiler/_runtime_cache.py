@@ -38,8 +38,9 @@ def _precompile_error(message: str) -> Exception:
     return PrecompileError(message)
 
 
-# Process-wide: once prepared, a frozen kernel serves every later compile of the
-# same Triton source in this process until Inductor's kernel caches are cleared.
+# Process-wide: once precompile.load installs them, a frozen kernel serves every
+# later compile of the same Triton source in this process until fresh_cache() /
+# clear_caches() (see FrozenTritonKernels).
 _frozen_triton_kernels: dict[str, bytes] = {}
 _loaded_triton_kernels: dict[str, CachingAutotuner] = {}
 _frozen_triton_kernels_lock = threading.Lock()
@@ -231,7 +232,13 @@ def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
         saved.prepare_for_pickle()
         saved.compile_results = [saved_result]
         saved._reload_kernel = None
-        _retain_cubin(saved_result)
+        try:
+            _retain_cubin(saved_result)
+        except (OSError, RuntimeError) as exc:
+            diagnostic = _triton_export_diagnostic(kernel, "cubin_unavailable")
+            diagnostic["error"] = str(exc)
+            rejected.append(diagnostic)
+            continue
         return pickle.dumps(
             StaticallyLaunchedAutotuner(
                 key, saved.inductor_meta.get("kernel_name", "unknown_kernel"), saved
@@ -311,9 +318,12 @@ def finalize_runtime_cache(
     """Freeze the scope's static Triton kernels into the cache artifact, pass it
     to ``write``, then keep the scope sealed.
 
-    The scope is sealed before kernels are frozen, so a compile racing
-    finalization raises instead of being left out, and unsealed again if freezing
-    or ``write`` raises so the caller can retry.
+    Pending async compiles are waited on first, then the scope is sealed so any
+    later compile raises before kernels are frozen, and it is unsealed again if
+    freezing, serialization or ``write`` raises so the caller can retry. The
+    caller must stop compiling before calling this: a kernel submitted on
+    another thread after the wait but before the seal is neither waited on nor
+    rejected, and is left out of the cache.
     """
     import torch
     from torch._inductor.async_compile import AsyncCompile
@@ -337,6 +347,8 @@ def finalize_runtime_cache(
             raise RuntimeError(
                 "The precompile cache already contains frozen runtime dependencies"
             )
+        # Drain before sealing: compile result callbacks re-check
+        # check_compilation_allowed, so draining under the seal rejects them.
         AsyncCompile.drain_pending()
         if torch.cuda.is_initialized():
             torch.cuda.synchronize()

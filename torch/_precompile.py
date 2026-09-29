@@ -3270,7 +3270,9 @@ def finalize_cache(
     during the scope added.
     Once the rewrite succeeds the enclosing :func:`capture_runtime` scope is
     sealed; if it fails, the scope stays unsealed and ``cache_path`` is left as it
-    was, so the call can be retried.
+    was, so the call can be retried. Stop compiling on every thread before
+    calling it: compile work submitted while it runs is not guaranteed to be
+    waited on or rejected.
 
     Raises :class:`~torch.compiler.PrecompileError` outside a
     :func:`capture_runtime` scope, when called a second time in one scope, for a
@@ -3318,9 +3320,11 @@ def prepare_runtime(
     hash, without executing the artifact or initializing CUDA. It runs under
     :func:`no_compilation`. Only Dynamo captures are supported.
 
-    The cache's frozen Triton kernels are installed process-wide: any later
-    compile in this process that generates the same Triton source is served the
-    frozen kernel and its selected config, until Inductor's caches are cleared.
+    It also checks the cache's frozen Triton kernels, which :func:`load` then
+    installs process-wide: from then on, any compile in this process that
+    generates the same Triton source is served the frozen kernel and its
+    selected config, until ``torch._inductor.utils.fresh_cache()`` or
+    ``clear_caches()`` resets Inductor's caches.
 
     Raises :class:`~torch.compiler.PrecompileError` for a make_fx capture, a
     mismatched or unreadable pair, or a cache :func:`finalize_cache` did not
