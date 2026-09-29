@@ -172,24 +172,23 @@ class FsspecWriter(FileSystemWriter):
 
 
 def _destinations_disjoint(targets: list[Tensor]) -> bool:
-    """Whether every destination occupies its own bytes on CPU.
+    """Whether every destination is a contiguous plain CPU tensor with disjoint bytes.
 
-    Copies into disjoint memory can run concurrently no matter what the planner
-    does. Overlap means two items would race, which happens when a planner
-    resolves several items onto one staging buffer, and it is also the normal
-    case when items narrow into different regions of the same tensor.
-
-    Non-contiguous or non-CPU tensors are rejected rather than analyzed, which keeps
-    ``[data_ptr, nbytes)`` an exact extent instead of a bound and avoids cross-device
-    address comparisons, so this never reports disjoint for targets that actually share bytes.
+    Overlap means two items would race, which happens when items narrow into
+    overlapping regions of the same tensor. Non-contiguous, non-CPU, or
+    custom tensor subclasses are rejected so ``[data_ptr, data_ptr + nbytes)``
+    is always an exact host memory extent.
     """
     spans = []
     for t in targets:
         try:
-            if not (t.is_cpu and t.is_contiguous()):
+            if not (type(t) is Tensor and t.is_cpu and t.is_contiguous()):
                 return False
             start = t.data_ptr()
-            spans.append((start, start + t.numel() * t.element_size()))
+            nbytes = t.numel() * t.element_size()
+            if start == 0 and nbytes > 0:
+                return False
+            spans.append((start, start + nbytes))
         except Exception:
             return False
     spans.sort()
@@ -208,23 +207,14 @@ def _load_aliased(buf: bytes | bytearray | memoryview) -> Tensor:
             and zf.get_record("byteorder") == sys.byteorder.encode()
         ):
             storage = torch.frombuffer(buf, dtype=torch.uint8).untyped_storage()
-        try:
-            return _load(
-                zf,
-                "cpu",
-                _weights_only_unpickler,
-                overall_storage=storage,
-                weights_only=True,
-                encoding="utf-8",
-            )
-        except TypeError:
-            return _load(
-                zf,
-                "cpu",
-                _weights_only_unpickler,
-                overall_storage=storage,
-                encoding="utf-8",
-            )
+        return _load(
+            zf,
+            "cpu",
+            _weights_only_unpickler,
+            overall_storage=storage,
+            weights_only=True,
+            encoding="utf-8",
+        )
 
 
 class FsspecReader(FileSystemReader):
@@ -268,22 +258,25 @@ class FsspecReader(FileSystemReader):
         self.path = self.fs.init_path(path, **kwargs)
 
     def _supports_batched_cat_ranges(self) -> bool:
-        if not (self.fs and self.fs.fs and hasattr(self.fs.fs, "cat_ranges")):
-            return False
+        # read_data runs two cat_ranges calls at once, which only an
+        # AsyncFileSystem is guaranteed to handle. Wrappers such as
+        # DirFileSystem are async even over a sync or caching filesystem, so
+        # the innermost filesystem decides.
         curr_fs = self.fs.fs
+        if not isinstance(curr_fs, fsspec.asyn.AsyncFileSystem):
+            return False
+        seen: set[int] = set()
         while True:
             if isinstance(curr_fs, CachingFileSystem):
                 return False
+            seen.add(id(curr_fs))
             inner = getattr(curr_fs, "fs", None)
-            if inner is None:
+            if not isinstance(inner, fsspec.AbstractFileSystem):
                 break
+            if id(inner) in seen:
+                return False
             curr_fs = inner
-        if isinstance(self.fs.fs, fsspec.asyn.AsyncFileSystem):
-            return bool(getattr(curr_fs, "async_impl", True))
-        cat_ranges_fn = getattr(
-            self.fs.fs.cat_ranges, "__func__", self.fs.fs.cat_ranges
-        )
-        return cat_ranges_fn is not fsspec.AbstractFileSystem.cat_ranges
+        return bool(getattr(curr_fs, "async_impl", True))
 
     def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
         if not plan.items or not self._supports_batched_cat_ranges():
@@ -341,7 +334,7 @@ class FsspecReader(FileSystemReader):
             return chunks
 
         def decode(req, chunk):
-            if getattr(self.storage_data[req.storage_index], "transform_descriptors", None):
+            if self.storage_data[req.storage_index].transform_descriptors:
                 return self._decode_item(req, io.BytesIO(chunk))
             if req.type == LoadItemType.BYTE_IO:
                 return io.BytesIO(chunk)
@@ -354,13 +347,26 @@ class FsspecReader(FileSystemReader):
             with torch.inference_mode(inference_mode):
                 dst.copy_(src)
 
+        # Resolving a whole batch before committing any of it is only safe
+        # when resolve_tensor and commit_tensor keep their default behavior.
+        planner_cls = type(planner)
+        parallel_copy = (
+            isinstance(planner, DefaultLoadPlanner)
+            and planner_cls.resolve_tensor is DefaultLoadPlanner.resolve_tensor
+            and planner_cls.commit_tensor is DefaultLoadPlanner.commit_tensor
+        )
+
         with (
             warnings.catch_warnings(),
             concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.cpu_workers
+                max_workers=self.cpu_workers, thread_name_prefix="FsspecReader-cpu"
             ) as cpu_executor,
-            concurrent.futures.ThreadPoolExecutor(max_workers=2) as io_executor,
+            concurrent.futures.ThreadPoolExecutor(
+                max_workers=2, thread_name_prefix="FsspecReader-io"
+            ) as io_executor,
         ):
+            # _load_aliased wraps the read-only fetched bytes without copying.
+            # The filter is process-wide so that it also covers the pool threads.
             warnings.filterwarnings(
                 "ignore",
                 message=".*The given buffer is not writable.*",
@@ -386,7 +392,7 @@ class FsspecReader(FileSystemReader):
                     # Every planner hook runs on this thread, so planners need
                     # not be thread safe. Only decoding above and the copies
                     # below go to the pool.
-                    if type(planner) is DefaultLoadPlanner:
+                    if parallel_copy:
                         pending: list[tuple[ReadItem, Tensor, Tensor]] = []
                         for i, req in enumerate(b_reqs):
                             f = decoded[i]
