@@ -81,5 +81,18 @@ class TestConstantFoldedExceptionContract(TestCase):
                 )
 
 
+    def test_constant_folded_str_format_attribute_error(self):
+        def fn():
+            try:
+                "{0.foo}".format(1)
+            except AttributeError as e:
+                return str(e)
+            return "no error"
+
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(), fn()
+        )
+
+
 if __name__ == "__main__":
     run_tests()
