@@ -490,6 +490,62 @@ static void conv3d_im2col_matmul(const Tensor& input,
                    .permute({0, 4, 1, 2, 3}));
 }
 
+enum class Conv1dKernel {
+  // One thread per output element.
+  Depthwise,
+  // One matmul2d per tap over the NCL input.
+  MppNcl,
+  // One matmul2d per tap over a zero-padded NLC input.
+  MppNlc,
+  // One matmul2d over all taps of a zero-padded NLC input.
+  MppNlcMerged,
+  // conv3d_metal_forward with unit depth and height.
+  Conv3d,
+};
+
+static Conv1dKernel conv1d_pick_kernel(const Tensor& input,
+                                       const Tensor& weight,
+                                       const Tensor& output,
+                                       int64_t padding,
+                                       int64_t stride,
+                                       int64_t dilation,
+                                       int64_t groups) {
+  using namespace mps;
+  constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
+  // matmul2d on M1/M2 misreads operands whose row stride exceeds this many elements.
+  constexpr int64_t kPreApple9MppMaxStride = std::numeric_limits<uint16_t>::max();
+  const auto channels = input.size(1);
+  const auto length = input.size(3);
+  const auto channels_per_group = weight.size(1);
+  const auto kernel_size = weight.size(3);
+  const auto out_channels = output.size(1);
+  const auto out_length = output.size(3);
+  // Conv2DParams sizes are int32, as are matmul2d offsets within a batch.
+  if ((length + 2 * padding) * channels > kInt32Max || out_channels * out_length > kInt32Max) {
+    return Conv1dKernel::Conv3d;
+  }
+  // Depthwise, or a single-channel conv whose output can't fill a 64x64 matmul2d tile.
+  if (channels_per_group == 1 && (groups > 1 || std::min(out_channels, out_length) < 64)) {
+    return Conv1dKernel::Depthwise;
+  }
+  // conv3d_metal_forward handles empty input channels.
+  if (channels_per_group == 0 || !has_mpp()) {
+    return Conv1dKernel::Conv3d;
+  }
+  // Read an NLC copy of the input: required for stride > 1, free if channels-last, faster for wide outputs.
+  const bool nlc = stride > 1 || input.is_contiguous(MemoryFormat::ChannelsLast) ||
+      (dilation == 1 && groups == 1 && out_channels >= 8 * channels);
+  // NLC windows are contiguous when dilation and groups are 1, so all taps run as one matmul.
+  const bool merged = nlc && dilation == 1 && groups == 1;
+  // Largest operand row stride: input (NCL row or NLC position step) versus weight row.
+  const auto operand_stride =
+      std::max(nlc ? stride * channels : length + padding, (merged ? kernel_size : 1) * channels_per_group);
+  if (!is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS) && operand_stride > kPreApple9MppMaxStride) {
+    return Conv1dKernel::Conv3d;
+  }
+  return merged ? Conv1dKernel::MppNlcMerged : nlc ? Conv1dKernel::MppNlc : Conv1dKernel::MppNcl;
+}
+
 static void conv1d_metal_forward(const Tensor& input_t,
                                  const Tensor& weight_t,
                                  const std::optional<Tensor>& bias_opt,
@@ -499,56 +555,69 @@ static void conv1d_metal_forward(const Tensor& input_t,
                                  int64_t groups,
                                  const Tensor& output_t) {
   using namespace mps;
-  constexpr int64_t kInt32Max = std::numeric_limits<int32_t>::max();
-  // matmul2d on M1/M2 misreads operands whose row stride exceeds this many elements.
-  constexpr int64_t kPreApple9MppMaxStride = std::numeric_limits<uint16_t>::max();
   const int64_t length = input_t.size(3);
   const int64_t kernel_size = weight_t.size(3);
-  const bool depthwise = weight_t.size(1) == 1 && (groups > 1 || std::min(output_t.size(1), output_t.size(3)) < 64);
-  // Read an NLC copy of the input: required for stride > 1, free if channels-last, faster for wide outputs.
-  const bool nlc = !depthwise &&
-      (stride > 1 || input_t.is_contiguous(MemoryFormat::ChannelsLast) ||
-       (dilation == 1 && groups == 1 && output_t.size(1) >= 8 * input_t.size(1)));
-  // NLC windows are contiguous when dilation and groups are 1, so all taps run as one matmul.
-  const bool merged = nlc && dilation == 1 && groups == 1;
-  // Largest operand row stride: input (NCL row or NLC position step) versus weight row.
-  // M1/M2 can only use the MPP kernel when this fits within kPreApple9MppMaxStride.
-  const int64_t operand_stride =
-      std::max(nlc ? stride * input_t.size(1) : length + padding, (merged ? kernel_size : 1) * weight_t.size(1));
-  const bool use_mpp = !depthwise && weight_t.size(1) > 0 && has_mpp() &&
-      (is_apple_family_or_newer(AppleGPUFamily::APPLE_9_PLUS) || operand_stride <= kPreApple9MppMaxStride);
-  if ((!depthwise && !use_mpp) || (length + 2 * padding) * input_t.size(1) > kInt32Max ||
-      output_t.size(1) * output_t.size(3) > kInt32Max) {
-    conv3d_metal_forward(input_t.unsqueeze(2),
-                         weight_t.unsqueeze(2),
-                         bias_opt,
-                         {0, 0, padding},
-                         {1, 1, stride},
-                         {1, 1, dilation},
-                         groups,
-                         output_t.unsqueeze(2));
-    return;
+  const auto padded_nlc_input = [&] {
+    return padding > 0 ? at::constant_pad_nd(input_t.squeeze(2).transpose(1, 2), {0, 0, padding, padding})
+                       : conv3d_to_ndhwc(input_t.unsqueeze(2));
+  };
+  const auto tap_major_weight = [&] {
+    const auto tap_major = weight_t.permute({3, 0, 1, 2});
+    return tap_major.is_contiguous() ? tap_major : conv3d_weights_to_dhwio(weight_t.transpose(0, 1).unsqueeze(2));
+  };
+  const auto dtype = scalarToMetalTypeString(input_t);
+  const auto out_layout = output_t.is_contiguous() ? "ncl" : "nlc";
+  const int simdgroups = weight_t.size(1) * kernel_size >= 1536 ? 2 : 4;
+  Tensor input, weight;
+  std::optional<Tensor> head;
+  auto input_length = length;
+  std::string kernel_name;
+  const auto kernel = conv1d_pick_kernel(input_t, weight_t, output_t, padding, stride, dilation, groups);
+  switch (kernel) {
+    case Conv1dKernel::Depthwise:
+      input = input_t.contiguous();
+      weight = weight_t.contiguous();
+      kernel_name = fmt::format("conv1d_depthwise_{}_{}", out_layout, dtype);
+      break;
+    case Conv1dKernel::MppNcl:
+      input = input_t.contiguous();
+      weight = tap_major_weight();
+      if (padding > 0) {
+        const auto head_length =
+            std::min(length + padding, c10::metal::ceil_div(padding, int64_t(64)) * 64 + (kernel_size - 1) * dilation);
+        head = at::constant_pad_nd(input.narrow(3, 0, head_length - padding), {padding, 0});
+      }
+      kernel_name = fmt::format("conv1d_mpp_ncl_{}_s{}_{}", out_layout, simdgroups, dtype);
+      break;
+    case Conv1dKernel::MppNlc:
+      input = padded_nlc_input();
+      input_length = length + 2 * padding;
+      weight = tap_major_weight();
+      kernel_name = fmt::format("conv1d_mpp_nlc_{}_s{}_{}", out_layout, simdgroups, dtype);
+      break;
+    case Conv1dKernel::MppNlcMerged:
+      input = padded_nlc_input();
+      input_length = length + 2 * padding;
+      weight = weight_t.squeeze(2).transpose(1, 2).contiguous();
+      kernel_name = fmt::format("conv1d_mpp_nlc_{}_s{}_{}", out_layout, simdgroups, dtype);
+      break;
+    case Conv1dKernel::Conv3d:
+      conv3d_metal_forward(input_t.unsqueeze(2),
+                           weight_t.unsqueeze(2),
+                           bias_opt,
+                           {0, 0, padding},
+                           {1, 1, stride},
+                           {1, 1, dilation},
+                           groups,
+                           output_t.unsqueeze(2));
+      return;
   }
-  const auto input = !nlc ? input_t.contiguous()
-      : padding > 0       ? at::constant_pad_nd(input_t.squeeze(2).transpose(1, 2), {0, 0, padding, padding})
-                          : conv3d_to_ndhwc(input_t.unsqueeze(2));
-  const int64_t head_length =
-      std::min(length + padding, c10::metal::ceil_div(padding, int64_t(64)) * 64 + (kernel_size - 1) * dilation);
-  const auto head = !depthwise && !nlc && padding > 0
-      ? at::constant_pad_nd(input.narrow(3, 0, head_length - padding), {padding, 0})
-      : input;
-  const auto tap_major = weight_t.permute({3, 0, 1, 2});
-  const auto weight = depthwise   ? weight_t.contiguous()
-      : merged                    ? weight_t.squeeze(2).transpose(1, 2).contiguous()
-      : tap_major.is_contiguous() ? tap_major
-                                  : conv3d_weights_to_dhwio(weight_t.transpose(0, 1).unsqueeze(2));
-  const bool out_nlc = !output_t.is_contiguous();
   const bool has_bias = bias_opt && bias_opt->defined();
   const auto bias = has_bias ? bias_opt->to(input_t.scalar_type()).contiguous() : input;
   const Conv2DParams params{
       .C_in = static_cast<int32_t>(input_t.size(1)),
       .C_out = static_cast<int32_t>(output_t.size(1)),
-      .W = static_cast<int32_t>(nlc ? length + 2 * padding : length),
+      .W = static_cast<int32_t>(input_length),
       .outW = static_cast<int32_t>(output_t.size(3)),
       .kW = static_cast<int32_t>(kernel_size),
       .sW = static_cast<int32_t>(stride),
@@ -558,11 +627,7 @@ static void conv1d_metal_forward(const Tensor& input_t,
       .C_out_per_group = static_cast<int32_t>(output_t.size(1) / groups),
       .has_bias = has_bias,
   };
-  const int simdgroups = weight_t.size(1) * kernel_size >= 1536 ? 2 : 4;
-  const auto kernel = depthwise
-      ? fmt::format("depthwise_{}", out_nlc ? "nlc" : "ncl")
-      : fmt::format("mpp_{}_{}_s{}", nlc ? "nlc" : "ncl", out_nlc ? "nlc" : "ncl", simdgroups);
-  auto pipeline = lib.getPipelineStateForFunc(fmt::format("conv1d_{}_{}", kernel, scalarToMetalTypeString(input_t)));
+  auto pipeline = lib.getPipelineStateForFunc(kernel_name);
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
@@ -570,7 +635,7 @@ static void conv1d_metal_forward(const Tensor& input_t,
       getMPSProfiler().beginProfileKernel(pipeline, "conv1d", {input, weight}, stream);
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, input, weight, output_t, params, bias, head);
-      if (depthwise) {
+      if (kernel == Conv1dKernel::Depthwise) {
         [encoder dispatchThreads:MTLSizeMake(params.outW, params.C_out, input_t.size(0))
             threadsPerThreadgroup:MTLSizeMake(std::min(params.outW, 256), 1, 1)];
       } else {
