@@ -1,18 +1,7 @@
 #!/usr/bin/python3
 # mypy: allow-untyped-defs
 
-import itertools
-
-import torch
-
-# pyrefly: ignore [deprecated]
-from torch.autograd.profiler_legacy import profile
-
-from . import (
-    _disable_server_process_global_profiler,
-    _enable_server_process_global_profiler,
-)
-
+from torch.autograd.profiler import profile
 
 __all__: list[str] = []
 
@@ -23,18 +12,19 @@ class _server_process_global_profile(profile):
     except that it enables profiling on all threads running RPC server request callbacks.
 
     Context manager that manages autograd profiler state and holds a summary of results.
-    Under the hood it just records events of functions being executed in C++ and
-    exposes those events to Python. You can wrap any code into it and it will
+    Under the hood it relies on Kineto to record events of functions being executed in C++
+    and exposes those events to Python. You can wrap any code into it and it will
     only report runtime of PyTorch functions.
-    Note: profiler is thread local and is automatically propagated into the async tasks
+    Note: profiling is process-global: enabling it here records events for every thread
+    running RPC server-side request callbacks.
 
     Args:
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
             Default: ``True``.
 
-        use_cuda (bool, optional): Enables timing of CUDA events as well using the cudaEvent API.
-            Adds approximately 4us of overhead to each tensor operation.
-            Default: ``False``
+        use_device (str, optional): Enables timing of device events for the given device
+            type (e.g. ``"cuda"`` or ``"npu"``). Adds approximately 4us of overhead to
+            each tensor operation. Default: ``None``
 
         record_shapes (bool, optional): If shapes recording is set, information
             about input dimensions will be collected. This allows one to see which
@@ -51,12 +41,6 @@ class _server_process_global_profile(profile):
 
     .. warning::
         Enabling memory profiling incurs additional profiler overhead
-
-    .. warning::
-        Due to some CUDA multiprocessing limitations (see :ref:`multiprocessing-cuda-note`),
-        one cannot use the profiler with ``use_cuda = True`` to benchmark
-        DataLoaders with ``num_workers > 0``. If you wish to benchmark data loading,
-        please use ``use_cuda = False`` or ``num_workers = 0``.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -104,67 +88,60 @@ class _server_process_global_profile(profile):
     """
 
     def __init__(self, *args, **kwargs):
+        # Backward compatibility: the legacy ``use_cuda`` flag maps to the
+        # device-agnostic ``use_device`` argument of the Kineto profiler.
+        use_cuda = kwargs.pop("use_cuda", None)
+        if use_cuda is not None:
+            kwargs.setdefault("use_device", "cuda" if use_cuda else None)
         super().__init__(*args, **kwargs)
 
     def __enter__(self):
         """
         Turn on server-side process-global profiling.
-        This enables thread-local profiler on all RPC threads running server-side request callbacks.
+        The Kineto profiler is process-global: starting it here records events for
+        every thread running RPC server-side request callbacks.
         """
         if not self.enabled:
             return
 
         if self.entered:  # type: ignore[has-type]
             raise RuntimeError("autograd profiler traces are not reentrant")
-        self.entered = True
+        # NOTE: do NOT set ``self.entered`` here — the Kineto profiler manages
+        # this flag itself (it raises "not reentrant" if it is already True).
 
-        profiler_kind = (
-            torch.autograd.ProfilerState.CUDA
-            if self.use_cuda
-            else torch.autograd.ProfilerState.CPU
-        )
-        profiler_config = torch.autograd.ProfilerConfig(
-            profiler_kind,
-            self.record_shapes,
-            self.profile_memory,
-            False,
-            False,
-            False,
-            torch.profiler._ExperimentalConfig(),
-        )
-        _enable_server_process_global_profiler(profiler_config)
-        return self
+        return super().__enter__()
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """
         Turn off server-side process-global profiling.
-        Aggregate all profiling events recorded by RPC threads.
+        Aggregate all profiling events recorded by RPC threads (grouped by thread id).
 
         These attributes are assigned on exiting context.
 
         Attributes:
-            function_events (torch.autograd.profiler.EventList).  It's a list that has helper
+            function_events (torch.autograd.profiler_util.EventList).  It's a list that has helper
             methods, like 1) show record items in a pretty-print table.
             2) do averaging by grouping on keys. 3) and more.
 
-            process_global_function_events (List[torch.autograd.profiler.FunctionEvent]).
-            It's a list of ``FunctionEvent`` elements. Every element is a profiling result
-            of an RPC request handling within the profiling range.
+            process_global_function_events (List[torch.autograd.profiler_util.EventList]).
+            Every element is the profiling result of one thread within the profiling
+            range, approximating the per-RPC-request results of the legacy profiler.
         """
         if not self.enabled:
-            return
+            return False
 
-        process_global_events = _disable_server_process_global_profiler()
+        super().__exit__(exc_type, exc_val, exc_tb)
 
-        # Every element in this list is a thread profiling result from an RPC request handling.
-        process_global_function_events = []
-        for thread_local_events in process_global_events:
-            # Parse from ``Event``s to ``FunctionEvent``s.
-            thread_local_function_events = (
-                torch.autograd.profiler_legacy._parse_legacy_records(
-                    thread_local_events
-                )
+        # Group the collected events by thread to approximate the per-thread
+        # profiling results previously produced by the legacy mechanism.
+        threads: dict = {}
+        for function_event in self.function_events:
+            threads.setdefault(getattr(function_event, "thread", None), []).append(
+                function_event
             )
+
+        process_global_function_events = []
+        for thread_local_function_events in threads.values():
             thread_local_function_events.sort(
                 key=lambda function_event: [
                     function_event.time_range.start,
@@ -172,16 +149,6 @@ class _server_process_global_profile(profile):
                 ]
             )
             process_global_function_events.append(thread_local_function_events)
-
-        flattened_function_events = list(
-            itertools.chain.from_iterable(process_global_function_events)
-        )
-        self.function_events = torch.autograd.profiler_util.EventList(
-            flattened_function_events,
-            use_device="cuda" if self.use_cuda else None,
-            profile_memory=self.profile_memory,
-        )
-        self.function_events._build_tree()
 
         self.process_global_function_events = process_global_function_events
 
