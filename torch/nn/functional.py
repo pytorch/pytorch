@@ -7256,6 +7256,9 @@ def quantize_tensor(
     transposed view of a contiguous tensor to quantize along its last dimension
     using the dim-m kernel.
 
+    This implementation requires an NVIDIA SM100 or newer GPU and the optional
+    ``nvidia-cutlass-dsl`` and ``apache-tvm-ffi`` packages. Autograd is not supported.
+
     Args:
         input (Tensor): Contiguous 2D tensor or a transposed view of one, with
           dtype ``float16``, ``bfloat16``, or ``float32``. Its data pointer must
@@ -7322,6 +7325,9 @@ def quantize_tensor_dual(
 
     Quantize a contiguous 2D tensor along both dim-k and dim-m dimensions in one
     pass. See :func:`quantize_tensor` to quantize along one dimension.
+
+    This implementation requires an NVIDIA SM100 or newer GPU and the optional
+    ``nvidia-cutlass-dsl`` and ``apache-tvm-ffi`` packages. Autograd is not supported.
 
     Args:
         input (Tensor): Contiguous 2D tensor with dtype ``float16``,

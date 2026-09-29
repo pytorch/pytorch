@@ -2,7 +2,7 @@
 # mypy: allow-untyped-defs
 
 from collections.abc import Callable, Sequence
-from enum import Enum
+from enum import Enum, IntEnum
 from typing import Any, Literal, overload, TypeAlias
 
 from torch import Tensor
@@ -707,6 +707,30 @@ def poisson_nll_loss(
 
 __all__ += ["poisson_nll_loss"]
 
+def quantize_tensor(
+    input: Tensor,
+    *,
+    qdata_dtype: _dtype,
+    inner_scale_calc: InnerScaleCalc,
+    scaling_type: ScalingType,
+    swizzle_type: SwizzleType,
+    scaling_type_square_block_and_expand: bool = False,
+) -> tuple[Tensor, Tensor]: ...
+
+__all__ += ["quantize_tensor"]
+
+def quantize_tensor_dual(
+    input: Tensor,
+    *,
+    qdata_dtype: _dtype,
+    inner_scale_calc: InnerScaleCalc,
+    scaling_type: ScalingType,
+    swizzle_type: SwizzleType,
+    scaling_type_square_block_and_expand: bool = False,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]: ...
+
+__all__ += ["quantize_tensor_dual"]
+
 def relu(input: Tensor, inplace: bool = ...) -> Tensor: ...
 
 __all__ += ["relu"]
@@ -816,6 +840,11 @@ class ScalingType(Enum):
     BlockWise128x128 = 5
 
 __all__ += ["ScalingType"]
+
+class InnerScaleCalc(IntEnum):
+    RCEIL_E8M0 = 0
+
+__all__ += ["InnerScaleCalc"]
 
 def selu(input: Tensor, inplace: bool = ...) -> Tensor: ...
 
