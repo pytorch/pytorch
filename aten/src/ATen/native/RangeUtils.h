@@ -109,7 +109,8 @@ int64_t compute_arange_size(const Scalar& start, const Scalar& end, const Scalar
       auto size_d_real = std::ceil((distance.real()) / xstepc.real());
       auto size_d_imag = std::ceil((distance.imag()) / xstepc.imag());
       TORCH_CHECK(size_d_real == size_d_imag,
-                  "cannot perform step due to incorrect upper and lower bounds");
+                  "inconsistent number of elements required give the step between real ",
+                  size_d_real, " and imag ", size_d_imag, ". They must be the same.");
         size_d = size_d_real; // size_d_imag is expected to be same
     }
   } else {
