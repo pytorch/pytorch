@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, cast
 from typing_extensions import deprecated
 
 import torch
@@ -251,19 +251,22 @@ def _functional_call(
     strict: bool = False,
 ):
     # TODO allow kwargs such as unsafe and others for parametrization
-    if not isinstance(parameters_and_buffers, dict):
+    normalized_parameters_and_buffers: dict[str, Tensor]
+    if isinstance(parameters_and_buffers, dict):
+        normalized_parameters_and_buffers = cast(
+            dict[str, Tensor], parameters_and_buffers
+        )
+    else:
         if not isinstance(parameters_and_buffers, Iterable):
             raise ValueError(
                 "Expected parameters_and_buffers to be a dict or an iterable of "
                 f"(name, Tensor) pairs, but got {type(parameters_and_buffers)}"
             )
         normalized_parameters_and_buffers = {}
-        repeated_keys = []
+        repeated_keys: list[str] = []
         for item in parameters_and_buffers:
             if not (
-                isinstance(item, tuple)
-                and len(item) == 2
-                and isinstance(item[0], str)
+                isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], str)
             ):
                 raise ValueError(
                     "Expected parameters_and_buffers to contain (name, Tensor) pairs"
@@ -276,7 +279,6 @@ def _functional_call(
             raise ValueError(
                 f"{sorted(set(repeated_keys))} appeared multiple times; behavior of functional call is ambiguous"
             )
-        parameters_and_buffers = normalized_parameters_and_buffers
     if (
         torch.jit.is_tracing()
         or torch.jit.is_scripting()
@@ -301,6 +303,9 @@ def _functional_call(
     elif not isinstance(args, tuple):
         args = (args,)
     with _reparametrize_module(
-        module, parameters_and_buffers, tie_weights=tie_weights, strict=strict
+        module,
+        normalized_parameters_and_buffers,
+        tie_weights=tie_weights,
+        strict=strict,
     ):
         return module(*args, **kwargs)
