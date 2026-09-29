@@ -5040,6 +5040,7 @@ class TestPrologueFusion(TestCase):
         ):
             yield
 
+    @config.patch(epilogue_fusion=False)
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
         M, K, N = sizes
@@ -5059,6 +5060,19 @@ class TestPrologueFusion(TestCase):
         else:
             # upcast preserves zero mask
             FileCheck().check("a =").check_not("tl.where").check("tl.dot").run(code[0])
+
+    @config.patch({"prologue_fusion": False, "epilogue_fusion": True})
+    def test_upcast_prologue_fusion_disabled(self):
+        M, K, N = 64, 128, 256
+        x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
+        y = torch.rand([K, N], dtype=torch.float, device=GPU_TYPE)
+
+        def foo(x, y):
+            return x.to(y.dtype) @ y
+
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
 
     @unittest.skip("Triton bug in compilation")
     def test_gather_fusion(self):
@@ -5166,11 +5180,13 @@ class TestPrologueFusion(TestCase):
 
     @config.patch(
         {
+            "prologue_fusion": False,
+            "epilogue_fusion": True,
             "benchmark_epilogue_fusion": True,
             "max_epilogue_benchmarked_choices": 3,
         }
     )
-    def test_addmm_prefix_prologue_fusion(self):
+    def test_addmm_store_output_producer_and_consumer_fusion(self):
         M, K, N = 63, 120, 190
 
         def foo(a, b, bias):
@@ -5197,6 +5213,79 @@ class TestPrologueFusion(TestCase):
             .check_count("tl.store", 1, exactly=True)
             .run(code[0])
         )
+
+    @config.patch(
+        {
+            "prologue_fusion": True,
+            "epilogue_fusion": False,
+            "benchmark_epilogue_fusion": True,
+            "max_epilogue_benchmarked_choices": 3,
+        }
+    )
+    def test_addmm_epilogue_fusion_disabled(self):
+        M, K, N = 63, 120, 190
+
+        def foo(a, b, bias):
+            computed_bias = bias * 2.0 - 1.0
+            return torch.relu(torch.addmm(computed_bias, a, b)) * 0.5
+
+        a = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+        bias = torch.randn(M, N, device=GPU_TYPE)
+
+        with self.force_template_fusion_benchmark():
+            out, code = run_and_get_code(torch.compile(foo), a, b, bias)
+
+        self.assertEqual(out, foo(a, b, bias), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=3, num_allocs=None, num_deallocs=None)
+        FileCheck().check_count("tl.store", 3, exactly=True).run(code[0])
+
+    @config.patch(
+        {
+            "benchmark_epilogue_fusion": True,
+            "max_epilogue_benchmarked_choices": 3,
+        }
+    )
+    def test_addmm_removed_prefix_not_registered(self):
+        from torch._inductor.select_algorithm import TritonTemplateKernel
+
+        M, K, N = 63, 120, 190
+
+        def foo(a, b, bias):
+            computed_bias = bias * 4.0
+            return torch.addmm(computed_bias, a, b)
+
+        original_def_kernel = TritonTemplateKernel.def_kernel
+        saw_removed_prefix = False
+
+        @functools.wraps(original_def_kernel)
+        def mark_prefix_removed(kernel, *argnames):
+            nonlocal saw_removed_prefix
+            if kernel.store_output_input_producer_groups:
+                prefix_name = kernel.input_nodes[0].get_name()
+                # Isolate graph-wide elimination from the kernel-local marker.
+                kernel.store_output_fused_inputs.discard(prefix_name)
+                V.graph.removed_buffers.add(prefix_name)
+                saw_removed_prefix = True
+            return original_def_kernel(kernel, *argnames)
+
+        a = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+        bias = torch.randn(M, N, device=GPU_TYPE)
+
+        with (
+            mock.patch.object(
+                TritonTemplateKernel,
+                "def_kernel",
+                mark_prefix_removed,
+            ),
+            self.force_template_fusion_benchmark(),
+        ):
+            out, code = run_and_get_code(torch.compile(foo), a, b, bias)
+
+        self.assertTrue(saw_removed_prefix)
+        self.assertEqual(out, foo(a, b, bias), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
 
     @config.patch(
         {
@@ -5229,6 +5318,40 @@ class TestPrologueFusion(TestCase):
             .run(code[0])
         )
 
+    @parametrize(
+        "prologue_fusion,epilogue_fusion",
+        ((True, False), (False, True)),
+    )
+    @config.patch(
+        {
+            "benchmark_epilogue_fusion": True,
+            "max_epilogue_benchmarked_choices": 3,
+        }
+    )
+    def test_addmm_shared_prefix_requires_both_placements(
+        self, prologue_fusion: bool, epilogue_fusion: bool
+    ):
+        M = K = N = 64
+
+        def foo(x, b):
+            computed = x * 2.0
+            return torch.addmm(computed, computed, b)
+
+        x = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+
+        with (
+            config.patch(
+                prologue_fusion=prologue_fusion,
+                epilogue_fusion=epilogue_fusion,
+            ),
+            self.force_template_fusion_benchmark(),
+        ):
+            out, code = run_and_get_code(torch.compile(foo), x, b)
+
+        self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
+
     @config.patch(
         {
             "benchmark_epilogue_fusion": True,
@@ -5236,9 +5359,9 @@ class TestPrologueFusion(TestCase):
         }
     )
     def test_addmm_shared_intermediate_prefix_and_input_prologue_fusion(self):
-        # The shared producer has two users, so it must be materialized. Its two
-        # single-use children can still fuse separately into LOAD_INPUT and
-        # STORE_OUTPUT.
+        # The shared producer and its two branches form a multi-output pointwise
+        # group. It must remain separate from the template rather than being
+        # incorrectly routed to one template input's producer group.
         M = K = N = 64
 
         def foo(x, b):
@@ -5254,18 +5377,18 @@ class TestPrologueFusion(TestCase):
             out, code = run_and_get_code(torch.compile(foo), x, b)
 
         self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=2, num_allocs=1, num_deallocs=3)
+        self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=4)
         (
             FileCheck()
             .check("100.0")
-            .check("tl.store")
-            .check("3.0")
-            .check("tl.dot")
             .check("2.0")
+            .check("3.0")
+            .check("tl.store")
+            .check("tl.dot")
             .check("acc +")
-            .check_count("tl.store", 2, exactly=True)
             .run(code[0])
         )
+        FileCheck().check_count("tl.store", 3, exactly=True).run(code[0])
 
     @config.patch(
         {
