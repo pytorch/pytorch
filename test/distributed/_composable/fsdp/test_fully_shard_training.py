@@ -2032,7 +2032,6 @@ class TestFullyShardNDTraining(FSDPTest):
         mlp_dim: int,
         foreach: bool,
     ):
-        global_mesh = self.init_global_mesh()
         _, dp_mesh, tp_mesh = (
             global_mesh["pp"],
             global_mesh["dp"],
@@ -2077,6 +2076,10 @@ class TestFullyShardNDTraining(FSDPTest):
 
     @skip_if_lt_x_gpu(8)
     def test_shard_placement_fn_tp_ep(self):
+        # Every new mesh adds NCCL communicators that hold /dev/shm until the
+        # processes exit, and the meshes depend only on tp_degree and
+        # dp_replicate, so build them once rather than once per subtest.
+        self._parallel_meshes = {}
         self.run_subtests(
             {
                 "tp_degree": [1, 2],
@@ -2170,7 +2173,10 @@ class TestFullyShardNDTraining(FSDPTest):
         self, tp_degree, dp_replicate, reshard_non_layer_modules
     ):
         ep_degree = 2
-        result = self._init_parallel_meshes(tp_degree, dp_replicate, ep_degree)
+        key = (tp_degree, dp_replicate, ep_degree)
+        if key not in self._parallel_meshes:
+            self._parallel_meshes[key] = self._init_parallel_meshes(*key)
+        result = self._parallel_meshes[key]
         if result is None:
             return
         (
@@ -2328,7 +2334,6 @@ class TestFullyShardHSDP3DTraining(FSDPTest):
         mlp_dim: int,
         foreach: bool,
     ):
-        global_mesh = self.init_global_mesh()
         dp_mesh, tp_mesh = global_mesh["dp_replicate", "dp_shard"], global_mesh["tp"]
         dp_pg = dp_mesh._flatten().get_group()  # used for `replicate()`
 
