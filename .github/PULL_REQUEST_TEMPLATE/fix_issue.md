@@ -10,6 +10,10 @@ Before submitting, please review:
 
 Fixes #<!-- Issue number. PRs without a linked issue may be automatically closed. -->
 
+Or
+
+Part of the umbrella issue #<!-- Issue number. PRs without a linked issue may be automatically closed. -->
+
 ## Summary
 
 <!-- Point to the issue for relevant design discussion. If not discussed there (rare), add up to one paragraph. Overly verbose descriptions will be considered spam. -->
