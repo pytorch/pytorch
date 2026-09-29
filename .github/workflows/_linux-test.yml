@@ -191,7 +191,7 @@ jobs:
       - name: Setup Linux rootless
         if: inputs.rootless-setup
         id: setup-linux-rootless
-        uses: ./.github/actions/setup-linux-rootless
+        uses: pytorch/pytorch/.github/actions/setup-linux-rootless@f5920454444ef88ae037093c4adddbfe797c5393
         with:
           python-version: ${{ inputs.python-version }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
