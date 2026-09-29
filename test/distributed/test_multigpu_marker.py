@@ -24,7 +24,6 @@ from unittest.mock import patch
 import torch
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    nccl_skip_if_lt_x_gpu,
     require_n_gpus_for_nccl_backend,
     requires_world_size,
     skip_if_lt_x_gpu,
@@ -66,7 +65,7 @@ class TestMultiGpuMarker(TestCase):
         def nccl_needs4(self):
             pass
 
-        @nccl_skip_if_lt_x_gpu("nccl", 8)
+        @require_n_gpus_for_nccl_backend(8, "nccl")
         def nccl_needs8(self):
             pass
 
