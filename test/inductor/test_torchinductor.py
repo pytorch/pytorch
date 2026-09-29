@@ -20050,6 +20050,34 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(y, ey)
         self.assertEqual(base, ebase)
 
+    def test_woq_fusion_device_registry(self):
+        """Third-party backends can opt into the WOQ int8 fusions by device type."""
+        from torch._inductor.fx_passes.quantization import (
+            _concat_linear_int8_woq_devices,
+            _woq_int8pack_fusion_devices,
+            register_concat_linear_int8_woq_device,
+            register_woq_int8pack_fusion_device,
+        )
+
+        device_type = "privateuseone"
+        self.addCleanup(_concat_linear_int8_woq_devices.discard, device_type)
+        self.addCleanup(_woq_int8pack_fusion_devices.discard, device_type)
+
+        # The registries start as the previously hardcoded whitelists:
+        # cpu/cuda for both, plus xpu for the int8pack-mm fusion only.
+        for default_device in ("cpu", "cuda"):
+            self.assertIn(default_device, _concat_linear_int8_woq_devices)
+            self.assertIn(default_device, _woq_int8pack_fusion_devices)
+        self.assertIn("xpu", _woq_int8pack_fusion_devices)
+        self.assertNotIn("xpu", _concat_linear_int8_woq_devices)
+
+        register_concat_linear_int8_woq_device(device_type)
+        register_woq_int8pack_fusion_device(device_type)
+        # Registering an already-registered device type is a no-op.
+        register_concat_linear_int8_woq_device(device_type)
+        self.assertIn(device_type, _concat_linear_int8_woq_devices)
+        self.assertIn(device_type, _woq_int8pack_fusion_devices)
+
     # end of class CommonTemplate - add new tests here
 
 
