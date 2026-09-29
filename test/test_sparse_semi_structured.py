@@ -1494,9 +1494,11 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         sparse_result = torch._cslt_sparse_mm(A_compressed, B.t(), out_dtype=out_dtype)
         torch.testing.assert_close(dense_result, sparse_result, rtol=1e-3, atol=1e-3)
 
-    @unittest.skip("cuSPARSELt v0.6.x does not support bfloat/float16 alpha scaling")
+    @unittest.skipIf(
+        not TEST_WITH_ROCM,
+        "cuSPARSELt v0.6.x does not support bfloat/float16 alpha scaling",
+    )
     @training_dtypes
-    @unittest.skipIf(TEST_WITH_ROCM, "Not supported on ROCm")
     def test_cslt_sparse_mm_alpha(self, dtype, device):
         A = torch.Tensor([0, 0, 1, 1]).tile((128, 64)).to(dtype).cuda()
         B = torch.ones((256, 128), device=device).to(dtype)
@@ -1508,6 +1510,9 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
 
         alpha_scaled = torch.stack([alpha] * 128).t()
         dense_result = alpha_scaled * torch.mm(A.to(torch.float32), B.to(torch.float32))
+        # hipSparseLt applies the bias epilogue for fp16/bf16 alpha scaling.
+        if TEST_WITH_ROCM:
+            dense_result = dense_result + bias.to(torch.float32)
         dense_result = dense_result.to(dtype)
 
         torch.testing.assert_close(sparse_result, dense_result, rtol=1e-3, atol=1e-3)
