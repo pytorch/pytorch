@@ -2090,26 +2090,25 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_inplace_foreach_copy(
             _,
             tx: "InstructionTranslatorBase",
-            destinations: VariableTracker,
-            sources: VariableTracker,
+            self: VariableTracker,
+            src: VariableTracker,
             non_blocking: VariableTracker | None = None,
         ) -> VariableTracker | None:
-            if not isinstance(
-                destinations, (ListVariable, TupleVariable)
-            ) or not isinstance(sources, (ListVariable, TupleVariable)):
+            if not isinstance(self, (ListVariable, TupleVariable)) or not isinstance(
+                src, (ListVariable, TupleVariable)
+            ):
                 return None
-            if len(destinations.items) != len(sources.items) or not all(
-                item.is_tensor() for item in (*destinations.items, *sources.items)
+            if len(self.items) != len(src.items) or not all(
+                item.is_tensor() for item in (*self.items, *src.items)
             ):
                 return None
 
             try:
                 destination_examples = [
-                    item.as_proxy().node.meta["example_value"]
-                    for item in destinations.items
+                    item.as_proxy().node.meta["example_value"] for item in self.items
                 ]
                 source_examples = [
-                    item.as_proxy().node.meta["example_value"] for item in sources.items
+                    item.as_proxy().node.meta["example_value"] for item in src.items
                 ]
             except KeyError:
                 return None
@@ -2124,25 +2123,31 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 from .higher_order_ops import get_tensor_storages
 
                 try:
-                    storages = [
+                    destination_storages = [
                         get_tensor_storages(example) for example in destination_examples
+                    ]
+                    source_storages = [
+                        get_tensor_storages(example) for example in source_examples
                     ]
                 except NotImplementedError:
                     return None
                 if not any(
-                    storages[i] & storages[j]
-                    for i in range(len(storages))
-                    for j in range(i + 1, len(storages))
+                    destination_storages[i] & destination_storages[j]
+                    or (
+                        destination_storages[i] & source_storages[j]
+                        and destination_examples[i] is not source_examples[j]
+                    )
+                    for i in range(len(destination_storages))
+                    for j in range(len(destination_storages))
+                    if i != j
                 ):
                     return None
 
             # CPU foreach copies are ordered; functionalization batches view mutations.
             kwargs = {"non_blocking": non_blocking} if non_blocking is not None else {}
-            for destination, source in zip(
-                destinations.items, sources.items, strict=True
-            ):
+            for destination, source in zip(self.items, src.items, strict=True):
                 destination.call_method(tx, "copy_", [source], kwargs)
-            return ConstantVariable.create(None)
+            return self
 
         @register(torch._foreach_lerp_)
         def handle_inplace_foreach_lerp_scalar(
