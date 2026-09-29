@@ -4170,7 +4170,7 @@ class CppCodeCache:
 
         from torch.compiler._runtime_cache import record_cpp_kernel
 
-        record_cpp_kernel(key, cls._binary_paths[key])
+        record_cpp_kernel(key, cls._binary_paths[key], cls.cache[key])
         return cls.cache[key]
 
     @classmethod

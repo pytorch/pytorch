@@ -50,6 +50,11 @@ class CacheArtifact(ABC):
         pass
 
     @staticmethod
+    def populate_first() -> bool:
+        """Whether populate_caches must populate this artifact before others."""
+        return False
+
+    @staticmethod
     def type() -> str:
         """
         Returns the type of the artifact. Must be unique across all CacheArtifact classes.
@@ -318,11 +323,11 @@ class CacheArtifactManager:
     @staticmethod
     def populate_caches(artifacts: CacheArtifactsResult) -> CacheInfo:
         info = CacheInfo()
-        runtime = artifacts.get("triton_runtime", ())
-        remaining = (
-            entries for name, entries in artifacts.items() if name != "triton_runtime"
+        ordered = sorted(
+            chain(*artifacts.values()),
+            key=lambda artifact: not artifact.populate_first(),
         )
-        for artifact in chain(runtime, *remaining):
+        for artifact in ordered:
             log.debug("writing: %s", artifact)
             info.add(artifact)
             artifact.populate_cache()

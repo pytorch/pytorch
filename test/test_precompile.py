@@ -6113,6 +6113,9 @@ def _static_runtime_kernel(block):
 
 @contextlib.contextmanager
 def _producer_triton_cache(directory):
+    if not HAS_TRITON:
+        yield
+        return
     import triton
 
     with (
@@ -6129,13 +6132,83 @@ def _producer_triton_cache(directory):
         yield
 
 
+class _FakeTritonRuntimeCache:
+    """Stands in for a triton.runtime.cache that can export its runtime cache."""
+
+    def __init__(self, root):
+        self.root = root
+        self.explicit = True
+        self.waits = 0
+        self.imports = []
+
+    def _runtime_cache_root(self, require_explicit=False):
+        if require_explicit and not self.explicit:
+            raise RuntimeError("TRITON_CACHE_DIR is not set")
+        return self.root
+
+    def export_runtime_cache(self, context):
+        return f"runtime cache from {self.root}".encode()
+
+    def import_runtime_cache(self, payload, context):
+        self.imports.append((payload, self.root))
+
+    def wait_for_pending_compiles(self):
+        self.waits += 1
+
+
+@contextlib.contextmanager
+def _fake_triton_runtime_cache(root):
+    import triton
+
+    from torch.compiler import _runtime_cache
+
+    fake = _FakeTritonRuntimeCache(root)
+    async_compile = types.SimpleNamespace(
+        wait_for_pending_compiles=fake.wait_for_pending_compiles
+    )
+    with (
+        triton.knobs.autotuning.scope(),
+        mock.patch.object(_runtime_cache, "_triton_runtime_cache", return_value=fake),
+        mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()),
+        mock.patch.dict(sys.modules, {"triton.runtime._async_compile": async_compile}),
+    ):
+        triton.knobs.autotuning.cache = True
+        yield fake
+
+
 _RUNTIME_CACHE_MODULE = """
 import torch
+import triton
+import triton.language as tl
+
+
+@triton.autotune(
+    configs=[triton.Config({"BLOCK": 64}), triton.Config({"BLOCK": 128})],
+    key=["n"],
+)
+@triton.jit
+def _scale_kernel(x_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offsets < n
+    tl.store(out_ptr + offsets, tl.load(x_ptr + offsets, mask=mask) * 3, mask=mask)
+
+
+@torch.library.custom_op("precompile_runtime_test::scale", mutates_args=())
+def scale(x: torch.Tensor) -> torch.Tensor:
+    out = torch.empty_like(x)
+    n = x.numel()
+    _scale_kernel[lambda meta: (triton.cdiv(n, meta["BLOCK"]),)](x, out, n)
+    return out
+
+
+@scale.register_fake
+def _(x):
+    return torch.empty_like(x)
 
 
 def fn(x, w):
     y = (x.sin() * 2 + x.cos()).relu()
-    return (y @ w).softmax(-1)
+    return scale((y @ w).softmax(-1))
 """
 
 
@@ -6157,6 +6230,7 @@ fn = __import__(module).fn
 pc = torch.compiler.precompile
 artifact = os.path.join(directory, "artifact.py")
 cache = os.path.join(directory, "artifact.cache")
+expected_path = os.path.join(directory, "expected.pt")
 torch._inductor.config.use_static_cuda_launcher = True
 
 
@@ -6174,15 +6248,29 @@ if phase == "capture":
         ) as cap:
             for seed in range(2):
                 cap(*inputs(seed))
+        torch.save([fn(*inputs(seed)) for seed in range(2, 4)], expected_path)
         pc.finalize_cache(artifact_path=artifact, cache_path=cache)
 else:
-    calls = [inputs(seed) for seed in range(2, 4)]
-    expected = [fn(*args) for args in calls]
+    from triton import knobs
+    from triton.runtime.cache import FileCacheManager
+
+    # A Triton JIT compile or autotuning benchmark writes through the cache
+    # manager; replaying from the imported runtime cache writes nothing.
+    writes = []
+
+    class RecordingCacheManager(FileCacheManager):
+        def put(self, data, filename, binary=True):
+            writes.append(filename)
+            return super().put(data, filename, binary=binary)
+
+    expected = torch.load(expected_path)
     pc.prepare_runtime(artifact_path=artifact, cache_path=cache)
+    knobs.cache.manager_class = RecordingCacheManager
     with pc.no_compilation():
         loaded = pc.load(artifact, cache)
-        for args, reference in zip(calls, expected):
-            torch.testing.assert_close(loaded(*args), reference)
+        for seed, reference in zip(range(2, 4), expected):
+            torch.testing.assert_close(loaded(*inputs(seed)), reference)
+    assert not writes, writes
 print("runtime cache phase ok:", phase)
 """
 
@@ -6232,10 +6320,15 @@ class TestPrecompileRuntimeCache(TestCase):
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_static_export_failure_leaves_live_kernel(self):
         from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
-        from torch.compiler._runtime_cache import _freeze_triton_kernel
+        from torch.compiler._runtime_cache import (
+            _freeze_triton_kernel,
+            _UnresolvedTritonExport,
+        )
 
         kernel = _static_runtime_kernel(64)
         kernel.compile_results[0].kernel.cubin_raw = None
+        evicted = _static_runtime_kernel(32)
+        evicted.compile_results[0].kernel.cubin_raw = None
         original_results = kernel.compile_results
         original_launchers = kernel.launchers
         original_fn = kernel.fn.fn
@@ -6245,9 +6338,14 @@ class TestPrecompileRuntimeCache(TestCase):
                 "reload_cubin_path",
                 side_effect=RuntimeError("missing selected binary"),
             ),
-            self.assertRaisesRegex(RuntimeError, "missing selected binary"),
+            self.assertRaises(_UnresolvedTritonExport) as failure,
         ):
-            _freeze_triton_kernel("source", [kernel])
+            _freeze_triton_kernel("source", [kernel, evicted])
+        rejected = failure.exception.sources[0]["instances"]
+        self.assertEqual(
+            [(r["reason"], r["error"]) for r in rejected],
+            [("cubin_unavailable", "missing selected binary")] * 2,
+        )
         self.assertIs(kernel.compile_results, original_results)
         self.assertIs(kernel.launchers, original_launchers)
         self.assertIs(kernel._cached_launcher, original_launchers[0])
@@ -6271,8 +6369,7 @@ class TestPrecompileRuntimeCache(TestCase):
             artifact.populate_cache()
             self.assertIn("source", _runtime_cache._frozen_triton_kernels)
             CompiledTritonKernels.cache_clear()
-            self.assertIsNone(_runtime_cache.load_triton_kernel("source"))
-            artifact.populate_cache()
+            self.assertIn("source", _runtime_cache._frozen_triton_kernels)
             with fresh_cache():
                 self.assertIsNone(_runtime_cache.load_triton_kernel("source"))
 
@@ -6355,8 +6452,52 @@ class TestPrecompileRuntimeCache(TestCase):
             CppCodeCache.load_async(source)
             with torch.compiler.precompile.capture_runtime():
                 CppCodeCache.load_async(source)
-                [(key, binary_path)] = _runtime_cache._capture.cpp_kernels.items()
+                [(key, (binary_path, _))] = _runtime_cache._capture.cpp_kernels.items()
             self.assertEqual(CppCodeCache._binary_paths[key], binary_path)
+
+    def test_finalize_builds_unforced_cpp_loads_and_rejects_missing_binaries(self):
+        from pathlib import Path
+
+        from torch._inductor.codecache import CppCodeCache
+        from torch._inductor.utils import fresh_cache
+        from torch._precompile import _read_runtime_cache_envelope
+        from torch.compiler import _runtime_cache
+        from torch.compiler._cache import CacheArtifactManager
+        from torch.compiler._no_compile import is_compilation_forbidden
+
+        pc = torch.compiler.precompile
+        with tempfile.TemporaryDirectory() as directory, fresh_cache():
+            with pc.capture_runtime():
+                source, cache = _capture_files(
+                    self,
+                    _no_compilation_single_graph,
+                    [(torch.ones(4),)],
+                    backend="eager",
+                )
+                CppCodeCache.load_async(
+                    'extern "C" long unforced_cpp_kernel(long x) { return x; }'
+                )
+                [(key, (binary_path, _))] = _runtime_cache._capture.cpp_kernels.items()
+                self.assertFalse(os.path.exists(binary_path))
+                missing = os.path.join(directory, "missing.so")
+                _runtime_cache.record_cpp_kernel("missing", missing, lambda: None)
+                with self.assertRaisesRegex(
+                    PrecompileError, "Could not finalize"
+                ) as failure:
+                    pc.finalize_cache(artifact_path=source, cache_path=cache)
+                self.assertIn("'missing'", str(failure.exception.__cause__))
+                self.assertFalse(is_compilation_forbidden())
+                del _runtime_cache._capture.cpp_kernels["missing"]
+                pc.finalize_cache(artifact_path=source, cache_path=cache)
+            artifacts = CacheArtifactManager.deserialize(
+                _read_runtime_cache_envelope(source, cache, "prepare_runtime")[
+                    "artifact"
+                ]
+            )
+            (frozen,) = artifacts["inductor_cpp"]
+            self.assertEqual(
+                pickle.loads(frozen.content), {key: Path(binary_path).read_bytes()}
+            )
 
     def test_frozen_cpp_kernels_follow_cache_reset(self):
         import hashlib
@@ -6476,7 +6617,6 @@ class TestPrecompileRuntimeCache(TestCase):
             self.assertEqual(owner.triton_kernels, {})
             self.assertIsNone(reference())
 
-    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_finalize_seals_capture_and_prepare_skips_graph(self):
         from pathlib import Path
 
@@ -6845,7 +6985,11 @@ class TestPrecompileRuntimeCache(TestCase):
                     torch.compiler.precompile.finalize_cache(
                         artifact_path=source, cache_path=cache
                     )
-                self.assertIs(failure.exception.__cause__, error)
+                if stage == "cubin":
+                    [rejected] = failure.exception.__cause__.sources[0]["instances"]
+                    self.assertEqual(rejected["reason"], "cubin_unavailable")
+                else:
+                    self.assertIs(failure.exception.__cause__, error)
                 self.assertFalse(is_compilation_forbidden())
                 self.assertEqual((source.read_bytes(), cache.read_bytes()), before)
                 self.assertIs(kernel.compile_results, live_results)
@@ -6947,6 +7091,8 @@ class TestPrecompileRuntimeCache(TestCase):
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
     @parametrize("coordesc", (False, True))
     def test_frozen_gpu_kernel_serves_strict_load_from_empty_caches(self, coordesc):
+        import gc
+
         from torch._inductor import config as inductor_config
         from torch._inductor.async_compile import CompiledTritonKernels
         from torch._inductor.utils import clear_caches
@@ -6972,11 +7118,16 @@ class TestPrecompileRuntimeCache(TestCase):
                 inductor_config.patch(coordinate_descent_tuning=coordesc),
                 pc.capture_runtime(),
             ):
+                compiled = torch.compile(fn, backend="inductor")
+                with torch.no_grad():
+                    expected = compiled(x)
                 source, cache = _capture_files(self, fn, [(x,)], backend="inductor")
                 [recorded] = _runtime_cache._capture.triton_kernels.values()
-                with torch.no_grad():
-                    expected = fn(x)
                 pc.finalize_cache(artifact_path=source, cache_path=cache)
+                # Collecting the frozen copies must not unload the live modules.
+                gc.collect()
+                with torch.no_grad():
+                    self.assertEqual(compiled(x), expected)
             winner = recorded[0].launchers[0].config
             clear_caches()
             try:
@@ -7084,6 +7235,143 @@ class TestPrecompileRuntimeCache(TestCase):
             )
         self.assertEqual(writes, ["runtime", "graph"])
 
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_triton_runtime_cache_round_trips_once_per_consumer(self):
+        from pathlib import Path
+
+        pc = torch.compiler.precompile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with _fake_triton_runtime_cache(root / "producer") as fake:
+                with pc.capture_runtime():
+                    source, cache = _capture_files(
+                        self,
+                        _no_compilation_single_graph,
+                        [(torch.ones(4),)],
+                        backend="eager",
+                    )
+                    pc.finalize_cache(artifact_path=source, cache_path=cache)
+                self.assertEqual(fake.waits, 1)
+                fake.root = root / "consumer"
+                pc.prepare_runtime(artifact_path=source, cache_path=cache)
+                pc.prepare_runtime(artifact_path=source, cache_path=cache)
+                with pc.no_compilation():
+                    pc.load(artifact_path=source, cache_path=cache)
+                payload = f"runtime cache from {root / 'producer'}".encode()
+                self.assertEqual(fake.imports, [(payload, root / "consumer")])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @parametrize("missing", ("cache_dir", "autotuning"))
+    def test_capture_runtime_requires_triton_runtime_cache_settings(self, missing):
+        from pathlib import Path
+
+        import triton
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            _fake_triton_runtime_cache(Path(directory)) as fake,
+        ):
+            if missing == "cache_dir":
+                fake.explicit = False
+            else:
+                triton.knobs.autotuning.cache = False
+            with self.assertRaisesRegex(
+                PrecompileError,
+                "TRITON_CACHE_DIR" if missing == "cache_dir" else "autotuning cache",
+            ):
+                with torch.compiler.precompile.capture_runtime():
+                    self.fail("capture_runtime started without Triton's settings")
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_finalize_rejects_changed_triton_cache_dir(self):
+        from pathlib import Path
+
+        from torch.compiler._no_compile import is_compilation_forbidden
+
+        pc = torch.compiler.precompile
+        with tempfile.TemporaryDirectory() as directory:
+            with _fake_triton_runtime_cache(Path(directory) / "first") as fake:
+                with pc.capture_runtime():
+                    source, cache = _capture_files(
+                        self,
+                        _no_compilation_single_graph,
+                        [(torch.ones(4),)],
+                        backend="eager",
+                    )
+                    fake.root = Path(directory) / "second"
+                    with self.assertRaisesRegex(
+                        PrecompileError, "Could not finalize"
+                    ) as failure:
+                        pc.finalize_cache(artifact_path=source, cache_path=cache)
+                    self.assertIn("namespace changed", str(failure.exception.__cause__))
+                    self.assertFalse(is_compilation_forbidden())
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @parametrize("damage", ("sha", "duplicate", "autotuning"))
+    def test_prepare_rejects_unusable_triton_runtime_cache(self, damage):
+        import hashlib
+        from pathlib import Path
+
+        import triton
+
+        from torch.compiler._cache import _serialize_single_cache
+        from torch.compiler._runtime_cache import (
+            InductorTritonCacheArtifact,
+            prepare_runtime_cache,
+            TritonRuntimeCacheArtifact,
+        )
+        from torch.utils._appending_byte_serializer import AppendingByteSerializer
+
+        payload = b"runtime cache"
+        digest = hashlib.sha256(b"other" if damage == "sha" else payload).hexdigest()
+        runtime = TritonRuntimeCacheArtifact(digest, payload)
+        static = pickle.dumps({})
+        serializer = AppendingByteSerializer(serialize_fn=_serialize_single_cache)
+        serializer.extend(
+            {
+                "inductor_triton": [
+                    InductorTritonCacheArtifact(
+                        hashlib.sha256(static).hexdigest(), static
+                    )
+                ],
+                "triton_runtime": [runtime] * (2 if damage == "duplicate" else 1),
+            }.items()
+        )
+        message = {
+            "sha": "Corrupt",
+            "duplicate": "more than one",
+            "autotuning": "autotuning cache",
+        }[damage]
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            _fake_triton_runtime_cache(Path(directory)) as fake,
+        ):
+            if damage == "autotuning":
+                triton.knobs.autotuning.cache = False
+            with self.assertRaisesRegex(RuntimeError, message):
+                prepare_runtime_cache(serializer.to_bytes())
+            self.assertEqual(fake.imports, [])
+
+    def test_triton_runtime_cache_needs_import_support_only_when_strict(self):
+        import hashlib
+
+        from torch.compiler import _runtime_cache
+
+        payload = b"runtime cache"
+        artifact = _runtime_cache.TritonRuntimeCacheArtifact(
+            hashlib.sha256(payload).hexdigest(), payload
+        )
+        with mock.patch.object(
+            _runtime_cache, "_triton_runtime_cache", return_value=None
+        ):
+            with self.assertLogs(_runtime_cache.log, "WARNING"):
+                artifact.populate_cache()
+            with (
+                torch.compiler.precompile.no_compilation(),
+                self.assertRaisesRegex(RuntimeError, "cannot import"),
+            ):
+                artifact.populate_cache()
+
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     @parametrize("device", (0, None))
     @parametrize("explicit_cache", (False, True))
@@ -7156,8 +7444,12 @@ class TestPrecompileRuntimeCache(TestCase):
                 TritonBundler.read_and_emit(bundle)
 
     @skipIfCrossRef
-    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     def test_strict_replay_in_fresh_process(self):
+        from torch.compiler._runtime_cache import _triton_runtime_cache
+
+        if _triton_runtime_cache() is None:
+            self.skipTest("requires a Triton that can export its runtime cache")
         with tempfile.TemporaryDirectory() as directory:
             module = f"precompile_runtime_{uuid.uuid4().hex}"
             with open(os.path.join(directory, module + ".py"), "w") as f:

@@ -3246,8 +3246,16 @@ def capture_runtime() -> contextlib.AbstractContextManager[None]:
     finalized cache would not cover raises
     :class:`~torch.compiler.PrecompileError` instead of passing silently.
 
+    When the installed Triton can export its runtime cache, set an explicit,
+    attempt-private ``TRITON_CACHE_DIR`` and ``TRITON_CACHE_AUTOTUNING=1`` before
+    entering, so :func:`finalize_cache` can carry kernels launched directly
+    through ``@triton.jit`` / ``@triton.autotune`` and their autotuning
+    decisions.
+
     Raises :class:`~torch.compiler.PrecompileError` if entered while compilation
-    is already forbidden, or while this process already has an active scope. A
+    is already forbidden, while this process already has an active scope, or,
+    with such a Triton, without an explicit ``TRITON_CACHE_DIR`` or with Triton's
+    autotuning cache disabled. A
     scope inherited across ``fork`` belongs to the parent and does not block the
     child.
     """
@@ -3267,16 +3275,21 @@ def finalize_cache(
     verifies that the pair matches without executing the artifact, waits for
     pending compile work, and rewrites ``cache_path`` in place (written beside it
     and renamed over it, keeping its mode) with the runtime dependencies recorded
-    during the scope added.
+    during the scope added. When the installed Triton can export its runtime
+    cache, that cache (Triton JIT binaries and autotuning decisions under
+    ``TRITON_CACHE_DIR``) is added too.
     Once the rewrite succeeds the enclosing :func:`capture_runtime` scope is
     sealed; if it fails, the scope stays unsealed and ``cache_path`` is left as it
-    was, so the call can be retried.
+    was, so the call can be retried. Stop compiling on every thread before
+    calling it: compile work submitted while it runs is not guaranteed to be
+    waited on or rejected.
 
     Raises :class:`~torch.compiler.PrecompileError` outside a
     :func:`capture_runtime` scope, when called a second time in one scope, for a
     make_fx capture, for an inductor capture that saved no compiled cache artifact
-    (which strict :func:`load` could not serve either), or when the pair does not
-    match.
+    (which strict :func:`load` could not serve either), when the pair does not
+    match, or when ``TRITON_CACHE_DIR`` changed since :func:`capture_runtime`
+    was entered.
     """
     from torch.compiler._runtime_cache import finalize_runtime_cache
 
@@ -3318,17 +3331,25 @@ def prepare_runtime(
     hash, without executing the artifact or initializing CUDA. It runs under
     :func:`no_compilation`. Only Dynamo captures are supported.
 
-    The cache's frozen Triton kernels are installed process-wide: any later
-    compile in this process that generates the same Triton source is served the
-    frozen kernel and its selected config, until Inductor's caches are cleared.
+    It also checks the cache's frozen Triton kernels, which :func:`load` then
+    installs process-wide: from then on, any compile in this process that
+    generates the same Triton source is served the frozen kernel and its
+    selected config, until ``torch._inductor.utils.fresh_cache()`` or
+    ``clear_caches()`` resets Inductor's caches.
     Frozen C++ kernels likewise, but a C++ kernel is keyed by its full build
     command, which includes absolute include and library paths: the serving host
     must install PyTorch and its toolchain at the producer's paths, or the kernel
     misses and, under :func:`no_compilation`, raises.
 
+    A cache that carries Triton's runtime cache has it imported here, into this
+    process's ``TRITON_CACHE_DIR``; :func:`load` does not import it again. Enable
+    Triton's autotuning cache (``TRITON_CACHE_AUTOTUNING=1``) before calling it,
+    so the captured autotuning decisions are reused instead of re-benchmarked.
+
     Raises :class:`~torch.compiler.PrecompileError` for a make_fx capture, a
-    mismatched or unreadable pair, or a cache :func:`finalize_cache` did not
-    produce.
+    mismatched or unreadable pair, a cache :func:`finalize_cache` did not
+    produce, or a cache carrying a Triton runtime cache that the installed Triton
+    cannot import or that its disabled autotuning cache would ignore.
     """
     from torch.compiler._runtime_cache import prepare_runtime_cache
 

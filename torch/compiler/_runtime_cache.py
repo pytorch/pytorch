@@ -7,6 +7,7 @@ import contextlib
 import copy
 import hashlib
 import json
+import logging
 import os
 import pickle
 import threading
@@ -21,6 +22,9 @@ from torch.compiler._cache import (
 )
 from torch.compiler._no_compile import is_compilation_forbidden, no_compilation
 from torch.utils._appending_byte_serializer import AppendingByteSerializer
+
+
+log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -39,8 +43,9 @@ def _precompile_error(message: str) -> Exception:
     return PrecompileError(message)
 
 
-# Process-wide: once prepared, a frozen kernel serves every later compile of the
-# same Triton source in this process until Inductor's kernel caches are cleared.
+# Process-wide: once precompile.load installs them, a frozen kernel serves every
+# later compile of the same Triton source in this process until fresh_cache() /
+# clear_caches() (see FrozenTritonKernels).
 _frozen_triton_kernels: dict[str, bytes] = {}
 _loaded_triton_kernels: dict[str, CachingAutotuner] = {}
 _frozen_triton_kernels_lock = threading.Lock()
@@ -59,9 +64,13 @@ def _triton_runtime_cache() -> ModuleType | None:
     """
     try:
         from triton.runtime import cache
+        from triton.runtime._async_compile import (  # noqa: F401
+            wait_for_pending_compiles,
+        )
     except ImportError:
         return None
-    return cache if hasattr(cache, "export_runtime_cache") else None
+    required = ("export_runtime_cache", "import_runtime_cache", "_runtime_cache_root")
+    return cache if all(hasattr(cache, name) for name in required) else None
 
 
 def _runtime_context() -> dict[str, str | None]:
@@ -71,22 +80,42 @@ def _runtime_context() -> dict[str, str | None]:
     return {"torch_key": torch_key().hex(), "torch_cuda": torch.version.cuda}
 
 
+# (artifact key, runtime-cache root) pairs already imported by this process, so
+# precompile.load after prepare_runtime does not extract the same cache again.
+_imported_triton_runtime: set[tuple[str, str]] = set()
+_imported_triton_runtime_lock = threading.Lock()
+
+
 @CacheArtifactFactory.register
 class TritonRuntimeCacheArtifact(CacheArtifact):
     @staticmethod
     def type() -> str:
         return "triton_runtime"
 
+    @staticmethod
+    def populate_first() -> bool:
+        # Graph artifacts can launch Triton kernels as they load.
+        return True
+
     def populate_cache(self) -> None:
         if hashlib.sha256(self.content).hexdigest() != self.key:
             raise RuntimeError("Corrupt Triton runtime-cache artifact")
         cache = _triton_runtime_cache()
         if cache is None:
-            raise RuntimeError(
+            message = (
                 "The precompile cache contains a Triton runtime cache, but the "
                 "installed Triton cannot import one"
             )
-        cache.import_runtime_cache(self.content, context=_runtime_context())
+            if is_compilation_forbidden():
+                raise RuntimeError(message)
+            log.warning("%s; Triton JIT kernels will compile on first use", message)
+            return
+        imported = (self.key, str(cache._runtime_cache_root()))
+        with _imported_triton_runtime_lock:
+            if imported in _imported_triton_runtime:
+                return
+            cache.import_runtime_cache(self.content, context=_runtime_context())
+            _imported_triton_runtime.add(imported)
 
 
 @CacheArtifactFactory.register
@@ -134,12 +163,12 @@ def clear_cpp_kernels() -> None:
         _frozen_cpp_kernels.clear()
 
 
-def record_cpp_kernel(key: str, binary_path: str) -> None:
+def record_cpp_kernel(key: str, binary_path: str, load: Callable[[], object]) -> None:
     with _capture_lock:
         owner = _capture
         if owner is None or owner.pid != os.getpid() or owner.sealed:
             return
-        owner.cpp_kernels[key] = binary_path
+        owner.cpp_kernels[key] = (binary_path, load)
 
 
 def restore_cpp_kernel(key: str, binary_path: str) -> None:
@@ -160,12 +189,13 @@ def restore_cpp_kernel(key: str, binary_path: str) -> None:
 
 
 def _freeze_cpp_kernels(kernels: dict[str, str]) -> bytes:
+    missing = sorted(key for key, path in kernels.items() if not os.path.exists(path))
+    if missing:
+        raise RuntimeError(f"Cannot export C++ kernels with no binary: {missing}")
     binaries: dict[str, bytes] = {}
     for key, binary_path in kernels.items():
-        # Unforced synchronous loads never build; replay fails on them at load.
-        if os.path.exists(binary_path):
-            with open(binary_path, "rb") as binary:
-                binaries[key] = binary.read()
+        with open(binary_path, "rb") as binary:
+            binaries[key] = binary.read()
     return pickle.dumps(binaries)
 
 
@@ -334,7 +364,13 @@ def _freeze_triton_kernel(key: str, instances: list[CachingAutotuner]) -> bytes:
         saved.prepare_for_pickle()
         saved.compile_results = [saved_result]
         saved._reload_kernel = None
-        _retain_cubin(saved_result)
+        try:
+            _retain_cubin(saved_result)
+        except (OSError, RuntimeError) as exc:
+            diagnostic = _triton_export_diagnostic(kernel, "cubin_unavailable")
+            diagnostic["error"] = str(exc)
+            rejected.append(diagnostic)
+            continue
         return pickle.dumps(
             StaticallyLaunchedAutotuner(
                 key, saved.inductor_meta.get("kernel_name", "unknown_kernel"), saved
@@ -353,7 +389,7 @@ class _RuntimeCapture:
         self.policy = contextlib.ExitStack()
         self.finalize_lock = threading.Lock()
         self.triton_kernels: dict[str, list[CachingAutotuner]] = {}
-        self.cpp_kernels: dict[str, str] = {}
+        self.cpp_kernels: dict[str, tuple[str, Callable[[], object]]] = {}
 
     def seal(self) -> None:
         if self.sealed:
@@ -384,7 +420,8 @@ def capture_runtime() -> Iterator[None]:
     """Own one producer lifetime, including strict validation and cleanup.
 
     When Triton can export its runtime cache, set an attempt-private
-    TRITON_CACHE_DIR and TRITON_CACHE_AUTOTUNING=1 before application imports.
+    TRITON_CACHE_DIR and enable Triton's autotuning cache (for example
+    TRITON_CACHE_AUTOTUNING=1) before application imports.
     Finalizing the cache seals this scope against further compiler work until the
     outer application cleanup has returned.
     """
@@ -397,16 +434,19 @@ def capture_runtime() -> Iterator[None]:
     if (cache := _triton_runtime_cache()) is not None:
         from triton import knobs
 
-        root = cache._runtime_cache_root(require_explicit=True)
-        root.mkdir(parents=True, exist_ok=True)
-        if (
-            not knobs.autotuning.cache
-            or os.environ.get("TRITON_CACHE_AUTOTUNING") != "1"
-        ):
+        try:
+            root = cache._runtime_cache_root(require_explicit=True)
+        except Exception as exc:
             raise _precompile_error(
-                "precompile.capture_runtime requires TRITON_CACHE_AUTOTUNING=1 "
-                "before application imports"
+                "precompile.capture_runtime requires an explicit, attempt-private "
+                "TRITON_CACHE_DIR before application imports"
+            ) from exc
+        if not knobs.autotuning.cache:
+            raise _precompile_error(
+                "precompile.capture_runtime requires Triton's autotuning cache "
+                "(TRITON_CACHE_AUTOTUNING=1) before application imports"
             )
+        root.mkdir(parents=True, exist_ok=True)
         cache_root = str(root)
     owner = _RuntimeCapture(cache_root)
     with _capture_lock:
@@ -431,12 +471,16 @@ def capture_runtime() -> Iterator[None]:
 def finalize_runtime_cache(
     artifact: bytes | None, write: Callable[[bytes | None], None]
 ) -> None:
-    """Freeze the scope's static Triton kernels into the cache artifact, pass it
-    to ``write``, then keep the scope sealed.
+    """Freeze the scope's static Triton kernels and C++ kernel binaries into the
+    cache artifact, pass it to ``write``, then keep the scope sealed.
 
-    The scope is sealed before kernels are frozen, so a compile racing
-    finalization raises instead of being left out, and unsealed again if freezing
-    or ``write`` raises so the caller can retry.
+    Pending async compiles are waited on and every recorded C++ kernel is built
+    first, then the scope is sealed so any
+    later compile raises before kernels are frozen, and it is unsealed again if
+    freezing, serialization or ``write`` raises so the caller can retry. The
+    caller must stop compiling before calling this: a kernel submitted on
+    another thread after the wait but before the seal is neither waited on nor
+    rejected, and is left out of the cache.
     """
     import torch
     from torch._inductor.async_compile import AsyncCompile
@@ -471,7 +515,15 @@ def finalize_runtime_cache(
             raise RuntimeError(
                 "The precompile cache already contains frozen runtime dependencies"
             )
+        # Drain before sealing: compile result callbacks re-check
+        # check_compilation_allowed, so draining under the seal rejects them.
         AsyncCompile.drain_pending()
+        with _capture_lock:
+            cpp_loads = [load for _, load in owner.cpp_kernels.values()]
+        # Finishes pending C++ builds and builds loads that were never forced, so
+        # no binary is missing or partially written when it is frozen.
+        for load in cpp_loads:
+            load()
         if cache is not None:
             from triton.runtime._async_compile import wait_for_pending_compiles
 
@@ -481,7 +533,7 @@ def finalize_runtime_cache(
         with _capture_lock:
             owner.seal()
             kernels = dict(owner.triton_kernels)
-            cpp_kernels = dict(owner.cpp_kernels)
+            cpp_kernels = {key: path for key, (path, _) in owner.cpp_kernels.items()}
         try:
             static_kernels: dict[str, bytes] = {}
             rejected_sources: list[dict[str, object]] = []
@@ -548,5 +600,14 @@ def prepare_runtime_cache(artifact: bytes | None) -> None:
         raise RuntimeError(
             "precompile.prepare_runtime found more than one Triton runtime cache"
         )
+    if runtime and _triton_runtime_cache() is not None:
+        from triton import knobs
+
+        if not knobs.autotuning.cache:
+            raise RuntimeError(
+                "precompile.prepare_runtime requires Triton's autotuning cache "
+                "(TRITON_CACHE_AUTOTUNING=1) to replay the captured autotuning "
+                "decisions"
+            )
     for entry in runtime:
         entry.populate_cache()
