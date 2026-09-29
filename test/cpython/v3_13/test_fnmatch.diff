@@ -1,0 +1,68 @@
+diff --git a/test/cpython/v3_13/test_fnmatch.py b/test/cpython/v3_13/test_fnmatch.py
+index 10ed496d4e2f37b72dbdbb6dacbd54118ad3ac60..a5f80d5cfd604c08bde3646172c0f375227c4276 100644
+--- a/test/cpython/v3_13/test_fnmatch.py
++++ b/test/cpython/v3_13/test_fnmatch.py
+@@ -1,3 +1,30 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_fnmatch.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++try:
++    import _warnings
++    if hasattr(_warnings, "_filters_mutated"):
++        torch._dynamo.config.ignore_logging_functions.add(_warnings._filters_mutated)
++except ImportError:
++    pass
++
++__TestCase = CPythonTestCase
++
++# ======= END Dynamo patch =======
++
+ """Test cases for the fnmatch module."""
+ 
+ import unittest
+@@ -7,7 +34,7 @@ import warnings
+ 
+ from fnmatch import fnmatch, fnmatchcase, translate, filter
+ 
+-class FnmatchTestCase(unittest.TestCase):
++class FnmatchTestCase(CPythonTestCase):
+ 
+     def check_match(self, filename, pattern, should_match=True, fn=fnmatch):
+         if should_match:
+@@ -217,7 +244,7 @@ class FnmatchTestCase(unittest.TestCase):
+             check('.', '[a-z--/A-Z]')
+ 
+ 
+-class TranslateTestCase(unittest.TestCase):
++class TranslateTestCase(CPythonTestCase):
+ 
+     def test_translate(self):
+         import re
+@@ -250,7 +277,7 @@ class TranslateTestCase(unittest.TestCase):
+         self.assertTrue(re.match(fatre, 'cbabcaxc'))
+         self.assertFalse(re.match(fatre, 'dabccbad'))
+ 
+-class FilterTestCase(unittest.TestCase):
++class FilterTestCase(CPythonTestCase):
+ 
+     def test_filter(self):
+         self.assertEqual(filter(['Python', 'Ruby', 'Perl', 'Tcl'], 'P*'),
+@@ -278,4 +305,4 @@ class FilterTestCase(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()
