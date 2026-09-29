@@ -921,8 +921,6 @@ class TestStaticTritonCompileResult(TestCase):
 
 
 @requires_gpu_and_triton
-# _FastCudaLauncher hipModuleLaunchKernel path segfaults on ROCm
-@skipIfRocm
 @skipIfXpu
 class TestFastCudaLauncher(TestCase):
     """Tests for _FastCudaLauncher vectorcall C extension."""
@@ -1119,7 +1117,6 @@ class TestFastCudaLauncher(TestCase):
         "use_fast_triton_launcher": True,
     }
 )
-@skipIfRocm  # see TestFastCudaLauncher
 class TestFastCudaLauncherCompileResult(TestCase):
     """E2E tests verifying _FastCudaLauncher handling in torch.compile.
 
