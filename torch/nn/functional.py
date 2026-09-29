@@ -1,11 +1,11 @@
 """Functional interface."""
 
 import dataclasses
+import enum
 import importlib
 import math
 import warnings
 from collections.abc import Callable
-from enum import IntEnum
 from typing import Any as _Any, Optional, TYPE_CHECKING
 
 import torch
@@ -39,7 +39,7 @@ ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
 
 
-class InnerScaleCalc(IntEnum):
+class InnerScaleCalc(enum.IntEnum):
     r"""Method used to calculate block scales for :func:`quantize_tensor`."""
 
     RCEIL_E8M0 = 0
@@ -7248,14 +7248,13 @@ def quantize_tensor(
 ) -> tuple[Tensor, Tensor]:
     r"""quantize_tensor(input, *, qdata_dtype, inner_scale_calc, scaling_type, swizzle_type, scaling_type_square_block_and_expand=False) -> tuple[Tensor, Tensor]
 
-    Quantize a 2D tensor to MXFP8 using one scale per 1x32 block and
-    round-to-nearest-even conversion. Returns ``(qdata, scale)`` for use with
-    :func:`scaled_mm`.
+    Quantize a 2D tensor. Returns ``(qdata, scale)`` for use with
+    :func:`scaled_mm`.  See the code samples at the bottom of this docblock
+    for supported formats.
 
     A contiguous input is quantized along its last dimension (dim-k). Pass a
     transposed view of a contiguous tensor to quantize along its last dimension
-    using the dim-m kernel. This first implementation requires NVIDIA SM100 or
-    newer and does not support automatic differentiation.
+    using the dim-m kernel.
 
     Args:
         input (Tensor): Contiguous 2D tensor or a transposed view of one, with
@@ -7280,13 +7279,23 @@ def quantize_tensor(
 
         >>> import torch.nn.functional as F
         >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
-        >>> qdata, scale = F.quantize_tensor(
-        ...     x,
+        >>> mx_kwargs = dict(
         ...     qdata_dtype=torch.float8_e4m3fn,
         ...     inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0,
         ...     scaling_type=F.ScalingType.BlockWise1x32,
         ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
         ... )
+        >>> # mxfp8 dim-k with swizzled scales
+        >>> qdata_k, scale_k = F.quantize_tensor(x, **mx_kwargs)
+        >>> # mxfp8 dim-m: pass a transposed view of the contiguous input
+        >>> qdata_m, scale_m = F.quantize_tensor(x.t(), **mx_kwargs)
+        >>> # mxfp8 dim-k with scales shared over 32x32 blocks
+        >>> qdata_square, scale_square = F.quantize_tensor(
+        ...     x, **mx_kwargs, scaling_type_square_block_and_expand=True
+        ... )
+        >>> # mxfp8 dim-k with compact, unswizzled scales
+        >>> plain_kwargs = {**mx_kwargs, "swizzle_type": F.SwizzleType.NO_SWIZZLE}
+        >>> qdata_plain, scale_plain = F.quantize_tensor(x, **plain_kwargs)
     """
     # TODO(future PR): add torch.export support for the native quantization op.
     outputs = torch.ops.aten._quantize_tensor.default(
@@ -7311,12 +7320,8 @@ def quantize_tensor_dual(
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     r"""quantize_tensor_dual(input, *, qdata_dtype, inner_scale_calc, scaling_type, swizzle_type, scaling_type_square_block_and_expand=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
 
-    Quantize a contiguous 2D tensor to MXFP8 along both dimensions in one
-    pass, using round-to-nearest-even conversion. See :func:`quantize_tensor`
-    to quantize along one dimension.
-
-    This implementation requires NVIDIA SM100 or newer and does not support
-    automatic differentiation.
+    Quantize a contiguous 2D tensor along both dim-k and dim-m dimensions in one
+    pass. See :func:`quantize_tensor` to quantize along one dimension.
 
     Args:
         input (Tensor): Contiguous 2D tensor with dtype ``float16``,
@@ -7340,13 +7345,14 @@ def quantize_tensor_dual(
 
         >>> import torch.nn.functional as F
         >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
-        >>> qk, sk, qm, sm = F.quantize_tensor_dual(
-        ...     x,
+        >>> mx_kwargs = dict(
         ...     qdata_dtype=torch.float8_e4m3fn,
         ...     inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0,
         ...     scaling_type=F.ScalingType.BlockWise1x32,
         ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
         ... )
+        >>> # mxfp8 dim-km with swizzled scales
+        >>> qdata_k, scale_k, qdata_m, scale_m = F.quantize_tensor_dual(x, **mx_kwargs)
     """
     outputs = torch.ops.aten._quantize_tensor_dual.default(
         input,
