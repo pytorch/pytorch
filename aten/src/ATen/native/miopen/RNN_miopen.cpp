@@ -389,6 +389,7 @@ struct RNNDescriptors {
             rnn_desc = fn.rnn.descriptorWithDropout(dropout_desc);
         }
 
+        TORCH_INTERNAL_ASSERT(x.is_contiguous() && y.is_contiguous(), "rnn: RNN descriptors assume packed x/y");
         x_descs = fn.tensors.descriptors(x);
         y_descs = fn.tensors.descriptors(y);
         hx_desc.set(hx, 5);
