@@ -1,6 +1,7 @@
 #pragma once
 
 #include <optional>
+#include <utility>
 
 #include <ATen/core/Tensor.h>
 #include <c10/core/Scalar.h>
@@ -11,6 +12,12 @@
 namespace at::native {
 
 enum class ELEMENTWISE_TYPE_PROMOTION_KIND { DEFAULT, INT_TO_FLOAT, ALWAYS_BOOL };
+
+// utils.elementwise_dtypes: the (computation, result) dtypes.
+std::pair<ScalarType, ScalarType> elementwise_dtypes(
+    const Tensor& a,
+    const Tensor& b,
+    ELEMENTWISE_TYPE_PROMOTION_KIND kind);
 
 Tensor binary_ref_meta(
     const Tensor& self,
