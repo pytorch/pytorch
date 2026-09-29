@@ -213,6 +213,8 @@ class TokenSwitch(abc.ABC):
       (e.g. the backward of :meth:`combine`) writes the new tokens into the same
       slots. A backend may compute the layout in :meth:`create_routing` or in the
       first :meth:`dispatch` on the Routing.
+    - Calls on different Routings may be interleaved in any order, e.g. two
+      dispatches before either combine.
     - Flat layout: a token is received once per destination rank, however many of
       its top-k experts live there. ``out_topk_idx`` holds that rank's local expert
       ids in ascending order, packed to the front, padded with -1;

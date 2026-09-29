@@ -342,6 +342,29 @@ class _TokenSwitchContractTests:
         self.assertEqual(y.float(), nd1 * nd2 * x.float())
         self.assertEqual(tokens.grad.float(), (nd1 * nd2).expand(NUM_TOKENS, HIDDEN))
 
+    def test_contract_interleaved_routings(self):
+        # Two dispatches before either combine (e.g. running one layer or micro-batch
+        # ahead); their backwards then run two combines and two dispatches back to back.
+        self._init()
+        ts = self.get_contract_token_switch()
+        max_recv = ts.max_recv_tokens_per_rank
+        for seed in range(9, 15, 2):
+            idx1, w1, x1, nd1, exp1, _ = self._contract_inputs(seed=seed)
+            idx2, w2, x2, nd2, exp2, _ = self._contract_inputs(seed=seed + 1)
+            r1 = ts.create_routing(idx1, layout="flat")
+            r2 = ts.create_routing(idx2, layout="flat")
+            t1 = x1.clone().requires_grad_(True)
+            t2 = x2.clone().requires_grad_(True)
+            d1, _, _ = ts.dispatch(r1, t1, w1, max_recv)
+            d2, _, _ = ts.dispatch(r2, t2, w2, max_recv)
+            y1 = ts.combine(r1, d1[: len(exp1)].contiguous())
+            y2 = ts.combine(r2, d2[: len(exp2)].contiguous())
+            (y1.sum() + 2 * y2.sum()).backward()
+            self.assertEqual(y1.float(), nd1 * x1.float())
+            self.assertEqual(y2.float(), nd2 * x2.float())
+            self.assertEqual(t1.grad.float(), nd1.expand(NUM_TOKENS, HIDDEN))
+            self.assertEqual(t2.grad.float(), (2 * nd2).expand(NUM_TOKENS, HIDDEN))
+
 
 class TokenSwitchReferenceTest(_TokenSwitchContractTests, MultiProcContinuousTest):
     """Runs the contract tests on the gloo reference backend (no GPU, no EP library)."""
