@@ -1837,7 +1837,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # original dict changes, the changes are reflected in proxy as well.
             dict_arg = args[0]
             if isinstance(dict_arg, variables.UserDefinedDictVariable):
-                dict_arg = dict_arg._base_vt
+                base_dict = dict_arg._base_vt
+                if isinstance(base_dict, ConstDictVariable):
+                    return variables.MappingProxyVariable(base_dict, union_unsafe=True)
             if isinstance(dict_arg, ConstDictVariable):
                 return variables.MappingProxyVariable(dict_arg)
         elif SideEffects.cls_supports_mutation_side_effects(self.value) and (

@@ -1020,11 +1020,14 @@ class MappingProxyVariable(VariableTracker):
     _cpython_type = types.MappingProxyType
 
     # proxies to the original dict_vt
-    def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
+    def __init__(
+        self, dv_dict: ConstDictVariable, union_unsafe: bool = False, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         if not isinstance(dv_dict, ConstDictVariable):
             raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
+        self.union_unsafe = union_unsafe
 
     def python_type(self) -> type:
         return types.MappingProxyType
@@ -1104,6 +1107,13 @@ class MappingProxyVariable(VariableTracker):
         other: VariableTracker,
         reverse: bool = False,
     ) -> VariableTracker:
+        if self.source or self.union_unsafe:
+            unimplemented(
+                gb_type="mappingproxy union with unknown mapping type",
+                context=f"Source: {self.source}, dict subclass: {self.union_unsafe}",
+                explanation="Dynamo cannot safely determine the proxy mapping's union behavior.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
         self._check_mutation_guard(tx)
         left, right = (other, self.dv_dict) if reverse else (self.dv_dict, other)
         return binary_op(tx, left, right, "nb_or", "|")
