@@ -5942,6 +5942,7 @@ class Scheduler:
         metrics.ir_nodes_pre_fusion += len(self.nodes)
         from torch._inductor.debug import (
             log_ir_post_fusion,
+            log_ir_post_fusion_pretty,
             log_ir_pre_fusion,
             log_ir_pre_fusion_pretty,
         )
@@ -6109,6 +6110,7 @@ class Scheduler:
             self.insert_memory_check_nodes()
 
         log_ir_post_fusion(self.nodes)
+        log_ir_post_fusion_pretty(self.nodes)
         # pyrefly: ignore[unbound-name]
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
