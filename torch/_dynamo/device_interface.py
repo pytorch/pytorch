@@ -203,6 +203,15 @@ class DeviceInterface:
         return False
 
     @classmethod
+    def is_compile_supported(cls) -> bool:
+        """
+        Returns True if torch.compile (dynamo + inductor) is supported for this
+        device type. Defaults to False so unknown backends stay conservative
+        until they opt in. Consumed by torch._dynamo.utils.is_compile_supported.
+        """
+        return False
+
+    @classmethod
     def exposes_streams(cls) -> bool:
         """
         True when a subclass provides its own Stream. The base Stream is a
@@ -294,6 +303,13 @@ class CudaInterface(DeviceInterface):
     @staticmethod
     def is_gpu() -> bool:
         return True
+
+    @classmethod
+    def is_compile_supported(cls) -> bool:
+        from torch._dynamo.eval_frame import is_dynamo_supported
+        from torch.utils._triton import has_triton
+
+        return is_dynamo_supported() and has_triton()
 
     # pyrefly: ignore [bad-override]
     class Worker:
@@ -402,6 +418,13 @@ class MtiaInterface(DeviceInterface):
     @staticmethod
     def is_gpu() -> bool:
         return True
+
+    @classmethod
+    def is_compile_supported(cls) -> bool:
+        from torch._dynamo.eval_frame import is_dynamo_supported
+        from torch.utils._triton import has_triton
+
+        return is_dynamo_supported() and has_triton()
 
     # pyrefly: ignore [bad-override]
     class Worker:
@@ -513,6 +536,13 @@ class XpuInterface(DeviceInterface):
     @staticmethod
     def is_gpu() -> bool:
         return True
+
+    @classmethod
+    def is_compile_supported(cls) -> bool:
+        from torch._dynamo.eval_frame import is_dynamo_supported
+        from torch.utils._triton import has_triton
+
+        return is_dynamo_supported() and has_triton()
 
     # pyrefly: ignore [bad-override]
     class Worker:
@@ -627,6 +657,12 @@ class CpuInterface(DeviceInterface):
     @staticmethod
     def is_available() -> bool:
         return True
+
+    @classmethod
+    def is_compile_supported(cls) -> bool:
+        from torch._dynamo.eval_frame import is_dynamo_supported
+
+        return is_dynamo_supported()
 
     @staticmethod
     def is_bf16_supported(including_emulation: bool = False) -> bool:

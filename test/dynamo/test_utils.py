@@ -14,6 +14,7 @@ import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch.compiler.config as compiler_config
 from torch._dynamo import utils
+from torch._dynamo.device_interface import DeviceInterface
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -1396,6 +1397,76 @@ class TestTimedSync(TestCase):
 
 
 instantiate_device_type_tests(TestTimedSync, globals(), allow_xpu=True)
+
+
+class TestCompileSupported(TestCase):
+    """
+    is_compile_supported must be registry-driven: in-tree devices keep their
+    exact legacy semantics (cpu: dynamo env; cuda/xpu/mtia: dynamo env and the
+    triton package), registered backends without an opt-in stay conservative
+    (False), unknown devices stay False, and out-of-tree backends opt in via
+    their DeviceInterface.
+    """
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_cpu_follows_dynamo_env(self):
+        with mock.patch(
+            "torch._dynamo.eval_frame.is_dynamo_supported", return_value=True
+        ):
+            self.assertTrue(utils.is_compile_supported("cpu"))
+        with mock.patch(
+            "torch._dynamo.eval_frame.is_dynamo_supported", return_value=False
+        ):
+            self.assertFalse(utils.is_compile_supported("cpu"))
+
+    def test_cuda_requires_triton_package(self):
+        with (
+            mock.patch(
+                "torch._dynamo.eval_frame.is_dynamo_supported", return_value=True
+            ),
+            mock.patch("torch.utils._triton.has_triton", return_value=False),
+        ):
+            self.assertFalse(utils.is_compile_supported("cuda"))
+        with (
+            mock.patch(
+                "torch._dynamo.eval_frame.is_dynamo_supported", return_value=True
+            ),
+            mock.patch("torch.utils._triton.has_triton", return_value=True),
+        ):
+            self.assertTrue(utils.is_compile_supported("cuda"))
+
+    def test_registered_backend_without_opt_in_defaults_to_false(self):
+        class FakeInterface(DeviceInterface):
+            pass
+
+        with mock.patch(
+            "torch._dynamo.device_interface.get_interface_for_device",
+            return_value=FakeInterface,
+        ):
+            self.assertFalse(utils.is_compile_supported("cpu"))
+
+    def test_backend_override_opts_in(self):
+        class FakeInterface(DeviceInterface):
+            @classmethod
+            def is_compile_supported(cls):
+                return True
+
+        with mock.patch(
+            "torch._dynamo.device_interface.get_interface_for_device",
+            return_value=FakeInterface,
+        ):
+            self.assertTrue(utils.is_compile_supported("cpu"))
+
+    def test_no_interface_returns_false(self):
+        with mock.patch(
+            "torch._dynamo.device_interface.get_interface_for_device",
+            side_effect=NotImplementedError("No interface for device"),
+        ):
+            self.assertFalse(utils.is_compile_supported("cpu"))
+
+    def test_mps_defaults_to_false(self):
+        self.assertFalse(utils.is_compile_supported("mps"))
 
 
 class TestInductorConfigParsingForLogging(TestCase):
