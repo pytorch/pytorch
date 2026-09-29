@@ -7581,6 +7581,164 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (torch.arange(6, dtype=torch.float32),))
 
+    def test_as_strided_view_of_unrealized_producer(self):
+        # https://github.com/pytorch/pytorch/issues/197431
+        def fn(x):
+            full = x.repeat((3, 1))
+            return torch.as_strided(full[:, ::2], (6, 2), full.stride())
+
+        self.common(fn, (torch.randn(2, 2),))
+
+    def test_as_strided_view_of_unrealized_producer_with_offset(self):
+        # The default storage_offset comes from the input view.
+        def fn(x):
+            full = x + 1
+            return torch.as_strided(full[:, 1:], (3, 1), (1, 1))
+
+        self.common(
+            fn,
+            (torch.arange(6, dtype=torch.float32).reshape(3, 2),),
+            exact_stride=True,
+        )
+
+    def test_as_strided_view_of_unrealized_producer_in_bounds(self):
+        # The extent fits in the view, so only the aliased storage tells the
+        # correct answer.
+        def fn(x):
+            full = x + 1
+            return torch.as_strided(full[:, ::2], (3, 1), (1, 1))
+
+        self.common(
+            fn,
+            (torch.arange(6, dtype=torch.float32).reshape(3, 2),),
+            exact_stride=True,
+        )
+
+    @parametrize("storage_offset", [None, 0])
+    def test_as_strided_view_of_transposed_producer(self, storage_offset):
+        def fn(x):
+            full = x.t() + 1
+            return torch.as_strided(full[1::2], (3,), (1,), storage_offset)
+
+        self.common(
+            fn,
+            (torch.arange(12, dtype=torch.float32).reshape(3, 4),),
+            exact_stride=True,
+        )
+
+    @parametrize("storage_offset", [None, 0])
+    def test_as_strided_reshaped_view_of_transposed_producer(self, storage_offset):
+        def fn(x):
+            full = x.t() + 1
+            view = full.t().view(-1)
+            return torch.as_strided(view[6:], (6,), (1,), storage_offset)
+
+        self.common(
+            fn,
+            (torch.arange(12, dtype=torch.float32).reshape(4, 3),),
+            exact_stride=True,
+        )
+
+    def test_as_strided_view_of_reshape_copy(self):
+        def fn(x):
+            # This reshape copies in eager, so its storage must be materialized.
+            full = (x + 1).t().reshape(-1)
+            return torch.as_strided(full[6:], (6,), (1,), 0)
+
+        self.common(
+            fn,
+            (torch.arange(12, dtype=torch.float32).reshape(3, 4),),
+            exact_stride=True,
+        )
+
+    @parametrize("view_kind", ["diagonal", "unfold"])
+    @parametrize("size", [1, 3])
+    def test_as_strided_nested_view(self, view_kind, size):
+        def fn(x):
+            full = x.t() + 1
+            view = full.t()
+            if view_kind == "diagonal":
+                view = view.diagonal()
+            else:
+                view = view.unfold(1, 2, 1)
+            return torch.as_strided(view, (size,), (1,), 0)
+
+        self.common(
+            fn,
+            (torch.arange(12, dtype=torch.float32).reshape(3, 4),),
+            exact_stride=True,
+        )
+
+    @parametrize("strict", [False, True])
+    @parametrize("output_view", ["input", "sibling"])
+    @parametrize("size", [1, 3])
+    def test_as_strided_view_with_other_output(self, strict, output_view, size):
+        def fn(x):
+            full = x.t() + 1
+            if output_view == "input":
+                view = full[::2]
+                earlier = view
+            else:
+                earlier = full.t()
+                view = full[::2]
+            return earlier, torch.as_strided(view, (size,), (1,))
+
+        x = torch.arange(12, dtype=torch.float32, device=self.device).reshape(3, 4)
+        with torch._inductor.config.patch(strict_output_strides=strict):
+            expected = fn(x)
+            actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        for result, reference in zip(actual, expected):
+            self.assertEqual(result.stride(), reference.stride())
+        self.assertTrue(torch._C._is_alias_of(actual[0], actual[1]))
+
+    @parametrize("strict", [False, True])
+    @parametrize("as_strided_from_base", [False, True])
+    def test_as_strided_nested_diagonal(self, strict, as_strided_from_base):
+        def fn(x):
+            full = x.permute(2, 1, 0) + 1
+            # Consecutive diagonals can nest GenericViews through TensorBoxes.
+            view = full.diagonal(dim1=0, dim2=1).diagonal()
+            source = full if as_strided_from_base else view
+            return view, source.as_strided((2,), (1,), 0)
+
+        x = torch.arange(24, dtype=torch.float32, device=self.device).reshape(2, 3, 4)
+        with torch._inductor.config.patch(strict_output_strides=strict):
+            expected = fn(x)
+            actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        for result, reference in zip(actual, expected):
+            self.assertEqual(result.stride(), reference.stride())
+        self.assertTrue(torch._C._is_alias_of(actual[0], actual[1]))
+
+    @parametrize("strict", [False, True])
+    def test_as_strided_view_of_extern_kernel(self, strict):
+        def fn(x):
+            full = torch.linalg.matrix_exp(x)
+            view = full.diagonal()
+            return view, view.as_strided((3,), (1,), 0)
+
+        x = torch.diag(torch.arange(3, dtype=torch.float32, device=self.device))
+        with torch._inductor.config.patch(strict_output_strides=strict):
+            expected = fn(x)
+            actual = torch.compile(fn, fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+        for result, reference in zip(actual, expected):
+            self.assertEqual(result.stride(), reference.stride())
+        self.assertTrue(torch._C._is_alias_of(actual[0], actual[1]))
+
+    @torch._inductor.config.patch(force_disable_caches=True)
+    def test_as_strided_view_of_unrealized_producer_unbacked(self):
+        # The extent is not known while compiling.
+        def fn(x, out):
+            full = x + 1
+            return torch.as_strided(full[:, ::2], (out.size(0), 1), (2, 2))
+
+        x = torch.arange(6, dtype=torch.float32, device=self.device).reshape(3, 2)
+        out = torch.empty(3, device=self.device)
+        torch._dynamo.decorators.mark_unbacked(out, 0)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(x, out), fn(x, out))
+
     @skipIfRocm(msg="loads before the graph input pointer read back 0 on ROCm")
     def test_as_strided_past_input_extent(self):
         # A graph input aliasing a larger storage may legitimately be
