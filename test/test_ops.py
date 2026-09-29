@@ -2966,11 +2966,11 @@ fake_backward_mps_xfails = {
     )
 }
 
-# MPS linalg solves return row-major results, while the metas are column-major
-fake_backward_mps_linalg_xfails = {
+# Under autocast the backward of these ops calls linalg.solve_triangular with
+# mismatched dtypes on MPS
+fake_autocast_backward_mps_xfails = {
     xfail(name, device_type="mps")
     for name in (
-        "cholesky_solve",
         "linalg.cholesky",
         "linalg.cholesky_ex",
         "linalg.lu",
@@ -2978,10 +2978,6 @@ fake_backward_mps_linalg_xfails = {
         "linalg.lu_factor_ex",
         "linalg.lu_solve",
         "linalg.qr",
-        "linalg.solve",
-        "linalg.solve_ex",
-        "linalg.solve_triangular",
-        "linalg.tensorsolve",
         "lu",
         "lu_solve",
     )
@@ -3244,10 +3240,7 @@ class TestFakeTensor(TestCase):
     @onlyAccelerator
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(
-        fake_backward_xfails
-        | fake_backward_mps_xfails
-        | fake_backward_mps_linalg_xfails
-        | {skip("sparse.sampled_addmm")}
+        fake_backward_xfails | fake_backward_mps_xfails | {skip("sparse.sampled_addmm")}
     )
     def test_fake_crossref_backward_no_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(device, dtype, op, contextlib.nullcontext)
@@ -3258,7 +3251,7 @@ class TestFakeTensor(TestCase):
         fake_backward_xfails
         | fake_autocast_backward_xfails
         | fake_backward_mps_xfails
-        | fake_backward_mps_linalg_xfails
+        | fake_autocast_backward_mps_xfails
     )
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(
