@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from typing import Any
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
@@ -128,12 +128,14 @@ def functional_call(
     Returns:
         Any: the result of calling ``module``.
     """
+    parameters_and_buffers: dict[str, Tensor]
     if isinstance(parameter_and_buffer_dicts, dict):
-        parameters_and_buffers = parameter_and_buffer_dicts
+        parameters_and_buffers = cast(dict[str, Tensor], parameter_and_buffer_dicts)
     elif isinstance(parameter_and_buffer_dicts, Iterable):
         items = list(parameter_and_buffer_dicts)
         if all(isinstance(item, dict) for item in items):
-            all_keys = [k for d in items for k in d]
+            dict_items = cast(list[dict[str, Tensor]], items)
+            all_keys = [k for d in dict_items for k in d]
             all_keys_counter: dict[str, int] = {}
             for k in all_keys:
                 v = all_keys_counter.get(k, 0)
@@ -143,7 +145,7 @@ def functional_call(
                 raise ValueError(
                     f"{repeated_keys} appeared in multiple dictionaries; behavior of functional call is ambiguous"
                 )
-            parameters_and_buffers = {k: v for d in items for k, v in d.items()}
+            parameters_and_buffers = {k: v for d in dict_items for k, v in d.items()}
         else:
             if any(isinstance(item, dict) for item in items):
                 raise ValueError(
@@ -151,7 +153,7 @@ def functional_call(
                     "or only (name, Tensor) pairs"
                 )
             parameters_and_buffers = {}
-            repeated_keys = []
+            repeated_keys: list[str] = []
             for item in items:
                 if not (
                     isinstance(item, tuple)
@@ -161,7 +163,7 @@ def functional_call(
                     raise ValueError(
                         "Expected parameter_and_buffer_dicts to contain (name, Tensor) pairs"
                     )
-                name, value = item
+                name, value = cast(tuple[str, Tensor], item)
                 if name in parameters_and_buffers:
                     repeated_keys.append(name)
                 parameters_and_buffers[name] = value
