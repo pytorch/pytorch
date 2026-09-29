@@ -6,11 +6,12 @@ import torch
 
 from .ir import Pointwise, TensorBox
 from .virtualized import ops
+from torch.utils._ordered_set import OrderedSet
 
 
 # Out-of-tree backends (e.g. PrivateUse1 devices) register after torch is
 # imported; they opt in through the register function below.
-_jagged_pointwise_devices: set[str] = {"cuda"}
+_jagged_pointwise_devices: OrderedSet[str] = OrderedSet(["cuda"])
 
 
 def register_jagged_pointwise_lowering_device(device_type: str) -> None:
