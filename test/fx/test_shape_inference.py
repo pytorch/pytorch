@@ -86,16 +86,6 @@ class TestShapeInference(TestCase):
         self.assertEqual(symints[7], 4258)
 
     def test_infer_symbol_values_batch_cancellation(self):
-        # Regression test for infer_symbol_values.py:65. In the
-        # "is invalid for input of size" branch, the batch symbol must be
-        # divided out using str(init_symints[0]); reverting to a literal "s0"
-        # leaves the batch symbol in the right-hand expression, so the resolved
-        # var becomes PYTHONHASHSEED-dependent and the batch symbol leaks into
-        # padding_constraints. Unlike test_infer_symbol_values, the batch symbol
-        # here does not cancel algebraically against the left side, so this
-        # exercises the loop at lines 64-67 directly. Checking the stored
-        # equation's content (not just the key) makes the failure deterministic
-        # regardless of which free_symbol is iterated first.
         shape_env = ShapeEnv()
         init_symints = [
             mksym(shape_env, 2, LocalSource("b"), DimDynamic.DYNAMIC),
