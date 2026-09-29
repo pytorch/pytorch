@@ -97,7 +97,7 @@ struct Tree : c10::intrusive_ptr_target {
          << expected_subtrees << " subtrees, but found only " << trees().size()
          << '\n';
       range().highlight(ss);
-      TORCH_CHECK(false, ss.str());
+      TORCH_CHECK(false, std::move(ss).str());
     }
   }
   ~Tree() override = default;
@@ -191,7 +191,7 @@ struct pretty_tree {
         out << ')';
         break;
     }
-    auto it_ = flat_strings.emplace(t, out.str());
+    auto it_ = flat_strings.emplace(t, std::move(out).str());
     return it_.first->second;
   }
   void print(std::ostream& out, const TreeRef& t, int indent) {

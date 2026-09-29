@@ -3,7 +3,6 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
-#include <ATen/NamedTensorUtils.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -457,7 +456,6 @@ IntArrayRef dilation,
 bool ceil_mode,
 const Tensor& output,
 const Tensor& indices) {
-  NoNamesGuard guard;
 
   TensorArg output_arg{ output, "output", 1 };
   TensorArg indices_arg{ indices, "indices", 2 };
@@ -513,13 +511,13 @@ const Tensor& indices) {
               at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
           int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
           int block_x = std::min<int>(
-              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), at::cuda::warp_size()));
+              {maxThreadsDim[0], lastPow2(nInputPlane), at::cuda::warp_size()});
           int block_y = std::min<int>(
-              maxThreadsDim[1], std::min<int>(lastPow2(outputWidth), max_threads / block_x));
+              {maxThreadsDim[1], lastPow2(outputWidth), max_threads / block_x});
           int block_z = std::min<int>(
-              maxThreadsDim[2], std::min<int>(lastPow2(outputHeight), max_threads / block_x / block_y));
+              {maxThreadsDim[2], lastPow2(outputHeight), max_threads / block_x / block_y});
           block_x = std::min<int>(
-              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
+              {maxThreadsDim[0], lastPow2(nInputPlane), max_threads / block_y / block_z});
           const dim3 block(block_x, block_y, block_z);
 
           bool use_int32 = can_use_int32_nhwc(
@@ -635,7 +633,6 @@ IntArrayRef dilation,
 bool ceil_mode,
 const Tensor& indices_,
 const Tensor& gradInput) {
-  NoNamesGuard guard;
 
   TensorArg gradInput_arg{ gradInput, "gradInput", 1 };
   TensorArg gradOutput_arg{ gradOutput_, "gradOutput_", 2 };
@@ -670,11 +667,6 @@ const Tensor& gradInput) {
   const int64_t inputHeight = input.size(-2);
   const int64_t inputWidth = input.size(-1);
 
-  const int64_t in_stride_n = input.ndimension() == 4 ? input.stride(-4) : 0;
-  const int64_t in_stride_c = input.stride(-3);
-  const int64_t in_stride_h = input.stride(-2);
-  const int64_t in_stride_w = input.stride(-1);
-
   const Tensor gradOutput = gradOutput_.contiguous(memory_format);
 
   const int64_t outputHeight = gradOutput.size(-2);
@@ -702,13 +694,13 @@ const Tensor& gradInput) {
           const int max_threads = std::min<int>(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock, CUDA_MAX_THREADS);
           int* maxThreadsDim = at::cuda::getCurrentDeviceProperties()->maxThreadsDim;
           int block_x = std::min<int>(
-              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), at::cuda::warp_size()));
+              {maxThreadsDim[0], lastPow2(nInputPlane), at::cuda::warp_size()});
           int block_y = std::min<int>(
-              maxThreadsDim[1], std::min<int>(lastPow2(inputWidth), max_threads / block_x));
+              {maxThreadsDim[1], lastPow2(inputWidth), max_threads / block_x});
           int block_z = std::min<int>(
-              maxThreadsDim[2], std::min<int>(lastPow2(inputHeight), max_threads / block_x / block_y));
+              {maxThreadsDim[2], lastPow2(inputHeight), max_threads / block_x / block_y});
           block_x = std::min<int>(
-              maxThreadsDim[0], std::min<int>(lastPow2(nInputPlane), max_threads / block_y / block_z));
+              {maxThreadsDim[0], lastPow2(nInputPlane), max_threads / block_y / block_z});
           const dim3 block(block_x, block_y, block_z);
 
           int kernel_stride_C = ceil_div(

@@ -4,13 +4,10 @@
 #endif
 #include <structmember.h>
 
-#include <c10/core/CPUAllocator.h>
 #include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
-#include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/copy_utils.h>
 
 #include <c10/util/intrusive_ptr.h>
@@ -29,7 +26,6 @@
 #include <ATen/MapAllocator.h>
 #include <ATen/StorageUtils.h>
 #include <torch/csrc/utils/python_numbers.h>
-#include <atomic>
 #include <string>
 
 static PyObject* THPStorage_sharedDecref(PyObject* self, PyObject* noargs) {
@@ -297,17 +293,13 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
   at::DeviceGuard device_guard(storage.device());
   THPObjectPtr tuple(PyTuple_New(8));
   THPObjectPtr device(THPUtils_packInt32(storage.device().index()));
-  THPObjectPtr _handle(Py_None);
-  Py_INCREF(Py_None);
+  THPObjectPtr _handle(Py_NewRef(Py_None));
   THPObjectPtr size_bytes(THPUtils_packUInt64(storage.nbytes()));
   THPObjectPtr _offset_bytes(THPUtils_packInt32(0));
-  THPObjectPtr _ref_counter(Py_None);
-  Py_INCREF(Py_None);
+  THPObjectPtr _ref_counter(Py_NewRef(Py_None));
   THPObjectPtr _ref_counter_offset(THPUtils_packInt32(0));
-  THPObjectPtr _event_handle(Py_None);
-  Py_INCREF(Py_None);
-  THPObjectPtr _event_sync_required(Py_None);
-  Py_INCREF(Py_None);
+  THPObjectPtr _event_handle(Py_NewRef(Py_None));
+  THPObjectPtr _event_sync_required(Py_NewRef(Py_None));
   if (storage.data()) {
     auto shandle =
         c10::cuda::CUDACachingAllocator::shareIpcHandle(storage.mutable_data());

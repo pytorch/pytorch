@@ -26,8 +26,7 @@ add_library(backend_with_compiler SHARED
         ${BACKEND_WITH_COMPILER_SRCS}
         )
 if(USE_KINETO)
-  set_target_properties(backend_with_compiler PROPERTIES COMPILE_FLAGS
-  "-DUSE_KINETO")
+  target_compile_definitions(backend_with_compiler PRIVATE "USE_KINETO")
 endif()
 target_link_libraries(backend_with_compiler torch)
 
@@ -104,7 +103,10 @@ add_executable(test_jit
 )
 
 # We also build with UBSAN flag in build_asan.h
-if(USE_ASAN)
+# Skip UBSan on ROCm: combining ASAN + UBSan on ROCm Clang causes
+# misaligned ASAN global metadata, triggering spurious ASAN alignment
+# check aborts at startup.
+if(USE_ASAN AND NOT USE_ROCM)
   target_compile_options(test_jit PRIVATE "-fsanitize=undefined")
   target_link_libraries(test_jit PRIVATE "-fsanitize=undefined")
 endif()

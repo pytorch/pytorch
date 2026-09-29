@@ -97,9 +97,7 @@ def _validate_out_schema(schema: "str | torch._C.FunctionSchema") -> None:
             f"Got: {schema}"
         )
     unsupported_mutable = [
-        arg
-        for arg in mutable_args
-        if isinstance(arg.type, (torch.OptionalType, torch.ListType))
+        arg for arg in mutable_args if not isinstance(arg.type, torch.TensorType)
     ]
     if unsupported_mutable:
         names = [a.name for a in unsupported_mutable]
@@ -177,10 +175,20 @@ def _validate_inplace_schema(schema: "str | torch._C.FunctionSchema") -> None:
             f"(the first argument). Got {len(returns)} returns. Got: {schema}"
         )
     ret = returns[0]
+    if not isinstance(ret.type, torch.TensorType):
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must return the first mutable argument "
+            f"(return must be a Tensor, got type '{ret.type}'). Got: {schema}"
+        )
     if ret.alias_info is None:
         raise ValueError(
             f"Schema tagged with torch.Tag.inplace must return the first mutable argument "
             f"(return must alias the first argument). Got: {schema}"
+        )
+    if not ret.alias_info.is_write:
+        raise ValueError(
+            f"Schema tagged with torch.Tag.inplace must return the first mutable argument "
+            f"(return must be a mutable alias, e.g., Tensor(a!)). Got: {schema}"
         )
     if ret.alias_info.before_set != first_arg.alias_info.before_set:
         raise ValueError(
@@ -304,7 +312,9 @@ class Library:
 
         result = self.m.define(schema, alias_analysis, tuple(tags))
         name = schema.split("(")[0]
-        qualname = self.ns + "::" + name
+        # C++ accepts a name prefixed with the matching namespace ("ns::foo");
+        # don't double-prepend the namespace in that case.
+        qualname = name if "::" in name else f"{self.ns}::{name}"
 
         # If the OpOverloadPacket exists already, then this means we're adding a
         # new OpOverload for it. Refresh the packet to include the new OpOverload.
@@ -395,6 +405,7 @@ class Library:
         Example::
 
             >>> my_lib = Library("aten", "IMPL")
+            >>> warnings.filterwarnings("ignore", message=".*other operators may also be overridden")  # docs: hide
             >>> my_lib._impl_with_aoti_compile("div.Tensor", "CPU")
         """
 
@@ -612,12 +623,22 @@ def _clear_torch_ops_cache(op_defs):
     # That's OK - the next time torch.ops.ns.foo gets called, it'll be
     # recomputed to point at the right collection of overloads.
     for qualname in op_defs:
-        ns, name_with_overload = qualname.split("::")
+        splits = qualname.split("::")
+        if len(splits) != 2:
+            # Defense-in-depth: this runs in a shutdown-time finalizer that must
+            # never raise, so tolerate any qualname that isn't a clean
+            # "namespace::name" instead of unpacking blindly.
+            continue
+        ns, name_with_overload = splits
         name = name_with_overload.split(".")[0]
         if not hasattr(torch.ops, ns):
             continue
         namespace = getattr(torch.ops, ns)
-        if not hasattr(namespace, name):
+        # Use vars() to check the instance dict directly, avoiding
+        # __getattr__ which calls into C++ via _jit_get_operation.
+        # During interpreter shutdown the C++ runtime may already be
+        # torn down, causing UnicodeDecodeError or segfaults.
+        if name not in vars(namespace):
             continue
         delattr(namespace, name)
         if name in namespace._dir:
@@ -1217,7 +1238,7 @@ def register_fake(
         >>> @torch.library.register_fake("mylib::custom_nonzero")
         >>> def _(x):
         >>> # Number of nonzero-elements is data-dependent.
-        >>> # Since we cannot peek at the data in an fake impl,
+        >>> # Since we cannot peek at the data in a fake impl,
         >>> # we use the ctx object to construct a new symint that
         >>> # represents the data-dependent size.
         >>>     ctx = torch.library.get_ctx()
@@ -1322,6 +1343,17 @@ def register_autograd(
     :class:`torch.autograd.Function`. The semantics of ``backward_fn`` are the
     same as :meth:`torch.autograd.Function.backward`.
 
+    .. warning::
+        The strides of the gradients passed to ``backward_fn`` are undefined:
+        they may not match the strides of the corresponding forward outputs
+        (for example, the backward of :func:`torch.cat` produces gradients
+        that are non-contiguous views into a larger tensor). If
+        ``backward_fn`` calls a kernel that assumes a particular memory
+        layout (such as a raw Triton or CUDA kernel), it must call
+        :meth:`~torch.Tensor.contiguous` on the gradients or handle their
+        strides explicitly. Backward formulas composed of PyTorch operations
+        handle arbitrary strides automatically.
+
     ``setup_context(ctx, inputs, output)`` runs during the forward pass.
     Please save quantities needed for backward onto the ``ctx`` object via
     either :meth:`torch.autograd.function.FunctionCtx.save_for_backward`
@@ -1397,6 +1429,11 @@ def register_autograd(
     qualname = op
     op = torch._library.utils.lookup_op(qualname)
     schema = op._schema
+    if _library.utils.is_out(op):
+        raise RuntimeError(
+            f"Cannot register autograd formula for operator tagged with "
+            f"torch.Tag.out: {op}. Out variants do not support autograd."
+        )
     if not _library.utils.is_functional_schema(schema):
         raise RuntimeError(
             f"Cannot register autograd formula for non-functional operator "
@@ -1670,7 +1707,7 @@ def _check_pystubs_once(func, qualname, actual_module_name):
 def get_ctx() -> "torch._library.fake_impl.FakeImplCtx":
     """get_ctx() returns the current AbstractImplCtx object.
 
-    Calling ``get_ctx()`` is only valid inside of an fake impl
+    Calling ``get_ctx()`` is only valid inside of a fake impl
     (see :func:`torch.library.register_fake` for more usage details.
     """
     return torch._library.fake_impl.global_ctx_getter()

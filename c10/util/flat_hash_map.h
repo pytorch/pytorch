@@ -520,6 +520,11 @@ class sherwood_v3_table : private EntryAlloc,
     EntryPointer it = entries + ptrdiff_t(index);
     for (int8_t distance = 0; it->distance_from_desired >= distance;
          ++distance, ++it) {
+      // The trailing terminator entry has distance_from_desired == 0, so at
+      // distance == 0 the loop condition also passes for it. Stop here before
+      // reading past the end (gh-174230).
+      if (it == end())
+        return end();
       if (compares_equal(key, it->value))
         return {it};
     }
@@ -556,6 +561,10 @@ class sherwood_v3_table : private EntryAlloc,
     int8_t distance_from_desired = 0;
     for (; current_entry->distance_from_desired >= distance_from_desired;
          ++current_entry, ++distance_from_desired) {
+      // See find() above; stop at the terminator rather than dereferencing
+      // past it (gh-174230).
+      if (current_entry == end())
+        break;
       if (compares_equal(key, current_entry->value))
         return {{current_entry}, false};
     }

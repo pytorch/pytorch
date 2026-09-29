@@ -4,9 +4,9 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/Layout.h>
 #include <torch/csrc/Storage.h>
+#include <torch/csrc/utils/object_ptr.h>
 
 #include <array>
-#include <stdexcept>
 
 namespace torch {
 namespace {
@@ -28,17 +28,13 @@ void registerLayoutObject(THPLayout* thp_layout, at::Layout layout) {
 
 THPDtype* getTHPDtype(at::ScalarType scalarType) {
   auto dtype = dtype_registry[static_cast<int>(scalarType)];
-  if (!dtype) {
-    throw std::invalid_argument("unsupported scalarType");
-  }
+  TORCH_CHECK(dtype, "unsupported scalarType");
   return dtype;
 }
 
 THPLayout* getTHPLayout(at::Layout layout) {
   auto thp_layout = layout_registry[static_cast<int>(layout)];
-  if (!thp_layout) {
-    throw std::invalid_argument("unsupported at::Layout");
-  }
+  TORCH_CHECK(thp_layout, "unsupported at::Layout");
   return thp_layout;
 }
 
@@ -52,20 +48,18 @@ PyObject* createPyObject(const at::Storage& storage) {
   // data_ptr is not allowed, through methods like
   // x.untyped_storage().data_ptr()
   PyObject* obj = THPStorage_Wrap(storage);
-  if (!obj)
-    throw python_error();
+  TORCH_CHECK_PYTHON(obj);
   return obj;
 }
 
 static PyTypeObject* loadTypedStorageTypeObject() {
-  PyObject* storage_module = PyImport_ImportModule("torch.storage");
+  THPObjectPtr storage_module(PyImport_ImportModule("torch.storage"));
   TORCH_INTERNAL_ASSERT(storage_module && PyModule_Check(storage_module));
 
   PyObject* typed_storage_obj =
       PyObject_GetAttrString(storage_module, "TypedStorage");
   TORCH_INTERNAL_ASSERT(typed_storage_obj && PyType_Check(typed_storage_obj));
-  return reinterpret_cast<PyTypeObject*>(
-      PyObject_GetAttrString(storage_module, "TypedStorage"));
+  return reinterpret_cast<PyTypeObject*>(typed_storage_obj);
 }
 
 static PyTypeObject* getTypedStorageTypeObject() {

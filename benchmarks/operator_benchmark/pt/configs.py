@@ -18,6 +18,21 @@ def remove_cpu(config_list):
     return [config for config in config_list if cpu_config not in config]
 
 
+def remove_rocm_slow_3d_transpose(config_list):
+    # ConvTranspose3d gradient/compile on ROCm (e.g. gfx950) spends ~1-2h per
+    # kernel=5, stride=2 config going through MIOpen generic-solver fallbacks,
+    # pushing the operator_microbenchmark job past its timeout (see
+    # https://github.com/pytorch/pytorch/issues/188557). ROCm reports
+    # device="cuda", so gate on the runtime HIP build rather than the config.
+    if torch.version.hip is None:
+        return config_list
+    return [
+        config
+        for config in config_list
+        if not ({"kernel": 5} in config and {"stride": 2} in config)
+    ]
+
+
 # Configs for conv-1d ops
 conv_1d_configs_short = op_bench.config_list(
     attr_names=["IC", "OC", "kernel", "stride", "N", "L"],
@@ -26,7 +41,7 @@ conv_1d_configs_short = op_bench.config_list(
         [256, 256, 3, 2, 4, 64],
     ],
     cross_product_configs={
-        "device": ["cpu", "cuda"],
+        "device": ["cpu", "cuda", "xpu"],
     },
     tags=["short"],
 )
@@ -38,7 +53,7 @@ conv_1d_configs_long = op_bench.cross_product_configs(
     stride=[1, 2],
     N=[8],
     L=[128],
-    device=["cpu", "cuda"],
+    device=["cpu", "cuda", "xpu"],
     tags=["long"],
 )
 
@@ -48,7 +63,7 @@ convtranspose_1d_configs_short = op_bench.config_list(
         [2016, 1026, 1024, 256, 1, 224],
     ],
     cross_product_configs={
-        "device": ["cpu", "cuda"],
+        "device": ["cpu", "cuda", "xpu"],
     },
     tags=["short"],
 )
@@ -70,7 +85,7 @@ conv_2d_configs_short = op_bench.config_list(
         [256, 256, 3, 1, 1, 16, 16, 1, 0],
     ],
     cross_product_configs={
-        "device": ["cpu", "cuda"],
+        "device": ["cpu", "cuda", "xpu"],
     },
     tags=["short"],
 )
@@ -85,7 +100,7 @@ conv_2d_configs_long = op_bench.cross_product_configs(
     W=[32],
     G=[1],
     pad=[0],
-    device=["cpu", "cuda"],
+    device=["cpu", "cuda", "xpu"],
     tags=["long"],
 )
 
@@ -105,7 +120,7 @@ conv_2d_pw_configs_short = op_bench.config_list(
         [256, 256, 1, 1, 16, 16, 1, 0],
     ],
     cross_product_configs={
-        "device": ["cpu", "cuda"],
+        "device": ["cpu", "cuda", "xpu"],
     },
     tags=["short"],
 )
@@ -119,7 +134,7 @@ conv_2d_pw_configs_long = op_bench.cross_product_configs(
     W=[32],
     G=[1],
     pad=[0],
-    device=["cpu", "cuda"],
+    device=["cpu", "cuda", "xpu"],
     tags=["long"],
 )
 
@@ -130,7 +145,7 @@ conv_3d_configs_short = op_bench.config_list(
         [64, 64, 3, 1, 8, 4, 16, 16],
     ],
     cross_product_configs={
-        "device": ["cpu", "cuda"],
+        "device": ["cpu", "cuda", "xpu"],
         "dtype": [torch.float32],
     },
     tags=["short"],
@@ -144,7 +159,7 @@ conv_3d_configs_long = op_bench.cross_product_configs(
     D=[128],
     H=[128],
     W=[128],
-    device=["cpu", "cuda"],
+    device=["cpu", "cuda", "xpu"],
     dtype=[torch.float32, torch.float16, torch.bfloat16],
     tags=["long"],
 )
@@ -157,7 +172,7 @@ linear_configs_short = op_bench.config_list(
         [16, 512, 256],
     ],
     cross_product_configs={
-        "device": ["cpu", "cuda"],
+        "device": ["cpu", "cuda", "xpu"],
     },
     tags=["short"],
 )

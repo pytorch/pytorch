@@ -293,6 +293,43 @@ op2.node.kernel = extern_kernels.mm""",
             m(input_tensor)
 
 
+class TestLogAutotuningResultsCallSite(test_torchinductor.TestCase):
+    def test_log_results_forwards_required_args_to_debug_formatter(self):
+        # Regression: AlgorithmSelectorCache.log_results omitted
+        # prescreening_elapse, which raised TypeError under
+        # TORCH_COMPILE_DEBUG=1 + LOG_AUTOTUNE_RESULTS=1 (those flags route
+        # V.debug to the real DebugFormatter, whose signature requires it).
+        import inspect
+
+        from torch._inductor.debug import DebugFormatter
+        from torch._inductor.select_algorithm import AlgorithmSelectorCache
+        from torch._inductor.virtualized import V
+
+        captured: dict = {}
+
+        class _Recorder:
+            def log_autotuning_results(self, *args, **kwargs):
+                captured["args"] = args
+                captured["kwargs"] = kwargs
+
+        with V.set_debug_handler(_Recorder()):
+            AlgorithmSelectorCache.log_results(
+                name="test_op",
+                input_nodes=[],
+                timings={},
+                elapse=0.0,
+                precompile_elapse=0.0,
+                prescreening_elapse=None,
+            )
+
+        self.assertIn("args", captured, "V.debug.log_autotuning_results was not called")
+        # Bind the captured call to the real DebugFormatter signature; missing
+        # required positional arg (e.g. prescreening_elapse) raises TypeError
+        # exactly like the production failure under LOG_AUTOTUNE_RESULTS=1.
+        sig = inspect.signature(DebugFormatter.log_autotuning_results)
+        sig.bind(_Recorder(), *captured["args"], **captured["kwargs"])
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CPU

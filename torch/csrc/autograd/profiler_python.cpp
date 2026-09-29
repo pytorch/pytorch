@@ -29,7 +29,6 @@
 #include <torch/csrc/profiler/orchestration/python_tracer.h>
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <optional>
@@ -375,8 +374,8 @@ void ValueCache::store<CallType::PyCall>(
   if (C10_UNLIKELY(locations.find(key) == locations.end())) {
     locations[key] = {
         key.line_number_,
-        at::StringView(key.filename_),
-        at::StringView(key.name_)};
+        at::StringView(std::string(key.filename_)),
+        at::StringView(std::string(key.name_))};
   }
 }
 
@@ -802,7 +801,7 @@ static PyObject* c_call_callback(
     PyObject* const* args,
     size_t nargsf,
     PyObject* kwnames) {
-  // The logic of this function is based on sys_defile_call_or_return defined
+  // The logic of this function is based on sys_profile_call_or_return defined
   // in https://github.com/python/cpython/blob/v3.12.5/Python/legacy_tracing.c
 
   PyThreadState* tstate = PyThreadState_GET();
@@ -934,8 +933,7 @@ static void unregisterMonitoringCallback() {
   if (strcmp(str, "PyTorch Profiler") != 0) {
     return;
   }
-  auto none = THPObjectPtr(Py_None);
-  Py_INCREF(Py_None);
+  auto none = THPObjectPtr(Py_NewRef(Py_None));
   auto result = THPObjectPtr(PyObject_CallMethod(
       monitoring,
       "register_callback",
@@ -1034,7 +1032,7 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
     return;
   }
 
-#if defined(Py_GIL_DISABLED) && !defined(IS_PYTHON_3_14_PLUS)
+#if defined(Py_GIL_DISABLED) && !IS_PYTHON_3_14_PLUS
   TORCH_WARN(
       "The PyTorch profiler is not thread-safe on Python 3.13t. "
       "Please use Python 3.14t or later.");
@@ -1101,20 +1099,26 @@ PythonTracer::PythonTracer(torch::profiler::impl::RecordQueue* queue)
 
 void unregister_gc_callback() {
   PyGILState_STATE gstate = PyGILState_Ensure();
+  auto gil_guard =
+      c10::make_scope_exit([gstate]() { PyGILState_Release(gstate); });
+
   PyObject* gc_module = PyImport_ImportModule("gc");
   if (!gc_module) {
     PyErr_Print();
-    PyGILState_Release(gstate);
     return;
   }
+  auto module_guard =
+      c10::make_scope_exit([gc_module]() { Py_DECREF(gc_module); });
+
   PyObject* callbacks = PyObject_GetAttrString(gc_module, "callbacks");
   if (!callbacks || !PyList_Check(callbacks)) {
     PyErr_Print();
-    Py_XDECREF(gc_module);
     Py_XDECREF(callbacks);
-    PyGILState_Release(gstate);
     return;
   }
+  auto callbacks_guard =
+      c10::make_scope_exit([callbacks]() { Py_DECREF(callbacks); });
+
   Py_ssize_t idx = PySequence_Index(callbacks, py_gc_callback);
   if (idx >= 0) {
     PySequence_DelItem(callbacks, idx);
@@ -1122,29 +1126,32 @@ void unregister_gc_callback() {
     // Not found, maybe already removed
     PyErr_Clear();
   }
-  Py_DECREF(callbacks);
-  Py_DECREF(gc_module);
   Py_XDECREF(py_gc_callback);
   py_gc_callback = nullptr;
-  PyGILState_Release(gstate);
 }
 
 void PythonTracer::register_gc_callback() {
   PyGILState_STATE gstate = PyGILState_Ensure();
+  auto gil_guard =
+      c10::make_scope_exit([gstate]() { PyGILState_Release(gstate); });
+
   PyObject* gc_module = PyImport_ImportModule("gc");
   if (!gc_module) {
     PyErr_Print();
-    PyGILState_Release(gstate);
     return;
   }
+  auto module_guard =
+      c10::make_scope_exit([gc_module]() { Py_DECREF(gc_module); });
+
   PyObject* callbacks = PyObject_GetAttrString(gc_module, "callbacks");
   if (!callbacks || !PyList_Check(callbacks)) {
     PyErr_Print();
-    Py_XDECREF(gc_module);
     Py_XDECREF(callbacks);
-    PyGILState_Release(gstate);
     return;
   }
+  auto callbacks_guard =
+      c10::make_scope_exit([callbacks]() { Py_DECREF(callbacks); });
+
   static PyMethodDef method_def = {
       "gc_event_callback",
       (PyCFunction)gc_event_callback,
@@ -1157,9 +1164,6 @@ void PythonTracer::register_gc_callback() {
     PyErr_Print();
   }
   gc_callback_registered_ = true;
-  Py_DECREF(callbacks);
-  Py_DECREF(gc_module);
-  PyGILState_Release(gstate);
 }
 
 void PythonTracer::stop() {
@@ -1491,6 +1495,7 @@ std::vector<std::shared_ptr<Result>> PythonTracer::getEvents(
   std::stable_sort(out.begin(), out.end(), [](const auto& a, const auto& b) {
     return a->start_time_ns_ < b->start_time_ns_;
   });
+  python_tracer::clampOverrunningPythonEvents(out);
 
   PythonIDVisitor id_visitor;
   for (auto& i : out) {

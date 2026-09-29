@@ -129,7 +129,7 @@ struct TopKTypeConfig<at::Half> {
   static inline __device__ RadixType convert(at::Half v) {
     RadixType x = __half_as_ushort(v);
     RadixType mask = (x & 0x00008000) ? 0x0000ffff : 0x00008000;
-    return (v == v) ? (x ^ mask) : 0xffff;
+    return (static_cast<float>(v) == static_cast<float>(v)) ? (x ^ mask) : 0xffff;
   }
 
   static inline __device__ at::Half deconvert(RadixType v) {
@@ -145,7 +145,7 @@ struct TopKTypeConfig<at::BFloat16> {
   static inline __device__ RadixType convert(at::BFloat16 v) {
     RadixType x = v.x;
     RadixType mask = (x & 0x00008000) ? 0x0000ffff : 0x00008000;
-    return (v == v) ? (x ^ mask) : 0xffff;
+    return (static_cast<float>(v) == static_cast<float>(v)) ? (x ^ mask) : 0xffff;
   }
 
   static inline __device__ at::BFloat16 deconvert(RadixType v) {

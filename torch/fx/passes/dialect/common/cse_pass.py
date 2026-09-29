@@ -153,5 +153,7 @@ class CSEPass(PassBase):
                     hash_env[hash_val] = new_node
                     token_map[hash_val] = token
 
+        if not modified:
+            return PassResult(graph_module, False)
         csed_gm = GraphModule(graph_module, new_graph)
-        return PassResult(csed_gm, modified)
+        return PassResult(csed_gm, True)

@@ -208,7 +208,8 @@ def debug_insert_nops(
         debug_checks(frame.f_code)
         code, _ = transform_code_object(frame.f_code, insert_nops)
         graph = OutputGraph(
-            code_options={},
+            # The nop-insertion path does not inspect code object attributes.
+            code_options={},  # type: ignore[arg-type]
             compiler_fn=None,
             root_tx=None,  # type: ignore[arg-type]
             export=False,
@@ -564,7 +565,7 @@ def expectedFailureCodegenDynamic(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     return fn
 
 
-# Controls test generated in test/inductor/test_cpp_wrapper.py
+# Controls tests generated in test/inductor/test_cpp_wrapper.py
 def expectedFailureDynamicWrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     fn._expected_failure_dynamic_wrapper = True  # type: ignore[attr-defined]
     return fn

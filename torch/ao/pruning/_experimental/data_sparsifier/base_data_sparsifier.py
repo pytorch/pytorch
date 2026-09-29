@@ -93,7 +93,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         """
         if type(data) not in SUPPORTED_TYPES:
             raise AssertionError(
-                f"specified data type:{type(data)} not  supported at the moment"
+                f"specified data type:{type(data)} not supported at the moment"
             )
         local_args = copy.deepcopy(self.defaults)
         local_args.update(config)
@@ -183,7 +183,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
     def _load_container_from_state(self, states, data_groups, container_state_dict):
         r"""This restores the state of the container specifically based on the data present in state and data_groups
         If the data was parametrized, then the data would be added to the container and then parametrized,
-        else it would just add the attribute the container.
+        else it would just add the attribute to the container.
         """
         for name, state in states.items():
             config_name = data_groups.get(name, None)
@@ -223,7 +223,7 @@ class BaseDataSparsifier(base_sparsifier.BaseSparsifier):
         r"""The load_state_dict() restores the state of the sparsifier based on the state_dict
 
         Args:
-        * state_dict - the dictionary that to which the current sparsifier needs to be restored to
+        * state_dict - the dictionary to which the current sparsifier needs to be restored to
         * strict - If True - the sparsifier is reset and is restored exactly to the state in state_dict.
             If False - the current sparsifier is not reset before loading the state_dict i.e. data added
             before loading the state_dict is not erased.

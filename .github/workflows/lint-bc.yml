@@ -15,9 +15,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  bc_linter:
+  check-ci:
     if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-latest
+    uses: ./.github/workflows/_check-ci.yml
+
+  bc_linter:
+    needs: check-ci
+    if: github.repository_owner == 'pytorch'
+    runs-on: ubuntu-24.04
     steps:
       - name: Run BC Lint Action
         uses: pytorch/test-infra/.github/actions/bc-lint@main

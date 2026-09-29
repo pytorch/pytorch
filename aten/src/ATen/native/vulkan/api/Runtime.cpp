@@ -150,7 +150,7 @@ VKAPI_ATTR VkBool32 VKAPI_CALL debug_report_callback_fn(
 
   std::stringstream stream;
   stream << layer_prefix << ' ' << message_code << ' ' << message << std::endl;
-  const std::string log = stream.str();
+  const std::string log = std::move(stream).str();
 
   std::cout << log;
 

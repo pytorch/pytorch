@@ -6,7 +6,6 @@
 
 #include <ATen/detail/AcceleratorHooksInterface.h>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 
 namespace at {
 
@@ -56,19 +55,20 @@ struct TORCH_API XLAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot get XLA pinned memory allocator without torch_xla library. ", XLA_HELP);
   }
 
-  bool isPinnedPtr(const void* data) const override {
+  bool isPinnedPtr(const void* /*data*/) const override {
     return false;
   }
 
-  bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex /*device_index*/) const override {
     TORCH_CHECK(false, "Cannot query primary context without torch_xla library. ", XLA_HELP);
   }
 
 };
 
+// Deprecated: no longer used internally, kept for ABI compatibility.
 struct TORCH_API XLAHooksArgs {};
 
-TORCH_DECLARE_REGISTRY(XLAHooksRegistry, XLAHooksInterface, XLAHooksArgs);
+TORCH_DECLARE_REGISTRY(XLAHooksRegistry, XLAHooksInterface);
 #define REGISTER_XLA_HOOKS(clsname) \
   C10_REGISTER_CLASS(XLAHooksRegistry, clsname, clsname)
 
@@ -76,4 +76,3 @@ namespace detail {
 TORCH_API const XLAHooksInterface& getXLAHooks();
 } // namespace detail
 } // namespace at
-C10_DIAGNOSTIC_POP()

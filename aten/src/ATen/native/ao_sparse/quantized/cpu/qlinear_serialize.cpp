@@ -235,8 +235,8 @@ BCSRSerializationType PackedLinearWeightQnnp::serialize() {
       std::move(w_scales_compact),
       std::move(w_zero_points_compact),
       (q_scheme_ == c10::kPerTensorAffine),
-      wrapped_row_values,
-      wrapped_col_indices,
+      std::move(wrapped_row_values),
+      std::move(wrapped_col_indices),
       wrap_vector<uint8_t>(bcsr_matrix_->values, c10::kByte),
       output_channels_,
       input_channels_);
