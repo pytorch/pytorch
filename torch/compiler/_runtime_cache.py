@@ -7,10 +7,7 @@ import os
 import threading
 from typing import TYPE_CHECKING
 
-from torch.compiler._cache import (
-    _serialize_single_cache,
-    CacheArtifactManager,
-)
+from torch.compiler._cache import _serialize_single_cache, CacheArtifactManager
 from torch.compiler._no_compile import is_compilation_forbidden, no_compilation
 from torch.utils._appending_byte_serializer import AppendingByteSerializer
 
