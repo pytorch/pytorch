@@ -4,7 +4,6 @@ import base64
 import json
 import time
 import uuid
-from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, TYPE_CHECKING
 
@@ -18,79 +17,6 @@ if TYPE_CHECKING:
     import torch
 
     from ._api import Transport
-
-
-@dataclass
-class _RankBootstrap:
-    store: dist.Store
-    rank: int
-    peer_rank: int
-    timeout: float
-
-    @classmethod
-    def create(
-        cls,
-        backend: str,
-        peer_rank: int,
-        store: dist.Store,
-        rank: int | None,
-        tag: str | None,
-        timeout: float,
-    ) -> _RankBootstrap:
-        _validate_timeout(timeout)
-        if timeout is None:
-            raise ValueError("bootstrap_timeout must be finite")
-        if not isinstance(tag, str) or not tag:
-            raise ValueError("bootstrap_tag must be a nonempty, unique string")
-        rank = dist.get_rank() if rank is None else rank
-        if type(rank) is not int or rank < 0:
-            raise ValueError("rank must be a nonnegative integer")
-        if type(peer_rank) is not int or peer_rank < 0:
-            raise ValueError("peer_rank must be a nonnegative integer")
-        if peer_rank == rank:
-            raise ValueError("peer_rank must differ from the local rank")
-        prefix = json.dumps(
-            ["transport", backend, tag, min(rank, peer_rank), max(rank, peer_rank)]
-        )
-        store = dist.PrefixStore(prefix, store)
-        # Never consume stale endpoint data when a tag is accidentally reused.
-        if store.add(f"claim/{rank}", 1) != 1:
-            raise ValueError("bootstrap_tag was already used for this rank pair")
-        return cls(store, rank, peer_rank, timeout)
-
-    def connect(self, transport: Transport) -> None:
-        deadline = time.monotonic() + self.timeout
-
-        def remaining() -> float:
-            seconds = deadline - time.monotonic()
-            if seconds <= 0:
-                raise TimeoutError("transport bootstrap timed out")
-            return seconds
-
-        try:
-            endpoint = transport.bind(timeout=remaining())
-            nonce = uuid.uuid4().hex
-            self.store.set(
-                f"endpoint/{nonce}", base64.b64encode(endpoint).decode("ascii")
-            )
-            self.store.set(str(self.rank), nonce)
-            self.store.wait([str(self.peer_rank)], timedelta(seconds=remaining()))
-            peer_nonce = self.store.get(str(self.peer_rank)).decode("ascii")
-            endpoint = base64.b64decode(
-                self.store.get(f"endpoint/{peer_nonce}"), validate=True
-            )
-            # Confirm the peer observed this attempt, not a stale publication.
-            self.store.set(f"ack/{nonce}/{peer_nonce}", "ready")
-            self.store.wait(
-                [f"ack/{peer_nonce}/{nonce}"], timedelta(seconds=remaining())
-            )
-            transport.connect(endpoint, timeout=remaining())
-        except BaseException as error:
-            try:
-                transport.close(timeout=max(0.0, deadline - time.monotonic()))
-            except Exception as cleanup_error:
-                error.add_note(f"transport bootstrap cleanup failed: {cleanup_error}")
-            raise
 
 
 def new_transport_rank(
@@ -148,9 +74,57 @@ def new_transport_rank(
     retry with a new tag. Construction/connection failures do not release Store
     keys. Bootstrap failures attempt to close the partially created transport.
     """
-    bootstrap = _RankBootstrap.create(
-        backend.lower(), peer_rank, store, rank, bootstrap_tag, bootstrap_timeout
+    _validate_timeout(bootstrap_timeout)
+    if bootstrap_timeout is None:
+        raise ValueError("bootstrap_timeout must be finite")
+    if not isinstance(bootstrap_tag, str) or not bootstrap_tag:
+        raise ValueError("bootstrap_tag must be a nonempty, unique string")
+    rank = dist.get_rank() if rank is None else rank
+    if type(rank) is not int or rank < 0:
+        raise ValueError("rank must be a nonnegative integer")
+    if type(peer_rank) is not int or peer_rank < 0:
+        raise ValueError("peer_rank must be a nonnegative integer")
+    if peer_rank == rank:
+        raise ValueError("peer_rank must differ from the local rank")
+    prefix = json.dumps(
+        [
+            "transport",
+            backend.lower(),
+            bootstrap_tag,
+            min(rank, peer_rank),
+            max(rank, peer_rank),
+        ]
     )
+    store = dist.PrefixStore(prefix, store)
+    # Never consume stale endpoint data when a tag is accidentally reused.
+    if store.add(f"claim/{rank}", 1) != 1:
+        raise ValueError("bootstrap_tag was already used for this rank pair")
     transport = new_transport(backend, device, **kwargs)
-    bootstrap.connect(transport)
+    deadline = time.monotonic() + bootstrap_timeout
+
+    def remaining() -> float:
+        seconds = deadline - time.monotonic()
+        if seconds <= 0:
+            raise TimeoutError("transport bootstrap timed out")
+        return seconds
+
+    try:
+        endpoint = transport.bind(timeout=remaining())
+        nonce = uuid.uuid4().hex
+        store.set(f"endpoint/{nonce}", base64.b64encode(endpoint).decode("ascii"))
+        store.set(str(rank), nonce)
+        store.wait([str(peer_rank)], timedelta(seconds=remaining()))
+        peer_nonce = store.get(str(peer_rank)).decode("ascii")
+        endpoint = base64.b64decode(store.get(f"endpoint/{peer_nonce}"), validate=True)
+        # Confirm the peer observed this attempt, not a stale publication.
+        store.set(f"ack/{nonce}/{peer_nonce}", "ready")
+        store.wait([f"ack/{peer_nonce}/{nonce}"], timedelta(seconds=remaining()))
+        transport.connect(endpoint, timeout=remaining())
+    except BaseException as error:
+        try:
+            transport.close(timeout=max(0.0, deadline - time.monotonic()))
+        except Exception as cleanup_error:
+            error.add_note(f"transport bootstrap cleanup failed: {cleanup_error}")
+        raise
+
     return transport
