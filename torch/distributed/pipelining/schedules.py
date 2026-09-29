@@ -3815,6 +3815,8 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             ``WAIT_REDUCE_GRAD`` until before the next reduction or schedule
             end. Otherwise, each wait follows its ``REDUCE_GRAD``. At most one
             reduction may be pending per pipeline rank.
+        max_outstanding_sends: Maximum number of pending forward and backward
+            send batches on each pipeline rank. ``None`` applies no hard limit.
     """
 
     def __init__(
@@ -3830,6 +3832,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
         *,
         defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         super().__init__(
             stages=stages,
@@ -3842,6 +3845,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             max_active_stages=max_active_stages,
             unshard_lookahead=unshard_lookahead,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
 
         # 1. Create the pipeline_order (all ranks do this calculation)
@@ -4207,6 +4211,8 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             ``WAIT_REDUCE_GRAD`` until before the next reduction or schedule
             end. Otherwise, each wait follows its ``REDUCE_GRAD``. At most one
             reduction may be pending per pipeline rank.
+        max_outstanding_sends: Maximum number of pending forward and backward
+            send batches on each pipeline rank. ``None`` applies no hard limit.
     """
 
     def __init__(
@@ -4224,6 +4230,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
         *,
         defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -4241,6 +4248,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             max_active_stages=max_active_stages,
             unshard_lookahead=unshard_lookahead,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -4424,6 +4432,8 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             ``WAIT_REDUCE_GRAD`` until before the next reduction or schedule
             end. Otherwise, each wait follows its ``REDUCE_GRAD``. At most one
             reduction may be pending per pipeline rank.
+        max_outstanding_sends: Maximum number of pending forward and backward
+            send batches on each pipeline rank. ``None`` applies no hard limit.
     """
 
     def __init__(
@@ -4441,6 +4451,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
         *,
         defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -4458,6 +4469,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             max_active_stages=max_active_stages,
             unshard_lookahead=unshard_lookahead,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -4630,6 +4642,8 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             ``WAIT_REDUCE_GRAD`` until before the next reduction or schedule
             end. Otherwise, each wait follows its ``REDUCE_GRAD``. At most one
             reduction may be pending per pipeline rank.
+        max_outstanding_sends: Maximum number of pending forward and backward
+            send batches on each pipeline rank. ``None`` applies no hard limit.
     """
 
     def __init__(
@@ -4647,6 +4661,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
         *,
         defer_reduce_grad_wait: bool = False,
+        max_outstanding_sends: int | None = None,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -4664,6 +4679,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             max_active_stages=max_active_stages,
             unshard_lookahead=unshard_lookahead,
             defer_reduce_grad_wait=defer_reduce_grad_wait,
+            max_outstanding_sends=max_outstanding_sends,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"

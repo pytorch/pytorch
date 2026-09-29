@@ -2260,12 +2260,22 @@ class TestSchedulePlan(TestCase):
         with self.assertRaisesRegex(ValueError, "non-negative integer"):
             _PipelineScheduleRuntime([], 1, max_outstanding_sends=value)
 
-    def test_max_outstanding_sends_applies_to_interleaved_schedule(self):
+    @parametrize(
+        "ScheduleClass",
+        [
+            ScheduleLoopedBFS,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleZBVZeroBubble,
+            ScheduleDualPipeV,
+        ],
+    )
+    def test_max_outstanding_sends_applies_to_runtime_schedule(self, ScheduleClass):
         stages = [
             MockPipelineStage(group_size=2, group_rank=0, num_stages=4)
             for _ in range(2)
         ]
-        schedule = ScheduleInterleaved1F1B(
+        schedule = ScheduleClass(
             stages,
             n_microbatches=8,
             max_outstanding_sends=4,
@@ -2282,20 +2292,22 @@ class TestSchedulePlan(TestCase):
                     outstanding -= 1
             self.assertLessEqual(peak, 4)
 
-        communication_schedule = {
-            rank: [
-                action
-                for action in actions
-                if action.computation_type
-                not in (UNSHARD, RESHARD, REDUCE_GRAD, WAIT_REDUCE_GRAD)
-            ]
-            for rank, actions in schedule.pipeline_order_with_comms.items()
-        }
-        _simulate_comms_compute(
-            communication_schedule,
-            lambda stage: schedule.stage_index_to_group_rank[stage],
-            schedule._num_stages,
-        )
+        # The simulator does not support DualPipeV's placeholder stage indices.
+        if ScheduleClass is not ScheduleDualPipeV:
+            communication_schedule = {
+                rank: [
+                    action
+                    for action in actions
+                    if action.computation_type
+                    not in (UNSHARD, RESHARD, REDUCE_GRAD, WAIT_REDUCE_GRAD)
+                ]
+                for rank, actions in schedule.pipeline_order_with_comms.items()
+            }
+            _simulate_comms_compute(
+                communication_schedule,
+                lambda stage: schedule.stage_index_to_group_rank[stage],
+                schedule._num_stages,
+            )
 
     def test_defer_reduce_grad_wait_lowering(self):
         actions = [

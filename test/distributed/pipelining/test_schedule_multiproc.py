@@ -886,7 +886,9 @@ class ScheduleTest(MultiProcContinuousTest):
             (ScheduleInterleaved1F1B, None),
             (ScheduleInterleaved1F1B, 4),
             (ScheduleLoopedBFS, None),
+            (ScheduleLoopedBFS, 4),
             (ScheduleInterleavedZeroBubble, None),
+            (ScheduleInterleavedZeroBubble, 4),
         ],
     )
     @parametrize("pre_split", [False, True])
@@ -931,9 +933,14 @@ class ScheduleTest(MultiProcContinuousTest):
         # Run pipeline with tensor leak checking
         out = None
         losses = []
+        # Split backward may retain the tensor after schedule ownership ends.
+        check_send_ownership = (
+            max_outstanding_sends is not None
+            and ScheduleClass is not ScheduleInterleavedZeroBubble
+        )
         send_ownership_context = (
             assert_explicit_forward_wait_ownership(self, stages)
-            if max_outstanding_sends is not None
+            if check_send_ownership
             else nullcontext()
         )
         with (
@@ -964,7 +971,7 @@ class ScheduleTest(MultiProcContinuousTest):
                         pre_split=pre_split,
                     )
 
-        if max_outstanding_sends is not None:
+        if check_send_ownership:
             self.assertTrue(released_while_stage_owned)
 
         self.assertEqual(
