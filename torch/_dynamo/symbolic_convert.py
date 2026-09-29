@@ -5243,7 +5243,7 @@ class InstructionTranslatorBase(
             kwargs["end_colno"] = positions.end_col_offset
         return traceback.FrameSummary(
             getattr(self.f_code, "co_filename", "<unknown>"),
-            self.lineno,
+            self.lineno if self.lineno >= 0 else None,
             getattr(self.f_code, "co_name", "<unknown>"),
             lookup_line=False,
             **kwargs,

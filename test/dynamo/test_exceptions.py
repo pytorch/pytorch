@@ -1637,6 +1637,25 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    @unittest.skipIf(sys.version_info < (3, 11), "requires co_linetable")
+    def test_exception_traceback_missing_line_table(self):
+        def inner():
+            raise ValueError("oops")
+
+        inner.__code__ = inner.__code__.replace(co_linetable=b"")
+
+        def fn(x):
+            try:
+                inner()
+            except ValueError as e:
+                tb = e.__traceback__
+                while tb.tb_next:
+                    tb = tb.tb_next
+                return x + 1, tb.tb_frame.f_lineno, tb.tb_lineno
+
+        self.assertEqual(fn(1), (2, None, None))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(1), fn(1))
+
     @unittest.skipIf(
         sys.version_info < (3, 11), "frame.f_lineno needs instruction positions"
     )
