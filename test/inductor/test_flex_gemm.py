@@ -761,6 +761,7 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
         sm120 = dataclasses.replace(sm100, pingpong=True, device_capacity=12)
         self.assertTrue(grouped_reduce_supports_config(sm100, axis=1, group=32))
+        self.assertFalse(grouped_reduce_supports_config(sm120, axis=1, group=16))
         self.assertFalse(grouped_reduce_supports_config(sm120, axis=1, group=32))
         self.assertTrue(grouped_reduce_supports_config(sm120, axis=0, group=32))
 
