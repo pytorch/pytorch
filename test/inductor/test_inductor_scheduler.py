@@ -2059,7 +2059,22 @@ class TestScheduler(TestCase):
             x_grouped_rate = NestedReduction._nested_sub_parent_rate(
                 sub_parent, x_grouped_context
             )
+            with inductor_config.patch(polyhedral_fusion=True):
+                sub_parent.get_ranges.return_value = ([3, 6, 8], [])
+                enabled_legacy_rate = NestedReduction._nested_sub_parent_rate(
+                    sub_parent, context
+                )
+                sub_parent.group = (None, (36, 1))
+                sub_parent.get_ranges.return_value = ([3, 6, 2], [])
+                self.assertEqual(
+                    NestedReduction._sub_parent_epilogue_rate(36, 288), (8, 1)
+                )
+                new_nested_rate = NestedReduction._nested_sub_parent_rate(
+                    sub_parent, context
+                )
         self.assertEqual(rate, (2, 1))
+        self.assertEqual(enabled_legacy_rate, (2, 1))
+        self.assertIsNone(new_nested_rate)
         self.assertIsNone(cross_group_rate)
         self.assertIsNone(x_grouped_rate)
 

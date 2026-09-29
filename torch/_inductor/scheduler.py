@@ -1329,7 +1329,7 @@ class NestedReduction:
             domain_context.grouped_numel * domain_context.grouped_rnumel
         )
         rate = cls._sub_parent_epilogue_rate(node_numel, full_numel)
-        if rate is None:
+        if rate not in cls.SUB_PARENT_RATES:
             return None
         factor, output_lanes = rate
         if domain_context.group_size % factor != 0:
