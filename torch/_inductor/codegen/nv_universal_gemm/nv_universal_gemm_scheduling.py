@@ -114,10 +114,16 @@ def _nvgemm_benchmark_tensor_specs(
         while isinstance(node, MutableBox):
             node = node.data
 
-        layout = node.get_layout()
         storage_node = node
+        view_byte_offset = 0
         while True:
-            if isinstance(storage_node, (MutableBox, ReinterpretView)):
+            if isinstance(storage_node, MutableBox):
+                storage_node = storage_node.data
+            elif isinstance(storage_node, ReinterpretView):
+                view_byte_offset += (
+                    V.graph.sizevars.optimization_hint(storage_node.layout.offset)
+                    * storage_node.get_dtype().itemsize
+                )
                 storage_node = storage_node.data
             elif isinstance(storage_node, Buffer) and isinstance(
                 storage_node.get_layout(), NonOwningLayout
@@ -126,8 +132,10 @@ def _nvgemm_benchmark_tensor_specs(
             else:
                 break
 
-        if isinstance(layout, NonOwningLayout):
-            layout = layout.view.get_layout()
+        view_byte_offset += (
+            V.graph.sizevars.optimization_hint(storage_node.get_layout().offset)
+            * storage_node.get_dtype().itemsize
+        )
 
         storage_key: int | StorageWeakRef = id(storage_node)
         storage_base_offset = 0
@@ -143,9 +151,8 @@ def _nvgemm_benchmark_tensor_specs(
 
         size = V.graph.sizevars.optimization_hints(node.get_size())
         stride = V.graph.sizevars.optimization_hints(node.get_stride())
-        offset = V.graph.sizevars.optimization_hint(layout.offset)
         dtype = node.get_dtype()
-        byte_offset = storage_base_offset + offset * dtype.itemsize
+        byte_offset = storage_base_offset + view_byte_offset
         storage_length = compute_required_storage_length(size, stride, 0)
         max_byte = byte_offset + storage_length * dtype.itemsize
         ranges_by_storage.setdefault(storage_key, []).append(

@@ -1084,6 +1084,17 @@ class TestNVUniversalGemmScheduling(TestCase):
                 )
             ),
         )
+        nested = ir.Buffer(
+            name="nested",
+            layout=ir.NonOwningLayout(
+                ir.ReinterpretView(
+                    data=ir.StorageBox(b),
+                    layout=ir.FixedLayout(
+                        torch.device("cuda"), torch.bfloat16, [2], [1], offset=2
+                    ),
+                )
+            ),
+        )
         out = make_buffer("out", [4, 4], [5, 1])
         epilogue_input = ir.ReinterpretView(
             data=shared_storage,
@@ -1092,7 +1103,7 @@ class TestNVUniversalGemmScheduling(TestCase):
             ),
         )
         graph.name_to_buffer.update(
-            {buf.get_name(): buf for buf in (bias, b, out, epilogue_input)}
+            {buf.get_name(): buf for buf in (bias, b, nested, out, epilogue_input)}
         )
 
         with V.set_graph_handler(graph):
@@ -1107,7 +1118,7 @@ class TestNVUniversalGemmScheduling(TestCase):
                 bias_node=bias,
                 epilogue=GemmEpiloguePlan(
                     source=f"def {EPILOGUE_FN_NAME}(accum):\n    return accum",
-                    reads=(epilogue_input.get_name(),),
+                    reads=(nested.get_name(), epilogue_input.get_name()),
                     writes=(out.get_name(),),
                     renames={"D": out.get_name()},
                 ),
@@ -1122,6 +1133,7 @@ class TestNVUniversalGemmScheduling(TestCase):
                     ("in_ptr0", "bias", "input"),
                     ("in_ptr1", "b", "input"),
                     ("out_ptr0", "out", "output"),
+                    ("nested", "nested", "epilogue"),
                     ("shared_storage", "shared_storage", "epilogue"),
                     ("bias", "bias", "epilogue"),
                     ("workspace", None, "workspace"),
@@ -1149,6 +1161,7 @@ class TestNVUniversalGemmScheduling(TestCase):
             "in_ptr0": bias,
             "in_ptr1": b,
             "out_ptr0": out,
+            "nested": nested,
             "shared_storage": epilogue_input,
             "bias": bias,
         }
@@ -1160,6 +1173,10 @@ class TestNVUniversalGemmScheduling(TestCase):
             )
             for name, buffer in expected_buffers.items()
         }
+        expected_offsets = {
+            name: layout.offset for name, layout in expected_layouts.items()
+        }
+        expected_offsets["nested"] = 3
         self.assertEqual(
             {
                 name: (
@@ -1173,7 +1190,7 @@ class TestNVUniversalGemmScheduling(TestCase):
                 name: (
                     tuple(buffer.get_size()),
                     tuple(buffer.get_stride()),
-                    expected_layouts[name].offset,
+                    expected_offsets[name],
                 )
                 for name, buffer in expected_buffers.items()
             },
@@ -1184,7 +1201,14 @@ class TestNVUniversalGemmScheduling(TestCase):
                 args_by_name["in_ptr1"], args_by_name["shared_storage"]
             )
         )
+        self.assertTrue(
+            torch._C._is_alias_of(args_by_name["in_ptr1"], args_by_name["nested"])
+        )
         self.assertEqual(args_by_name["in_ptr1"].data_ptr() % 16, 2)
+        self.assertEqual(args_by_name["nested"].data_ptr() % 16, 6)
+        self.assertEqual(
+            args_by_name["nested"].data_ptr() - args_by_name["in_ptr1"].data_ptr(), 4
+        )
         self.assertEqual(args_by_name["shared_storage"].data_ptr() % 16, 4)
         self.assertEqual(args_by_name["in_ptr0"].untyped_storage().nbytes(), 32)
         self.assertEqual(args_by_name["in_ptr1"].untyped_storage().nbytes(), 48)
