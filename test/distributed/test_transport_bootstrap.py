@@ -70,10 +70,10 @@ class TestRankBootstrap(TestCase):
 
     def test_pair(self):
         store = dist.HashStore()
-        for attempt in range(2):
-            self._connect_pair(store, attempt)
+        for attempt, timeout in enumerate((2, timedelta(seconds=2))):
+            self._connect_pair(store, attempt, timeout)
 
-    def _connect_pair(self, store, attempt):
+    def _connect_pair(self, store, attempt, timeout):
         transports = [Mock(spec=Transport), Mock(spec=Transport)]
         for rank, transport in enumerate(transports):
             transport.bind.return_value = bytes([rank, attempt, 255])
@@ -91,7 +91,7 @@ class TestRankBootstrap(TestCase):
                     store=store,
                     rank=rank,
                     peer_rank=1 - rank,
-                    bootstrap_timeout=2,
+                    bootstrap_timeout=timeout,
                     fixture=transport,
                 )
                 for rank, transport in enumerate(transports)
@@ -102,8 +102,7 @@ class TestRankBootstrap(TestCase):
             self.assertEqual(
                 transport.connect.call_args.args, (bytes([1 - rank, attempt, 255]),)
             )
-            self.assertGreater(transport.connect.call_args.kwargs["timeout"], 0)
-            self.assertLessEqual(transport.connect.call_args.kwargs["timeout"], 2)
+            self.assertEqual(transport.connect.call_args.kwargs["timeout"], 2)
             transport.close.assert_not_called()
 
     def test_stale_peer_times_out_and_closes(self):
