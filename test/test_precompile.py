@@ -7542,7 +7542,7 @@ class TestPrecompileRuntimeCache(TestCase):
             )
 
         def fn(x):
-            return (x.sin() * 2).sum(dim=-1)
+            return x.sin() * 2 + x.cos()
 
         pc = torch.compiler.precompile
         x = torch.randn(64, 1024, device="cuda")
