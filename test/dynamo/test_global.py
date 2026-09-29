@@ -435,16 +435,17 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                 return x + 1
 
             x = torch.ones(2, 2)
-            # With fullgraph the caller's handler catches the observed exception
-            # and the frame traces to completion.
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            self.assertEqual(opt_fn(x), x + 1)
-
-            torch._dynamo.reset()
-            # Without fullgraph the graph break falls back to eager, which raises
-            # and catches the real NameError.
-            opt_fn = torch.compile(fn, backend="eager")
-            self.assertEqual(opt_fn(x), x + 1)
+            # The caller's handler catches the observed exception while tracing,
+            # so the frame completes with no graph break under either mode; it is
+            # only an uncaught one that breaks the graph and falls back to eager
+            # (see _assert_delete_missing_global).
+            for fullgraph in (True, False):
+                with self.subTest(fullgraph=fullgraph):
+                    torch._dynamo.reset()
+                    cnt = torch._dynamo.testing.CompileCounter()
+                    opt_fn = torch.compile(fn, backend=cnt, fullgraph=fullgraph)
+                    self.assertEqual(opt_fn(x), x + 1)
+                    self.assertEqual(cnt.frame_count, 1)
 
     def test_delete_global_created_then_deleted(self):
         with temp_globals(globals(), _dg_a=_ABSENT):
@@ -495,19 +496,6 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
 
     def test_delete_global_then_store(self):
         with temp_globals(globals(), _dg_a=1, _dg_pad=0):
-            # Eager deletes the entry and the store re-inserts it, so the name
-            # moves to the end of the module __dict__.
-            eager = {"_dg_a": 1, "_dg_pad": 0}
-            del eager["_dg_a"]
-            eager["_dg_a"] = 7
-            self.assertEqual(list(eager), ["_dg_pad", "_dg_a"])
-
-            # Compiled replays the store alone: store_attr keys mutations by
-            # name, so the store overwrites the recorded delete and the name
-            # keeps its position instead of moving past `_dg_pad`. That matches
-            # how Dynamo already replays `del obj.a; obj.a = 5` for instance
-            # attributes, and differs from eager above.
-            position = list(globals()).index("_dg_a")
 
             def fn(x):
                 global _dg_a
@@ -516,11 +504,28 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                 return x + 1
 
             x = torch.ones(2, 2)
+            position = list(globals()).index("_dg_a")
+            self.assertLess(position, list(globals()).index("_dg_pad"))
+
+            # Compiled replays the store alone: store_attr keys mutations by
+            # name, so the store overwrites the recorded delete and the name
+            # keeps its position. That matches how Dynamo already replays
+            # `del obj.a; obj.a = 5` for instance attributes.
             opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
             self.assertEqual(opt_fn(x), x + 1)
             self.assertEqual(_dg_a, 7)
-            self.assertEqual(list(globals()).index("_dg_a"), position)
-            self.assertLess(position, list(globals()).index("_dg_pad"))
+            compiled_position = list(globals()).index("_dg_a")
+            self.assertEqual(compiled_position, position)
+
+            # Eager is the spec: the delete drops the entry and the store
+            # re-inserts it, so the name moves past `_dg_pad` to the end of the
+            # module __dict__, unlike the compiled order above.
+            fn(x)
+            self.assertEqual(_dg_a, 7)
+            self.assertGreater(
+                list(globals()).index("_dg_a"), list(globals()).index("_dg_pad")
+            )
+            self.assertNotEqual(list(globals()).index("_dg_a"), compiled_position)
 
     def test_delete_tensor_global(self):
         # A pre-existing tensor global is the "record a delete" branch: the
@@ -577,6 +582,117 @@ class TestDeleteGlobal(torch._dynamo.test_case.TestCase):
                 x = torch.ones(2, 2)
                 self.assertEqual(fn(x), x + 1)
             self.assertNotIn("store_then_delete_missing_value", mod.__dict__)
+
+    def test_delete_global_crossfile_then_store(self):
+        # `del g; g = 7` in an inlined callee. As in the root frame (see
+        # test_delete_global_then_store), store_attr keys mutations by name, so
+        # the store overwrites the recorded delete and the store alone is
+        # replayed: the value lands and the name keeps its position in the
+        # callee module __dict__, where eager moves it to the end.
+        with crossfile_globals(delete_then_store_value=1) as mod:
+            position = list(mod.__dict__).index("delete_then_store_value")
+            successor = list(mod.__dict__).index("delete_then_store_value_fn")
+            self.assertLess(position, successor)
+
+            def fn(x):
+                mod.delete_then_store_value_fn()
+                return x + 1
+
+            x = torch.ones(2, 2)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertEqual(mod.delete_then_store_value, 7)
+            self.assertEqual(
+                list(mod.__dict__).index("delete_then_store_value"), position
+            )
+
+    def test_delete_global_crossfile_then_store_multi(self):
+        # The re-store follows an insert of a second name, so the two recorded
+        # mutations replay in insertion order and both values have to land.
+        with crossfile_globals(
+            delete_then_store_multi=1, delete_then_store_multi_new=_ABSENT
+        ) as mod:
+
+            def fn(x):
+                mod.delete_then_store_multi_fn()
+                return x + 1
+
+            x = torch.ones(2, 2)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), x + 1)
+            self.assertEqual(mod.delete_then_store_multi, 3)
+            self.assertEqual(mod.delete_then_store_multi_new, 2)
+
+    def test_delete_global_crossfile_created_then_deleted_in_stdlib(self):
+        # `test_delete_global_crossfile_created_then_deleted` covers the
+        # cancelled store on a normal module. This covers the stdlib case, where
+        # the source `store_attr` records is wrapped in SkipGuardSource: the
+        # frame has to drop that same wrapped source when the delete cancels the
+        # store, or it stays in mutated_sources and reports the module as
+        # mutated for the lifetime of the compiled artifact.
+        import collections.abc
+
+        from torch._dynamo.side_effects import SideEffects
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+
+        name = "stdlib_store_then_delete"
+        stdlib_globals = collections.abc.__dict__
+        discarded: list[object] = []
+        mutated_sources: list[set[object]] = []
+
+        orig_run = InstructionTranslator.run
+        orig_discard = SideEffects.discard_attr_mutation
+
+        def run(self, *args, **kwargs):
+            try:
+                return orig_run(self, *args, **kwargs)
+            finally:
+                mutated_sources.append(set(self.output.side_effects.mutated_sources))
+
+        def discard_attr_mutation(self, item, attr_name):
+            discarded.append(self.mutated_sources_by_attr.get((item, attr_name)))
+            orig_discard(self, item, attr_name)
+
+        with (
+            mock.patch.dict(stdlib_globals),
+            mock.patch.object(InstructionTranslator, "run", run),
+            mock.patch.object(
+                SideEffects, "discard_attr_mutation", discard_attr_mutation
+            ),
+        ):
+            exec(
+                compile(
+                    f"""
+def fn():
+    global {name}
+    {name} = 1
+    del {name}
+    return 0
+""",
+                    "<stdlib-globals>",
+                    "exec",
+                ),
+                stdlib_globals,
+            )
+            stdlib_fn = stdlib_globals["fn"]
+            self.assertNotIn(name, stdlib_globals)
+
+            def fn(x):
+                stdlib_fn()
+                return x + 1
+
+            x = torch.ones(2, 2)
+            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            self.assertEqual(opt_fn(x), x + 1)
+
+        # The cancelled store registered a source for the stdlib module, and
+        # discarding it has to remove exactly that source from every frame.
+        self.assertEqual(len(discarded), 1)
+        self.assertIsNotNone(discarded[0])
+        self.assertTrue(mutated_sources)
+        for sources in mutated_sources:
+            self.assertNotIn(discarded[0], sources)
+        self.assertNotIn(name, stdlib_globals)
 
     # ------------------------------------------------------------------
     # Recompilation when the global's presence changes between calls
@@ -680,115 +796,6 @@ fn = functools.partial(my_fn)
             compiled = torch.compile(mod.fn, backend="eager")
             self.assertTrue(same(compiled(x), x + 1))
             self.assertNotIn("flag", mod.__dict__)
-
-    def test_delete_global_crossfile_then_store(self):
-        # `del g; g = 7` in an inlined callee. As in the root frame, store_attr
-        # keys mutations by name, so the store overwrites the recorded delete
-        # and the store alone is replayed: the value lands and the name keeps
-        # its position in the callee module __dict__, where eager moves it to
-        # the end.
-        with crossfile_globals(delete_then_store_value=1) as mod:
-            position = list(mod.__dict__).index("delete_then_store_value")
-
-            def fn(x):
-                mod.delete_then_store_value_fn()
-                return x + 1
-
-            x = torch.ones(2, 2)
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            self.assertEqual(opt_fn(x), x + 1)
-            self.assertEqual(mod.delete_then_store_value, 7)
-            self.assertEqual(
-                list(mod.__dict__).index("delete_then_store_value"), position
-            )
-
-    def test_delete_global_crossfile_then_store_multi(self):
-        # The re-store follows an insert of a second name, so the two recorded
-        # mutations replay in insertion order and both values have to land.
-        with crossfile_globals(
-            delete_then_store_multi=1, delete_then_store_multi_new=_ABSENT
-        ) as mod:
-
-            def fn(x):
-                mod.delete_then_store_multi_fn()
-                return x + 1
-
-            x = torch.ones(2, 2)
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            self.assertEqual(opt_fn(x), x + 1)
-            self.assertEqual(mod.delete_then_store_multi, 3)
-            self.assertEqual(mod.delete_then_store_multi_new, 2)
-
-    def test_delete_global_crossfile_created_then_deleted_in_stdlib(self):
-        # `test_delete_global_crossfile_created_then_deleted` covers the
-        # cancelled store on a normal module. This covers the stdlib case, where
-        # the source `store_attr` records is wrapped in SkipGuardSource: the
-        # frame has to drop that same wrapped source when the delete cancels the
-        # store, or it stays in mutated_sources and reports the module as
-        # mutated for the lifetime of the compiled artifact.
-        import collections.abc
-
-        from torch._dynamo.side_effects import SideEffects
-        from torch._dynamo.symbolic_convert import InstructionTranslator
-
-        name = "stdlib_store_then_delete"
-        stdlib_globals = collections.abc.__dict__
-        discarded: list[object] = []
-        mutated_sources: list[set[object]] = []
-
-        orig_run = InstructionTranslator.run
-        orig_discard = SideEffects.discard_attr_mutation
-
-        def run(self, *args, **kwargs):
-            try:
-                return orig_run(self, *args, **kwargs)
-            finally:
-                mutated_sources.append(set(self.output.side_effects.mutated_sources))
-
-        def discard_attr_mutation(self, item, attr_name):
-            discarded.append(self.mutated_sources_by_attr.get((item, attr_name)))
-            orig_discard(self, item, attr_name)
-
-        with (
-            mock.patch.dict(stdlib_globals),
-            mock.patch.object(InstructionTranslator, "run", run),
-            mock.patch.object(
-                SideEffects, "discard_attr_mutation", discard_attr_mutation
-            ),
-        ):
-            exec(
-                compile(
-                    f"""
-def fn():
-    global {name}
-    {name} = 1
-    del {name}
-    return 0
-""",
-                    "<stdlib-globals>",
-                    "exec",
-                ),
-                stdlib_globals,
-            )
-            stdlib_fn = stdlib_globals["fn"]
-            self.assertNotIn(name, stdlib_globals)
-
-            def fn(x):
-                stdlib_fn()
-                return x + 1
-
-            x = torch.ones(2, 2)
-            opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
-            self.assertEqual(opt_fn(x), x + 1)
-
-        # The cancelled store registered a source for the stdlib module, and
-        # discarding it has to remove exactly that source from every frame.
-        self.assertEqual(len(discarded), 1)
-        self.assertIsNotNone(discarded[0])
-        self.assertTrue(mutated_sources)
-        for sources in mutated_sources:
-            self.assertNotIn(discarded[0], sources)
-        self.assertNotIn(name, stdlib_globals)
 
 
 if __name__ == "__main__":

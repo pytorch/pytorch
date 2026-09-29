@@ -2718,6 +2718,44 @@ class <lambda>(torch.nn.Module):
         self.assertIn("record_event", graph_str)
         self.assertNotIn("_stream_del_global_created", globals())
 
+    def test_del_global_preexisting_tensor_no_sync_dealloc(self, device):
+        # `_check_global_delete` emits the dealloc sync only for a value a
+        # STORE_GLOBAL made earlier in the same trace; a tensor that is already
+        # in the module when the trace starts is not covered, so deleting it
+        # here emits no `sync_dealloc`. Pin that gap so closing it has to update
+        # this test on purpose.
+        def fn(x, y):
+            global _stream_del_global_preexisting
+            s = torch.Stream(device=device)
+            e = torch.Event(device=device)
+            z0 = _stream_del_global_preexisting + 1
+            with s:
+                z = torch.add(_stream_del_global_preexisting, y)
+                e.record()
+            e.wait()
+            del _stream_del_global_preexisting
+            return z0, z
+
+        inp = (torch.ones(2, 2, device=device), torch.ones(2, 2, device=device))
+        with patch.dict(globals(), {"_stream_del_global_preexisting": inp[0]}):
+            expected = fn(*inp)
+            self.assertNotIn("_stream_del_global_preexisting", globals())
+            # The name has to be present when the trace starts, so bind it again
+            # and let the compiled run delete it.
+            globals()["_stream_del_global_preexisting"] = inp[0]
+
+            (
+                actual,
+                _,
+                fw_graphs,
+                _,
+            ) = extract_graph(fn, *inp)
+            self.assertEqual(len(fw_graphs), 1)
+            self.assertEqual(expected, actual)
+            graph_str = print_graph(fw_graphs[0])
+            self.assertNotIn("sync_dealloc", graph_str)
+            self.assertNotIn("_stream_del_global_preexisting", globals())
+
     def test_del_global_same_stream_no_sync_dealloc(self, device):
         def fn(x, y):
             global _stream_del_global
