@@ -7029,10 +7029,23 @@ def error_inputs_complex(op_info, device, is_ref=False, **kwargs):
                                  out=make_arg(M, S, dtype=torch.complex64)),
                      error_type=RuntimeError, error_regex=error_out)
 
+def _sample_inputs_logaddexp_large_gap(device, dtype, requires_grad):
+    # Operand gaps past where exp (~709) and exp2 (1024) overflow, see #196704.
+    # Complex is excluded: complex sigmoid itself returns nan there on some backends.
+    if dtype.is_complex:
+        return
+    make_arg = partial(torch.tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    yield SampleInput(make_arg([0., 0., 0., 0.]), make_arg([800., -800., 1601., -1601.]))
+
 def sample_inputs_logaddexp(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     shape = (S, S)
     yield SampleInput(make_arg(shape), make_arg(shape))
+    yield from _sample_inputs_logaddexp_large_gap(device, dtype, requires_grad)
+
+def sample_inputs_logaddexp_elementwise(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_binary(op_info, device, dtype, requires_grad, **kwargs)
+    yield from _sample_inputs_logaddexp_large_gap(device, dtype, requires_grad)
 
 def sample_inputs_prod(op_info, device, dtype, requires_grad, **kwargs):
     def make_arg(shape):
@@ -14543,6 +14556,7 @@ op_db: list[OpInfo] = [
                     dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
                     dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.complex32),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+                    sample_inputs_func=sample_inputs_logaddexp_elementwise,
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=False,
