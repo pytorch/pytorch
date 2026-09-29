@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import timedelta
 from importlib import import_module
 from threading import RLock
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 
@@ -48,17 +48,6 @@ class NIXLTransport(Transport):
     to NIXL's ``create_backend``. NIXL is an optional dependency, imported only
     when selected. Transfers require registered views; raw tensors are rejected
     rather than allocated or registered implicitly.
-
-    Lifecycle: open -> closing -> closed. Binding and connecting leave the
-    transport open. Once close starts, new operations are rejected. Failed
-    transfer-handle or peer-metadata cleanup also starts closing. A failed/timed-out close retains unreleased resources;
-    retry ``close`` or ``close_async`` to finish cleanup. A closed transport cannot
-    reopen; construct a new one instead.
-
-    Registrations retain the transport independently of outgoing Work completion,
-    since peers may still access them. Coordinate remote access before unregistering
-    or closing. Each Work is single-use: a wait timeout does not cancel its DMA,
-    and retrying that wait observes the same operation rather than resubmitting it.
     """
 
     def __init__(
@@ -113,7 +102,11 @@ class NIXLTransport(Transport):
         self._transfers: dict[int, Any] = {}
         self._pending: dict[int, _NIXLWork] = {}
         self._operation_lock = RLock()
-        self._cuda_bridges: dict[tuple[int, int], Any] = {}
+        # Lifecycle: open -> closing -> closed. Closing rejects new operations and
+        # is terminal; a failed or timed-out close retains unreleased resources
+        # and retrying close only finishes cleanup. Failed transfer-handle or
+        # peer-metadata cleanup also starts closing. Registrations are released
+        # only by unregister or close, independent of Work completion.
         self._closed = False
         self._closing = False
 
@@ -222,9 +215,12 @@ class NIXLTransport(Transport):
             registration = memory._registration
             if not registration.active:
                 return
-            if any(bridge.owns(registration) for bridge in self._cuda_bridges.values()):
+            if any(
+                cast(NIXLMemoryView, view)._memory._registration is registration
+                for view in self._cuda_stream_views()
+            ):
                 raise RuntimeError(
-                    "memory is retained by CUDA operations or graphs; close before unregistering"
+                    "memory is retained by CUDA stream transfers or graphs"
                 )
             if any(
                 work._buffers[0]._memory._registration is registration
@@ -258,16 +254,9 @@ class NIXLTransport(Transport):
             metadata,
         )
 
-    def _submit(
-        self,
-        operation: str,
-        local_buffer: MemoryView,
-        remote_buffer: RemoteBuffer,
-        *,
-        mutable: bool,
-        timeout: float,
-    ) -> _NIXLWork:
-        agent = self._ensure_open()
+    def _check_transfer(
+        self, local_buffer: MemoryView, remote_buffer: RemoteBuffer, *, mutable: bool
+    ) -> None:
         expected_type = NIXLMutableMemoryView if mutable else NIXLMemoryView
         if not isinstance(local_buffer, expected_type) or (
             local_buffer._memory._transport is not self
@@ -288,6 +277,21 @@ class NIXLTransport(Transport):
             raise RuntimeError(
                 "registered tensor was resized or its storage was replaced"
             )
+
+    def _submit(
+        self,
+        operation: str,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        mutable: bool,
+        timeout: float,
+    ) -> _NIXLWork:
+        agent = self._ensure_open()
+        self._check_transfer(local_buffer, remote_buffer, mutable=mutable)
+        local_buffer = cast(NIXLMemoryView, local_buffer)
+        remote_buffer = cast(NIXLRemoteBuffer, remote_buffer)
+        registration = local_buffer._memory._registration
         work = _NIXLWork(self, local_buffer, remote_buffer, timeout)
         if local_buffer.size() == 0:
             work._done = True
@@ -338,107 +342,6 @@ class NIXLTransport(Transport):
             # retain buffers until a native terminal state establishes safety.
             work._error = error
         return work
-
-    def _cuda_bridge(self, stream):
-        from ._cuda_host import _CudaStreamBridge
-
-        key = (stream.device.index, stream.cuda_stream)
-        if key not in self._cuda_bridges:
-            self._cuda_bridges[key] = _CudaStreamBridge(self, stream)
-        return self._cuda_bridges[key]
-
-    def cuda_graph(self, stream=None):
-        """Capture CUDA stream transfers; close resets the returned graphs.
-
-        Warm up and register buffers first. Use this context instead of external
-        capture so callbacks remain alive. Serialize replay and close. Captured
-        Work objects cannot be waited on; synchronize the replay stream instead.
-        """
-        return self._cuda_bridge(stream or torch.cuda.current_stream()).capture()
-
-    def write_stream(
-        self,
-        local_buffer: MemoryView,
-        remote_buffer: RemoteBuffer,
-        *,
-        stream=None,
-        async_op: bool = False,
-        timeout: float | None = None,
-    ) -> int | Work:
-        """Write with CUDA producer/completion dependencies on stream (current by default).
-
-        CUDA calls return after enqueueing; async_op returns optional host Work.
-        CPU views use ordinary write behavior. See the prototype restrictions in
-        the distributed transport documentation.
-        """
-        return self._start_stream(
-            "WRITE",
-            local_buffer,
-            remote_buffer,
-            mutable=False,
-            stream=stream,
-            async_op=async_op,
-            timeout=timeout,
-        )
-
-    def read_stream(
-        self,
-        local_buffer: MutableMemoryView,
-        remote_buffer: RemoteBuffer,
-        *,
-        stream=None,
-        async_op: bool = False,
-        timeout: float | None = None,
-    ) -> int | Work:
-        """Read with CUDA stream ordering; CPU views use ordinary read behavior."""
-        return self._start_stream(
-            "READ",
-            local_buffer,
-            remote_buffer,
-            mutable=True,
-            stream=stream,
-            async_op=async_op,
-            timeout=timeout,
-        )
-
-    def _start_stream(
-        self,
-        operation,
-        local_buffer,
-        remote_buffer,
-        *,
-        mutable,
-        async_op,
-        timeout,
-        stream,
-    ):
-        if (
-            isinstance(local_buffer, NIXLMemoryView)
-            and local_buffer._memory._registration.tensor.is_cuda
-        ):
-            tensor = local_buffer._memory._registration.tensor
-            stream = stream or torch.cuda.current_stream(tensor.device)
-            if stream.device != tensor.device:
-                raise ValueError(
-                    "stream and local tensor must use the same CUDA device"
-                )
-            bridge = self._cuda_bridge(stream)
-            work = bridge._enqueue(
-                operation.lower(),
-                local_buffer,
-                remote_buffer,
-                self._timeout if timeout is None else timeout,
-            )
-            # CUDA callers get stream ordering rather than a submitting-thread wait.
-            return work if async_op else 0
-        return self._start(
-            operation,
-            local_buffer,
-            remote_buffer,
-            mutable=mutable,
-            async_op=async_op,
-            timeout=timeout,
-        )
 
     def _start(
         self,
@@ -544,9 +447,7 @@ class NIXLTransport(Transport):
             return list(self._pending.values())
 
     def close(self, *, timeout: float | None = None) -> None:
-        for bridge in self._cuda_bridges.values():
-            bridge.close()
-        self._cuda_bridges.clear()
+        self._close_cuda_streams()
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
@@ -575,9 +476,7 @@ class NIXLTransport(Transport):
         Retry close after pending work completes. Native cleanup is not
         interruptible; peer access must already have been stopped externally.
         """
-        for bridge in self._cuda_bridges.values():
-            bridge.close()
-        self._cuda_bridges.clear()
+        self._close_cuda_streams()
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout

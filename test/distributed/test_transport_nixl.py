@@ -450,16 +450,14 @@ class TestNIXLTransport(TransportTestMixin, TestCase):
             self.assertEqual(first._agent.released, 0)
         first.close()
 
-    def test_cpu_transfers_do_not_use_cuda_ordering(self):
+    def test_ordinary_transfers_do_not_use_cuda_streams(self):
         first, second, memory, remote = self.registered_pair()
         with patch.object(
-            first, "_cuda_bridge", side_effect=AssertionError("CPU used CUDA")
+            first, "_cuda_stream", side_effect=AssertionError("used a CUDA stream")
         ):
             self.assertEqual(first.write(memory.to_view(), remote), 0)
             first.read(memory.to_mutable_view(), remote, async_op=True).wait()
-            self.assertEqual(first.write_stream(memory.to_view(), remote), 0)
-            first.read_stream(memory.to_mutable_view(), remote, async_op=True).wait()
-        self.assertFalse(first._cuda_bridges)
+        self.assertFalse(first._cuda_streams)
 
     def test_native_setup_runs_on_calling_thread(self):
         first, second = self.make_transport_pair()

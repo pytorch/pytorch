@@ -126,8 +126,9 @@ def _worker(rank, pipe, capture=False):
     # Stop peer accesses before closing local registrations.
     pipe.send_bytes(b"finished")
     pipe.recv_bytes()
+    orderings = list(transport._cuda_streams.values())
     transport.close()
-    if any(b._captured or b._graphs for b in transport._cuda_bridges.values()):
+    if any(o._captured or o._graphs for o in orderings):
         raise AssertionError("graph resources retained after close")
 
 
@@ -145,7 +146,7 @@ def _callback_worker(fail, capture=False):
             patch.object(transport, "_submit", return_value=native_work),
             patch.object(
                 transport,
-                "_cuda_bridge",
+                "_cuda_stream",
                 side_effect=AssertionError("ordinary API used stream ordering"),
             ),
         ):
@@ -197,9 +198,9 @@ def _callback_worker(fail, capture=False):
 
 @unittest.skipUnless(
     os.getenv("TORCH_TEST_CUDA_TRANSPORT") == "1" and torch.cuda.device_count() >= 2,
-    "opt-in two-GPU CUDA/NIXL prototype test",
+    "requires TORCH_TEST_CUDA_TRANSPORT=1 and two GPUs",
 )
-class TestCudaHostTransport(TestCase):
+class TestCudaStreamTransport(TestCase):
     def test_enqueue_returns_before_completion(self):
         self._check_callback_worker(False, 0)
 

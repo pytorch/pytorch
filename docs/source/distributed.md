@@ -2270,9 +2270,8 @@ not that the remote application consumed or acknowledged the data. Asyncio calle
 can use ``read_async``, ``write_async``, or ``wait_all``. Registration remains valid
 until unregistration or close, and tensors must not be resized or have their storage replaced.
 
-The base API does not order operations on CUDA streams or provide tracing,
-batching, or remote slicing. The experimental NIXL CUDA path below provides
-explicit stream ordering and graph capture. Descriptor classes define explicit
+Ordinary reads and writes are not ordered on CUDA streams. The API does not
+provide tracing, batching, or remote slicing. Descriptor classes define explicit
 ``serialize()``/``deserialize()`` methods.
 The built-in backends declare their fields in a versioned JSON envelope; binary
 metadata is base64-encoded. Unknown fields, versions, backends, and invalid field
@@ -2291,6 +2290,42 @@ types are rejected. Tensor contents and native handles are never serialized.
 .. autofunction:: torch.distributed._transport.wait_all
 .. autofunction:: torch.distributed._transport.available_transports
 .. autofunction:: torch.distributed._transport.register_transport
+
+CUDA streams
+~~~~~~~~~~~~
+
+``read_stream`` and ``write_stream`` order a transfer on a CUDA stream, the
+current stream by default. The transfer starts after prior work on the stream;
+later work waits for it to complete. Calls return after enqueueing and no kernel
+runs while the transfer is in flight. ``async_op=True`` additionally returns Work
+for host-side completion.
+
+.. code-block:: python
+
+    with torch.cuda.stream(stream):
+        source.copy_(producer)
+        transport.write_stream(source_view, remote_destination)
+        transport.read_stream(destination_view, remote_source)
+        consume(destination)
+
+Capture with ``transport.cuda_graph(stream)``, not ``torch.cuda.graph``, so the
+transport keeps callbacks and buffers alive until ``close``. Register buffers
+and warm up transfers before capture. Each replay submits a new transfer;
+captured Work cannot be waited on, so synchronize the replay stream instead.
+
+.. code-block:: python
+
+    with transport.cuda_graph(stream) as graph:
+        source.copy_(producer)
+        transport.write_stream(source_view, remote_destination)
+    graph.replay()
+
+The default implementation drives host transfers from a per-stream progress
+thread and gates the stream with a CUDA stream memory wait. It requires Linux
+and GPUDirect RDMA write ordering, and allows 64 outstanding transfers per
+stream; captured transfers hold their slot until ``close``. Since consumers may
+already be enqueued, a failed transfer terminates the process. Backends with
+native stream support may override these methods.
 
 NIXL backend
 ~~~~~~~~~~~~
@@ -2320,12 +2355,6 @@ pending requests and buffers, even if the caller drops its Work. Wait again or
 successfully close before reusing buffers. Coordinate with peers before closing
 exposed memory; close only drains locally submitted operations.
 
-The transport lifecycle is ``open -> closing -> closed``. Binding and connecting
-keep it open. Closing is terminal: it rejects new operations, and retrying close
-only finishes cleanup; it never reopens the endpoint. Construct a new transport
-for a new connection after close. Each Work represents one submission and cannot
-be reset or reused for another transfer.
-
 ``NIXLTransport.close_async`` awaits pending transfers before native cleanup.
 A timed-out or cancelled close rejects new work and retains resources; retry
 close to finish cleanup. Registrations keep the transport alive even after its last outgoing transfer,
@@ -2343,76 +2372,5 @@ cannot interrupt a blocked native call, even when it releases the GIL.
 
 .. autoclass:: torch.distributed._transport.nixl.NIXLTransport
    :members: close_async
-
-CUDA streams and graphs (prototype)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-For a registered CUDA tensor, NIXL ``read_stream`` and ``write_stream`` order the
-transfer on the supplied ``stream`` or that device's current stream by default.
-Ordinary ``read``, ``write``, ``read_async``, and ``write_async`` retain their
-existing behavior and insert no CUDA dependencies. Previous producer work finishes before
-native submission; subsequent consumers wait for transfer completion. CPU tensors
-use the existing direct path without CUDA events, gates, or progress threads.
-Remote readiness is still the application's responsibility.
-
-.. code-block:: python
-
-    with torch.cuda.stream(stream):
-        source_tensor.copy_(producer)
-        transport.write_stream(source_view, remote_destination)
-        transport.read_stream(destination_view, remote_source)
-        consume(destination_tensor)
-
-CUDA stream-variant calls return after enqueueing, not after a submitting-thread wait.
-``async_op=True`` returns a Work for optional host completion observation; the
-stream dependency is inserted regardless of that flag. Asyncio callers can await the returned Work with ``wait_all``. CUDA transfer timeouts must be
-positive; zero-timeout polling is available on returned Work via
-``is_completed()``. CPU timeout and waiting behavior is unchanged.
-
-A short host callback hands submission to a per-stream progress thread and
-returns immediately. That thread may call CUDA through UCX, polls native Work
-with a 1 ms backoff, and signals a mapped completion word. A stream memory wait
-holds consumers until completion. The callback must not block waiting for the
-progress thread: native CUDA copies can otherwise deadlock with graph execution.
-This uses no Python executor, but does require a progress thread per used stream.
-
-This private prototype requires Linux/x86-64, ``cuda-bindings``, CUDA stream-memory
-operations, and native owner-device GPUDirect RDMA write ordering. CUDA 13/H100
-was tested with UCX CUDA transfers on one host; multihost RDMA is unvalidated.
-Register buffers and prewarm kernels, copies, and native transfers before capture.
-Construction and teardown may synchronize. Lazy loading or native allocation can
-introduce implicit synchronization even though enqueue adds no explicit CPU wait.
-
-Use ``transport.cuda_graph(stream)`` to retain callbacks and buffers across replay:
-
-.. code-block:: python
-
-    with transport.cuda_graph(stream) as graph:
-        source_tensor.copy_(producer)
-        transport.write_stream(source_view, remote_destination)
-    graph.replay()
-
-Capture records producer, submission, completion-gate, and consumer nodes without
-submitting transfers. Each replay resets its gate and submits fresh native Work.
-Buffers and remote addresses remain fixed; contents may change between replays.
-Captured Work has no per-replay host completion and rejects ``wait`` or future
-observation: synchronize the replay stream instead. Serialize replays, do not
-clone graph executables, and do not race capture/replay with close. External graph
-capture is rejected; the transport must own the callback lifetimes.
-
-Each stream has 64 completion slots. Eager slots are reclaimed after stream
-completion; captured slots remain reserved until close. Capacity exhaustion
-raises before enqueueing. Unregistration rejects memory retained by queued
-operations or captured graphs. ``close`` drains CUDA work, resets owned graphs,
-and releases slots before native cleanup. ``close_async`` also performs this
-synchronous CUDA teardown. Neither bounds a blocked CUDA device synchronization;
-use an external watchdog. Replay after close is invalid.
-
-Coordinate with peers before consuming incoming writes, modifying a remote read
-source, or unregistering exposed memory. Local completion does not notify the
-remote application. Transfer failures or failure to install a completion gate
-terminate the process rather than allow consumers to observe incomplete data.
-Timeout starts with native submission, not producer execution. Recoverable CUDA
-errors, cancellation of submitted DMA, and tracing are unsupported.
 
 ```
