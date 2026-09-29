@@ -2929,7 +2929,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     from_exc=e,
                 )
 
-        _synchronize_fn_to_device_type = {
+        _synchronize_fn_to_device_type: dict[Callable[..., Any], str] = {
             torch.cuda.synchronize: "cuda",
             torch.mtia.synchronize: "mtia",
             torch.xpu.synchronize: "xpu",
@@ -3309,7 +3309,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 backend_fn = getattr(privateuse1_backend_mod, fn_name, None)
                 if callable(backend_fn):
                     handlers[backend_fn] = _make_exchange_device_handler(
-                        backend_fn, privateuse1_backend_name
+                        cast(Callable[[int], int | None], backend_fn),
+                        privateuse1_backend_name,
                     )
 
             # trace_rules routes torch.* functions through its static rule map,
