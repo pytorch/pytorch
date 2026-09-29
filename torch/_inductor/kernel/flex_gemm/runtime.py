@@ -137,9 +137,10 @@ class FlexGemmRuntimeLocalReducePlan:
     stores: bool = False
     out: torch.Tensor | None = None
     feeds_main: bool = False
-    combine: str | None = None
+    combine: Callable[..., Any] | str | None = None
     finalize: Callable[..., Any] | str | None = None
     finalize_operands: tuple[str, ...] = ()
+    reduce_planes: int = 1
     fragment_reduced: bool = False
     store_finalize: Callable[..., Any] | str | None = None
     binary_store_finalize: bool = False
@@ -190,6 +191,7 @@ class FlexGemmRuntimeLocalReducePlan:
             self.combine,
             self.finalize,
             self.finalize_operands,
+            self.reduce_planes,
             self.fragment_reduced,
             self.store_finalize,
             self.prepass,
@@ -362,8 +364,9 @@ def flex_gemm_epimod(
                     combine=local_reduce.combine,
                     finalize=finalize,
                     finalize_operands=local_reduce.finalize_operands,
-                    fragment_reduced=local_reduce.fragment_reduced,
                     output_layout=output_layout,
+                    reduce_planes=local_reduce.reduce_planes,
+                    fragment_reduced=local_reduce.fragment_reduced,
                 )
                 sinks[LOCAL_REDUCE_FEED_MAIN_ARG_NAME] = reduce_op
     epimod = epilogue_module.fragment_epilogue(
