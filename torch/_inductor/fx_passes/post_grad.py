@@ -2328,7 +2328,7 @@ def _normalized_scaled_mm(
     from torch.fx.operator_schemas import normalize_function
 
     normalized = normalize_function(
-        scaled_mm.target,
+        aten._scaled_mm.default,
         scaled_mm.args,
         scaled_mm.kwargs,
         normalize_to_only_use_kwargs=True,
