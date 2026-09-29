@@ -1581,14 +1581,24 @@ class TestInductorDynamic(DynamicShapesTestCase):
 
 
 class TestSymbolicFull(TestCase):
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    @parametrize("fill_value", (0, 3))
-    def test_full_symbolic_fill_respects_dtype(self, device, fill_value):
+    def _check_symbolic_fill_respects_dtype(self, device, fill_value):
         def f(x):
             return torch.full((2,), x.item(), dtype=torch.bool, device=device).sum()
 
         x = torch.tensor(fill_value, device=device)
         self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize("fill_value", (0, 3))
+    def test_full_symbolic_fill_respects_dtype(self, device, fill_value):
+        self._check_symbolic_fill_respects_dtype(device, fill_value)
+
+    @onlyOn(["cpu", "cuda", "xpu"])
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize("fill_value", (0, 3))
+    def test_full_symbolic_fill_respects_dtype_cpp_wrapper(self, device, fill_value):
+        self._check_symbolic_fill_respects_dtype(device, fill_value)
 
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
