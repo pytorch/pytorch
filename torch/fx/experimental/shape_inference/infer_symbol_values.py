@@ -8,6 +8,13 @@ import sympy as sp
 import torch
 
 
+__all__ = [
+    "infer_symbol_values",
+    "calculate_value",
+    "solve_equation",
+    "update_equation",
+]
+
 square_brackets_pattern = r"\[([^]]+)\]"
 parentheses_pattern = r"\((.*?)\)"
 s_pattern = r"s\d+"
