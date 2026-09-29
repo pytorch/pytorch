@@ -2195,6 +2195,7 @@ class TritonOverrides(OpOverrides):
                 V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel
             )
             and V.graph.get_current_device_or_throw().type == "cuda"
+            and config.use_rand4x
             and V.kernel.triton_tensor_ndim() == 1
             and not config.align_random_eager
         )
