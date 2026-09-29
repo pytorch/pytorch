@@ -1452,7 +1452,7 @@ class ForeachTests(TestCase):
         actual = torch.compile(fn)(*args_clone)
         self.assertEqual(actual, expected)
 
-    @requires_gpu
+    @requires_cuda_and_triton
     def test_foreach_pow_int_fallback(self):
         def fn_inplace(t, e):
             torch._foreach_pow_(t, e)
