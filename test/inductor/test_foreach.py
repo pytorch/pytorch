@@ -1452,7 +1452,6 @@ class ForeachTests(TestCase):
         actual = torch.compile(fn)(*args_clone)
         self.assertEqual(actual, expected)
 
-
     @requires_gpu
     def test_foreach_pow_int_fallback(self):
         def fn_inplace(t, e):
@@ -1465,8 +1464,14 @@ class ForeachTests(TestCase):
 
         t = [torch.tensor([2], device=GPU_TYPE, dtype=torch.int32)]
         e = [torch.tensor(3, device=GPU_TYPE, dtype=torch.int32)]
-        self.assertEqual(fn_inplace([t[0].clone()], e), torch.compile(fn_inplace)([t[0].clone()], e))
-        self.assertEqual(fn_outplace([t[0].clone()], e), torch.compile(fn_outplace)([t[0].clone()], e))
+        self.assertEqual(
+            fn_inplace([t[0].clone()], e), torch.compile(fn_inplace)([t[0].clone()], e)
+        )
+        self.assertEqual(
+            fn_outplace([t[0].clone()], e),
+            torch.compile(fn_outplace)([t[0].clone()], e),
+        )
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
