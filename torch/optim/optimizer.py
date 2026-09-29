@@ -811,23 +811,15 @@ class Optimizer:
     def _process_value_according_to_param_policy(
         param: torch.Tensor,
         value: torch.Tensor,
-        param_id: int,
-        param_groups: list[dict[str, Any]],
+        param_group: dict[str, Any],
         key: str | None = None,
     ) -> torch.Tensor:
         # Floating-point types are a bit special here. They are the only ones
         # that are assumed to always match the type of params.
         # Make sure state['step'] is not casted https://github.com/pytorch/pytorch/issues/74424
         # UNLESS fused or capturable, see note [special device hosting for step]
-        fused = False
-        capturable = False
-        if param_groups is None:
-            raise AssertionError("Expected param_groups to be set")
-        for pg in param_groups:
-            if param_id in pg["params"]:
-                fused = pg.get("fused", False)
-                capturable = pg.get("capturable", False)
-                break
+        fused = param_group.get("fused", False)
+        capturable = param_group.get("capturable", False)
         if key == "step":
             if capturable or fused:
                 return value.to(dtype=torch.float32, device=param.device)
@@ -1001,8 +993,7 @@ class Optimizer:
         def _cast(
             param: torch.Tensor,
             value: _T,
-            param_id: int,
-            param_groups: list[dict[str, Any]],
+            param_group: dict[str, Any],
             key: str | None = None,
         ) -> _T:
             r"""Make a deep copy of value, casting all tensors to device of param."""
@@ -1010,14 +1001,12 @@ class Optimizer:
                 return cast(
                     _T,
                     Optimizer._process_value_according_to_param_policy(
-                        param, value, param_id, param_groups, key
+                        param, value, param_group, key
                     ),
                 )
             elif isinstance(value, dict):
                 casted = {
-                    k: _cast(
-                        param, v, param_id=param_id, param_groups=param_groups, key=k
-                    )
+                    k: _cast(param, v, param_group=param_group, key=k)
                     for k, v in value.items()
                 }
                 return cast(_T, casted)
@@ -1025,7 +1014,7 @@ class Optimizer:
                 # pyrefly: ignore [bad-instantiation]
                 rebuilt = type(value)(
                     # pyrefly: ignore [bad-argument-count]
-                    _cast(param, v, param_id=param_id, param_groups=param_groups)
+                    _cast(param, v, param_group=param_group)
                     for v in value
                 )  # type: ignore[call-arg]
                 return cast(_T, rebuilt)
@@ -1035,13 +1024,14 @@ class Optimizer:
         # Copy state assigned to params (and cast tensors to appropriate types).
         # State that is not assigned to params is copied as is (needed for
         # backward compatibility).
+        saved_param_to_group = {
+            p: g for g in state_dict["param_groups"] for p in g["params"]
+        }
         state: defaultdict[torch.Tensor, dict[Any, Any]] = defaultdict(dict)
         for k, v in state_dict["state"].items():
             if k in id_map:
                 param = id_map[k]
-                state[param] = _cast(
-                    param, v, param_id=k, param_groups=state_dict["param_groups"]
-                )
+                state[param] = _cast(param, v, param_group=saved_param_to_group[k])
             else:
                 state[k] = v
 
