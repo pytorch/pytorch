@@ -3931,7 +3931,17 @@ class CppCodeCache:
     be compiled, while compilation flags are set by CppBuilder."""
 
     cache: dict[str, Callable[[], CDLL | ModuleType]] = {}
-    cache_clear = staticmethod(cache.clear)
+    # Shared by subclasses and never cleared: a key hashes the source and build
+    # command, and every miss rewrites its entry for the current cache directory.
+    _binary_paths: dict[str, str] = {}
+
+    @staticmethod
+    def cache_clear() -> None:
+        from torch.compiler._runtime_cache import clear_cpp_kernels
+
+        CppCodeCache.cache.clear()
+        clear_cpp_kernels()
+
     cpp_compile_command_flags: dict[str, Any] = {}
 
     @staticmethod
@@ -4126,12 +4136,9 @@ class CppCodeCache:
                     main_builder.get_target_file_path()
                 )
 
-            from torch.compiler._runtime_cache import (
-                record_cpp_kernel,
-                restore_cpp_kernel,
-            )
+            from torch.compiler._runtime_cache import restore_cpp_kernel
 
-            record_cpp_kernel(key, binary_path)
+            cls._binary_paths[key] = binary_path
             restore_cpp_kernel(key, binary_path)
 
             def load_fn() -> Any:
@@ -4161,6 +4168,9 @@ class CppCodeCache:
 
             cls.cache[key] = load_fn
 
+        from torch.compiler._runtime_cache import record_cpp_kernel
+
+        record_cpp_kernel(key, cls._binary_paths[key])
         return cls.cache[key]
 
     @classmethod
