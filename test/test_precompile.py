@@ -5327,9 +5327,18 @@ def _capture_files(test, fn, example_inputs, backend, dynamic=None, tracer=None)
     directory = temp_dir.name
     artifact_path = os.path.join(directory, "artifact.py")
     cache_path = os.path.join(directory, "artifact.cache")
+    renamed = contextlib.nullcontext()
     if tracer is None:
         tracer = DynamoTracer(dynamic=dynamic, require_no_risky_drops=False)
+        if fn.__module__ == "__main__":
+            # The records name fn's module, which is __main__ under a script run
+            # and the driver refuses that; capture it from an importable alias.
+            module = "precompile_test_captured_module"
+            sys.modules[module] = sys.modules["__main__"]
+            test.addCleanup(sys.modules.pop, module, None)
+            renamed = mock.patch.object(fn, "__module__", module)
     with (
+        renamed,
         torch.no_grad(),
         capture(
             fn,
@@ -6238,6 +6247,28 @@ class TestPrecompileRuntimeCache(TestCase):
                 PrecompileError,
                 f"precompile.{operation} supports only Dynamo captures",
             ),
+        ):
+            getattr(pc, operation)(artifact_path=source, cache_path=cache)
+
+    @parametrize("operation", ("finalize_cache", "prepare_runtime"))
+    @parametrize("damage", ("no_artifact", "no_cache", "corrupt", "format"))
+    def test_runtime_cache_names_operation_for_unreadable_pair(self, operation, damage):
+        pc = torch.compiler.precompile
+        source, cache = _capture_files(
+            self, _no_compilation_single_graph, [(torch.ones(4),)], backend="eager"
+        )
+        if damage == "no_artifact":
+            os.remove(source)
+        elif damage == "no_cache":
+            os.remove(cache)
+        elif damage == "corrupt":
+            with open(cache, "r+b") as f:
+                f.truncate(20)
+        else:
+            _rewrite_envelope(cache, format="incompatible")
+        with (
+            pc.capture_runtime(),
+            self.assertRaisesRegex(PrecompileError, f"^precompile\\.{operation} "),
         ):
             getattr(pc, operation)(artifact_path=source, cache_path=cache)
 
