@@ -44,7 +44,7 @@ def _worker(rank: int, world_size: int) -> None:
 def main() -> int:
     n = torch.cuda.device_count()
     test_config = os.environ.get("TEST_CONFIG", "")
-    min_gpus = 4 if test_config == "distributed_4gpu" else 1
+    min_gpus = 4 if test_config == "distributed_4gpu" else 2
     if n < min_gpus:
         print(
             f"::error::ROCm pre-flight: need at least {min_gpus} GPUs "
