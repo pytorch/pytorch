@@ -44,7 +44,7 @@ struct ForwardGrad;
 // and to un-register itself from this same level if that tangent is removed via
 // ForwardGrad::reset. The ForwardADLevel is created when a new level is entered
 // via ForwardADLevel::get_next_idx. A reference to the new ForwardADLevel is
-// stored into a global (for the whole process) vector that ensure it can be
+// stored into a global (for the whole process) vector that ensures it can be
 // accessed via ForwardADLevel::get_by_idx. This reference is deleted when the
 // index is released by the user when calling ForwardADLevel::release_idx. When
 // it is destructed, the ForwardADLevel is responsible for clearing all the

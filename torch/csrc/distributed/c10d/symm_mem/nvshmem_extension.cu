@@ -34,6 +34,11 @@
 #include <nvshmem.h>
 #include <nvshmemx.h>
 
+// NVSHMEM_VENDOR_VERSION selects the tile reduce API in the tile_reduce_kernel.
+#if !defined(NVSHMEM_VENDOR_VERSION)
+#error "NVSHMEM_VENDOR_VERSION is not defined! Cannot select the tile reduce API!"
+#endif
+
 namespace c10d::nvshmem_extension {
 
 #define THREADS_PER_BLOCK 512
@@ -530,8 +535,11 @@ __device__ int64_t prefixSum_warp(int64_t *odata, int64_t *idata, int n) {
   // Compute the warp-wide exclusive prefix sum
   WarpScan(temp_storage[warp_id]).ExclusiveSum(thread_data, thread_data, warp_aggregate);
 
-  // Store the result
-  odata[tid] = thread_data;
+  // Store the result. Callers size `odata` to `n`, not to WARP_SIZE, so the
+  // lanes past `n` must not write.
+  if (tid < n) {
+    odata[tid] = thread_data;
+  }
   return warp_aggregate;
 }
 
@@ -577,6 +585,15 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_split
 
   // Total length of each tile
   __shared__ int64_t len_per_tile[NUM_TILES];
+  // Tiles with no splits skip the prefix sum below, and lanes past
+  // `nsplits_per_tile` are never written by it. Zero both arrays first so the
+  // second scan and the offset fix-up do not read uninitialized shared memory.
+  // NUM_TILES * A2AV_TILE_SIZE == THREADS_PER_BLOCK, so this covers every entry.
+  tile_prefix_sums[tileId][laneId] = 0;
+  if (tid < NUM_TILES) {
+    len_per_tile[tid] = 0;
+  }
+  __syncthreads();
   // When `nsplits` is small, not every tile gets data to sum. They can skip
   // this local prefix sum.
   if (nsplits_per_tile > 0) {
@@ -628,13 +645,66 @@ __global__ void allToAllV_2d(void *send_data, void *recv_data, int64_t* in_split
       peer_size,
       peer_global);  // peer's global index
   }
-  // Write out the output offsets (to the scratchpad line)
-  if (bid == 0 && tid < nsplits) {
-    source_offsets[tid] = tile_prefix_sums[tid / minor_size][tid % minor_size];
-  }
   // Make sure getmem_nbi calls finish
   nvshmem_quiet();
 #endif
+}
+
+// Writes the output offsets to the scratchpad line of `out_splits_offsets`.
+// This is a separate kernel, and not the tail of `allToAllV_2d`, because every
+// block of `allToAllV_2d` reads that same line as `source_offsets` during the
+// exchange, and that kernel has no grid-wide barrier to order the write after
+// those reads. Recomputing the offsets in one block is cheaper than the
+// synchronization would be, and the kernel boundary is the barrier.
+__global__ void writeOutputOffsets_2d(
+    int64_t* out_splits_offsets,
+    int minor_size,
+    int major_size,
+    int64_t major_align) {
+  int nsplits = minor_size * major_size;
+  auto output_splits = out_splits_offsets;
+  auto source_offsets = out_splits_offsets + nsplits;
+  int tid = threadIdx.x;
+
+  constexpr int NUM_TILES = THREADS_PER_BLOCK / A2AV_TILE_SIZE;
+  int tileId = tid / A2AV_TILE_SIZE;
+  int laneId = tid % A2AV_TILE_SIZE;
+  __shared__ int64_t tile_prefix_sums[NUM_TILES][A2AV_TILE_SIZE];
+  int nsplits_per_tile = min(minor_size, nsplits - tileId * minor_size);
+
+  __shared__ int64_t len_per_tile[NUM_TILES];
+  // See the matching comment in `allToAllV_2d`: tiles that skip the prefix sum
+  // below would otherwise leave these reading as uninitialized shared memory.
+  tile_prefix_sums[tileId][laneId] = 0;
+  if (tid < NUM_TILES) {
+    len_per_tile[tid] = 0;
+  }
+  __syncthreads();
+
+  if (nsplits_per_tile > 0) {
+    int64_t my_tile_len = prefixSum_warp<NUM_TILES>(tile_prefix_sums[tileId], output_splits + tileId * minor_size, nsplits_per_tile);
+    if (laneId == A2AV_TILE_SIZE - 1) {
+      if (major_align != 0) {
+        auto aligned_len = (my_tile_len + major_align - 1) / major_align * major_align;
+        len_per_tile[tileId] = max(aligned_len, major_align);
+      } else {
+        len_per_tile[tileId] = my_tile_len;
+      }
+    }
+  }
+  __syncthreads();
+
+  __shared__ int64_t start_offset_per_tile[NUM_TILES];
+  static_assert(NUM_TILES <= WARP_SIZE);
+  prefixSum_warp<1>(start_offset_per_tile, len_per_tile, NUM_TILES);
+  __syncthreads();
+
+  tile_prefix_sums[tileId][laneId] += start_offset_per_tile[tileId];
+  __syncthreads();
+
+  if (tid < nsplits) {
+    source_offsets[tid] = tile_prefix_sums[tid / minor_size][tid % minor_size];
+  }
 }
 
 void all_to_all_vdev_2d(
@@ -785,6 +855,11 @@ void all_to_all_vdev_2d(
       args1,
       0,
       stream);
+
+  // Separate launch so the write is ordered after every block's reads above.
+  writeOutputOffsets_2d<<<dim3(1), dim3(THREADS_PER_BLOCK), 0, stream>>>(
+      out_splits_offsets_ptr, world_size, ne, major_align_val);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 void all_to_all_vdev_2d_offset(
@@ -920,6 +995,11 @@ void all_to_all_vdev_2d_offset(
       args1,
       0,
       stream);
+
+  // Separate launch so the write is ordered after every block's reads above.
+  writeOutputOffsets_2d<<<dim3(1), dim3(THREADS_PER_BLOCK), 0, stream>>>(
+      out_splits_offsets_ptr, ne, world_size, major_align_val);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 /* Tiled Communication */
@@ -953,7 +1033,7 @@ __global__ void tile_reduce_kernel(
   auto block_src_tensor = nvshmemx::Tensor(block_src_ptr, block_layout);
   auto block_dst_tensor = nvshmemx::Tensor(block_dst_ptr, block_layout);
 
-  // Making these empty to avoid nvshmemx::tile_sum_reduce_block() from doing
+  // Making these empty to avoid nvshmemx::tile_sum_rooted_reduce_block() from doing
   // additional range checks
   auto start_coord = nvshmemx::make_shape();
   auto boundary = nvshmemx::make_shape();
@@ -961,8 +1041,13 @@ __global__ void tile_reduce_kernel(
   // Use one-shot pull to reduce the tile
   uint64_t flag = 0;
   constexpr auto algo = nvshmemx::tile_coll_algo_t::NVLS_ONE_SHOT_PULL_NBI;
-  nvshmemx::tile_sum_reduce_block<decltype(block_src_tensor), decltype(block_dst_tensor), decltype(boundary), algo>(
+  #if NVSHMEM_VENDOR_VERSION >= 30519
+    nvshmemx::tile_sum_rooted_reduce_block<decltype(block_src_tensor), decltype(block_dst_tensor), decltype(boundary), algo>(
       team, block_src_tensor, block_dst_tensor, start_coord, boundary, root, flag /* unused */);
+  #else
+    nvshmemx::tile_sum_reduce_block<decltype(block_src_tensor), decltype(block_dst_tensor), decltype(boundary), algo>(
+      team, block_src_tensor, block_dst_tensor, start_coord, boundary, root, flag /* unused */);
+  #endif
 
   // Wait for the operation to complete
   nvshmemx::tile_collective_wait<algo>(team, flag /* unused */);
@@ -1061,8 +1146,8 @@ void multi_root_tile_reduce(
   int i = 0, my_tile_idx = 0, root = world_size;
   // Note: if there is no tile for the current rank, my_tile_idx will remain
   // initial value 0, and root will remain `world_size`. This is OK. In
-  // `nvshmemx::tile_sum_reduce_block`, this rank would skip the reduction
-  // operation, but would still participate in the barrier.
+  // `nvshmemx::tile_sum_rooted_reduce_block`, this rank would skip the reduction
+  // operation, but would still participate in the barrier. (confirmed in NVSHMEM 3.7.2)
   for (auto& in_tile : in_tiles) {
     TORCH_CHECK(in_tile.dim() == 2, "Only 2D tensors are supported");
     c10d::symmetric_memory::rendezvous(in_tile, group_name);

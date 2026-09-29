@@ -18,7 +18,8 @@ from c10d_backend_common import (
     instantiate_backend_tests,
 )
 
-from torch.testing._internal.common_utils import run_tests
+from torch._C._distributed_c10d import WorkResult
+from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests
 
 
 class AbstractProcessGroupTest(C10dBackendTest):
@@ -135,6 +136,31 @@ class AbstractProcessGroupTest(C10dBackendTest):
         del tensor
         del work
         dist.barrier()
+
+    def test_work_wait_is_stream_ordered(self):
+        if self.device_type != "cuda":
+            self.skipTest(f"{self.backend_name} does not use CUDA")
+        self._init_pg()
+        dist.all_reduce(torch.ones(1, device=self.device))
+        torch.cuda.synchronize()
+        torch.cuda._sleep(int(250 * get_cycles_per_ms()))
+        work = dist.all_reduce(torch.ones(4, device=self.device), async_op=True)
+
+        work.wait()
+
+        self.assertFalse(torch.cuda.current_stream().query())
+        torch.cuda.synchronize()
+
+    def test_work_result_future(self):
+        if not self.supports_work_result:
+            self.skipTest(f"{self.backend_name} does not report work results")
+        self._init_pg()
+        work = dist.all_reduce(torch.ones(4, device=self.device), async_op=True)
+
+        result = work.get_future_result().wait()
+
+        self.assertEqual(WorkResult(result), WorkResult.SUCCESS)
+        self.assertTrue(work.is_completed())
 
     def test_work_future(self):
         self._init_pg()
