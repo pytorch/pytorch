@@ -283,14 +283,6 @@ def at_least_x_gpu(x):
     return torch.accelerator.is_available() and torch.accelerator.device_count() >= x
 
 
-def _maybe_handle_skip_if_lt_x_gpu(args, msg) -> bool:
-    _handle_test_skip = getattr(args[0], "_handle_test_skip", None)
-    if len(args) == 0 or _handle_test_skip is None:
-        return False
-    _handle_test_skip(msg)
-    return True
-
-
 def skip_if_lt_x_gpu(x, *, allow_cpu=False):
     """Skip if fewer than x accelerators available.
 
