@@ -168,7 +168,7 @@ jobs:
     timeout-minutes: 480
     outputs:
       docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
-      test-matrix: ${{ steps.map-runners.outputs.test-matrix }}
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
       - name: Setup Linux
@@ -202,21 +202,6 @@ jobs:
           selected-test-configs: ${{ inputs.selected-test-configs }}
           ignore-test-config-labels: ${{ inputs.ignore-test-config-labels }}
           job-name: ${{ steps.setup-linux.outputs.job-name }}
-
-      - name: Map EC2 runners to ARC runners
-        id: map-runners
-        env:
-          FILTERED_TEST_MATRIX: ${{ steps.filter.outputs.test-matrix }}
-          RUNNER_PREFIX: ${{ inputs.runner_prefix }}
-        shell: bash
-        run: |
-          # Run via uv so pyyaml is provisioned regardless of the build image's
-          # Python setup. Build containers like ubuntu-cross-riscv use the
-          # system apt python3, which doesn't include pyyaml. Matches the
-          # pattern used by parse_ref.py / filter_test_configs.py in
-          # .github/actions/filter-test-configs/action.yml.
-          uv run --no-project --with pyyaml==6.0.2 \
-            python .github/scripts/map_ec2_to_arc.py --prefix "${RUNNER_PREFIX}" "${FILTERED_TEST_MATRIX}"
 
       - name: Configure AWS credentials
         id: aws-creds

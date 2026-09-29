@@ -73,7 +73,7 @@ from .utils import counters
 
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from torch._dynamo.variables import VariableTracker
     from torch._guards import CompileId
@@ -571,7 +571,7 @@ def raise_observed_exception(
     exc_type: type[Exception],
     tx: InstructionTranslatorBase,
     *,
-    args: list[VariableTracker] | list[str] | None = None,
+    args: Sequence[object] | None = None,
     kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
     from .variables.base import VariableTracker
