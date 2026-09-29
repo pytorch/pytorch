@@ -417,6 +417,21 @@ class TestCuspyRecords(TestCase):
         _attach_metadata(clean, {}, None)
         self.assertNotIn("metadata", clean["kernel"])
 
+    def test_resolver_invalidation_during_lookup(self):
+        from torch.profiler._cuspy.observers.base import _CachedResolver
+
+        annotations = {7: "region"}
+
+        def resolve(node_id):
+            value = annotations.get(node_id)
+            annotations.clear()
+            cached.cache_clear()
+            return value
+
+        cached = _CachedResolver(resolve)
+        self.assertEqual(cached(7), "region")
+        self.assertIsNone(cached(7))
+
     def test_attach_metadata_graph_resolver(self):
         # CUDA-graph-captured collectives have no replay-time external correlation;
         # their blob is resolved by graph_node_id via the metadata resolver (the same
