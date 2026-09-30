@@ -482,14 +482,16 @@ struct ExpandableSegment {
       std::vector<c10::DeviceIndex> peers,
       Expandable_Segments_Handle_Type handle_type =
           Expandable_Segments_Handle_Type::UNSPECIFIED,
-      // Set only by fromShared(), to the producer's exact handle count. An
-      // imported segment cannot grow: map() is reachable only from map_block()
-      // on segments the allocator owns in expandable_segments_, and an
-      // imported segment is never inserted there. Reserving growth headroom
-      // for one therefore strands 1 1/8 of device memory worth of address
-      // space apiece, which exhausts the 128 TiB user VA after a few hundred
-      // imports.
-      std::optional<size_t> imported_handles = std::nullopt,
+      // When set, reserve exactly this many handles instead of growth headroom
+      // derived from device memory. fromShared() passes the producer's count:
+      // an imported segment cannot grow, since map() is reachable only from
+      // map_block() on segments the allocator owns in expandable_segments_, and
+      // an imported segment is never inserted there. Reserving headroom for one
+      // strands 1 1/8 of device memory worth of address space apiece, which
+      // exhausts the 128 TiB user VA after a few hundred imports.
+      // restore_expandable_segment passes the count its original process
+      // reserved, so the recreated range matches it exactly.
+      std::optional<size_t> max_handles = std::nullopt,
       // When set, reserve at this exact address rather than letting the driver
       // choose, and fail rather than fall back. See
       // Note [Expandable Segment Reserved Address].
@@ -501,8 +503,8 @@ struct ExpandableSegment {
         peers_(std::move(peers)),
         handle_type_(handle_type) {
     mapped_size_ = 0;
-    max_handles_ = imported_handles.has_value()
-        ? *imported_handles
+    max_handles_ = max_handles.has_value()
+        ? *max_handles
         : numSegments(growableReserveBytes(device_, stream));
     const size_t reserve_bytes = segment_size_ * max_handles_;
     // Log expandable-segment VA context immediately BEFORE the (unchanged)
@@ -3153,6 +3155,10 @@ class DeviceCachingAllocator {
       if (head_block->expandable_segment_) {
         segment_info.expandable_segment_base =
             reinterpret_cast<size_t>(head_block->expandable_segment_->ptr());
+        segment_info.expandable_reservation_size =
+            head_block->expandable_segment_->size();
+        segment_info.expandable_segment_size =
+            head_block->expandable_segment_->getSegmentSize();
       }
       segment_info.context_when_allocated =
           head_block->context_when_segment_allocated;
@@ -3438,18 +3444,23 @@ class DeviceCachingAllocator {
     return !expandable_segments_.empty();
   }
 
-  // Re-create an expandable segment at a grid slot a previous process recorded,
+  // Re-create an expandable segment at an address a previous process recorded,
   // and map the byte ranges it had mapped, leaving them as free blocks in
   // `mempool_id`'s pool. Together with _resize_with_addr_ this puts a tensor
   // back at its original address, which is what replaying a serialized CUDA
   // graph needs: the graph's kernel arguments embed device pointers verbatim.
-  // `mapped_ranges` are (offset from the segment base, length) pairs and must
-  // be sorted, non-overlapping and segment_size-aligned.
+  // `reserve_size` and `segment_size` are the original reservation's, reused
+  // rather than taken from this process's settings: a downsized reservation
+  // stays downsized, and one mapped in, say, 40 MB segments keeps mapping in
+  // 40 MB segments. `mapped_ranges` are (offset from the segment base, length)
+  // pairs and must be sorted, non-overlapping and segment_size-aligned.
   void restore_expandable_segment(
       cudaStream_t stream,
       MempoolId_t mempool_id,
       bool is_small,
       size_t address,
+      size_t reserve_size,
+      size_t segment_size,
       const std::vector<std::pair<size_t, size_t>>& mapped_ranges) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     TORCH_CHECK(
@@ -3471,16 +3482,38 @@ class DeviceCachingAllocator {
       pool = is_small ? &small_blocks : &large_blocks;
     }
 
-    auto segment_size = is_small
-        ? kSmallBuffer
-        : AcceleratorAllocatorConfig::large_segment_size();
+    TORCH_CHECK(
+        !is_small || segment_size == kSmallBuffer,
+        "a small-pool expandable segment must use ",
+        kSmallBuffer,
+        " byte segments, not ",
+        segment_size);
+    TORCH_CHECK(
+        segment_size > 0 && reserve_size > 0 &&
+            reserve_size % segment_size == 0,
+        "a ",
+        reserve_size,
+        " byte expandable reservation cannot be made of ",
+        segment_size,
+        " byte segments");
+    for (const auto& [offset, length] : mapped_ranges) {
+      TORCH_CHECK(
+          offset % segment_size == 0 && length % segment_size == 0,
+          "mapped range (",
+          offset,
+          ", ",
+          length,
+          ") is not aligned to the ",
+          segment_size,
+          " byte segment size");
+    }
     expandable_segments_.emplace_back(new ExpandableSegment(
         device_id,
         stream,
         segment_size,
         devices_with_peer_access_,
         Expandable_Segments_Handle_Type::UNSPECIFIED,
-        /*imported_handles=*/std::nullopt,
+        reserve_size / segment_size,
         std::optional<CUdeviceptr>(address)));
     ExpandableSegment* es = expandable_segments_.back();
 
@@ -4944,6 +4977,8 @@ class NativeCachingAllocator : public CUDAAllocator {
       MempoolId_t mempool_id,
       bool is_small,
       size_t address,
+      size_t reserve_size,
+      size_t segment_size,
       const std::vector<std::pair<size_t, size_t>>& mapped_ranges) override {
     TORCH_INTERNAL_ASSERT(
         0 <= device && static_cast<size_t>(device) < device_allocator.size(),
@@ -4951,7 +4986,13 @@ class NativeCachingAllocator : public CUDAAllocator {
         device,
         ": did you call init?");
     device_allocator[device]->restore_expandable_segment(
-        stream, mempool_id, is_small, address, mapped_ranges);
+        stream,
+        mempool_id,
+        is_small,
+        address,
+        reserve_size,
+        segment_size,
+        mapped_ranges);
   }
 
   void mallocWithAddress(
