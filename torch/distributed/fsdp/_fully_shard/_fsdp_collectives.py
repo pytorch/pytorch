@@ -856,22 +856,35 @@ def _cast_and_view_sharded_grads(
     # cast-before-add rounding.
     sharded_grads: list[torch.Tensor] = []
     reduce_output_numel = reduce_output.numel()
+    runs = [
+        (grad_dtype, list(group))
+        for grad_dtype, group in groupby(
+            zip(fsdp_params, padded_unsharded_sizes),
+            key=lambda param_and_size: param_and_size[0].sharded_grad_dtype,
+        )
+    ]
+    cast_numel = sum(
+        sum(size.numel() for _, size in param_group) // world_size
+        for grad_dtype, param_group in runs
+        if grad_dtype is not None and grad_dtype != reduce_output.dtype
+    )
+    # Views of an uncast run keep all of reduce_output alive, including the
+    # regions of runs cast into their own buffers, so copy the uncast runs when
+    # those regions are larger.
+    copy_uncast = cast_numel > reduce_output_numel - cast_numel
     flat_grad_offset = 0  # [0, reduce_output_numel - 1]
-    for grad_dtype, group in groupby(
-        zip(fsdp_params, padded_unsharded_sizes),
-        key=lambda param_and_size: param_and_size[0].sharded_grad_dtype,
-    ):
-        param_group = list(group)
+    for grad_dtype, param_group in runs:
         group_numel = sum(size.numel() for _, size in param_group) // world_size
         group_output = reduce_output
         if group_numel != reduce_output_numel:
             group_output = group_output.narrow(0, flat_grad_offset, group_numel)
-        if (cast_output := _to_dtype_if_needed(group_output, grad_dtype)) is not (
-            group_output
-        ):
-            # These sharded gradients alias the cast's new buffer instead
-            record_grad_output_stream(cast_output, consumer_stream)
-        group_output = cast_output
+        new_output = _to_dtype_if_needed(group_output, grad_dtype)
+        if new_output is group_output and copy_uncast:
+            new_output = group_output.clone()
+        if new_output is not group_output:
+            # These sharded gradients alias the new buffer instead
+            record_grad_output_stream(new_output, consumer_stream)
+        group_output = new_output
         group_offset = group_output.storage_offset()
         for fsdp_param, padded_unsharded_size in param_group:
             # Assume even sharding for Shard(i), i > 0; otherwise would

@@ -712,6 +712,29 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         self.assertEqual(len(grad_storages), 2)
 
     @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_mixed_group_frees_reduce_output(self):
+        for fp32_param_name in ("bias", "weight"):
+            model = nn.Linear(16, 16, device=device_type, dtype=torch.bfloat16)
+            getattr(model, fp32_param_name).grad_dtype = torch.float32
+            fully_shard(model)
+            model(
+                torch.ones(2, 16, device=device_type, dtype=torch.bfloat16)
+            ).sum().backward()
+            for param in model.parameters():
+                actual = param.grad.full_tensor()
+                self.assertEqual(actual, torch.full_like(actual, 2.0))
+            # The group reduces in fp32 and casts the bf16 gradient into its
+            # own buffer. The fp32 bias gradient is copied out so it does not
+            # keep the weight's fp32 region alive; the larger fp32 weight
+            # gradient keeps viewing the reduce-scatter output instead.
+            local_grad = getattr(model, fp32_param_name).grad.to_local()
+            storage_nbytes = local_grad.untyped_storage().nbytes()
+            if fp32_param_name == "bias":
+                self.assertEqual(storage_nbytes, local_grad.nbytes)
+            else:
+                self.assertGreater(storage_nbytes, local_grad.nbytes)
+
+    @skip_if_lt_x_gpu(2)
     def test_structured_input_output(self):
         """
         Tests numeric parity between FSDP and a reference model when using
