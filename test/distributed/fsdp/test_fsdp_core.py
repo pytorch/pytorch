@@ -28,6 +28,7 @@ from torch.testing._internal.common_fsdp import (
     DummyDDP,
     FSDPInitMode,
     FSDPTest,
+    FSDPTestContinuous,
     get_devtype,
     MixtureOfExperts,
     NestedWrappedModule,
@@ -36,6 +37,7 @@ from torch.testing._internal.common_fsdp import (
     TransformerWithSharedParams,
 )
 from torch.testing._internal.common_utils import (
+    IS_LINUX,
     parametrize,
     run_tests,
     TEST_HPU,
@@ -104,6 +106,7 @@ class TestParityWithDDP(FSDPTest):
             "use_orig_params": [False, True],
         }
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/170373")
     @skip_if_lt_x_gpu(2)
     @parametrize(params, configs, subtest_name)
     def test_nested_wrapped_model(
@@ -266,7 +269,7 @@ class TestParityWithDDP(FSDPTest):
         )
 
 
-class TestParamInit(FSDPTest):
+class TestParamInit(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @parametrize("mixed_precision", [True, False])
     def test_param_change_after_init(self, mixed_precision):
@@ -306,7 +309,7 @@ class TestParamInit(FSDPTest):
         )
 
 
-class TestHooks(FSDPTest):
+class TestHooks(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @parametrize("cuda_first", [False, True])
     def test_pre_backward_hook_registration(self, cuda_first: bool):
@@ -396,7 +399,7 @@ class TestHooks(FSDPTest):
             self.assertTrue(register_post_bwd_mock.called)
 
 
-class TestNoGrad(FSDPTest):
+class TestNoGrad(FSDPTestContinuous):
     @skip_if_lt_x_gpu(2)
     @parametrize("mixed_precision", [True, False])
     def test_transformer_no_grad(self, mixed_precision):

@@ -3,15 +3,57 @@
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
 
+import collections
+import enum
+import sys
+
 import torch
+import torch._dynamo.exc
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+import torch._dynamo.testing
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+)
 
 
 lst = []
 
 
+class AlwaysEqualForListRemove:
+    def __eq__(self, other):
+        return True
+
+
+class NeverEqualForListRemove:
+    def __eq__(self, other):
+        return False
+
+
+class DequeSubclassForRemove(collections.deque):
+    pass
+
+
+class IndexForListPop:
+    def __index__(self):
+        return 1
+
+
+class IntEnumForListPop(enum.IntEnum):
+    SECOND = 1
+
+
+class CmpKeyForListSort:
+    def __init__(self, v):
+        self.v = v
+
+    def __lt__(self, other):
+        return self.v % 3 < other.v % 3
+
+
 class TupleTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Tuple methods
     # + count
     # + index
@@ -34,10 +76,10 @@ class TupleTests(torch._dynamo.test_case.TestCase):
         return super().tearDown()
 
     def assertEqual(self, a, b):
-        return self.assertTrue(a == b, f"{a} != {b}")
+        return self.assertTrue(a == b, lambda msg: f"{msg}\n{a} != {b}")
 
     def assertNotEqual(self, x, y, msg=None, *, atol=None, rtol=None, **kwargs):
-        return self.assertTrue(x != y, f"{x} == {y}")
+        return self.assertTrue(x != y, lambda msg: f"{msg}\n{x} == {y}")
 
     @make_dynamo_test
     def test_count(self):
@@ -268,6 +310,27 @@ class ListTests(TupleTests):
         self.assertRaises(TypeError, p.pop, 2, 3)
 
     @make_dynamo_test
+    def test_pop_index_conversion(self):
+        p = self.thetype("abcd")
+        self.assertEqual(p.pop(-2), "c")
+        self.assertEqual(p.pop(IndexForListPop()), "b")
+        self.assertEqual(p, ["a", "d"])
+
+        # An IntEnum and a bool are int subclasses, so both convert by value.
+        p = self.thetype("abcd")
+        self.assertEqual(p.pop(IntEnumForListPop.SECOND), "b")
+        self.assertEqual(p.pop(True), "c")
+        self.assertRaises(IndexError, p.pop, -3)
+        self.assertRaises(TypeError, p.pop, 1.0)
+        self.assertRaisesRegex(
+            OverflowError, "too large to convert to C ssize_t", p.pop, 2**80
+        )
+
+        # The conversion precedes the empty-list check.
+        self.assertRaises(TypeError, self.thetype().pop, 1.0)
+        self.assertRaises(IndexError, self.thetype().pop, 0)
+
+    @make_dynamo_test
     def test_remove(self):
         p = self.thetype("abad")
         self.assertIsNone(p.remove("a"))
@@ -277,6 +340,19 @@ class ListTests(TupleTests):
         # Wrong number of arguments
         self.assertRaises(TypeError, p.remove)
         self.assertRaises(TypeError, p.remove, 2, 3)
+
+    @make_dynamo_test
+    def test_remove_uses_item_richcompare(self):
+        p = [AlwaysEqualForListRemove()]
+        self.assertIsNone(p.remove(NeverEqualForListRemove()))
+        self.assertEqual(p, [])
+
+    @make_dynamo_test
+    def test_remove_matches_identity_before_richcompare(self):
+        item = NeverEqualForListRemove()
+        p = [item]
+        self.assertIsNone(p.remove(item))
+        self.assertEqual(p, [])
 
     @make_dynamo_test
     def test_reverse(self):
@@ -292,6 +368,54 @@ class ListTests(TupleTests):
         p = self.thetype("dbca")
         self.assertIsNone(p.sort())
         self.assertEqual(p, self.thetype("abcd"))
+
+    @make_dynamo_test
+    def test_sort_cmp_to_key(self):
+        from functools import cmp_to_key
+
+        def revcmp(a, b):
+            return (a < b) - (a > b)
+
+        p = self.thetype([1, 3, 2])
+        p.sort(key=cmp_to_key(revcmp))
+        self.assertEqual(p, self.thetype([3, 2, 1]))
+        p.sort(key=cmp_to_key(revcmp), reverse=True)
+        self.assertEqual(p, self.thetype([1, 2, 3]))
+
+    @make_dynamo_test
+    def test_sort_user_defined_lt(self):
+        p = self.thetype([3, 4, 5])
+        p.sort(key=CmpKeyForListSort)
+        self.assertEqual(p, self.thetype([3, 4, 5]))
+        p.sort(key=CmpKeyForListSort, reverse=True)
+        self.assertEqual(p, self.thetype([5, 4, 3]))
+
+    @make_dynamo_test
+    def test_sort_modified_during_sort(self):
+        from functools import cmp_to_key
+
+        p = self.thetype([1, 3, 2])
+
+        def selfmodifying(a, b):
+            p.append(4)
+            return (a > b) - (a < b)
+
+        self.assertRaises(ValueError, p.sort, key=cmp_to_key(selfmodifying))
+        # items appended during the sort are discarded
+        self.assertEqual(p, self.thetype([1, 2, 3]))
+
+    @make_dynamo_test
+    def test_sort_empty_during_sort(self):
+        p = self.thetype([1, 3, 2])
+        sizes = []
+
+        def key(x):
+            sizes.append(len(p))
+            return x
+
+        p.sort(key=key)
+        self.assertEqual(p, self.thetype([1, 2, 3]))
+        self.assertEqual(sizes, [0, 0, 0])
 
     @make_dynamo_test
     def test_binop_imul(self):
@@ -403,6 +527,310 @@ class ListTests(TupleTests):
         self.assertRaises(TypeError, p.__delitem__)
         self.assertRaises(TypeError, p.__delitem__, 1.1)
         self.assertRaises(TypeError, p.__delitem__, 1, 2)
+
+    @make_dynamo_test
+    def test___setitem___slice_non_iterable(self):
+        # ref: https://github.com/python/cpython/pull/120442 (gh-120384),
+        # which fixed an array-out-of-bounds crash by moving the
+        # PySequence_Fast check ahead of the step==1 branch in
+        # list_ass_subscript. Before this landed, simple (step is None or
+        # 1) slices raised "can only assign an iterable" instead of the
+        # unified extended-slice message. Verified empirically against
+        # real CPython builds (cross-checked via two independent
+        # toolchains): the fix shipped in 3.10.20, 3.11.15, and 3.12.5
+        # (3.12.0 is the first 3.12 release, so 3.12.0-3.12.4 predate it);
+        # 3.13+ never had the bug.
+        v = sys.version_info
+        has_bug = (
+            (v[:2] == (3, 10) and v < (3, 10, 20))
+            or (v[:2] == (3, 11) and v < (3, 11, 15))
+            or (v[:2] == (3, 12) and v < (3, 12, 5))
+        )
+        p = self.thetype("abcdef")
+        if has_bug:
+            self.assertRaisesRegex(
+                TypeError,
+                "can only assign an iterable",
+                p.__setitem__,
+                slice(1, 3),
+                1,
+            )
+        else:
+            self.assertRaisesRegex(
+                TypeError,
+                "must assign iterable to extended slice",
+                p.__setitem__,
+                slice(1, 3),
+                1,
+            )
+
+        # Extended slices (step != 1) always use the extended-slice message.
+        self.assertRaisesRegex(
+            TypeError,
+            "must assign iterable to extended slice",
+            p.__setitem__,
+            slice(1, 5, 2),
+            1,
+        )
+
+        # Valid iterable assignments are unaffected.
+        p[1:3] = ["x", "y"]
+        self.assertEqual(p, ["a", "x", "y", "d", "e", "f"])
+
+
+class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    # list/tuple/deque share BaseListVariable.list_index, but CPython's
+    # ValueError text does not: on <=3.13 list and deque repr the missing
+    # value while tuple ignores it; 3.14 dropped the repr everywhere
+    # (gh-121288). Each sequence is built twice: from constants (the inline
+    # fast path) and from opaque objects (the polyfills.index path).
+    def _check(self, fn):
+        x = torch.ones(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_list(self):
+        def fn(x):
+            try:
+                [1, 2, 3].index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_tuple(self):
+        def fn(x):
+            try:
+                (1, 2, 3).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_deque(self):
+        def fn(x):
+            try:
+                collections.deque([1, 2, 3]).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_list_nonconst(self):
+        def fn(x):
+            try:
+                [NeverEqualForListRemove()].index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_tuple_nonconst(self):
+        def fn(x):
+            try:
+                (NeverEqualForListRemove(),).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_deque_nonconst(self):
+        def fn(x):
+            try:
+                collections.deque([NeverEqualForListRemove()]).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+
+class RemoveTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    # list and deque share BaseListVariable.list_remove, which must delete in
+    # place rather than call the public pop (deque.pop takes no index, see
+    # https://github.com/pytorch/pytorch/issues/198682). deque wraps it to bump
+    # the iterator mutation counter. The ValueError text differs from index():
+    # list never reprs the value, deque does until 3.14.
+    def _check(self, fn):
+        x = torch.ones(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_deque(self):
+        def fn(x):
+            d = collections.deque([1, 2, 2, 3])
+            d.remove(2)
+            return x + 1, list(d)
+
+        self._check(fn)
+
+    def test_deque_input(self):
+        def fn(x, d):
+            d.remove(2)
+            return x + 1, list(d)
+
+        x = torch.ones(2)
+        d1 = collections.deque([1, 2, 3, 2])
+        d2 = d1.copy()
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x, d2), fn(x, d1))
+        self.assertEqual(d1, d2)
+
+    def test_deque_not_found(self):
+        def fn(x):
+            d = collections.deque([1, 2, 3])
+            try:
+                d.remove("z")
+            except ValueError as e:
+                return str(e), list(d)
+
+        self._check(fn)
+
+    def test_deque_not_found_nonconst(self):
+        def fn(x):
+            d = collections.deque([NeverEqualForListRemove()])
+            try:
+                d.remove("z")
+            except ValueError as e:
+                return str(e), len(d)
+
+        self._check(fn)
+
+    def test_deque_nonconst(self):
+        # Opaque items take the polyfills.index path; identity matches first.
+        def fn(x):
+            d = collections.deque([NeverEqualForListRemove(), x, x + 1])
+            d.remove(x)
+            return len(d), d[1]
+
+        self._check(fn)
+
+    def test_deque_subclass(self):
+        def fn(x):
+            d = DequeSubclassForRemove([1, 2, 3])
+            d.remove(2)
+            try:
+                d.remove("z")
+            except ValueError as e:
+                return x + 1, list(d), str(e)
+
+        self._check(fn)
+
+    def test_deque_iterator_sees_mutation(self):
+        def fn(x):
+            d = collections.deque([1, 2, 3])
+            it = iter(d)
+            first = next(it)
+            d.remove(2)
+            try:
+                return first, next(it)
+            except RuntimeError as e:
+                return first, str(e)
+
+        self._check(fn)
+
+    def test_deque_maxlen(self):
+        def fn(x):
+            d = collections.deque([1, 2, 3], maxlen=3)
+            d.remove(2)
+            d.append(4)
+            d.append(5)
+            return x + 1, list(d), d.maxlen
+
+        self._check(fn)
+
+    def test_deque_wrong_arity(self):
+        def fn(x):
+            d = collections.deque([1, 2, 3])
+            msgs = []
+            for args in [(), (1, 2)]:
+                try:
+                    d.remove(*args)
+                except TypeError as e:
+                    msgs.append(str(e))
+            return msgs, list(d)
+
+        self._check(fn)
+
+    def test_list_not_found(self):
+        def fn(x):
+            try:
+                [1, 2, 3].remove("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_list_not_found_nonconst(self):
+        def fn(x):
+            try:
+                [NeverEqualForListRemove()].remove("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+
+class SymIntIndexTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    # pop() specializes a shape-derived index under a guard, since which element
+    # leaves the list is structural. ref: https://github.com/pytorch/pytorch/issues/196285
+    def _check(self, fn, sizes):
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnts, fullgraph=True, dynamic=True)
+        for n in sizes:
+            x = torch.ones(n)
+            self.assertEqual(compiled(x), fn(x))
+        return cnts
+
+    def test_pop_sym_index(self):
+        def fn(x):
+            values = [x * 2, x * 3, x * 4]
+            first = values.pop(x.shape[0] - 2)
+            return first + values.pop(-x.shape[0] + 1)
+
+        self._check(fn, [3])
+
+    def test_pop_sym_index_recompiles(self):
+        def fn(x):
+            values = [x + 1, x + 2, x + 3]
+            return values.pop(x.shape[0] - 3) * 10 + values[0]
+
+        cnts = self._check(fn, [3, 4])
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_pop_sym_index_out_of_range(self):
+        # Caught inside the compiled region: fullgraph rejects an escaping one.
+        def fn(x):
+            try:
+                return [1, 2, 3].pop(x.shape[0] + 5)
+            except IndexError as e:
+                return str(e)
+
+        self._check(fn, [3])
+
+    def test_deque_sym_maxlen(self):
+        # maxlen goes through the same PyLong_AsSsize_t conversion as pop's index.
+        def fn(x):
+            q = collections.deque([1, 2, 3], maxlen=x.shape[0] - 1)
+            return x + len(q)
+
+        cnts = self._check(fn, [3, 4])
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_pop_unbacked_index_raises(self):
+        # No guard can make an unbacked choice sound, so pop refuses rather than
+        # specializing on the first sample.
+        def fn(x):
+            return [1, 2, 3].pop(x.sum().item() % 3)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            compiled(torch.ones(3, dtype=torch.int64))
 
 
 if __name__ == "__main__":

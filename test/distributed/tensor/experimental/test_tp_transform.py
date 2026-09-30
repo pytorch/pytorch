@@ -12,7 +12,8 @@ from torch.distributed.tensor.parallel.style import (
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
+    DTensorContinuousTestBase,
+    NUM_DEVICES,
     with_comms,
 )
 
@@ -45,15 +46,14 @@ class DummyModel(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
         self.fc = torch.nn.Linear(3, 5)
-        self.bn = torch.nn.BatchNorm1d(5)
+        self.register_buffer("boundaries", torch.tensor([-1.0, 0.0, 1.0]))
 
     def forward(self, x):
-        return self.bn(self.fc(x))
+        return torch.searchsorted(self.boundaries, self.fc(x))
 
 
-class TensorParallelTest(DTensorTestBase):
-    def setUp(self) -> None:
-        super().setUp()
+class TensorParallelTest(DTensorContinuousTestBase):
+    world_size = NUM_DEVICES
 
     def assert_has_c10d_ops(
         self, gm: torch.fx.GraphModule, expected_ops_count: dict[str, int]

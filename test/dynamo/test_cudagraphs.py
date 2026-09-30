@@ -228,6 +228,28 @@ class TestAotCudagraphs(torch._dynamo.test_case.TestCase):
             "Replaying inference workload should not warn about repeated graph captures",
         )
 
+    def test_compile_during_capture_errors(self):
+        # https://github.com/pytorch/pytorch/issues/185074
+        from torch._dynamo.exc import TorchRuntimeError
+
+        def fn(x):
+            return x + 1
+
+        comp_fn = torch.compile(backend="eager")(fn)
+
+        x = torch.randn(10, device="cuda")
+
+        # Should raise TorchRuntimeError when trying to compile during capture
+        with self.assertRaisesRegex(
+            TorchRuntimeError,
+            r"cannot JIT compile during CUDA graph capture",
+        ):
+            g = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(g):
+                comp_fn(x)
+
+        self.assertEqual(comp_fn(x), fn(x))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

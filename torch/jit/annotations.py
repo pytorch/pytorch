@@ -360,7 +360,7 @@ def get_enum_value_type(e: type[enum.Enum], loc):
 
     # If Enum values are of different types, an exception will be raised here.
     # Even though Python supports this case, we chose to not implement it to
-    # avoid overcomplicate logic here for a rare use case. Please report a
+    # avoid overcomplicating logic here for a rare use case. Please report a
     # feature request if you find it necessary.
     res = torch._C.unify_type_list(ir_types)
     if not res:

@@ -46,6 +46,7 @@ TypePtr ScriptTypeParser::subscriptToType(
       return TupleType::create({});
     }
     std::vector<TypePtr> subscript_expr_types;
+    subscript_expr_types.reserve(subscript.subscript_exprs().size());
     for (auto expr : subscript.subscript_exprs()) {
       subscript_expr_types.emplace_back(parseTypeFromExprImpl(expr));
     }
@@ -145,7 +146,7 @@ std::optional<std::pair<TypePtr, int32_t>> ScriptTypeParser::parseBroadcastList(
   auto var = Var(subscript.value());
   auto subscript_exprs = subscript.subscript_exprs();
 
-  // handle the case where the BroadcastingList is wrapped in a Optional type
+  // handle the case where the BroadcastingList is wrapped in an Optional type
   if (var.name().name() == "Optional") {
     auto broadcast_list = parseBroadcastList(subscript_exprs[0]);
     if (broadcast_list) {
@@ -293,7 +294,7 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
       }
     }
 
-    throw ErrorReport(expr) << "Unknown type name '" << type_name << "'";
+    throw ErrorReport(expr) << "Unknown type name '" << type_name << '\'';
   } else if (auto name = parseBaseTypeName(expr)) {
     auto itr = string_to_type_lut().find(*name);
     if (itr != string_to_type_lut().end()) {
@@ -309,7 +310,7 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
       return custom_class_type;
     }
 
-    throw ErrorReport(expr) << "Unknown type name '" << *name << "'";
+    throw ErrorReport(expr) << "Unknown type name '" << *name << '\'';
   }
   throw ErrorReport(expr.range())
       << "Expression of type " << kindToString(expr.kind())
