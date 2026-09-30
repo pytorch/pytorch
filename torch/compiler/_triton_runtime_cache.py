@@ -14,7 +14,6 @@ before the application does.
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import os
@@ -22,7 +21,6 @@ import platform
 import re
 import secrets
 import shutil
-import stat
 import struct
 import sys
 import sysconfig
@@ -44,6 +42,17 @@ _READY = ".runtime_cache_bundle"
 _BINARY_SUFFIXES = (".cubin", ".hsaco", ".zebin")
 _NATIVE_SUFFIXES = (".so", ".pyd", ".dll", ".dylib")
 _AUTOTUNE_SUFFIX = ".autotune.json"
+
+
+def _create_root(root: Path) -> None:
+    try:
+        root.mkdir(parents=True, exist_ok=True)
+    except FileExistsError:
+        raise RuntimeError(
+            f"Triton cache directory {root} is not a directory"
+        ) from None
+    except OSError as exc:
+        raise RuntimeError(f"Cannot create Triton cache directory {root}") from exc
 
 
 def runtime_cache_root(*, require_explicit: bool = False) -> Path:
@@ -85,7 +94,7 @@ def _compatibility(context: Any) -> dict[str, Any]:
 
     try:
         # The header holds context as JSON, so import compares it in that form.
-        context = json.loads(json.dumps(context, sort_keys=True))
+        context = json.loads(json.dumps(context, sort_keys=True, allow_nan=False))
     except (TypeError, ValueError) as exc:
         raise RuntimeError(
             "Triton runtime-cache context must be JSON-serializable"
@@ -139,14 +148,9 @@ def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) ->
     directory is marked as holding this bundle.
     """
     root = runtime_cache_root(require_explicit=True)
-    try:
-        # Triton creates the directory on first use, and a capture may launch
-        # no Triton kernel.
-        root.mkdir(parents=True, exist_ok=True)
-    except FileExistsError:
-        raise RuntimeError(
-            f"Triton cache directory {root} is not a directory"
-        ) from None
+    # Triton creates the directory on first use, and a capture may launch no
+    # Triton kernel.
+    _create_root(root)
     excluded = {_cache_key(key) for key in exclude}
     suffix = sysconfig.get_config_var("EXT_SUFFIX")
     if not suffix:
@@ -389,13 +393,13 @@ def _group_contents(root: Path, record: dict[str, Any]) -> str:
 
 
 def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
-    """Verify a bundle and hydrate Triton's cache directory with it atomically.
+    """Verify a bundle and hydrate Triton's cache directory with it.
 
-    Call before any Triton kernel is imported or launched. An empty (or
-    missing) directory is filled in one rename, which keeps the permission bits
-    of a pre-created directory but not its owner or ACLs. A nonempty one must
-    already hold this bundle, or this raises, so each bundle needs its own
-    directory.
+    Call before any Triton kernel is imported or launched. Each cache entry
+    appears in one rename, and the directory is marked as holding the bundle
+    only once every entry is in place. The directory itself is kept, so it may
+    be a mount point and keeps its owner and permissions. It must be empty or
+    hold only this bundle, so each bundle needs its own directory.
     """
     root = runtime_cache_root()
     try:
@@ -403,15 +407,23 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
         raise RuntimeError("Malformed Triton runtime-cache bundle") from exc
     digest = hashlib.sha256(bundle).hexdigest()
+    keys = {key for key, _ in payloads}
 
-    def validate_ready() -> None:
-        marker = root / _READY
-        if not marker.is_file() or marker.is_symlink() or marker.read_text() != digest:
-            raise RuntimeError(
-                f"Triton cache directory {root} is nonempty and does not hold this "
-                "runtime cache; import each runtime cache into its own empty "
-                "TRITON_CACHE_DIR"
-            )
+    def foreign() -> RuntimeError:
+        return RuntimeError(
+            f"Triton cache directory {root} is nonempty and does not hold this "
+            "runtime cache; import each runtime cache into its own empty "
+            "TRITON_CACHE_DIR"
+        )
+
+    def reject_foreign_entries() -> None:
+        if any(
+            entry.name not in keys and not entry.name.startswith(_READY)
+            for entry in root.iterdir()
+        ):
+            raise foreign()
+
+    def validate_members() -> None:
         for (key, name), payload in payloads.items():
             path = root / key / name
             if (
@@ -432,17 +444,18 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
                         f"{path}"
                     )
 
-    if root.exists() and any(root.iterdir()):
-        validate_ready()
+    marker = root / _READY
+    if marker.exists():
+        if marker.is_symlink() or not marker.is_file() or marker.read_text() != digest:
+            raise foreign()
+        validate_members()
         return
-    root.parent.mkdir(parents=True, exist_ok=True)
-    # Unlike mkdtemp, mkdir honors the umask, as Triton's own makedirs does.
-    staging = root.parent / f"{root.name}.hydrate-{os.getpid()}-{secrets.token_hex(8)}"
+    _create_root(root)
+    reject_foreign_entries()
+    # The marker prefix keeps the staging directory out of exports.
+    staging = root / f"{_READY}.hydrate-{os.getpid()}-{secrets.token_hex(8)}"
     staging.mkdir()
     try:
-        # The rename replaces a pre-created directory, so keep its permissions.
-        if root.is_dir():
-            staging.chmod(stat.S_IMODE(root.stat().st_mode))
         for (key, name), payload in payloads.items():
             (staging / key).mkdir(exist_ok=True)
             (staging / key / name).write_bytes(payload)
@@ -450,23 +463,17 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
             if record["kind"] == "kernel":
                 group = staging / record["key"] / ("__grp__" + record["group"])
                 group.write_text(_group_contents(root, record))
+        for key in sorted(keys):
+            try:
+                os.rename(staging / key, root / key)
+            except OSError:
+                # An interrupted or concurrent import placed this entry first.
+                if not (root / key).is_dir():
+                    raise
+        # Another import may have hydrated a different bundle meanwhile.
+        reject_foreign_entries()
+        validate_members()
         (staging / _READY).write_text(digest)
-        try:
-            os.replace(staging, root)
-        except OSError:
-            # Windows cannot rename over a directory, even an empty one.
-            with contextlib.suppress(OSError):
-                root.rmdir()
-                try:
-                    os.replace(staging, root)
-                except OSError:
-                    root.mkdir()
-                    raise
-            if staging.exists():
-                if not root.is_dir() or not any(root.iterdir()):
-                    raise
-                # Another process hydrated the directory first.
-                validate_ready()
+        os.replace(staging / _READY, marker)
     finally:
-        if staging.exists():
-            shutil.rmtree(staging)
+        shutil.rmtree(staging)
