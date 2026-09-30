@@ -43,7 +43,6 @@ if torch.backends.mps.is_available():
             "ormqr",
             "renorm",
             "sparse.sampled_addmm",
-            "to_sparse",
         }
 
         MACOS_BEFORE_14_4_XFAILLIST = {
