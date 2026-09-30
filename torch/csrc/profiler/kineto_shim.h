@@ -1,7 +1,5 @@
 #pragma once
 
-#include <array>
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -144,7 +142,7 @@ void logInvariantViolation(
 
 #ifdef USE_KINETO
 TORCH_API std::vector<libkineto::XpuMetricGroupInfo> xpuAvailableMetrics(
-    const std::array<uint8_t, 16>& deviceUuid);
+    const libkineto::XpuDeviceUuid& deviceUuid);
 #endif
 
 } // namespace impl::kineto

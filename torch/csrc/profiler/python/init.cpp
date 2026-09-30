@@ -15,7 +15,6 @@
 #include <torch/csrc/utils/pybind.h>
 
 #include <algorithm>
-#include <array>
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPCapturedTraceback {
@@ -731,10 +730,12 @@ void initPythonBindings(PyObject* module) {
   m.def("_xpu_available_metrics", [](const py::bytes& device_uuid) {
 #ifdef USE_KINETO
     const std::string uuid_str = device_uuid;
-    std::array<uint8_t, 16> uuid{};
+    libkineto::XpuDeviceUuid uuid{};
     TORCH_CHECK(
         uuid_str.size() == uuid.size(),
-        "Expected a 16-byte XPU device UUID, got ",
+        "Expected a ",
+        uuid.size(),
+        "-byte XPU device UUID, got ",
         uuid_str.size(),
         " bytes");
     std::copy(uuid_str.begin(), uuid_str.end(), uuid.begin());
