@@ -50,6 +50,29 @@ _META_FUNCTIONS = {
     "recv_any_source_": lambda *args: create_fakework(args, return_first_arg=False),
 }
 
+
+def _check_config(op, meta_func):
+    schema = getattr(torch.ops.c10d, op).default._schema
+    config_index = next(
+        (index for index, arg in enumerate(schema.arguments) if arg.name == "config"),
+        None,
+    )
+
+    def meta(*args, **kwargs):
+        config = (
+            args[config_index]
+            if config_index is not None and config_index < len(args)
+            else kwargs.get("config")
+        )
+        if config is not None:
+            raise RuntimeError(
+                "Raw c10d configuration calls cannot be traced; use torch.distributed collective APIs"
+            )
+        return meta_func(*args, **kwargs)
+
+    return meta
+
+
 lib_impl = torch.library.Library("c10d", "IMPL")
 for op, meta_func in _META_FUNCTIONS.items():
-    lib_impl.impl(op, meta_func, "Meta")
+    lib_impl.impl(op, _check_config(op, meta_func), "Meta")

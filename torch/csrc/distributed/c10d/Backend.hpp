@@ -360,6 +360,198 @@ class TORCH_API Backend : public torch::CustomClassHolder {
             " does not implement getBackendOptions."));
   }
 
+  // Configuration is opt-in per collective. Existing backends retain their
+  // ordinary virtual methods for calls without a configuration.
+  virtual c10::intrusive_ptr<Work> broadcastConfig(
+      std::vector<at::Tensor>& tensors,
+      const BroadcastOptions& opts = BroadcastOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return broadcast(tensors, opts);
+  }
+
+  virtual c10::intrusive_ptr<Work> allreduceConfig(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return allreduce(tensors, opts);
+  }
+
+  virtual c10::intrusive_ptr<Work> allreduce_sparseConfig(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return allreduce_sparse(tensors, opts);
+  }
+
+  virtual c10::intrusive_ptr<Work> allreduce_coalescedConfig(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceCoalescedOptions& opts = AllreduceCoalescedOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return allreduce_coalesced(tensors, opts);
+  }
+
+  virtual c10::intrusive_ptr<Work> reduceConfig(
+      std::vector<at::Tensor>& tensors,
+      const ReduceOptions& opts = ReduceOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return reduce(tensors, opts);
+  }
+
+  virtual c10::intrusive_ptr<Work> allgatherConfig(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return allgather(outputTensors, inputTensors, opts);
+  }
+
+  virtual c10::intrusive_ptr<Work> all_gather_singleConfig(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return all_gather_single(outputBuffer, inputBuffer, opts);
+  }
+
+  virtual c10::intrusive_ptr<Work> allgather_coalescedConfig(
+      std::vector<std::vector<at::Tensor>>& outputTensorLists,
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return allgather_coalesced(outputTensorLists, inputTensors, opts);
+  }
+
+  virtual c10::intrusive_ptr<Work> all_gather_single_coalescedConfig(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const AllgatherOptions& opts = AllgatherOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return all_gather_single_coalesced(outputs, inputs, opts);
+  }
+
+  virtual c10::intrusive_ptr<Work> gatherConfig(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const GatherOptions& opts = GatherOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return gather(outputTensors, inputTensors, opts);
+  }
+
+  virtual c10::intrusive_ptr<Work> gather_singleConfig(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const GatherOptions& opts = GatherOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return gather_single(outputBuffer, inputBuffer, opts);
+  }
+
+  virtual c10::intrusive_ptr<Work> reduce_scatterConfig(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return reduce_scatter(outputTensors, inputTensors, opts);
+  }
+
+  virtual c10::intrusive_ptr<Work> reduce_scatter_singleConfig(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return reduce_scatter_single(outputBuffer, inputBuffer, opts);
+  }
+
+  virtual c10::intrusive_ptr<Work> reduce_scatter_single_coalescedConfig(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return reduce_scatter_single_coalesced(outputs, inputs, opts);
+  }
+
+  virtual c10::intrusive_ptr<Work> all_to_all_singleConfig(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const AllToAllOptions& opts = AllToAllOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return all_to_all_single(
+        outputBuffer, inputBuffer, outputSplitSizes, inputSplitSizes, opts);
+  }
+
+  virtual c10::intrusive_ptr<Work> alltoallConfig(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllToAllOptions& opts = AllToAllOptions()) {
+    TORCH_CHECK(
+        !opts.config.has_value(),
+        "Backend ",
+        getBackendName(),
+        " does not support per-collective configuration");
+    return alltoall(outputTensors, inputTensors, opts);
+  }
+
   virtual c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
       const BroadcastOptions& /* opts */ = BroadcastOptions()) {

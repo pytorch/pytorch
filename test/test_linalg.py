@@ -7174,6 +7174,31 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
     @onlyCPU
+    @parametrize("k", [16, 32])
+    @parametrize("n", [16, 32])
+    @parametrize("x_dtype", [torch.int8, torch.uint8])
+    def test__int_mm_cpu_size1_dim_stride(self, device, k, n, x_dtype):
+        # https://github.com/pytorch/pytorch/issues/195066
+        def genf(rows, cols, dtype):
+            info = torch.iinfo(dtype)
+            return torch.randint(
+                info.min, info.max, (rows, cols), dtype=dtype, device=device
+            )
+
+        def check(a, b):
+            ref = torch.mm(a.float(), b.float())
+            self.assertEqual(torch._int_mm(a, b).float(), ref)
+            out = a.new_full((a.size(0), b.size(1)), 42, dtype=torch.int32)
+            torch._int_mm(a, b, out=out)
+            self.assertEqual(out.float(), ref)
+
+        a, b = genf(1, k, x_dtype), genf(k, n, torch.int8)
+        for a_stride in ((0, 1), (1, 1)):
+            check(a.as_strided((1, k), a_stride), b)
+        # with a size-1 contraction dim it is the other stride that is arbitrary
+        check(genf(n, 1, x_dtype).as_strided((n, 1), (1, 0)), genf(1, n, torch.int8))
+
+    @onlyCPU
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_mm_cpu_unaligned(self, device, dtype):
         m, n, k, n_groups = 16, 32, 64, 4
@@ -9748,6 +9773,31 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.assertEqual(out_accelerator.cpu(), out_cpu)
 
 
+class TestLinalgSVD(TestCase):
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @skipIfRocm
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfMPS(torch.float32, torch.complex64)
+    def test_svd_ill_conditioned(self, device, dtype):
+        # Small columns must still undergo Jacobi rotations: skipping them at
+        # an absolute epsilon cutoff breaks orthogonality and inflates sigma.
+        q = torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q
+        v = torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q
+        A = (q * torch.logspace(-5, 0, 32, dtype=q.real.dtype)) @ v.mH
+        cpu_s = torch.linalg.svdvals(A)
+        U, S, Vh = (t.cpu() for t in torch.linalg.svd(A.to(device), full_matrices=False))
+        eye = torch.eye(32, dtype=dtype).expand(16, 32, 32)
+        self.assertEqual(U.mH @ U, eye, atol=1e-4, rtol=1e-4)
+        self.assertEqual(Vh @ Vh.mH, eye, atol=1e-4, rtol=1e-4)
+        self.assertEqual((U * S.unsqueeze(-2)) @ Vh, A, atol=1e-4, rtol=1e-4)
+        self.assertEqual(S, cpu_s, atol=1e-5, rtol=1e-4)
+        self.assertEqual(
+            (S > 1e-4 * S[..., :1]).sum(-1),
+            (cpu_s > 1e-4 * cpu_s[..., :1]).sum(-1),
+        )
+
+
 class TestLinalgCudaOnly(TestCase):
     """CUDA/ROCm-specific linalg tests (TunableOp, backend library selection)."""
 
@@ -11920,6 +11970,7 @@ class TestGroupedMM(TestCase):
         self.grouped_mm_helper(a, b, offs, backward=False)
 
 instantiate_device_type_tests(TestLinalg, globals())
+instantiate_device_type_tests(TestLinalgSVD, globals(), allow_mps=True)
 instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
 instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
 
