@@ -919,9 +919,6 @@ def execute_in_green_contexts(
     The caller's current stream and device are restored on success or failure.
     After a callback raises, remaining callbacks are not invoked. Callbacks
     must enqueue their work on the supplied stream or join other work to it.
-    Keep the owning green contexts and tensors alive until their work completes;
-    normal cross-stream tensor lifetime rules still apply. Streams may belong
-    to different devices. A single stream has the same fork/join semantics.
 
     Args:
         green_ctx_streams: Nonempty sequence of streams from green contexts.
@@ -937,7 +934,7 @@ def execute_in_green_contexts(
     completed = 0
     try:
         if all(stream.device == caller_stream.device for stream in green_ctx_streams):
-            # Restoring the caller stream between launches increases launch skew.
+            # Restoring the caller stream between launches increases overheads.
             try:
                 for index, (stream, done) in enumerate(zip(green_ctx_streams, events)):
                     torch.cuda.set_stream(stream)
