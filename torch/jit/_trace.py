@@ -184,8 +184,9 @@ _JIT_STATS = os.environ.get("PYTORCH_JIT_STATS", False)
 
 @contextlib.contextmanager
 def _time(trace_name, name, time=True):
-    # Dev-only timing helper for manual instrumentation while debugging JIT
-    # trace. Gated by PYTORCH_JIT_TIME or time=True; no in-tree callers.
+    # Dev-only timing helper. No in-tree callers. Gated by PYTORCH_JIT_TIME or
+    # time=True. This only removes the CUDA hardcoding; the backend must
+    # support timing events (enable_timing, record, synchronize, elapsed_time).
     if (not _JIT_TIME and not time) or not torch.accelerator.is_available():
         yield
         return
