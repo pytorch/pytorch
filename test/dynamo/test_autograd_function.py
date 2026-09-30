@@ -923,6 +923,47 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         after = compiled_model(*args, **kwargs)
         self.assertEqual(before, after)
 
+    def test_ctx_saved_tensors_hasattr(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                # saved_tensors should exist before saving anything.
+                if not hasattr(ctx, "saved_tensors"):
+                    raise AssertionError("expected ctx to have saved_tensors")
+                if getattr(ctx, "saved_tensors", None) is None:
+                    raise AssertionError("expected ctx.saved_tensors to not be None")
+
+                ctx.save_for_backward(x)
+
+                # It should remain accessible after saving.
+                if not hasattr(ctx, "saved_tensors"):
+                    raise AssertionError("expected ctx to have saved_tensors")
+                if getattr(ctx, "saved_tensors", None) is None:
+                    raise AssertionError("expected ctx.saved_tensors to not be None")
+
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def fn(x):
+            return Foo.apply(x)
+
+        x = torch.randn(3)
+
+        expected = fn(x)
+
+        compiled_fn = torch.compile(
+            fn,
+            backend="eager",
+            fullgraph=True,
+        )
+
+        actual = compiled_fn(x)
+
+        self.assertEqual(actual, expected)
+
     def test_function_context_mark_and_save(self):
         mod = ModuleWithGradFunc(ContextMarkAndSave)
         args, kwargs = ([torch.rand([1])], {})
