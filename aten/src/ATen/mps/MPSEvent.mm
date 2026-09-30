@@ -39,15 +39,16 @@ void MPSEvent::recordLocked(bool syncEvent) {
   }
 }
 
-bool MPSEvent::waitLocked(bool syncEvent) {
+bool MPSEvent::waitLocked(bool syncEvent, MPSStream* stream) {
   const uint64_t signalCounter = m_signalCounter.load();
   // skip the wait if the event is unrecorded or already signaled
   if (!m_recorded.load() || m_event.signaledValue >= signalCounter) {
     return false;
   }
+  MPSStream* wait_stream = stream ? stream : m_stream;
   // active encoders must end before encoding or waiting
-  m_stream->endKernelCoalescing();
-  id<MTLCommandBuffer> commandBuffer = m_stream->commandBuffer();
+  wait_stream->endKernelCoalescing();
+  id<MTLCommandBuffer> commandBuffer = wait_stream->commandBuffer();
   [commandBuffer encodeWaitForEvent:m_event value:signalCounter];
   if (syncEvent) {
     m_stream->synchronize(SyncType::COMMIT);
@@ -67,14 +68,15 @@ void MPSEvent::record(bool needsLock, bool syncEvent) {
   });
 }
 
-bool MPSEvent::wait(bool needsLock, bool syncEvent) {
+bool MPSEvent::wait(bool needsLock, bool syncEvent, MPSStream* stream) {
   __block bool waited = false;
   if (!needsLock) {
-    return waitLocked(syncEvent);
+    return waitLocked(syncEvent, stream);
   }
-  dispatch_sync(m_stream->queue(), ^() {
+  MPSStream* dispatch_stream = stream ? stream : m_stream;
+  dispatch_sync(dispatch_stream->queue(), ^() {
     @autoreleasepool {
-      waited = waitLocked(syncEvent);
+      waited = waitLocked(syncEvent, stream);
     }
   });
   return waited;
@@ -116,11 +118,11 @@ bool MPSEvent::query() const {
 }
 
 void MPSEvent::reset(MPSStream* stream, bool enable_timing) {
-  if (stream != m_stream) {
-    m_signalCounter.store(0);
-    m_event.signaledValue = 0;
-    m_stream = stream;
-  }
+  // Deliberately do not reset `m_signalCounter` or `m_event.signaledValue`.
+  // Their absolute values don't matter, only the difference between them does.
+  // Resetting them could cause a subsequent `waitLocked` call to incorrectly
+  // determine that an event was satisfied without waiting for it.
+  m_stream = stream;
   {
     std::lock_guard<std::mutex> lock(m_cpu_sync_mutex);
     m_completion_time = 0.0;
@@ -192,14 +194,19 @@ void MPSEventPool::releaseEvent(id_t event_id) {
   m_in_use_events.erase(event_id);
 }
 
+void MPSEventPool::resetEvent(id_t event_id, MPSStream* stream, bool enable_timing) {
+  MPSEvent* event = getInUseEvent(event_id);
+  event->reset(stream, enable_timing);
+}
+
 void MPSEventPool::recordEvent(id_t event_id, bool syncEvent) {
   MPSEvent* event = getInUseEvent(event_id);
   event->record(/*needsLock*/ true, syncEvent);
 }
 
-void MPSEventPool::waitForEvent(id_t event_id, bool syncEvent) {
+void MPSEventPool::waitForEvent(id_t event_id, bool syncEvent, MPSStream* stream) {
   MPSEvent* event = getInUseEvent(event_id);
-  event->wait(/*needsLock*/ true, syncEvent);
+  event->wait(/*needsLock*/ true, syncEvent, stream);
 }
 
 void MPSEventPool::synchronizeEvent(id_t event_id) {

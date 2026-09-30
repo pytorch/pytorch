@@ -40,7 +40,6 @@ from ..current_scope_id import current_scope_id
 from ..exc import (
     ObservedAttributeError,
     raise_attribute_error,
-    raise_observed_exception,
     raise_type_error,
     unimplemented,
     Unsupported,
@@ -517,6 +516,9 @@ def store_attr_mutation(
     se = tx.output.side_effects
     item = item.realize()
     if not se.is_attribute_mutation(item):
+        # This helper's callers model writable function and descriptor slots.
+        # Their sourced owners must already be tracked; unlike generic Python
+        # setattr, this closed path has no valid sourced-untracked fallback.
         if item.source is not None:
             raise AssertionError(
                 f"{item} has a source but was never registered via "
@@ -925,6 +927,10 @@ def _wrap_descr_get(
         raise_type_error(tx, "this method takes no keyword arguments")
     if len(args) not in (1, 2):
         raise_type_error(tx, f"expected 1 or 2 arguments, got {len(args)}")
+    # wrap_descr_get treats None as absent for both arguments and rejects the
+    # call when both are absent.
+    if all(a.is_constant_none() for a in args):
+        raise_type_error(tx, "__get__(None, None) is invalid")
     obj = args[0]
     owner = args[1] if len(args) > 1 else obj.tp_getattro_impl(tx, "__class__")
     return func(self, tx, obj, owner)
@@ -1829,8 +1835,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         value: Any,
         cache: dict[int, Any] | None = None,
         side_effects: SideEffects | None = None,
-        *,
-        visit_keys: bool = False,
     ) -> None:
         """
         Walk value and call fn on all the VariableTracker instances.
@@ -1838,9 +1842,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         When side_effects is provided, also walks attributes stored in
         store_attr_mutations (e.g. dataclass fields set during tracing
         that aren't in the VT's __dict__).
-
-        When visit_keys is True, also unwraps HashableTracker
-        dict keys and visits their underlying VariableTracker.
 
         Implemented with an explicit worklist rather than recursion so that
         deeply chained structures (e.g. the ~N-node buffer built by
@@ -1881,14 +1882,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             elif istype(cur, (list, tuple)):
                 children = list(cur)
             elif istype(cur, (dict, collections.OrderedDict)):
-                children = list(cur.values())
-                if visit_keys:
-                    # Deferred: visit() is a hot path (every stack value,
-                    # local, and mutated var), but visit_keys=True has a
-                    # single caller, so avoid paying this import otherwise.
-                    from .hashable import HashableTracker
+                # Preserve the existing values-first visitation order, then visit
+                # keys, including VariableTrackers wrapped for hashing.
+                # The local import avoids a base.py <-> hashable.py cycle.
+                from .hashable import HashableTracker
 
-                    children.extend(k.vt for k in cur if isinstance(k, HashableTracker))
+                children = list(cur.values())
+                children.extend(
+                    key.vt if isinstance(key, HashableTracker) else key for key in cur
+                )
             else:
                 continue
             worklist.extend(reversed(children))
@@ -2387,19 +2389,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def sq_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Called when sq_length is not implemented."""
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[f"object of type '{self.python_type_name()}' has no len()"],
-        )
+        raise_type_error(tx, f"object of type '{self.python_type_name()}' has no len()")
 
     def mp_length_impl(self, tx: InstructionTranslatorBase) -> VariableTracker:
         """Called when mp_length is not implemented."""
-        raise_observed_exception(
-            TypeError,
-            tx,
-            args=[f"object of type '{self.python_type_name()}' has no len()"],
-        )
+        raise_type_error(tx, f"object of type '{self.python_type_name()}' has no len()")
 
     def mp_subscript_impl(
         self,
@@ -2837,12 +2831,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         The base implementation raises TypeError, matching CPython's behavior
         when tp_as_number->nb_index is NULL (_PyIndex_Check fails).
         """
-        raise_observed_exception(
-            TypeError,
+        raise_type_error(
             tx,
-            args=[
-                f"'{self.python_type_name()}' object cannot be interpreted as an integer"
-            ],
+            f"'{self.python_type_name()}' object cannot be interpreted as an integer",
         )
 
     def tp_repr_impl(
