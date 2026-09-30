@@ -626,14 +626,35 @@ class _SplitterBase:
         - nodes from the same fusion depend on the same set of outer nodes,
         - outer nodes depending on a fusion depend on all nodes in that fusion.
         """
-        for node in self.fusions:
-            fusion = self.fusions[node]
-            for fused_neighbor in fusion:
-                self.deps[node].update(self.deps[fused_neighbor] - fusion)
+        # FxNetAccFusionsFinder maps every member of a fusion group to the same
+        # set object, so a group of size K appears K times here. Deduplicate by
+        # identity and do the work once per group: iterating per member repeated
+        # it K times, and because each repeat unioned into self.deps while
+        # reading from it, the sets grew as it went. That made this pass
+        # quadratic in group size, which dominates lowering on graphs with large
+        # fusion groups.
+        visited_fusions: set[int] = set()
+        for fusion in self.fusions.values():
+            if id(fusion) in visited_fusions:
+                continue
+            visited_fusions.add(id(fusion))
 
-                for user in fused_neighbor.users:
-                    if user not in fusion:
-                        self.deps[user].add(node)
+            external_deps: NodeSet = set()
+            for fused_node in fusion:
+                external_deps |= self.deps[fused_node]
+            external_deps -= fusion
+
+            outside_users = {
+                user
+                for fused_node in fusion
+                for user in fused_node.users
+                if user not in fusion
+            }
+
+            for fused_node in fusion:
+                self.deps[fused_node] |= external_deps
+            for user in outside_users:
+                self.deps[user] |= fusion
 
     def _merge_overlapping_fusions(self) -> None:
         """
