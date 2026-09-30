@@ -1084,28 +1084,6 @@ class MappingProxyVariable(VariableTracker):
         codegen(self.dv_dict)
         codegen.extend_output(create_call_function(1, False))
 
-    def _check_mutation_guard(self, tx: "InstructionTranslatorBase") -> None:
-        if self.source and tx.output.side_effects.has_existing_dict_mutation():
-            msg = (
-                "A dict has been modified while we have an existing mappingproxy object. "
-                "A mapping proxy object, as the name suggest, proxies a mapping "
-                "object (usually a dict). If the original dict object mutates, it "
-                "is reflected in the proxy object as well. For an existing proxy "
-                "object, we do not know the original dict it points to. Therefore, "
-                "for correctness we graph break when there is dict mutation and we "
-                "are trying to access a proxy object."
-            )
-
-            unimplemented(
-                gb_type="mapping proxy affected by dictionary mutation",
-                context=f"Source: {self.source}, Dict mutation detected",
-                explanation=msg,
-                hints=[
-                    "Avoid modifying dictionaries that might be referenced by mapping proxy objects",
-                    "Or avoid using the mapping proxy objects after modifying its underlying dictionary",
-                ],
-            )
-
     def mp_subscript_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -1113,7 +1091,6 @@ class MappingProxyVariable(VariableTracker):
     ) -> VariableTracker:
         # mappingproxy_getitem: https://github.com/python/cpython/blob/62a6e898e01/Objects/descrobject.c#L1052-L1056
         # TODO(follow-up): add tests for invalid key type, missing key
-        self._check_mutation_guard(tx)
         return self.dv_dict.mp_subscript_impl(tx, key)
 
     def call_method(
@@ -1123,7 +1100,6 @@ class MappingProxyVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self._check_mutation_guard(tx)
         return self.dv_dict.call_method(tx, name, args, kwargs)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -1139,13 +1115,11 @@ class MappingProxyVariable(VariableTracker):
         return self.dv_dict.mp_length_impl(tx)
 
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        self._check_mutation_guard(tx)
         return VariableTracker.build(
             tx, f"mappingproxy({tracked_repr(tx, self.dv_dict)})"
         )
 
     def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        self._check_mutation_guard(tx)
         return generic_str(tx, self.dv_dict)
 
     def tp_richcompare_impl(
@@ -1195,9 +1169,6 @@ class DictViewVariable(VariableTracker):
         if not isinstance(dv_dict, ConstDictVariable):
             raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
-        # Set when dv_dict is the _base_vt of a dict subclass, so .mapping
-        # proxies the subclass rather than its plain-dict storage.
-        self.owner: VariableTracker | None = None
 
     @property
     def view_items(self) -> Any:
@@ -1244,10 +1215,7 @@ class DictViewVariable(VariableTracker):
     # dict. https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5032-L5040
     tp_getset = {
         "mapping": GetSet(
-            lambda s, _: MappingProxyVariable(
-                s.dv_dict if s.owner is None else s.owner
-            ),
-            readonly_setter,
+            lambda s, _: MappingProxyVariable(s.dv_dict), readonly_setter
         ),
     }
 

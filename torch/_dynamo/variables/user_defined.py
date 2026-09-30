@@ -1852,8 +1852,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is types.MappingProxyType and len(args) == 1:
             # types.MappingProxyType is a read-only proxy of the dict. If the
             # original dict changes, the changes are reflected in proxy as well.
-            if isinstance(args[0], ConstDictVariable):
-                return variables.MappingProxyVariable(args[0])
+            dict_arg = args[0]
+            if isinstance(dict_arg, ConstDictVariable):
+                return variables.MappingProxyVariable(dict_arg)
         elif SideEffects.cls_supports_mutation_side_effects(self.value) and (
             self.source or torch._dynamo.config.enable_trace_load_build_class
         ):
