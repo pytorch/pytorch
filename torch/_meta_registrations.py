@@ -1744,6 +1744,62 @@ def _parse_qr_mode(mode: str) -> tuple[bool, bool]:
     return compute_q, reduced  # type: ignore[possibly-undefined]
 
 
+@register_meta(aten.geqrf.default)
+@out_wrapper("a", "tau")
+def geqrf_meta(input: Tensor) -> tuple[Tensor, Tensor]:
+    torch._check(
+        input.ndim >= 2,
+        lambda: "torch.geqrf: input must have at least 2 dimensions.",
+    )
+    checkFloatingOrComplex(input, "torch.geqrf", allow_low_precision_dtypes=False)
+    a = input.new_empty(input.mT.shape).transpose(-2, -1)
+    tau = input.new_empty((*input.shape[:-2], sym_min(*input.shape[-2:])))
+    return a, tau
+
+
+@register_meta(aten.geqrf.a)
+def geqrf_out_meta(input: Tensor, *, a: Tensor, tau: Tensor) -> tuple[Tensor, Tensor]:
+    result_a, result_tau = geqrf_meta(input)
+    for name, out in (("a", a), ("tau", tau)):
+        torch._check(
+            out.device == input.device,
+            lambda: (
+                f"torch.geqrf: Expected {name} and input tensors to be on the same device, "
+                f"but got {name} on {out.device} and input on {input.device}"
+            ),
+        )
+        torch._check(
+            utils.can_safe_cast_to(cast_from=input.dtype, cast_to=out.dtype),
+            lambda: (
+                f"torch.geqrf: Expected {name} to be safely castable from {input.dtype} dtype, "
+                f"but got {name} with dtype {out.dtype}"
+            ),
+        )
+
+    copy_needed = (
+        (
+            a.numel() != 0
+            and (a.ndim < 2 or not a.mT.is_contiguous() or a.shape != input.shape)
+        )
+        or a.dtype != input.dtype
+        or (tau.numel() != 0 and (not tau.is_contiguous() or tau.shape != result_tau.shape))
+        or tau.dtype != input.dtype
+    )
+    if copy_needed:
+        _maybe_resize_out(a, result_a.shape)
+        _maybe_resize_out(tau, result_tau.shape)
+    else:
+        if a.numel() == 0:
+            a.resize_(input.mT.shape, memory_format=torch.contiguous_format)
+            a.transpose_(-2, -1)
+        if tau.numel() == 0:
+            tau.resize_(result_tau.shape)
+
+    _safe_copy_out(copy_from=result_a, copy_to=a)
+    _safe_copy_out(copy_from=result_tau, copy_to=tau)
+    return a, tau
+
+
 @register_meta([aten.linalg_qr.default, aten.linalg_qr.out])
 @out_wrapper("Q", "R")
 def linalg_qr_meta(A: Tensor, mode: str = "reduced") -> tuple[Tensor, Tensor]:
