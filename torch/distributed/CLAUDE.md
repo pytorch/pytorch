@@ -7,7 +7,11 @@
   custom extensions may use `dist.get_backend_impl(...).foo(...)`.
 - Write accelerator-generic code where possible; avoid CUDA-only assumptions.
 - Provide clear errors, graceful recovery, and bounded timeouts where possible.
-- Support CUDA graphs where possible; test capture and repeated replay.
+- Support CUDA graphs where possible.
+
+## Testing
+
+- Test CUDA graph capture and repeated replay where supported.
 - Keep expensive multi-GPU tests fast: prefer `MultiThreadedTestCase` or
   `MultiProcContinuousTest` over per-test process launches where possible.
   Reset reused-worker state; retain fresh processes when isolation is required.
