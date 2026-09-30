@@ -354,11 +354,12 @@ extern "C"
   int64_t oStrideM = {{kernel.stride(output, 2)}};
   int64_t oStrideH = {{kernel.stride(output, 1)}};
 
-  // Inputs/outputs buffers
-  const scalar_t* q_data = query;
-  const scalar_t* k_data = key;
-  const scalar_t* v_data = value;
-  scalar_t* out_data = output;
+  // Inputs/outputs buffers. Arguments carry the raw storage pointer, so the
+  // view offsets of query/key/value have to be applied here.
+  const scalar_t* q_data = query + {{kernel.rename_indexing(query.get_layout().offset)}};
+  const scalar_t* k_data = key + {{kernel.rename_indexing(key.get_layout().offset)}};
+  const scalar_t* v_data = value + {{kernel.rename_indexing(value.get_layout().offset)}};
+  scalar_t* out_data = output + {{kernel.rename_indexing(output.get_layout().offset)}};
 
 """
 
