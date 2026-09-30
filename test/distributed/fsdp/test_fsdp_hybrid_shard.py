@@ -11,7 +11,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.fsdp._traversal_utils as traversal_utils
 import torch.nn as nn
-from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.distributed.distributed_c10d import _rank_not_in_group
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
@@ -245,6 +245,10 @@ class TestFSDPHybridShard(FSDPTestContinuous):
             2. Process groups are the same across FSDP wrapped instances
             3. reduce_scatter and allreduce called the expected no. of times
         """
+        # The workers are reused for every test in this class, and each new mesh
+        # adds NCCL communicators that hold /dev/shm until the workers exit, so
+        # build the mesh once rather than once per subtest.
+        device_mesh = init_device_mesh(device_type, (1, self.world_size))
         self.run_subtests(
             {
                 "hsdp_sharding_strategy": [
@@ -258,25 +262,22 @@ class TestFSDPHybridShard(FSDPTestContinuous):
                 "use_orig_params": [False, True],
                 "use_device_mesh": [False, True],
             },
-            self._test_fsdp_hybrid_shard_basic_setup,
+            partial(self._test_fsdp_hybrid_shard_basic_setup, device_mesh),
         )
 
     def _test_fsdp_hybrid_shard_basic_setup(
         self,
+        device_mesh: DeviceMesh,
         hsdp_sharding_strategy: ShardingStrategy,
         sharding_strategy_mode: ShardingStrategyMode,
         use_orig_params: bool,
         use_device_mesh: bool,
     ):
-        if use_device_mesh:
-            device_mesh = init_device_mesh(device_type, (1, self.world_size))
-        else:
-            device_mesh = None
         hsdp_model = self._init_hsdp_model(
             hsdp_sharding_strategy,
             sharding_strategy_mode,
             use_orig_params,
-            hsdp_device_mesh=device_mesh,
+            hsdp_device_mesh=device_mesh if use_device_mesh else None,
         )
         # All FSDP modules should have state.process_group as the process group over which to
         # shard (default process group), and state._inter_node_pg (process group containing only
@@ -344,6 +345,10 @@ class TestFSDPHybridShard(FSDPTestContinuous):
 
     @skip_if_lt_x_gpu(4)
     def test_fsdp_hybrid_shard_parity(self):
+        # Build the HSDP groups once rather than once per subtest; see
+        # test_fsdp_hybrid_shard_basic_setup.
+        global_pg = dist.distributed_c10d._get_default_group()
+        hsdp_pgs = _init_intra_and_inter_node_groups(global_pg, 2)
         self.run_subtests(
             {
                 "hsdp_sharding_strategy": [
@@ -352,15 +357,17 @@ class TestFSDPHybridShard(FSDPTestContinuous):
                 ],
                 "use_orig_params": [False, True],
             },
-            self._test_fsdp_hybrid_shard_parity,
+            partial(self._test_fsdp_hybrid_shard_parity, hsdp_pgs),
         )
 
     def _test_fsdp_hybrid_shard_parity(
-        self, hsdp_sharding_strategy: ShardingStrategy, use_orig_params: bool
+        self,
+        hsdp_pgs: tuple[dist.ProcessGroup, dist.ProcessGroup],
+        hsdp_sharding_strategy: ShardingStrategy,
+        use_orig_params: bool,
     ):
         fsdp_model = self._init_fsdp_model(use_orig_params)
         global_pg = dist.distributed_c10d._get_default_group()
-        hsdp_pgs = _init_intra_and_inter_node_groups(global_pg, 2)
         hsdp_model = self._init_hsdp_model(
             hsdp_sharding_strategy,
             ShardingStrategyMode.ALL_HYBRID_SHARD,

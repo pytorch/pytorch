@@ -45,11 +45,11 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
-          { config: "inductor_cpp_wrapper", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_cpp_wrapper", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g" },
+          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-45-167-a10g-4" },
+          { config: "inductor_cpp_wrapper", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g" },
+          { config: "inductor_cpp_wrapper", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g" },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -83,11 +83,11 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
-          { config: "inductor_cpp_wrapper", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
-          { config: "inductor_cpp_wrapper", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g" },
+          { config: "inductor", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g" },
+          { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-45-167-a10g-4" },
+          { config: "inductor_cpp_wrapper", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g" },
+          { config: "inductor_cpp_wrapper", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86aavx2-11-41-a10g" },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -120,7 +120,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor-halide", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.12xlarge" },
+          { config: "inductor-halide", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-48-384" },
         ]}
       python-version: "3.12"
       compiler: gcc11
@@ -151,7 +151,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor-triton-cpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.amx" },
+          { config: "inductor-triton-cpu", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-32-128" },
         ]}
       python-version: "3.12"
       compiler: gcc11
@@ -182,20 +182,20 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor_amx", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
-          { config: "inductor_amx", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
-          { config: "inductor_amx", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
-          { config: "inductor_amx", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
-          { config: "inductor_amx", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
-          { config: "inductor_amx", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
-          { config: "inductor_amx", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_amx", shard: 1, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64" },
+          { config: "inductor_amx", shard: 2, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64" },
+          { config: "inductor_amx", shard: 3, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64" },
+          { config: "inductor_amx", shard: 4, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64" },
+          { config: "inductor_amx", shard: 5, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64" },
+          { config: "inductor_amx", shard: 6, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64" },
+          { config: "inductor_amx", shard: 7, num_shards: 7, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64" },
           # Staging: re-runs the AOTInductor suites under all-fallback mode. Known red
           # (torch.cond subgraph constants, proxy-executor constant folding) -- the
           # `unstable` key keeps the name out of trymerge's blocking set while the
           # failures are triaged. Drop the key to promote; delete the entries if nobody
           # is driving the failures down.
-          { config: "inductor_aoti_fallback", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", unstable: "unstable" },
-          { config: "inductor_aoti_fallback", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx", unstable: "unstable" },
+          { config: "inductor_aoti_fallback", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", unstable: "unstable" },
+          { config: "inductor_aoti_fallback", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iamx-8-64", unstable: "unstable" },
         ]}
       python-version: "3.11"
       compiler: gcc11
@@ -229,8 +229,8 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "inductor_core", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
-          { config: "inductor_core", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "inductor_core", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
+          { config: "inductor_core", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}l-x86iavx512-8-64" },
         ]}
       python-version: "${{ matrix.python-version }}"
       compiler: clang21
