@@ -42,6 +42,8 @@ from torch.testing._internal.common_device_type import (
 )
 
 from torch.testing._internal.common_utils import (
+    _restore_fp32_precision,
+    _snapshot_fp32_precision,
     IS_JETSON,
     IS_WINDOWS,
     MI200_ARCH,
@@ -51,7 +53,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     random_matrix_with_scaled_reduction_dim,
     run_tests,
-    runOnRocmArch,
     serialTest,
     skipIfRocm,
     skipIfRocmArch,
@@ -126,14 +127,13 @@ def sm_carveout(value: int | None):
 class TestMatmulCuda(InductorTestCase):
     def setUp(self):
         super().setUp()
-        # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
-        # writing allow_tf32 back can't always reproduce the original
-        # fp32_precision value (e.g. the "none" default).
-        self._prev_cuda_matmul_fp32 = torch.backends.cuda.matmul.fp32_precision
+        # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
+        # backend-specific fp32_precision, so snapshot and restore all of it.
+        self._prev_fp32_state = _snapshot_fp32_precision()
         torch.backends.cuda.matmul.allow_tf32 = False
 
     def tearDown(self):
-        torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
+        _restore_fp32_precision(self._prev_fp32_state)
         super().tearDown()
 
     @unittest.skipUnless(
@@ -637,7 +637,6 @@ class TestMatmulCuda(InductorTestCase):
 
     @onlyCUDA
     @skipCUDAIfNotRocm
-    @runOnRocmArch(MI200_ARCH)
     @parametrize("batched", [False, True])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_fp16_backward_preserves_subnormals_rocm(self, backend, batched):
@@ -752,7 +751,7 @@ class TestMatmulCuda(InductorTestCase):
         if N == M and M == P:
             M2_eye = torch.eye(N, device=device, dtype=dtype)
             out1_eye_gpu = torch.nn.functional.linear(M1, M2_eye.t(), torch.zeros_like(A))
-            if runOnRocmArch(MI200_ARCH) and dtype == torch.float16:
+            if TEST_WITH_ROCM and isRocmArchAnyOf(MI200_ARCH) and dtype == torch.float16:
                 self.assertEqual(M1_cpu.to(dtype=dtype), out1_eye_gpu.cpu(), atol=1e-4, rtol=0.001)
             else:
                 self.assertEqual(M1_cpu.to(dtype=dtype), out1_eye_gpu.cpu())
@@ -770,7 +769,7 @@ class TestMatmulCuda(InductorTestCase):
         if N == M and M == P:
             M2_eye = torch.eye(N, device=device, dtype=dtype).expand(batch_size, N, N)
             out2_eye_gpu = torch.baddbmm(torch.zeros_like(A), M1, M2_eye, beta=beta, alpha=alpha)
-            if runOnRocmArch(MI200_ARCH) and dtype == torch.float16:
+            if TEST_WITH_ROCM and isRocmArchAnyOf(MI200_ARCH) and dtype == torch.float16:
                 self.assertEqual(M1_cpu.to(dtype=dtype), out2_eye_gpu.cpu(), atol=1e-4, rtol=0.001)
             else:
                 self.assertEqual(M1_cpu.to(dtype=dtype), out2_eye_gpu.cpu())

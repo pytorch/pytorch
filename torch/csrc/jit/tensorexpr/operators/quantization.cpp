@@ -158,7 +158,7 @@ Tensor computeQuantizePerTensor(
     } else if (static_cast<int64_t>(ScalarType::QUInt8) == qdtype) {
       return Dtype(ScalarType::QUInt8);
     }
-    throw malformed_input("Expected quantized dtype");
+    TORCH_CHECK(false, "MALFORMED INPUT: Expected quantized dtype");
   }(std::get<int64_t>(inputs[3]));
 
   ExprHandle e =
@@ -235,7 +235,7 @@ Tensor computeQuantizePerTensorExternalCall(
     } else if (static_cast<int64_t>(ScalarType::QUInt8) == qdtype) {
       return Dtype(ScalarType::QUInt8);
     }
-    throw malformed_input("Expected quantized dtype");
+    TORCH_CHECK(false, "MALFORMED INPUT: Expected quantized dtype");
   }(qdtype);
   auto ResultBuf = [&]() {
     if (isChannelsLast(x)) {
