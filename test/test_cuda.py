@@ -18,10 +18,11 @@ import unittest
 import warnings
 import weakref
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from itertools import product
 from random import randint
-from unittest.mock import patch
+from unittest.mock import call, Mock, patch
 
 import psutil
 
@@ -12962,6 +12963,402 @@ finally:
         limited_time = t3 - t2
 
         self.assertGreater(limited_time, baseline_time)
+
+    @parametrize("num_streams, fail_at", [(1, None), (2, None), (1, 0), (2, 0), (2, 1)])
+    @serialTest()
+    def test_execute_in_green_contexts(
+        self, device: str, num_streams: int, fail_at: int | None
+    ) -> None:
+        from torch.cuda.green_contexts import execute_in_green_contexts, GreenContext
+
+        device_index = torch.device(device).index
+        contexts = [
+            GreenContext(num_sms=1, device_id=device_index) for _ in range(num_streams)
+        ]
+        streams = [ctx.Stream() for ctx in contexts]
+        caller = torch.cuda.Stream(device=device)
+        source = torch.zeros(1024, device=device)
+        outputs = [torch.zeros_like(source) for _ in streams]
+        observed = [torch.zeros_like(source) for _ in streams]
+        torch.cuda._sleep(1)
+        torch.cuda.synchronize(device)
+        visited = []
+        original_stream = torch.cuda.current_stream(device)
+        original_device = torch.cuda.current_device()
+
+        def compute(index: int) -> None:
+            self.assertEqual(torch.cuda.current_stream(), streams[index])
+            visited.append(index)
+            torch.cuda._sleep(20_000_000)
+            outputs[index].copy_(source)
+            if index == fail_at:
+                raise RuntimeError("callback failed")
+
+        with torch.cuda.stream(caller):
+            torch.cuda._sleep(20_000_000)
+            source.fill_(7)
+            if fail_at is None:
+                execute_in_green_contexts(streams, compute)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "callback failed"):
+                    execute_in_green_contexts(streams, compute)
+            self.assertEqual(torch.cuda.current_stream(), caller)
+            for dst, src in zip(observed, outputs):
+                dst.copy_(src)
+
+        caller.synchronize()
+        count = num_streams if fail_at is None else fail_at + 1
+        self.assertEqual(visited, list(range(count)))
+        for index, value in enumerate(observed):
+            self.assertEqual(value, torch.full_like(value, 7 if index < count else 0))
+        self.assertEqual(torch.cuda.current_stream(device), original_stream)
+        self.assertEqual(torch.cuda.current_device(), original_device)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple GPUs")
+    @parametrize("fail_at", [None, 0, 1])
+    @serialTest()
+    def test_execute_in_green_contexts_multiple_devices(
+        self, device: str, fail_at: int | None
+    ) -> None:
+        from torch.cuda.green_contexts import execute_in_green_contexts, GreenContext
+
+        contexts = [GreenContext(num_sms=1, device_id=index) for index in range(2)]
+        streams = [ctx.Stream() for ctx in contexts]
+        original_device = torch.cuda.current_device()
+        original_streams = [torch.cuda.current_stream(index) for index in range(2)]
+        caller = torch.cuda.Stream(device=device)
+        completed = []
+
+        def compute(index: int) -> None:
+            self.assertEqual(torch.cuda.current_device(), index)
+            self.assertEqual(torch.cuda.current_stream(), streams[index])
+            torch.cuda._sleep(20_000_000)
+            event = torch.cuda.Event()
+            event.record()
+            completed.append(event)
+            if index == fail_at:
+                raise RuntimeError("callback failed")
+
+        with torch.cuda.stream(caller):
+            if fail_at is None:
+                execute_in_green_contexts(streams, compute)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "callback failed"):
+                    execute_in_green_contexts(streams, compute)
+            self.assertEqual(torch.cuda.current_stream(), caller)
+            self.assertEqual(torch.cuda.current_device(), caller.device.index)
+        caller.synchronize()
+        self.assertEqual(len(completed), 2 if fail_at is None else fail_at + 1)
+        self.assertTrue(all(event.query() for event in completed))
+        self.assertEqual(torch.cuda.current_device(), original_device)
+        for index, stream in enumerate(original_streams):
+            self.assertEqual(torch.cuda.current_stream(index), stream)
+
+
+class TestGreenContextExecution(TestCase):
+    def test_empty_execution_streams(self) -> None:
+        from torch.cuda.green_contexts import execute_in_green_contexts
+
+        with patch("torch.cuda.current_stream") as current_stream:
+            with self.assertRaisesRegex(ValueError, "at least one"):
+                execute_in_green_contexts([], lambda index: None)
+            current_stream.assert_not_called()
+
+    @parametrize("num_streams", [1, 2, 3])
+    @parametrize("fail_at", [None, 0, 1])
+    def test_direct_stream_switching(
+        self, num_streams: int, fail_at: int | None
+    ) -> None:
+        from torch.cuda.green_contexts import execute_in_green_contexts
+
+        device = torch.device("cuda", 0)
+        streams = [Mock(device=device) for _ in range(num_streams)]
+        caller = Mock(device=device)
+        events = [Mock() for _ in streams]
+        start = Mock()
+        visited = []
+
+        def compute(index: int) -> None:
+            visited.append(index)
+            self.assertTrue(
+                set_stream.call_args_list == [call(s) for s in streams[: index + 1]]
+            )
+            if index == fail_at:
+                raise RuntimeError("callback failed")
+
+        with (
+            patch("torch.cuda.current_stream", return_value=caller) as current,
+            patch("torch.cuda.Event", side_effect=[*events, start]),
+            patch("torch.cuda.set_stream") as set_stream,
+            patch(
+                "torch.cuda.stream",
+                side_effect=AssertionError("unexpected stream context manager"),
+            ),
+            patch(
+                "torch.cuda.synchronize",
+                side_effect=AssertionError("unexpected host synchronization"),
+            ),
+        ):
+            if fail_at is not None and fail_at < len(streams):
+                with self.assertRaisesRegex(RuntimeError, "callback failed"):
+                    execute_in_green_contexts(streams, compute)
+            else:
+                execute_in_green_contexts(streams, compute)
+
+        count = len(streams) if fail_at is None else min(fail_at + 1, len(streams))
+        self.assertEqual(visited, list(range(count)))
+        current.assert_called_once_with()
+        self.assertTrue(
+            set_stream.call_args_list == [call(s) for s in [*streams[:count], caller]]
+        )
+        start.record.assert_called_once_with(caller)
+        self.assertTrue(
+            caller.wait_event.call_args_list == [call(e) for e in events[:count]]
+        )
+        for index, (stream, event) in enumerate(zip(streams, events)):
+            if index < count:
+                stream.wait_event.assert_called_once_with(start)
+                event.record.assert_called_once_with(stream)
+            else:
+                stream.wait_event.assert_not_called()
+                event.record.assert_not_called()
+            event.synchronize.assert_not_called()
+
+
+instantiate_parametrized_tests(TestGreenContextExecution)
+
+
+class TestLocalizedMemPool(TestCase):
+    @parametrize("no_split", [False, True])
+    @serialTest()
+    def test_localized_allocation(self, device: str, no_split: bool) -> None:
+        from torch.cuda.green_contexts import (
+            get_num_locality_domains,
+            is_localization_supported,
+        )
+
+        torch.cuda.init()
+        device_id = torch.device(device).index
+        if not is_localization_supported(device_id):
+            self.skipTest("requires CUDA 13.4 and a multi-domain GPU")
+        if torch.cuda.get_allocator_backend() != "native":
+            self.skipTest("requires the native caching allocator")
+        for domain in range(get_num_locality_domains(device_id)):
+            pool = torch.cuda.LocalizedMemPool(domain, device=device, no_split=no_split)
+            self.assertEqual(pool.device_id, device_id)
+            self.assertEqual(pool.locality_domain_id, domain)
+            with torch.cuda.use_mem_pool(pool, device=device):
+                value = torch.full((1024,), 7, device=device)
+            self.assertEqual(value, torch.full_like(value, 7))
+            ptr = value.data_ptr()
+            del value
+            with torch.cuda.use_mem_pool(pool, device=device):
+                reused = torch.empty(1024, device=device)
+            self.assertEqual(reused.data_ptr(), ptr)
+            del reused
+            torch.cuda.current_stream(device).synchronize()
+
+    def test_invalid_locality_domain(self, device: str) -> None:
+        from torch.cuda.green_contexts import (
+            get_num_locality_domains,
+            is_localization_supported,
+        )
+
+        torch.cuda.init()
+        device_id = torch.device(device).index
+        if not is_localization_supported(device_id):
+            self.skipTest("requires CUDA 13.4 and a multi-domain GPU")
+        for domain in (-1, get_num_locality_domains(device_id)):
+            with self.assertRaisesRegex(ValueError, "Invalid locality_domain_id"):
+                torch.cuda.LocalizedMemPool(domain, device=device)
+
+
+class TestLocalizedMemPoolAllocator(TestCase):
+    def test_initialization_before_support_check(self) -> None:
+        from torch.cuda import memory
+
+        order = []
+        with (
+            patch.object(
+                memory, "_lazy_init", side_effect=lambda: order.append("init")
+            ),
+            patch.object(memory, "_get_device_index", return_value=0),
+            patch.object(
+                memory,
+                "is_localization_supported",
+                side_effect=lambda device: order.append("query") or True,
+            ),
+            patch.object(memory, "get_num_locality_domains", return_value=2),
+        ):
+            allocator = memory._DomainLocalityAllocator(1, 0)
+        self.assertEqual(order, ["init", "query"])
+        self.assertEqual(allocator.locality_domain_id, 1)
+
+    @parametrize(
+        "fail_at",
+        [None, "cuMemCreate", "cuMemAddressReserve", "cuMemMap", "cuMemSetAccess"],
+    )
+    def test_allocation_cleanup(self, fail_at: str | None) -> None:
+        from torch.cuda import memory
+
+        allocator = object.__new__(memory._DomainLocalityAllocator)
+        allocator.device_id = 0
+        allocator.locality_domain_id = 1
+        allocator._records = {}
+        with (
+            patch.object(memory, "_drv") as driver,
+            patch.object(
+                memory, "_check_cuda_bindings", side_effect=lambda result: result
+            ),
+        ):
+            driver.cuMemGetAllocationGranularity.return_value = 64
+            driver.cuMemCreate.return_value = 11
+            driver.cuMemAddressReserve.return_value = 1024
+            if fail_at is not None:
+                getattr(driver, fail_at).side_effect = RuntimeError("allocation failed")
+                with self.assertRaisesRegex(RuntimeError, "allocation failed"):
+                    allocator.allocate(65, 0, None)
+                self.assertEqual(allocator._records, {})
+                unmap = fail_at == "cuMemSetAccess"
+                address_free = fail_at in ("cuMemMap", "cuMemSetAccess")
+                release = fail_at != "cuMemCreate"
+            else:
+                self.assertEqual(allocator.allocate(65, 0, None), 1024)
+                prop = driver.cuMemCreate.call_args.args[1]
+                self.assertEqual(prop.location.localized.deviceId, 0)
+                self.assertEqual(prop.location.localized.localityDomainId, 1)
+                self.assertEqual(allocator._records, {1024: (128, 11)})
+                allocator.free(1024)
+                self.assertEqual(allocator._records, {})
+                unmap = address_free = release = True
+            if unmap:
+                driver.cuMemUnmap.assert_called_once_with(1024, 128)
+            else:
+                driver.cuMemUnmap.assert_not_called()
+            if address_free:
+                driver.cuMemAddressFree.assert_called_once_with(1024, 128)
+            else:
+                driver.cuMemAddressFree.assert_not_called()
+            if release:
+                driver.cuMemRelease.assert_called_once_with(11)
+            else:
+                driver.cuMemRelease.assert_not_called()
+
+    def test_wrong_device_and_empty_allocation(self) -> None:
+        from torch.cuda import memory
+
+        allocator = object.__new__(memory._DomainLocalityAllocator)
+        allocator.device_id = 0
+        with patch.object(memory, "_drv") as driver:
+            self.assertEqual(allocator.allocate(0, 0, None), 0)
+            with self.assertRaisesRegex(RuntimeError, "Device mismatch"):
+                allocator.allocate(64, 1, None)
+            driver.cuMemCreate.assert_not_called()
+
+
+instantiate_parametrized_tests(TestLocalizedMemPoolAllocator)
+instantiate_device_type_tests(TestLocalizedMemPool, globals(), only_for="cuda")
+
+
+class TestGreenContextStreamPool(TestCase):
+    def test_failed_stream_creation(self) -> None:
+        from torch.cuda import green_contexts
+
+        ctx = object.__new__(green_contexts.GreenContext)
+        ctx._init_from_cuda_objects(0, 1, 1)
+        try:
+            with (
+                patch.object(green_contexts, "_drv") as driver,
+                patch.object(
+                    green_contexts, "_check_cuda_bindings", side_effect=lambda x: x
+                ),
+                patch(
+                    "torch.cuda.ExternalStream",
+                    side_effect=lambda stream, device: stream,
+                ),
+            ):
+                driver.cuGreenCtxStreamCreate.side_effect = [
+                    RuntimeError("creation failed"),
+                    10,
+                ]
+                with self.assertRaisesRegex(RuntimeError, "creation failed"):
+                    ctx.Stream()
+                self.assertEqual(ctx._curr_stream_idx, -1)
+                self.assertTrue(
+                    all(stream is None for stream in ctx._green_ctx_streams)
+                )
+                self.assertEqual(ctx.Stream(), 10)
+                self.assertEqual(ctx._curr_stream_idx, 0)
+                self.assertEqual(ctx._green_ctx_streams[0], 10)
+        finally:
+            ctx._green_ctx = None
+
+    @parametrize("fail_first", [False, True])
+    def test_concurrent_stream_pool_initialization(self, fail_first: bool) -> None:
+        from torch.cuda import green_contexts
+
+        ctx = object.__new__(green_contexts.GreenContext)
+        ctx._init_from_cuda_objects(0, 1, 1)
+        creating = threading.Event()
+        release = threading.Event()
+        requesting = threading.Event()
+        created = []
+        pool_size = green_contexts._STREAMS_PER_GREEN_CONTEXT_POOL
+
+        def create_stream(*args) -> int:
+            handle = len(created) + 1
+            created.append(handle)
+            if handle == 1:
+                creating.set()
+                if not release.wait(10):
+                    raise RuntimeError("timed out waiting to publish the first stream")
+                if fail_first:
+                    raise RuntimeError("creation failed")
+            return handle
+
+        def wrap_pool() -> list[torch.cuda.Stream]:
+            requesting.set()
+            return [ctx.Stream() for _ in range(pool_size + 1)]
+
+        try:
+            with (
+                patch.object(green_contexts, "_drv") as driver,
+                patch.object(
+                    green_contexts, "_check_cuda_bindings", side_effect=lambda x: x
+                ),
+                patch(
+                    "torch.cuda.ExternalStream",
+                    side_effect=lambda stream, device: stream,
+                ),
+                ThreadPoolExecutor(max_workers=2) as executor,
+            ):
+                driver.cuGreenCtxStreamCreate.side_effect = create_stream
+                first = executor.submit(ctx.Stream)
+                try:
+                    self.assertTrue(creating.wait(10))
+                    rest = executor.submit(wrap_pool)
+                    self.assertTrue(requesting.wait(10))
+                    with self.assertRaises(TimeoutError):
+                        rest.result(timeout=0.1)
+                finally:
+                    release.set()
+                if fail_first:
+                    with self.assertRaisesRegex(RuntimeError, "creation failed"):
+                        first.result(timeout=10)
+                    expected = list(range(2, pool_size + 2)) + [2]
+                else:
+                    self.assertEqual(first.result(timeout=10), 1)
+                    expected = list(range(2, pool_size + 1)) + [1, 2]
+                self.assertEqual(rest.result(timeout=10), expected)
+                self.assertEqual(created, list(range(1, pool_size + 1 + fail_first)))
+                self.assertTrue(
+                    all(stream is not None for stream in ctx._green_ctx_streams)
+                )
+        finally:
+            ctx._green_ctx = None
+
+
+instantiate_parametrized_tests(TestGreenContextStreamPool)
 
 
 class TestCudaArchList(TestCase):

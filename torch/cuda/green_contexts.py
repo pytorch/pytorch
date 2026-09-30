@@ -3,8 +3,9 @@ from __future__ import annotations
 import functools
 import os
 import sys
+import threading
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from ctypes import byref, c_int
 from typing import Any
 from typing_extensions import deprecated
@@ -24,6 +25,7 @@ from torch.cuda._utils import (
 __all__ = [
     "GreenContext",
     "SMPartition",
+    "execute_in_green_contexts",
     "get_num_locality_domains",
     "is_localization_supported",
 ]
@@ -685,6 +687,7 @@ class GreenContext:
             None
         ] * _STREAMS_PER_GREEN_CONTEXT_POOL
         self._curr_stream_idx = -1
+        self._stream_lock = threading.Lock()
         self._green_ctx = green_ctx
 
     @staticmethod
@@ -881,22 +884,85 @@ class GreenContext:
 
         Use the returned stream with :func:`torch.cuda.stream` to run work on
         the green context. Synchronization with other streams is not automatic;
-        use CUDA events as with any other custom stream.
+        use CUDA events as with any other custom stream. Calls from multiple
+        threads safely share a bounded pool, but streams are reused rather than
+        exclusively leased to a caller.
         """
         self._ensure_alive()
-        curr_idx = self._curr_stream_idx + 1
-        idx = curr_idx % _STREAMS_PER_GREEN_CONTEXT_POOL
-        if curr_idx < _STREAMS_PER_GREEN_CONTEXT_POOL:
-            green_ctx_stream = _check_cuda_bindings(
-                _drv.cuGreenCtxStreamCreate(  # pyrefly: ignore [missing-attribute]
-                    self._green_ctx,
-                    _drv.CUstream_flags.CU_STREAM_NON_BLOCKING,  # pyrefly: ignore [missing-attribute]
-                    0,
+        with self._stream_lock:
+            curr_idx = self._curr_stream_idx + 1
+            idx = curr_idx % _STREAMS_PER_GREEN_CONTEXT_POOL
+            if curr_idx < _STREAMS_PER_GREEN_CONTEXT_POOL:
+                green_ctx_stream = _check_cuda_bindings(
+                    _drv.cuGreenCtxStreamCreate(  # pyrefly: ignore [missing-attribute]
+                        self._green_ctx,
+                        _drv.CUstream_flags.CU_STREAM_NON_BLOCKING,  # pyrefly: ignore [missing-attribute]
+                        0,
+                    )
                 )
-            )
-            self._green_ctx_streams[idx] = green_ctx_stream
-        else:
-            green_ctx_stream = self._green_ctx_streams[idx]
-        self._curr_stream_idx = curr_idx
+                self._green_ctx_streams[idx] = green_ctx_stream
+            else:
+                green_ctx_stream = self._green_ctx_streams[idx]
+            self._curr_stream_idx = curr_idx
         # pyrefly: ignore [bad-argument-type]
         return torch.cuda.ExternalStream(int(green_ctx_stream), self._device_id)
+
+
+def execute_in_green_contexts(
+    green_ctx_streams: Sequence[torch.cuda.Stream],
+    fn: Callable[[int], None],
+) -> None:
+    r"""Enqueue a callback on each stream and join its work to the caller stream.
+
+    Calls ``fn(index)`` in order with the corresponding stream made current.
+    Python callbacks run sequentially; their CUDA work may execute concurrently.
+    Each stream waits for work previously submitted to the caller's current
+    stream. Subsequent work on the caller stream waits for every callback's
+    queued work, including work queued before a callback raises. These waits
+    are asynchronous and do not synchronize the host.
+
+    The caller's current stream and device are restored on success or failure.
+    After a callback raises, remaining callbacks are not invoked. Callbacks
+    must enqueue their work on the supplied stream or join other work to it.
+    Keep the owning green contexts and tensors alive until their work completes;
+    normal cross-stream tensor lifetime rules still apply. Streams may belong
+    to different devices. A single stream has the same fork/join semantics.
+
+    Args:
+        green_ctx_streams: Nonempty sequence of streams from green contexts.
+        fn: Callback receiving the index of the current stream.
+    """
+    if not green_ctx_streams:
+        raise ValueError("Need at least one green context stream to execute in")
+
+    caller_stream = torch.cuda.current_stream()
+    events = [torch.cuda.Event() for _ in green_ctx_streams]
+    start = torch.cuda.Event()
+    start.record(caller_stream)
+    completed = 0
+    try:
+        if all(stream.device == caller_stream.device for stream in green_ctx_streams):
+            # Restoring the caller stream between launches increases launch skew.
+            try:
+                for index, (stream, done) in enumerate(zip(green_ctx_streams, events)):
+                    torch.cuda.set_stream(stream)
+                    stream.wait_event(start)
+                    try:
+                        fn(index)
+                    finally:
+                        done.record(stream)
+                        completed += 1
+            finally:
+                torch.cuda.set_stream(caller_stream)
+        else:
+            for index, (stream, done) in enumerate(zip(green_ctx_streams, events)):
+                with torch.cuda.stream(stream):
+                    stream.wait_event(start)
+                    try:
+                        fn(index)
+                    finally:
+                        done.record(stream)
+                        completed += 1
+    finally:
+        for done in events[:completed]:
+            caller_stream.wait_event(done)
