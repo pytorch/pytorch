@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
-    OpDTypes, onlyCPU, onlyNativeDeviceTypes, expectedFailureMeta, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
+    OpDTypes, onlyCPU, onlyNativeDeviceTypes, expectedFailureMeta, expectedFailureXPU, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
     dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
     precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
@@ -1498,6 +1498,14 @@ class TestReductions(TestCase):
             result = torch.prod(torch.tensor(val, device=device)).item()
             expect = np.prod(np.array(val))
             self.assertEqual(result, expect)
+
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32)
+    def test_prod_integer_accumulates_in_int64(self, device, dtype):
+        # 5**14 overflows int32 and float32's 24-bit mantissa; 200 elements spread the reduction over several simdgroups
+        x = torch.ones(2, 200, dtype=dtype, device=device)
+        x[:, :14] = 5
+        self.assertEqual(x[0].prod(), 5 ** 14)
+        self.assertEqual(x.prod(1), torch.full((2,), 5 ** 14, device=device))
 
     @onlyAccelerator
     @skipIfMPS
@@ -3347,6 +3355,30 @@ class TestReductions(TestCase):
 
         linear = torch.linspace(0, 0.99 - 5.0e-7, 101).to(device)
         test_against_np(linear, bins=20, min=0, max=0.99)
+
+    @dtypes(torch.float32, torch.float64)
+    @dtypesIfMPS(torch.float32)  # MPS cannot allocate float64 tensors
+    @expectedFailureXPU  # XPU _histc_out_xpu (out-of-tree) does not enforce dtype check yet
+    def test_histc_out_dtype(self, device, dtype):
+        x = torch.randn(8, dtype=dtype, device=device)
+        # Mismatched out dtype should raise
+        out_wrong = torch.empty(4, dtype=torch.int64, device=device)
+        msg = "torch.histogram: input tensor and hist tensor should have the same dtype"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            torch.histc(x, bins=4, min=-2.0, max=2.0, out=out_wrong)
+        # Safe widening (float32 in, float64 out) should also raise — histc
+        # enforces exact dtype equality, matching CPU behaviour. This is
+        # skipped on MPS, which cannot allocate a float64 tensor at all.
+        if dtype == torch.float32 and self.device_type != "mps":
+            out_wide = torch.empty(4, dtype=torch.float64, device=device)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                torch.histc(x, bins=4, min=-2.0, max=2.0, out=out_wide)
+        # Matching dtype should succeed and write in-place
+        out_ok = torch.empty(4, dtype=dtype, device=device)
+        h = torch.histc(x, bins=4, min=-2.0, max=2.0, out=out_ok)
+        self.assertEqual(h.data_ptr(), out_ok.data_ptr())
+        expected = torch.histc(x, bins=4, min=-2.0, max=2.0)
+        self.assertEqual(out_ok, expected)
 
     @dtypes(torch.uint8, torch.int8, torch.int, torch.long, torch.float, torch.double)
     @skipIfMPS
