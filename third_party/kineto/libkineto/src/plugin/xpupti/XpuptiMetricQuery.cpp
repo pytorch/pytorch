@@ -10,6 +10,7 @@
 
 #include "ThrowUtil.h"
 #include "XpuptiProfilerMacros.h"
+#include "XpuptiScopeProfilerApi.h"
 
 #include <cstring>
 #include <memory>
@@ -80,17 +81,14 @@ inline std::string metricValueTypeToString(pti_metric_value_type type) {
 
 std::vector<XpuMetricGroupInfo> xpuptiAvailableMetrics(
     const XpuDeviceUuid& deviceUuid) {
-  uint32_t deviceCount = 0;
-  XPUPTI_CALL(ptiMetricsGetDevices(nullptr, &deviceCount), kMetricsHint);
-  auto devices = std::make_unique<pti_device_properties_t[]>(deviceCount);
-  XPUPTI_CALL(ptiMetricsGetDevices(devices.get(), &deviceCount), kMetricsHint);
+  const auto devices = getMetricsDevices(kMetricsHint);
 
   // PTI device order is not guaranteed to match torch.xpu device indices.
   const pti_device_properties_t* device = nullptr;
-  for (uint32_t i = 0; i < deviceCount; ++i) {
-    if (std::memcmp(devices[i]._uuid, deviceUuid.data(), deviceUuid.size()) ==
+  for (const auto& candidate : devices) {
+    if (std::memcmp(candidate._uuid, deviceUuid.data(), deviceUuid.size()) ==
         0) {
-      device = &devices[i];
+      device = &candidate;
       break;
     }
   }
@@ -100,7 +98,7 @@ std::vector<XpuMetricGroupInfo> xpuptiAvailableMetrics(
         fmt::format(
             "The requested XPU device does not support metrics collection "
             "(PTI reports {} metrics-capable device(s))",
-            deviceCount));
+            devices.size()));
   }
 
   uint32_t groupCount = 0;
