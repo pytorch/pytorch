@@ -838,7 +838,11 @@ class MetalKernel(SIMDKernel):
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
         if reduction_type in ["argmin", "argmax"]:
-            data_acc_buf = self._new_idxvar(src_dtype, shmem_buf_size)
+            # Metal compiler miscompiles the bf16 simd argmax/argmin for some reduction
+            # sizes (wrong indices), so combine bf16 partials in fp32. Not done for fp16,
+            # where it is correct and fp32 partials make the kernel up to 4x slower.
+            acc_dtype = torch.float32 if src_dtype == torch.bfloat16 else src_dtype
+            data_acc_buf = self._new_idxvar(acc_dtype, shmem_buf_size)
             idx_acc_buf = self._new_idxvar(dtype, shmem_buf_size)
             src_metal_type = DTYPE_TO_METAL[src_dtype]
             cast_value = f"static_cast<{src_metal_type}>({value})"
@@ -864,7 +868,7 @@ class MetalKernel(SIMDKernel):
             return self.cse.generate(
                 self.stores,
                 f"c10::metal::threadgroup_{reduction_type}({data_acc_buf}, {idx_acc_buf}, "
-                f"{val}, {idx_val}, {reduction_idx}, {acc_buf_size_str})",
+                f"static_cast<{DTYPE_TO_METAL[acc_dtype]}>({val}), {idx_val}, {reduction_idx}, {acc_buf_size_str})",
                 dtype=dtype,
             )
         if reduction_type == "welford_reduce":
