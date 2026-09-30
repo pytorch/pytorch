@@ -158,7 +158,6 @@ GENERATED_H = [
     "Functions.h",
     "NativeFunctions.h",
     "NativeMetaFunctions.h",
-    "NativeAotStubs.h",
     "FunctionalInverses.h",
     "RedispatchFunctions.h",
     "RegistrationDeclarations.h",
@@ -213,7 +212,6 @@ GENERATED_CPP_MTIA = [
 
 GENERATED_CPP = [
     "Functions.cpp",
-    "NativeAotStubs.cpp",
     "RegisterBackendSelect.cpp",
     "RegisterCPU_0.cpp",
     "RegisterCPU_1.cpp",

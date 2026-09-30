@@ -2,6 +2,7 @@
 
 import builtins
 import importlib.util
+import math
 import os
 import sys
 import tempfile
@@ -30,6 +31,7 @@ from torch._inductor.fx_utils import (
 )
 from torch._inductor.utils import (
     _gpu_types,
+    _infer_scale_swizzle_impl,
     device_need_guard,
     get_device_tflops,
     get_gpu_type,
@@ -41,12 +43,15 @@ from torch._inductor.utils import (
 )
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.nn.functional import ScalingType, SwizzleType
 from torch.ops import aten
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     TestCase,
     xfailIfNoAcceleratorTriton,
@@ -1488,6 +1493,74 @@ class TestDeviceClassification(TestCase):
         self.assertFalse(device_need_guard("mps"))
         self.assertFalse(is_gpu("cpu"))
         self.assertFalse(is_gpu("cuda:0"))
+
+
+@instantiate_parametrized_tests
+class TestScaleSwizzleInference(TestCase):
+    """`_infer_scale_swizzle_impl` names a scale layout from a scale's shape and count.
+
+    The two ROCm MX layouts hold the same number of scales wherever their
+    paddings coincide, so a tie has to resolve to NO_SWIZZLE: that is what v1
+    `_scaled_mm` and every pre-gfx950 arch take, and 32x8 callers pass the
+    swizzle explicitly. Runs on any host; the gfx950 probe is mocked.
+
+    Unswizzled scales keep the (rows, k_blocks) shape they are computed in;
+    `to_blocked` hands back the 32x8 buffer flattened.
+    """
+
+    def _infer(self, mat_size, scale_size, mat_dtype, prefers_32_8):
+        with (
+            mock.patch.object(torch.version, "hip", "7.14.0"),
+            mock.patch(
+                "torch._inductor.utils._prefers_swizzle_32_8",
+                return_value=prefers_32_8,
+            ),
+        ):
+            return _infer_scale_swizzle_impl(
+                mat_size=mat_size,
+                scale_size=scale_size,
+                scale_numel=math.prod(scale_size),
+                mat_dtype=mat_dtype,
+                scale_dtype=torch.float8_e8m0fnu,
+                eq_fn=lambda a, b: a == b,
+            )
+
+    # fp4 packs two values per element, so its mat sizes are half of fp8's for
+    # the same K in elements.
+    @parametrize("mat_dtype", [torch.float8_e4m3fn, torch.float4_e2m1fn_x2])
+    def test_mx_layout_tie_is_no_swizzle(self, mat_dtype):
+        packed = mat_dtype == torch.float4_e2m1fn_x2
+        # K in elements = 256, where both layouts hold 1024 scales, so neither
+        # shape a caller can arrive with is enough to pick 32x8.
+        mat_size = (128, 128 if packed else 256)
+        for scale_size in [(128, 8), (1024,)]:
+            with self.subTest(scale_size=scale_size):
+                self.assertEqual(
+                    self._infer(mat_size, scale_size, mat_dtype, prefers_32_8=True),
+                    (ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE),
+                )
+
+    @parametrize("mat_dtype", [torch.float8_e4m3fn, torch.float4_e2m1fn_x2])
+    def test_mx_32_8_inferred_when_counts_differ(self, mat_dtype):
+        packed = mat_dtype == torch.float4_e2m1fn_x2
+        # K in elements = 128: 512 scales unswizzled, 1024 in the 32x8 layout.
+        mat_size = (128, 64 if packed else 128)
+        self.assertEqual(
+            self._infer(mat_size, (128, 4), mat_dtype, prefers_32_8=True),
+            (ScalingType.BlockWise1x32, SwizzleType.NO_SWIZZLE),
+        )
+        self.assertEqual(
+            self._infer(mat_size, (1024,), mat_dtype, prefers_32_8=True),
+            (ScalingType.BlockWise1x32, SwizzleType.SWIZZLE_32_8),
+        )
+
+    @parametrize("mat_dtype", [torch.float8_e4m3fn, torch.float4_e2m1fn_x2])
+    def test_mx_32_8_count_is_no_layout_off_gfx950(self, mat_dtype):
+        packed = mat_dtype == torch.float4_e2m1fn_x2
+        mat_size = (128, 64 if packed else 128)
+        self.assertEqual(
+            self._infer(mat_size, (1024,), mat_dtype, prefers_32_8=False), (None, None)
+        )
 
 
 if __name__ == "__main__":
