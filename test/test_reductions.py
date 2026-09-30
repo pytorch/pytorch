@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
-    OpDTypes, onlyCPU, onlyNativeDeviceTypes, expectedFailureMeta, expectedFailureXPU, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
+    OpDTypes, onlyCPU, onlyNativeDeviceTypes, expectedFailureMeta, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
     dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
     precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
@@ -3393,7 +3393,6 @@ class TestReductions(TestCase):
 
     @dtypes(torch.float32, torch.float64)
     @dtypesIfMPS(torch.float32)  # MPS cannot allocate float64 tensors
-    @expectedFailureXPU  # XPU _histc_out_xpu (out-of-tree) does not enforce dtype check yet
     def test_histc_out_dtype(self, device, dtype):
         x = torch.randn(8, dtype=dtype, device=device)
         # Mismatched out dtype should raise
