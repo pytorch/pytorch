@@ -518,7 +518,7 @@ void logInvariantViolation(
 
 #ifdef USE_KINETO
 std::vector<libkineto::XpuMetricGroupInfo> xpuAvailableMetrics(
-    const std::array<uint8_t, 16>& deviceUuid) {
+    const libkineto::XpuDeviceUuid& deviceUuid) {
 #ifdef HAS_XPUPTI
   return libkineto::xpuptiAvailableMetrics(deviceUuid);
 #else

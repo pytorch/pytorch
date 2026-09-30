@@ -9,11 +9,15 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 namespace libkineto {
+
+constexpr std::size_t kXpuDeviceUuidSize = 16;
+using XpuDeviceUuid = std::array<uint8_t, kXpuDeviceUuidSize>;
 
 struct XpuMetricInfo {
   std::string name;
@@ -31,6 +35,6 @@ struct XpuMetricGroupInfo {
 };
 
 std::vector<XpuMetricGroupInfo> xpuptiAvailableMetrics(
-    const std::array<uint8_t, 16>& deviceUuid);
+    const XpuDeviceUuid& deviceUuid);
 
 } // namespace libkineto
