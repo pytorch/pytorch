@@ -589,6 +589,43 @@ it does not poison subsequent forks.
 Actual splitting and context creation always use CUDA, independently of this
 capability check.
 
+### Fork/join execution
+
+`execute_in_green_contexts` runs a Python callback for each supplied stream,
+passing its index. Callbacks run sequentially on the host, but their CUDA work
+can run concurrently. Every stream waits for work already queued on the caller's
+current stream, and subsequent work on the caller stream waits for the callbacks.
+This also applies to a single stream and to work queued before a callback raises.
+When all supplied streams are on the caller's device, the helper switches
+directly between them and restores the caller stream once at the end to reduce
+launch skew. Cross-device execution uses `torch.cuda.stream` to restore the
+per-device stream state. Neither path synchronizes the host. After an exception,
+remaining callbacks are not invoked.
+
+```python
+from torch.cuda.green_contexts import execute_in_green_contexts
+
+contexts = GreenContext.split(num_sms=(24, 24), device_id=0)
+streams = [ctx.Stream() for ctx in contexts]
+inputs = [torch.randn(1024, device="cuda:0") for _ in streams]
+outputs = [torch.empty_like(x) for x in inputs]
+
+def compute(index: int) -> None:
+    torch.mul(inputs[index], 2, out=outputs[index])
+
+with torch.cuda.device(0):
+    execute_in_green_contexts(streams, compute)
+    result = outputs[0] + outputs[1]
+    torch.cuda.current_stream().synchronize()
+```
+
+Keep the owning green contexts and tensors alive until their work completes.
+The usual cross-stream tensor lifetime rules still apply. Callbacks must enqueue
+work on the supplied stream, or explicitly join any other streams they use.
+Streams on different devices are supported; the caller stream is the fork/join
+point, not every device's current stream.
+
+
 ### Localized memory pools
 
 With CUDA driver and cuda.bindings 13.4+, `LocalizedMemPool` allocates physical
@@ -620,6 +657,7 @@ thread are redirected.
 
     GreenContext
     SMPartition
+    execute_in_green_contexts
     get_num_locality_domains
     is_localization_supported
 ```

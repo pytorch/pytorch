@@ -21,7 +21,7 @@ from collections import defaultdict
 from copy import deepcopy
 from itertools import product
 from random import randint
-from unittest.mock import patch
+from unittest.mock import call, Mock, patch
 
 import psutil
 
@@ -12962,6 +12962,169 @@ finally:
         limited_time = t3 - t2
 
         self.assertGreater(limited_time, baseline_time)
+
+    @parametrize("num_streams, fail_at", [(1, None), (2, None), (1, 0), (2, 0), (2, 1)])
+    @serialTest()
+    def test_execute_in_green_contexts(
+        self, device: str, num_streams: int, fail_at: int | None
+    ) -> None:
+        from torch.cuda.green_contexts import execute_in_green_contexts, GreenContext
+
+        device_index = torch.device(device).index
+        contexts = [
+            GreenContext(num_sms=1, device_id=device_index) for _ in range(num_streams)
+        ]
+        streams = [ctx.Stream() for ctx in contexts]
+        caller = torch.cuda.Stream(device=device)
+        source = torch.zeros(1024, device=device)
+        outputs = [torch.zeros_like(source) for _ in streams]
+        observed = [torch.zeros_like(source) for _ in streams]
+        torch.cuda._sleep(1)
+        torch.cuda.synchronize(device)
+        visited = []
+        original_stream = torch.cuda.current_stream(device)
+        original_device = torch.cuda.current_device()
+
+        def compute(index: int) -> None:
+            self.assertEqual(torch.cuda.current_stream(), streams[index])
+            visited.append(index)
+            torch.cuda._sleep(20_000_000)
+            outputs[index].copy_(source)
+            if index == fail_at:
+                raise RuntimeError("callback failed")
+
+        with torch.cuda.stream(caller):
+            torch.cuda._sleep(20_000_000)
+            source.fill_(7)
+            if fail_at is None:
+                execute_in_green_contexts(streams, compute)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "callback failed"):
+                    execute_in_green_contexts(streams, compute)
+            self.assertEqual(torch.cuda.current_stream(), caller)
+            for dst, src in zip(observed, outputs):
+                dst.copy_(src)
+
+        caller.synchronize()
+        count = num_streams if fail_at is None else fail_at + 1
+        self.assertEqual(visited, list(range(count)))
+        for index, value in enumerate(observed):
+            self.assertEqual(value, torch.full_like(value, 7 if index < count else 0))
+        self.assertEqual(torch.cuda.current_stream(device), original_stream)
+        self.assertEqual(torch.cuda.current_device(), original_device)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple GPUs")
+    @parametrize("fail_at", [None, 0, 1])
+    @serialTest()
+    def test_execute_in_green_contexts_multiple_devices(
+        self, device: str, fail_at: int | None
+    ) -> None:
+        from torch.cuda.green_contexts import execute_in_green_contexts, GreenContext
+
+        contexts = [GreenContext(num_sms=1, device_id=index) for index in range(2)]
+        streams = [ctx.Stream() for ctx in contexts]
+        original_device = torch.cuda.current_device()
+        original_streams = [torch.cuda.current_stream(index) for index in range(2)]
+        caller = torch.cuda.Stream(device=device)
+        completed = []
+
+        def compute(index: int) -> None:
+            self.assertEqual(torch.cuda.current_device(), index)
+            self.assertEqual(torch.cuda.current_stream(), streams[index])
+            torch.cuda._sleep(20_000_000)
+            event = torch.cuda.Event()
+            event.record()
+            completed.append(event)
+            if index == fail_at:
+                raise RuntimeError("callback failed")
+
+        with torch.cuda.stream(caller):
+            if fail_at is None:
+                execute_in_green_contexts(streams, compute)
+            else:
+                with self.assertRaisesRegex(RuntimeError, "callback failed"):
+                    execute_in_green_contexts(streams, compute)
+            self.assertEqual(torch.cuda.current_stream(), caller)
+            self.assertEqual(torch.cuda.current_device(), caller.device.index)
+        caller.synchronize()
+        self.assertEqual(len(completed), 2 if fail_at is None else fail_at + 1)
+        self.assertTrue(all(event.query() for event in completed))
+        self.assertEqual(torch.cuda.current_device(), original_device)
+        for index, stream in enumerate(original_streams):
+            self.assertEqual(torch.cuda.current_stream(index), stream)
+
+
+class TestGreenContextExecution(TestCase):
+    def test_empty_execution_streams(self) -> None:
+        from torch.cuda.green_contexts import execute_in_green_contexts
+
+        with patch("torch.cuda.current_stream") as current_stream:
+            with self.assertRaisesRegex(ValueError, "at least one"):
+                execute_in_green_contexts([], lambda index: None)
+            current_stream.assert_not_called()
+
+    @parametrize("num_streams", [1, 2, 3])
+    @parametrize("fail_at", [None, 0, 1])
+    def test_direct_stream_switching(
+        self, num_streams: int, fail_at: int | None
+    ) -> None:
+        from torch.cuda.green_contexts import execute_in_green_contexts
+
+        device = torch.device("cuda", 0)
+        streams = [Mock(device=device) for _ in range(num_streams)]
+        caller = Mock(device=device)
+        events = [Mock() for _ in streams]
+        start = Mock()
+        visited = []
+
+        def compute(index: int) -> None:
+            visited.append(index)
+            self.assertTrue(
+                set_stream.call_args_list == [call(s) for s in streams[: index + 1]]
+            )
+            if index == fail_at:
+                raise RuntimeError("callback failed")
+
+        with (
+            patch("torch.cuda.current_stream", return_value=caller) as current,
+            patch("torch.cuda.Event", side_effect=[*events, start]),
+            patch("torch.cuda.set_stream") as set_stream,
+            patch(
+                "torch.cuda.stream",
+                side_effect=AssertionError("unexpected stream context manager"),
+            ),
+            patch(
+                "torch.cuda.synchronize",
+                side_effect=AssertionError("unexpected host synchronization"),
+            ),
+        ):
+            if fail_at is not None and fail_at < len(streams):
+                with self.assertRaisesRegex(RuntimeError, "callback failed"):
+                    execute_in_green_contexts(streams, compute)
+            else:
+                execute_in_green_contexts(streams, compute)
+
+        count = len(streams) if fail_at is None else min(fail_at + 1, len(streams))
+        self.assertEqual(visited, list(range(count)))
+        current.assert_called_once_with()
+        self.assertTrue(
+            set_stream.call_args_list == [call(s) for s in [*streams[:count], caller]]
+        )
+        start.record.assert_called_once_with(caller)
+        self.assertTrue(
+            caller.wait_event.call_args_list == [call(e) for e in events[:count]]
+        )
+        for index, (stream, event) in enumerate(zip(streams, events)):
+            if index < count:
+                stream.wait_event.assert_called_once_with(start)
+                event.record.assert_called_once_with(stream)
+            else:
+                stream.wait_event.assert_not_called()
+                event.record.assert_not_called()
+            event.synchronize.assert_not_called()
+
+
+instantiate_parametrized_tests(TestGreenContextExecution)
 
 
 class TestLocalizedMemPool(TestCase):
