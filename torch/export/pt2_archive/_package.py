@@ -864,6 +864,8 @@ def _load_payload_config(
 def _load_state_dict(
     archive_reader: PT2ArchiveReader,
     model_name: str,
+    *,
+    weights_only: bool = True,
 ) -> dict[str, torch.Tensor] | bytes:
     # Make it BC compatible with legacy weight files
     legacy_weights_file = f"{WEIGHTS_DIR}{model_name}.pt"
@@ -890,8 +892,10 @@ def _load_state_dict(
                 weight_bytes = archive_reader.read_bytes(
                     os.path.join(WEIGHTS_DIR, payload_meta.path_name)
                 )
+                # weights_only defaults to True. Pass False only for archives
+                # that embed non-tensor pickled weights.
                 state_dict[weight_fqn] = torch.load(
-                    io.BytesIO(weight_bytes), weights_only=False
+                    io.BytesIO(weight_bytes), weights_only=weights_only
                 )
             else:
                 tensor_meta = payload_meta.tensor_meta
@@ -920,6 +924,8 @@ def _load_state_dict(
 def _load_constants(
     archive_reader: PT2ArchiveReader,
     model_name: str,
+    *,
+    weights_only: bool = True,
 ) -> dict[str, torch.Tensor] | bytes:
     # Make it BC compatible with legacy constant files
     legacy_constants_file = f"{CONSTANTS_DIR}{model_name}.pt"
@@ -949,7 +955,7 @@ def _load_constants(
                         os.path.join(CONSTANTS_DIR, path_name)
                     )
                     constants[constant_fqn] = torch.load(
-                        io.BytesIO(constant_bytes), weights_only=False
+                        io.BytesIO(constant_bytes), weights_only=weights_only
                     )
                 else:
                     tensor_meta = payload_meta.tensor_meta
@@ -968,12 +974,26 @@ def _load_constants(
                     constants[constant_fqn] = constant_tensor
 
             elif path_name.startswith(CUSTOM_OBJ_FILENAME_PREFIX):
+                if weights_only:
+                    raise RuntimeError(
+                        "Refusing to deserialize ScriptObject / custom_obj "
+                        "constants under weights_only=True. Pass "
+                        "weights_only=False to load_pt2 only if you trust the "
+                        ".pt2 source."
+                    )
                 constant_bytes = archive_reader.read_bytes(
                     os.path.join(CONSTANTS_DIR, path_name)
                 )
                 constants[constant_fqn] = torch._C._pickle_load_obj(constant_bytes)
 
             elif path_name.startswith(OPAQUE_OBJ_FILENAME_PREFIX):
+                if weights_only:
+                    raise RuntimeError(
+                        "Refusing to deserialize opaque_obj constants via "
+                        "pickle.loads under weights_only=True. Pass "
+                        "weights_only=False to load_pt2 only if you trust the "
+                        ".pt2 source."
+                    )
                 constant_bytes = archive_reader.read_bytes(
                     os.path.join(CONSTANTS_DIR, path_name)
                 )
@@ -989,6 +1009,8 @@ def _load_exported_programs(
     archive_reader: PT2ArchiveReader,
     file_names: list[str],
     expected_opset_version: dict[str, int] | None,
+    *,
+    weights_only: bool = True,
 ) -> dict[str, ExportedProgram]:
     exported_program_files = [
         file for file in file_names if file.startswith(MODELS_DIR)
@@ -1011,14 +1033,19 @@ def _load_exported_programs(
         serialized_exported_program = _bytes_to_dataclass(
             schema.ExportedProgram, exported_program_bytes
         )
-        state_dict = _load_state_dict(archive_reader, model_name)
-        constants = _load_constants(archive_reader, model_name)
+        state_dict = _load_state_dict(
+            archive_reader, model_name, weights_only=weights_only
+        )
+        constants = _load_constants(
+            archive_reader, model_name, weights_only=weights_only
+        )
 
         ep = ExportedProgramDeserializer(expected_opset_version).deserialize(
             serialized_exported_program,
             state_dict,
             constants,
             serialized_sample_inputs,
+            weights_only=weights_only,
         )
 
         exported_programs[model_name] = ep
@@ -1090,6 +1117,7 @@ def load_pt2(
     device_index: int = -1,
     load_weights_from_disk: bool = False,
     use_stream_affinity: bool = False,
+    weights_only: bool = True,
 ) -> PT2ArchiveContents:  # type: ignore[type-arg]
     """
     Loads all the artifacts previously saved with ``package_pt2``.
@@ -1115,6 +1143,11 @@ def load_pt2(
         use_stream_affinity (bool): Whether each non-null device stream should
             retain a stable model instance. This is intended for controlled
             multi-stream benchmarking and can reduce host-side pipelining.
+
+        weights_only (bool): If True (default), refuse opaque/custom pickle
+            constants and load pickled weight/constant tensors with
+            ``torch.load(..., weights_only=True)``. Set False only for trusted
+            ``.pt2`` sources that embed non-tensor pickled payloads.
 
     Returns:
         A ``PT2ArchiveContents`` object which contains all the objects in the PT2.
@@ -1150,7 +1183,10 @@ def load_pt2(
         file_names = archive_reader.get_file_names()
 
         exported_programs = _load_exported_programs(
-            archive_reader, file_names, expected_opset_version
+            archive_reader,
+            file_names,
+            expected_opset_version,
+            weights_only=weights_only,
         )
         extra_files = _load_extra_files(archive_reader, file_names)
 
@@ -1176,7 +1212,9 @@ def load_pt2(
                     len(WEIGHTS_DIR) :
                 ]  # remove data/weights/ prefix
                 weight_bytes = archive_reader.read_bytes(file)
-                loaded_weight = torch.load(io.BytesIO(weight_bytes))
+                loaded_weight = torch.load(
+                    io.BytesIO(weight_bytes), weights_only=weights_only
+                )
                 weights[weight_file_name] = loaded_weight
 
     if isinstance(f, (io.IOBase, IO)):
