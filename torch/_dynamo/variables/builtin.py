@@ -2107,6 +2107,52 @@ class BuiltinVariable(BaseBuiltinVariable):
         no_keywords(tx, "bytes", kwargs)
         return variables.ConstantVariable.create(b"")
 
+    @staticmethod
+    def _guard_metaclass_globals(tx: "InstructionTranslatorBase", meta: type) -> bool:
+        # The metaclass runs eagerly, so the class it builds is baked into the
+        # graph. Guard every module global its functions (and the functions
+        # those reach) read, so rebinding one recompiles instead of reusing a
+        # stale class. Returns False if some global cannot be sourced.
+        seen_code: set[types.CodeType] = set()
+        guarded: set[tuple[int, str]] = set()
+        pending = [
+            (f.__code__, f.__globals__)
+            for klass in meta.__mro__
+            for v in vars(klass).values()
+            if isinstance(f := getattr(v, "__func__", v), types.FunctionType)
+        ]
+        while pending:
+            code, f_globals = pending.pop()
+            if code in seen_code:
+                continue
+            seen_code.add(code)
+            pending.extend(
+                (c, f_globals) for c in code.co_consts if isinstance(c, types.CodeType)
+            )
+            for inst in dis.get_instructions(code):
+                if inst.opname != "LOAD_GLOBAL" or inst.argval not in f_globals:
+                    continue
+                name = inst.argval
+                if (id(f_globals), name) in guarded:
+                    continue
+                guarded.add((id(f_globals), name))
+                if tx.output.global_scope is f_globals:
+                    source: Source = GlobalSource(name)
+                else:
+                    module_name = f_globals.get("__name__")
+                    module = sys.modules.get(module_name)  # type: ignore[arg-type]
+                    if module is None or module.__dict__ is not f_globals:
+                        return False
+                    source = AttrSource(tx.import_source(module_name), name)
+                value = f_globals[name]
+                if variables.ConstantVariable.is_literal(value):
+                    install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
+                else:
+                    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+                if isinstance(value, types.FunctionType):
+                    pending.append((value.__code__, value.__globals__))
+        return True
+
     def call___build_class__(self, tx, *args, **kwargs):
         def fail(args, kwargs, *, skip_frame=False) -> NoReturn:
             unimplemented(
@@ -2157,14 +2203,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                 for name, cell in zip(f.__code__.co_freevars, f.__closure__ or ())
             ):
                 fail(args, kwargs, skip_frame=True)
-            if isinstance(meta, type) and any(
-                instruction.opname == "LOAD_GLOBAL"
-                and instruction.argval in f.__globals__
-                for klass in meta.__mro__
-                for v in vars(klass).values()
-                if isinstance(f := getattr(v, "__func__", v), types.FunctionType)
-                for instruction in dis.get_instructions(f)
-            ):
+            if isinstance(meta, type) and not self._guard_metaclass_globals(tx, meta):
                 fail(args, kwargs, skip_frame=True)
             try:
                 r = builtins.__build_class__(

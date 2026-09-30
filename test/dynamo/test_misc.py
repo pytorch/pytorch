@@ -17948,26 +17948,37 @@ fn
         class Meta(type):
             def __new__(cls, name, bases, ns):
                 ns["tag"] = _build_class_meta_tag
+                # Read through a helper too: guards must follow the call.
+                ns["scale"] = _build_class_meta_scale()
                 return super().__new__(cls, name, bases, ns)
 
         def fn(t):
             class A(metaclass=Meta):
                 pass
 
-            return t + A.tag
+            return t * A.scale + A.tag
 
         t = torch.ones(1)
         globals()["_build_class_meta_tag"] = 2
+        globals()["_build_class_meta_factor"] = 5
+        globals()["_build_class_meta_scale"] = lambda: _build_class_meta_factor
         try:
-            opt_fn = torch.compile(fn, backend="eager")
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
             self.assertEqual(opt_fn(t), fn(t))
+            self.assertEqual(opt_fn(t), fn(t))
+            self.assertEqual(cnt.frame_count, 1)
+            # Rebinding a global the metaclass read recompiles.
             globals()["_build_class_meta_tag"] = 3
             self.assertEqual(opt_fn(t), fn(t))
-            torch._dynamo.reset()
-            with self.assertRaisesRegex(Unsupported, "__build_class__"):
-                torch.compile(fn, backend="eager", fullgraph=True)(t)
+            self.assertEqual(cnt.frame_count, 2)
+            globals()["_build_class_meta_factor"] = 7
+            self.assertEqual(opt_fn(t), fn(t))
+            self.assertEqual(cnt.frame_count, 3)
         finally:
             del globals()["_build_class_meta_tag"]
+            del globals()["_build_class_meta_factor"]
+            del globals()["_build_class_meta_scale"]
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test___build_class___metaclass_kwargs(self):
@@ -18802,7 +18813,9 @@ assert functorch_config.error_on_custom_op_aliasing is True
         self.assertEqual(
             default_result.returncode,
             0,
-            msg=lambda msg: f"{msg}\nstdout:\n{default_result.stdout}\nstderr:\n{default_result.stderr}",
+            msg=lambda msg: (
+                f"{msg}\nstdout:\n{default_result.stdout}\nstderr:\n{default_result.stderr}"
+            ),
         )
 
         script = """
@@ -18844,7 +18857,9 @@ with torch.library._scoped_library("mylib_ci", "FRAGMENT") as lib:
         self.assertEqual(
             result.returncode,
             0,
-            msg=lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+            msg=lambda msg: (
+                f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+            ),
         )
 
     def test_make_contiguous_strides_for_under_compile(self):
