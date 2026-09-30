@@ -4,11 +4,12 @@
 import itertools
 
 import torch
+import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
 from torch.distributed._local_tensor import LocalTensor, maybe_run_for_local_tensor
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp import fully_shard
+from torch.distributed.fsdp import CPUOffloadPolicy, fully_shard
 from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
@@ -16,6 +17,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._random import (
     is_rng_supported_mesh,
     manual_seed,
@@ -336,6 +338,55 @@ class DistTensorRandomInitTest(DTensorTestBase):
         compute_rankwise_if_local_tensor(weight_local, weight_gather.wait(), self.rank)
 
     @with_comms
+    @skip_unless_torch_gpu
+    def test_fsdp_cpu_offload_init(self):
+        # FSDP2 CPU offload keeps accelerator-mesh DTensors with CPU local
+        # shards, so their random ops draw from the CPU generator.
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        torch.manual_seed(0)
+        with torch.device("meta"):
+            model = torch.nn.Sequential(
+                torch.nn.Linear(8, 2 * self.world_size, bias=False),
+                torch.nn.Linear(8, 2 * self.world_size, bias=False),
+            )
+        fully_shard(model, mesh=mesh, offload_policy=CPUOffloadPolicy())
+        model.to_empty(device="cpu")
+        replicated = DTensor(
+            torch.empty(4, 4),
+            DTensorSpec(
+                mesh,
+                (Replicate(),),
+                TensorMeta(torch.Size([4, 4]), (4, 1), torch.float32),
+            ),
+            requires_grad=False,
+        )
+
+        cpu_rng_state = torch.get_rng_state()
+        for param in model.parameters():
+            torch.nn.init.normal_(param)
+        replicated.normal_()
+        # The global CPU generator is left untouched.
+        self.assertEqual(torch.get_rng_state(), cpu_rng_state)
+
+        w0, w1 = (param.to_local() for param in model.parameters())
+        self.assertEqual(w0.device.type, "cpu")
+        # Each op draws fresh values, so same-shaped params differ.
+        self.assertNotEqual(w0, w1)
+
+        def gather(local_tensor):
+            return funcol.all_gather_single(
+                local_tensor.to(self.device_type), gather_dim=0, group=(mesh, 0)
+            ).chunk(self.world_size)
+
+        # Shards differ across ranks; replicas match.
+        w0_shards = gather(w0)
+        replicas = gather(replicated.to_local())
+        for other_rank in range(self.world_size):
+            if other_rank != self.rank:
+                self.assertNotEqual(w0_shards[other_rank], w0_shards[self.rank])
+            self.assertEqual(replicas[other_rank], replicas[self.rank])
+
+    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_dtensor_init_helper_tensor_meta_strides(self):
         """Test that DTensorSpec.tensor_meta has correct strides in _distribute_region."""
@@ -370,6 +421,35 @@ class DistTensorRandomInitTest(DTensorTestBase):
         self.assertEqual(len(captured_specs), 1)
         self.assertEqual(captured_specs[0].shape, torch.Size([8, 8]))
         self.assertEqual(captured_specs[0].stride, (8, 1))
+
+
+class DistTensorCPUOffloadRandomOpTest(DTensorTestBase):
+    @property
+    def backend(self):
+        # CPU-offloaded DTensor ops need a CPU backend for their collectives.
+        device_backend = dist.get_default_backend_for_device(self.device_type)
+        return f"cpu:gloo,{self.device_type}:{device_backend}"
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_fsdp_cpu_offload_repeated_random_ops(self):
+        # Repro from https://github.com/pytorch/pytorch/issues/196562: repeated
+        # random ops on a CPU-offloaded param used to redraw the same values,
+        # so trunc_normal_'s rejection loop never terminated.
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        lin = torch.nn.Linear(4, 4, bias=False)
+        fully_shard(lin, mesh=mesh, offload_policy=CPUOffloadPolicy())
+        lin.to_empty(device="cpu")
+
+        with torch.no_grad():
+            lin.weight.normal_()
+            first = lin.weight.to_local().clone()
+            lin.weight.normal_()
+            self.assertNotEqual(lin.weight.to_local(), first)
+            # Bounds with ~38% acceptance: wide enough for trunc_normal_ to use
+            # its rejection loop, tight enough that some draws are rejected.
+            torch.nn.init.trunc_normal_(lin.weight, a=-0.5, b=0.5)
+        self.assertTrue(lin.weight.to_local().abs().le(0.5).all())
 
 
 class DistTensorRandomOpTest(DTensorTestBase):
@@ -1064,6 +1144,10 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
 
 DistTensorRandomInitTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomInitTest,
+    skipped_tests=[
+        # LocalTensorMode does not simulate FSDP2 CPU offload
+        "test_fsdp_cpu_offload_init",
+    ],
 )
 
 DistTensorRandomOpTestWithLocalTensor = create_local_tensor_test_class(
