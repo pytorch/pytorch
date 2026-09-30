@@ -1818,7 +1818,7 @@ def _strict_export(
                     )
                 if is_custom_class(type(attr)):
                     node.meta["val"] = maybe_to_fake_obj(dynamo_fake_mode, attr)
-                else:
+                elif isinstance(attr, torch.Tensor):
                     node.meta["val"] = dynamo_fake_mode.from_tensor(
                         attr, static_shapes=True
                     )

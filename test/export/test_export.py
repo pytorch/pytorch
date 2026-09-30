@@ -7282,6 +7282,26 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         ):
             export(M(), (torch.tensor(3, dtype=torch.int64),), strict=False)
 
+    def test_torch_check_lambda_message(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                n = x.sum().int().item()
+                torch._check(n != 3, lambda: "sum must not be 3")
+                return x * n
+
+        ep = export(M(), (torch.ones(4),))
+        self.assertEqual(ep.module()(torch.ones(4)), torch.ones(4) * 4)
+        with self.assertRaisesRegex(RuntimeError, "Ne\\(u0, 3\\)"):
+            ep.module()(torch.tensor([1.0, 1.0, 1.0, 0.0]))
+
+        class Empty(torch.nn.Module):
+            def forward(self, x):
+                torch._check(x.numel() > 0, lambda: "x must have non-zero elements")
+                return x * 2
+
+        with self.assertRaisesRegex(RuntimeError, "x must have non-zero elements"):
+            export(Empty(), (torch.randn(0),))
+
     def test_replaced_unbacked_bindings(self):
         import sympy
 
