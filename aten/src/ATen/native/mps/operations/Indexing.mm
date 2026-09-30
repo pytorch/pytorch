@@ -17,6 +17,7 @@
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/NonEmptyUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
@@ -900,7 +901,9 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
-      encodeIndexBoundsCheck(compute_encoder, stream, index, result.size(dim));
+      // A 0-dim self accepts index 0, so treat it as size 1 rather than
+      // asking for size(0) of a tensor that has no dimensions.
+      encodeIndexBoundsCheck(compute_encoder, stream, index, ensure_nonempty_size(result, dim));
       auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format(
           "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(result), mps::scalarToMetalTypeString(index)));
       getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source});

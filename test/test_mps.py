@@ -15759,6 +15759,22 @@ class TestErrorInputs(TestCase):
                 torch.tensor([9.0], device=device), "amax", include_self=True)
             torch.mps.synchronize()
 
+    def test_index_reduce_scalar_self(self, device):
+        # A 0-dim self has no dimensions to ask the size of, but index 0 is
+        # still valid: the bounds check must treat it as a dim of size 1
+        # rather than calling size(0) on it.
+        for reduce in ("amax", "amin", "prod", "mean"):
+            x = torch.ones((), device=device)
+            x.index_reduce_(0, torch.tensor([0], device=device),
+                            torch.full((), 4.0, device=device), reduce, include_self=True)
+            torch.mps.synchronize()
+            self.assertEqual(x.item(), 4.0)
+        with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
+            torch.ones((), device=device).index_reduce_(
+                0, torch.tensor([1], device=device),
+                torch.full((), 4.0, device=device), "amax", include_self=True)
+            torch.mps.synchronize()
+
     def test_one_hot_out_of_bounds(self, device):
         # Regression for https://github.com/pytorch/pytorch/issues/170507.
         with self.assertRaisesRegex(torch.AcceleratorError, "out of bounds"):
