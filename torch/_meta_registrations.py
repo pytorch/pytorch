@@ -240,6 +240,8 @@ def meta__transformer_encoder_layer_fwd(
 @register_meta([aten.linalg_cross.default, aten.linalg_cross.out])
 @out_wrapper()
 def linalg_cross(self, other, *, dim=-1):
+    from torch.fx.experimental.symbolic_shapes import sym_and
+
     x_d = self.ndim
     y_d = other.ndim
     torch._check(
@@ -247,7 +249,7 @@ def linalg_cross(self, other, *, dim=-1):
         lambda: "linalg.cross: inputs must have the same number of dimensions.",
     )
     torch._check(
-        self.size(dim) == 3 and other.size(dim) == 3,
+        sym_and(self.size(dim) == 3, other.size(dim) == 3),
         lambda: (
             f"linalg.cross: inputs dimension {dim} must have length 3. "
             f"Got {self.size(dim)} and {other.size(dim)}"
@@ -6572,6 +6574,12 @@ def meta__scaled_dot_product_fused_attention_overrideable(
     S_KV = key.size(-2)
     D_V = value.size(-1)
 
+    torch._check(
+        S_KV == value.size(-2),
+        lambda: f"key sequence length ({S_KV}) must match "
+        f"value sequence length ({value.size(-2)})",
+    )
+
     if attn_bias is not None:
         bias_s_kv = attn_bias.size(-1)
         if bias_s_kv != 1:
@@ -8305,7 +8313,7 @@ def meta_bucketize_scalar(
 
 
 @register_meta([aten.histc])
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 def meta_histc(input, bins=100, min=0, max=0):
     fn_name = "histc()"
     if device_hint(input) == "cpu":
@@ -9348,6 +9356,28 @@ import torch._refs.nn.functional
 import torch._refs.special
 
 
+# Ops whose C++ Meta kernels are SymInt-aware and faithful to their Python
+# decomps. activate_meta doesn't register the Python version as their Meta
+# kernel, and FakeTensorMode doesn't run their decomps.
+cpp_meta_supports_symint_ops = {
+    aten.empty.memory_format,
+    aten.empty_strided.default,
+    aten.as_strided_scatter.default,
+    aten.as_strided.default,
+    aten.as_strided_.default,
+    aten.zeros.default,
+    aten.detach.default,
+    aten.view_as_real.default,
+    aten.view_as_complex.default,
+    aten.set_.source_Storage_storage_offset,
+    aten._sparse_coo_tensor_with_dims_and_tensors.default,
+    aten.stack.default,
+    aten.arange.default,
+    aten.arange.start,
+    aten.arange.start_step,
+}
+
+
 def activate_meta():
     activate_meta_table = {}
 
@@ -9372,6 +9402,11 @@ def activate_meta():
                 f"op_overload must be OpOverload, got {type(op_overload)}"
             )
 
+        # Use the symint-aware C++ meta kernels; a Python Meta kernel would
+        # shadow them under the Python dispatcher.
+        if op_overload in cpp_meta_supports_symint_ops:
+            continue
+
         op_overload.py_impl(torch._C.DispatchKey.Meta)(fn)
 
         if torch._C._dispatch_has_kernel_for_dispatch_key(
@@ -9395,17 +9430,11 @@ def activate_meta():
         elif (
             op_overload.name()
             in {
-                "aten::empty_strided",  # causing infinite recursion, test_meta.py
                 "aten::clone",  # causing infinite recursion
                 "aten::_to_copy",  # causing infinite recursion, test_serialization.py -k test_tensor_subclass_getstate_overwrite
                 "aten::copy_",  # Exception not raised, test_torch.py -k test_storage_meta_errors_cpu_int64
                 "aten::constant_pad_nd",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_amp_istft_cuda_float32
                 "aten::rot90",  # requires_grad mismatch! test_ops.py -k test_fake_crossref_backward_amp_rot90_cuda_float32
-                "aten::as_strided_scatter",  # requires_grad mismatch, test_ops.py -k test_fake_crossref_backward_no_amp_as_strided_scatter_cuda_float32
-                "aten::stack",  # use the symint-aware C++ meta kernel (stack_meta)
-                "aten::arange",  # use the symint-aware C++ meta kernel (arange_meta)
-                "aten::arange.start",
-                "aten::arange.start_step",
             }
         ):
             pass

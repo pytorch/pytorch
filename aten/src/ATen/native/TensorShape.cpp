@@ -1325,6 +1325,21 @@ static Tensor make_qtensor(
   return result;
 }
 
+// as_strided creates a new TensorImpl but shares the storage so for faketensor
+// we need to copy over the metadata like the device and also the faketensormode
+// pointer
+static void maybe_copy_fake_tensor_metadata(
+    const Tensor& self,
+    TensorImpl* result) {
+  if (!self.is_fake()) {
+    return;
+  }
+  auto fake_device = self.unsafeGetTensorImpl()->fake_device();
+  TORCH_INTERNAL_ASSERT(fake_device.has_value());
+  result->set_and_normalize_fake_device(*fake_device);
+  result->set_fake_tensor_mode(self.unsafeGetTensorImpl()->fake_tensor_mode());
+}
+
 Tensor as_strided_tensorimpl(
     const Tensor& self,
     IntArrayRef size,
@@ -1337,6 +1352,7 @@ Tensor as_strided_tensorimpl(
       self.key_set(),
       self.dtype());
   setStrided(result, size, stride, storage_offset);
+  maybe_copy_fake_tensor_metadata(self, result.unsafeGetTensorImpl());
   return result;
 }
 
@@ -1371,6 +1387,7 @@ Tensor as_strided_tensorimpl_meta_symint(
   // bases / storage size.
   setStridedUnchecked(
       result, sym_size, sym_stride, std::move(sym_storage_offset));
+  maybe_copy_fake_tensor_metadata(self, result.unsafeGetTensorImpl());
   return result;
 }
 
@@ -1938,6 +1955,7 @@ static Tensor alias_with_sizes_and_strides(
   } else {
     self_tmp_->set_sizes_and_strides(sizes, strides, self.storage_offset());
   }
+  maybe_copy_fake_tensor_metadata(self, self_tmp_);
   return self_;
 }
 
@@ -4733,8 +4751,8 @@ at::Tensor as_strided_scatter_symint(
   auto output = clone_preserve_strides(self);
   auto slice =
       output.as_strided_symint(size, stride, std::move(storage_offset));
-  TORCH_CHECK(
-      slice.sym_sizes() == src.sym_sizes(),
+  TORCH_SYM_CHECK(
+      sym_equals(slice.sym_sizes(), src.sym_sizes()),
       "expected src to have a size equal to the slice of self. src size = ",
       src.sym_sizes(),
       ", slice size = ",
