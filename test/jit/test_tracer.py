@@ -2836,5 +2836,129 @@ class TestMixTracingScripting(JitTestCase):
                 self.assertTrue(n.output().isCompleteTensor())
 
 
+class TestJitTraceTimingHelper(JitTestCase):
+    def test_time_noop_without_accelerator(self):
+        from torch.jit import _trace as trace_mod
+
+        with (
+            unittest.mock.patch.object(
+                torch.accelerator, "is_available", return_value=False
+            ),
+            unittest.mock.patch.object(
+                torch.accelerator, "current_stream"
+            ) as current_stream,
+            unittest.mock.patch.object(torch.cuda, "current_stream") as cuda_stream,
+            unittest.mock.patch("builtins.print") as mocked_print,
+        ):
+            ran = False
+            with trace_mod._time("trace", "op", time=True):
+                ran = True
+        self.assertTrue(ran)
+        current_stream.assert_not_called()
+        cuda_stream.assert_not_called()
+        mocked_print.assert_not_called()
+
+    def test_time_noop_when_disabled(self):
+        from torch.jit import _trace as trace_mod
+
+        with (
+            unittest.mock.patch.object(trace_mod, "_JIT_TIME", False),
+            unittest.mock.patch.object(
+                torch.accelerator, "is_available", return_value=True
+            ),
+            unittest.mock.patch.object(
+                torch.accelerator, "current_stream"
+            ) as current_stream,
+            unittest.mock.patch("builtins.print") as mocked_print,
+        ):
+            with trace_mod._time("trace", "op", time=False):
+                pass
+        current_stream.assert_not_called()
+        mocked_print.assert_not_called()
+
+    def test_time_records_generic_events(self):
+        from torch.jit import _trace as trace_mod
+
+        stream = object()
+        events = []
+
+        class FakeEvent:
+            def __init__(self, enable_timing=False):
+                self.enable_timing = enable_timing
+                self.records = []
+                self.synchronized = False
+                events.append(self)
+
+            def record(self, recorded_stream):
+                self.records.append(recorded_stream)
+
+            def synchronize(self):
+                self.synchronized = True
+
+            def elapsed_time(self, other):
+                return 1.5
+
+        with (
+            unittest.mock.patch.object(trace_mod, "_JIT_TIME", False),
+            unittest.mock.patch.object(
+                torch.accelerator, "is_available", return_value=True
+            ),
+            unittest.mock.patch.object(
+                torch.accelerator, "current_stream", return_value=stream
+            ),
+            unittest.mock.patch.object(torch, "Event", FakeEvent),
+            unittest.mock.patch.object(torch.cuda, "current_stream") as cuda_stream,
+            unittest.mock.patch.object(torch.cuda, "Event") as cuda_event,
+            unittest.mock.patch("builtins.print") as mocked_print,
+        ):
+            with trace_mod._time("trace_a", "fwd", time=True):
+                self.assertEqual(len(events), 2)
+                self.assertEqual(events[0].records, [stream])
+                self.assertEqual(events[1].records, [])
+        self.assertTrue(events[0].enable_timing)
+        self.assertTrue(events[1].enable_timing)
+        self.assertEqual(events[1].records, [stream])
+        self.assertTrue(events[1].synchronized)
+        self.assertFalse(events[0].synchronized)
+        cuda_stream.assert_not_called()
+        cuda_event.assert_not_called()
+        mocked_print.assert_called_once_with("trace_a fwd time: 1.5 ms")
+
+    def test_jit_time_flag_enables_timing(self):
+        from torch.jit import _trace as trace_mod
+
+        stream = object()
+        events = []
+
+        class FakeEvent:
+            def __init__(self, enable_timing=False):
+                events.append(self)
+
+            def record(self, _recorded_stream):
+                return None
+
+            def synchronize(self):
+                return None
+
+            def elapsed_time(self, other):
+                return 0.25
+
+        with (
+            unittest.mock.patch.object(trace_mod, "_JIT_TIME", "1"),
+            unittest.mock.patch.object(
+                torch.accelerator, "is_available", return_value=True
+            ),
+            unittest.mock.patch.object(
+                torch.accelerator, "current_stream", return_value=stream
+            ),
+            unittest.mock.patch.object(torch, "Event", FakeEvent),
+            unittest.mock.patch("builtins.print") as mocked_print,
+        ):
+            with trace_mod._time("trace_b", "bwd", time=False):
+                pass
+        self.assertEqual(len(events), 2)
+        mocked_print.assert_called_once_with("trace_b bwd time: 0.25 ms")
+
+
 if __name__ == "__main__":
     raise_on_run_directly("test/test_jit.py")
