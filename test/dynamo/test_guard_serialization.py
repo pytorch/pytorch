@@ -250,6 +250,22 @@ _MODE = _Mode.FAST
 _torch_add = torch.add
 
 
+@torch.library.custom_op("guard_serialization_test::triple", mutates_args=())
+def _custom_triple(x: torch.Tensor) -> torch.Tensor:
+    return x * 3
+
+
+_custom_triple.register_fake(torch.empty_like)
+
+
+@torch.library.custom_op("guard_serialization_test::halve", mutates_args=())
+def _custom_halve(x: torch.Tensor) -> torch.Tensor:
+    return x / 2
+
+
+_custom_halve.register_fake(torch.empty_like)
+
+
 class _TupleOwner:
     class Point(NamedTuple):
         x: int
@@ -1551,6 +1567,19 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertFalse(is_portable_identity_guard("ID_MATCH", (), member))
             GuardsStatePickler({}, {}, {}, {}, buf).dump({"perms": member})
         self.assertIs(load_guards_state(buf.getvalue())["perms"], member)
+
+    def test_a_custom_op_def_pickles_by_its_registered_name(self):
+        from torch._library.custom_ops import OPDEFS
+
+        buf = io.BytesIO()
+        GuardsStatePickler({}, {}, {}, {}, buf).dump({"op": _custom_triple})
+        self.assertIs(load_guards_state(buf.getvalue())["op"], _custom_triple)
+        self.assertTrue(is_portable_identity_guard("ID_MATCH", (), _custom_triple))
+        # Redefining the op under the same name replaces it in the registry.
+        with mock.patch.dict(OPDEFS, {_custom_triple._qualname: _custom_halve}):
+            self.assertFalse(
+                is_portable_identity_guard("ID_MATCH", (), _custom_triple)
+            )
 
     def test_an_unguarded_grad_loads_as_none(self):
         # The .grad of a guarded leaf is a tensor the guard tree may not reach;
@@ -3669,6 +3698,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
         ref, loaded = self._test_serialization("ID_MATCH", fn, x)
         self._test_check_fn(ref, loaded, {"x": x}, True)
         with mock.patch.dict(globals(), {"_torch_add": torch.sub}):
+            self._test_check_fn(ref, loaded, {"x": x}, False)
+
+    def test_id_match_on_a_custom_op_def(self):
+        def fn(x):
+            return _custom_triple(x) + 1
+
+        x = torch.randn(3)
+
+        ref, loaded = self._test_serialization("ID_MATCH", fn, x)
+        self._test_check_fn(ref, loaded, {"x": x}, True)
+        with mock.patch.dict(globals(), {"_custom_triple": _custom_halve}):
             self._test_check_fn(ref, loaded, {"x": x}, False)
 
     def test_portable_identity_guard_values(self):
