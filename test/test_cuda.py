@@ -6468,12 +6468,15 @@ with torch.cuda.use_mem_pool(pool):
         x.fill_(i + 1)
         result.append({"addr": x.data_ptr(), "sum": x.sum().item(), "numel": x.numel()})
 torch.cuda.synchronize()
-print(json.dumps(result))
+print(json.dumps({
+    "tensors": result,
+    "segments": torch.cuda.memory_snapshot(mempool_id=pool.id, include_traces=False),
+}))
 """
 
-    def _run(self, script, *args):
+    def _run(self, script, *args, conf="expandable_segments:True"):
         env = os.environ.copy()
-        env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+        env["PYTORCH_CUDA_ALLOC_CONF"] = conf
         out = subprocess.check_output([sys.executable, "-c", script, *args], env=env)
         return json.loads(out.decode().strip().splitlines()[-1])
 
@@ -6483,7 +6486,7 @@ print(json.dumps(result))
         with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
             json.dump(saved, f)
             f.flush()
-            restored = self._run(self._RESTORE, f.name)
+            restored = self._run(self._RESTORE, f.name)["tensors"]
 
         self.assertEqual(len(restored), len(saved["tensors"]))
         for i, (want, got) in enumerate(zip(saved["tensors"], restored)):
@@ -6509,6 +6512,36 @@ except RuntimeError as e:
     print(json.dumps(str(e)))
 """
         self.assertIn("could not reserve", self._run(script))
+
+    def test_restores_the_saved_reservation_settings(self):
+        # Reserve settings can shrink a reservation below 1 1/8 of device memory,
+        # and large_segment_size_mb changes the segment size it maps in. Restoring
+        # under default settings must recreate both as saved.
+        conf = "expandable_segments:True,expandable_segments_reserve:0.05,large_segment_size_mb:40"
+        saved = self._run(self._SAVE, conf=conf)
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
+            json.dump(saved, f)
+            f.flush()
+            restored = self._run(self._RESTORE, f.name)["segments"]
+
+        def reservations(segments):
+            return {
+                (
+                    s["expandable_segment_base"],
+                    s["expandable_reservation_size"],
+                    s["expandable_segment_size"],
+                )
+                for s in segments
+            }
+
+        full = torch.cuda.get_device_properties(0).total_memory * 9 // 8
+        for s in saved["segments"]:
+            self.assertLess(s["expandable_reservation_size"], full)
+            # the small pool always maps 2 MB segments
+            small = s["segment_type"] == "small"
+            want = (2 if small else 40) * 1024 * 1024
+            self.assertEqual(s["expandable_segment_size"], want)
+        self.assertEqual(reservations(restored), reservations(saved["segments"]))
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
