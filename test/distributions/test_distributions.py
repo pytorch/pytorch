@@ -1537,6 +1537,12 @@ class TestDistributions(DistributionsTestCase):
                         )
                     except NotImplementedError:
                         pass
+                    try:
+                        self.assertEqual(
+                            expanded.entropy(), d.entropy().expand(expanded_shape)
+                        )
+                    except NotImplementedError:
+                        pass
 
     @expectedFailureMPS
     def test_distribution_subclass_expand(self):
@@ -1941,6 +1947,22 @@ class TestDistributions(DistributionsTestCase):
             dtype=torch.get_default_dtype(),
         )
         self.assertEqual(dist.entropy(), expected, atol=1e-3, rtol=0)
+
+    @expectedFailureMPS
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_multinomial_entropy_double(self):
+        # lgamma(total_count + 1) used to be evaluated in the default dtype, so a double
+        # distribution carried a float32 error that grows with total_count
+        total_count = 1000
+        p = torch.tensor([0.1, 0.2, 0.7], dtype=torch.double)
+        dist = Multinomial(total_count, probs=p)
+        entropy = dist.entropy()
+        self.assertEqual(entropy.dtype, torch.double)
+        expected = torch.tensor(
+            scipy.stats.multinomial.entropy(total_count, p.numpy()), dtype=torch.double
+        )
+        self.assertEqual(entropy, expected)
+        self.assertEqual(dist.expand((2,)).entropy(), expected.expand(2))
 
     @expectedFailureMPS
     @set_default_dtype_if_supported(torch.double)
@@ -7042,6 +7064,28 @@ class TestFunctors(DistributionsTestCase):
 
 
 class TestValidation(DistributionsTestCase):
+    def test_valid_does_not_format_error(self):
+        class UnformattableConstraint(Constraint):
+            def check(self, value):
+                return torch.ones_like(value, dtype=torch.bool)
+
+            def __repr__(self):
+                raise AssertionError("valid constraints should not be formatted")
+
+        constraint = UnformattableConstraint()
+
+        class UnformattableDistribution(Distribution):
+            arg_constraints = {"value": constraint}
+            support = constraint
+
+            def __init__(self, value, validate_args):
+                self.value = value
+                super().__init__(validate_args=validate_args)
+
+        value = torch.tensor(0.0)
+        UnformattableDistribution(value, validate_args=False)._validate_sample(value)
+        UnformattableDistribution(value, validate_args=True)
+
     def test_valid(self):
         for Dist, params in _get_examples():
             for param in params:
