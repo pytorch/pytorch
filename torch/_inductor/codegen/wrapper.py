@@ -2001,8 +2001,12 @@ class PythonWrapperCodegen(CodeGen):
 
     @cache_on_self
     def get_output_refs(self) -> list[str]:
+        # Graph partition returns the mutated buffer, so the mutating op's name is
+        # only bound inside the partition function.
+        real_names = V.graph.scheduler.mutation_real_name if V.graph.scheduler else {}
         return [
-            x.codegen_reference(self.wrapper_call) for x in self.get_graph_outputs()
+            real_names.get(ref := x.codegen_reference(self.wrapper_call), ref)
+            for x in self.get_graph_outputs()
         ]
 
     def mark_output_type(self) -> None:
