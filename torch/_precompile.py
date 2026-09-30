@@ -3329,7 +3329,7 @@ def prepare_runtime(
     *, artifact_path: str | os.PathLike[str], cache_path: str | os.PathLike[str]
 ) -> None:
     """
-    Install a finalized cache's runtime dependencies before the application starts.
+    Verify a finalized cache's runtime dependencies before the application starts.
 
     Call it early in a serving worker, before the application imports anything that
     compiles, and then :func:`load` the same pair::
@@ -3343,8 +3343,15 @@ def prepare_runtime(
     hash, without executing the artifact or initializing CUDA. It runs under
     :func:`no_compilation`. Only Dynamo captures are supported.
 
-    Raises :class:`~torch.compiler.PrecompileError` for a make_fx capture or a
-    mismatched or unreadable pair.
+    It also checks the cache's frozen Triton kernels, which :func:`load` then
+    installs process-wide: from then on, any compile in this process that
+    generates the same Triton source is served the frozen kernel and its
+    selected config, until ``torch._inductor.utils.fresh_cache()`` or
+    ``clear_caches()`` resets Inductor's caches.
+
+    Raises :class:`~torch.compiler.PrecompileError` for a make_fx capture, a
+    mismatched or unreadable pair, or a cache :func:`finalize_cache` did not
+    produce.
     """
     from torch.compiler._runtime_cache import prepare_runtime_cache
 
