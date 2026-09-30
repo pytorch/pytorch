@@ -12,7 +12,7 @@ import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import TEST_CUDA, tf32_on_and_off
+from torch.testing._internal.common_cuda import tf32_on_and_off
 from torch.testing._internal.common_device_type import (
     disablecuDNN,
     disableMkldnn,
@@ -562,55 +562,6 @@ class TestConvolutionNN(NNTestCase):
                 stride=(5, 1, 1),
             )
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_thnn_conv_strided_padded_dilated(self):
-        for convfn, dims, transposed in (
-            (torch.nn.functional.conv2d, 2, False),
-            (torch.nn.functional.conv_transpose2d, 2, True),
-            (torch.nn.functional.conv3d, 3, False),
-            (torch.nn.functional.conv_transpose3d, 3, True),
-        ):
-            for stride, padding, dilation in (
-                (2, 0, 1),
-                (1, 1, 1),
-                (2, 1, 1),
-                (1, 0, 2),
-            ):
-                kwargs = {"stride": stride, "padding": padding, "dilation": dilation}
-                inp_shape = (1, 2) + dims * (4,)
-                weight_shape = (2, 2) + dims * (1,)
-                inputs = torch.randn(
-                    inp_shape, dtype=torch.double, device="cuda", requires_grad=True
-                )
-                weight = torch.randn(
-                    weight_shape, dtype=torch.double, device="cuda", requires_grad=True
-                )
-                bias = torch.randn(
-                    2, dtype=torch.double, device="cuda", requires_grad=True
-                )
-                with torch.backends.cudnn.flags(enabled=False):
-                    res = convfn(inputs, weight, bias, **kwargs)
-                res_cpu = convfn(inputs.cpu(), weight.cpu(), bias.cpu(), **kwargs)
-                self.assertEqual(res, res_cpu)
-                with torch.backends.cudnn.flags(enabled=False):
-                    torch.autograd.gradcheck(
-                        lambda x, w, b: convfn(x, w, b, **kwargs),
-                        (inputs, weight, bias),
-                    )
-                    torch.autograd.gradcheck(
-                        lambda x, w, b: convfn(x, w, b, **kwargs),
-                        (inputs.cpu(), weight.cpu(), bias.cpu()),
-                    )
-
-                # Non-batched must match batched-then-squeezed.
-                inputs_nb = inputs[0]
-                with torch.backends.cudnn.flags(enabled=False):
-                    res_nb = convfn(inputs_nb, weight, bias, **kwargs)
-                    res_via_batched = convfn(
-                        inputs_nb.unsqueeze(0), weight, bias, **kwargs
-                    ).squeeze(0)
-                self.assertEqual(res_nb, res_via_batched)
-
     def test_Conv2d_inconsistent_types(self):
         inputs = torch.randn(4, 1, 7, 7, dtype=torch.float)
         weights = torch.randn(1, 1, 3, 3, dtype=torch.double)
@@ -779,6 +730,46 @@ class TestConvolutionNN(NNTestCase):
             compiled_valid(input_exact, weight_tensor).shape,
             torch.Size([2, 6, 1, 1]),
         )
+
+    def test_conv_transpose_meta_invalid_output_padding(self):
+        """Meta and eager both raise when output_padding >= stride and >= dilation.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/178125
+        """
+        input_t = torch.randn(20, 16, 50)
+        weight_t = torch.randn(16, 33, 5)
+        error_re = "output padding must be smaller than either stride or dilation"
+
+        with self.assertRaisesRegex(RuntimeError, error_re):
+            F.conv_transpose1d(input_t, weight_t, stride=2, output_padding=2)
+
+        with self.assertRaisesRegex(RuntimeError, error_re):
+            F.conv_transpose1d(
+                input_t.to("meta"), weight_t.to("meta"), stride=2, output_padding=2
+            )
+
+    def test_conv_transpose_meta_invalid_bias_shape(self):
+        """Meta raises when bias size doesn't match out_channels for a grouped transposed conv.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/178128
+        """
+        input_t = torch.randn(20, 16, 50, 10, 20)
+        weight_t = torch.randn(16, 33, 3, 3, 3)
+        # groups=2 means expected bias size is weight.shape[1] * groups = 66, not 33
+        wrong_bias = torch.randn(33)
+
+        with self.assertRaises(RuntimeError):
+            F.conv_transpose3d(input_t, weight_t, bias=wrong_bias, groups=2)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "expected bias to be 1-dimensional with 66 elements"
+        ):
+            F.conv_transpose3d(
+                input_t.to("meta"),
+                weight_t.to("meta"),
+                bias=wrong_bias.to("meta"),
+                groups=2,
+            )
 
     def test_ConvTranspose2d_output_size(self):
         m = nn.ConvTranspose2d(3, 4, 3, 3, 0, 2)
@@ -1286,11 +1277,11 @@ class TestConvolutionNNDevice(NNTestCase):
     @onlyAccelerator
     @skipMPS
     def test_thnn_conv_strided_padded_dilated(self, device):
-        for convfn, dims, transposed in (
-            (torch.nn.functional.conv2d, 2, False),
-            (torch.nn.functional.conv_transpose2d, 2, True),
-            (torch.nn.functional.conv3d, 3, False),
-            (torch.nn.functional.conv_transpose3d, 3, True),
+        for convfn, dims in (
+            (torch.nn.functional.conv2d, 2),
+            (torch.nn.functional.conv_transpose2d, 2),
+            (torch.nn.functional.conv3d, 3),
+            (torch.nn.functional.conv_transpose3d, 3),
         ):
             for stride, padding, dilation in (
                 (2, 0, 1),
@@ -1333,6 +1324,15 @@ class TestConvolutionNNDevice(NNTestCase):
                         lambda x, w, b: convfn(x, w, b, **kwargs),
                         (inputs.cpu(), weight.cpu(), bias.cpu()),
                     )
+
+                # Non-batched must match batched-then-squeezed.
+                inputs_nb = inputs[0]
+                with torch.backends.cudnn.flags(enabled=False):
+                    res_nb = convfn(inputs_nb, weight, bias, **kwargs)
+                    res_via_batched = convfn(
+                        inputs_nb.unsqueeze(0), weight, bias, **kwargs
+                    ).squeeze(0)
+                self.assertEqual(res_nb, res_via_batched)
 
     @onlyAccelerator
     @skipMPS
@@ -4325,7 +4325,6 @@ class TestConvolutionNNCUDA(NNTestCase):
         F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
 
     @skipCUDAIfNoCudnn
-    @skipCUDAIfRocm
     @dtypes(torch.half)
     def test_Conv2d_depthwise_kernel_flag(self, device, dtype):
         channels = 32
@@ -4334,7 +4333,11 @@ class TestConvolutionNNCUDA(NNTestCase):
             channels, channels, kernel_size=3, padding=1, groups=channels
         ).to(device, dtype)
 
+        one, zero = (1, 1), (0, 0)
+        args = [x, conv.weight, conv.bias, one, one, one, False, zero, channels]
+
         results = {}
+        backends = {}
         for mode in ("auto", "cudnn", "native"):
             with torch.backends.cudnn.flags(
                 enabled=True,
@@ -4342,10 +4345,41 @@ class TestConvolutionNNCUDA(NNTestCase):
                 deterministic=True,
                 depthwise_kernel=mode,
             ):
+                backends[mode] = torch._C._select_conv_backend(*args)
                 results[mode] = conv(x).detach().clone()
 
-        self.assertEqual(results["cudnn"], results["native"], atol=1e-3, rtol=1e-3)
-        self.assertEqual(results["auto"], results["native"], atol=1e-3, rtol=1e-3)
+        # The comparisons below are vacuous unless the modes really do reach different
+        # kernels: when "native" is not honored every mode runs the same kernel and
+        # returns bitwise identical results, which passes at any tolerance.
+        self.assertEqual(backends["native"], torch._C._ConvBackend.CudaDepthwise2d)
+        if TEST_WITH_ROCM:
+            self.assertEqual(backends["cudnn"], torch._C._ConvBackend.MiopenDepthwise)
+
+        # On ROCm "cudnn" and "auto" select MIOpen, which runs fp16 depthwise 3x3 through a
+        # Winograd solver whose output is off by about two fp16 steps from the native kernel.
+        atol = 1e-2 if TEST_WITH_ROCM else 1e-3
+        self.assertEqual(results["cudnn"], results["native"], atol=atol, rtol=1e-3)
+        self.assertEqual(results["auto"], results["native"], atol=atol, rtol=1e-3)
+
+    @dtypes(torch.half)
+    def test_Conv3d_depthwise_kernel_flag_native_is_2d_only(self, device, dtype):
+        # The native depthwise kernel that depthwise_kernel="native" asks for is 2-D
+        # only, so a 5-D depthwise convolution keeps whatever backend it had.
+        channels = 32
+        x = torch.randn(2, channels, 4, 8, 8, device=device, dtype=dtype)
+        weight = torch.randn(channels, 1, 3, 3, 3, device=device, dtype=dtype)
+        expected = (
+            torch._C._ConvBackend.MiopenDepthwise
+            if TEST_WITH_ROCM
+            else torch._C._ConvBackend.CudaDepthwise3d
+        )
+        one, zero = (1, 1, 1), (0, 0, 0)
+        args = [x, weight, None, one, one, one, False, zero, channels]
+        with torch.backends.cudnn.flags(
+            enabled=True, benchmark=False, deterministic=True, depthwise_kernel="native"
+        ):
+            backend = torch._C._select_conv_backend(*args)
+        self.assertEqual(backend, expected)
 
     @dtypes(torch.half, torch.float, torch.cfloat)
     def test_conv_cudnn_nhwc(self, device, dtype):
