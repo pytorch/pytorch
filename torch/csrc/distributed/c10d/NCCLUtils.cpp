@@ -2,7 +2,6 @@
 
 #ifdef USE_C10D_NCCL
 #include <fmt/format.h>
-#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -247,7 +246,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   if (color_id >= 0) {
     // Waiting for parent comm above still does not seem to guarantee the child
     // comm ptr is valid. Therefore we add a manual wait here for safety.
-    // TODO: remove this wait after NCCL fix the semantics.
+    // TODO: remove this wait after NCCL fixes the semantics.
     auto startTime = std::chrono::steady_clock::now();
     auto timeout = nccl_nonblocking_timeout();
     while (!comm->ncclComm_) {
