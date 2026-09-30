@@ -1340,6 +1340,7 @@ class TritonOverrides(OpOverrides):
         src_dtype: torch.dtype | None = None,
         use_compute_types=True,
     ):
+        """Emit a cast of x to dtype, or x itself when it is already that dtype."""
         fp8_dtypes = (
             torch.float8_e4m3fn,
             torch.float8_e5m2,
@@ -1409,13 +1410,13 @@ class TritonOverrides(OpOverrides):
         ):
             return f"{x}.to(tl.float32).to({out_dtype})"
 
-        # A cast whose source is already the target dtype is a no-op in Triton
-        # but still prints as one more instruction. This shows up as
-        # `tmp = tmp.to(tl.float32)` chains in emulate_precision_casts mode
-        # (#196958). When the input's tracked dtype already matches, and the
-        # emitted type is that same torch dtype (not a compute upcast), skip
-        # the cast entirely.
-        if getattr(x, "dtype", None) == dtype and out_dtype == triton_type(dtype):
+        # A same-dtype cast is a no-op in Triton; skip it when x's tracked
+        # dtype already matches (#196958).
+        if (
+            isinstance(x, TritonCSEVariable)
+            and x.dtype == dtype
+            and out_dtype == triton_type(dtype)
+        ):
             return x
 
         return f"{x}.to({out_dtype})"

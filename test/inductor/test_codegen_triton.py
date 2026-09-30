@@ -1124,27 +1124,62 @@ def helper(x):
             self.assertNotIn("tt.pointer_range", kernel)
 
     def test_to_dtype_skips_dead_same_dtype_cast(self):
-        """A cast whose input is already at the target dtype returns the input.
-
-        emulate_precision_casts mode otherwise prints chains like
-        `tmp22 = tmp21.to(tl.float32)` where tmp21 is already fp32 (#196958).
-        """
+        # Same-dtype casts on a tracked CSE var are skipped (#196958).
         from torch._inductor.codegen.triton import TritonOverrides
 
         value = TritonCSEVariable(
             "tmp21", ValueRanges.unknown(), torch.float32, shape=("1",)
         )
         self.assertIs(TritonOverrides.to_dtype(value, torch.float32), value)
-
-        # real conversions are never skipped
         self.assertEqual(
             TritonOverrides.to_dtype(value, torch.int64), "tmp21.to(tl.int64)"
         )
-
-        # untracked callers (plain strings) keep emitting the cast as before
+        # untracked string inputs keep emitting the cast
         self.assertEqual(
             TritonOverrides.to_dtype("tmp21", torch.float32), "tmp21.to(tl.float32)"
         )
+
+    @unittest.skipUnless(HAS_GPU_AND_TRITON, "requires GPU and Triton")
+    @inductor_config.patch(emulate_precision_casts=True)
+    @inductor_config.patch("test_configs.runtime_triton_dtype_assert", True)
+    def test_emulate_precision_casts_no_dead_same_dtype_cast(self):
+        # End-to-end check for #196958: the emulation round trips must stay,
+        # but a cast whose input already has the target dtype must not print.
+
+        def dead_casts(src: str) -> list[str]:
+            rhs_by_var = {}
+            for line in src.splitlines():
+                m = re.match(r"^    (\w+) = (.+)$", line)
+                if m:
+                    rhs_by_var[m.group(1)] = m.group(2)
+            dead = []
+            for var, rhs in rhs_by_var.items():
+                m = re.fullmatch(r"\(?(\w+)\)?\.to\((tl\.\w+)\)", rhs)
+                if m is None or m.group(1) not in rhs_by_var:
+                    continue
+                src_rhs = rhs_by_var[m.group(1)]
+                if re.search(rf"\.to\({re.escape(m.group(2))}\)", src_rhs):
+                    dead.append(f"{var} = {rhs}")
+            return dead
+
+        def fn(scal, idx):
+            a = torch.where(idx >= 0, scal, 0.0) * 1000.0
+            w = torch.exp(idx * -9.210340371976184 * 0.0078125)
+            return (torch.sin(a * w) + torch.cos(a * w)).to(torch.bfloat16)
+
+        scal = torch.tensor([1.5], device=GPU_TYPE, dtype=torch.bfloat16)
+        idx = torch.arange(128, device=GPU_TYPE, dtype=torch.float32)
+        result, codes = run_and_get_code(torch.compile(fn), scal, idx)
+
+        for code in codes:
+            self.assertEqual(dead_casts(code), [])
+        code_str = "\n".join(codes)
+        # the emulation round trips are still there
+        self.assertIn(".to(tl.bfloat16)", code_str)
+        self.assertIn(".to(tl.float32)", code_str)
+
+        eager = fn(scal, idx)
+        torch.testing.assert_close(result, eager, rtol=0.02, atol=0.02)
 
     def test_is_multiple_of_rules(self):
         """Test structural divisibility rules in _is_multiple_of."""
