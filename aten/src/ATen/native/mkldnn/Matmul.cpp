@@ -195,9 +195,24 @@ mkldnn_gemm(
   ideep::tensor a = make_ideep_tensor<scalar_t>({k, m}, idtype, a_strides, const_cast<scalar_t*>(a_data));
   ideep::tensor b = make_ideep_tensor<scalar_t>({n, k}, idtype, b_strides, const_cast<scalar_t*>(b_data));
   ideep::tensor c = make_ideep_tensor<scalar_t>({n, m}, idtype, c_strides, c_data);
+  ideep::tensor src = b;
+
+#if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
+  if constexpr (std::is_same_v<scalar_t, c10::Half>) {
+    const bool src_is_dense = transb == TransposeType::NoTranspose
+        ? n == 1 || ldb == k
+        : k == 1 || ldb == n;
+    // FP16 matmul on AArch64 requires a dense source tensor to pick up the optimized kernel
+    // falls back to ref otherwise
+    if (!src_is_dense) {
+      src.init({n, k}, idtype);
+      b.reorder_to(src);
+    }
+  }
+#endif
 
   ideep::matmul_forward::compute(
-      b, a, c, alpha, beta,
+      src, a, c, alpha, beta,
       ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);
 
   if (c.get_data_handle() != c_data){
@@ -274,6 +289,11 @@ bool mkldnn_bf16_gemm(
     const c10::BFloat16 *b, int64_t ldb,
     float beta,
     c10::BFloat16 *c, int64_t ldc) {
+#if AT_MKLDNN_ACL_ENABLED()
+  if (n == 1 && alpha == 1.0f && is_arm_neoverse()) {
+    return false;
+  }
+#endif
   return mkldnn_gemm<c10::BFloat16>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
@@ -403,8 +423,8 @@ void mkldnn_matmul(
   mat2_ = may_convert_to_default_contiguous_strides(mat2_);
 
   // mkldnn_matmul only proceed CPU tensor
-  const ideep::tensor x = itensor_view_from_dense(mat1_);
-  const ideep::tensor w = itensor_view_from_dense(mat2_);
+  const ideep::tensor x = itensor_view_from_dense(mat1_, /*from_const_data_ptr*/true);
+  const ideep::tensor w = itensor_view_from_dense(mat2_, /*from_const_data_ptr*/true);
   ideep::tensor y = itensor_view_from_dense(result_unsqueezed);
   ideep::matmul_forward::compute(x, w, y, alpha, beta,
       ideep::scale_t(), ideep::scale_t(), ideep::scale_t(), op_attr);

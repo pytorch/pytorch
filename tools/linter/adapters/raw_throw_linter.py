@@ -406,6 +406,9 @@ def replacement_macro(path: str) -> str:
         or "torch/csrc/stable/" in posix
         # Installed, and deliberately depends on torch/headeronly only.
         or posix.endswith("torch/csrc/utils/generated_serialization_types.h")
+        # Exists to prove torch/headeronly builds without c10, so it cannot
+        # reach for TORCH_CHECK either.
+        or "test/cpp/aoti_abi_check/" in posix
     ):
         return "STD_TORCH_CHECK"
     return "TORCH_CHECK"
