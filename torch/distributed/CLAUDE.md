@@ -7,6 +7,8 @@
   custom extensions may use `dist.get_backend_impl(...).foo(...)`.
 - Write accelerator-generic code where possible; avoid CUDA-only assumptions.
 - Provide clear errors, graceful recovery, and bounded timeouts where possible.
+- For security, avoid pickle where possible; prefer `torch.load(..., weights_only=True)`
+  when deserializing checkpoints.
 - Support CUDA graphs where possible.
 
 ## Testing
