@@ -4099,8 +4099,25 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker | None:
         getattr_fn = self._check_for_getattr()
         if isinstance(getattr_fn, types.FunctionType):
+            is_nn_module_getattr = getattr_fn is unpatched_nn_module_getattr
             if (
-                getattr_fn is unpatched_nn_module_getattr
+                self.source
+                and is_nn_module_getattr
+                and hasattr(self.value, "__dict__")
+                and name not in self.value.__dict__
+            ):
+                # Instance dict entries shadow registered nn.Module attributes.
+                # Pending deletions can reach this fallback while the live dict
+                # still has the name; only guard absence in the input state.
+                install_guard(
+                    self.source.make_guard(
+                        functools.partial(
+                            GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=name
+                        )
+                    )
+                )
+            if (
+                is_nn_module_getattr
                 and isinstance(self, variables.UnspecializedNNModuleVariable)
                 and istype(self.value._parameters, dict)  # type: ignore[attr-defined]
                 and istype(self.value._buffers, dict)  # type: ignore[attr-defined]

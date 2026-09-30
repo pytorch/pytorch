@@ -3358,6 +3358,98 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         helper()
 
+    @parametrize("name", ["sub", "w", "b"])
+    @parametrize("nested", [False, True])
+    @parametrize("specialize", [False, True])
+    @parametrize("registry_type", [dict, collections.OrderedDict])
+    def test_instance_dict_shadows_registered_attr(
+        self, name, nested, specialize, registry_type
+    ):
+        class Wrapper(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = torch.nn.Linear(4, 4, bias=False)
+                self.w = torch.nn.Parameter(torch.ones(4))
+                self.register_buffer("b", torch.zeros(4))
+                with torch.no_grad():
+                    self.sub.weight.copy_(torch.eye(4))
+                # Dict subclasses exercise the non-manual __getattr__ path.
+                self._modules = registry_type(self._modules)
+                self._parameters = registry_type(self._parameters)
+                self._buffers = registry_type(self._buffers)
+
+            def forward(self, x):
+                return self.sub(x) * self.w + self.b
+
+        class Outer(torch.nn.Module):
+            def __init__(self, block):
+                super().__init__()
+                self.block = block
+
+            def forward(self, x):
+                return self.block(x)
+
+        target = Wrapper()
+        model = Outer(target) if nested else target
+        if specialize:
+            # This selects NNModuleVariable; inline_inbuilt_nn_modules is a no-op.
+            model.torchdynamo_force_dynamic = False
+            target.torchdynamo_force_dynamic = False
+        x = torch.arange(4.0)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(model, backend=cnt, fullgraph=True)
+        for _ in range(2):
+            self.assertEqual(compiled(x), model(x))
+            self.assertEqual(cnt.frame_count, 1)
+
+        if name == "sub":
+            replacement = torch.nn.Linear(4, 4, bias=False)
+            with torch.no_grad():
+                replacement.weight.fill_(5.0)
+        elif name == "w":
+            replacement = torch.nn.Parameter(torch.full((4,), 2.0))
+        else:
+            replacement = torch.full((4,), 7.0)
+
+        object.__setattr__(target, name, replacement)
+        for _ in range(2):
+            self.assertEqual(compiled(x), model(x))
+            self.assertEqual(cnt.frame_count, 2)
+
+        del target.__dict__[name]
+        for _ in range(2):
+            self.assertEqual(compiled(x), model(x))
+            self.assertEqual(cnt.frame_count, 2)
+
+        object.__setattr__(target, name, replacement)
+        self.assertEqual(compiled(x), model(x))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @parametrize("replace_dict", [False, True])
+    def test_registered_attr_after_pending_instance_dict_mutation(self, replace_dict):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("b", torch.zeros(4))
+
+        def fn(model, x):
+            if replace_dict:
+                model.__dict__ = {k: v for k, v in model.__dict__.items() if k != "b"}
+            else:
+                del model.__dict__["b"]
+            return x + model.b
+
+        model = Mod()
+        x = torch.arange(4.0)
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+        for _ in range(2):
+            object.__setattr__(model, "b", torch.ones(4))
+            self.assertEqual(compiled(model, x), x)
+            self.assertNotIn("b", model.__dict__)
+            self.assertEqual(model.b, torch.zeros(4))
+            self.assertEqual(cnt.frame_count, 1)
+
     def test_monkeypatching_forward_inside_compiled_region(self):
         class Mod(torch.nn.Module):
             def forward(self, x):
