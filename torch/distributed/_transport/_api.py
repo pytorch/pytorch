@@ -13,8 +13,6 @@ from ._work import _validate_timeout, wait_all
 
 
 if TYPE_CHECKING:
-    from contextlib import AbstractContextManager
-
     from ._cuda_stream import _CudaStreamOrdering
 
 
@@ -99,7 +97,7 @@ class Transport(ABC):
     ``read_stream`` and ``write_stream`` order transfers on the current CUDA
     stream: the transfer starts after prior work on the stream, and later work
     waits for it to complete. They return after enqueueing, without holding SMs
-    while the transfer is in flight, and can be captured with ``cuda_graph``.
+    while the transfer is in flight, and can be captured in CUDA graphs.
     Transfer failures terminate the process, since consumers may already be
     enqueued. Ordinary ``read`` and ``write`` do not interact with CUDA streams.
     """
@@ -197,9 +195,7 @@ class Transport(ABC):
         if timeout == 0:
             raise ValueError("stream transfers require a positive timeout")
         self._check_transfer(local_buffer, remote_buffer, mutable=False)
-        submit = partial(
-            self.write, local_buffer, remote_buffer, async_op=True, timeout=timeout
-        )
+        submit = partial(self.write_async, local_buffer, remote_buffer, timeout=timeout)
         self._cuda_stream(torch.cuda.current_stream()).enqueue(submit, local_buffer)
 
     def read_stream(
@@ -214,19 +210,8 @@ class Transport(ABC):
         if timeout == 0:
             raise ValueError("stream transfers require a positive timeout")
         self._check_transfer(local_buffer, remote_buffer, mutable=True)
-        submit = partial(
-            self.read, local_buffer, remote_buffer, async_op=True, timeout=timeout
-        )
+        submit = partial(self.read_async, local_buffer, remote_buffer, timeout=timeout)
         self._cuda_stream(torch.cuda.current_stream()).enqueue(submit, local_buffer)
-
-    def cuda_graph(
-        self, stream: torch.cuda.Stream
-    ) -> AbstractContextManager[torch.cuda.CUDAGraph]:
-        """Capture stream transfers on ``stream`` into a CUDA graph.
-
-        Register buffers and warm up transfers first. Close resets the graph.
-        """
-        return self._cuda_stream(stream).capture()
 
     def _check_transfer(  # noqa: B027
         self, local_buffer: MemoryView, remote_buffer: RemoteBuffer, *, mutable: bool

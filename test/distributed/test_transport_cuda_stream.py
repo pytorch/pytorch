@@ -48,11 +48,12 @@ def _worker(rank, pipe, capture=False):
         with torch.cuda.stream(stream):
             transport.read_stream(local_destination.to_mutable_view(), remote_source)
         stream.synchronize()
-        with transport.cuda_graph(stream) as write_graph:
+        write_graph, read_graph = torch.cuda.CUDAGraph(), torch.cuda.CUDAGraph()
+        with torch.cuda.graph(write_graph):
             torch.cuda._sleep(1_000_000)
             source.copy_(producer, non_blocking=True)
             transport.write_stream(local_source.to_view(), remote_destination)
-        with transport.cuda_graph(stream) as read_graph:
+        with torch.cuda.graph(read_graph):
             transport.read_stream(local_destination.to_mutable_view(), remote_source)
             consumer.copy_(destination, non_blocking=True)
         torch.testing.assert_close(source, torch.zeros_like(source))
@@ -112,7 +113,7 @@ def _worker(rank, pipe, capture=False):
     pipe.recv_bytes()
     orderings = list(transport._cuda_streams.values())
     transport.close()
-    if any(o._captured or o._graphs for o in orderings):
+    if any(o._retained for o in orderings):
         raise AssertionError("graph resources retained after close")
 
 
@@ -143,20 +144,20 @@ def _callback_worker(fail, capture=False):
                 raise AssertionError("ordinary asynchronous read changed")
     entered, release = threading.Event(), threading.Event()
 
-    def transfer(*args, **kwargs):
+    async def transfer(*args, **kwargs):
         entered.set()
         if fail:
             raise RuntimeError("injected callback failure")
-        if not release.wait(5):
+        if not await asyncio.to_thread(release.wait, 5):
             raise TimeoutError("enqueue blocked the submitting thread")
-        return SimpleNamespace(is_completed=lambda: True, wait=lambda: None)
 
     with (
-        patch.object(transport, "_start", side_effect=transfer),
+        patch.object(transport, "_transfer_async", side_effect=transfer),
         torch.cuda.stream(stream),
     ):
         if capture:
-            with transport.cuda_graph(stream) as graph:
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
                 transport.write_stream(memory.to_view(), remote)
             graph.replay()
         else:

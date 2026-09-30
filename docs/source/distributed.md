@@ -2307,19 +2307,21 @@ transfer is in flight.
         transport.read_stream(destination_view, remote_source)
         consume(destination)
 
-Capture with ``transport.cuda_graph(stream)``, not ``torch.cuda.graph``, so the
-transport keeps callbacks and buffers alive until ``close``. Register buffers
-and warm up transfers before capture. Each replay submits a new transfer.
+Stream transfers can be captured with ``torch.cuda.graph``; each replay submits
+a new transfer. Register buffers and warm up transfers before capture. Captured
+buffers stay registered until ``close``; replaying after ``close`` terminates
+the process.
 
 .. code-block:: python
 
-    with transport.cuda_graph(stream) as graph:
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
         source.copy_(producer)
         transport.write_stream(source_view, remote_destination)
     graph.replay()
 
-The default implementation drives host transfers from a per-stream progress
-thread and gates the stream with a CUDA stream memory wait. It requires Linux
+The default implementation awaits ``write_async``/``read_async`` on a shared
+asyncio loop thread and gates the stream with a CUDA stream memory wait. It requires Linux
 and GPUDirect RDMA write ordering, and allows 64 outstanding transfers per
 stream; captured transfers hold their slot until ``close``. Since consumers may
 already be enqueued, a failed transfer terminates the process. Backends with

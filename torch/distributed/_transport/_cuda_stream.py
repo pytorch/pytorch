@@ -1,7 +1,7 @@
 """Order host-driven transport operations on CUDA streams.
 
-A host callback enqueued on the stream hands the transfer to a progress thread,
-which submits it and signals a pinned completion flag. A stream memory wait
+A host callback enqueued on the stream schedules the transfer on a shared
+asyncio loop, which awaits it and signals a pinned completion flag. A stream memory wait
 holds later stream work until that flag is set, so no kernel occupies SMs while
 the transfer runs. The callback itself never blocks: CUDA forbids CUDA calls
 from host callbacks, and blocking on native CUDA work can deadlock graph replay.
@@ -9,21 +9,19 @@ from host callbacks, and blocking on native CUDA work can deadlock graph replay.
 
 from __future__ import annotations
 
+import asyncio
 import ctypes
 import logging
 import os
-import queue
 import sys
 import threading
-from contextlib import contextmanager
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.distributed import Work
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Coroutine
 
 
 logger = logging.getLogger(__name__)
@@ -35,6 +33,10 @@ _CU_STREAM_WAIT_VALUE_GEQ = 0
 
 _HostFn = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
 _libcuda: ctypes.CDLL | None = None
+_loop: asyncio.AbstractEventLoop | None = None
+_loop_lock = threading.Lock()
+# Captured callbacks outlive their transport: a graph may replay after close.
+_closed_captures: list[Any] = []
 
 
 def _driver() -> ctypes.CDLL:
@@ -61,6 +63,16 @@ def _driver() -> ctypes.CDLL:
     return _libcuda
 
 
+def _event_loop() -> asyncio.AbstractEventLoop:
+    global _loop
+    with _loop_lock:
+        if _loop is None:
+            # Unlike the CUDA callback thread, this loop may call CUDA.
+            _loop = asyncio.new_event_loop()
+            threading.Thread(target=_loop.run_forever, daemon=True).start()
+        return _loop
+
+
 def _check(result: int, what: str) -> None:
     if result:
         raise RuntimeError(f"{what} failed with CUDA driver error {result}")
@@ -74,7 +86,7 @@ def _fatal(message: str, error: BaseException) -> None:
 
 
 class _CudaStreamOrdering:
-    """Orders transfers on one CUDA stream; owns callbacks and captured graphs."""
+    """Orders transfers on one CUDA stream and owns their callbacks."""
 
     def __init__(self, stream: torch.cuda.Stream) -> None:
         driver = _driver()
@@ -94,72 +106,46 @@ class _CudaStreamOrdering:
                 "CUDA stream transfers require native GPUDirect RDMA write ordering"
             )
         self._driver = driver
+        self._loop = _event_loop()
         self._stream = stream
         # Pinned memory is device-mapped at the same address under UVA.
         self._flags = torch.zeros(_NUM_SLOTS, dtype=torch.int32, pin_memory=True)
         self._free_slots = list(range(_NUM_SLOTS))
         self._lock = threading.Lock()
         self._closed = False
-        self._capturing = False
         # Callback trampolines and views must outlive every launch that uses
         # them, not merely the completion of their transfer.
         # Entries are (retired event, view, slot, keepalive); captured entries
         # have no event and are released only on close.
-        self._pending: list[tuple[torch.cuda.Event, Any, int, Any]] = []
-        self._captured: list[tuple[None, Any, int, Any]] = []
-        self._graphs: list[torch.cuda.CUDAGraph] = []
-        self._queue: queue.SimpleQueue[
-            tuple[Callable[[], None], ctypes.c_uint32] | None
-        ] = queue.SimpleQueue()
-        self._thread = threading.Thread(target=self._progress, daemon=True)
-        self._thread.start()
-
-    def _progress(self) -> None:
-        # Unlike the CUDA callback thread, this thread may call CUDA.
-        torch.cuda.set_device(self._stream.device)
-        while (item := self._queue.get()) is not None:
-            transfer, flag = item
-            transfer()
-            flag.value = 1
+        self._retained: list[tuple[torch.cuda.Event | None, Any, int, Any]] = []
 
     def _flag(self, slot: int) -> ctypes.c_uint32:
         return ctypes.c_uint32.from_address(self._flags.data_ptr() + slot * 4)
 
     def _reap(self) -> None:
-        pending = []
-        for item in self._pending:
-            if item[0].query():
+        retained = []
+        for item in self._retained:
+            if item[0] is not None and item[0].query():
                 self._free_slots.append(item[2])
             else:
-                pending.append(item)
-        self._pending = pending
+                retained.append(item)
+        self._retained = retained
 
     def retained_views(self) -> list[Any]:
         with self._lock:
-            return [item[1] for item in self._captured] + [
-                item[1] for item in self._pending if not item[0].query()
+            return [
+                item[1]
+                for item in self._retained
+                if item[0] is None or not item[0].query()
             ]
 
-    @contextmanager
-    def capture(self) -> Iterator[torch.cuda.CUDAGraph]:
-        if self._closed or self._capturing:
-            raise RuntimeError("stream is closed or already capturing")
-        graph = torch.cuda.CUDAGraph()
-        self._graphs.append(graph)
-        self._capturing = True
-        try:
-            with torch.cuda.graph(graph, stream=self._stream):
-                yield graph
-        finally:
-            self._capturing = False
-
-    def enqueue(self, submit: Callable[[], int | Work], view: Any) -> None:
+    def enqueue(
+        self, submit: Callable[[], Coroutine[Any, Any, None]], view: Any
+    ) -> None:
         with self._lock, torch.cuda.stream(self._stream):
             if self._closed:
                 raise RuntimeError("transport is closed")
             capturing = torch.cuda.is_current_stream_capturing()
-            if capturing and not self._capturing:
-                raise RuntimeError("capture transfers with Transport.cuda_graph()")
             if not capturing:
                 self._reap()
             if not self._free_slots:
@@ -170,18 +156,27 @@ class _CudaStreamOrdering:
             flag = self._flag(slot)
             flag.value = 0
 
-            def transfer() -> None:
+            device = self._stream.device
+
+            async def transfer() -> None:
                 try:
-                    cast(Work, submit()).wait()
+                    torch.cuda.set_device(device)
+                    await submit()
                 except BaseException as error:
                     _fatal("CUDA stream transfer failed", error)
+                flag.value = 1
+
+            def start() -> None:
+                self._loop.create_task(transfer())
 
             @_HostFn
             def callback(_: int) -> None:
                 try:
+                    if self._closed:
+                        raise RuntimeError("CUDA graph replayed after transport close")
                     # Each graph replay resets its flag before the stream waits.
                     flag.value = 0
-                    self._queue.put((transfer, flag))
+                    self._loop.call_soon_threadsafe(start)
                 except BaseException as error:
                     _fatal("CUDA stream transfer callback failed", error)
 
@@ -207,27 +202,19 @@ class _CudaStreamOrdering:
                 )
             except BaseException as error:
                 _fatal("CUDA stream transfer completion wait failed", error)
-            if capturing:
-                self._captured.append((None, view, slot, callback))
-            else:
+            retired = None
+            if not capturing:
                 retired = torch.cuda.Event()
                 retired.record(self._stream)
-                self._pending.append((retired, view, slot, callback))
+            self._retained.append((retired, view, slot, callback))
 
     def close(self) -> None:
         with self._lock:
             if self._closed:
                 return
-            if self._capturing:
-                raise RuntimeError("cannot close during CUDA graph capture")
-            # Graphs may replay on other streams; keep callbacks alive until
-            # all launches finish and graph executables are destroyed.
             torch.cuda.synchronize(self._stream.device)
-            for graph in self._graphs:
-                graph.reset()
-            self._graphs.clear()
-            self._captured.clear()
-            self._pending.clear()
+            _closed_captures.extend(
+                item[3] for item in self._retained if item[0] is None
+            )
+            self._retained.clear()
             self._closed = True
-            self._queue.put(None)
-            self._thread.join()
