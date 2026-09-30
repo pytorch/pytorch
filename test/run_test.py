@@ -285,6 +285,8 @@ S390X_BLOCKLIST = [
     # crash on s390x that needs investigation
     "test_schema_check",
     "test_meta",
+    # needs fixes in s390x vectorization code
+    "inductor/test_compile_subprocess",
 ]
 
 XPU_BLOCKLIST = [
