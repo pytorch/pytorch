@@ -17,6 +17,7 @@ from torch._inductor.codegen.common import CSEVariable
 from torch._inductor.codegen.simd import (
     _GroupedReductionLayout,
     _PointwiseRemapHandler,
+    _SubParentFusion,
     _SubParentValueResolver,
     SIMDScheduling,
 )
@@ -33,6 +34,7 @@ from torch._inductor.scheduler import (
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
     FusedNestedReductions,
+    FusedStagedReduction,
     FusionMemoryState,
     MemoryDepMatch,
     NestedReduction,
@@ -44,6 +46,7 @@ from torch._inductor.scheduler import (
     SubParentEpilogueCandidate,
     SubParentEpilogueStage,
     SubParentEpilogueGrouping,
+    SubParentFusionResult,
     SubParentOutputGroup,
     StagedReductionPlan,
 )
@@ -1183,6 +1186,7 @@ class TestScheduler(TestCase):
                     ),
                 ),
             ),
+            allow_translation=True,
         )
         scheduling = object.__new__(SIMDScheduling)
         scheduling.supports_sub_parent_epilogue = True
@@ -1198,15 +1202,155 @@ class TestScheduler(TestCase):
             patch.object(
                 NestedReduction,
                 "sub_parent_epilogue_result",
-                return_value=Mock(plan=plan),
+                side_effect=(
+                    SubParentFusionResult(False, None),
+                    SubParentFusionResult(True, plan),
+                ),
             ),
-            inductor_config.patch({"triton.nested_reduction": True}),
+            inductor_config.patch(
+                {"polyhedral_fusion": True, "triton.nested_reduction": True}
+            ),
         ):
             admitted = scheduling._sub_parent_epilogue_plan((node,), 4, 256)
             if torch.device(device).type == "cuda":
                 self.assertIs(admitted, plan)
             else:
                 self.assertIsNone(admitted)
+
+    @parametrize(
+        "legacy_state", ["accepted", "not_admitted", "not_proved", "both_not_admitted"]
+    )
+    @parametrize("enabled", [False, True])
+    def test_sub_parent_selection_preserves_existing_plan(self, legacy_state, enabled):
+        legacy = Mock(allow_translation=False)
+        translated = Mock(allow_translation=True)
+        legacy_result = SubParentFusionResult(
+            True, None if legacy_state == "not_proved" else legacy
+        )
+        scheduling = object.__new__(SIMDScheduling)
+        scheduling.supports_sub_parent_epilogue = True
+        nodes = (Mock(),)
+        with (
+            inductor_config.patch(
+                {"polyhedral_fusion": enabled, "triton.nested_reduction": True}
+            ),
+            patch.object(
+                NestedReduction,
+                "sub_parent_epilogue_result",
+                side_effect=(legacy_result, SubParentFusionResult(True, translated)),
+            ) as planner,
+            patch.object(
+                SIMDScheduling,
+                "_sub_parent_plan_is_admitted",
+                side_effect=lambda nodes, numel, plan: (
+                    (plan is translated and legacy_state != "both_not_admitted")
+                    or legacy_state == "accepted"
+                ),
+            ),
+        ):
+            plan = scheduling._sub_parent_epilogue_plan(nodes, 8, 128)
+        expected = None
+        if legacy_state == "accepted":
+            expected = legacy
+        elif enabled and legacy_state != "both_not_admitted":
+            expected = translated
+        self.assertIs(plan, expected)
+        attempts = [False] if legacy_state == "accepted" or not enabled else [False, True]
+        self.assertEqual(
+            [call.kwargs["allow_translation"] for call in planner.call_args_list], attempts
+        )
+
+    @parametrize("legacy_accepted", [False, True])
+    @parametrize("enabled", [False, True])
+    def test_sub_parent_semantic_selection_preserves_existing_plan(
+        self, legacy_accepted, enabled
+    ):
+        legacy = Mock(allow_translation=False)
+        translated = Mock(allow_translation=True)
+        nodes = (Mock(),)
+        with (
+            inductor_config.patch(polyhedral_fusion=enabled),
+            patch.object(
+                NestedReduction,
+                "sub_parent_epilogue_result",
+                side_effect=(
+                    SubParentFusionResult(True, legacy if legacy_accepted else None),
+                    SubParentFusionResult(True, translated),
+                ),
+            ) as planner,
+        ):
+            plan = NestedReduction.sub_parent_epilogue_plan(nodes, 8, 128)
+        expected = legacy if legacy_accepted else translated if enabled else None
+        self.assertIs(plan, expected)
+        attempts = [False] if legacy_accepted or not enabled else [False, True]
+        self.assertEqual(
+            [call.kwargs["allow_translation"] for call in planner.call_args_list], attempts
+        )
+        for call in planner.call_args_list:
+            self.assertEqual(call.args, (nodes, 8, 128))
+
+    def test_sub_parent_plan_search_continues_after_failure(self):
+        scheduling = object.__new__(SIMDScheduling)
+        first, second = Mock(), Mock()
+        first.group = (None, (8, 128))
+        second.group = (None, (8, 256))
+        nodes = [first, second]
+        plan = Mock()
+        with patch.object(
+            SIMDScheduling, "_sub_parent_epilogue_plan", side_effect=(None, plan)
+        ) as planner:
+            self.assertIs(scheduling._find_sub_parent_epilogue_plan(nodes), plan)
+        self.assertEqual(
+            [call.args for call in planner.call_args_list],
+            [(nodes, 8, 128), (nodes, 8, 256)],
+        )
+
+    @parametrize("consumer_numel", [8, 32, 1024])
+    @inductor_config.patch("triton.nested_reduction", True)
+    def test_sub_parent_failed_plan_uses_original_shape_fallback(self, consumer_numel):
+        scheduling = object.__new__(SIMDScheduling)
+        scheduling.supports_sub_parent_epilogue = True
+        reduction, consumer = Mock(), Mock()
+        reduction.is_reduction.return_value = True
+        consumer.is_reduction.return_value = False
+        reduction.group = (None, (8, 128))
+        consumer.group = (None, (consumer_numel, 1))
+        reduction.get_nodes.return_value = [reduction]
+        consumer.get_nodes.return_value = [consumer]
+        with (
+            V.set_graph_handler(Mock(sizevars=SizeVarAllocator())),
+            patch.object(SIMDScheduling, "_sub_parent_epilogue_plan", return_value=None),
+        ):
+            decision = scheduling._sub_parent_epilogue_decision(reduction, consumer)
+        expected = _SubParentFusion.REJECT if consumer_numel == 32 else _SubParentFusion.DEFER
+        self.assertIs(decision, expected)
+
+    @parametrize("valid_plan", [False, True])
+    def test_standalone_staged_codegen_reconstructs_selected_plan(self, valid_plan):
+        scheduling = object.__new__(SIMDScheduling)
+        scheduling.scheduler = None
+        nodes = [Mock()]
+        node = Mock(spec=FusedStagedReduction)
+        node.get_nodes.return_value = nodes
+        plan = Mock() if valid_plan else None
+        with (
+            patch.object(
+                SIMDScheduling,
+                "_find_sub_parent_epilogue_plan",
+                return_value=plan,
+            ) as selector,
+            patch.object(
+                SIMDScheduling, "_codegen_reduction_with_sub_parent_epilogue"
+            ) as emitter,
+        ):
+            if valid_plan:
+                scheduling.codegen_staged_reduction(node)
+                emitter.assert_called_once_with(nodes, plan)
+            else:
+                with self.assertRaisesRegex(AssertionError, "plan was lost before codegen"):
+                    scheduling.codegen_staged_reduction(node)
+                emitter.assert_not_called()
+            selector.assert_called_once_with(nodes)
 
     def test_sub_parent_resolver_uses_planned_lane_set(self):
         d0 = sympy.Symbol("d0", integer=True, nonnegative=True)
@@ -1416,6 +1560,7 @@ class TestScheduler(TestCase):
             sympy.Integer(3),
             replay_context=None,
             replay_node=None,
+            replay_accesses=None,
         )
         inner.load.assert_not_called()
         kernel.load.assert_called_once_with("buf0", sympy.Integer(7))
@@ -2124,7 +2269,10 @@ class TestScheduler(TestCase):
                 sub_parent.group = (None, (36, 1))
                 sub_parent.get_ranges.return_value = ([3, 6, 2], [])
                 self.assertEqual(
-                    NestedReduction._sub_parent_epilogue_rate(36, 288), (8, 1)
+                    NestedReduction._sub_parent_epilogue_rate(
+                        36, 288, allow_translation=True
+                    ),
+                    (8, 1),
                 )
                 new_nested_rate = NestedReduction._nested_sub_parent_rate(
                     sub_parent, context
