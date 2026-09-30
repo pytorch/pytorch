@@ -4,7 +4,6 @@ Utility functions for NVIDIA Universal GEMM.
 """
 
 import copyreg
-import functools
 from typing import Any
 
 from torch.nn.functional import ScalingType, SwizzleType
@@ -49,13 +48,8 @@ def _rebuild_scaled_operand_constraints(
     return ScaledOperandConstraints(quantized, scale, mode, swizzle)
 
 
-@functools.cache
-def register_scaled_operand_constraints_pickling() -> None:
-    """Avoid CUTLASS's recursive ``__getattr__`` during unpickling.
-
-    Called lazily because importing cutlass.operators is expensive and most
-    compiles never build an NVGEMM choice.
-    """
+def _register_scaled_operand_constraints_pickling() -> None:
+    """Avoid CUTLASS's recursive ``__getattr__`` during unpickling."""
     try:
         from cutlass.operators.metadata import ScaledOperandConstraints
     except ImportError:
@@ -68,6 +62,9 @@ def register_scaled_operand_constraints_pickling() -> None:
             (value.quantized, value.scale, value.mode, value.swizzle),
         ),
     )
+
+
+_register_scaled_operand_constraints_pickling()
 
 
 def to_cutlass_scale_mode(

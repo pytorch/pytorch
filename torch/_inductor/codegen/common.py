@@ -5,7 +5,6 @@ import contextlib
 import dataclasses
 import enum
 import functools
-import importlib
 import itertools
 import logging
 import math
@@ -633,31 +632,19 @@ def _init_builtin_backend_registration() -> None:
     # The built-in devices are never unregistered, so this only needs to run
     # once per process; the privateuse1 probe in init_backend_registration
     # below re-runs on every call.
+    from .cpp import CppScheduling
     from .cpp_wrapper_cpu import CppWrapperCpu
     from .cpp_wrapper_gpu import CppWrapperGpu
     from .cpp_wrapper_mps import CppWrapperMps
+    from .cuda_combined_scheduling import CUDACombinedScheduling
+    from .halide import HalideScheduling
+    from .mps import MetalScheduling
+    from .pallas import PallasScheduling
     from .python_wrapper_mtia import PythonWrapperMtia
+    from .triton import TritonScheduling
     from .wrapper import PythonWrapperCodegen
     from .wrapper_fxir import WrapperFxCodegen
-
-    # Scheduling classes pull in lowering and kernel codegen; import them only
-    # when a graph is actually scheduled, not on an FX graph cache hit.
-    def lazy(module: str, name: str) -> SchedulingConstructor:
-        def construct(scheduler: Scheduler | None) -> BaseScheduling:
-            cls = getattr(importlib.import_module(module, __package__), name)
-            return cls(scheduler)
-
-        return construct
-
-    CppScheduling = lazy(".cpp", "CppScheduling")
-    CUDACombinedScheduling = lazy(".cuda_combined_scheduling", "CUDACombinedScheduling")
-    HalideScheduling = lazy(".halide", "HalideScheduling")
-    MetalScheduling = lazy(".mps", "MetalScheduling")
-    PallasScheduling = lazy(".pallas", "PallasScheduling")
-    TritonScheduling = lazy(".triton", "TritonScheduling")
-    XPUCombinedScheduling = lazy(
-        ".xpu.xpu_combined_scheduling", "XPUCombinedScheduling"
-    )
+    from .xpu.xpu_combined_scheduling import XPUCombinedScheduling
 
     if get_scheduling_for_device("cpu") is None:
         cpu_backends = {
