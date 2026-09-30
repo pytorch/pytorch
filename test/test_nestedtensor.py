@@ -8082,6 +8082,44 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
+    @skipMeta
+    def test_compile_with_uncached_seq_len_cache_tensor(self, device, dtype):
+        values = torch.randn(10, device=device, dtype=dtype)
+        offsets = torch.tensor([0, 1, 4, 6, 10], device=device, dtype=torch.int64)
+
+        def f(nt):
+            max_seqlen = nt._max_seqlen
+            # Eager populates the cache tensor on the same object.
+            return (
+                nt._max_seqlen_tensor.shape[0] + max_seqlen,
+                nt._min_seqlen_tensor is None,
+            )
+
+        ref = f(NestedTensor(values.clone(), offsets.clone()))
+        compiled_f = torch.compile(f, backend="eager", fullgraph=True, dynamic=True)
+        self.assertEqual(compiled_f(NestedTensor(values.clone(), offsets.clone())), ref)
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
+    @skipMeta
+    def test_compile_with_uncached_seq_len_intermediate_autograd(self, device, dtype):
+        offsets = torch.tensor([0, 1, 4, 6, 10], device=device, dtype=torch.int64)
+
+        def f(values):
+            # The raw _values of this intermediate carries no autograd history.
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets) * 2
+            return (nt * nt._max_seqlen).values().sum()
+
+        ref_values = torch.randn(10, device=device, dtype=dtype, requires_grad=True)
+        f(ref_values).backward()
+        values = ref_values.detach().clone().requires_grad_(True)
+        out = torch.compile(f, backend="aot_eager", fullgraph=True)(values)
+        self.assertTrue(out.requires_grad)
+        out.backward()
+        self.assertEqual(values.grad, ref_values.grad)
+
+    @dtypes(torch.float32)
+    @skipIfTorchDynamo("Test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_compile_with_propagated_dynamic_max_seq_len(self, device, dtype):
         # shape (B, *, D)
