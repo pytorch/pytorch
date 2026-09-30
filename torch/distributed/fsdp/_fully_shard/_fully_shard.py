@@ -427,8 +427,9 @@ class FSDPModule:
         both reduce-scatter and all-reduce together. This is the equivalence of
         `no_sync` in FSDP1.
 
-        Unsynchronized gradients accumulate on unsharded parameters according
-        to ``MixedPrecisionPolicy.reduce_dtype``. Sharded gradients and HSDP
+        Unsynchronized gradients accumulate on unsharded parameters in
+        ``MixedPrecisionPolicy.reduce_dtype`` if set, and otherwise as the
+        parameter's ``grad_dtype`` specifies (the original dtype if unset). Sharded gradients and HSDP
         buffers awaiting all-reduce remain separate. CPU offload moves only
         fully reduced sharded gradients to CPU.
 

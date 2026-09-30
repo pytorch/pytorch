@@ -374,8 +374,11 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
                 self.assertFalse(tensors[0].is_contiguous())
             expected = torch._chunk_cat([t.to(fp32) for t in tensors], 0, 4)
             out = torch.empty_like(expected)
+            version = out._version
             torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, 4, out=out)
             self.assertEqual(out, expected, atol=0, rtol=0)
+            # Autograd must see the in-place write to out
+            self.assertGreater(out._version, version)
 
     @onlyCUDA
     def test_kernels(self, device):
@@ -398,7 +401,7 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
 
 
 instantiate_device_type_tests(
-    TestFullyShardChunkCatMixedDtype, globals(), only_for=("cpu", "cuda")
+    TestFullyShardChunkCatMixedDtype, globals(), only_for=("cpu", "cuda", "xpu")
 )
 
 
