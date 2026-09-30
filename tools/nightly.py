@@ -1156,11 +1156,6 @@ def _is_version(name: str) -> bool:
     return True
 
 
-def _source_sort_key(name: str) -> tuple[int, Any]:
-    # Numbered versions first in version order, then named channels such as "preview".
-    return (0, Version(name)) if _is_version(name) else (1, name)
-
-
 def parse_arguments() -> argparse.Namespace:
     parser = make_parser()
     args = parser.parse_args()
@@ -1199,17 +1194,12 @@ def main() -> None:
                 if pip_source is None:
                     print(
                         f"{toolkit} {requested} is not available on platform {PLATFORM}. "
-                        f"Available version(s): {', '.join(sorted(available_sources, key=_source_sort_key))}"
+                        f"Available version(s): {', '.join(sorted(available_sources))}"
                     )
                     sys.exit(1)
             else:
+                # Named channels such as "preview" are opt-in only.
                 versions = [v for v in available_sources if _is_version(v)]
-                if not versions:
-                    print(
-                        f"No numbered {toolkit} version available on platform {PLATFORM}; "
-                        f"pass one of: {', '.join(sorted(available_sources))}"
-                    )
-                    sys.exit(1)
                 pip_source = available_sources[max(versions, key=Version)]
 
     if pip_source is None:
