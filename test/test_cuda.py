@@ -6424,7 +6424,48 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
-    @unittest.skipIf(TEST_WITH_ROCM, "CUDA-specific capture ID regression")
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    @parametrize("allocation_capture_ended", [False, True])
+    def test_graph_allocator_free_in_unrelated_capture(self, allocation_capture_ended):
+        torch.cuda.empty_cache()
+        allocation_graph = torch.cuda.CUDAGraph()
+        free_graph = torch.cuda.CUDAGraph()
+        allocation_stream = torch.cuda.Stream()
+        free_stream = torch.cuda.Stream()
+
+        torch.cuda.synchronize()
+        with torch.cuda.stream(allocation_stream):
+            allocation_graph.capture_begin(capture_error_mode="relaxed")
+            temporary = torch.ones(64, device="cuda")
+            allocation_output = temporary + 1
+            if allocation_capture_ended:
+                allocation_graph.capture_end()
+
+        with torch.cuda.stream(free_stream):
+            free_graph.capture_begin(capture_error_mode="relaxed")
+            # Free in a different root, either while the allocation's capture
+            # is still active or after its tracking metadata has been removed.
+            del temporary
+            free_output = torch.full((64,), 3, device="cuda")
+            free_graph.capture_end()
+
+        if not allocation_capture_ended:
+            with torch.cuda.stream(allocation_stream):
+                allocation_graph.capture_end()
+
+        allocation_graph.replay()
+        free_graph.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(allocation_output, torch.full_like(allocation_output, 2))
+        self.assertEqual(free_output, torch.full_like(free_output, 3))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @skipIfRocmVersionLessThan((7, 14))
     @unittest.skipUnless(
         TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
     )
