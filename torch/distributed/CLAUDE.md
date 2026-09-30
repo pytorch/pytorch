@@ -1,29 +1,24 @@
 # Distributed development
 
-- Never use sleeps to establish distributed/race ordering. Use events, barriers,
-  futures, or handshakes; timeouts bound failure, not synchronization.
-- Keep top-level APIs backend-generic: no hardcoded `"nccl"` checks or vendor
-  branches in `distributed_c10d.py`. Dispatch through general backend interfaces;
-  keep implementation and capability checks in backends, including custom ones.
-  Extensions may use `dist.get_backend_impl(...).foo(...)`, which bypasses tracing
-  and other hooks.
-- Support CUDA graphs where possible. Test collective capture and repeated replay,
-  not just eager execution; explicitly document unsupported paths.
-- Keep multi-GPU tests fast. Prefer `MultiThreadedTestCase` or
-  `MultiProcContinuousTest` over per-test process launches where semantics allow.
-  Reset shared worker state; retain fresh processes for lifecycle/failure tests
-  or state that cannot be isolated safely.
-- Put distributed-specific tests in `test/distributed/`; prefer backend-generic
-  suites unless the behavior is backend-specific.
+- Avoid sleeps in distributed/race code; synchronize with events, barriers,
+  futures, or handshakes instead of timing assumptions.
+- Keep top-level interfaces backend-generic: no hardcoded `"nccl"` behavior in
+  `distributed_c10d.py`. Put backend-specific logic in backend implementations;
+  custom extensions may use `dist.get_backend_impl(...).foo(...)`.
+- Support CUDA graphs where possible; test capture and repeated replay.
+- Keep expensive multi-GPU tests fast: prefer `MultiThreadedTestCase` or
+  `MultiProcContinuousTest` over per-test process launches where possible.
+  Reset reused-worker state; retain fresh processes when isolation is required.
+- Put distributed-specific tests in `test/distributed/`; use backend-generic
+  suites unless testing backend-specific behavior.
 
-## Distributed review checks
+## Review
 
-- Check collective order and participants across ranks and process groups,
-  including divergent branches, empty inputs, nonmembers, and exceptions.
-  Verify roots, rank mappings, shapes/dtypes, split sizes, and matching P2P tags.
-- Check that waits cannot block collective progress; rank failure, timeout,
-  cancellation, reconfiguration, and teardown must not strand peers or futures.
-- Retain buffers, registrations, communicators, and callback state until native
-  work completes. Timeout/cancellation does not prove DMA or remote access stopped.
-- Preserve collective effects, ordering, configuration, and async semantics through
-  functional operators, compilation/export, and backward; do not silently drop them.
+- Check collective order/participants across ranks and groups, matching P2P tags,
+  rank mappings, and tensor metadata, including divergent/error paths.
+- Check progress and peer/future cleanup on failure, timeout, cancellation,
+  reconfiguration, and teardown; avoid waits that block their own progress.
+- Keep buffers/registrations/communicators alive until native work completes;
+  timeout/cancellation does not imply DMA or remote access has stopped.
+- Preserve collective effects, ordering, configuration, and async semantics
+  through compilation/export and backward.
