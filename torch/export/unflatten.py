@@ -332,19 +332,22 @@ class FlatArgsAdapter(abc.ABC):
 
 class _UnflattenedForward:
     """
-    Non-data descriptor for UnflattenedModule.forward. The runtime call stays
-    variadic, but inspect.signature reports the exported top-level input names
-    so re-export binds example inputs like the original module. Binding happens
-    at attribute access, so shallow copies such as DataParallel replicas call
-    their own state rather than the instance the signature was configured on.
+    Non-data descriptor decorating UnflattenedModule.forward. The runtime call
+    stays variadic, but inspect.signature reports the exported top-level input
+    names so re-export binds example inputs like the original module. Binding
+    happens at attribute access, so shallow copies such as DataParallel replicas
+    call their own state rather than the instance the signature was configured on.
     """
+
+    def __init__(self, fn):
+        self.fn = fn
 
     def __get__(self, module, owner=None):
         if module is None:
-            return UnflattenedModule._forward_impl
+            return self.fn
 
         def forward(*args, **kwargs):
-            return module._forward_impl(*args, **kwargs)
+            return self.fn(module, *args, **kwargs)
 
         signature = module.__dict__.get("_forward_signature")
         if signature is not None:
@@ -744,7 +747,8 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
                 exc_info=True,
             )
 
-    def _forward_impl(self, *args, **kwargs):
+    @_UnflattenedForward
+    def forward(self, *args, **kwargs):  # pyrefly: ignore [bad-override]
         flat_args = self.process_forward_inputs(*args, **kwargs)
         signature = self.module_call_graph[0].signature
 
@@ -764,8 +768,6 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
                 *flat_args, enable_io_processing=False
             )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
-
-    forward = _UnflattenedForward()  # pyrefly: ignore [bad-assignment]
 
     def finalize(self):
         self.__dict__["graph_module"] = torch.fx.GraphModule(self, self.graph)
