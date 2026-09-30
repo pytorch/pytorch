@@ -659,10 +659,11 @@ def _restore_expandable_segments(
     previous process, and map back the ranges they had mapped.
 
     ``segments`` are entries from :func:`memory_snapshot` taken in the earlier
-    process. Each is re-reserved at the address it had, which the driver honors
-    because the reservation is large (see Note [Expandable Segment Reserved
-    Address]); the address does not have to have been predictable when it was
-    recorded. The restored ranges become free blocks in ``mempool_id``, so
+    process. Each is re-reserved at the address, size and segment size it had,
+    whatever this process's settings, which the driver honors because the
+    reservation is large (see Note [Expandable Segment
+    Reserved Address]); the address does not have to have been predictable when
+    it was recorded. The restored ranges become free blocks in ``mempool_id``, so
     ``UntypedStorage._resize_with_addr_`` can then place a tensor back at its
     original address.
 
@@ -677,6 +678,7 @@ def _restore_expandable_segments(
     # Group the snapshot's per-mapped-run entries back into whole segments: a
     # segment with holes is reported as several runs sharing one base address.
     runs: dict[tuple[bool, int], list[tuple[int, int]]] = {}
+    reservations: dict[tuple[bool, int], tuple[int, int]] = {}
     for seg in segments:
         if not seg["is_expandable"]:
             raise ValueError(
@@ -686,6 +688,10 @@ def _restore_expandable_segments(
         key = (seg["segment_type"] == "small", seg["expandable_segment_base"])
         offset = seg["address"] - seg["expandable_segment_base"]
         runs.setdefault(key, []).append((offset, seg["total_size"]))
+        reservations[key] = (
+            seg["expandable_reservation_size"],
+            seg["expandable_segment_size"],
+        )
 
     for (is_small, base), ranges in runs.items():
         torch._C._cuda_restoreExpandableSegment(
@@ -693,6 +699,7 @@ def _restore_expandable_segments(
             mempool_id,
             is_small,
             base,
+            *reservations[(is_small, base)],
             sorted(ranges),
         )
 

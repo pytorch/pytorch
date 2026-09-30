@@ -312,6 +312,8 @@ class CUDAAllocator : public DeviceAllocator {
       MempoolId_t mempool_id,
       bool is_small,
       size_t address,
+      size_t reserve_size,
+      size_t segment_size,
       const std::vector<std::pair<size_t, size_t>>& mapped_ranges) {
     TORCH_CHECK(
         false,
@@ -442,9 +444,18 @@ inline void restoreExpandableSegment(
     MempoolId_t mempool_id,
     bool is_small,
     size_t address,
+    size_t reserve_size,
+    size_t segment_size,
     const std::vector<std::pair<size_t, size_t>>& mapped_ranges) {
   get()->restoreExpandableSegment(
-      device, stream, mempool_id, is_small, address, mapped_ranges);
+      device,
+      stream,
+      mempool_id,
+      is_small,
+      address,
+      reserve_size,
+      segment_size,
+      mapped_ranges);
 }
 
 // CUDAGraph interactions
