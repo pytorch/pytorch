@@ -95,11 +95,19 @@ void CaptureTracker::recordFree(const void* block, cudaStream_t free_stream) {
   }
 
   const AllocationContext free_context = allocationContext(free_stream);
-  if (free_context.tracked_capture_id.has_value() &&
-      !isFreeInAllocationCaptureOrAncestor(
-          allocation_it->second, *free_context.tracked_capture_id)) {
-    ++capture_tree_.at(*free_context.tracked_capture_id)
-          .invalid_capture_free_count;
+  if (free_context.tracked_capture_id.has_value()) {
+    const auto allocation_capture_it =
+        capture_tree_.find(allocation_it->second);
+    const auto free_capture_it =
+        capture_tree_.find(*free_context.tracked_capture_id);
+    if (allocation_capture_it != capture_tree_.end() &&
+        free_capture_it != capture_tree_.end() &&
+        allocation_capture_it->second.root_capture_id ==
+            free_capture_it->second.root_capture_id &&
+        !isFreeInAllocationCaptureOrAncestor(
+            allocation_it->second, *free_context.tracked_capture_id)) {
+      ++free_capture_it->second.invalid_capture_free_count;
+    }
   }
   block_allocation_captures_.erase(allocation_it);
 }
