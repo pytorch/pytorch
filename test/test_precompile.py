@@ -6626,8 +6626,9 @@ class TestPrecompileRuntimeCache(TestCase):
         pc = torch.compiler.precompile
         fn = _no_compilation_inductor_graph
         x = torch.randn(8, 16)
+        # Windows can't delete the loaded kernel modules.
         with (
-            tempfile.TemporaryDirectory() as directory,
+            tempfile.TemporaryDirectory(ignore_cleanup_errors=IS_WINDOWS) as directory,
             inductor_config.patch(cpp_cache_precompile_headers=precompile_headers),
         ):
             clear_caches()
