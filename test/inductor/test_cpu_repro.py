@@ -154,6 +154,35 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    @torch._dynamo.config.patch(prefer_deferred_runtime_asserts_over_guards=True)
+    def test_prefer_deferred_runtime_asserts_backed_symint_compile(self):
+        def fn(x):
+            y = x.reshape(100, -1).clone()
+            return y + 10
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+
+        x = torch.rand(100, 100)
+        self.assertEqual(compiled(x), fn(x))
+
+        with self.assertRaisesRegex(RuntimeError, "to be True"):
+            compiled(torch.rand(101, 101))
+
+    @torch._dynamo.config.patch(prefer_deferred_runtime_asserts_over_guards=True)
+    def test_prefer_deferred_runtime_asserts_compound_backed_symint_compile(self):
+        def fn(x):
+            # sym_and produces a sympy.And predicate rather than a Relational.
+            torch._check((x.shape[0] % 2 == 0) & (x.shape[0] % 3 == 0))
+            return x + 10
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)
+
+        x = torch.rand(12)
+        self.assertEqual(compiled(x), fn(x))
+
+        with self.assertRaisesRegex(RuntimeError, "to be True"):
+            compiled(torch.rand(10))
+
     def _check_interpolate_mutated_input_backward(
         self, fn, activation_memory_budget=1.0
     ):
@@ -225,7 +254,8 @@ class CPUReproTests(TestCase):
         finally:
             handle.destroy()
 
-    def test_in_graph_mutated_grad_input_zero_memory_budget(self):
+    @parametrize("activation_memory_budget", (0, 1))
+    def test_in_graph_mutated_grad_input_backward(self, activation_memory_budget):
         def fn(w, x):
             result = w.sin()
             with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(w):
@@ -238,16 +268,9 @@ class CPUReproTests(TestCase):
         # The preserved version counter makes backward read the updated data.
         expected_grad = x.cos()
 
-        with (
-            functorch_config.patch(
-                activation_memory_budget=0, enable_autograd_cache=False
-            ),
-            patch(
-                "torch._functorch.partitioners.solve_min_cut",
-                side_effect=AssertionError(
-                    "in-graph mutations should keep the zero-budget fast path"
-                ),
-            ),
+        with functorch_config.patch(
+            activation_memory_budget=activation_memory_budget,
+            enable_autograd_cache=False,
         ):
             actual = torch.compile(fn, backend="inductor", fullgraph=True)(w, x)
             actual.sum().backward()
@@ -270,6 +293,32 @@ class CPUReproTests(TestCase):
             result, mutated_x = fn_to_run(x, y)
             result.sum().backward()
             return result.detach(), mutated_x.detach(), base.grad, y.grad
+
+        torch.manual_seed(0)
+        expected = run(fn)
+        torch.manual_seed(0)
+        with functorch_config.patch(activation_memory_budget=activation_memory_budget):
+            actual = run(torch.compile(fn, backend="inductor", fullgraph=True))
+
+        self.assertEqual(actual, expected)
+
+    @parametrize("activation_memory_budget", (0, 1))
+    def test_mutated_subclass_input_saved_for_backward(self, activation_memory_budget):
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        def fn(x, y):
+            result = x.clone() * y
+            x.add_(1)
+            return result, x
+
+        def run(fn_to_run):
+            # The subclass requires grad while its components do not.
+            leaf = TwoTensor(torch.randn(2, 4), torch.randn(2, 4)).requires_grad_(True)
+            x = leaf * 1.0
+            y = torch.randn(2, 4, requires_grad=True)
+            result, mutated_x = fn_to_run(x, y)
+            result.sum().backward()
+            return result.a, mutated_x.a, leaf.grad.a, leaf.grad.b, y.grad
 
         torch.manual_seed(0)
         expected = run(fn)

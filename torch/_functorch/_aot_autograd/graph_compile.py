@@ -93,7 +93,10 @@ from .schemas import (
     SubclassMeta,
     ViewAndMutationMeta,
 )
-from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
+from .subclass_utils import (
+    compute_inner_input_info_from_subclass_meta,
+    compute_inner_mutated_inp_indices_from_subclass_meta,
+)
 from .utils import (
     _is_primal,
     contain_metadata_mutation_ops,
@@ -1997,7 +2000,12 @@ def _partition_joint_graph_into_fw_bw(
         if _is_primal(node)
         and not isinstance(node.meta.get("desc"), ForwardTokenAOTInput)
     ]
-    for node, info in zip(primals, inner_meta.input_info):
+    # Subclass components do not carry the outer tensor's requires_grad, so
+    # take the info from the outer metadata expanded onto the inner inputs.
+    inner_input_info = compute_inner_input_info_from_subclass_meta(
+        fw_metadata, inner_meta
+    )
+    for node, info in zip(primals, inner_input_info):
         if (
             info.requires_grad
             and info.mutates_data
