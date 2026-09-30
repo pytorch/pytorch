@@ -343,6 +343,43 @@ class TestPartitionedScatterOpt(TestCase):
         self._check_accuracy(f, (grad, idx))
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
 
+    def test_embedding_dense_backward_scale_grad_by_freq(self):
+        torch.manual_seed(42)
+        B, T, num_weights, dim, padding_idx = 64, 128, 24, 16, 3
+
+        def f(grad, idx):
+            return torch.ops.aten.embedding_dense_backward(
+                grad, idx, num_weights, padding_idx, True
+            )
+
+        grad = torch.randn(B, T, dim)
+        idx = torch.randint(0, num_weights, (B, T), dtype=torch.int64)
+        idx[::2] = 0
+        idx[::7] = padding_idx
+
+        self._check_accuracy(f, (grad, idx), atol=1e-2, rtol=1e-2)
+        # counts accumulate is int64 and falls back; the grad accumulate is rewritten.
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
+
+    def test_masked_accumulate_index_shaped_mask(self):
+        torch.manual_seed(3)
+        n, D, A, B = 8, 4, 64, 128
+
+        def f(out, mask, idx, vals):
+            return torch.ops.aten._unsafe_masked_index_put_accumulate(
+                out, mask, [idx], vals
+            )
+
+        out = torch.zeros(n, D)
+        idx = torch.randint(0, n, (A, B), dtype=torch.int64)
+        mask = torch.ones(A, B, dtype=torch.bool)
+        idx[0, 0] = -5
+        mask[0, 0] = False
+        vals = torch.randn(A, B, D)
+
+        self._check_accuracy(f, (out, mask, idx, vals), atol=1e-3, rtol=1e-3)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
+
     def test_scatter_reduce_sum(self):
         """The scatter_reduce family reaches the same atomic_add, with an
         explicit dim and a values-shaped index."""
@@ -362,8 +399,55 @@ class TestPartitionedScatterOpt(TestCase):
         idx = torch.randint(0, 4, (N, D), dtype=torch.int64)
         vals = torch.randn(N, D, dtype=torch.float32)
 
-        self._check_accuracy(f, (out, idx, vals), atol=1.0, rtol=1e-2)
+        self._check_accuracy(f, (out, idx, vals), atol=1e-3, rtol=1e-3)
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 3)
+
+    def test_scatter_reduce_include_self_false_not_matched(self):
+        torch.manual_seed(42)
+        N, n, D = 8192, 8, 4
+        idx = torch.randint(0, 4, (N, D), dtype=torch.int64)
+        vals = torch.randn(N, D)
+        out = torch.randn(n, D)
+
+        def run(include_self):
+            counters.clear()
+            torch._dynamo.reset()
+
+            def f(out, idx, vals):
+                return out.scatter_reduce(
+                    0, idx, vals, "sum", include_self=include_self
+                )
+
+            with torch.no_grad():
+                expected = f(out, idx, vals)
+                actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                    out, idx, vals
+                )
+            return (
+                counters["inductor"]["partitioned_scatter_applied"],
+                expected,
+                actual,
+            )
+
+        applied, expected, actual = run(True)
+        self.assertEqual(applied, 1)
+        self.assertEqual(expected, actual, atol=1e-3, rtol=1e-3)
+        applied, expected, actual = run(False)
+        self.assertEqual(applied, 0)
+        self.assertEqual(expected, actual, atol=1e-3, rtol=1e-3)
+
+    def test_scatter_narrow_index_nonzero_dim(self):
+        torch.manual_seed(1)
+        n, D, N = 4, 8, 8192
+        idx = torch.randint(0, D, (1, N), dtype=torch.int64)
+        vals = torch.randn(1, N)
+        out = torch.zeros(n, D)
+
+        def f(out, idx, vals):
+            return out.scatter_add(1, idx, vals), out.scatter_add(-1, idx, vals)
+
+        self._check_accuracy(f, (out, idx, vals), atol=1e-3, rtol=1e-3)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 2)
 
     def test_scatter_reduce_int32_index(self):
         """An int32 index is legal and must be widened before the partition
@@ -378,7 +462,7 @@ class TestPartitionedScatterOpt(TestCase):
         idx = torch.randint(0, 4, (N, D), dtype=torch.int32)
         vals = torch.randn(N, D, dtype=torch.float32)
 
-        self._check_accuracy(f, (out, idx, vals), atol=1.0, rtol=1e-2)
+        self._check_accuracy(f, (out, idx, vals), atol=1e-3, rtol=1e-3)
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
 
     @config.patch(partitioned_scatter_fp32_accumulation=True)
@@ -854,6 +938,48 @@ class TestPartitionedScatterOpt(TestCase):
         )
         self.assertTrue(torch.allclose(expected, actual, atol=1e-1, rtol=1e-2))
 
+    def test_skip_atomic_fallback(self):
+        torch.manual_seed(21)
+        N, n, D = 8192, 8, 4
+
+        def f(out, idx, vals):
+            return out.scatter_add(0, idx, vals)
+
+        idx = torch.randint(0, 4, (N, D), dtype=torch.int64)
+        vals = torch.randint(0, 4, (N, D), dtype=torch.int64)
+        out = torch.zeros(n, D, dtype=torch.int64)
+
+        with torch.no_grad():
+            expected = f(out, idx, vals)
+            actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                out, idx, vals
+            )
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_skipped_atomic_fallback"], 0
+        )
+        self.assertEqual(expected, actual)
+
+        counters.clear()
+        torch._dynamo.reset()
+        out = torch.zeros(n, D)
+        vals = torch.randn(N, D)
+        deterministic = torch.are_deterministic_algorithms_enabled()
+        torch.use_deterministic_algorithms(True)
+        try:
+            with torch.no_grad():
+                expected = f(out, idx, vals)
+                actual = torch.compile(f, backend="inductor", fullgraph=True)(
+                    out, idx, vals
+                )
+        finally:
+            torch.use_deterministic_algorithms(deterministic)
+        self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 0)
+        self.assertGreater(
+            counters["inductor"]["partitioned_scatter_skipped_atomic_fallback"], 0
+        )
+        self.assertEqual(expected, actual, atol=1e-3, rtol=1e-3)
+
     def test_compute_num_partitions_tight_budget(self):
         """Memory constraint picks P=4: P=8 overhead (28 MB) exceeds 20 MB budget."""
         # P=4: overhead = 1M * 4 * 3 = 12 MB ≤ 20 MB
@@ -876,6 +1002,7 @@ class TestPartitionedScatterOpt(TestCase):
                 scatter_dim_size=1_000_000,
                 values_numel=4_000_000,
                 contention_ratio=4.0,
+                writes_per_slot=4.0,
                 dtype=dtype,
                 acc_dtype=acc_dtype,
             )
@@ -922,49 +1049,31 @@ class TestPartitionedScatterOpt(TestCase):
 
         # writes_per_slot=256 → cap=256, min(256, max_p=128) = 128
         result = _compute_num_partitions(
-            available,
-            1024,
-            4,
-            min_p=2,
-            max_p=128,
-            index_size=4096,
-            scatter_dim_size=16,
+            available, 1024, 4, min_p=2, max_p=128, writes_per_slot=256
         )
         self.assertEqual(result, 128)
 
         # writes_per_slot=64 → cap=64
         result = _compute_num_partitions(
-            available,
-            1024,
-            4,
-            min_p=2,
-            max_p=128,
-            index_size=1024,
-            scatter_dim_size=16,
+            available, 1024, 4, min_p=2, max_p=128, writes_per_slot=64
         )
         self.assertEqual(result, 64)
 
         # writes_per_slot=4 → cap=4
         result = _compute_num_partitions(
-            available,
-            1024,
-            4,
-            min_p=2,
-            max_p=128,
-            index_size=64,
-            scatter_dim_size=16,
+            available, 1024, 4, min_p=2, max_p=128, writes_per_slot=4
         )
         self.assertEqual(result, 4)
 
-        # writes_per_slot=0.5 → cap=max(2, 2)=2
+        # writes_per_slot=0.5 → cap=max(2, 1)=2
         result = _compute_num_partitions(
-            available,
-            1024,
-            4,
-            min_p=2,
-            max_p=128,
-            index_size=8,
-            scatter_dim_size=16,
+            available, 1024, 4, min_p=2, max_p=128, writes_per_slot=0.5
+        )
+        self.assertEqual(result, 2)
+
+        # scatter index [1024, 1] into [16, 64] writes 1024 elements, not a full row.
+        result = _compute_num_partitions(
+            available, 16 * 64, 4, min_p=2, max_p=128, writes_per_slot=1024 / (16 * 64)
         )
         self.assertEqual(result, 2)
 

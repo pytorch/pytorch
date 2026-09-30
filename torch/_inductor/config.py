@@ -1360,8 +1360,9 @@ _micro_pipeline_tp: bool = False
 
 
 # Enable/disable partitioned scatter optimization for atomic add kernels.
-# Improves kernel performance for high-contention index_put(accumulate=True)
-# at the cost of temporary memory for expanded partition buffers.
+# Improves kernel performance for high-contention accumulating scatters
+# (index_put, index_add, scatter_add, scatter_reduce) at the cost of
+# temporary memory for expanded partition buffers.
 _partitioned_scatter_default = "1" if torch.version.hip else "0"
 partitioned_scatter_enabled = (
     os.environ.get(
@@ -1379,7 +1380,9 @@ partitioned_scatter_max_partitions: int = 64
 # Skip ops with fewer writes than this — small scatters don't generate meaningful contention.
 partitioned_scatter_min_index_size: int = 4096
 
-# Skip ops where index_numel / scatter_dim_size is below this ratio.
+# Skip ops where (writes along the scatter dim) / scatter_dim_size is below
+# this ratio. The numerator is index.numel() for index_put and index.shape[dim]
+# for scatter_add / scatter_reduce.
 # Contention is measured per scatter-dim slot; low density means most slots get ≤1 write.
 # The partitioned form pays a zero-fill and reduce over the expanded buffer plus a
 # slower scatter kernel (atomics over P copies lose cache residency), whether or not
