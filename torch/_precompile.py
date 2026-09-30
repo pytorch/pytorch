@@ -3266,16 +3266,17 @@ def capture_runtime() -> contextlib.AbstractContextManager[None]:
     so any compile the finalized cache would not cover raises
     :class:`~torch.compiler.PrecompileError` instead of passing silently.
 
-    When the installed Triton can export its runtime cache, set an explicit,
-    attempt-private ``TRITON_CACHE_DIR`` and ``TRITON_CACHE_AUTOTUNING=1`` before
-    entering, so :func:`finalize_cache` can carry kernels launched directly
-    through ``@triton.jit`` / ``@triton.autotune`` and their autotuning
-    decisions.
+    When Triton is installed, set an explicit, attempt-private
+    ``TRITON_CACHE_DIR`` and ``TRITON_CACHE_AUTOTUNING=1`` before entering, so
+    :func:`finalize_cache` can carry kernels launched directly through
+    ``@triton.jit`` / ``@triton.autotune`` and their autotuning decisions.
+    Triton does not cache the decision of an autotuner with ``pre_hook``
+    configs, so such a kernel is benchmarked again on first use.
 
     Raises :class:`~torch.compiler.PrecompileError` if entered while compilation
     is already forbidden, while this process already has an active scope, or,
-    with such a Triton, without an explicit ``TRITON_CACHE_DIR`` or with Triton's
-    autotuning cache disabled. A scope inherited across ``fork`` belongs to the
+    with Triton installed, without an explicit ``TRITON_CACHE_DIR`` or with
+    Triton's autotuning cache disabled. A scope inherited across ``fork`` belongs to the
     parent and does not block the child.
     """
     from torch.compiler._runtime_cache import capture_runtime as _capture_runtime
@@ -3294,9 +3295,9 @@ def finalize_cache(
     verifies that the pair matches without executing the artifact, waits for
     pending compile work, and rewrites ``cache_path`` in place (written beside it
     and renamed over it, keeping its mode) with the runtime dependencies recorded
-    during the scope added. When the installed Triton can export its runtime
-    cache, that cache (Triton JIT binaries and autotuning decisions under
-    ``TRITON_CACHE_DIR``) is added too.
+    during the scope added. When Triton is installed, its runtime cache (Triton
+    JIT binaries and autotuning decisions under ``TRITON_CACHE_DIR``) is added
+    too.
     The enclosing :func:`capture_runtime` scope is sealed while the cache is
     rewritten and stays sealed once the rewrite succeeds; if the rewrite fails, the
     scope is unsealed again and ``cache_path`` is left as it was, so the call can
@@ -3367,15 +3368,15 @@ def prepare_runtime(
     process's ``TRITON_CACHE_DIR``; :func:`load` does not import it again. Enable
     Triton's autotuning cache (``TRITON_CACHE_AUTOTUNING=1``) before calling it,
     so the captured autotuning decisions are reused instead of re-benchmarked.
-    ``prepare_runtime`` is for strict serving, so it raises when the installed
-    Triton cannot import that cache or its autotuning cache is disabled. A worker
+    ``prepare_runtime`` is for strict serving, so it raises when that cache
+    cannot be imported or Triton's autotuning cache is disabled. A worker
     that serves without :func:`no_compilation` can skip it: :func:`load` then
     logs a warning and Triton compiles or autotunes those kernels on first use.
 
     Raises :class:`~torch.compiler.PrecompileError` for a make_fx capture, a
     mismatched or unreadable pair, a cache :func:`finalize_cache` did not
-    produce, or a cache carrying a Triton runtime cache that the installed Triton
-    cannot import or that its disabled autotuning cache would ignore.
+    produce, or a cache carrying a Triton runtime cache that cannot be imported
+    or that Triton's disabled autotuning cache would ignore.
     """
     from torch.compiler._runtime_cache import prepare_runtime_cache
 
