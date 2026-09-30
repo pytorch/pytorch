@@ -15,7 +15,6 @@
 #include <ATen/ops/sort_native.h>
 #endif
 
-
 namespace at::native {
 
 std::vector<int64_t> infer_dense_strides_dim_last(const Tensor & self, int64_t dim);

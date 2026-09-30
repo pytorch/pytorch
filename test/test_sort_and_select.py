@@ -28,7 +28,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     slowTest,
-    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -1424,9 +1423,6 @@ class TestSortAndSelectCUDA(TestCase):
         - GPU: ~72 GB (data ~16GB + values ~16GB + indices ~32GB + other ~8GB)
         - CPU: ~170 GB (indices copy ~32GB + torch.unique extra memory ~130GB + other ~8GB)
         """
-        if TEST_WITH_ROCM and dtype in (torch.float16, torch.bfloat16):
-            self.skipTest("half dtypes take the ROCm sort path, capped at INT_MAX")
-
         extra = random.randint(500, 2000)
         n = 2**32 + extra
         k = random.randint(2**32 + 100, n - 100)
@@ -1504,45 +1500,53 @@ class TestSortAndSelectCUDA(TestCase):
     def test_sort_slice_larger_than_int_max(self, device):
         """Sorting a dimension longer than INT_MAX.
 
-        The sort path used to reject this outright, and underneath the rejection
-        it sized its batches and filled its initial indices with 32-bit
-        arithmetic that wrapped. int8 keeps the keys cheap; the int64 indices
-        dominate the footprint.
+        The sort path used to reject this outright, and behind the rejection it
+        sized its batches and filled its initial indices in 32 bits. int8 keeps
+        the keys cheap; the int64 indices dominate the footprint.
         """
         n = 2**31 + 2
         data = torch.empty(n, device=device, dtype=torch.int8)
-        data.random_()
+        data.random_(-128, 128)
 
         values, indices = torch.sort(data)
 
-        self.assertTrue(torch.all(values[1:] >= values[:-1]).item())
-        # the initial indices were an iota filled with a 32-bit counter, so a
-        # wrap shows up as the tail of the permutation never being reached
-        self.assertEqual(indices.min().item(), 0)
-        self.assertEqual(indices.max().item(), n - 1)
+        non_decreasing = torch.all(values[1:] >= values[:-1]).item()
+        self.assertTrue(non_decreasing, "sorted output is not non-decreasing")
+        # the initial indices used to be filled by a kernel taking `int numel`,
+        # which goes negative here so the fill wrote nothing at all and left the
+        # buffer uninitialized. Only the full permutation has this sum.
+        self.assertEqual(indices.sum().item(), n * (n - 1) // 2)
         # spot-check past INT_MAX rather than gathering all n indices
         tail = slice(n - 1024, n)
         self.assertEqual(data[indices[tail]], values[tail])
 
     @slowTest
-    @largeTensorTest("80GB", "cuda")
-    def test_topk_large_k_sorted(self, device):
+    @dtypes(torch.int8, torch.bfloat16)
+    @largeTensorTest("88GB", "cuda")
+    def test_topk_large_k_sorted(self, device, dtype):
         """topk(sorted=True) with k > INT_MAX.
 
-        sorted=True is topk's default, so this is the path a caller lands on
+        sorted=True is topk's default, so this is the path a caller reaches
         without asking for anything unusual. Ordering the selected values goes
         through the same sort that could not handle more than INT_MAX elements,
-        which made the default fail on inputs topk itself handles fine.
+        which made the default fail on inputs topk itself handles. bfloat16 also
+        covers should_use_sort, which only routes the half types into the ROCm
+        full-sort fallback.
         """
         n = 2**31 + 2
+        # k has to clear INT_MAX for the ordering step to be the one under test,
+        # which at this n leaves the selection itself trivial. Non-trivial
+        # selection above INT_MAX is already covered by test_topk_large_k.
         k = 2**31 + 1
-        data = torch.empty(n, device=device, dtype=torch.int8)
-        data.random_()
+        data = torch.empty(n, device=device, dtype=dtype)
+        data.random_(-128, 128)
 
         values, indices = torch.topk(data, k, sorted=True)
 
         self.assertEqual(values.numel(), k)
-        self.assertTrue(torch.all(values[1:] <= values[:-1]).item())
+        non_increasing = torch.all(values[1:] <= values[:-1]).item()
+        self.assertTrue(non_increasing, "topk output is not non-increasing")
+        # spot-check past INT_MAX rather than gathering all k indices
         tail = slice(k - 1024, k)
         self.assertEqual(data[indices[tail]], values[tail])
 

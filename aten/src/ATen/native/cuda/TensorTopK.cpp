@@ -41,8 +41,9 @@ bool should_use_sort(const Tensor& self, int64_t dim) {
     return false;
   }
 
-  // Past INT_MAX a full sort orders the whole input and allocates temporaries
-  // to match, while the topk kernels select in a few radix passes.
+  // Past INT_MAX a full sort orders the whole input and allocates temporaries to
+  // match. The topk kernels are cheaper: multi-block selection up to UINT32_MAX,
+  // and single-block above it, which still beats sorting the whole input.
   if (self.size(dim) > std::numeric_limits<int>::max()) {
     return false;
   }
