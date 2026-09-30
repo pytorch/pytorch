@@ -332,10 +332,16 @@ class Library:
 
         source = torch._library.utils.get_source(_stacklevel + 1)
         frame = sys._getframe(_stacklevel)
-        caller_module = inspect.getmodule(frame)
-        # Can be none if you call register_fake from somewhere there isn't a module
-        # (e.g. __main__)
-        caller_module_name = None if caller_module is None else caller_module.__name__
+        caller_module_name = frame.f_globals.get("__name__")
+        caller_module = sys.modules.get(caller_module_name)  # type: ignore[arg-type]
+        # Fast path: inspect.getmodule rescans sys.modules whenever it grows.
+        if getattr(caller_module, "__file__", None) != frame.f_code.co_filename:
+            caller_module = inspect.getmodule(frame)
+            # Can be none if you call register_fake from somewhere there isn't a module
+            # (e.g. __main__)
+            caller_module_name = (
+                None if caller_module is None else caller_module.__name__
+            )
 
         # TODO(rzou): We're gonna need to stage this change with torchvision,
         # since torchvision is github first.
