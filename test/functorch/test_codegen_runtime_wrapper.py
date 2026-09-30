@@ -506,6 +506,36 @@ class TestCodegenRuntimeWrapper(TestCase):
                     ]
                     self.assertEqual(len(aliasing_warnings), 0)
 
+    def test_neg_view_input_resolved_only_when_present(self):
+        """
+        An input carrying the lazy negative bit is replaced by a resolved copy
+        before the compiled call, and the in-graph mutation of that copy is
+        copied back. Graphs without such inputs emit neither step.
+        """
+
+        def f(x, y):
+            x.add_(1)
+            return x * y
+
+        with capture_codegen_source("runtime_wrapper_orchestration") as captured:
+            compiled_f = torch.compile(f, backend="aot_eager")
+            y = torch.randn(4)
+
+            base = torch.arange(4.0)
+            base_ref = torch.arange(4.0)
+            out = compiled_f(base._neg_view(), y)
+            out_ref = f(base_ref._neg_view(), y)
+            # The dispatch key guard recompiles for a plain input.
+            compiled_f(torch.arange(4.0), y)
+
+        self.assertEqual(out, out_ref)
+        self.assertEqual(base, base_ref)
+        self.assertEqual(len(captured), 2)
+        self.assertIn("_resolve_neg_inputs_", captured[0])
+        self.assertIn("_copy_back_neg_inputs_", captured[0])
+        self.assertNotIn("_resolve_neg_inputs_", captured[1])
+        self.assertNotIn("_copy_back_neg_inputs_", captured[1])
+
     @skipIfTorchDynamo("dynamo handles mutations in-graph")
     def test_leaf_no_grad_mutation_uses_copy(self):
         """
