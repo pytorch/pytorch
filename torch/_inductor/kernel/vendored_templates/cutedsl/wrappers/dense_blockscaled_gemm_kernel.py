@@ -2,42 +2,209 @@
 
 from __future__ import annotations
 
+import dataclasses
+import functools
 import itertools
 import logging
 from collections.abc import Callable, Generator  # noqa: TC003
 
-import cutlass_api
-from cutlass_api.arguments import GemmArguments  # noqa: TC002
-from cutlass_api.artifact import CompiledArtifact
-from cutlass_api.library import ScaleMode, ScaleSwizzleMode
-from cutlass_api.metadata import (
-    DenseTensorAttributes,
+import cutlass.operators
+from cutlass.operators import ScaleMode, ScaleSwizzleMode
+from cutlass.operators.arch import TargetSm
+from cutlass.operators.arguments import GemmArguments
+from cutlass.operators.artifact import CompiledArtifact  # noqa: TC002
+from cutlass.operators.metadata import (
+    DenseTensorConstraints,
     GemmOperandsMetadata,
-    KernelMetadata,
-    ScaledTensorAttributes,
+    OperatorMetadata,
+    ScaledOperandConstraints,
     Sm100DesignMetadata,
 )
-from cutlass_api.providers.cutedsl.kernel import CuteDslKernel
-from cutlass_api.providers.cutedsl.utils import get_max_active_clusters
-from cutlass_api.status import Status
-from cutlass_api.utils import strides_to_layout_string, to_cuda_stream, tuple_to_string
+from cutlass.operators.mma import BlackwellTcgen05Mma
+from cutlass.operators.providers.cutedsl import integration_utils as cutedsl_utils
+from cutlass.operators.providers.cutedsl.operator import CuteDslOperator
+from cutlass.operators.status import Status
+from cutlass.operators.utils.common import tuple_to_string
+from cutlass.operators.utils.device import to_cuda_stream
+from cutlass.operators.utils.tensor import strides_to_layout_string
+
+from torch._inductor.codegen.nv_universal_gemm.epilogue_capabilities import (
+    BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES,
+)
+from torch._inductor.kernel.gemm_epilogue_codegen import (
+    GemmReductionCompileConfig,
+    get_cutedsl_epilogue_schema,
+    materialize_epilogue_function,
+)
 
 
 log = logging.getLogger(__name__)
 
 
+_ONES_ALPHA: dict = {}
+
+
+@dataclasses.dataclass(frozen=True, kw_only=True)
+class _EpilogueABI:
+    """Runtime tensors and metadata derived from a traced epilogue signature."""
+
+    input_pack: EpilogueInputPack
+    outputs: EpilogueOutputPack
+    primary_output: int
+
+    @classmethod
+    def from_args(cls, args, tensor_attr: str) -> _EpilogueABI:
+        outputs, primary_output = _epilogue_outputs(args, tensor_attr)
+        return cls(
+            input_pack=_epilogue_input_pack(args, tensor_attr),
+            outputs=outputs,
+            primary_output=primary_output,
+        )
+
+
+@functools.lru_cache(maxsize=256)
+def _epilogue_signature(epilogue_fn) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    schema = get_cutedsl_epilogue_schema(epilogue_fn)
+    if schema is not None:
+        return (
+            tuple(name for name in schema.inputs if name != "accum"),
+            schema.outputs,
+        )
+    from cutlass.operators.fusion import trace_in_out
+
+    inputs, outputs = trace_in_out(epilogue_fn)
+    return (
+        tuple(name for name in inputs if name != "accum"),
+        tuple(outputs),
+    )
+
+
+def _epilogue_input_pack(args, attr: str) -> EpilogueInputPack:
+    epilogue = getattr(args, "epilogue", None)
+    if epilogue is None:
+        return EpilogueInputPack(())
+    schema = get_cutedsl_epilogue_schema(epilogue.epilogue_fn)
+    scalar_names = () if schema is None else schema.scalar_broadcast_names
+    inputs = []
+    for name in _epilogue_signature(epilogue.epilogue_fn)[0]:
+        tensor = epilogue.tensors[name]
+        shape = tensor.shape
+        if name in scalar_names or all(size == 1 for size in shape):
+            kind = 4
+        elif len(shape) == 1 or shape[-2] == 1:
+            kind = 2
+        elif shape[-1] == 1:
+            kind = 3
+        else:
+            kind = 1
+        abi_tensor = getattr(_epilogue_abi_tensor(tensor), attr)
+        inputs.append(EpilogueInput(abi_tensor, kind))
+    return EpilogueInputPack(tuple(inputs))
+
+
+def _epilogue_abi_tensor(tensor):
+    runtime_tensor = tensor.runtime_tensor
+    leading = runtime_tensor.shape[0]
+    if leading % 8 == 0:
+        return tensor
+    from cutlass.operators.utils.tensor import TensorWrapper
+
+    padded_shape = (leading + 7) // 8 * 8, *runtime_tensor.shape[1:]
+    import torch
+
+    padded = torch.empty(
+        padded_shape,
+        dtype=runtime_tensor.dtype,
+        device=runtime_tensor.device,
+    )
+    padded[:leading].copy_(runtime_tensor)
+    return TensorWrapper(padded)
+
+
+def _epilogue_outputs(args, attr: str) -> tuple[EpilogueOutputPack, int]:
+    epilogue = getattr(args, "epilogue", None)
+    if epilogue is None:
+        return EpilogueOutputPack(()), 0
+    output_names = _epilogue_signature(epilogue.epilogue_fn)[1]
+    if not output_names:
+        raise NotImplementedError("NVGEMM scaled epilogues require an output")
+    if len(output_names) > 1 and "D" not in output_names:
+        raise NotImplementedError("NVGEMM scaled multi-store requires a D output")
+    primary_index = output_names.index("D") if "D" in output_names else 0
+    tensors = EpilogueOutputPack(
+        tuple(
+            getattr(epilogue.tensors[name], attr)
+            for index, name in enumerate(output_names)
+            if index != primary_index
+        )
+    )
+    return tensors, primary_index
+
+
+def _ones_alpha():
+    """Cached per-device (4,)-ones alpha TensorWrapper (identity global scale).
+
+    The kernel always takes an alpha arg so its signature is consistent across
+    compile/run paths; when not fusing we pass ones (a no-op *1.0). Len is a
+    multiple of 4 (CuTeDSL requires the operand's last dim divisible by 4).
+    """
+    from cutlass.operators.utils.tensor import TensorWrapper
+
+    import torch
+
+    dev = torch.cuda.current_device()
+    tw = _ONES_ALPHA.get(dev)
+    if tw is None:
+        tw = TensorWrapper(torch.ones(4, dtype=torch.float32, device=f"cuda:{dev}"))
+        _ONES_ALPHA[dev] = tw
+    return tw
+
+
+def _local_reduce_abi_tensor(args):
+    reduction = args.local_reduce
+    tensor = reduction.output
+    if (
+        tensor is None
+        or reduction.axis != 1
+        or (len(tensor.shape) != 1 and tensor.shape[-1] >= 4)
+    ):
+        return tensor
+    from cutlass.operators.utils.tensor import TensorWrapper
+
+    runtime_tensor = tensor.runtime_tensor
+    padded_shape = (
+        (runtime_tensor.shape[0], 4)
+        if runtime_tensor.ndim == 1
+        else (*runtime_tensor.shape[:-1], 4)
+    )
+    import torch
+
+    padded = torch.empty(
+        padded_shape,
+        dtype=runtime_tensor.dtype,
+        device=runtime_tensor.device,
+    )
+    return TensorWrapper(padded)
+
+
 try:
     from ..dense_blockscaled_gemm_persistent import (  # pyrefly: ignore[missing-import]
+        EpilogueInput,
+        EpilogueInputPack,
+        EpilogueOutputPack,
         Sm100BlockScaledPersistentDenseGemmKernel as BlockScaledGemmKernelImpl,
     )
 except ImportError:
     BlockScaledGemmKernelImpl = None  # type: ignore[misc, assignment]
 
 
-class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
+class VendoredDenseBlockScaledGemmKernel(CuteDslOperator):
     """Wrapper for vendored dense blockscaled GEMM template for SM100 GPUs."""
 
-    def __init__(self, metadata: KernelMetadata):
+    supported_args_type = GemmArguments
+    designed_for_min_cc = 100
+
+    def __init__(self, metadata: OperatorMetadata):
         super().__init__(metadata)
 
         self.sf_vec_size = metadata.operands.A.mode[-1]
@@ -47,12 +214,16 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
             metadata.design.cluster_shape[1],
         )
 
+        import os
+
         self.impl = BlockScaledGemmKernelImpl(  # pyrefly: ignore[not-callable]
             self.sf_vec_size,
             mma_tiler_mn,
             cluster_shape_mn,
+            use_prefetch=os.environ.get("TORCHINDUCTOR_NVGEMM_PREFETCH", "0") == "1",
         )
         self.cluster_shape_mn = cluster_shape_mn
+        self.mma_tiler_mn = mma_tiler_mn
 
     @staticmethod
     def _major_modes(args):
@@ -77,14 +248,71 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
 
         return a_major_mode, b_major_mode, out_layout
 
-    def compile(self, args: GemmArguments, cc: int | None = None) -> CompiledArtifact:
+    def _compile(
+        self, args: GemmArguments, target_sm: TargetSm | None = None
+    ) -> CompiledArtifact:
         import cutlass.cute as cute
 
         stream = cute.runtime.make_fake_stream()
-        max_active_clusters = get_max_active_clusters(self.cluster_shape_mn)
+        max_active_clusters = cutedsl_utils.mma.get_max_active_clusters(
+            self.cluster_shape_mn
+        )
 
-        # pyrefly: ignore[missing-attribute]
-        compiled_kernel = self.cute_compile(
+        # Fused global scale: alpha is ALWAYS threaded as a trailing kernel arg
+        # (ones when not fusing) so the kernel signature is consistent across all
+        # compile/run paths -- a None alpha is not reliably dropped from the
+        # runtime signature. args.alpha (a TensorWrapper, len multiple-of-4) is
+        # applied elementwise in the epilogue; closure capture cannot read a
+        # runtime tensor there.
+        alpha = getattr(args, "alpha", None)
+        if alpha is None:
+            alpha = cute.runtime.make_fake_compact_tensor(
+                cutlass.Float32, (4,), assumed_align=16
+            )
+
+        def epilogue_op(v):
+            return v
+
+        if getattr(args, "epilogue", None) is not None:
+            epilogue_op = args.epilogue.epilogue_fn
+            if isinstance(epilogue_op, str):
+                epilogue_op = materialize_epilogue_function(epilogue_op, cute)
+        epilogue = _EpilogueABI.from_args(args, "compile_time_tensor")
+        epilogue_inputs = epilogue.input_pack
+        reduction_args = args.local_reduce
+        reduction_tensors = reduction_args.map_tensors(
+            lambda value: value.compile_time_tensor
+        )
+        local_reduce_out = _local_reduce_abi_tensor(args)
+        if reduction_args.primary_enabled:
+            reduction_config = GemmReductionCompileConfig.from_args(
+                reduction_args, cute
+            )
+            return self.cute_compile(
+                self.impl,
+                args.A.tensor,
+                args.B.tensor,
+                args.A.scale.tensor,
+                args.B.scale.tensor,
+                args.out.tensor,
+                max_active_clusters,
+                stream,
+                epilogue_op,
+                self.metadata.operands.out.dtype,
+                alpha,
+                epilogue_inputs,
+                epilogue.outputs,
+                epilogue.primary_output,
+                (
+                    local_reduce_out.compile_time_tensor
+                    if local_reduce_out is not None
+                    else None
+                ),
+                reduction_tensors.feed_output,
+                reduction_config.blockscaled_primary_constexprs(),
+                target_sm=target_sm,
+            )
+        return self.cute_compile(
             self.impl,
             args.A.tensor,
             args.B.tensor,
@@ -93,9 +321,14 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
             args.out.tensor,
             max_active_clusters,
             stream,
+            epilogue_op,
+            self.metadata.operands.out.dtype,
+            alpha,
+            epilogue_inputs,
+            epilogue.outputs,
+            epilogue.primary_output,
+            target_sm=target_sm,
         )
-
-        return CompiledArtifact(compiled_kernel, self)
 
     def _run(
         self,
@@ -104,14 +337,66 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
         stream,
         workspace=None,
     ) -> None:
+        import tvm_ffi  # pyrefly: ignore [missing-import]
+
         import torch
 
         stream = to_cuda_stream(stream)
         compiled_gemm = compiled_artifact.compiled_obj
 
-        # TVM FFI needs a torch.cuda.Stream, not a raw int handle
-        if isinstance(stream, int):
-            stream = torch.cuda.ExternalStream(stream)
+        # TVM FFI needs a torch.cuda.Stream, not a raw stream handle.
+        if not isinstance(stream, torch.cuda.Stream):
+            stream = torch.cuda.ExternalStream(int(stream))
+
+        # Runtime arg list must match _compile: alpha always trails stream.
+        alpha = getattr(args, "alpha", None)
+        if alpha is None:
+            alpha = _ones_alpha()
+        with torch.cuda.stream(stream):
+            epilogue = _EpilogueABI.from_args(args, "runtime_tensor")
+            input_values = tuple(
+                (value.tensor, value.kind) for value in epilogue.input_pack.values
+            )
+            epilogue_inputs = tvm_ffi.convert((input_values,))
+            epilogue_outputs = tvm_ffi.convert((epilogue.outputs.values,))
+
+        reduction = args.local_reduce
+        reduction_tensors = reduction.map_tensors(lambda value: value.runtime_tensor)
+        logical_reduce_out = reduction.output
+        with torch.cuda.stream(stream):
+            local_reduce_out = _local_reduce_abi_tensor(args)
+        if reduction.primary_enabled:
+            self.cute_run(  # pyrefly: ignore[missing-attribute]
+                compiled_gemm,
+                args.A.tensor,
+                args.B.tensor,
+                args.A.scale.tensor,
+                args.B.scale.tensor,
+                args.out.tensor,
+                stream,
+                alpha,
+                epilogue_inputs,
+                epilogue_outputs,
+                local_reduce_out.runtime_tensor
+                if local_reduce_out is not None
+                else None,
+                reduction_tensors.feed_output,
+            )
+            if local_reduce_out is not logical_reduce_out:
+                if local_reduce_out is None:
+                    raise AssertionError("expected padded local-reduction output")
+                if logical_reduce_out is None:
+                    raise AssertionError("expected logical local-reduction output")
+                with torch.cuda.stream(stream):
+                    compact = (
+                        local_reduce_out.runtime_tensor[..., 0]
+                        if logical_reduce_out.runtime_tensor.ndim == 1
+                        else local_reduce_out.runtime_tensor[
+                            ..., : logical_reduce_out.runtime_tensor.shape[-1]
+                        ]
+                    )
+                    logical_reduce_out.runtime_tensor.copy_(compact)
+            return
 
         self.cute_run(  # pyrefly: ignore[missing-attribute]
             compiled_gemm,
@@ -121,55 +406,105 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
             args.B.scale.tensor,
             args.out.tensor,
             stream,
+            alpha,
+            epilogue_inputs,
+            epilogue_outputs,
+            None,
+            None,
         )
 
-    def get_workspace_size(self, args: GemmArguments) -> int:
-        return 0
+    def _supports(
+        self, args: GemmArguments, target_sm: TargetSm | None = None
+    ) -> Status:
+        # Match the upstream block-scaled operator: validate scale-factor element
+        # counts via ScaledOperand.numel_scale for the operand's mode/swizzle,
+        # rather than re-inferring the layout (the old _infer_scale_swizzle_impl
+        # check wrongly rejected valid NVFP4 args on the transposed B operand).
+        from cutlass.operators.arguments import ScaledOperand
 
-    def _supports(self, args: GemmArguments) -> Status:
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
-            cutlass_dtype_to_torch,
+        reduction = getattr(args, "local_reduce", None)
+        epilogue = getattr(args, "epilogue", None)
+        schema = (
+            None
+            if epilogue is None
+            else get_cutedsl_epilogue_schema(epilogue.epilogue_fn)
         )
-        from torch._inductor.utils import _infer_scale_swizzle_impl
-
-        mat_dtype = cutlass_dtype_to_torch(args.A.element_type)
-        sf_dtype = cutlass_dtype_to_torch(args.A.scale.element_type)
-        if mat_dtype is None or sf_dtype is None:
+        if (
+            reduction is not None
+            and reduction.enabled
+            and reduction.tensor_epilogue_returns_local_reduce
+            != (schema is not None and schema.returns_local_reduce)
+        ):
             return Status.fail(
-                f"Unknown dtype: mat={args.A.element_type}, sf={args.A.scale.element_type}."
+                "Block-scaled local reduction contract must match the tensor epilogue return"
             )
+        if (
+            reduction is not None
+            and reduction.enabled
+            and not BLOCK_SCALED_GEMM_REDUCTION_CAPABILITIES.supports_contract(
+                reduction
+            )
+        ):
+            return Status.fail("Unsupported block-scaled local reduction contract")
+        if reduction is not None and reduction.primary_enabled:
+            local_reduce_out = reduction.output
+            local_reduce_feed_out = reduction.feed_output
+            group = reduction.group
+            axis = reduction.axis
+            m, n = args.out.shape[-2:]
+            selected_size = n if axis == 1 else m
+            max_group = (
+                self.mma_tiler_mn[axis] if axis == 1 else min(64, self.mma_tiler_mn[0])
+            )
+            if (
+                axis not in (0, 1)
+                or group <= 1
+                or group > max_group
+                or selected_size % group != 0
+            ):
+                return Status.fail(
+                    "Grouped reduction requires a supported M- or N-axis group "
+                    "that divides the selected dimension."
+                )
+            if local_reduce_out is not None:
+                expected_shape = (m, n // group) if axis == 1 else (m // group, n)
+                if local_reduce_out.shape != expected_shape:
+                    return Status.fail(
+                        "Grouped reduction output shape must be "
+                        f"{expected_shape}; got {local_reduce_out.shape}."
+                    )
+                if local_reduce_out.dtype is not cutlass.Float32 or tuple(
+                    local_reduce_out.stride
+                ) != (expected_shape[1], 1):
+                    return Status.fail(
+                        "Grouped reduction output must be contiguous Float32."
+                    )
+            if local_reduce_feed_out is not None:
+                if local_reduce_feed_out.shape != args.out.shape:
+                    return Status.fail(
+                        "Grouped reduction feed output must match the GEMM output shape."
+                    )
+                if tuple(local_reduce_feed_out.stride) != (n, 1):
+                    return Status.fail(
+                        "Grouped reduction feed output must be row-major contiguous."
+                    )
 
         m, n = args.out.shape[-2:]
         k = args.A.shape[-1]
+        L = args.A.shape[0] if len(args.A.shape) == 3 else 1
 
-        scaling_type_a, _ = _infer_scale_swizzle_impl(
-            mat_size=(m, k),
-            scale_size=(args.A.scale.numel(),),
-            scale_numel=args.A.scale.numel(),
-            mat_dtype=mat_dtype,
-            scale_dtype=sf_dtype,
-            eq_fn=lambda a, b: a == b,
-        )
-        if scaling_type_a is None:
+        expected_sfa = ScaledOperand.numel_scale((L, m, k), args.A.mode, args.A.swizzle)
+        expected_sfb = ScaledOperand.numel_scale((L, n, k), args.B.mode, args.B.swizzle)
+        if args.A.scale.numel() != expected_sfa:
             return Status.fail(
-                f"Unrecognized scale layout for A: "
-                f"mat shape {args.A.shape}, scale numel {args.A.scale.numel()}."
+                f"Scale factor A must have {expected_sfa} elements for mat shape "
+                f"{args.A.shape}; got {args.A.scale.numel()}."
             )
-
-        scaling_type_b, _ = _infer_scale_swizzle_impl(
-            mat_size=(n, k),
-            scale_size=(args.B.scale.numel(),),
-            scale_numel=args.B.scale.numel(),
-            mat_dtype=mat_dtype,
-            scale_dtype=sf_dtype,
-            eq_fn=lambda a, b: a == b,
-        )
-        if scaling_type_b is None:
+        if args.B.scale.numel() != expected_sfb:
             return Status.fail(
-                f"Unrecognized scale layout for B: "
-                f"mat shape {args.B.shape}, scale numel {args.B.scale.numel()}."
+                f"Scale factor B must have {expected_sfb} elements for mat shape "
+                f"{args.B.shape}; got {args.B.scale.numel()}."
             )
-
         return Status.success()
 
     @staticmethod
@@ -298,13 +633,13 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
                 sf_div = alignment_bytes * 8 // sf_dtype.width
 
                 yield GemmOperandsMetadata(
-                    A=ScaledTensorAttributes(
-                        base=DenseTensorAttributes(
+                    A=ScaledOperandConstraints(
+                        quantized=DenseTensorConstraints(
                             dtype=ab_dtype,
                             stride=stride_A,
                             divisibility=ab_div,
                         ),
-                        scale=DenseTensorAttributes(
+                        scale=DenseTensorConstraints(
                             dtype=sf_dtype,
                             stride=None,
                             divisibility=sf_div,
@@ -312,13 +647,13 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
                         mode=scale_mode,
                         swizzle=ScaleSwizzleMode.Swizzle32x4x4,
                     ),
-                    B=ScaledTensorAttributes(
-                        base=DenseTensorAttributes(
+                    B=ScaledOperandConstraints(
+                        quantized=DenseTensorConstraints(
                             dtype=ab_dtype,
                             stride=stride_B,
                             divisibility=ab_div,
                         ),
-                        scale=DenseTensorAttributes(
+                        scale=DenseTensorConstraints(
                             dtype=sf_dtype,
                             stride=None,
                             divisibility=sf_div,
@@ -326,7 +661,7 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
                         mode=scale_mode,
                         swizzle=ScaleSwizzleMode.Swizzle32x4x4,
                     ),
-                    out=DenseTensorAttributes(
+                    out=DenseTensorConstraints(
                         dtype=out_dtype,
                         stride=stride_out,
                         divisibility=out_div,
@@ -334,8 +669,8 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
                     accumulator_type=cutlass.Float32,
                 )
 
-    @staticmethod
-    def _valid_metadata(metadata: KernelMetadata) -> bool:
+    @classmethod
+    def _valid_metadata(cls, metadata: OperatorMetadata) -> bool:
         scale_vec = metadata.operands.A.mode
 
         if len(scale_vec) > 1:
@@ -373,23 +708,26 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
         if use_2cta and cm % 2 != 0:
             return False
 
-        if metadata.epilogue is not None:
+        if metadata.epilogue is not None and "EFC" not in cls.__name__:
             return False
 
         return True
 
-    @staticmethod
-    def generate_kernels(
-        metadata_filter: Callable[[KernelMetadata], bool],
+    @classmethod
+    def _generate_operators(
+        cls,
+        metadata_filter: Callable[[OperatorMetadata], bool],
         epilogue_args=None,
-        cc: int | None = None,
+        target_sm: TargetSm | None = None,
+        args=None,
     ) -> list[VendoredDenseBlockScaledGemmKernel]:
-        if cc is not None and cc not in [100, 101, 103]:
+        if target_sm is not None and target_sm.cc not in [100, 101, 103]:
             return []
         if epilogue_args is not None:
             return []
 
         design_params = {
+            "mma_instruction_type": [BlackwellTcgen05Mma],
             "use_2cta_mma": [True],
             "tile_shape": [
                 (M, N, 256) for M in [128, 256] for N in [64, 128, 192, 256]
@@ -401,17 +739,14 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
         param_names = list(design_params.keys())
         param_values = [design_params[name] for name in param_names]
 
-        kernel_list = []
+        operator_list = []
 
-        for (
-            operands
-        ) in VendoredDenseBlockScaledGemmKernel._metadata_operand_combinations():
-            # pyrefly: ignore[no-matching-overload]
+        for operands in cls._metadata_operand_combinations():
             for values in itertools.product(*param_values):
                 design = Sm100DesignMetadata(**dict(zip(param_names, values)))
 
-                kernel_name = (
-                    "inductor_vendored.DenseBlockScaledGemmKernel_sm100_"
+                operator_name = (
+                    f"inductor_vendored.{cls.__name__}_sm100_"
                     "{layout}_A{A}_B{B}_out{out}_SFA{SFA}_SFB{SFB}_"
                     "acc{acc}_scale{scale_mode}_swizzle{scale_swizzle}_"
                     "{num_cta}cta_cluster{cluster}_tile{tile}"
@@ -436,28 +771,38 @@ class VendoredDenseBlockScaledGemmKernel(CuteDslKernel):
                     _tma_store="_tma_store" if design.use_tma_store else "",
                 )
 
-                metadata = KernelMetadata(
+                metadata = OperatorMetadata(
                     operands=operands,
                     design=design,
-                    kernel_name=kernel_name,
-                    kernel_class=VendoredDenseBlockScaledGemmKernel,
-                    min_cc=100,
+                    operator_name=operator_name,
+                    operator_class=cls,
+                    supported_targets=TargetSm.get_supported_targets(design, operands),
                     epilogue=None,
                 )
 
-                if VendoredDenseBlockScaledGemmKernel._valid_metadata(metadata):
+                if cls._valid_metadata(metadata):
                     if metadata_filter is None or metadata_filter(metadata):
-                        kernel_list.append(VendoredDenseBlockScaledGemmKernel(metadata))
+                        operator_list.append(cls(metadata))
 
         log.debug(
             "Generated %d DenseBlockScaledGemmKernel configurations",
-            len(kernel_list),
+            len(operator_list),
         )
-        return kernel_list
+        return operator_list
+
+
+class VendoredDenseBlockScaledGemmEFC(VendoredDenseBlockScaledGemmKernel):
+    """Block-scaled provider variant using the kernel's unary epilogue hook."""
+
+    supported_args_type = GemmArguments
+    designed_for_min_cc = 100
 
 
 # Only register if kernel implementation is available
 if BlockScaledGemmKernelImpl is not None:
-    cutlass_api.providers.cutedsl.CuTeDSLProvider.register(
+    cutlass.operators.providers.cutedsl.CuTeDSLProvider.register(
         VendoredDenseBlockScaledGemmKernel
+    )
+    cutlass.operators.providers.cutedsl.CuTeDSLProvider.register(
+        VendoredDenseBlockScaledGemmEFC
     )

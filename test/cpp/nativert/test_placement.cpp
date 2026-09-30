@@ -31,7 +31,7 @@ TEST(PlacementTest, PlacementDefaultOnly) {
 
   std::ostringstream os;
   os << placement;
-  EXPECT_EQ(os.str(), "|cuda:0");
+  EXPECT_EQ(std::move(os).str(), "|cuda:0");
 
   c10::Device cuda0 = c10::Device(c10::DeviceType::CUDA, 0);
   c10::Device cuda1 = c10::Device(c10::DeviceType::CUDA, 1);
@@ -53,7 +53,7 @@ TEST(PlacementTest, PlacementBasic) {
 
   std::ostringstream os;
   os << placement;
-  EXPECT_EQ(os.str(), "cpu|cpu,cuda:0|cuda:1,cuda:1|cuda:2,|cuda:0");
+  EXPECT_EQ(std::move(os).str(), "cpu|cpu,cuda:0|cuda:1,cuda:1|cuda:2,|cuda:0");
 
   c10::Device cpu = c10::Device(c10::DeviceType::CPU);
   c10::Device cuda0 = c10::Device(c10::DeviceType::CUDA, 0);

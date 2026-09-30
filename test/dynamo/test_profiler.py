@@ -10,10 +10,15 @@ from torch._dynamo.utils import chromium_event_timed, ChromiumEventLogger, dynam
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.ctx_manager import ProfilerRecordFunctionContextVariable
 from torch.profiler import record_function
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    TemporaryFileName,
+)
 
 
 class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_dynamo_timed_profiling_isolated(self):
         # dynamo_timed functions should appear in profile traces.
         def inner_fn(x):
@@ -66,7 +71,7 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         # Check for the main dynamo event (follows pattern from test_dynamo_timed_profiling_backend_compile)
         self.assertTrue(
             any("(dynamo_timed)" in name for name in event_names),
-            f"Expected dynamo_timed events in profiler: {event_names}",
+            lambda msg: f"{msg}\nExpected dynamo_timed events in profiler: {event_names}",
         )
 
     def test_record_functions_thread_local(self):
@@ -90,7 +95,9 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
         # Each thread should only see its own entry (length 1)
         for thread_id, length in results.items():
             self.assertEqual(
-                length, 1, f"Thread {thread_id} saw {length} entries instead of 1"
+                length,
+                1,
+                lambda msg: f"{msg}\nThread {thread_id} saw {length} entries instead of 1",
             )
 
     def test_chromium_event_timed_scoped_reset_preserves_outer_event(self):
@@ -384,15 +391,15 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     _record_function_enter_new = torch.ops.profiler._record_function_enter_new('my_net1', None)
-    a = l_x_.sin();  l_x_ = None
+    sin = l_x_.sin();  l_x_ = None
     _record_function_exit__record_function = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new);  _record_function_enter_new = _record_function_exit__record_function = None
     _record_function_enter_new_1 = torch.ops.profiler._record_function_enter_new('my_cos', None)
-    b = a.cos();  a = None
+    cos = sin.cos();  sin = None
     _record_function_exit__record_function_1 = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new_1);  _record_function_enter_new_1 = _record_function_exit__record_function_1 = None
     _record_function_enter_new_2 = torch.ops.profiler._record_function_enter_new('my_net2', None)
-    c = b + 2;  b = None
+    add = cos + 2;  cos = None
     _record_function_exit__record_function_2 = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new_2);  _record_function_enter_new_2 = _record_function_exit__record_function_2 = None
-    return (c,)""",
+    return (add,)""",
         )
         self.assertExpectedInline(
             backend.fw_graphs[0].code.strip(),
@@ -461,8 +468,8 @@ def forward(self, arg0_1):
 def forward(self, L_args_0_ : torch.Tensor):
     l_args_0_ = L_args_0_
     _record_function_enter_new = torch.ops.profiler._record_function_enter_new('my_net', None)
-    a = l_args_0_.sin();  l_args_0_ = None
-    add = a + 2;  a = None
+    sin = l_args_0_.sin();  l_args_0_ = None
+    add = sin + 2;  sin = None
     _record_function_exit__record_function = torch.ops.profiler._record_function_exit._RecordFunction(_record_function_enter_new);  _record_function_enter_new = _record_function_exit__record_function = None
     return (add,)""",
         )

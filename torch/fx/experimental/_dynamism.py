@@ -80,7 +80,7 @@ def track_dynamism_across_examples(
             if not isinstance(value, (int, float, torch.Tensor)):
                 continue
             if isinstance(value, torch.Tensor):
-                shape: tuple[int | float, ...] = tuple(value.shape)
+                shape: tuple[int | float, ...] = value.shape
                 is_tensor = True
             else:
                 shape = (value,)

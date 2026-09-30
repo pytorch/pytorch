@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from time import perf_counter_ns
 from typing import Any, Optional
+from typing_extensions import deprecated
 from warnings import warn
 
 
@@ -124,9 +125,6 @@ class profile:
     Args:
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
 
-        use_cuda (bool, optional): Enables timing of CUDA events as well
-            using the cudaEvent API. (will be deprecated)
-
         use_device (str, optional): Enables timing of device events.
             Adds approximately 4us of overhead to each tensor operation when use cuda.
             The valid devices options are 'cuda', 'xpu', 'mtia' and 'privateuseone'.
@@ -155,8 +153,12 @@ class profile:
             corresponding to the callstack of the op. e.g. If module A's forward call's
             module B's forward which contains an aten::add op,
             then aten::add's module hierarchy is A.B
-            Note that this support exist, at the moment, only for TorchScript models
-            and not eager mode models.
+
+            .. deprecated::
+                ``with_modules`` is deprecated and will be removed in a future version.
+                It only collects data for TorchScript models, which are themselves
+                deprecated, and does nothing in eager mode. Use ``with_stack=True``,
+                which records ``nn.Module`` events for eager models.
 
         use_kineto (bool, optional): experimental, enable profiling with Kineto profiler.
 
@@ -214,7 +216,6 @@ class profile:
         self,
         enabled=True,
         *,
-        use_cuda=False,  # Deprecated
         use_device=None,
         record_shapes=False,
         with_flops=False,
@@ -228,21 +229,12 @@ class profile:
         custom_trace_id_callback=None,
         post_processing_timeout_s: float | None = None,
         activity_filters: dict[ProfilerActivity, set[str]] | None = None,
+        _profiler_extensions: dict[str, str] | None = None,
     ):
         self.enabled: bool = enabled
         if not self.enabled:
             return
-        self.use_cuda = use_cuda
-        if self.use_cuda:
-            warn(
-                "The attribute `use_cuda` will be deprecated soon, "
-                "please use ``use_device = 'cuda'`` instead.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            self.use_device: str | None = "cuda"
-        else:
-            self.use_device = use_device
+        self.use_device: str | None = use_device
         # TODO Consider changing _function_events into data structure with size cap
         self._function_events: EventList | None = None
         self._old_function_events: EventList | None = None
@@ -267,6 +259,22 @@ class profile:
             )
             experimental_config = copy.copy(experimental_config)
             experimental_config.trace_only = False
+        if experimental_config.adjust_profiler_step:
+            warn(
+                "adjust_profiler_step is deprecated and ignored. It will be "
+                "removed in a future release.",
+                FutureWarning,
+                stacklevel=2,
+            )
+        if with_modules:
+            warn(
+                "with_modules is deprecated and will be removed in a future release. "
+                "It only collects data for TorchScript models, which are themselves "
+                "deprecated, and does nothing in eager mode. Use with_stack=True, "
+                "which records nn.Module events for eager models.",
+                FutureWarning,
+                stacklevel=2,
+            )
         self.experimental_config = experimental_config
         self.kineto_results: _ProfilerResult | None = None
         self.profiling_start_time_ns = 0
@@ -275,6 +283,7 @@ class profile:
         self.custom_trace_id_callback = custom_trace_id_callback
         self.post_processing_timeout_s = post_processing_timeout_s
         self.activity_filters = activity_filters or {}
+        self._profiler_extensions = _profiler_extensions or {}
         self.trace_id = ""
         if not self.use_cpu:
             if not use_kineto:
@@ -294,7 +303,6 @@ class profile:
 
             if self.use_device == "cuda" and not torch.cuda.is_available():
                 warn("CUDA is not available, disabling CUDA profiling", stacklevel=2)
-                self.use_cuda = False
                 self.use_device = None
 
             if self.use_device == "xpu" and not torch.xpu.is_available():
@@ -403,6 +411,7 @@ class profile:
             self.config(create_trace_id=True),
             self.kineto_activities,
             activity_filter=self.activity_filters,
+            profiler_extensions=self._profiler_extensions,
         )
         t1 = perf_counter_ns()
         self._stats.profiler_prepare_call_duration_us = int((t1 - t0) / 1000)
@@ -530,17 +539,36 @@ class profile:
 
     table.__doc__ = EventList.table.__doc__
 
-    def export_chrome_trace(self, path, metadata=None, use_python_export=False):
+    def export_chrome_trace(
+        self,
+        path,
+        metadata=None,
+        use_python_export=False,
+        cuda_graph_annotations=None,
+        graph_lanes="none",
+        default_stream=7,
+    ):
         """
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
         """
-        if use_python_export and kineto_available():
+        # graph_lanes is only honored by the Python exporter, so route there for anything
+        # but the "none" default rather than dropping it on the floor.
+        if (
+            use_python_export or cuda_graph_annotations or graph_lanes != "none"
+        ) and kineto_available():
             from torch.profiler._chrome_trace_export import (
                 export_chrome_trace as _export,
             )
 
-            _export(self.kineto_results, path, metadata)  # type: ignore[union-attr]
+            _export(  # type: ignore[union-attr]
+                self.kineto_results,
+                path,
+                metadata,
+                cuda_graph_annotations,
+                graph_lanes,
+                default_stream,
+            )
         elif kineto_available():
             self.kineto_results.save(path)  # type: ignore[union-attr]
         else:
@@ -570,12 +598,16 @@ class profile:
         group_by_input_shape=False,
         group_by_stack_n=0,
         group_by_overload_name=False,
+        include_python_functions=False,
     ):
         self._ensure_function_events()
         if self._function_events is None:
             raise AssertionError("Expected profiling results")
         return self._function_events.key_averages(
-            group_by_input_shape, group_by_stack_n, group_by_overload_name
+            group_by_input_shape,
+            group_by_stack_n,
+            group_by_overload_name,
+            include_python_functions,
         )
 
     key_averages.__doc__ = EventList.key_averages.__doc__
@@ -716,8 +748,8 @@ class profile:
                 is_user_annotation=kineto_event.is_user_annotation(),
                 is_python_function=kineto_event.is_python_function(),
                 activity_type=kineto_event.activity_type(),
-                metadata_json=kineto_event.metadata_json(),
                 extra_meta=kineto_event.extra_meta() or None,
+                typed_metadata=kineto_event.typed_metadata() or None,
                 flow_id=kineto_event.flow_id(),
                 flow_type=kineto_event.flow_type(),
                 flow_start=kineto_event.flow_start(),
@@ -750,7 +782,11 @@ class profile:
                     device_corr_map[corr_id] = []
                 device_corr_map[corr_id].append(fe)
             elif corr_id == 0:
-                frontend_function_events.append(fe)
+                # Unlinked runtime/driver records and overhead have external_id=0.
+                # Their correlation ids can alias PyTorch operator ids, so do not
+                # use them to look up device work. See KinetoEvent::externalId().
+                if fe.external_id != 0:
+                    frontend_function_events.append(fe)
             else:
                 raise RuntimeError(
                     f"Got negative correlation id {corr_id} in profiler post processing"
@@ -836,30 +872,17 @@ class profile:
         return all_function_events
 
 
-# pyrefly: ignore [invalid-inheritance]
-_cupti_monitor_module: Any = None
-_cupti_monitor_checked = False
+# Set by torch.profiler to the active cuspy ProfilerObserver while a session is
+# running (None otherwise). record_function routes regions to it via push/pop_annotation.
+# Held as an opaque object -- NOT imported from the cuspy package -- so record_function never
+# pulls in the cuspy chain on a non-cuspy run, and there is a single "is a session active"
+# signal (this reference) rather than a separate flag.
+_active_cuspy_profiler_observer: Any = None
 
 
-def _maybe_cupti_monitor():
-    # The experimental CUPTI monitor lets record_function regions show up as user
-    # annotations in monitor traces. Cache the optional module once so the
-    # record_function hot path never re-imports it.
-    global _cupti_monitor_module, _cupti_monitor_checked
-    if not _cupti_monitor_checked:
-        _cupti_monitor_checked = True
-        try:
-            from torch.profiler import _cupti_monitor
-
-            _cupti_monitor_module = _cupti_monitor
-        except ModuleNotFoundError:
-            pass
-        except Exception:
-            log.warning(
-                "Unexpected error importing torch.profiler._cupti_monitor",
-                exc_info=True,
-            )
-    return _cupti_monitor_module
+def _set_active_cuspy_profiler_observer(observer: Any) -> None:
+    global _active_cuspy_profiler_observer
+    _active_cuspy_profiler_observer = observer
 
 
 class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritance]
@@ -913,29 +936,29 @@ class record_function(_ContextDecorator):  # pyrefly: ignore [invalid-inheritanc
             Optional["torch.classes.profiler._RecordFunction"],
             None,
         )
-        self._cupti_monitor_external_id: int | None = None
+        self._cuspy_external_id: int | None = None
 
     def __enter__(self):
         self.record = torch.ops.profiler._record_function_enter_new(
             self.name, self.args
         )
-        # Guard the CUPTI monitor hookup behind is_scripting() so TorchScript
-        # never compiles _maybe_cupti_monitor (it uses globals/imports).
+        # Route the region to the active cuspy observer, if any. The reference is
+        # None unless a cuspy profile is running, so a non-cuspy run never touches
+        # the cuspy chain. Guarded by is_scripting() (the global access doesn't compile under
+        # TorchScript), and the global is read inside the guard so it is dead-code-eliminated.
         if not torch.jit.is_scripting():
-            monitor = _maybe_cupti_monitor()
-            if monitor is not None:
-                self._cupti_monitor_external_id = monitor.push_user_annotation(
-                    self.name
-                )
+            observer = _active_cuspy_profiler_observer
+            if observer is not None:
+                self._cuspy_external_id = observer.push_annotation(self.name)
         return self
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any):
         if not torch.jit.is_scripting():
-            if self._cupti_monitor_external_id is not None:
-                monitor = _maybe_cupti_monitor()
-                if monitor is not None:
-                    monitor.pop_user_annotation()
-                self._cupti_monitor_external_id = None
+            if self._cuspy_external_id is not None:
+                observer = _active_cuspy_profiler_observer
+                if observer is not None:
+                    observer.pop_annotation()
+                self._cuspy_external_id = None
         if not self.run_callbacks_on_exit:
             return
 
@@ -1190,16 +1213,24 @@ class emit_nvtx:
         return False
 
 
+@deprecated(
+    "`torch.autograd.profiler.load_nvprof` is deprecated and will be removed "
+    "in PyTorch 2.17.",
+    category=FutureWarning,
+)
 def load_nvprof(path):
-    """Open an nvprof trace file and parses autograd annotations.
+    """Open an nvprof trace file and parse autograd annotations.
+
+    .. deprecated::
+        This function is deprecated and will be removed in PyTorch 2.17.
 
     Args:
         path (str): path to nvprof trace
     """
-    return EventList(parse_nvprof_trace(path))
+    return EventList(_parse_nvprof_trace(path))
 
 
-class EnforceUnique:
+class _EnforceUnique:
     """Raises an error if a key is seen more than once."""
 
     def __init__(self):
@@ -1214,7 +1245,34 @@ class EnforceUnique:
         self.seen.add(key)
 
 
+@deprecated(
+    "`torch.autograd.profiler.EnforceUnique` is deprecated and will be removed "
+    "in PyTorch 2.17.",
+    category=FutureWarning,
+)
+class EnforceUnique(_EnforceUnique):
+    """Raises an error if a key is seen more than once.
+
+    .. deprecated::
+        This class is deprecated and will be removed in PyTorch 2.17.
+    """
+
+
+@deprecated(
+    "`torch.autograd.profiler.parse_nvprof_trace` is deprecated and will be "
+    "removed in PyTorch 2.17.",
+    category=FutureWarning,
+)
 def parse_nvprof_trace(path):
+    """Parse autograd annotations from an nvprof trace file.
+
+    .. deprecated::
+        This function is deprecated and will be removed in PyTorch 2.17.
+    """
+    return _parse_nvprof_trace(path)
+
+
+def _parse_nvprof_trace(path):
     import sqlite3
 
     conn = sqlite3.connect(path)
@@ -1237,7 +1295,7 @@ def parse_nvprof_trace(path):
     """
     functions = []
     functions_map = {}
-    unique = EnforceUnique()
+    unique = _EnforceUnique()
     for row in conn.execute(marker_query):
         unique.see(row["marker_id"])
         evt = FunctionEvent(
@@ -1267,7 +1325,7 @@ def parse_nvprof_trace(path):
         INNER JOIN CUPTI_ACTIVITY_KIND_CONCURRENT_KERNEL AS kernel
             ON kernel.correlationId = runtime.correlationId
     """
-    unique = EnforceUnique()
+    unique = _EnforceUnique()
     for row in conn.execute(kernel_query):
         unique.see(row["marker_id"], row["runtime_id"])
         # 211 is cudaKernelLaunch for cuda >= 9.2

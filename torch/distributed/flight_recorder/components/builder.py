@@ -51,12 +51,12 @@ logger: FlightRecorderLogger = FlightRecorderLogger()
 
 
 try:
-    from tabulate import tabulate
+    from tabulate import tabulate as _tabulate
 except ModuleNotFoundError:
     logger.warning("tabulate is not installed. Proceeding without it.")
 
     # Define a no-op tabulate function
-    def tabulate(data: Any, headers: Any = None) -> Any:  # type: ignore[misc]
+    def _tabulate(data: Any, headers: Any = None) -> Any:  # type: ignore[misc]
         return data
 
 
@@ -116,7 +116,7 @@ def build_groups_memberships(
             _pg_guids[(pg_uid, global_rank)] = pg_guid
             if isinstance(ranks, str):
                 # TODO Bug in FR data format? ranks is '[0, 1,...]'
-                ranks = eval(ranks)
+                ranks = ast.literal_eval(ranks)
 
             if pg_guid not in _groups:
                 groups.append(Group(id=pg_guid, desc=desc, size=len(ranks)))
@@ -398,7 +398,7 @@ def transform_ft(
         rank = dump["rank"]
         for key, pg_config in dump["pg_config"].items():
             if pg_config["desc"] == "default_pg":
-                ranks = eval(pg_config["ranks"])
+                ranks = ast.literal_eval(pg_config["ranks"])
                 replica_id = rank // group_world_size
                 first_rank = replica_id * group_world_size
                 new_ranks = [r + first_rank for r in ranks]
@@ -450,13 +450,13 @@ def build_db(
     logger.debug("built collectives, nccl_calls")
     if args.verbose:
         logger.debug("Groups")
-        logger.debug(tabulate(groups, headers=Group._fields))
+        logger.debug(_tabulate(groups, headers=Group._fields))
         logger.debug("Memberships")
-        logger.debug(tabulate(memberships, headers=Membership._fields))
+        logger.debug(_tabulate(memberships, headers=Membership._fields))
         logger.debug("Collectives")
-        logger.debug(tabulate(collectives, headers=Collective._fields))
+        logger.debug(_tabulate(collectives, headers=Collective._fields))
         logger.debug("NCCLCalls")
-        logger.debug(tabulate(nccl_calls, headers=NCCLCall._fields))
+        logger.debug(_tabulate(nccl_calls, headers=NCCLCall._fields))
     db = Database(
         tracebacks=tracebacks,
         collectives=collectives,

@@ -6,7 +6,11 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo.convert_frame import fullgraph_capture
 from torch._dynamo.utils import get_metrics_context
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    skipIfTorchDynamo,
+)
 
 
 class SimpleLinearModule(torch.nn.Module):
@@ -21,6 +25,8 @@ class SimpleLinearModule(torch.nn.Module):
 @torch._dynamo.config.patch(generate_pycode=True)
 @skipIfTorchDynamo("Not suitable for generate_pycode=True")
 class TestPycode(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_pycode_module(self):
         mod = SimpleLinearModule()
         x = torch.randn(3, 3)
@@ -36,8 +42,8 @@ class TestPycode(torch._dynamo.test_case.TestCase):
         self.assertExpectedInline(
             pycode_str,
             """\
-__arg0 = self._modules['linear']._parameters['weight']
-__arg1 = self._modules['linear']._parameters['bias']
+__arg0 = self._modules['linear']._parameters['bias']
+__arg1 = self._modules['linear']._parameters['weight']
 __arg2 = x
 __graph_out = __compiled_fn_<ID>(__arg0, __arg1, __arg2)
 __stack0 = __graph_out[0]
@@ -102,8 +108,8 @@ __ret = __stack0""",
             """\
 def __generate_func__():
     def __dynamo_func__(self, x):
-        __arg0 = self._modules['linear']._parameters['weight']
-        __arg1 = self._modules['linear']._parameters['bias']
+        __arg0 = self._modules['linear']._parameters['bias']
+        __arg1 = self._modules['linear']._parameters['weight']
         __arg2 = x
         __graph_out = __compiled_fn_<ID>(__arg0, __arg1, __arg2)
         __stack0 = __graph_out[0]

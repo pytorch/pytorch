@@ -97,7 +97,7 @@ struct TORCH_API TracingState
 // for when this happens is when we get an IntArrayRef argument with e.g. sizes
 // for view. When tracing, those might be tensors, which let us encode extra
 // data dependencies, but once they get to the ATen call where we actually have
-// the tracing logic, they get converted into a raw IntArrayRef, and we loose
+// the tracing logic, they get converted into a raw IntArrayRef, and we lose
 // all information. To prevent this, we temporarily stash it in here.
 struct ArgumentStash {
   struct IntArrayRefTrace : std::vector<Value*> {
@@ -358,7 +358,8 @@ void addInputs(
 
 template <size_t N>
 void addInputs(Node* n, const char* name, std::array<bool, N> value) {
-  throw std::runtime_error(
+  TORCH_CHECK(
+      false,
       "Found an unsupported argument type in the JIT tracer. File a bug report.");
 }
 

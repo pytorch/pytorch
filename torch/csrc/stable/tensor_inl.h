@@ -8,6 +8,7 @@
 #include <torch/csrc/stable/macros.h>
 #include <torch/csrc/stable/stableivalue_conversions.h>
 #include <torch/csrc/stable/tensor_struct.h>
+#include <torch/headeronly/core/Dispatch_v2.h>
 #include <torch/headeronly/core/Layout.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
@@ -46,32 +47,34 @@ inline Layout Tensor::layout() const {
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 // The following data ptr cast methods mirror the methods defined in
 // aten/src/ATen/templates/TensorMethods.cpp
-#define DEFINE_DATA_PTR_CAST(T, name, PRED)               \
-  template <>                                             \
-  inline T* Tensor::mutable_data_ptr() const {            \
-    auto stype = scalar_type();                           \
-    STD_TORCH_CHECK(                                      \
-        PRED(stype, torch::headeronly::ScalarType::name), \
-        "expected scalar type " #name " but found ",      \
-        torch::headeronly::toString(stype));              \
-    return static_cast<T*>(mutable_data_ptr());           \
-  }                                                       \
-  template <>                                             \
-  inline const T* Tensor::const_data_ptr() const {        \
-    auto stype = scalar_type();                           \
-    STD_TORCH_CHECK(                                      \
-        PRED(stype, torch::headeronly::ScalarType::name), \
-        "expected scalar type " #name " but found ",      \
-        torch::headeronly::toString(stype));              \
-    return static_cast<const T*>(const_data_ptr());       \
+#define DEFINE_DATA_PTR_CAST(T, name, PRED)          \
+  template <>                                        \
+  inline T* Tensor::mutable_data_ptr() const {       \
+    auto stype = scalar_type();                      \
+    STD_TORCH_CHECK(                                 \
+        PRED(stype, name),                           \
+        "expected scalar type " #name " but found ", \
+        torch::headeronly::toString(stype));         \
+    return static_cast<T*>(mutable_data_ptr());      \
+  }                                                  \
+  template <>                                        \
+  inline const T* Tensor::const_data_ptr() const {   \
+    auto stype = scalar_type();                      \
+    STD_TORCH_CHECK(                                 \
+        PRED(stype, name),                           \
+        "expected scalar type " #name " but found ", \
+        torch::headeronly::toString(stype));         \
+    return static_cast<const T*>(const_data_ptr());  \
   }
 
 #define _PRED(S1, S2) S1 == S2
 #define DEFINE_CAST(T, name) DEFINE_DATA_PTR_CAST(T, name, _PRED)
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CAST)
-DEFINE_CAST(uint16_t, UInt16)
-DEFINE_CAST(uint32_t, UInt32)
-DEFINE_CAST(uint64_t, UInt64)
+AT_FORALL_SCALAR_TYPES_V2(
+    AT_WRAP(DEFINE_CAST),
+    AT_EXPAND(AT_ALL_SCALAR_TYPES_WITH_COMPLEX),
+    torch::headeronly::ScalarType::UInt16,
+    torch::headeronly::ScalarType::UInt32,
+    torch::headeronly::ScalarType::UInt64)
 #undef DEFINE_CAST
 #undef _PRED
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0

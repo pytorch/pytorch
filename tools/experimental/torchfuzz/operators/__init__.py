@@ -46,7 +46,7 @@ from torchfuzz.operators.scalar_pointwise import (
     ScalarAddOperator,
     ScalarDivOperator,
     ScalarMulOperator,
-    ScalarPointwiseOperator,
+    ScalarPointwiseOperatorBase,
     ScalarSubOperator,
 )
 from torchfuzz.operators.tensor_pointwise import (
@@ -54,20 +54,20 @@ from torchfuzz.operators.tensor_pointwise import (
     ClampOperator,
     DivOperator,
     MulOperator,
-    PointwiseOperator,
+    PointwiseOperatorBase,
     SubOperator,
 )
 
 
 __all__ = [
     "Operator",
-    "PointwiseOperator",
+    "PointwiseOperatorBase",
     "AddOperator",
     "MulOperator",
     "SubOperator",
     "DivOperator",
     "ClampOperator",
-    "ScalarPointwiseOperator",
+    "ScalarPointwiseOperatorBase",
     "ScalarAddOperator",
     "ScalarMulOperator",
     "ScalarSubOperator",
