@@ -4099,6 +4099,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
     ) -> VariableTracker | None:
         getattr_fn = self._check_for_getattr()
         if isinstance(getattr_fn, types.FunctionType):
+            # __getattr__ only runs because `name` is missing from the
+            # instance __dict__. Guard on that, otherwise a later
+            # object.__setattr__ / __dict__ write that shadows e.g. an
+            # nn.Module's _modules entry would reuse the stale graph.
+            if (
+                self.source
+                and hasattr(self.value, "__dict__")
+                and name not in self.value.__dict__
+            ):
+                install_guard(
+                    self.source.make_guard(
+                        functools.partial(
+                            GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=name
+                        )
+                    )
+                )
             if (
                 getattr_fn is unpatched_nn_module_getattr
                 and isinstance(self, variables.UnspecializedNNModuleVariable)

@@ -529,6 +529,16 @@ class NNModuleVariable(VariableTracker):
 
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
+        elif object_member and name not in base_dict:
+            # Resolved via _modules/_parameters/_buffers; an instance
+            # __dict__ entry added later would shadow it.
+            install_guard(
+                self.source.make_guard(
+                    functools.partial(
+                        GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=name
+                    )
+                )
+            )
 
         if object_member:
             out = VariableTracker.build(tx, subobj, NNModuleSource(source))  # type: ignore[arg-type]

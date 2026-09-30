@@ -3378,6 +3378,41 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(mod, inp0, inp1), inp0 + inp1)
         self.assertEqual(mod(inp0), inp0 + inp1)
 
+    @parametrize("inline", [True, False])
+    @parametrize("kind", ["submodule", "parameter", "buffer"])
+    def test_instance_dict_shadows_registered_attr(self, kind, inline):
+        # https://github.com/pytorch/pytorch/issues/197859
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub = torch.nn.Linear(4, 4)
+                self.w = torch.nn.Parameter(torch.ones(4))
+                self.register_buffer("b", torch.ones(4))
+
+            def forward(self, x):
+                return self.sub(x) * self.w + self.b
+
+        attr, value = {
+            "submodule": ("sub", torch.nn.Linear(4, 4)),
+            "parameter": ("w", torch.nn.Parameter(torch.full((4,), 2.0))),
+            "buffer": ("b", torch.full((4,), 3.0)),
+        }[kind]
+
+        with torch._dynamo.config.patch(inline_inbuilt_nn_modules=inline):
+            mod = Mod()
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_mod = torch.compile(mod, backend=cnt)
+            x = torch.randn(4)
+            self.assertEqual(opt_mod(x), mod(x))
+
+            object.__setattr__(mod, attr, value)
+            self.assertEqual(opt_mod(x), mod(x))
+            self.assertEqual(cnt.frame_count, 2)
+
+            del mod.__dict__[attr]
+            self.assertEqual(opt_mod(x), mod(x))
+            self.assertEqual(cnt.frame_count, 2)
+
     def test_user_defined_nn_module_dynamic(self):
         class Conv2d(torch.nn.Conv2d):
             def __init__(self, *args, **kwargs):

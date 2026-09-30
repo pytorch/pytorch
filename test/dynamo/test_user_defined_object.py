@@ -849,6 +849,25 @@ class TestUserDefinedClassDict(TestCase):
         # Should have recompiled
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_instance_dict_shadows_getattr(self):
+        class MyClass:
+            def __getattr__(self, name):
+                return 1.0
+
+        obj = MyClass()
+
+        def fn(t):
+            return t + obj.scale
+
+        cnt = dynamo_testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+        t = torch.zeros(2)
+        self.assertEqual(compiled(t), fn(t))
+
+        obj.scale = 5.0
+        self.assertEqual(compiled(t), fn(t))
+        self.assertEqual(cnt.frame_count, 2)
+
 
 class TestClassSetattr(TestCase):
     hw_classification = HardwareClassification.GENERIC
