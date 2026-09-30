@@ -1757,7 +1757,10 @@ def _get_cpp_stdlib_args(
         ]
     elif config.is_fbcode():
         lib_dir_paths = [sysconfig.get_config_var("LIBDIR")]
-        libs.append("stdc++")
+        # LIBDIR has no unversioned libstdc++.so, so a plain -lstdc++ falls
+        # through to the host GCC's libstdc++, which may be newer than the one
+        # loaded into this process.
+        libs.append(":libstdc++.so.6")
 
     return lib_dir_paths, libs, passthrough_args
 
