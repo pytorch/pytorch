@@ -337,6 +337,15 @@ class TestCompileWorker(TestCase):
         )
         self.assertIn("shutdown returned", result.stdout)
 
+    def test_shutdown_no_wait(self):
+        pool = SubprocPool(2)
+        self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
+        start = time.time()
+        pool.shutdown(wait=False)
+        self.assertLess(time.time() - start, 5)
+        # The sidecar still exits on its own after reading SHUTDOWN.
+        self.assertEqual(pool.process.wait(60), 0)
+
 
 @config.patch("quiesce_async_compile_time", 0.1)
 class TestCompileWorkerWithTimer(TestCompileWorker):
