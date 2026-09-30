@@ -4715,7 +4715,13 @@ class GuardsStatePickler(FunctionPicklerBase):
 
     @classmethod
     def _unpickle_custom_op_def(cls, qualname: str) -> Any:
-        return OPDEFS[qualname]
+        try:
+            return OPDEFS[qualname]
+        except KeyError:
+            raise RuntimeError(
+                f"Custom op {qualname} is not registered; import the module that "
+                "defines it before loading"
+            ) from None
 
     @staticmethod
     def _unpickle_sdp_backend(name: str) -> torch.nn.attention.SDPBackend:
@@ -5406,7 +5412,7 @@ def _guard_value(builder: GuardBuilder, guard: Guard) -> object:
     try:
         return builder.get(guard)
     except Exception:
-        # Not a module, enum member, class or function: never portable.
+        # A value the guard cannot read is never portable.
         return None
 
 
