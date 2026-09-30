@@ -3,6 +3,7 @@
 #include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <c10/core/impl/FakeTensorModeTLS.h>
 #include <c10/util/ScopeExit.h>
+#include <torch/csrc/FakeTensorMode.h>
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
@@ -10,7 +11,6 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
-#include <torch/csrc/utils/python_fake_tensor.h>
 
 #include <algorithm>
 #include <string>
@@ -1143,7 +1143,7 @@ struct ActiveFakeMode {
 ActiveFakeMode get_active_fake_mode() {
   auto mode = c10::impl::FakeTensorModeTLS::get_state();
   TORCH_CHECK(mode != nullptr, "FakeTensorMode must be active");
-  py::object py_fake_mode = getCppFakeTensorModePyObj(mode);
+  py::object py_fake_mode = fake_tensor::getCppFakeTensorModePyObj(mode);
   TORCH_CHECK(!py_fake_mode.is_none(), "CppFakeTensorMode must be set on mode");
   return {std::move(mode), std::move(py_fake_mode)};
 }
