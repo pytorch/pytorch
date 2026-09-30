@@ -14,6 +14,7 @@ before the application does.
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -482,8 +483,15 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
         except FileExistsError:
             if marker.read_text() != digest:
                 raise foreign() from None
-        except OSError:
-            # Some filesystems have no hard links.
+        except OSError as exc:
+            # What filesystems without hard links report (vfat: EPERM).
+            if exc.errno not in (
+                errno.EPERM,
+                errno.EOPNOTSUPP,
+                errno.ENOTSUP,
+                errno.ENOSYS,
+            ):
+                raise
             os.replace(staging / _READY, marker)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
