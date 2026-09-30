@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import unittest
 from unittest import mock
 
 import torch
@@ -21,6 +22,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TEST_ACCELERATOR,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -142,14 +144,11 @@ class TestCollectiveUtils(MultiProcessTestCase):
 
     @parametrize("device", ["cpu"] if device_type == "cpu" else ["cpu", device_type])
     @skip_if_lt_x_gpu(4)
+    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
     def test_check_rng_sync(
         self,
         device,
     ) -> None:
-        if device == "cuda" and not torch.cuda.is_available():
-            self.skipTest("CUDA is not available")
-        if device == "xpu" and not torch.xpu.is_available():
-            self.skipTest("XPU is not available")
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="gloo", store=store, rank=self.rank, world_size=self.world_size

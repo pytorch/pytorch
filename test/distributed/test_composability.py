@@ -24,13 +24,13 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     requires_accelerator_dist_backend,
+    requires_nccl,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    skip_but_pass_in_sandcastle_if,
     skipIfRocm,
 )
 
@@ -402,13 +402,12 @@ class ComposabilityTest(MultiProcContinuousTest):
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @skipIfRocm
     @parametrize("defer_reduce_grad_wait", [False, True])
     def test_pp_fsdp_outer_gradient_accumulation(self, defer_reduce_grad_wait):
         torch.get_device_module(device_type).set_device(self.device)
         device_mesh = init_device_mesh(
-            "cuda",
+            device_type,
             mesh_shape=(self.world_size, 1),
             mesh_dim_names=("dp", "pp"),
         )
@@ -532,7 +531,6 @@ class ComposabilityTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
     @parametrize("dp_type", ["FSDP", "FSDP_MP"])
     def test_pp_fsdp_unshard_reshard_runtime(self, dp_type):
         """Test FSDP UNSHARD/RESHARD functionality using _PipelineScheduleRuntime with custom schedules."""

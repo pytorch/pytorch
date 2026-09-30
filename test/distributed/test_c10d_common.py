@@ -2604,12 +2604,11 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
         )
 
         # Ensure backend config can be created with the following arguments
-
         backend_config_strings_and_expected_values = [
             (dist.Backend.GLOO, "cpu:gloo,cuda:gloo"),
             (dist.Backend.XCCL, "xpu:xccl"),
             (dist.Backend.NCCL, "cuda:nccl"),
-            (dist.Backend.MPI, "cpu:mpi,cuda:mpi,xpu:mpi"),
+            (dist.Backend.MPI, "cpu:mpi,cuda:mpi"),
             (dist.Backend.UCC, "cpu:ucc,cuda:ucc"),
             (dist.Backend.DUMMY, dummy_backend_config),
             ("DUMMY", dummy_backend_config),
@@ -2656,14 +2655,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             _parse_backend_string("NCCL", available_devices=all_devices),
             {"cuda": "nccl"},
         )
-        self.assertEqual(
-            _parse_backend_string("xccl", available_devices=all_devices),
-            {"xpu": "xccl"},
-        )
-        self.assertEqual(
-            _parse_backend_string("XCCL", available_devices=all_devices),
-            {"xpu": "xccl"},
-        )
+        for backend_str in ("xccl", "XCCL"):
+            parsed = _parse_backend_string(backend_str, available_devices=all_devices)
+            self.assertEqual(parsed, {"xpu": "xccl"})
         # gloo is the default for both cpu and mps in default_device_backend_map.
         self.assertEqual(
             _parse_backend_string("gloo", available_devices=all_devices),
@@ -2681,14 +2675,9 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
             ),
             {"cpu": "gloo", "cuda": "nccl"},
         )
-        self.assertEqual(
-            _parse_backend_string("cpu:gloo,xpu:xccl", available_devices=all_devices),
-            {"cpu": "gloo", "xpu": "xccl"},
-        )
-        self.assertEqual(
-            _parse_backend_string("CPU:GLOO , XPU:XCCL", available_devices=all_devices),
-            {"cpu": "gloo", "xpu": "xccl"},
-        )
+        for backend_str in ("cpu:gloo,xpu:xccl", "CPU:GLOO , XPU:XCCL"):
+            parsed = _parse_backend_string(backend_str, available_devices=all_devices)
+            self.assertEqual(parsed, {"cpu": "gloo", "xpu": "xccl"})
         # Unknown device types in merged form are accepted (no validation here).
         self.assertEqual(
             _parse_backend_string("xpu:nccl", available_devices=all_devices),

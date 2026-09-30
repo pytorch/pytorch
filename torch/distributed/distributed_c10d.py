@@ -603,7 +603,7 @@ class Backend(str):  # noqa: SLOT000
         NCCL: ["cuda"],
         XCCL: ["xpu"],
         UCC: ["cpu", "cuda"],
-        MPI: ["cpu", "cuda", "xpu"],
+        MPI: ["cpu", "cuda"],
         FAKE: ["cpu", "cuda", "hpu", "xpu"],
     }
 
