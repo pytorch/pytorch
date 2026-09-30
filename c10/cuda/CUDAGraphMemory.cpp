@@ -10,20 +10,38 @@ void CaptureTracker::captureBegin() {
 
 void CaptureTracker::captureBegin(const CaptureRegistration& registration) {
   TORCH_INTERNAL_ASSERT(registration.capture_id != 0);
+  TORCH_INTERNAL_ASSERT(
+      registration.parent_capture_id.has_value() ==
+      registration.parent_dependency_stream.has_value());
   TORCH_INTERNAL_ASSERT(!capture_tree_.count(registration.capture_id));
 
   CaptureId_t root_capture_id = registration.capture_id;
+  cudaStream_t block_reuse_stream = registration.primary_stream;
   if (registration.parent_capture_id.has_value()) {
     auto parent_it = capture_tree_.find(*registration.parent_capture_id);
     TORCH_INTERNAL_ASSERT(
         parent_it != capture_tree_.end() && parent_it->second.is_active,
         "Conditional capture parent is not active");
-    root_capture_id = parent_it->second.root_capture_id;
+    TORCH_INTERNAL_ASSERT(
+        parent_it->second.mempool_id == registration.mempool_id,
+        "Conditional capture must share its parent's memory pool");
+    const CaptureTreeNode& parent = parent_it->second;
+    root_capture_id = parent.root_capture_id;
+    block_reuse_stream = *registration.parent_dependency_stream;
+    if (block_reuse_stream == parent.primary_stream) {
+      block_reuse_stream = parent.block_reuse_stream;
+    }
   }
 
   capture_tree_.emplace(
       registration.capture_id,
-      CaptureTreeNode{registration.parent_capture_id, root_capture_id, true});
+      CaptureTreeNode{
+          registration.mempool_id,
+          registration.primary_stream,
+          block_reuse_stream,
+          registration.parent_capture_id,
+          root_capture_id,
+          true});
   captureBegin();
 }
 
@@ -61,7 +79,8 @@ size_t CaptureTracker::captureEnd(CaptureId_t capture_id) {
 AllocationContext CaptureTracker::allocationContext(
     cudaStream_t request_stream) const {
   const auto info = c10::cuda::captureInfoMayInitCtx(request_stream);
-  AllocationContext context{info.status != CaptureStatus::None, std::nullopt};
+  AllocationContext context{
+      info.status != CaptureStatus::None, std::nullopt, request_stream};
   if (info.status != CaptureStatus::Active) {
     return context;
   }
@@ -74,6 +93,9 @@ AllocationContext CaptureTracker::allocationContext(
       capture_it->second.is_active,
       "Active CUDA capture has inactive graph-memory state");
   context.tracked_capture_id = info.id;
+  if (request_stream == capture_it->second.primary_stream) {
+    context.block_reuse_stream = capture_it->second.block_reuse_stream;
+  }
   return context;
 }
 
