@@ -2067,7 +2067,9 @@ class _InProcessFxCompile(FxCompile):
                         V.graph.disable_cudagraphs_reason = (
                             check_lowering_disable_cudagraph(
                                 # pyrefly: ignore [unbound-name]
-                                V.graph.device_node_mapping
+                                V.graph.device_node_mapping,
+                                # pyrefly: ignore [unbound-name]
+                                use_cudagraph_partition=V.graph.use_cudagraph_partition,
                             )
                         )
 
