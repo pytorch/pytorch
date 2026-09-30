@@ -365,8 +365,8 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         graph = V.graph
         operation_watermark = len(graph.operations)
         buffer_watermark = len(graph.buffers)
-        operation_names = set(graph.name_to_op)
-        buffer_names = set(graph.name_to_buffer)
+        operation_names = OrderedSet(graph.name_to_op)
+        buffer_names = OrderedSet(graph.name_to_buffer)
         env = graph.env.copy()
 
         plan: InlinedSubgraphPlan | None = None
@@ -387,9 +387,9 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 graph.env.clear()
                 graph.env.update(env)
 
-                for name in set(graph.name_to_op) - operation_names:
+                for name in OrderedSet(graph.name_to_op) - operation_names:
                     graph.name_to_op.pop(name, None)
-                for name in set(graph.name_to_buffer) - buffer_names:
+                for name in OrderedSet(graph.name_to_buffer) - buffer_names:
                     graph.name_to_buffer.pop(name, None)
 
                 # A later committed expansion may reuse the same deterministic

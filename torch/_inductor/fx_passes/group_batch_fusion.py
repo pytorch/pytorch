@@ -190,7 +190,9 @@ class PostGradBatchLinearFusion(BatchFusion):
             and isinstance(input_shapes[1], int)
         )
 
-    def match(self, node: torch.fx.Node) -> tuple[str, int, int, int, bool, str] | None:
+    def match(
+        self, node: torch.fx.Node
+    ) -> tuple[str, int, int, int, bool, str, str] | None:
         if CallFunctionVarArgs(aten.mm).match(node):
             input_m, weight_m = node.args
             bias_m = None
@@ -211,7 +213,17 @@ class PostGradBatchLinearFusion(BatchFusion):
             return None
         m, k = input_m.meta["val"].shape  # type: ignore[union-attr]
         n = weight_m.meta["val"].shape[1]  # type: ignore[union-attr]
-        batch_key = ("batch_linear_post_grad", m, k, n, bias_m is not None, str(users))
+        batch_key = (
+            "batch_linear_post_grad",
+            m,
+            k,
+            n,
+            bias_m is not None,
+            str(users),
+            # mm/addmm operands share a dtype, so mixing an autocast-exempt fp32
+            # linear with bf16 ones would make the stack in fuse() fail.
+            str(input_m.meta["val"].dtype),  # type: ignore[union-attr]
+        )
         return batch_key
 
     def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
@@ -421,8 +433,9 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
         if CallFunctionVarArgs(self.op).match(
             node
         ) and self._pointwise_node_can_be_fused(node):
-            alpha = node.kwargs.get("alpha", DEFAULT_ALPHA)
-            rounding_mode = node.kwargs.get("rounding_mode", None)
+            # NOTE: fuse() propagates subset[0].kwargs verbatim onto the
+            # fused node, so the group key must encode everything that is
+            # copied; key on node.kwargs rather than individual fields.
             input, other = node.args
             shape = list(input.meta["val"].shape)  # type: ignore[union-attr]
             if self.graph_search_options.get("fuse_nodes_with_same_parent", False):
@@ -445,8 +458,7 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
                 str(shape),
                 str(input.meta["val"].dtype),  # type: ignore[union-attr]
                 str(other.meta["val"].dtype),  # type: ignore[union-attr]
-                str(alpha),
-                str(rounding_mode),
+                str(node.kwargs),
                 str(parent),
             )
         else:
@@ -455,7 +467,9 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
 
     def fuse(self, graph: torch.fx.GraphModule, subset: list[torch.fx.Node]):
         batch_inputs, batch_others = [], []
-        alpha = subset[0].kwargs.get("alpha", DEFAULT_ALPHA)
+        # Safe because match() keys the group on str(node.kwargs): every
+        # node in the subset shares the same kwargs.
+        kwargs = subset[0].kwargs
         batch_inputs_meta, batch_others_meta = [], []
 
         for node in subset:
@@ -478,17 +492,19 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             batch_op = graph.call_function(  # type: ignore[operator]
                 self.op,
                 args=(stack_inputs, stack_others),
-                kwargs={"alpha": alpha} if self.op == aten.add.Tensor else {},
+                kwargs=kwargs,
             )
-            batch_op.meta["val"] = self.op(stack_inputs_meta, stack_others_meta)
-            for i, original_add in enumerate(subset):
+            batch_op.meta["val"] = self.op(
+                stack_inputs_meta, stack_others_meta, **kwargs
+            )
+            for i, original_node in enumerate(subset):
                 with graph.inserting_after(batch_op):  # type: ignore[operator]
-                    new_add = graph.call_function(  # type: ignore[operator]
+                    new_node = graph.call_function(  # type: ignore[operator]
                         torch.ops.aten.select, args=((batch_op, 0, i))
                     )
-                original_add.replace_all_uses_with(new_add)
-                new_add.meta.update(original_add.meta)
-                graph.erase_node(original_add)  # type: ignore[operator]
+                original_node.replace_all_uses_with(new_node)
+                new_node.meta.update(original_node.meta)
+                graph.erase_node(original_node)  # type: ignore[operator]
         counters["inductor"][
             "batch_aten_" + self.op.__name__.lower().split(".")[0]
         ] += 1
