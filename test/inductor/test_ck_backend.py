@@ -994,19 +994,33 @@ struct FlatmmPipelineProblem
             ops = template.gen_ops()
             if not ops:
                 raise unittest.SkipTest(f"no instance offered for {arch}")
-            op = ops[0]
+            # One instance per distinct block tile. Compiling only ops[0] builds
+            # whichever tile happens to sort first and leaves every other tile
+            # in the arch's set unbuilt.
+            by_tile: dict[tuple[int, int, int], object] = {}
+            for candidate in ops:
+                by_tile.setdefault(
+                    (candidate.tile_m, candidate.tile_n, candidate.tile_k), candidate
+                )
+            selected = list(by_tile.values())
             expected = (16, 16) if arch == "gfx1250" else (32, 32)
-            self.assertEqual((op.warp_tile_m, op.warp_tile_n), expected)
-            source = "\n".join(
-                [
-                    template.header().getvalue(),
-                    template.globals().getvalue(),
-                    template.emit_ck_instance(
-                        op, use_v2_api=self._probe(rocm.rocm_home)
-                    ),
-                ]
-            )
-        self._compile_ck_tile_source(source, arch=arch)
+            sources = []
+            for op in selected:
+                self.assertEqual((op.warp_tile_m, op.warp_tile_n), expected)
+                sources.append(
+                    "\n".join(
+                        [
+                            template.header().getvalue(),
+                            template.globals().getvalue(),
+                            template.emit_ck_instance(
+                                op, use_v2_api=self._probe(rocm.rocm_home)
+                            ),
+                        ]
+                    )
+                )
+        for op, source in zip(selected, sources):
+            with self.subTest(block_tile=(op.tile_m, op.tile_n, op.tile_k)):
+                self._compile_ck_tile_source(source, arch=arch)
 
 
 if __name__ == "__main__":
