@@ -80,6 +80,8 @@ def new_transport_rank(
     store = dist.PrefixStore(json.dumps([*pair, attempt]), store)
     transport = new_transport(backend, device, **kwargs)
     try:
+        # Store.set accepts bytes; the stub only declares str.
+        # pyrefly: ignore [bad-argument-type]
         store.set(str(rank), transport.bind(timeout=timeout))
         store.wait([str(peer_rank)], bootstrap_timeout)
         transport.connect(store.get(str(peer_rank)), timeout=timeout)
