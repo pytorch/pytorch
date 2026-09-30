@@ -58,10 +58,8 @@ from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
-    DictGetItemSource,
     GenericAttrSource,
     GetItemSource,
-    TypeDictSource,
     TypeMROSource,
     TypeSource,
     WeakRefCallSource,
@@ -94,7 +92,7 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .object_protocol import generic_str
+from .object_protocol import generic_repr, generic_str, mro_attr_source
 from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
@@ -358,6 +356,13 @@ class SuperVariable(VariableTracker):
             return fn_vt.call_function(tx, [cls_variable, *args], kwargs)
         elif isinstance(inner_fn, types.FunctionType):
             fn_vt = VariableTracker.build(tx, inner_fn, source=source, realize=True)
+            # With a class objvar, either objvar is super()'s su_obj_type, so
+            # CPython passes obj=NULL to the descriptor, or the real super()
+            # fallback in _resolved_getattr_and_source already applied it
+            # (metaclass case). Either way the function is called unbound.
+            # https://github.com/python/cpython/blob/v3.13.0/Objects/typeobject.c#L11162-L11166
+            if issubclass(self.objvar.python_type(), type):
+                return fn_vt.call_function(tx, args, kwargs)
             return fn_vt.call_function(tx, [self.objvar] + args, kwargs)
         elif isinstance(inner_fn, types.MethodType):
             return variables.UserMethodVariable(
@@ -729,6 +734,12 @@ class ExceptionVariable(VariableTracker):
                     se.track_attribute_mutation_new(self)
                 se.store_instance_dict_attr(self, attr, args[1])
             return variables.ConstantVariable.create(None)
+        elif name == "__delattr__":
+            attr = args[0].as_python_constant()
+            getset = self.lookup_tp_getset_member(attr)
+            if getset is not None:
+                getset.setter(self, tx, None)
+                return variables.ConstantVariable.create(None)
         return super().call_method(tx, name, args, kwargs)
 
     def tp_getattro_impl(
@@ -895,6 +906,9 @@ class ExceptionVariable(VariableTracker):
         if len(self.args) == 0:
             return VariableTracker.build(tx, "")
         elif len(self.args) == 1:
+            # KeyError.__str__ uses repr for a single key, unlike BaseException.
+            if self.exc_type is KeyError:
+                return generic_repr(tx, self.args[0])
             return generic_str(tx, self.args[0])
         else:
             from . import TupleVariable
@@ -1146,6 +1160,53 @@ class CellVariable(VariableTracker):
 
     def python_type(self) -> type:
         return types.CellType
+
+    def _current_contents(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker | None:
+        """Cell contents, or None if the cell is empty (PyCell_GET == NULL).
+
+        An empty cell is represented by the DeletedVariable marker, both for a
+        cell that was never assigned (pre_existing_contents) and for one
+        emptied by `del` (the pending cell_contents mutation).
+        """
+        side_effects = tx.output.side_effects
+        if side_effects.has_pending_mutation_of_attr(self, "cell_contents"):
+            contents = side_effects.load_attr(
+                self, "cell_contents", deleted_ok=True, check=False
+            )
+        else:
+            contents = self.pre_existing_contents
+        if contents is None or isinstance(contents, DeletedVariable):
+            return None
+        return contents
+
+    def tp_richcompare_impl(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
+    ) -> VariableTracker:
+        """
+        cell_richcompare: cells compare by contents, and an empty cell sorts
+        before any non-empty cell. Non-cells are not handled.
+        https://github.com/python/cpython/blob/v3.13.0/Objects/cellobject.c#L82-L100
+        """
+
+        from .object_protocol import generic_richcompare
+
+        if not isinstance(other, CellVariable):
+            return ConstantVariable.create(NotImplemented)
+
+        self_contents = self._current_contents(tx)
+        other_contents = other._current_contents(tx)
+        if self_contents is not None and other_contents is not None:
+            return generic_richcompare(tx, self_contents, other_contents, op)
+
+        # Py_RETURN_RICHCOMPARE(b == NULL, a == NULL, op)
+        return generic_richcompare(
+            tx,
+            ConstantVariable.create(other_contents is None),
+            ConstantVariable.create(self_contents is None),
+            op,
+        )
 
 
 class NewGlobalVariable(VariableTracker):
@@ -1472,35 +1533,10 @@ class AutogradFunctionVariable(VariableTracker):
         if self.fn_cls_source is None:
             return None
 
-        for idx, klass in enumerate(self.fn_cls.__mro__):
-            if name not in klass.__dict__:
-                continue
-
-            for absent_idx in range(idx):
-                absent_klass = self.fn_cls.__mro__[absent_idx]
-                cache_key = (id(absent_klass), name)
-                if cache_key in tx.output.guarded_mro_absent_keys:
-                    continue
-                tx.output.guarded_mro_absent_keys.add(cache_key)
-                klass_source: Source = self.fn_cls_source
-                if absent_idx:
-                    klass_source = GetItemSource(
-                        TypeMROSource(self.fn_cls_source), absent_idx
-                    )
-                install_guard(
-                    TypeDictSource(klass_source).make_guard(
-                        functools.partial(GuardBuilder.DICT_NOT_CONTAINS, key=name)
-                    )
-                )
-
-            klass_source = self.fn_cls_source
-            if idx:
-                klass_source = GetItemSource(TypeMROSource(self.fn_cls_source), idx)
-            source = DictGetItemSource(TypeDictSource(klass_source), name)
+        source = mro_attr_source(tx, self.fn_cls, self.fn_cls_source, name)
+        if source is not None:
             install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
-            return source
-
-        return None
+        return source
 
     def _unsupported_method(self, name: str) -> NoReturn:
         unimplemented(
