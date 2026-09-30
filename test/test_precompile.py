@@ -6,6 +6,7 @@ import functools
 import importlib
 import inspect
 import io
+import json
 import os
 import pickle
 import stat
@@ -6079,6 +6080,81 @@ class TestPrecompileNoCompilation(TestCase):
         ):
             BuildExtension.build_extensions(command)
         self.assertEqual(command.mock_calls, [])
+
+
+@skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
+@instantiate_parametrized_tests
+class TestPrecompileRuntimeCache(TestCase):
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
+    @parametrize("device", (0, None))
+    @parametrize("explicit_cache", (False, True))
+    def test_strict_hydration_restores_kernel_where_autotuner_loads_it(
+        self, device, explicit_cache
+    ):
+        from pathlib import Path
+
+        from torch._inductor.runtime.cache_dir_utils import triton_cache_dir
+        from torch._inductor.runtime.triton_heuristics import _resolve_load_device
+        from torch._inductor.triton_bundler import (
+            TritonBundle,
+            TritonBundler,
+            TritonKernelArtifact,
+            TritonKernelArtifacts,
+        )
+
+        bundle = TritonBundle(
+            [
+                TritonKernelArtifacts(
+                    "kernel-key",
+                    device,
+                    [
+                        TritonKernelArtifact("kernel.cubin", b"compiled-kernel"),
+                        TritonKernelArtifact(
+                            "__grp__kernel.json",
+                            b'{"child_paths": {"kernel.cubin": "[REPLACE]/kernel.cubin"}}',
+                        ),
+                    ],
+                )
+            ],
+            [],
+        )
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.dict(os.environ, {"TORCHINDUCTOR_CACHE_DIR": directory}),
+            torch._inductor.config.patch(
+                bundle_triton_into_fx_graph_cache=True,
+                use_static_triton_launcher=False,
+            ),
+            torch.compiler.precompile.no_compilation(),
+        ):
+            if explicit_cache:
+                os.environ["TRITON_CACHE_DIR"] = str(Path(directory) / "explicit")
+            else:
+                os.environ.pop("TRITON_CACHE_DIR", None)
+            TritonBundler.read_and_emit(bundle)
+            # CachingAutotuner.__init__ and reload_cubin_path resolve the kernel
+            # directory this way, so a None (compile_on_one_rank) device must land
+            # under the current device rather than triton/None.
+            basedir = Path(triton_cache_dir(_resolve_load_device(device, "cuda")))
+            if not explicit_cache:
+                expected = torch.cuda.current_device() if device is None else device
+                self.assertEqual(basedir, Path(directory) / "triton" / str(expected))
+            kernel_dir = basedir / "kernel-key"
+            self.assertEqual(
+                (kernel_dir / "kernel.cubin").read_bytes(), b"compiled-kernel"
+            )
+            self.assertEqual(
+                json.loads((kernel_dir / "__grp__kernel.json").read_text())[
+                    "child_paths"
+                ],
+                {"kernel.cubin": str(kernel_dir / "kernel.cubin")},
+            )
+            TritonBundler.read_and_emit(bundle)
+            (kernel_dir / "kernel.cubin").unlink()
+            with self.assertRaisesRegex(
+                RuntimeError, "incomplete or incompatible Triton kernel file"
+            ):
+                TritonBundler.read_and_emit(bundle)
 
 
 if __name__ == "__main__":

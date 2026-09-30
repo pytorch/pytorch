@@ -5661,15 +5661,20 @@ class LambdaFuture(CodeCacheFuture):
     ) -> None:
         self.result_fn = result_fn
         self.future = future
+        self._result: tuple[Callable[..., Any]] | None = None
 
     def result(self, timeout: float | None = None) -> Callable[..., Any]:
-        if timeout is not None and self.future is not None:
-            # Wait on the underlying cross-process future with the caller's
-            # timeout; raises concurrent.futures.TimeoutError if it does not
-            # resolve in time. result_fn will then consume the completed
-            # future without blocking further.
-            self.future.result(timeout=timeout)
-        return self.result_fn()
+        # result_fn can have side effects (a Triton kernel's runs precompile), and
+        # AsyncCompile.drain_pending may consume a future before its owner does.
+        if self._result is None:
+            if timeout is not None and self.future is not None:
+                # Wait on the underlying cross-process future with the caller's
+                # timeout; raises concurrent.futures.TimeoutError if it does not
+                # resolve in time. result_fn will then consume the completed
+                # future without blocking further.
+                self.future.result(timeout=timeout)
+            self._result = (self.result_fn(),)
+        return self._result[0]
 
 
 class StaticAutotunerFuture(CodeCacheFuture):

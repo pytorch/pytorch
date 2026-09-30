@@ -300,6 +300,38 @@ class AsyncCompile:
             )
         return ThreadPoolExecutor(get_compile_threads())
 
+    @classmethod
+    def drain_pending(cls, timeout: float | None = 600) -> None:
+        """Wait for all submitted compile work, then shut down the compile workers.
+
+        Call this only after submissions have stopped. It first waits on every
+        cached Triton kernel future (running its result callback), the worker
+        warm-up future, and every job still queued in a subprocess pool.
+        ``timeout`` bounds the total time spent on those waits; exceeding it
+        raises ``concurrent.futures.TimeoutError``, and a failed future re-raises
+        its error. Either error propagates before anything is shut down, so the
+        pools and compile workers stay usable. Thread pools and a non-subprocess
+        process pool expose no pending work to wait on, so the shutdown that
+        follows joins them without the ``timeout`` bound.
+        """
+        deadline = None if timeout is None else time() + timeout
+
+        def remaining() -> float | None:
+            return None if deadline is None else max(0.0, deadline - time())
+
+        for future in list(CompiledTritonKernels._cache.values()):
+            if not isinstance(future, StaticAutotunerFuture):
+                future.result(timeout=remaining())
+        if cls._ready_future is not None:
+            cls._ready_future.result(timeout=remaining())
+        for pool in list(_pool_set):
+            if isinstance(pool, SubprocPool):
+                pool.drain_pending(timeout=remaining())
+        if cls.pool.cache_info().currsize:
+            cls.pool().shutdown(wait=True)
+            cls.pool.cache_clear()
+        shutdown_compile_workers()
+
     @staticmethod
     def _get_ready():
         """No-op function to help mark when the subprocess pool is ready."""
@@ -578,7 +610,10 @@ class AsyncCompile:
             ]
             extra_env = {v: os.environ.get(v) for v in env_vars}
             extra_config = {
-                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher
+                "use_static_triton_launcher": torch._inductor.config.use_static_triton_launcher,
+                "static_launch_user_defined_triton_kernels": (
+                    torch._inductor.config.static_launch_user_defined_triton_kernels
+                ),
             }
 
             if len(torch._inductor.config.autotune_lookup_table) > 0:
