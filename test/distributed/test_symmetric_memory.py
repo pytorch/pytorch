@@ -1523,7 +1523,8 @@ class AsyncTPTest(MultiProcContinuousTest):
         # selection criteria of _fused_all_gather_matmul_native().
         M = 4096
         N = 1024
-        K = 1024
+        # ROCm only takes the native path for K < 1024.
+        K = 512 if TEST_WITH_ROCM else 1024
         group_name = dist.group.WORLD.group_name
 
         torch.manual_seed(42 + self.rank)

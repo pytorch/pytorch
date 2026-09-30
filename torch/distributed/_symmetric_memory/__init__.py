@@ -1007,10 +1007,10 @@ _ROCM_ASYNC_MM_ARCHS = ("gfx942", "gfx950")
 _ROCM_ASYNC_MM_TILE_M = 256
 # N and K must be multiples of the kernel's 16-byte bf16 vector loads.
 _ROCM_ASYNC_MM_VECTOR = 8
-# On ROCm, native loses to the decomposition fallback from K=2048 up. Latency
-# relative to the fallback on MI350 (ws=4, bf16): ~0.5-0.65x at K=512,
-# ~0.84-0.96x at K=1024, ~1.17-1.34x at K=2048, ~1.8x at K=4096.
-_ROCM_ASYNC_MM_MAX_K = 2048
+# Native only beats the decomposition fallback for small K. Latency relative
+# to the fallback on MI355X (M=4096, bf16, 2 and 4 ranks): ~0.65-0.97x at
+# K=512, ~0.95-1.4x at K=1024, ~1.0-1.6x at K=2048 and above.
+_ROCM_ASYNC_MM_MAX_K = 1024
 
 
 def _rocm_supports_fused_all_gather_matmul_native(
@@ -1021,7 +1021,6 @@ def _rocm_supports_fused_all_gather_matmul_native(
         arch in _ROCM_ASYNC_MM_ARCHS
         and A_shard.dtype == torch.bfloat16
         and B.dtype == torch.bfloat16
-        and (B.is_contiguous() or B.t().is_contiguous())
         and local_M % _ROCM_ASYNC_MM_TILE_M == 0
         and A_shard.shape[-1] % _ROCM_ASYNC_MM_VECTOR == 0
         and B.shape[-1] % _ROCM_ASYNC_MM_VECTOR == 0
@@ -1115,19 +1114,36 @@ def _fused_all_gather_matmul_native(
     return A, out
 
 
+# HIP runs device copies larger than 1 MiB on a DMA engine, and each switch
+# between that engine and the stream_write_value32 kernel on the backend stream
+# stalls the async GEMM by ~100 us. Copies of at most 1 MiB run as kernels on
+# the stream's own queue.
+_ROCM_ASYNC_MM_MAX_COPY_BYTES = 1 << 20
+
+
+def _rocm_copy_in_pieces(dst: torch.Tensor, src: torch.Tensor) -> None:
+    rows = max(1, _ROCM_ASYNC_MM_MAX_COPY_BYTES // (dst.stride(0) * dst.element_size()))
+    for d, s in zip(dst.split(rows), src.split(rows)):
+        d.copy_(s)
+
+
 def _fused_all_gather_matmul_native_rocm(
     A_shard: torch.Tensor,
     B: torch.Tensor,
     group_name: c10d.GroupName,
 ) -> tuple[torch.Tensor, torch.Tensor]:
+    # The CK kernel is 1.6x (gfx942) to 6x (gfx950) slower with column-major B
+    # than with row-major B, which outweighs copying B to row-major.
+    B = B if B.is_contiguous() else B.contiguous()
     symm_mem = rendezvous(A_shard, group_name)
     if symm_mem is None:
         symm_mem = get_symm_mem_workspace(
             group_name, A_shard.numel() * A_shard.element_size()
         )
-        symm_mem.barrier()
+        # No barrier before overwriting this rank's workspace: ops that read
+        # peers' workspace end with a symm_mem.barrier() after their reads.
         buf = symm_mem.get_buffer(symm_mem.rank, A_shard.shape, A_shard.dtype)
-        buf.copy_(A_shard)
+        _rocm_copy_in_pieces(buf, A_shard)
         A_shard = buf
 
     rank = symm_mem.rank
@@ -1146,7 +1162,7 @@ def _fused_all_gather_matmul_native_rocm(
     backend_stream.wait_stream(current_stream)
     current_stream.wait_stream(backend_stream)
 
-    A_shards[rank].copy_(A_shard)
+    _rocm_copy_in_pieces(A_shards[rank], A_shard)
     if not torch.cuda.is_current_stream_capturing():
         _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
     else:
@@ -1157,7 +1173,7 @@ def _fused_all_gather_matmul_native_rocm(
         src_rank = (rank + step) % world_size
         src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
         with backend_stream:
-            A_shards[src_rank].copy_(src_buf)
+            _rocm_copy_in_pieces(A_shards[src_rank], src_buf)
             if not torch.cuda.is_current_stream_capturing():
                 _SymmetricMemory.stream_write_value32(A_signals, src_rank, 1)
             else:
