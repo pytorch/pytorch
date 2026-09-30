@@ -3,6 +3,7 @@
 
 import collections
 import copy
+import inspect
 import itertools
 import os
 import tempfile
@@ -1859,6 +1860,24 @@ class MockModule(torch.nn.Module):
 
 class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    def test_wrapping_does_not_use_getattr_static(self):
+        # Wrapping a module can happen while the eval frame callback is
+        # installed (compiled autograd compiles the backward graph that way),
+        # and Dynamo then intercepts and traces CPython's inspect internals.
+        # Use _static_getattr instead (gh-190500).
+        seen = []
+        orig = inspect.getattr_static
+
+        def spy(obj, name, default=None):
+            seen.append(name)
+            return orig(obj, name, default)
+
+        with patch("inspect.getattr_static", spy):
+            torch.compile(MockModule(), backend="eager")
+
+        static = [n for n in seen if n in ("_initialize_hook", "get_compiler_config")]
+        self.assertFalse(static, "should be looked up with _static_getattr")
 
     def test_nn_module(self):
         mod = MockModule()
