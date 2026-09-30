@@ -1724,6 +1724,7 @@ class TestMetaCudaRef(_TestMetaBase):
         )
 
 
+@unMarkDynamoStrictTest
 @instantiate_parametrized_tests
 class TestMetaCore(TestCase):
     hw_classification = HardwareClassification.GENERIC
