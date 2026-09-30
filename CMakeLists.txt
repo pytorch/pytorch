@@ -519,7 +519,6 @@ cmake_dependent_option(
   BUILD_LAZY_TS_BACKEND
   "Build the lazy Torchscript backend, not compatible with mobile builds" ON
   "NOT INTERN_BUILD_MOBILE" OFF)
-cmake_dependent_option(BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin folder"
                        OFF "USE_CUDA" OFF)
 cmake_dependent_option(
@@ -976,7 +975,6 @@ if(INTERN_BUILD_MOBILE)
     set(INTERN_DISABLE_AUTOGRAD ON)
   endif()
   set(BUILD_PYTHON OFF)
-  set(BUILD_FUNCTORCH OFF)
   set(USE_DISTRIBUTED OFF)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
@@ -1082,9 +1080,10 @@ include(ExternalProject)
 
 # ---[ Dependencies ---[ FBGEMM doesn't work on x86 32bit and
 # CMAKE_SYSTEM_PROCESSOR thinks its 64bit
-if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|aarch64)$")
+if(USE_FBGEMM AND (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|x86_64|aarch64)$"
+                   OR CMAKE_SIZEOF_VOID_P EQUAL 4))
   message(WARNING
-    "x86_64 or aarch64 required for FBGEMM. "
+    "64-bit x86 or aarch64 required for FBGEMM. "
     "Not compiling with FBGEMM. "
     "Turn this warning off by USE_FBGEMM=OFF.")
   set(USE_FBGEMM OFF)
@@ -1598,7 +1597,7 @@ if(DEFINED USE_CUSTOM_DEBINFO)
 
   string(REGEX REPLACE " +" ";" SOURCE_FILES_LIST "${SOURCE_FILES}")
 
-  # Set the COMPILE_FLAGS property for each source file
+  # Add debug info for each source file
   foreach(SOURCE_FILE ${SOURCE_FILES_LIST})
     # We have to specify the scope here. We do this by specifying the targets we
     # care about and caffe2/ for all test targets defined there
@@ -1609,9 +1608,9 @@ if(DEFINED USE_CUSTOM_DEBINFO)
       # @todo test if we can remove this
       set(ALL_PT_TARGETS "torch_python;c10;torch_cpu;torch")
     endif()
-    set_source_files_properties(
-      ${SOURCE_FILE} DIRECTORY "caffe2/" TARGET_DIRECTORY ${ALL_PT_TARGETS}
-      PROPERTIES COMPILE_FLAGS "-g")
+    set_property(SOURCE ${SOURCE_FILE}
+      DIRECTORY "caffe2/" TARGET_DIRECTORY ${ALL_PT_TARGETS}
+      APPEND PROPERTY COMPILE_OPTIONS "-g")
   endforeach()
 
   # Link everything with debug info when any file is in debug mode
