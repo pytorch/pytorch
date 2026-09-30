@@ -5,7 +5,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 import gc
-from unittest import skip, skipIf
+import unittest
 
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
@@ -13,18 +13,26 @@ from attn_positional import BertSelfAttention as BertSelfAttentionB
 import functorch.dim
 import torch
 from functorch.dim import Dim, DimList, dimlists, dims, stack, Tensor
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_LINUX,
+    IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
-    TEST_CUDA,
+    TEST_WITH_ROCM,
+    TEST_WITH_SLOW,
+    TEST_XPU,
     TestCase,
 )
 
 
 try:
-    from torchvision.models import resnet18
+    from torchvision import models as torchvision_models
+
+    HAS_TORCHVISION = True
 except ImportError:
-    resnet18 = None
+    HAS_TORCHVISION = False
 
 from contextlib import contextmanager
 from time import perf_counter
@@ -55,31 +63,7 @@ def triu(A):
     return torch.where(i <= j, a, zero).order(i, j)
 
 
-def gpu_time(lmb, name, r=100):
-    b = torch.cuda.Event(enable_timing=True)
-    e = torch.cuda.Event(enable_timing=True)
-    # with magic_trace(name + ".fxt"):
-    for _ in range(r):
-        lmb()
-    b.record()
-    for _ in range(r):
-        lmb()
-    e.record()
-    e.synchronize()
-    elapsed = b.elapsed_time(e)
-    # with torch.profiler.profile(schedule=torch.profiler.schedule(
-    #     wait=0,
-    #     warmup=1,
-    #     active=2), on_trace_ready=tensorboard_trace_handler(name), with_stack=True) as profiler:
-    #     for _ in range(3):
-    #         lmb()
-    #         profiler.step()
-    print(name, elapsed / r)
-    return elapsed / r
-
-
-@skipIfTorchDynamo("Bad interaction")
-class TestMin(TestCase):
+class _TestMinBase(TestCase):
     def setUp(self):
         super().setUp()
         gc.disable()
@@ -88,8 +72,6 @@ class TestMin(TestCase):
         for o in gc.get_objects():
             if isinstance(o, (torch.Tensor, Dim, Tensor, DimList)):
                 self.interesting.add(id(o))
-        if "cuda" in self._testMethodName:
-            self.mem_allocated = torch.cuda.memory_allocated()
 
     def tearDown(self):
         interesting = []
@@ -100,44 +82,43 @@ class TestMin(TestCase):
             ):
                 interesting.append(o)
 
-        extra_memory = 0
-        if "cuda" in self._testMethodName:
-            extra_memory += torch.cuda.memory_allocated() - self.mem_allocated
-
         #  nolevels = _n_levels_in_use() == 0
-        if extra_memory != 0 or len(interesting) != 0:
+        if len(interesting) != 0:
             import refcycle
 
             refcycle.garbage().export_image("garbage.pdf")
         gc.collect()
         # assert nolevels, f"cleanup failed? {_n_levels_in_use()}"
         self.assertEqual(
-            extra_memory, 0, f"extra cuda memory left allocated: {extra_memory}"
-        )
-        self.assertEqual(
             len(interesting),
             0,
             (
-                f"extra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:"
+                lambda msg: f"{msg}\nextra torch.Tensor, Dim, or Tensor left allocated: {len(interesting)} objects of types:"
                 f"{[type(t) for t in interesting]}"
             ),
         )
 
-    def test_manual_stuff(self):
-        A_ = torch.rand(3, 4)
-        B_ = torch.rand(4, 5)
-        i, j, k = dims()
-        A = A_[i, k]
-        B = B_[k, j]
-        C = (A.expand(j) * B.expand(i)).sum(k)
-        torch.testing.assert_close(C.order(i, j), torch.mm(A_, B_))
-        torch.testing.assert_close(torch.triu(A_, 0), triu(A_))
-
-        D_ = torch.randint(0, 3, (6,))
-        d = dims()
-        D = D_[d]
-
-        A.index([i], [D]).order(k, d)
+    def gpu_time(self, lmb, name, r=100):
+        b = torch.Event(enable_timing=True)
+        e = torch.Event(enable_timing=True)
+        # with magic_trace(name + ".fxt"):
+        for _ in range(r):
+            lmb()
+        b.record()
+        for _ in range(r):
+            lmb()
+        e.record()
+        e.synchronize()
+        elapsed = b.elapsed_time(e)
+        # with torch.profiler.profile(schedule=torch.profiler.schedule(
+        #     wait=0,
+        #     warmup=1,
+        #     active=2), on_trace_ready=tensorboard_trace_handler(name), with_stack=True) as profiler:
+        #     for _ in range(3):
+        #         lmb()
+        #         profiler.step()
+        print(name, elapsed / r)
+        return elapsed / r
 
     def attn(
         self,
@@ -176,8 +157,8 @@ class TestMin(TestCase):
         )  # why does a simple matmul not do the right thing?
 
         if time:
-            gpu_time(lambda: B(hidden_state), "positional", r=3)
-            gpu_time(lambda: A(hidden_state), "first_class", r=3)
+            self.gpu_time(lambda: B(hidden_state), "positional", r=3)
+            self.gpu_time(lambda: A(hidden_state), "first_class", r=3)
 
         for approach in ("relative_key", "relative_key_query"):
             A = maybe_to(
@@ -209,8 +190,8 @@ class TestMin(TestCase):
             torch.testing.assert_close(a_out, b_out)
 
             if time:
-                gpu_time(lambda: B(hidden_state), "positional", r=3)
-                gpu_time(lambda: A(hidden_state), "first_class", r=3)
+                self.gpu_time(lambda: B(hidden_state), "positional", r=3)
+                self.gpu_time(lambda: A(hidden_state), "first_class", r=3)
 
         A = maybe_to(
             BertSelfAttentionA(
@@ -258,8 +239,29 @@ class TestMin(TestCase):
         torch.testing.assert_close(a_out, b_out)
 
         if time:
-            gpu_time(lambda: B(hidden_state), "positional", r=3)
-            gpu_time(lambda: A(hidden_state), "first_class", r=3)
+            self.gpu_time(lambda: B(hidden_state), "positional", r=3)
+            self.gpu_time(lambda: A(hidden_state), "first_class", r=3)
+
+
+@skipIfTorchDynamo("Bad interaction")
+class TestMin(_TestMinBase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_manual_stuff(self):
+        A_ = torch.rand(3, 4)
+        B_ = torch.rand(4, 5)
+        i, j, k = dims()
+        A = A_[i, k]
+        B = B_[k, j]
+        C = (A.expand(j) * B.expand(i)).sum(k)
+        torch.testing.assert_close(C.order(i, j), torch.mm(A_, B_))
+        torch.testing.assert_close(torch.triu(A_, 0), triu(A_))
+
+        D_ = torch.randint(0, 3, (6,))
+        d = dims()
+        D = D_[d]
+
+        A.index([i], [D]).order(k, d)
 
     def test_attn(self):
         self.attn()
@@ -284,19 +286,6 @@ class TestMin(TestCase):
         # check that we still match names correctly
         for _ in range(10):
             f()
-
-    @skipIf(not TEST_CUDA, "no CUDA")
-    def test_attn_cuda(self):
-        # size from the BERT paper, 90% pretraining of sequence length 128
-        self.attn(
-            batch_size=256,
-            hidden_size=768,
-            sequence_length=128,
-            num_attention_heads=12,
-            device="cuda",
-            time=measure_perf,
-            linear=torch.nn.Linear,
-        )
 
     def test_stack(self):
         i, j, d = dims()
@@ -487,10 +476,9 @@ class TestMin(TestCase):
         i = dims()
         self.assertEqual(list(A[i].expand(2, 4).order(i).size()), [3, 2, 4])
 
+    @unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
     def test_network(self):
-        if resnet18 is None:
-            self.skipTest("no torchvision")
-        rn = resnet18(
+        rn = torchvision_models.resnet18(
             norm_layer=lambda x: torch.nn.BatchNorm2d(x, track_running_stats=False)
         )
         rn.train()
@@ -677,10 +665,53 @@ class TestMin(TestCase):
         x.split(l, 0)
 
 
-skip_functorch_only = ["test_time_mm_fuse", "test_attn_cuda"]
+@skipIfTorchDynamo("Bad interaction")
+class TestMinDevice(_TestMinBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def setUp(self):
+        super().setUp()
+        self.mem_allocated = torch.accelerator.memory_allocated()
+
+    def tearDown(self):
+        extra_memory = torch.accelerator.memory_allocated() - self.mem_allocated
+        if extra_memory != 0:
+            import refcycle
+
+            refcycle.garbage().export_image("garbage.pdf")
+        self.assertEqual(
+            extra_memory,
+            0,
+            lambda msg: f"{msg}\nextra accelerator memory left allocated: {extra_memory}",
+        )
+        super().tearDown()
+
+    @unittest.skipIf(
+        not (TEST_XPU and IS_LINUX)  # The test passes for XPU on Linux
+        and (IS_LINUX or TEST_WITH_ROCM or TEST_WITH_SLOW or IS_WINDOWS),
+        "https://github.com/pytorch/pytorch/issues/86710",
+    )
+    def test_attn(self, device):
+        # size from the BERT paper, 90% pretraining of sequence length 128
+        self.attn(
+            batch_size=256,
+            hidden_size=768,
+            sequence_length=128,
+            num_attention_heads=12,
+            device=device,
+            time=measure_perf,
+            linear=torch.nn.Linear,
+        )
+
+
+instantiate_device_type_tests(
+    TestMinDevice, globals(), except_for=("cpu",), allow_xpu=True
+)
 
 
 class TestMinFunctorchOnly(TestMin):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         functorch.dim.POINTWISE_OPTIMIZE = False
@@ -689,9 +720,10 @@ class TestMinFunctorchOnly(TestMin):
         functorch.dim.POINTWISE_OPTIMIZE = True
         super().tearDown()
 
+    @unittest.skip("skip_functorch_only")
+    def test_time_mm_fuse(self):
+        pass
 
-for n in skip_functorch_only:
-    setattr(TestMinFunctorchOnly, n, skip("skip_functorch_only")(lambda self: None))
 
 if __name__ == "__main__":
     run_tests()

@@ -10,6 +10,7 @@
 #include <ATen/native/Unfold3d.h>
 #include <c10/util/irange.h>
 #include <c10/util/safe_numerics.h>
+#include <utility>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -822,7 +823,8 @@ std::tuple<Tensor, Tensor, Tensor> slow_conv3d_backward_cpu(
       grad_weight,
       grad_bias);
 
-  return std::make_tuple(grad_input, grad_weight, grad_bias);
+  return std::make_tuple(
+      std::move(grad_input), std::move(grad_weight), std::move(grad_bias));
 }
 
 Tensor& slow_conv3d_out(const Tensor& self,

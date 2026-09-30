@@ -23,41 +23,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <ostream>
 
 namespace at {
 namespace vec {
 
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
-
-inline std::ostream& operator<<(std::ostream& stream, const c10::qint32& val) {
-  stream << val.val_;
-  return stream;
-}
-inline std::ostream& operator<<(std::ostream& stream, const c10::qint8& val) {
-  stream << static_cast<int>(val.val_);
-  return stream;
-}
-inline std::ostream& operator<<(std::ostream& stream, const c10::quint8& val) {
-  stream << static_cast<unsigned int>(val.val_);
-  return stream;
-}
-
-template <typename T>
-std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
-  T buf[Vectorized<T>::size()];
-  vec.store(buf);
-  stream << "vec[";
-  for (int i = 0; i != Vectorized<T>::size(); i++) {
-    if (i != 0) {
-      stream << ", ";
-    }
-    stream << buf[i];
-  }
-  stream << ']';
-  return stream;
-}
 
 #if defined(CPU_CAPABILITY_AVX512)
 
@@ -113,9 +84,8 @@ std::
         const Vectorized<double>& src,
         const double* base_addr,
         const Vectorized<int64_t>& vindex,
-        Vectorized<double>& mask) {
-  auto all_ones = _mm512_castsi512_pd(_mm512_set1_epi64(0xFFFFFFFFFFFFFFFF));
-  auto mask_ = _mm512_cmp_pd_mask(all_ones, mask.values, _CMP_EQ_OQ);
+        const Vectorized<double>& mask) {
+  auto mask_ = _mm512_movepi64_mask(_mm512_castpd_si512(mask.values));
   return _mm512_mask_i64gather_pd(src, mask_, vindex, base_addr, scale);
 }
 
@@ -125,9 +95,8 @@ std::
         const Vectorized<float>& src,
         const float* base_addr,
         const Vectorized<int32_t>& vindex,
-        Vectorized<float>& mask) {
-  auto all_ones = _mm512_castsi512_ps(_mm512_set1_epi32(0xFFFFFFFF));
-  auto mask_ = _mm512_cmp_ps_mask(all_ones, mask.values, _CMP_EQ_OQ);
+        const Vectorized<float>& mask) {
+  auto mask_ = _mm512_movepi32_mask(_mm512_castps_si512(mask.values));
   return _mm512_mask_i32gather_ps(src, mask_, vindex, base_addr, scale);
 }
 #endif

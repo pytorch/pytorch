@@ -16,8 +16,9 @@ from torch._inductor.heuristics.registry import (
     register_codegen_heuristic,
 )
 
-# Import submodule to trigger registration
-from . import pointwise as pointwise
+# Keep explicit re-exports for packaging and type checkers. Registry lookup
+# performs eager runtime imports when registration is needed.
+from . import pointwise as pointwise, reduction as reduction
 
 
 __all__ = [

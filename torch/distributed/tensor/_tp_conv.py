@@ -251,7 +251,7 @@ def convolution_handler(
     args: tuple[object, ...],
     kwargs: dict[str, object],
 ) -> object:
-    # extract local tensor and sharding infos to a OpInfo
+    # extract local tensor and sharding infos to an OpInfo
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
 
     # sharding propagation
@@ -290,7 +290,7 @@ def convolution_backward_handler(
     args[0] = args[0].redistribute(args[1].device_mesh, args[1].placements)
     args = tuple(args)
 
-    # extract local tensor and sharding infos to a OpInfo
+    # extract local tensor and sharding infos to an OpInfo
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
 
     # sharding propagation

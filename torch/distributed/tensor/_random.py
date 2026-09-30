@@ -387,7 +387,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         start_offset_incr = (shard_linear_idx * local_size + 3) // 4 * 4
         end_offset_incr = (prod(spec.shape) + 3) // 4 * 4
 
-        return start_offset_incr, end_offset_incr
+        return start_offset_incr, end_offset_incr  # type: ignore[bad-return]
 
     def _calc_shard_linear_idx(
         self, shard_coord: Sequence[IntLikeType], shard_size: Sequence[IntLikeType]

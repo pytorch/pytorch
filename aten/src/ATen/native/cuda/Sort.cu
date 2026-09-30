@@ -55,7 +55,7 @@ struct SmallBitonicSort {
     constexpr int sort_size = 32;
     constexpr int max_block_y = 16;
     constexpr int items_per_thread = 2;
-    static_assert(sort_size % items_per_thread == 0, "");
+    static_assert(sort_size % items_per_thread == 0);
     constexpr int block_x = sort_size / items_per_thread;
 
     TORCH_INTERNAL_ASSERT(keySliceSize <= sort_size);
@@ -262,7 +262,7 @@ struct MediumRadixSort {
       at::cuda::detail::TensorInfo<V, IndexType> valueInfo,
       IndexType valueSliceStride,
       bool descending) {
-    static_assert(sort_size % items_per_thread == 0, "");
+    static_assert(sort_size % items_per_thread == 0);
     constexpr int block = sort_size / items_per_thread;
     dim3 grid;
     TORCH_INTERNAL_ASSERT(getGridFromTiles(keySlices, grid),

@@ -10,7 +10,6 @@
 
 #include <cstddef>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
 struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
@@ -28,7 +27,9 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   virtual bool hasMPS() const {
     return false;
   }
-  virtual bool isOnMacOSorNewer(unsigned major = 13, unsigned minor = 0) const {
+  virtual bool isOnMacOSorNewer(
+      [[maybe_unused]] unsigned major = 13,
+      [[maybe_unused]] unsigned minor = 0) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
   const Generator& getDefaultGenerator(
@@ -66,43 +67,46 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   virtual size_t getRecommendedMaxMemory() const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  virtual size_t getMaxBufferLength() const {
+    return 0;
+  }
   virtual void setMemoryFraction(double /*ratio*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  virtual void profilerStartTrace(const std::string& mode, bool waitUntilCompleted) const {
+  virtual void profilerStartTrace(const std::string& /*mode*/, bool /*waitUntilCompleted*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
   virtual void profilerStopTrace() const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  virtual uint32_t acquireEvent(bool enable_timing) const {
+  virtual uint32_t acquireEvent(bool /*enable_timing*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  Device getDeviceFromPtr(void* data) const override {
+  Device getDeviceFromPtr(void* /*data*/) const override {
     TORCH_CHECK(false, "Cannot get device of pointer on MPS without ATen_mps library. ");
   }
-  virtual void releaseEvent(uint32_t event_id) const {
+  virtual void releaseEvent(uint32_t /*event_id*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  virtual void recordEvent(uint32_t event_id) const {
+  virtual void recordEvent(uint32_t /*event_id*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  virtual void waitForEvent(uint32_t event_id) const {
+  virtual void waitForEvent(uint32_t /*event_id*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  virtual void synchronizeEvent(uint32_t event_id) const {
+  virtual void synchronizeEvent(uint32_t /*event_id*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  virtual bool queryEvent(uint32_t event_id) const {
+  virtual bool queryEvent(uint32_t /*event_id*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  virtual double elapsedTimeOfEvents(uint32_t start_event_id, uint32_t end_event_id) const {
+  virtual double elapsedTimeOfEvents(uint32_t /*start_event_id*/, uint32_t /*end_event_id*/) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex /*device_index*/) const override {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
-  bool isPinnedPtr(const void* data) const override {
+  bool isPinnedPtr(const void* /*data*/) const override {
     return false;
   }
   Allocator* getPinnedMemoryAllocator() const override {
@@ -111,9 +115,10 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   #undef FAIL_MPSHOOKS_FUNC
 };
 
+// Deprecated: no longer used internally, kept for ABI compatibility.
 struct TORCH_API MPSHooksArgs {};
 
-TORCH_DECLARE_REGISTRY(MPSHooksRegistry, MPSHooksInterface, MPSHooksArgs);
+TORCH_DECLARE_REGISTRY(MPSHooksRegistry, MPSHooksInterface);
 #define REGISTER_MPS_HOOKS(clsname) \
   C10_REGISTER_CLASS(MPSHooksRegistry, clsname, clsname)
 
@@ -122,4 +127,3 @@ TORCH_API const MPSHooksInterface& getMPSHooks();
 
 } // namespace detail
 } // namespace at
-C10_DIAGNOSTIC_POP()

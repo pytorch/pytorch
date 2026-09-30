@@ -9,6 +9,7 @@ from typing import Any, TypeAlias
 
 import torch
 from torch._dynamo.utils import counters
+from torch._prims_common import is_contiguous_or_false
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_or_false
 from torch.utils._ordered_set import OrderedSet
 
@@ -122,18 +123,22 @@ def _get_split_args_default(split_node):
 
 
 def _get_dim(node: Any):
-    assert isinstance(node, torch.fx.Node)
+    if not isinstance(node, torch.fx.Node):
+        raise AssertionError(f"expected torch.fx.Node, got {type(node)}")
     if "dim" in node.kwargs:
-        assert isinstance(node.kwargs["dim"], int)
+        if not isinstance(node.kwargs["dim"], int):
+            raise AssertionError(f"expected int dim, got {node.kwargs['dim']}")
         return node.kwargs["dim"]
     if node.target is torch.unbind:
         if len(node.args) == 2:
-            assert isinstance(node.args[-1], int)
+            if not isinstance(node.args[-1], int):
+                raise AssertionError(f"expected int dim, got {node.args[-1]}")
             return node.args[-1]
         return 0  # defaults to dim=0
     if node.target is torch.split:
         if len(node.args) == 3:
-            assert isinstance(node.args[-1], int)
+            if not isinstance(node.args[-1], int):
+                raise AssertionError(f"expected int dim, got {node.args[-1]}")
             return node.args[-1]
         return 0  # defaults to dim=0
     raise AssertionError(
@@ -181,7 +186,10 @@ def normalize_split_base(
     if not is_node_meta_valid(split_node):
         log.debug("example value absent for node: %s", split_node)
         return
-    assert isinstance(split_node.meta["example_value"], (list, tuple))
+    if not isinstance(split_node.meta["example_value"], (list, tuple)):
+        raise AssertionError(
+            f"expected list/tuple example_value, got {split_node.meta['example_value']}"
+        )
     split_sections = [t.size()[split_dim] for t in split_node.meta["example_value"]]
 
     if any(isinstance(section, torch.SymInt) for section in split_sections):
@@ -241,7 +249,10 @@ def remove_split_with_size_one(match: Match, *args, **kwargs):
     if not is_node_meta_valid(split_node):
         log.debug("example value absent for node: %s", split_node)
         return
-    assert isinstance(split_node.meta["example_value"], (list, tuple))
+    if not isinstance(split_node.meta["example_value"], (list, tuple)):
+        raise AssertionError(
+            f"expected list/tuple example_value, got {split_node.meta['example_value']}"
+        )
     split_sections = [t.size()[split_dim] for t in split_node.meta["example_value"]]
 
     if any(isinstance(section, torch.SymInt) for section in split_sections):
@@ -249,7 +260,7 @@ def remove_split_with_size_one(match: Match, *args, **kwargs):
         return
     # remove the dummy split whose split sections size is one
     # theoretically nodes with no users should be removed, but we have seen the corner case
-    # thus we add its users check to walk around the StopIteration error.
+    # thus we add its users check to work around the StopIteration error.
     if len(split_sections) == 1 and len(split_node.users.keys()) > 0:
         # find the grand children of the split_node
         next_users = find_next_users(split_node)
@@ -305,7 +316,7 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
 
 
 @register_graph_pattern(
-    CallFunctionVarArgs([torch.cat, torch.concat], users=MULTIPLE),
+    CallFunctionVarArgs([torch.cat, torch.concat, torch.concatenate], users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
 )
 def normalize_cat_default(match: Match, *args, **kwargs):
@@ -322,7 +333,8 @@ def normalize_cat_default(match: Match, *args, **kwargs):
     if tensors is None or cat_dim is None:
         log.debug("couldn't find cat args")
         return
-    assert isinstance(tensors, (list, tuple))
+    if not isinstance(tensors, (list, tuple)):
+        raise AssertionError(f"expected list/tuple tensors, got {type(tensors)}")
     for tensor in itertools.chain([cat_node], tensors):
         if not is_node_meta_valid(tensor):
             log.debug("example value absent for node: %s", tensor)
@@ -335,9 +347,10 @@ def normalize_cat_default(match: Match, *args, **kwargs):
         x_shape = x.meta["example_value"].shape
         return len(x_shape) == 1 and guard_or_false(x_shape[0] == 0)
 
-    assert all(
+    if not all(
         ndim == x.meta["example_value"].dim() or is_empty_tensor(x) for x in tensors
-    )
+    ):
+        raise AssertionError("expected all tensors to match ndim or be empty")
 
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim
@@ -376,7 +389,8 @@ def normalize_stack_default(match: Match, *args, **kwargs):
     if tensors is None or dim is None:
         log.debug("couldn't find stack args")
         return
-    assert isinstance(tensors, (list, tuple))
+    if not isinstance(tensors, (list, tuple)):
+        raise AssertionError(f"expected list/tuple tensors, got {type(tensors)}")
 
     # A bug in pytorch, some nodes miss the example_value metadata
     for tensor in itertools.chain([node], tensors):
@@ -418,7 +432,8 @@ def normalize_squeeze_default(match: Match, *args, **kwargs):
     squeeze_input = get_arg_value(squeeze_node, 0)
 
     if "dim" in squeeze_node.kwargs:
-        assert len(squeeze_node.args) == 1
+        if len(squeeze_node.args) != 1:
+            raise AssertionError(f"expected 1 arg, got {len(squeeze_node.args)}")
         dim = squeeze_node.kwargs["dim"]
     elif len(squeeze_node.args) == 1:
         # squeeze(Tensor)
@@ -1700,7 +1715,8 @@ def normalize_split_default_aten(match: Match, *args, **kwargs):
     if not is_node_meta_valid(split_node):
         log.debug("val absent for node: %s", split_node)
         return
-    assert isinstance(split_node.meta["val"], (list, tuple))
+    if not isinstance(split_node.meta["val"], (list, tuple)):
+        raise AssertionError(f"expected list/tuple val, got {split_node.meta['val']}")
     split_sections = [t.size()[split_dim] for t in split_node.meta["val"]]
     if any(isinstance(section, torch.SymInt) for section in split_sections):
         # TODO dynamic_shapes with assume_static_by_default=False fails while AOT Autograd tracing.
@@ -1877,6 +1893,35 @@ def merge_split_cat_aten(match: Match, *args, **kwargs):
         counters[backend]["split_cat_aten_pass"] += 1
 
 
+def _get_select_cat_indices(
+    cat_inputs: Any, select_input: torch.fx.Node, cat_dim: int
+) -> list[int] | None:
+    """
+    Return the select indices if every cat input is select(select_input, cat_dim, i),
+    otherwise None.
+    """
+    ndim = select_input.meta["val"].dim()
+    dim_size = select_input.meta["val"].shape[cat_dim]
+    if not isinstance(dim_size, int):
+        return None
+    indices = []
+    for select_node in cat_inputs:
+        if not (
+            isinstance(select_node, torch.fx.Node)
+            and select_node.target is torch.ops.aten.select.int
+            and get_arg_value(select_node, 0, "self") is select_input
+        ):
+            return None
+        select_dim = get_arg_value(select_node, 1, "dim")
+        index = get_arg_value(select_node, 2, "index")
+        if not isinstance(select_dim, int) or not isinstance(index, int):
+            return None
+        if select_dim % ndim != cat_dim:
+            return None
+        indices.append(index + dim_size if index < 0 else index)
+    return indices
+
+
 @register_graph_pattern(
     CallFunction(
         torch.ops.aten.cat.default,
@@ -1892,46 +1937,59 @@ def merge_split_cat_aten(match: Match, *args, **kwargs):
 def merge_select_cat_aten(match: Match, *args, **kwargs):
     graph = match.graph
     node = match.nodes[0]
-    node_input = get_arg_value(node, 0, "tensors")
-    # get the select nodes from the node
-    select_nodes = list(node_input.users.keys())
+    node_input = get_arg_value(node, 0, "self")
+    if not is_node_meta_valid(node_input) or node_input.meta["val"].dim() < 2:
+        return
+    input_val = node_input.meta["val"]
     for cat_node in list(node.users.keys()):
         if cat_node.target is torch.ops.aten.cat.default:
             cat_dim = get_arg_value(cat_node, 1, "dim")
             cat_inputs = get_arg_value(cat_node, 0, "tensors")
-            # check all select nodes has same slice dim
-            if not all(
-                select_node.args[1] == select_nodes[0].args[1]
-                for select_node in select_nodes
-            ):
+            if not isinstance(cat_dim, int) or not is_node_meta_valid(cat_node):
                 continue
-            # We only consider the case where selece slice dim and cat node has same dim
-            if select_nodes[0].args[1] != cat_dim:
-                continue
-            if not is_node_meta_valid(cat_node):
-                continue
-            # check the cat node has consecutive indices
-            indices = [select.args[2] for select in cat_node.args[0]]  # type: ignore[union-attr]
+            # the cat output has one dim less than the select input
+            cat_dim = cat_dim % (input_val.dim() - 1)
+            # cat([select(x, d, 0), ..., select(x, d, n - 1)], d) is a copy of x
+            # with dims d and d + 1 flattened, so all the cat inputs must be
+            # selects of the same input along the cat dim, covering that dim in
+            # order
+            indices = _get_select_cat_indices(cat_inputs, node_input, cat_dim)
             if (
-                not is_sorted_and_consecutive(indices)  # type: ignore[arg-type]
-                or len(select_nodes) != len(cat_inputs)
+                indices is None
+                or len(indices) != input_val.shape[cat_dim]
+                or any(index != i for i, index in enumerate(indices))
             ):
                 continue
-            # check all the select nodes can be merged to the cat node input
-            if len(indices) != select_nodes[0].args[0].meta["val"].shape[cat_dim]:  # type: ignore[union-attr]
+            # the flattened dims must be contiguous with each other to be viewed
+            if not guard_or_false(
+                input_val.stride(cat_dim)
+                == input_val.stride(cat_dim + 1) * input_val.shape[cat_dim + 1]
+            ):
                 continue
-            # reshape the node input to be the same shape as the cat node
+            cat_val = cat_node.meta["val"]
+            # the copy below is contiguous, which has to match the cat's layout
+            if not is_contiguous_or_false(cat_val):
+                continue
+            # reshape the node input to be the same shape as the cat node. Unlike
+            # the cat, the view aliases the node input, so it is copied: otherwise
+            # a later mutation of either one would show up in the other
             with graph.inserting_before(node):
                 view_node = graph.call_function(
                     torch.ops.aten.view.default,
-                    args=(node_input, cat_node.meta["val"].shape),
+                    args=(node_input, cat_val.shape),
                 )
+                clone_node = graph.call_function(
+                    torch.ops.aten.clone.default,
+                    args=(view_node,),
+                    kwargs={"memory_format": torch.contiguous_format},
+                )
+            view_node.meta["val"] = input_val.view(cat_val.shape)
             # replace the node input with the new node
-            cat_node.replace_all_uses_with(view_node)
-            view_node.meta.update(cat_node.meta)
+            cat_node.replace_all_uses_with(clone_node)
+            clone_node.meta.update(cat_node.meta)
             # remove the cat node
             graph.erase_node(cat_node)
-            for select_node in select_nodes:
+            for select_node in OrderedSet(cat_inputs):
                 if len(select_node.users) == 0:
                     graph.erase_node(select_node)
             counters[backend]["select_cat_aten_pass"] += 1
@@ -1955,7 +2013,8 @@ def normalize_cat_default_aten(match: Match, *args, **kwargs):
     if tensors is None or cat_dim is None:
         log.debug("couldn't find cat args")
         return
-    assert isinstance(tensors, (list, tuple))
+    if not isinstance(tensors, (list, tuple)):
+        raise AssertionError(f"expected list/tuple tensors, got {type(tensors)}")
     for tensor in itertools.chain([cat_node], tensors):
         if "val" not in tensor.meta:
             log.debug("val absent for node: %s", tensor)
@@ -1968,7 +2027,8 @@ def normalize_cat_default_aten(match: Match, *args, **kwargs):
         x_shape = x.meta["val"].shape
         return len(x_shape) == 1 and x_shape[0] == 0
 
-    assert all(ndim == x.meta["val"].dim() or is_empty_tensor(x) for x in tensors)
+    if not all(ndim == x.meta["val"].dim() or is_empty_tensor(x) for x in tensors):
+        raise AssertionError("expected all tensors to match ndim or be empty")
 
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim

@@ -35,7 +35,7 @@ Tensor cov(
       self.ndimension(),
       " dimensions");
 
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       self.scalar_type() != kBool,
       "cov(): bool dtype is not supported for input");
 
