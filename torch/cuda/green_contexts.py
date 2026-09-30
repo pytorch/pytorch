@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import os
 import sys
+import threading
 import warnings
 from collections.abc import Callable, Sequence
 from ctypes import byref, c_int
@@ -686,6 +687,7 @@ class GreenContext:
             None
         ] * _STREAMS_PER_GREEN_CONTEXT_POOL
         self._curr_stream_idx = -1
+        self._stream_lock = threading.Lock()
         self._green_ctx = green_ctx
 
     @staticmethod
@@ -882,23 +884,26 @@ class GreenContext:
 
         Use the returned stream with :func:`torch.cuda.stream` to run work on
         the green context. Synchronization with other streams is not automatic;
-        use CUDA events as with any other custom stream.
+        use CUDA events as with any other custom stream. Calls from multiple
+        threads safely share a bounded pool, but streams are reused rather than
+        exclusively leased to a caller.
         """
         self._ensure_alive()
-        curr_idx = self._curr_stream_idx + 1
-        idx = curr_idx % _STREAMS_PER_GREEN_CONTEXT_POOL
-        if curr_idx < _STREAMS_PER_GREEN_CONTEXT_POOL:
-            green_ctx_stream = _check_cuda_bindings(
-                _drv.cuGreenCtxStreamCreate(  # pyrefly: ignore [missing-attribute]
-                    self._green_ctx,
-                    _drv.CUstream_flags.CU_STREAM_NON_BLOCKING,  # pyrefly: ignore [missing-attribute]
-                    0,
+        with self._stream_lock:
+            curr_idx = self._curr_stream_idx + 1
+            idx = curr_idx % _STREAMS_PER_GREEN_CONTEXT_POOL
+            if curr_idx < _STREAMS_PER_GREEN_CONTEXT_POOL:
+                green_ctx_stream = _check_cuda_bindings(
+                    _drv.cuGreenCtxStreamCreate(  # pyrefly: ignore [missing-attribute]
+                        self._green_ctx,
+                        _drv.CUstream_flags.CU_STREAM_NON_BLOCKING,  # pyrefly: ignore [missing-attribute]
+                        0,
+                    )
                 )
-            )
-            self._green_ctx_streams[idx] = green_ctx_stream
-        else:
-            green_ctx_stream = self._green_ctx_streams[idx]
-        self._curr_stream_idx = curr_idx
+                self._green_ctx_streams[idx] = green_ctx_stream
+            else:
+                green_ctx_stream = self._green_ctx_streams[idx]
+            self._curr_stream_idx = curr_idx
         # pyrefly: ignore [bad-argument-type]
         return torch.cuda.ExternalStream(int(green_ctx_stream), self._device_id)
 
