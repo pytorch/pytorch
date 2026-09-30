@@ -1102,13 +1102,47 @@ static void linalg_solve_out_mps_impl(const Tensor& A,
   at::linalg_lu_solve_out(result_, LU, pivots, B_, left, false);
 }
 
+static void lu_inv_small_encode(const Tensor& A, const Tensor& result, const Tensor& info) {
+  const auto n = A.size(-1);
+  const auto batch = c10::multiply_integers(A.sizes().begin(), A.sizes().end() - 2);
+  const auto A_ = A.reshape({batch, n, n});
+  const auto X = result.view({batch, n, n});
+  const auto threads = c10::checked_convert<uint32_t>(batch, "uint32_t");
+  const LUSmallInvParams<> params{.A_bstride = A_.stride(0),
+                                  .A_rstride = A_.stride(1),
+                                  .A_cstride = A_.stride(2),
+                                  .X_bstride = X.stride(0),
+                                  .X_rstride = X.stride(1),
+                                  .X_cstride = X.stride(2)};
+  auto pso = lib.getPipelineStateForFunc(fmt::format("luInvSmall_{}", n));
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto enc = stream->commandEncoder();
+      [enc setComputePipelineState:pso];
+      mtl_setArgs(enc, A_, X, info, params);
+      // using mtl_dispatch1DJob would launch a single threadgroup of up to 1024 threads
+      // all of which would be pinned to one GPU core, which is not ideal for such work
+      [enc dispatchThreads:MTLSizeMake(threads, 1, 1)
+          threadsPerThreadgroup:MTLSizeMake(c10::metal::simdgroup_size, 1, 1)];
+    }
+  });
+}
+
 static void linalg_inv_ex_out_mps_impl(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
   using namespace mps;
   TORCH_CHECK(result.is_mps(), "Output tensor is not MPS");
   TORCH_CHECK(!A.is_complex(), "linalg_inv: not supported for complex types yet!");
 
-  info.zero_();
   if (A.numel() == 0) {
+    info.zero_();
+    return;
+  }
+  if (A.size(-1) <= kLUSmallInvMax) {
+    lu_inv_small_encode(A, result, info);
+    if (check_errors) {
+      at::_linalg_check_errors(info, "linalg.inv_ex", A.dim() == 2);
+    }
     return;
   }
 
@@ -1214,6 +1248,27 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
 
   TORCH_CHECK(supportedFloatingOrComplexType(batch1) || c10::isIntegralType(batch1.scalar_type(), true),
               "MPS device does not support addbmm or baddbmm for this input type");
+
+  // Reject what the reference rejects; MPSGraph would abort rather than raise. baddbmm is already
+  // covered by its meta function.
+  TORCH_CHECK(batch1.scalar_type() == batch2.scalar_type(),
+              "self and mat2 must have the same dtype, but got ",
+              batch1.scalar_type(),
+              " and ",
+              batch2.scalar_type());
+  TORCH_CHECK(input.scalar_type() == batch1.scalar_type(),
+              "Input dtypes must be the same, got: input ",
+              input.scalar_type(),
+              ", batch1: ",
+              batch1.scalar_type(),
+              ", batch2: ",
+              batch2.scalar_type());
+  TORCH_CHECK(result.scalar_type() == input.scalar_type(),
+              "Expected out tensor to have dtype ",
+              input.scalar_type(),
+              ", but got ",
+              result.scalar_type(),
+              " instead");
 
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
@@ -1715,14 +1770,35 @@ static void triangular_solve_metal(const Tensor& A_,
   params.conj = conjugate;
   params.unit = unitriangular;
 
+  const bool use_small_kernel =
+      A_.scalar_type() == kFloat && (n == 16 || n == 32 || n == 64) && k >= kTriangularSolveTileSize;
+  const bool general = !unitriangular || upper || transpose || k % kTriangularSolveTileSize != 0;
+  // MPP computes offsets within each 16x32 tile in int32.
+  constexpr uint64_t kMaxMppStride =
+      (std::numeric_limits<int32_t>::max() - (kTriangularSolveMppCols - 1)) / (kTriangularSolveMppRows - 1);
+  const bool use_mpp = use_small_kernel && has_mpp() && k <= kMaxMppStride;
+  // Inverse application and its substitution fallback may reread both inputs.
+  const auto a = use_small_kernel && A_.is_alias_of(out) ? A_.clone() : A_;
+  const auto b = use_small_kernel && B_.is_alias_of(out) ? B_.clone() : B_;
+
   const uint64_t elem_size = A_.element_size();
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       auto encoder = stream->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc(fmt::format("triangular_solve_{}", scalarToMetalTypeString(A_)));
-      getMPSProfiler().beginProfileKernel(pso, "triangular_solve", {A_, B_}, stream);
+      auto pso = lib.getPipelineStateForFunc(
+          use_small_kernel
+              ? fmt::format("triangular_solve_small_{}{}{}", use_mpp ? "mpp_" : "", general ? "general_" : "", n)
+              : fmt::format("triangular_solve_{}", scalarToMetalTypeString(A_)));
+      getMPSProfiler().beginProfileKernel(pso, "triangular_solve", {a, b}, stream);
       [encoder setComputePipelineState:pso];
+      mtl_setArgs(encoder, a, b, out, params);
+      if (use_small_kernel) {
+        [encoder dispatchThreadgroups:MTLSizeMake(batchSize, 1, 1)
+                threadsPerThreadgroup:MTLSizeMake(n / kTriangularSolveTileSize * c10::metal::simdgroup_size, 1, 1)];
+        getMPSProfiler().endProfileKernel(pso, stream);
+        return;
+      }
       // Every substitution step reduces across the whole threadgroup, so don't
       // spread a short row over more threads than it has work for, and keep the
       // group a whole number of simdgroups so the reduction stays exact.
@@ -1739,7 +1815,6 @@ static void triangular_solve_metal(const Tensor& A_,
       const uint64_t maxTGMem = [MPSDevice::getInstance()->device() maxThreadgroupMemoryLength];
       TORCH_INTERNAL_ASSERT(
           prefixBytes + redBytes <= maxTGMem, "triangular_solve: n=", n, " does not fit in threadgroup memory");
-      mtl_setArgs(encoder, A_, B_, out, params);
       [encoder setThreadgroupMemoryLength:prefixBytes atIndex:0];
       [encoder setThreadgroupMemoryLength:redBytes atIndex:1];
       [encoder dispatchThreads:MTLSizeMake(tgSize * batchSize * k, 1, 1)
@@ -2210,14 +2285,14 @@ static void svd_kernel_mps(const Tensor& A,
   SvdParams params{static_cast<uint32_t>(wm),
                    static_cast<uint32_t>(k),
                    /*max_sweeps=*/30u,
-                   static_cast<uint32_t>(compute_uv ? 1 : 0),
                    /*tol=*/1e-6f,
                    static_cast<uint32_t>(u_ld),
                    static_cast<uint32_t>(u_bs),
                    static_cast<uint32_t>(v_ld),
                    static_cast<uint32_t>(v_bs),
-                   static_cast<uint32_t>(transposed ? 1 : 0),
-                   static_cast<uint32_t>(stage_v ? 1 : 0)};
+                   compute_uv,
+                   transposed,
+                   stage_v};
 
   MPSStream* stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -2325,9 +2400,9 @@ static void eigh_kernel_mps(const Tensor& eigenvalues,
 
   EighParams params{static_cast<uint32_t>(n),
                     /*max_sweeps=*/80u,
-                    static_cast<uint32_t>(compute_eigenvectors ? 1 : 0),
-                    static_cast<uint32_t>(upper ? 1 : 0),
-                    /*tol=*/1e-6f};
+                    /*tol=*/1e-6f,
+                    compute_eigenvectors,
+                    upper};
 
   MPSStream* stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
@@ -2488,7 +2563,9 @@ static void lstsq_kernel_mps(const Tensor& a,
 } // namespace mps
 
 Tensor addr_mps(const Tensor& self, const Tensor& vec1, const Tensor& vec2, const Scalar& beta, const Scalar& alpha) {
-  Tensor result = at::empty({0}, self.options());
+  // The reference builds a TensorIterator, so the result takes the promoted dtype, not self's.
+  const auto dtype = c10::promoteTypes(c10::promoteTypes(self.scalar_type(), vec1.scalar_type()), vec2.scalar_type());
+  Tensor result = at::empty({0}, self.options().dtype(dtype));
   addr_out_mps(self, vec1, vec2, beta, alpha, result);
   return result;
 }
@@ -2507,6 +2584,15 @@ Tensor& addr_out_mps(const Tensor& self,
 
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {vec1, "vec1", 2}, {vec2, "vec2", 3}};
   checkAllSameGPU(__func__, args);
+
+  // The reference computes at the promoted input dtype and only then casts into `result`.
+  const auto opmathType =
+      c10::promoteTypes(c10::promoteTypes(self.scalar_type(), vec1.scalar_type()), vec2.scalar_type());
+  TORCH_CHECK(c10::canCast(opmathType, result.scalar_type()),
+              "result type ",
+              opmathType,
+              " can't be cast to the desired output type ",
+              result.scalar_type());
 
   IntArrayRef vec1_sizes = vec1.sizes();
   IntArrayRef vec2_sizes = vec2.sizes();
@@ -2550,12 +2636,16 @@ Tensor& addr_out_mps(const Tensor& self,
   };
 
   @autoreleasepool {
-    std::string key = "addr_out_mps_impl" + getTensorsStringKey({vec1, vec2, *self_}) + ":" +
+    std::string key = "addr_out_mps_impl" + getTensorsStringKey({vec1, vec2, *self_, result}) + ":" +
         std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
+    const auto computeType = getMPSDataType(opmathType);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* t1 = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec1), inputShape);
-      MPSGraphTensor* t2 = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec2), otherShape);
-      MPSGraphTensor* selfTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, *self_);
+      auto vec1Placeholder = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec1), inputShape);
+      auto vec2Placeholder = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec2), otherShape);
+      auto selfPlaceholder = mps::mpsGraphRankedPlaceHolder(mpsGraph, *self_);
+      auto t1 = castMPSTensor(mpsGraph, vec1Placeholder, computeType);
+      auto t2 = castMPSTensor(mpsGraph, vec2Placeholder, computeType);
+      auto selfTensor = castMPSTensor(mpsGraph, selfPlaceholder, computeType);
 
       // Intermediate as placeholder
       MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:t1
@@ -2563,10 +2653,8 @@ Tensor& addr_out_mps(const Tensor& self,
                                                                                  name:@"MM/(vec1Xvec2)"];
 
       // Intermediates for beta and alpha
-      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta.toDouble()
-                                                       dataType:getMPSScalarType((*self_).scalar_type())];
-      MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble()
-                                                        dataType:getMPSScalarType(vec1.scalar_type())];
+      MPSGraphTensor* betaTensor = [mpsGraph constantWithScalar:beta.toDouble() dataType:computeType];
+      MPSGraphTensor* alphaTensor = [mpsGraph constantWithScalar:alpha.toDouble() dataType:computeType];
 
       // Intermediates for multiplying by beta and alpha
       MPSGraphTensor* productTimesAlphaTensor = [mpsGraph multiplicationWithPrimaryTensor:productTensor
@@ -2586,10 +2674,10 @@ Tensor& addr_out_mps(const Tensor& self,
                                                       name:@"MM/beta*input+alpha*(vec1@vec2)"];
       }
 
-      newCachedGraph->vec1Tensor_ = t1;
-      newCachedGraph->vec2Tensor_ = t2;
-      newCachedGraph->selfTensor_ = selfTensor;
-      newCachedGraph->resultTensor_ = resultTensor;
+      newCachedGraph->vec1Tensor_ = vec1Placeholder;
+      newCachedGraph->vec2Tensor_ = vec2Placeholder;
+      newCachedGraph->selfTensor_ = selfPlaceholder;
+      newCachedGraph->resultTensor_ = castMPSTensor(mpsGraph, resultTensor, getMPSDataType(result));
     });
 
     Placeholder vec1Placeholder = Placeholder(cachedGraph->vec1Tensor_, vec1, inputShape);

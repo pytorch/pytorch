@@ -34,6 +34,7 @@ import math
 import operator
 import os
 import re
+import struct
 import sys
 import textwrap
 import threading
@@ -74,6 +75,7 @@ from torch._C import (
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
 )
+from torch._C._dynamo.utils import get_current_stream  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext
 from torch._guards import CompileId, Source, TracingContext
@@ -1242,6 +1244,45 @@ def istype(obj: object, allowed_types: Any) -> bool:
     return type(obj) is allowed_types
 
 
+def constant_bits(value: Any, /) -> bytes | None:
+    if type(value) is float:
+        return struct.pack(">d", value)
+    if type(value) is complex:
+        return struct.pack(">dd", value.real, value.imag)
+    return None
+
+
+def constants_identical(a: Any, b: Any, /) -> bool:
+    """Value-identity comparison for specialized constants. Python float eq is
+    not value-identity: nan != nan while -0.0 == 0.0, so compare float and
+    complex values by IEEE-754 bit pattern, recursively through containers."""
+    bits = constant_bits(a)
+    if type(a) is type(b) and bits is not None:
+        return bits == constant_bits(b)
+
+    if type(a) is type(b) and type(a) in (list, tuple, torch.Size):
+        if a is b:
+            return True
+        return len(a) == len(b) and all(constants_identical(x, y) for x, y in zip(a, b))
+
+    if type(a) is type(b) and type(a) in (set, frozenset):
+        if a is b:
+            return True
+        if len(a) != len(b):
+            return False
+        remaining = list(b)
+        for x in a:
+            for i, y in enumerate(remaining):
+                if constants_identical(x, y):
+                    remaining.pop(i)
+                    break
+            else:
+                return False
+        return True
+
+    return a == b
+
+
 _builtin_final_typing_classes: tuple[Any, ...] = tuple()
 if sys.version_info >= (3, 12):
     # Some typing classes moved to C in 3.12,
@@ -1349,6 +1390,7 @@ def _unpack_fast_types() -> tuple[type, ...]:
         variables.FakeItemVariable,
         variables.FrozensetVariable,
         variables.ListIteratorVariable,
+        variables.ListReverseIteratorVariable,
         variables.ListVariable,
         variables.MappingProxyVariable,
         variables.NNModuleHooksDictVariable,
@@ -3167,12 +3209,19 @@ range_iterator: type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 deque_iterator = type(iter(collections.deque()))
 deque_rev_iterator = type(reversed(collections.deque()))
+list_reverseiterator = type(reversed([]))
+list_reverseiterator_len = list_reverseiterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
 dict_new = dict.__new__
 dict_methods = {
     method
     for method in itertools.chain(dict.__dict__.values(), OrderedDict.__dict__.values())
     if callable(method)
+}
+# defaultdict adds __init__/__repr__/__missing__/copy on top of dict's; a
+# defaultdict subclass inherits both, so UDOV slot delegation needs the union.
+defaultdict_methods = dict_methods | {
+    method for method in collections.defaultdict.__dict__.values() if callable(method)
 }
 set_methods = {method for method in set.__dict__.values() if callable(method)}
 frozenset_methods = {
@@ -3262,6 +3311,15 @@ def product(it: Iterable[T]) -> int:
 def tuple_iterator_getitem(it: Any, index: int) -> Any:
     _, (obj,), start = it.__reduce__()
     return obj[start + index]
+
+
+def list_reverseiterator_backing_list(it: Any) -> list[Any]:
+    return it.__reduce__()[1][0]
+
+
+def list_reverseiterator_setstate(it: Any, it_index: int) -> Any:
+    it.__setstate__(it_index)
+    return it
 
 
 def dataclass_fields(cls: Any) -> Any:
@@ -3864,7 +3922,7 @@ def same(
                     ):
                         multiplier = 10.0
                     elif use_larger_multiplier_for_smaller_tensor and (
-                        fp64_ref.numel() <= 500
+                        fp64_ref.numel() < 1000
                     ):
                         multiplier = 8.0
                     elif (
@@ -5770,10 +5828,6 @@ def set_torch_function_mode_stack(stack: list[Any]) -> None:
 def clear_torch_function_mode_stack() -> None:
     for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
-
-
-def get_current_stream(device: torch.device) -> torch.Stream:
-    return torch.accelerator.current_stream(device)
 
 
 # call from C dynamo in order to inspect values in pdb
