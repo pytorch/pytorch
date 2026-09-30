@@ -29,7 +29,7 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionInRange, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
-     runOnRocmArch, MI200_ARCH, MI300_ARCH, NAVI_ARCH, TEST_CUDA,
+     MI200_ARCH, NAVI_ARCH, TEST_CUDA,
      skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
@@ -9748,6 +9748,30 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.assertEqual(out_accelerator.cpu(), out_cpu)
 
 
+class TestLinalgSVD(TestCase):
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfMPS(torch.float32, torch.complex64)
+    def test_svd_ill_conditioned(self, device, dtype):
+        # Small columns must still undergo Jacobi rotations: skipping them at
+        # an absolute epsilon cutoff breaks orthogonality and inflates sigma.
+        q = torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q
+        v = torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q
+        A = (q * torch.logspace(-5, 0, 32, dtype=q.real.dtype)) @ v.mH
+        cpu_s = torch.linalg.svdvals(A)
+        U, S, Vh = (t.cpu() for t in torch.linalg.svd(A.to(device), full_matrices=False))
+        eye = torch.eye(32, dtype=dtype).expand(16, 32, 32)
+        self.assertEqual(U.mH @ U, eye, atol=1e-4, rtol=1e-4)
+        self.assertEqual(Vh @ Vh.mH, eye, atol=1e-4, rtol=1e-4)
+        self.assertEqual((U * S.unsqueeze(-2)) @ Vh, A, atol=1e-4, rtol=1e-4)
+        self.assertEqual(S, cpu_s, atol=1e-5, rtol=1e-4)
+        self.assertEqual(
+            (S > 1e-4 * S[..., :1]).sum(-1),
+            (cpu_s > 1e-4 * cpu_s[..., :1]).sum(-1),
+        )
+
+
 class TestLinalgCudaOnly(TestCase):
     """CUDA/ROCm-specific linalg tests (TunableOp, backend library selection)."""
 
@@ -11072,7 +11096,6 @@ class TestLinalgCudaOnly(TestCase):
             fastest_time = min(info["timings"].values())
             self.assertEqual(winner_time, fastest_time, (key, info))
 
-    @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
     def test_tf32_tunableop(self, device, dtype):
         with tf32_enabled():
@@ -11126,7 +11149,6 @@ class TestLinalgCudaOnly(TestCase):
                                                      'nn_37_37_37_ld_37_37_37')
                 self.assertTrue(found_result is not None)
 
-    @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
     def test_tf32_offline_tunableop(self, device, dtype):
         # This test is the offline version of test_tf32_tunableop
@@ -11851,6 +11873,13 @@ class TestGroupedMM(TestCase):
         subtest(((64, 64), (4, 32, 64), [16, 32, 48, 64], True), name="2d_3d_regular"),
         subtest(((64, 64), (4, 32, 64), [32, 32, 48, 64], False), name="2d_3d_zero_size"),
         subtest(((48, 19), (4, 67, 19), [17, 30, 38, 48], True), name="2d_3d_ragged"),
+        subtest(((1, 19), (4, 67, 19), [0, 0, 1, 1], True), name="2d_3d_gemv"),
+        subtest(
+            ((8, 535), (16, 67, 535), [0, 1, 1, 2, 3, 3, 4, 5, 5, 5, 6, 6, 7, 7, 8, 8], True),
+            name="2d_3d_sparse_decode", decorators=[toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)})]),
+        subtest(((8, 32), (8, 17, 32), [0, 8, 8, 8, 8, 8, 8, 8], True), name="2d_3d_skewed_decode"),
+        subtest(((8, 19), (8, 67, 19), [0, 2, 2, 3, 3, 3, 3, 3], True), name="2d_3d_decode_unused_rows"),
+        subtest(((32, 64), (32, 32, 64), [0] * 24 + [0, 0, 8, 12, 12, 16, 24, 32], True), name="2d_3d_batched_decode"),
         subtest(((4, 16, 64), (4, 32, 64), None, True), name="3d_3d"),
         subtest(((4, 16, 64), (128, 64), [32, 64, 96, 128], True), name="3d_2d_regular"),
         subtest(((4, 16, 64), (128, 64), [64, 64, 96, 128], False), name="3d_2d_zero_size"),
@@ -11896,21 +11925,26 @@ class TestGroupedMM(TestCase):
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @serialTest()
     @largeTensorTest("6GB")
-    @largeMPSBufferTest((2**31 + 8) * torch.float16.itemsize)
-    @dtypes(torch.float16)
+    @largeMPSBufferTest((2**31 + 64) * torch.bfloat16.itemsize)
+    @dtypes(torch.bfloat16)
     def test_grouped_mm_u64_indexing(self, device, dtype):
         # Exercises MPS's combined extent/stride guard and 64-bit indexing. Strides fit int32,
         # but accessed offsets exceed it; the size-one stride test never accesses distant storage.
         stride = 2**30
-        storage = torch.empty(2 * stride + 8, device=device, dtype=dtype)
+        storage = torch.empty(2 * stride + 64, device=device, dtype=dtype)
         for row in range(3):
-            storage[row * stride:row * stride + 8].normal_()
+            storage[row * stride:row * stride + 64].normal_()
         a = self._make_grouped_mm_matrix((1, 3), False, device, dtype)
         b = storage.as_strided((8, 3), (1, stride))
         offs = torch.tensor([1, 3], device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
+        a = self._make_grouped_mm_matrix((2, 8), True, device, dtype)
+        b = storage.as_strided((2, 8, 8), (2 * stride, 8, 1))
+        offs = torch.tensor([1, 2], device=device, dtype=torch.int32)
+        self.grouped_mm_helper(a, b, offs, backward=False)
 
 instantiate_device_type_tests(TestLinalg, globals())
+instantiate_device_type_tests(TestLinalgSVD, globals(), allow_mps=True)
 instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
 instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
 
