@@ -410,6 +410,9 @@ class OpDispatcher:
                     and random._rng_tracker.distribute_region_enabled
                 ):
                     accelerator = torch.accelerator.current_accelerator()
+                    # Type narrowing does not propagate into the nested function
+                    # below, so bind the non-None spec here.
+                    output_spec = output_sharding.output_spec
 
                     def _run_op_under_distribute_region():
                         # shared execution block for the generic
@@ -418,7 +421,7 @@ class OpDispatcher:
                             first_arg._spec, generator=maybe_user_generator
                         ):
                             with _ignore_fresh_unbacked_symbols_for_dtensor_tracing(
-                                output_sharding.output_spec
+                                output_spec
                             ):
                                 return op_call(
                                     *local_tensor_args, **op_info.local_kwargs

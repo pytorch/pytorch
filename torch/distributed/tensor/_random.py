@@ -2,9 +2,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from logging import getLogger
-from typing import Optional
+from typing import cast, Optional
 
 import torch
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
@@ -33,7 +33,9 @@ _rng_tracker: Optional["_RNGStateTracker"] = None
 _RNG_TRACKER_REGISTRY: dict[str, type["_RNGStateTracker"]] = {}
 
 
-def register_rng_tracker(device_type: str, tracker_cls: type["_RNGStateTracker"]) -> None:
+def register_rng_tracker(
+    device_type: str, tracker_cls: type["_RNGStateTracker"]
+) -> None:
     """Register a custom RNG tracker class for a device type.
 
     Third-party backends whose RNG does not follow the CUDA philox
@@ -57,7 +59,9 @@ def register_rng_tracker(device_type: str, tracker_cls: type["_RNGStateTracker"]
     Returns:
         None
     """
-    if not (isinstance(tracker_cls, type) and issubclass(tracker_cls, _RNGStateTracker)):
+    if not (
+        isinstance(tracker_cls, type) and issubclass(tracker_cls, _RNGStateTracker)
+    ):
         raise TypeError(
             f"tracker_cls must be a subclass of _RNGStateTracker, got {tracker_cls!r}"
         )
@@ -107,10 +111,15 @@ def get_or_create_rng_tracker(
     """
     global _rng_tracker
     if not _rng_tracker:
-        tracker_cls = _RNG_TRACKER_REGISTRY.get(
-            device_mesh.device_type, OffsetBasedRNGTracker
+        # Registered trackers are constructed from a device mesh (the contract
+        # documented in ``register_rng_tracker``); ``_RNGStateTracker`` itself
+        # takes an already resolved ``torch.device``, so the registry lookup is
+        # cast to the construction contract shared by all trackers here.
+        tracker_ctor = cast(
+            Callable[[DeviceMesh, bool], "_RNGStateTracker"],
+            _RNG_TRACKER_REGISTRY.get(device_mesh.device_type, OffsetBasedRNGTracker),
         )
-        _rng_tracker = tracker_cls(device_mesh, run_state_sync)
+        _rng_tracker = tracker_ctor(device_mesh, run_state_sync)
     return _rng_tracker
 
 
