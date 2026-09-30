@@ -11030,6 +11030,36 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(same(arg1, arg2))
         self.assertTrue(same(arg3, arg4))
 
+    def test_input_mutation_copy_of_input_mutated_later(self):
+        # A copy of an input that is mutated later in the graph must stay a real
+        # copy. remove_noop_ops replaced it by the input itself, so the copy into
+        # b read the *updated* a, directly or through a chain of views. This needs
+        # a's write-back copy_ to come first: a sorts first under
+        # canonicalize_output_graph_node_order and is also the first tensor used,
+        # so it is the first graph input either way.
+        def copy_slice(a, b):
+            b[0:, :] = a[0:, :]
+            a.add_(1)
+            return a
+
+        def copy_view_chain(a, b):
+            y = a.clone()
+            a.add_(1)
+            b.copy_(y.view(-1).view(3, 4))
+
+        for fn in (copy_slice, copy_view_chain):
+            for dynamic in (False, True):
+                torch._dynamo.reset()
+                a1 = torch.arange(12, dtype=torch.float32, device=self.device)
+                a1 = a1.view(3, 4)
+                b1 = torch.zeros(3, 4, device=self.device)
+                a2, b2 = a1.clone(), b1.clone()
+                correct = fn(a1, b1)
+                actual = torch.compile(fn, dynamic=dynamic)(a2, b2)
+                self.assertEqual(actual, correct)
+                self.assertEqual(a1, a2)
+                self.assertEqual(b1, b2)
+
     def test_input_mutation2(self):
         def fn(a):
             b = a + 1
