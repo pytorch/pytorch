@@ -10,6 +10,11 @@ from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.fx as fx
+import torch.utils._pytree as pytree
+from torch.fx.experimental.symbolic_shapes import (
+    free_symbols,
+    is_symbol_binding_fx_node,
+)
 from torch.hub import tqdm
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._content_store import ContentStoreWriter
@@ -26,6 +31,15 @@ is_tuple = object()
 
 class MinifierSanityCheckFailed(RuntimeError):
     pass
+
+
+def symbolic_meta_leaves(val: Any) -> list[Any]:
+    """Tensor and symbolic leaves of node metadata, skipping dtypes, devices, etc."""
+    return [
+        leaf
+        for leaf in pytree.tree_leaves(val)
+        if isinstance(leaf, (torch.Tensor, torch.SymInt, torch.SymFloat, torch.SymBool))
+    ]
 
 
 @dataclass
@@ -392,10 +406,38 @@ def minifier(
                 f"len(ph_nodes)={len(ph_nodes)} != len(cur_inps)={len(cur_inps)}"
             )
 
-        new_inps: list[torch.Tensor] = []
+        unused_symbol_bindings = {
+            node
+            for node in ph_nodes
+            if len(node.users) == 0 and is_symbol_binding_fx_node(node) is not None
+        }
+        needed_symbols = set()
+        for node in cur_graph.nodes:
+            if node in unused_symbol_bindings:
+                continue
+            for meta_name in ("val", "example_value"):
+                if meta_name in node.meta:
+                    needed_symbols |= set(
+                        free_symbols(symbolic_meta_leaves(node.meta[meta_name]))
+                    )
+
+        bound_symbols = {
+            symbol
+            for node in ph_nodes
+            if node not in unused_symbol_bindings
+            if (symbol := is_symbol_binding_fx_node(node)) is not None
+        }
+
+        new_inps: list[Any] = []
         for idx in range(len(ph_nodes)):
-            if len(ph_nodes[idx].users) == 0:
-                cur_graph.erase_node(ph_nodes[idx])
+            ph_node = ph_nodes[idx]
+            if len(ph_node.users) == 0:
+                symbol = is_symbol_binding_fx_node(ph_node)
+                if symbol in needed_symbols and symbol not in bound_symbols:
+                    bound_symbols.add(symbol)
+                    new_inps.append(cur_inps[idx])
+                else:
+                    cur_graph.erase_node(ph_node)
             else:
                 new_inps.append(cur_inps[idx])
         if len(new_inps) < len(cur_inps):
