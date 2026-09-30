@@ -296,6 +296,8 @@ def split_with_sizes_copy(
     )
 
 
+# Unused within FSDP since the reduce-scatter copy-in moved to
+# fsdp::chunk_cat_mixed_dtype; kept to avoid breaking potential external callers.
 lib.define(
     "chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> ()"
 )

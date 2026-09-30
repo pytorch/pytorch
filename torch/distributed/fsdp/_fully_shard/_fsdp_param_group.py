@@ -681,9 +681,6 @@ class FSDPParamGroup:
                 self._set_unsharded_grad_dtypes(defer_upcast=False)
                 if self.reshard_after_backward:
                     self.reshard()
-            if not unsharded_grads:
-                return
-            self._wait_for_post_backward()
             # Recycle prior modules' reduce-scatter input buffers, keeping at most
             # `max_input_buffers` in flight: reclaim the oldest (wait on its
             # reduce-scatter, then drop the keepalive ref that was deferring the
@@ -706,6 +703,9 @@ class FSDPParamGroup:
                         if oldest.event is not None:
                             self.device_handle.current_stream().wait_event(oldest.event)
                         del oldest
+            if not unsharded_grads:
+                return
+            self._wait_for_post_backward()
             with record_function(self._with_fqn("FSDP::post_backward_reduce")):
                 all_reduce_pg = (
                     self._all_reduce_process_group

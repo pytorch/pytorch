@@ -1175,6 +1175,7 @@ class FSDPParam:
     def unsharded_accumulated_grad(self) -> torch.Tensor | None:
         # The autograd leaf owns accumulation even while its parameter data is
         # resharded. Never fold reduced history into this native-dtype buffer.
+        # Unused within FSDP; kept to avoid breaking potential external callers.
         param = getattr(self, "_unsharded_param", None)
         return param.grad if param is not None else None
 
