@@ -114,7 +114,7 @@ from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
-from . import config, distributed_autotune, metrics
+from . import config, metrics
 from .codegen.common import (
     get_compile_option_owner,
     get_wrapper_codegen_for_device,
@@ -124,14 +124,6 @@ from .codegen.common import (
 from .debug import DebugContext
 from .decomposition import select_decomp_table
 from .exc import InductorError
-from .fx_passes.joint_graph import joint_graph_passes
-from .fx_passes.post_grad import (
-    decompose_triton_kernel_wrapper_functional,
-    post_grad_passes,
-    view_to_reshape,
-)
-from .fx_passes.pre_grad import pre_grad_passes
-from .graph import GraphLowering
 from .ir import get_device_type, IRNode
 from .triton_bundler import TritonBundler
 from .utils import (
@@ -156,6 +148,7 @@ if TYPE_CHECKING:
     from torch.export.pt2_archive._package_weights import Weights
 
     from .codecache import CacheInfo
+    from .graph import GraphLowering
     from .ir import ExternKernelNode
 
 
@@ -723,6 +716,8 @@ def _recursive_pre_grad_passes(
                 # as we don't have recursive example inputs, passing empty set here
                 new_subgraph = _recursive_pre_grad_passes(subgraph, ())
                 setattr(gm, subgraph_name, new_subgraph)
+            from .fx_passes.pre_grad import pre_grad_passes
+
             return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
 
 
@@ -760,6 +755,8 @@ def _recursive_joint_graph_passes(
             for subgraph_name in old_subgraph_names:
                 _run_on_sub_graph_module(subgraph_name)
 
+            from .fx_passes.joint_graph import joint_graph_passes
+
             out_gm = joint_graph_passes(gm, input_device)
 
             # Some joint graph passes may create new sub graph module. Run one round
@@ -782,6 +779,11 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
     ):
         _propagate_invoke_subgraph_nested_region_config(gm)
         with _patch_nested_region_inductor_config(gm):
+            from .fx_passes.post_grad import (
+                decompose_triton_kernel_wrapper_functional,
+                post_grad_passes,
+            )
+
             if not config.use_post_grad_passes:
                 # triton_kernel_wrapper_functional (a user-defined Triton kernel already
                 # in the model) has no inductor lowering; post_grad_passes normally
@@ -1667,6 +1669,8 @@ class _InProcessFxCompile(FxCompile):
             #
             # Also this has to be done before FakeTensorProp below to avoid the failed
             # .view() call.
+            from .fx_passes.post_grad import view_to_reshape
+
             view_to_reshape(gm)
 
             with dynamo_timed(
@@ -1758,6 +1762,9 @@ class _InProcessFxCompile(FxCompile):
                         # TODO(T216453900): need to work around for now to support vllm
                         # See details in vllm/compilation/pass_manager.py.
                         log.warning("failed to log pt2_configs")
+
+            from . import distributed_autotune
+            from .graph import GraphLowering
 
             with (
                 V.set_fake_mode(fake_mode),
@@ -2526,6 +2533,8 @@ def fw_compiler_freezing(
         aot_autograd_model,
         input_device=next(iter(inputs_devices)),
     )
+
+    from .graph import GraphLowering
 
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
     if layout_opt:
