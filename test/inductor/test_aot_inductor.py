@@ -6608,7 +6608,10 @@ class AOTInductorTestsTemplate:
         a = torch.randn(batch, M, K, device=self.device)
         example_inputs = (a,)
 
-        if self.device == "mps":
+        if config.fallback_by_default:
+            # lite mode: addmm goes through the proxy executor under the op name
+            kernel_calls = [("aten.addmm.default", 1)]
+        elif self.device == "mps":
             kernel_calls = [("aoti_torch_mps_addmm_out", 2)]
         elif self.device == GPU_TYPE:
             kernel_calls = [
@@ -6640,7 +6643,7 @@ class AOTInductorTestsTemplate:
                 ).run(code)
 
         # test printing selected kernel's tensor values codegen
-        filtered_kernel_name = f"aoti_torch_{self.device}_addmm_out"
+        filtered_kernel_name, filtered_count = kernel_calls[-1]
         with config.patch(
             {
                 "aot_inductor.debug_intermediate_value_printer": "2",
@@ -6651,7 +6654,7 @@ class AOTInductorTestsTemplate:
                 AOTIRunnerUtil.legacy_compile, model, example_inputs
             )
             filtered_kernel_calls = [
-                (filtered_kernel_name, 2),
+                (filtered_kernel_name, filtered_count),
             ]
             for kernel_call, count in filtered_kernel_calls:
                 FileCheck().check_count(
@@ -6700,11 +6703,13 @@ class AOTInductorTestsTemplate:
         batch = 2
         a = torch.randn(batch, M, K, device=self.device)
         example_inputs = (a,)
-        kernel_calls = (
-            f"aoti_torch_{GPU_TYPE}_addmm_out"
-            if self.device == GPU_TYPE
-            else "aoti_torch_cpu_addmm_out"
-        )
+        if config.fallback_by_default:
+            # lite mode: addmm goes through the proxy executor under the op name
+            kernel_calls = "aten.addmm.default"
+        elif self.device == GPU_TYPE:
+            kernel_calls = f"aoti_torch_{GPU_TYPE}_addmm_out"
+        else:
+            kernel_calls = "aoti_torch_cpu_addmm_out"
         with config.patch(
             {
                 "cpp.enable_kernel_profile": enable_kernel_profile,
@@ -6849,10 +6854,17 @@ class AOTInductorTestsTemplate:
             # still looking populated to a trace consumer. The IValue variable
             # carries the shim name, so match it in the same line to pin the
             # assertion to this kernel rather than any transposed GEMM.
+            if config.fallback_by_default:
+                # lite mode: transpose falls back too, so the operand is a buffer
+                operand = r"(?:borrow_arrayref_tensor_as_tensor\()?buf\d+\)?, &"
+            else:
+                operand = (
+                    r"wrap_with_raii_handle_if_needed\(reinterpret_tensor_wrapper.*"
+                )
             FileCheck().check_regex(
-                r"aoti_torch_tensor_to_ivalue\(wrap_with_raii_handle_if_needed\("
-                r"reinterpret_tensor_wrapper.*"
-                r"tmp_aoti_torch_\w*scaled_dot_product\w*_input_0\)"
+                r"aoti_torch_tensor_to_ivalue\("
+                + operand
+                + r"tmp_aoti_torch_\w*scaled_dot_product\w*_input_0\)"
             ).run(code)
             FileCheck().check("RAIIAtenRecordFunctionHandle").run(code)
 
@@ -7608,6 +7620,7 @@ class AOTInductorTestsTemplate:
                     count,
                 ).run(code)
 
+    @skip_if_lite_mode("every op falls back, so no cpp kernel is generated")
     def test_aoti_debug_printer_cpp_kernel(self):
         if self.device != "cpu":
             raise unittest.SkipTest("cpu test case only")
