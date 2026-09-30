@@ -956,6 +956,11 @@ def nan_to_num(
     if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
         return a.clone()
 
+    if utils.is_complex_dtype(a.dtype):
+        real = nan_to_num(torch.real(a), nan, posinf, neginf)
+        imag = nan_to_num(torch.imag(a), nan, posinf, neginf)
+        return torch.complex(real, imag)
+
     if nan is None:
         nan = 0.0
 
@@ -5811,7 +5816,7 @@ def logspace(
         dtype = default_complex_dtype
         _dtype = None  # torch.linspace will update the correct dtype
     else:
-        _dtype = torch.float64
+        _dtype = highest_precision_float(device)
 
     if isinstance(base, complex):
         raise AssertionError(f"base must not be complex, got {type(base)}")  # for mypy
