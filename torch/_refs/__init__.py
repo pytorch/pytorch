@@ -5816,7 +5816,7 @@ def logspace(
         dtype = default_complex_dtype
         _dtype = None  # torch.linspace will update the correct dtype
     else:
-        _dtype = torch.float64
+        _dtype = highest_precision_float(device)
 
     if isinstance(base, complex):
         raise AssertionError(f"base must not be complex, got {type(base)}")  # for mypy
