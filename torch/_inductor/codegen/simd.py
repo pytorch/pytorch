@@ -4667,19 +4667,22 @@ class SIMDScheduling(BaseScheduling):
         """
         Helper method to codegen a single template kernel variant
         """
-        # Epilogue reductions need the output tile to span full rows (see
-        # TritonTemplateKernel.codegen_tile_reduction_epilogue). Check before
-        # rendering, since some templates codegen their epilogues themselves.
+        # Epilogue reductions need an output tile that can hold them (see
+        # tile_fits_reduction_epilogue). The scheduler rejects choices whose
+        # tile doesn't fit, so reaching here with a misfit is a bug.
         if any(node.is_reduction() for node in epilogue_nodes):
             template = template_node.node
-            n = template.get_size()[-1]
             tile = (
                 template.output_tile
                 if isinstance(template, ir.TritonTemplateBuffer)
                 else None
             )
             if not tile_fits_reduction_epilogue(tile, template, epilogue_nodes):
-                raise CantSplit(n, tile or ())
+                raise AssertionError(
+                    f"output tile {tile} can't hold the reduction epilogue of "
+                    f"{template.get_name()} (size {template.get_size()}); the "
+                    "scheduler's choice pre-check should have rejected it"
+                )
 
         buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()
