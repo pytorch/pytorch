@@ -360,6 +360,9 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(
         not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
     )
+    @skipIfXpu(  # https://github.com/intel/torch-xpu-ops/issues/3570
+        msg="XCCL collectives captured in an XPU graph are not replayed"
+    )
     def test_allreduce_in_cudagraph(self):
         local_device_idx = self.rank_to_GPU[self.rank][0]
         # This device setting is needed by the CUDAGraph API to understand on
@@ -392,14 +395,11 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
     )
     @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIACCELERATOR, "NCCL test requires 2+ accelerators"
-    )
     def test_nccl_watchdog_cudagraph(self):
         # test that the watchdog does not crash graphs with disallowed event query
         pg = self.pg
         rank = self.rank_to_GPU[self.rank][0]
-        with torch.accelerator.device(rank):
+        with torch.accelerator.device_index(rank):
             for _ in range(10):
                 xs = [torch.FloatTensor([1]).to(torch.device(device_type, rank))]
                 for _ in range(30):
@@ -431,7 +431,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         # expandable_segments is a CUDA caching-allocator knob; other backends
         # have no equivalent, so only they set up the multisegment condition.
         if device_type == "cuda":
-            torch.accelerator.memory._set_allocator_settings("expandable_segments:True")
+            torch.cuda.memory._set_allocator_settings("expandable_segments:True")
 
         b, t, d = 64, 1, 101024
         inp = torch.ones((b, t, d), device=device_type) * (self.rank + 1)
@@ -455,9 +455,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
         self.assertEqual(static_output.sum().item(), expected_sum)
         if device_type == "cuda":
-            torch.accelerator.memory._set_allocator_settings(
-                "expandable_segments:False"
-            )
+            torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
     @requires_accelerator_dist_backend(["nccl", "xccl"])
     @skip_but_pass_in_sandcastle_if(
