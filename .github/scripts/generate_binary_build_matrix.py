@@ -46,15 +46,11 @@ CUDA_ARCHES_CUDNN_VERSION = {
 }
 
 ROCM_ARCHES = ["7.14", "10.0"]
-ROCM_PREVIEW_VERSION = (
-    (REPO_ROOT / ".ci/docker/ci_commit_pins/rocm-preview.txt").read_text().strip()
-)
 
 
 class RocmPreviewLane(NamedTuple):
     arch: str
     channel: str
-    desired_cuda: str
     version: str
 
 
@@ -62,8 +58,9 @@ class RocmPreviewLane(NamedTuple):
 ROCM_PREVIEW = RocmPreviewLane(
     arch="preview",
     channel="rocm-preview",
-    desired_cuda="rocmpreview",
-    version=ROCM_PREVIEW_VERSION,
+    version=(REPO_ROOT / ".ci/docker/ci_commit_pins/rocm-preview.txt")
+    .read_text()
+    .strip(),
 )
 ROCM_PREVIEW_ARCHES = [ROCM_PREVIEW.arch]
 
@@ -146,20 +143,14 @@ CUDA_NIGHTLY_SOURCE_MATRIX = {
     )
     for major, minor in (map(int, version.split(".")) for version in CUDA_ARCHES)
 }
-
-
-def _rocm_channel(arch: str, separator: str = "") -> str:
-    return f"rocm{separator}{arch}"
-
-
 ROCM_NIGHTLY_SOURCE_MATRIX = {
-    _rocm_channel(arch, "-"): dict(
-        name=_rocm_channel(arch, "-"),
-        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/{_rocm_channel(arch)}",
+    f"rocm-{major}.{minor}": dict(
+        name=f"rocm-{major}.{minor}",
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/rocm{major}.{minor}",
         supported_platforms=["Linux"],
         accelerator="rocm",
     )
-    for arch in ROCM_ARCHES
+    for major, minor in (map(int, version.split(".")) for version in ROCM_ARCHES)
 }
 ROCM_PREVIEW_NIGHTLY_SOURCE_MATRIX = {
     ROCM_PREVIEW.channel: dict(
@@ -331,10 +322,7 @@ WHEEL_CONTAINER_IMAGES = {
         gpu_arch: f"manylinuxaarch64-builder:cuda{gpu_arch.replace('-aarch64', '')}"
         for gpu_arch in CUDA_AARCH64_ARCHES
     },
-    **{
-        gpu_arch: f"manylinux2_28-builder:{_rocm_channel(gpu_arch)}"
-        for gpu_arch in ROCM_ARCHES
-    },
+    **{gpu_arch: f"manylinux2_28-builder:rocm{gpu_arch}" for gpu_arch in ROCM_ARCHES},
     ROCM_PREVIEW.arch: f"manylinux2_28-builder:{ROCM_PREVIEW.channel}",
     "xpu": "manylinux2_28-builder:xpu",
     "cpu": "manylinux2_28-builder:cpu",
@@ -357,15 +345,13 @@ FULL_PYTHON_VERSIONS = [
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
-    if gpu_arch_version == ROCM_PREVIEW.arch:
-        return ROCM_PREVIEW.desired_cuda
     return {
         "cpu": "cpu",
         "cpu-aarch64": "cpu",
         "cpu-s390x": "cpu",
         "cuda": f"cu{gpu_arch_version.replace('.', '')}",
         "cuda-aarch64": f"cu{gpu_arch_version.replace('-aarch64', '').replace('.', '')}",
-        "rocm": _rocm_channel(gpu_arch_version),
+        "rocm": f"rocm{gpu_arch_version}",
         "xpu": "xpu",
     }.get(gpu_arch_type, gpu_arch_version)
 
@@ -512,18 +498,14 @@ def generate_wheels_matrix(
                     }
                 )
             else:
-                desired_cuda = translate_desired_cuda(gpu_arch_type, gpu_arch_version)
-                build_name_arch = (
-                    desired_cuda
-                    if gpu_arch_type == "rocm"
-                    else f"{gpu_arch_type}{gpu_arch_version}"
-                )
                 ret.append(
                     {
                         "python_version": python_version,
                         "gpu_arch_type": gpu_arch_type,
                         "gpu_arch_version": gpu_arch_version,
-                        "desired_cuda": desired_cuda,
+                        "desired_cuda": translate_desired_cuda(
+                            gpu_arch_type, gpu_arch_version
+                        ),
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version].split(
                             ":"
                         )[0],
@@ -531,7 +513,7 @@ def generate_wheels_matrix(
                             arch_version
                         ].split(":")[1],
                         "package_type": package_type,
-                        "build_name": f"{package_type}-py{python_version}-{build_name_arch}".replace(
+                        "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
                             ".", "_"
                         ),
                         "pytorch_extra_install_requirements": (
@@ -590,14 +572,7 @@ def generate_libtorch_extraction_configs(
         # Include arch in the build name so windows x86_64 and arm64 libtorch
         # packages don't share a name and overwrite each other on upload.
         arch_tag = f"{arch}-" if os == "windows-arm64" else ""
-        # For rocm, desired_cuda already carries the channel (e.g. rocmpreview),
-        # so use it directly to avoid a doubled "rocm" prefix in the name.
-        gpu_tag = (
-            desired_cuda
-            if gpu_arch_type == "rocm"
-            else f"{gpu_arch_type}{gpu_arch_version}"
-        )
-        build_name = f"libtorch-{arch_tag}{gpu_tag}-{libtorch_variant}-release".replace(
+        build_name = f"libtorch-{arch_tag}{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-release".replace(
             ".", "_"
         )
 

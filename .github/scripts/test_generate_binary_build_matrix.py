@@ -30,8 +30,8 @@ class TestRocmPreviewMatrix(TestCase):
         self.assertTrue(source["index_url"].endswith("/nightly/rocm-preview"))
 
     def test_non_preview_configs_have_no_subfolder_override(self) -> None:
-        for os in ("linux", "linux-aarch64", "windows"):
-            for config in matrix.generate_wheels_matrix(os):
+        for platform in ("linux", "linux-aarch64", "windows"):
+            for config in matrix.generate_wheels_matrix(platform):
                 if config.get("gpu_arch_version") != matrix.ROCM_PREVIEW.arch:
                     self.assertNotIn("upload_subfolder", config)
 
