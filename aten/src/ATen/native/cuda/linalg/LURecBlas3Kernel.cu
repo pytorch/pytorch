@@ -851,6 +851,17 @@ auto real(const scalar_t& v) {
   }
 }
 
+// A[j, i] given A[i, j] for a Hermitian (hermitian == true) or symmetric matrix
+template <bool hermitian, typename scalar_t>
+__device__ __forceinline__
+scalar_t mirror(const scalar_t& v) {
+  if constexpr (hermitian && c10::is_complex<scalar_t>::value) {
+    return std::conj(v);
+  } else {
+    return v;
+  }
+}
+
 template <typename real_t, int BS>
 __device__ __forceinline__
 std::tuple<real_t, int> block_max(
@@ -914,16 +925,14 @@ std::tuple<typename c10::scalar_value_type<scalar_t>::type, int> find_pivot_row(
 } // namespace ::ldl
 
 
-template <typename scalar_t, int BS>
+template <typename scalar_t, int BS, bool hermitian>
 __global__ void __launch_bounds__(BS)
 ldl_diagonal_panel_fused_kernel(
   scalar_t* __restrict__ dLD, int n, int lda,
   int nb, int curr_step, int* dcurr_step,
-  int* dipiv, int* dinfo,
-  scalar_t* __restrict__ dcorr
+  int* dipiv, int* dinfo
 ) {
   using real_t = c10::scalar_value_type<scalar_t>::type;
-  constexpr auto one = static_cast<scalar_t>(1);
   const real_t ALPHA = (1 + std::sqrt(17)) / 8;
   const auto tid = threadIdx.x;
   const auto panel_start = curr_step;
@@ -931,64 +940,59 @@ ldl_diagonal_panel_fused_kernel(
 
   scalar_t D[2][2];
 
-  scalar_t* __restrict__ corr_col = dcorr;
-  scalar_t* __restrict__ corr_row = dcorr + n;
-  // Let Lprev = dLD[curr_step:, panel_start:curr_step],
-  //     Uprev = dLD[panel_start:curr_step, curr_step:],
-  //     Lcurr = dLD[curr_step:, curr_step],
-  // then Lcurr needs to accumulate -(Lprev @ Uprev)[:, 0] before
-  // being normalized by D^{-1} on the right.
-
-  // This method computes dLD[curr_step:, diag] -= (Lprev @ Uprev)[:, diag],
-  // and dLD[diag,  curr_step:] -= (Lprev @ Uprev)[diag, :].
-  // It is assumed that
-  // corr_col holds (Lprev @ Uprev)[:, diag], and
-  // corr_row holds (Lprev @ Uprev)[diag, :], which are then
-  // applied additively to the corresponding row/col of dLD
-  // as per += alpha * corr_col/corr_row.
-  const auto apply_rank1_updates = [&](const int diag, const scalar_t alpha, const bool recompute = true) {
-    // No-op for the very first column/row in the panel
-    if (curr_step == panel_start) return;
-
-    // Handle col
-    for (int i = curr_step + tid; i < n; i += BS) {
-      // recompute is passed by default or as an rvalue -- NVCC should optimize
-      if (recompute) {
-        scalar_t acc{};
-        for (int j = panel_start; j < curr_step; ++j) {
-          acc += dLD[LinOff(i, j, lda)] * dLD[LinOff(j, diag, lda)];
+  // The panel is processed left to right. Rows/cols >= curr_step are stale,
+  // i.e. they lack the updates from the panel's factored columns to the left,
+  // and are made current only when needed. With
+  //   Lprev = dLD[:, panel_start:curr_step],
+  //   Uprev = dLD[panel_start:curr_step, :],
+  // this subtracts (or adds back, if undo) Lprev @ Uprev from dLD[first:, k],
+  // leaving out index skip. Subtracting one column at a time in place rounds
+  // like a right-looking update. Lprev @ Uprev = Lprev @ D @ op(Lprev) is
+  // symmetric/Hermitian, so dLD[k, first:] is the mirror of the column
+  // and is copied rather than recomputed with strided reads.
+  //
+  // Interchanges do not touch Lprev/Uprev, so the stale data moved to a
+  // position p is later updated with row/col p of Lprev/Uprev.
+  // To keep that consistent, only current data is ever moved to p,
+  // and adding the update for p back to it makes it stale again.
+  const auto update_rowcol = [&](const int k, const int first, const int skip, const bool undo = false) {
+    // No early exit when curr_step == panel_start: the row is still copied
+    // from the column. Every row of U has to come from a column, otherwise
+    // the rounding mismatch between the triangles left by the trailing GEMMs
+    // leaks into L and D, and grows from panel to panel.
+    for (int i = first + tid; i < n; i += BS) {
+      if (i == skip) continue;
+      auto a = dLD[LinOff(i, k, lda)];
+      for (int j = panel_start; j < curr_step; ++j) {
+        if (undo) {
+          a += dLD[LinOff(i, j, lda)] * dLD[LinOff(j, k, lda)];
+        } else {
+          a -= dLD[LinOff(i, j, lda)] * dLD[LinOff(j, k, lda)];
         }
-        corr_col[i - curr_step] = acc;
       }
-      dLD[LinOff(i, diag, lda)] += alpha * corr_col[i - curr_step];
-    }
-
-    // Handle row
-    for (int i = curr_step + tid; i < n; i += BS) {
-      // The diagonal is owned by the column sweep above
-      if (i == diag) continue;
-      // recompute is passed by default or as an rvalue -- NVCC should optimize
-      if (recompute) {
-        scalar_t acc{};
-        for (int j = panel_start; j < curr_step; ++j) {
-          acc += dLD[LinOff(j, i, lda)] * dLD[LinOff(diag, j, lda)];
+      if (i == k) {
+        // A Hermitian diagonal is real, but complex rounding leaves an imaginary
+        // residue. The mirrored rows assume a real pivot, so drop it (as zhetf2 does).
+        if constexpr (hermitian) {
+          a = ldl::real(a);
         }
-        corr_row[i - curr_step] = acc;
+      } else {
+        dLD[LinOff(k, i, lda)] = ldl::mirror<hermitian>(a);
       }
-      dLD[LinOff(diag, i, lda)] += alpha * corr_row[i - curr_step];
+      dLD[LinOff(i, k, lda)] = a;
     }
   };
 
   // The processed block will factor nb or nb+1 rows/cols
-  while (curr_step < panel_start + nb) {
+  while (curr_step < panel_end) {
     int piv;
     int pivot_rank = 1;
 
-    // Accumulate rank-1 updates for the current row/col.
-    apply_rank1_updates(curr_step, /*alpha=*/-one);
+    // Bring the current row/col up to date
+    update_rowcol(curr_step, /*first=*/curr_step, /*skip=*/-1);
     __syncthreads();
 
-    if (curr_step == panel_start + nb - 1) {
+    if (curr_step == panel_end - 1) {
       break;
     }
 
@@ -1001,8 +1005,8 @@ ldl_diagonal_panel_fused_kernel(
       dLD, lda, n, curr_step, curr_step,
       /*exclude_idx=*/curr_step
     );
-    bool ilambda_outside_panel = (ilambda >= panel_end) && (curr_step > panel_start);
     const auto diag_abs = ldl::abs(dLD[LinOff(curr_step, curr_step, lda)]);
+    bool ilambda_updated = false;
 
     // ilambda is -1 when the scan found no candidate at all, which happens once
     // NaNs reach the column: every comparison against a NaN is false, so the
@@ -1012,8 +1016,10 @@ ldl_diagonal_panel_fused_kernel(
       // No permutation, 1x1 pivot
       piv = curr_step;
     } else {
-      // New pivot candidate needs to accumulate rank-1 updates
-      apply_rank1_updates(ilambda, /*alpha=*/-one);
+      // Bring the candidate row/col up to date. Its entries in row/col
+      // curr_step are already current.
+      update_rowcol(ilambda, /*first=*/curr_step + 1, /*skip=*/-1);
+      ilambda_updated = true;
       __syncthreads();
       // Checking whether ilambda diagonal pivot is "stable"
       const auto [sigma, _] = ldl::find_pivot_row<scalar_t, BS>(
@@ -1030,6 +1036,12 @@ ldl_diagonal_panel_fused_kernel(
         // New 2x2 pivot
         piv = ilambda;
         pivot_rank = 2;
+        // The swap below moves row/col curr_step + 1 to ilambda, so it has
+        // to be current too. The entries shared with ilambda already are.
+        if (ilambda != curr_step + 1) {
+          update_rowcol(curr_step + 1, /*first=*/curr_step + 1, /*skip=*/ilambda);
+          __syncthreads();
+        }
       }
     }
     // }
@@ -1066,11 +1078,12 @@ ldl_diagonal_panel_fused_kernel(
     }
     // }
 
-    // After the swap the ilamda col/row needs to undo the rank-1 update,
-    // as these will later be handled by GEMM,
-    // but only if ilambda is outside of the panel.
-    if (ilambda_outside_panel) {
-      apply_rank1_updates(ilambda, /*alpha=*/one, false);
+    // Unless it is part of the pivot, row/col ilambda now holds current data,
+    // yet it gets updated later either here (in-panel) or by the GEMM.
+    // Make it stale again.
+    if (ilambda_updated && ilambda >= curr_step + pivot_rank) {
+      update_rowcol(ilambda, /*first=*/curr_step + pivot_rank, /*skip=*/-1, /*undo=*/true);
+      __syncthreads();
     }
 
     // Update L21 {
@@ -1137,11 +1150,11 @@ ldl_diagonal_panel_fused_kernel(
   }
 }
 
-template <typename scalar_t>
+template <typename scalar_t, bool hermitian>
 void ldl_diagonal_panel(
   scalar_t* dLD, int n, int lda,
   int nb, int curr_step, int* dcurr_step,
-  int* dipiv, int* dinfo, scalar_t* dcorr
+  int* dipiv, int* dinfo
 ) {
   constexpr int PANEL_THRESHOLD = 512;
   constexpr int LARGE_PANEL_NTHREADS = 1024;
@@ -1151,16 +1164,16 @@ void ldl_diagonal_panel(
 
   auto problem_dim = n - curr_step;
   if (problem_dim > PANEL_THRESHOLD) {
-    ldl_diagonal_panel_fused_kernel<scalar_t, LARGE_PANEL_NTHREADS><<<grid, LARGE_PANEL_NTHREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+    ldl_diagonal_panel_fused_kernel<scalar_t, LARGE_PANEL_NTHREADS, hermitian><<<grid, LARGE_PANEL_NTHREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
       dLD, n, lda,
       nb, curr_step, dcurr_step,
-      dipiv, dinfo, dcorr
+      dipiv, dinfo
     );
   } else {
-    ldl_diagonal_panel_fused_kernel<scalar_t, SMALL_PANEL_NTHREADS><<<grid, SMALL_PANEL_NTHREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
+    ldl_diagonal_panel_fused_kernel<scalar_t, SMALL_PANEL_NTHREADS, hermitian><<<grid, SMALL_PANEL_NTHREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
       dLD, n, lda,
       nb, curr_step, dcurr_step,
-      dipiv, dinfo, dcorr
+      dipiv, dinfo
     );
   }
 }
@@ -1185,9 +1198,6 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
     auto panel_step_holder = at::empty({1}, LD.options().dtype(at::kInt));
     auto* dstep = static_cast<int*>(panel_step_holder.data_ptr());
 
-    // Scratch for the out-of-panel pivot replay: two vectors of length n
-    auto corr = at::empty({2 * n}, LD.options());
-    auto* dcorr = static_cast<scalar_t*>(corr.data_ptr());
     int step = 0;
 
     // Right-Down-Diagonal-looking blocked LDLT/LDLH:
@@ -1196,11 +1206,13 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
     while (step < n - 1) {
       // 1. Panel factorization {
       const auto curr_nb = std::min(n - step, ldl::MAX_LDL_NB);
-      ldl_diagonal_panel(
-        dLD, n, lda,
-        curr_nb, step, dstep,
-        dipiv, dinfo, dcorr
-      );
+      // Real types: symmetric and Hermitian coincide, so one instantiation suffices
+      constexpr bool is_complex = c10::is_complex<scalar_t>::value;
+      if (hermitian && is_complex) {
+        ldl_diagonal_panel<scalar_t, /*hermitian=*/is_complex>(dLD, n, lda, curr_nb, step, dstep, dipiv, dinfo);
+      } else {
+        ldl_diagonal_panel<scalar_t, /*hermitian=*/false>(dLD, n, lda, curr_nb, step, dstep, dipiv, dinfo);
+      }
       // }
 
       // 2. Trailing matrix update of B[step + curr_nb: step + curr_nb:] {
@@ -1217,6 +1229,7 @@ void ldl_factor_blas3_kernel(const Tensor& LD, const Tensor& pivots, const Tenso
           /*LD22=*/dLD + LinOff(step + curr_nb, step + curr_nb, lda), lda
         );
       }
+      // }
 
       // Finish iteration
       step = curr_step;
