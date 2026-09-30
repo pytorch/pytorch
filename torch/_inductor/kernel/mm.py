@@ -1400,12 +1400,15 @@ def scaled_mm_v2_constraint(
                 and recipe in (ScalingType.BlockWise1x128, ScalingType.BlockWise128x128)
             ):
                 matrix = operands["self" if side == "a" else "mat2"]
-                if recipe == ScalingType.BlockWise128x128 and all(
+                ambiguous = recipe == ScalingType.BlockWise128x128 and all(
                     _blockwise128x128_shape_match(
                         scale.get_size(), matrix.get_size(), transpose=side == "b"
                     )[:2]
-                ):
-                    # Ambiguous scale shapes encode their orientation in strides.
+                )
+                if ambiguous or scale.get_dtype() == torch.float8_e8m0fnu:
+                    # Ambiguous scale shapes encode their orientation in strides,
+                    # and K128 UE8M0 scales are validated against the caller's
+                    # layout (see _is_cuda_k128_ue8m0_scale), not the fp32 one.
                     # Use FX metadata even when a producer's IR layout is flexible.
                     _, fake_args, fake_kwargs = get_fake_args_kwargs(fx_node)
                     fake_operands = dict(zip(names, fake_args))
