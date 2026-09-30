@@ -261,6 +261,16 @@ class Vectorized<float> {
   Vectorized<float> conj() const {
     return values;
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> acos() const;
+  Vectorized<float> acosh() const;
+  Vectorized<float> asin() const;
+  Vectorized<float> asinh() const;
+  Vectorized<float> atan() const;
+  Vectorized<float> atanh() const;
+  Vectorized<float> atan2(const Vectorized<float>& b) const;
+  Vectorized<float> copysign(const Vectorized<float>& sign) const;
+#else
   Vectorized<float> acos() const {
     return USE_SLEEF(
         Vectorized<float>(Sleef_acosfx_u10sve(values)), map(std::acos));
@@ -315,6 +325,15 @@ class Vectorized<float> {
           return loadu(tmp);
         });
   }
+#endif
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> erf() const;
+  Vectorized<float> erfc() const;
+  Vectorized<float> erfinv() const;
+  Vectorized<float> exp() const;
+  Vectorized<float> exp2() const;
+  Vectorized<float> expm1() const;
+#else
   Vectorized<float> erf() const {
     return USE_SLEEF(
         Vectorized<float>(Sleef_erffx_u10sve(values)), map(std::erf));
@@ -338,6 +357,7 @@ class Vectorized<float> {
     return USE_SLEEF(
         Vectorized<float>(Sleef_expm1fx_u10sve(values)), map(std::expm1));
   }
+#endif
   Vectorized<float> exp_u20() const {
     // special case to handle special inputs that are too large or too small
     // i.e. where there's at least one element x, s.t. |x| >= 87.3...
@@ -350,6 +370,20 @@ class Vectorized<float> {
   Vectorized<float> fexp_u20() const {
     return at::vec::fexp_u20(values);
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> fmod(const Vectorized<float>& q) const;
+  Vectorized<float> hypot(const Vectorized<float>& b) const;
+  Vectorized<float> i0() const;
+  Vectorized<float> i0e() const;
+  Vectorized<float> digamma() const;
+  Vectorized<float> igamma(const Vectorized<float>& x) const;
+  Vectorized<float> igammac(const Vectorized<float>& x) const;
+  Vectorized<float> nextafter(const Vectorized<float>& b) const;
+  Vectorized<float> log() const;
+  Vectorized<float> log2() const;
+  Vectorized<float> log10() const;
+  Vectorized<float> log1p() const;
+#else
   Vectorized<float> fmod(const Vectorized<float>& q) const {
     USE_SLEEF(
         { return Vectorized<float>(Sleef_fmodfx_sve(values, q)); },
@@ -437,7 +471,16 @@ class Vectorized<float> {
     return USE_SLEEF(
         Vectorized<float>(Sleef_log1pfx_u10sve(values)), map(std::log1p));
   }
+#endif
   Vectorized<float> frac() const;
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> sin() const;
+  Vectorized<float> sinh() const;
+  Vectorized<float> cos() const;
+  Vectorized<float> cosh() const;
+  Vectorized<float> ceil() const;
+  Vectorized<float> floor() const;
+#else
   Vectorized<float> sin() const {
     return USE_SLEEF(
         Vectorized<float>(Sleef_sinfx_u35sve(values)), map(std::sin));
@@ -461,9 +504,15 @@ class Vectorized<float> {
   Vectorized<float> floor() const {
     return svrintm_f32_x(ptrue, values);
   }
+#endif
   Vectorized<float> neg() const {
     return svneg_f32_x(ptrue, values);
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> round() const;
+  Vectorized<float> tan() const;
+  Vectorized<float> tanh() const;
+#else
   Vectorized<float> round() const {
     return svrinti_f32_x(ptrue, values);
   }
@@ -525,13 +574,18 @@ class Vectorized<float> {
     // Return the calculated tanh values.
     return tanh;
   }
+#endif
   Vectorized<float> trunc() const {
     return svrintz_f32_x(ptrue, values);
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> lgamma() const;
+#else
   Vectorized<float> lgamma() const {
     return USE_SLEEF(
         Vectorized<float>(Sleef_lgammafx_u10sve(values)), map(std::lgamma));
   }
+#endif
   Vectorized<float> sqrt() const {
     return svsqrt_f32_x(ptrue, values);
   }
@@ -541,6 +595,9 @@ class Vectorized<float> {
   Vectorized<float> rsqrt() const {
     return svdivr_f32_x(ptrue, svsqrt_f32_x(ptrue, values), ONE_F32);
   }
+#ifdef AT_VEC_CUSTOM_MATH
+  Vectorized<float> pow(const Vectorized<float>& b) const;
+#else
   Vectorized<float> pow(const Vectorized<float>& b) const {
     USE_SLEEF(
         { return Vectorized<float>(Sleef_powfx_u10sve(values, b)); },
@@ -555,6 +612,7 @@ class Vectorized<float> {
           return loadu(tmp);
         });
   }
+#endif
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
   //   `Q`: do not raise if an operand is NaN

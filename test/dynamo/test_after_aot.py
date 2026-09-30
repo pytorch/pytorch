@@ -654,7 +654,8 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         self.assertIsInstance(result[1], torch.SymInt)
 
     def test_get_compile_args_preserves_shapes(self):
-        """_get_compile_args preserves symbolic shape info from traced graph."""
+        """_get_compile_args preserves symbolic shape info from traced graph,
+        including for graphs whose only inputs are tensors."""
 
         def f(x):
             return (x * 2,)
@@ -662,7 +663,9 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         args = [torch.randn(4, 8)]
         gm = make_fx(f, tracing_mode="symbolic")(*args)
         result = _get_compile_args(gm, args)
-        # FakeTensor should preserve the shape
+        self.assertIsNot(result, args)
+        self.assertIsInstance(result[0], torch._subclasses.FakeTensor)
+        self.assertTrue(free_symbols(result[0]))
         self.assertEqual(result[0].shape, torch.Size([4, 8]))
 
     def test_get_compile_args_real_tracing_returns_concrete(self):
@@ -719,7 +722,22 @@ reader.tensor(buf0, (3, 4, 5, 6), (120, 1, 24, 4), is_leaf=True)  # x""",
         result = compiled(list(concrete_args))
         self.assertEqual(result[0].shape, torch.Size([N]))
 
-    def test_get_compile_args_e2e_real_no_fake_mode_mismatch(self):
+    def test_get_compile_args_e2e_tensor_only_symbolic_compile(self):
+        """E2E: tensor-only symbolic graphs compile with dynamic shapes, so
+        the compiled artifact accepts a different batch size."""
+        from torch._inductor.compile_fx import compile_fx_inner
+
+        def f(x):
+            return (x * 2,)
+
+        concrete_args = [torch.randn(4, 8)]
+        gm = make_fx(f, tracing_mode="symbolic")(*concrete_args)
+
+        compiled = compile_fx_inner(gm, _get_compile_args(gm, concrete_args))
+        self.assertNotIsInstance(compiled, str)
+        other = torch.randn(6, 8)
+        self.assertEqual(compiled([other])[0], other * 2)
+
         """E2E: compile_fx_inner fails when given FakeTensors from
         different FakeTensorModes (extracted from real-mode traced graph
         placeholder metadata) but succeeds with _get_compile_args which

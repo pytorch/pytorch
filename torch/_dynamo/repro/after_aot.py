@@ -1324,18 +1324,19 @@ def _get_compile_args(mod: torch.fx.GraphModule, args: Sequence[Any]) -> Sequenc
     For tracing_mode='real', concrete args are fine — we must NOT extract
     FakeTensor metadata because different nodes may have FakeTensors from
     different FakeTensorModes, causing a FakeTensorMode mismatch assertion
-    in Inductor.  We detect symbolic tracing by checking for SymInt values,
+    in Inductor.  We detect symbolic tracing by checking for free symbols in
+    the placeholder metadata (SymInt inputs or symbolic FakeTensor shapes),
     which only exist when tracing_mode='symbolic'.
     """
     placeholders = [n for n in mod.graph.nodes if n.op == "placeholder"]
     if not placeholders:
         return args
     # Only extract metadata if the graph was traced with symbolic mode.
-    # SymInt values in placeholder metadata are the reliable indicator —
     # FakeTensors appear in both real and symbolic modes, but only symbolic
-    # tracing creates SymInts for integer inputs.
-    has_symint = any(isinstance(n.meta.get("val"), torch.SymInt) for n in placeholders)
-    if not has_symint:
+    # tracing gives them symbolic sizes or creates SymInts for integer inputs.
+    if not any(
+        has_free_symbols(symbolic_meta_leaves(n.meta.get("val"))) for n in placeholders
+    ):
         return args
     return [n.meta.get("val", a) for n, a in zip(placeholders, args)]
 
