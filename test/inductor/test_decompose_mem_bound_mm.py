@@ -6,9 +6,14 @@ import unittest
 import torch
 import torch._inductor
 from torch._dynamo.utils import counters
-from torch._inductor.fx_passes.decompose_mem_bound_mm import check_device
+from torch._inductor.fx_passes.decompose_mem_bound_mm import (
+    check_device,
+    should_decompose_bmm,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -494,6 +499,102 @@ class TestDecomposeMemMM(TestCase):
             counters["inductor"]["decompose_addmm"],
             1,
         )
+        counters.clear()
+
+
+class TestDecomposeBmmCpuDynamicShape(TestCase):
+    """CPU bmm decomposition when the batch dim is symbolic.
+
+    Kept out of TestDecomposeMemMM because these cases need no GPU.
+    """
+
+    _ENABLED = {"decompose_mm_pass": {"bmm_skip_dynamic_shape_dim_check": True}}
+    _DISABLED = {"decompose_mm_pass": {}}
+
+    def _bmm_nodes(self, batch1, batch2, shape_env=None):
+        """Two fx nodes whose meta["val"] are the operands of a CPU bmm."""
+        with FakeTensorMode(shape_env=shape_env or ShapeEnv()):
+            mat1 = torch.empty(batch1, 20, 65, device="cpu")
+            mat2 = torch.empty(batch2, 65, 5, device="cpu")
+        graph = torch.fx.Graph()
+        node1 = graph.placeholder("mat1")
+        node1.meta["val"] = mat1
+        node2 = graph.placeholder("mat2")
+        node2.meta["val"] = mat2
+        return node1, node2
+
+    def _unbacked_bmm_nodes(self):
+        """bmm operands whose batch dim the shape env cannot bound.
+
+        The symbol has to come from the same shape env the fake tensors are
+        built in, or the two disagree about what is known.
+        """
+        shape_env = ShapeEnv()
+        size = shape_env.create_unbacked_symint()
+        torch._check_is_size(size)
+        return self._bmm_nodes(size, size, shape_env)
+
+    def _decomposes(self, node1, node2, options):
+        with torch._inductor.config.patch(post_grad_fusion_options=options):
+            return should_decompose_bmm(node1, node2)
+
+    def test_unprovable_batch_guards_by_default(self):
+        # Without the flag the threshold comparison is evaluated directly, which
+        # a batch dim the shape env cannot bound does not survive.
+        nodes = self._unbacked_bmm_nodes()
+        with self.assertRaises(GuardOnDataDependentSymNode):
+            self._decomposes(*nodes, self._DISABLED)
+
+    def test_batch_over_threshold_not_decomposed_by_default(self):
+        nodes = self._bmm_nodes(64, 64)
+        self.assertFalse(self._decomposes(*nodes, self._DISABLED))
+
+    def test_unprovable_batch_decomposed_when_enabled(self):
+        nodes = self._unbacked_bmm_nodes()
+        self.assertTrue(self._decomposes(*nodes, self._ENABLED))
+
+    def test_batch_size_irrelevant_when_enabled(self):
+        # Enabling the flag switches the criterion from batch size to operand
+        # size, so a large batch with small operands now decomposes.
+        nodes = self._bmm_nodes(64, 64)
+        self.assertTrue(self._decomposes(*nodes, self._ENABLED))
+
+    def test_large_operands_not_decomposed_when_enabled(self):
+        # The flag relaxes only the batch dim. M/K/N that are not known to be
+        # small must keep the extern bmm rather than become a plain reduction.
+        shape_env = ShapeEnv()
+        size = shape_env.create_unbacked_symint()
+        torch._check_is_size(size)
+        with FakeTensorMode(shape_env=shape_env):
+            mat1 = torch.empty(size, 4096, 65, device="cpu")
+            mat2 = torch.empty(size, 65, 5, device="cpu")
+        graph = torch.fx.Graph()
+        node1 = graph.placeholder("mat1")
+        node1.meta["val"] = mat1
+        node2 = graph.placeholder("mat2")
+        node2.meta["val"] = mat2
+        self.assertFalse(self._decomposes(node1, node2, self._ENABLED))
+
+    def test_batch_within_threshold_decomposed_either_way(self):
+        nodes = self._bmm_nodes(1, 1)
+        self.assertTrue(self._decomposes(*nodes, self._DISABLED))
+        self.assertTrue(self._decomposes(*nodes, self._ENABLED))
+
+    @torch._inductor.config.patch(
+        post_grad_fusion_options={
+            "decompose_mm_pass": {"bmm_skip_dynamic_shape_dim_check": True},
+        }
+    )
+    def test_decomposed_end_to_end_when_enabled(self):
+        counters.clear()
+        mat1 = torch.randn(64, 20, 65)
+        mat2 = torch.randn(64, 65, 5)
+        module = MyModule2()
+        traced = torch.compile(module)
+        torch.testing.assert_close(
+            module(mat1, mat2), traced(mat1, mat2), atol=1e-3, rtol=1e-3
+        )
+        self.assertEqual(counters["inductor"]["decompose_bmm"], 1)
         counters.clear()
 
 
