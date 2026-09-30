@@ -5640,6 +5640,28 @@ if HAS_CUDA_AND_TRITON:
 
             self.assertFalse(compiles.forward_is_cudagraph_partitioned)
 
+        @torch._functorch.config.patch("force_non_lazy_backward_lowering", True)
+        def test_uncaptured_backward_lowered_before_forward_runs(self):
+            # The backward is lowered right after the forward compiles, before the
+            # forward has ever run, so no CUDA Graph manager exists yet when the
+            # uncaptured backward is wrapped to signal the backward generation.
+            class Mod(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(16, 16)
+
+                def forward(self, x):
+                    return torch.sin(self.linear(x)).sum()
+
+            model = torch._dynamo.override_cudagraphs(fwd=True, bwd=False)(Mod().cuda())
+            compiled_model = torch.compile(model, mode="reduce-overhead")
+            x = torch.randn(16, 16, device="cuda", requires_grad=True)
+            compiled_model(x).backward()
+
+            manager = self.get_manager()
+            self.assertIsNotNone(manager)
+            self.assertFalse(manager.running_forwards_with_pending_backwards)
+
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_only(self):
             class Mod(torch.nn.Module):
