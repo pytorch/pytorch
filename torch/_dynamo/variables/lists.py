@@ -18,6 +18,7 @@ import collections
 import operator
 import sys
 from typing import Any, Optional, TYPE_CHECKING
+from typing_extensions import TypeIs
 
 import torch
 import torch.fx
@@ -50,6 +51,7 @@ from ..utils import (
     raise_args_mismatch,
     range_iterator,
     set_example_value,
+    specialize_symnode,
     tracked_repr,
     unpack_and_apply_fn,
     unpack_iterable,
@@ -99,10 +101,6 @@ def pylist_checkexact(obj: VariableTracker) -> bool:
     return obj.python_type() is list
 
 
-def pyslice_check(obj: VariableTracker) -> bool:
-    return issubclass(obj.python_type(), slice)
-
-
 def _cpython_has_simple_slice_bug() -> bool:
     # CPython gh-120384 fixed an array-out-of-bounds crash by moving the
     # PySequence_Fast check ahead of the step==1 branch in
@@ -127,6 +125,9 @@ class BaseListVariable(VariableTracker):
     # CPython's ValueError text for a failed .index(); tuple (and so namedtuple
     # and torch.Size) ignores the value while list/deque repr it.
     _index_not_found_msg = "tuple.index(x): x not in tuple"
+    # CPython's ValueError text for a failed .remove(); list never reprs the
+    # value, deque does before 3.14 (see DequeVariable).
+    _remove_not_found_msg = "list.remove(x): x not in list"
 
     @staticmethod
     def cls_for_instance(obj: object) -> type["BaseListVariable"]:
@@ -134,6 +135,7 @@ class BaseListVariable(VariableTracker):
 
     @staticmethod
     def cls_for(obj: Any) -> type:
+        # Exact-type dispatch; subclasses of these types are not supported.
         return {
             iter: ListIteratorVariable,
             list: ListVariable,
@@ -198,8 +200,6 @@ class BaseListVariable(VariableTracker):
                     IndexError, tx, args=["list index out of range"]
                 )
         elif pyslice_check(arg):
-            if not isinstance(arg, SliceVariable):
-                raise AssertionError("Expected arg to be a SliceVariable")
             index = arg.as_index_slice(tx)
             if index.step == 0:
                 raise_observed_exception(
@@ -463,13 +463,13 @@ class BaseListVariable(VariableTracker):
 
         return ConstantVariable.create(cmp_op(len(left), len(right)))
 
-    def list_index(
+    def _index_or_raise(
         self,
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
+        not_found_msg: str,
     ) -> VariableTracker:
-        check_positional(tx, "index", len(args), 1, 3)
         try:
             # Speedup trace times for constant data structures
             items = [item.as_python_constant() for item in self.items]
@@ -481,17 +481,23 @@ class BaseListVariable(VariableTracker):
                 )
             except ValueError:
                 raise_observed_exception(
-                    ValueError,
-                    tx,
-                    args=[self._index_not_found_msg.format(const_args[0])],
+                    ValueError, tx, args=[not_found_msg.format(const_args[0])]
                 )
         except AsPythonConstantNotImplementedError:
-            not_found_msg = ConstantVariable.create(self._index_not_found_msg)
             return tx.inline_user_function_return(
                 VariableTracker.build(tx, polyfills.index),
                 [self] + list(args),
-                {**kwargs, "not_found_msg": not_found_msg},
+                {**kwargs, "not_found_msg": ConstantVariable.create(not_found_msg)},
             )
+
+    def list_index(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        check_positional(tx, "index", len(args), 1, 3)
+        return self._index_or_raise(tx, args, kwargs, self._index_not_found_msg)
 
     def list_count(
         self,
@@ -530,7 +536,12 @@ class BaseListVariable(VariableTracker):
         # CPython has a series of checks to optimize list.extend for different data types
         # ref: https://github.com/python/cpython/blob/0fd4fd4496c557b68477a99c1c231a5870c91daf/Objects/listobject.c#L1389-L1444
         from .dicts import ConstDictVariable
-        from .sets import DictKeySetVariable, FrozensetVariable, SetVariable
+        from .sets import (
+            DictKeySetVariable,
+            FrozensetVariable,
+            OrderedSetVariable,
+            SetVariable,
+        )
         from .user_defined import UserDefinedObjectVariable
 
         sz = len(self.items)
@@ -540,7 +551,13 @@ class BaseListVariable(VariableTracker):
             self.items.extend(unpack_iterable(tx, args[0]))
         elif isinstance(
             args[0],
-            (ConstDictVariable, SetVariable, FrozensetVariable, DictKeySetVariable),
+            (
+                ConstDictVariable,
+                SetVariable,
+                FrozensetVariable,
+                DictKeySetVariable,
+                OrderedSetVariable,
+            ),
         ):
             items = [item.vt for item in args[0].items]
             self.items.extend(items)
@@ -647,8 +664,11 @@ class BaseListVariable(VariableTracker):
     ) -> VariableTracker | None:
         if not self.is_mutable():
             return None
-        idx = self.call_method(tx, "index", args, kwargs)
-        self.call_method(tx, "pop", [idx], {})
+        # list_remove deletes in place (list_ass_slice) rather than calling the
+        # public pop, whose arity differs per type (deque.pop takes no index).
+        idx = self._index_or_raise(tx, args, kwargs, self._remove_not_found_msg)
+        tx.output.side_effects.mutation(self)
+        del self.items[idx.as_python_constant()]
         return ConstantVariable.create(None)
 
     def list_sort(
@@ -734,29 +754,17 @@ class BaseListVariable(VariableTracker):
             raise_observed_exception(ValueError, tx, args=["list modified during sort"])
         return ConstantVariable.create(None)
 
-    def list_reversed(
-        self,
-        tx: "InstructionTranslatorBase",
-        args: list[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
-        # list/tuple/namedtuple __reversed__: reverse iterator over items.
-        return ListIteratorVariable(
-            list(reversed(self.items)),
-            mutation_type=ValueMutationNew(),
-        )
-
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/listobject.c#L3597-L3616
     tp_methods = {
         "index": Method(list_index),
         "count": Method(list_count),
-        "__reversed__": Method(list_reversed),
     }
 
 
 class RangeVariable(BaseListVariable):
     # PyRange_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/rangeobject.c#L767
     _cpython_type = range
+    _index_not_found_msg = "sequence.index(x): x not in sequence"
 
     def __init__(self, items: list[VariableTracker], **kwargs: Any) -> None:
         items_to_map = items
@@ -931,8 +939,6 @@ class RangeVariable(BaseListVariable):
             i = pynumber_index(tx, arg)
             return self.apply_index(tx, i.as_python_constant())
         elif pyslice_check(arg):
-            if not isinstance(arg, SliceVariable):
-                raise AssertionError("Expected arg to be a SliceVariable")
             return self.apply_slice(arg.as_index_slice(tx))
         raise_type_error(
             tx,
@@ -1092,7 +1098,20 @@ class RangeVariable(BaseListVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        x = args[0].as_python_constant()
+        # ref: https://github.com/python/cpython/blob/v3.13.5/Objects/rangeobject.c (range_index)
+        if maybe_get_python_type(args[0]) not in (int, bool):
+            # Specialize symbolic bounds before using the guarded iterator path.
+            iterator = RangeVariable(
+                [specialize_symnode(item) for item in self.items]
+            ).tp_iter_impl(tx)
+            if isinstance(iterator, variables.misc.DelayGraphBreakVariable):
+                return iterator.call_function(tx, [], {})
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.index),
+                [iterator, args[0]],
+                {"not_found_msg": ConstantVariable.create(self._index_not_found_msg)},
+            )
+        x = specialize_symnode(args[0]).as_python_constant()
         start, stop, step = self.start(), self.stop(), self.step()
         in_range = (start <= x < stop) if step > 0 else (stop < x <= start)
         if in_range and ((x - start) % step) == 0:
@@ -1103,8 +1122,6 @@ class RangeVariable(BaseListVariable):
             args=[f"{x} is not in range"],
         )
 
-    # Reuse BaseListVariable's table, overriding index/count with range's
-    # arithmetic implementations.
     def range_reversed(
         self,
         tx: "InstructionTranslatorBase",
@@ -1120,6 +1137,7 @@ class RangeVariable(BaseListVariable):
         new_step = -step
         return RangeIteratorVariable(new_start, 0, new_step, length)
 
+    # Override BaseListVariable's methods with range-specific implementations.
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/rangeobject.c#L781-L787
     tp_methods = {
         "count": Method(count),
@@ -1364,6 +1382,18 @@ class ListVariable(BaseListVariable):
 
         raise_type_error(tx, f"unhashable type: '{self.python_type_name()}'")
 
+    def list_reversed(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # list __reversed__: reverse iterator over items.
+        return ListReverseIteratorVariable(
+            source_seq=self,
+            mutation_type=ValueMutationNew(),
+        )
+
     # ref: https://github.com/python/cpython/blob/c3aefdb9eff0734058376b96fc86d89b1a345d75/Objects/listobject.c#L3597-L3616
     tp_methods = {
         "append": Method(BaseListVariable.list_append),
@@ -1375,6 +1405,7 @@ class ListVariable(BaseListVariable):
         "reverse": Method(BaseListVariable.list_reverse),
         "remove": Method(BaseListVariable.list_remove),
         "sort": Method(BaseListVariable.list_sort),
+        "__reversed__": Method(list_reversed),
     }
 
 
@@ -1384,6 +1415,11 @@ class DequeVariable(BaseListVariable):
     _cpython_type = collections.deque
     _index_not_found_msg = (
         "deque.index(x): x not in deque"
+        if sys.version_info >= (3, 14)
+        else "{!r} is not in deque"
+    )
+    _remove_not_found_msg = (
+        "deque.remove(x): x not in deque"
         if sys.version_info >= (3, 14)
         else "{!r} is not in deque"
     )
@@ -1821,6 +1857,19 @@ class DequeVariable(BaseListVariable):
         self.state += 1
         return result
 
+    def remove(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        # deque_remove deletes through deque_del_item, which bumps state.
+        result = BaseListVariable.list_remove(self, tx, args, kwargs)
+        if result is None:
+            return None
+        self.state += 1
+        return result
+
     def deque_reversed(
         self,
         tx: "InstructionTranslatorBase",
@@ -1919,7 +1968,7 @@ class DequeVariable(BaseListVariable):
         "clear": Method(clear),
         "rotate": Method(_rotate),
         "reverse": Method(BaseListVariable.list_reverse),
-        "remove": Method(BaseListVariable.list_remove),
+        "remove": Method(remove),
         "copy": Method(copy),
         "__copy__": Method(copy),
         "__reversed__": Method(deque_reversed),
@@ -2010,6 +2059,304 @@ class TupleVariable(BaseListVariable):
             is_fake = is_fake or fake
             raw_hashes.append(RawHash(h))
         return hash(tuple(raw_hashes)), is_fake
+
+
+class ByteArrayVariable(VariableTracker):
+    # PyByteArray_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+    # Missing slots: tp_as_sequence.sq_ass_item, tp_as_mapping.mp_ass_subscript
+    _cpython_type = bytearray
+    _index_not_found_msg = (
+        "bytearray.index(x): x not in bytearray"
+        if sys.version_info >= (3, 14)
+        else "{!r} is not in bytearray"
+    )
+
+    _nonvar_fields = {
+        "data",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(self, data: bytearray, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        if not isinstance(data, bytearray):
+            raise AssertionError(f"data must be a bytearray, got {type(data).__name__}")
+        self.data = data
+
+    def python_type(self) -> type[bytearray]:  # type: ignore[type-arg]
+        return bytearray
+
+    def as_python_constant(self) -> bytearray:
+        return bytearray(self.data)
+
+    def as_proxy(self) -> bytearray:
+        return self.data
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(length={len(self.data)})"
+
+    def mp_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        if pyindex_check(maybe_get_python_type(key)):
+            index = pynumber_as_ssize_t(tx, key).as_python_constant()
+            try:
+                return ConstantVariable.create(self.data[index])
+            except IndexError as e:
+                raise_observed_exception(IndexError, tx, args=list(e.args))
+        elif pyslice_check(key):
+            index = key.as_index_slice(tx)
+            if index.step == 0:
+                raise_observed_exception(
+                    ValueError, tx, args=["slice step cannot be zero"]
+                )
+            return ByteArrayVariable(
+                bytearray(self.data[index]),
+                source=None,
+                mutation_type=ValueMutationNew() if self.mutation_type else None,
+            )
+        else:
+            raise_type_error(
+                tx,
+                f"bytearray indices must be integers or slices, "
+                f"not {key.python_type_name()}",
+            )
+
+    def sq_item_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+    ) -> VariableTracker:
+        index = key.as_python_constant()
+        try:
+            return ConstantVariable.create(self.data[index])
+        except IndexError as e:
+            raise_observed_exception(IndexError, tx, args=list(e.args))
+
+    def sq_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return VariableTracker.build(tx, len(self.data))
+
+    mp_length_impl = sq_length_impl
+
+    def sq_contains_impl(
+        self, tx: "InstructionTranslatorBase", item: VariableTracker
+    ) -> VariableTracker:
+        if item.is_python_constant():
+            search = item.as_python_constant()
+            try:
+                return ConstantVariable.create(search in self.data)
+            except (TypeError, ValueError) as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+        return super().sq_contains_impl(tx, item)
+
+    def sq_repeat_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        count: VariableTracker,
+    ) -> VariableTracker:
+        # bytearray_repeat: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        n = count.as_python_constant()
+        try:
+            new_data = self.data * n
+        except (MemoryError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ByteArrayVariable(new_data, mutation_type=ValueMutationNew())
+
+    def sq_inplace_repeat_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        count: VariableTracker,
+    ) -> VariableTracker:
+        # bytearray_irepeat: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            raise AssertionError(
+                f"sq_inplace_repeat_impl reached an immutable "
+                f"{type(self).__name__}; every construction site should set "
+                "mutation_type."
+            )
+        n = count.as_python_constant()
+        try:
+            new_data = self.data * n
+        except (MemoryError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        # New buffer — do not mutate a sourced live object during tracing.
+        self.data = new_data
+        return self
+
+    def _concat_operand(
+        self, tx: "InstructionTranslatorBase", other: VariableTracker
+    ) -> bytearray:
+        if isinstance(other, ByteArrayVariable):
+            return other.data
+        if other.is_python_constant():
+            const = other.as_python_constant()
+            if isinstance(const, (bytes, bytearray)):
+                return bytearray(const)
+        raise_type_error(
+            tx,
+            f"can only concatenate bytearray (not "
+            f"'{other.python_type_name()}') to bytearray",
+        )
+
+    def sq_concat_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # bytearray_concat: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        return ByteArrayVariable(
+            self.data + self._concat_operand(tx, other),
+            mutation_type=ValueMutationNew(),
+        )
+
+    def sq_inplace_concat_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        # bytearray_iconcat: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if not self.is_mutable():
+            raise AssertionError(
+                f"sq_inplace_concat_impl reached an immutable "
+                f"{type(self).__name__}; every construction site should set "
+                "mutation_type."
+            )
+        other_data = self._concat_operand(tx, other)
+        tx.output.side_effects.mutation(self)
+        # Assign a new buffer so tracing never mutates a sourced live object.
+        # Side-effect replay writes the final contents back via old[:] = new.
+        self.data = self.data + other_data
+        return self
+
+    def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return ByteArrayIteratorVariable(self, 0, mutation_type=ValueMutationNew())
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        return VariableTracker.build(tx, repr(self.data))
+
+    def nb_remainder_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        reverse: bool = False,
+    ) -> VariableTracker:
+        # bytearray_mod: https://github.com/python/cpython/blob/v3.13.0/Objects/bytearrayobject.c
+        if reverse:
+            return ConstantVariable.create(NotImplemented)
+        if other.is_python_constant():
+            try:
+                result = self.data % other.as_python_constant()
+            except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            return ByteArrayVariable(
+                bytearray(result), mutation_type=ValueMutationNew()
+            )
+        return tx.inline_user_function_return(
+            VariableTracker.build(tx, polyfills.operator.mod),
+            [self, other],
+            {},
+        )
+
+    def nb_inplace_remainder_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+    ) -> VariableTracker:
+        if not self.is_mutable():
+            raise AssertionError(
+                f"nb_inplace_remainder_impl reached an immutable "
+                f"{type(self).__name__}; every construction site should set "
+                "mutation_type."
+            )
+        if not other.is_python_constant():
+            return ConstantVariable.create(NotImplemented)
+        try:
+            result = self.data % other.as_python_constant()
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        tx.output.side_effects.mutation(self)
+        # New buffer — do not mutate a sourced live object during tracing.
+        self.data = bytearray(result)
+        return self
+
+    def tp_richcompare_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        other: VariableTracker,
+        op: str,
+    ) -> VariableTracker:
+        from .object_protocol import python_constant_richcompare_impl
+
+        return python_constant_richcompare_impl(self, tx, other, op)
+
+    def bytearray_index(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        check_positional(tx, "index", len(args), 1, 3)
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            try:
+                return VariableTracker.build(
+                    tx, self.data.index(*const_args, **const_kwargs)
+                )
+            except ValueError as e:
+                raise_observed_exception(
+                    ValueError,
+                    tx,
+                    args=list(e.args),
+                )
+        except AsPythonConstantNotImplementedError:
+            not_found_msg = ConstantVariable.create(self._index_not_found_msg)
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.index),
+                [self] + list(args),
+                {**kwargs, "not_found_msg": not_found_msg},
+            )
+
+    def bytearray_count(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        check_positional(tx, "count", len(args), 1, 3)
+        no_keywords(tx, "count", kwargs)
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            return VariableTracker.build(tx, self.data.count(*const_args))
+        except AsPythonConstantNotImplementedError:
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, bytearray.count),
+                [self] + list(args),
+                kwargs,
+            )
+
+    tp_methods = {
+        "index": Method(bytearray_index),
+        "count": Method(bytearray_count),
+    }
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.append_output(codegen.create_load_python_module(bytearray))  # type: ignore[arg-type]
+        )
+        codegen.append_output(codegen.create_load_const(bytes(self.data)))
+        codegen.extend_output(create_call_function(1, False))
+
+    def reconstruct_pycode(self, codegen: "PyCodegen") -> str:
+        return f"bytearray({bytes(self.data)!r})"
+
+    def is_hashable(self) -> bool:
+        return False
+
+    def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
+        raise_type_error(tx, "unhashable type: 'bytearray'")
 
 
 class SizeVariable(TupleVariable):
@@ -2409,6 +2756,10 @@ class SliceVariable(VariableTracker):
     tp_methods = {"indices": Method(indices)}
 
 
+def pyslice_check(obj: VariableTracker) -> TypeIs[SliceVariable]:
+    return isinstance(obj, SliceVariable)
+
+
 class BaseListIteratorVariable(IteratorVariable):
     # In CPython list_iterator, tuple_iterator, _deque_iterator, and
     # _deque_reverse_iterator are siblings, not subclasses of one another, so
@@ -2465,10 +2816,33 @@ class BaseListIteratorVariable(IteratorVariable):
     def unpack_var_sequence(
         self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
-        if self.is_exhausted:
+        if self.is_exhausted or self.index >= len(self.items):
+            self.is_exhausted = True
             return []
+        if not self.is_mutable():
+            raise AssertionError("list iterator must be mutable to iterate")
+        tx.output.side_effects.mutation(self)
         self.is_exhausted = True
-        return list(self.items[self.index :])
+        res = list(self.items[self.index :])
+        self.index = len(self.items)
+        return res
+
+    def length_hint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # listiter_len/tupleiter_len: items left, floored at 0; an exhausted
+        # iterator permanently reports 0.
+        # ref: https://github.com/python/cpython/blob/v3.13.3/Objects/listobject.c#L4100-L4108
+        #
+        # A forward iterator aliases the source list and so sees its mutations.
+        # `list_reversed` copies the items instead, so a shrink of the source
+        # below the current index is not reflected here.
+        if self.is_exhausted:
+            return ConstantVariable.create(0)
+        return ConstantVariable.create(max(len(self.items) - self.index, 0))
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # starting in 3.15 GET_ITER creates virtual iterators (see https://github.com/python/cpython/issues/145668), so use builtin iter instead
@@ -2483,6 +2857,8 @@ class BaseListIteratorVariable(IteratorVariable):
         codegen.foreach(remaining_items)
         codegen.append_output(create_build_tuple(len(remaining_items)))
         codegen.extend_output(create_call_function(1, False))
+
+    tp_methods = {"__length_hint__": Method(length_hint)}
 
 
 class ListIteratorVariable(BaseListIteratorVariable):
@@ -2501,6 +2877,75 @@ class TupleIteratorVariable(BaseListIteratorVariable):
         if self.index > 0:
             raise NotImplementedError
         return iter(tuple(x.as_python_constant() for x in self.items))
+
+
+class ByteArrayIteratorVariable(IteratorVariable):
+    _cpython_type = type(iter(bytearray()))
+
+    _nonvar_fields = {
+        "parent",
+        "index",
+        "is_exhausted",
+        *IteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        parent: ByteArrayVariable,
+        index: int = 0,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.parent = parent
+        self.index = index
+        self.is_exhausted = False
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(length={len(self.parent.data)}, "
+            f"index={repr(self.index)})"
+        )
+
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if not self.is_mutable():
+            raise AssertionError("bytearray iterator must be mutable to iterate")
+        if self.is_exhausted:
+            raise_observed_exception(StopIteration, tx)
+        data = self.parent.data
+        if self.index >= len(data):
+            self.is_exhausted = True
+            raise_observed_exception(StopIteration, tx)
+
+        tx.output.side_effects.mutation(self)
+        value = ConstantVariable.create(data[self.index])
+        self.index += 1
+        return value
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        return VariableTracker.build(tx, hasattr(iter(bytearray()), name))
+
+    def python_type(self) -> type:
+        return type(iter(bytearray()))
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        # Match ListIteratorVariable: rebuild from remaining items so iterator
+        # position survives graph breaks (iter(parent) would restart at index 0).
+        codegen.add_push_null(
+            lambda: codegen.append_output(codegen.create_load_python_module(iter))  # type: ignore[arg-type]
+        )
+        codegen.add_push_null(
+            lambda: codegen.append_output(codegen.create_load_python_module(bytearray))  # type: ignore[arg-type]
+        )
+        data = self.parent.data
+        if self.is_exhausted or self.index >= len(data):
+            remaining = b""
+        else:
+            remaining = bytes(data[self.index :])
+        codegen(ConstantVariable.create(remaining))
+        codegen.extend_output(create_call_function(1, False))  # bytearray(remaining)
+        codegen.extend_output(create_call_function(1, False))  # iter(result)
 
 
 class DequeIteratorVariable(BaseListIteratorVariable):
@@ -2525,6 +2970,10 @@ class DequeIteratorVariable(BaseListIteratorVariable):
 
     def _check_mutation(self, tx: "InstructionTranslatorBase") -> None:
         if self.source_deque.state != self.saved_state:
+            # dequeiter_next zeroes the counter before raising, so
+            # __length_hint__ reports 0 afterwards.
+            # ref: https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L1936-L1941
+            self.is_exhausted = True
             raise_observed_exception(
                 RuntimeError, tx, args=["deque mutated during iteration"]
             )
@@ -2561,6 +3010,10 @@ class DequeReverseIteratorVariable(BaseListIteratorVariable):
 
     def _check_mutation(self, tx: "InstructionTranslatorBase") -> None:
         if self.source_deque.state != self.saved_state:
+            # dequereviter_next zeroes the counter before raising, so
+            # __length_hint__ reports 0 afterwards.
+            # ref: https://github.com/python/cpython/blob/v3.13.3/Modules/_collectionsmodule.c#L2085-L2090
+            self.is_exhausted = True
             raise_observed_exception(
                 RuntimeError, tx, args=["deque mutated during iteration"]
             )
@@ -2571,6 +3024,115 @@ class DequeReverseIteratorVariable(BaseListIteratorVariable):
 
     def python_type(self) -> type:
         return type(reversed(collections.deque()))
+
+
+class ListReverseIteratorVariable(IteratorVariable):
+    # PyListRevIter_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/listobject.c#L3960
+    _cpython_type = type(reversed([]))
+
+    _nonvar_fields = {
+        "index",
+        "it_index",
+        "is_exhausted",
+        *IteratorVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        source_seq: VariableTracker,
+        it_index: int | None = None,
+        index: int = 0,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        if it_index is None:
+            it_index = len(source_seq.items) - 1  # type: ignore[attr-defined]
+        self.source_seq = source_seq
+        self.it_index = it_index
+        self.index = index
+        self.is_exhausted = False
+
+    def __repr__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(source_seq={self.source_seq!r}, "
+            f"it_index={self.it_index!r}, index={self.index!r})"
+        )
+
+    def python_type(self) -> type:
+        return type(reversed([]))
+
+    def as_python_constant(self) -> Any:
+        raise NotImplementedError
+
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> ConstantVariable:
+        return ConstantVariable.create(hasattr(reversed([]), name))
+
+    def tp_iternext_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if not self.is_mutable():
+            raise AssertionError("list reverse iterator must be mutable to iterate")
+        if (
+            self.is_exhausted
+            or self.it_index < 0
+            or self.it_index >= len(self.source_seq.items)  # type: ignore[attr-defined]
+        ):
+            self.is_exhausted = True
+            raise_observed_exception(StopIteration, tx)
+
+        tx.output.side_effects.mutation(self)
+        item = self.source_seq.items[self.it_index]  # type: ignore[attr-defined]
+        self.it_index -= 1
+        self.index += 1
+        return item
+
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
+        if (
+            self.is_exhausted
+            or self.it_index < 0
+            or self.it_index >= len(self.source_seq.items)  # type: ignore[attr-defined]
+        ):
+            self.is_exhausted = True
+            return []
+        if not self.is_mutable():
+            raise AssertionError("list reverse iterator must be mutable to iterate")
+        tx.output.side_effects.mutation(self)
+        self.is_exhausted = True
+        remaining = [
+            self.source_seq.items[i]  # type: ignore[attr-defined]
+            for i in range(self.it_index, -1, -1)
+        ]
+        self.index += len(remaining)
+        self.it_index = -1
+        return remaining
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        if self.is_exhausted or self.it_index != len(self.source_seq.items) - 1:  # type: ignore[attr-defined]
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
+                    "torch._dynamo.utils", "list_reverseiterator_setstate"
+                )
+            )
+            codegen.add_push_null(
+                lambda: codegen.append_output(
+                    codegen.create_load_python_module(reversed)  # type: ignore[arg-type]
+                )
+            )
+            codegen(self.source_seq)
+            codegen.extend_output(create_call_function(1, False))
+            target_index = -1 if self.is_exhausted else self.it_index
+            codegen.append_output(codegen.create_load_const(target_index))
+            codegen.extend_output(create_call_function(2, False))
+        else:
+            codegen.add_push_null(
+                lambda: codegen.append_output(
+                    codegen.create_load_python_module(reversed)  # type: ignore[arg-type]
+                )
+            )
+            codegen(self.source_seq)
+            codegen.extend_output(create_call_function(1, False))
 
 
 class RangeIteratorVariable(IteratorVariable):
