@@ -83,6 +83,7 @@ from .utils import (
     cmp,
     decompose_index,
     device_need_guard,
+    fx_node_crosses_devices,
     get_current_backend,
     get_device_tflops,
     get_dtype_size,
@@ -287,6 +288,16 @@ class MixOrderReduction:
             if isinstance(subnode, SchedulerNode)
             and subnode.is_reduction()
             and isinstance(subnode.node, ComputedBuffer)
+        )
+
+    @staticmethod
+    def supports_noncontiguous_reductions(node: BaseSchedulerNode) -> bool:
+        return all(
+            subnode.node.get_reduction_type() in {"sum", "prod"}  # type: ignore[union-attr]
+            and subnode.node.get_dtype()  # type: ignore[union-attr]
+            in {torch.float16, torch.bfloat16, torch.float32}
+            for subnode in node.get_nodes()
+            if subnode.is_reduction()
         )
 
     @classmethod
@@ -527,18 +538,7 @@ class MixOrderReduction:
         if MixOrderReduction.is_split_reduction(contiguous_node):
             return False
 
-        # Other reduction types like max/min is not supported yet.
-        # There are no real use case as well.
-        out = all(
-            subnode.node.get_reduction_type()  # type: ignore[union-attr]
-            in {
-                "sum",
-                "prod",
-            }
-            for subnode in other_node.get_nodes()
-            if subnode.is_reduction()
-        )
-        return out
+        return cls.supports_noncontiguous_reductions(other_node)
 
     @classmethod
     def are_mix_order_reductions(
@@ -4530,9 +4530,10 @@ class FusedMixOrderReductions(FusedSchedulerNode):
 
         # Since node1 is from the current mix order reduction, if node1 is
         # contiguous, the fused node should also be contiguous.
-        if MixOrderReduction.is_contiguous_node(
-            node1
-        ) and not MixOrderReduction.is_contiguous_node(node2):
+        if MixOrderReduction.is_contiguous_node(node1):
+            if not MixOrderReduction.is_contiguous_node(node2):
+                return False
+        elif not MixOrderReduction.supports_noncontiguous_reductions(node2):
             return False
 
         def _get_ancestors(nodes: tuple[BaseSchedulerNode, ...]) -> OrderedSet[str]:
@@ -7483,7 +7484,7 @@ class Scheduler:
 
             from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-            bench_epilogue = config.benchmark_epilogue_fusion
+            benchmark_template_fusion = config.benchmark_template_fusion
             num_fusible_callers = sum(
                 isinstance(c, (TritonTemplateCallerBase, NVUniversalGemmCaller))
                 for c in multi_node.choices
@@ -7491,8 +7492,9 @@ class Scheduler:
             # Track if the choice timings can be retrieved async after compilation
             get_choice_timings_async = (
                 use_pipelined_autotuning()
-                and not bench_epilogue
-                and num_fusible_callers <= config.max_epilogue_benchmarked_choices
+                and not benchmark_template_fusion
+                and num_fusible_callers
+                <= config.max_template_fusion_benchmarked_choices
             )
 
             ms1, ms2 = float("inf"), float("inf")
@@ -7505,7 +7507,7 @@ class Scheduler:
                     choice_timings.items(), key=operator.itemgetter(1)
                 )
             else:
-                # Use 0 for unfused time, won't be used as bench_epilogue
+                # Use 0 for unfused time, won't be used as benchmark_template_fusion
                 # is guaranteed to be False here
                 choice_timings_iter = [(c, 0) for c in multi_node.choices]
 
@@ -7584,7 +7586,7 @@ class Scheduler:
                     multi_node.finalize_as_triton_caller(best)
                 return FusionResult.fuse(True)
 
-            if bench_epilogue:
+            if benchmark_template_fusion:
                 ms2, path2 = (
                     self.benchmark_fused_nodes(node_list_2)
                     if epilogue_fusion
@@ -7632,11 +7634,11 @@ class Scheduler:
                 ):
                     continue
 
-                if bench_epilogue and unfused_time >= ms1 + ms2:
+                if benchmark_template_fusion and unfused_time >= ms1 + ms2:
                     break
 
                 template_choices += 1
-                if template_choices > config.max_epilogue_benchmarked_choices:
+                if template_choices > config.max_template_fusion_benchmarked_choices:
                     break
 
                 try:
@@ -7698,7 +7700,7 @@ class Scheduler:
                     try:
                         if future is not None:
                             res = future.result()
-                        elif not bench_epilogue:
+                        elif not benchmark_template_fusion:
                             if hasattr(mod_fused, "triton_"):
                                 res = mod_fused.triton_
                                 res.precompile()
@@ -7718,7 +7720,7 @@ class Scheduler:
                             )
                         continue
 
-                    if bench_epilogue:
+                    if benchmark_template_fusion:
                         is_nvgemm_choice = isinstance(choice, NVUniversalGemmCaller)
                         swap_ctx = (
                             # pyrefly: ignore [missing-attribute]
@@ -7775,11 +7777,11 @@ class Scheduler:
                                 ms_fused_choice = choice
                                 break
 
-                if bench_epilogue:
+                if benchmark_template_fusion:
                     log_fusion(min_ms_fused, ms1, ms2)
 
                 if (
-                    not bench_epilogue or min_ms_fused < (ms1 + ms2)
+                    not benchmark_template_fusion or min_ms_fused < (ms1 + ms2)
                 ) and ms_fused_choice is not None:
                     is_nvgemm = isinstance(ms_fused_choice, NVUniversalGemmCaller)
                     if is_nvgemm:
@@ -7795,7 +7797,7 @@ class Scheduler:
                         # pyrefly: ignore [missing-attribute]
                         multi_node.finalize_as_triton_caller(ms_fused_choice)
 
-                    if bench_epilogue:
+                    if benchmark_template_fusion:
                         # pyrefly: ignore [missing-attribute]
                         multi_node._choice_timings[None] = new_timings
                     return True
@@ -10934,10 +10936,12 @@ class Scheduler:
             relevant_reading_nodes = node1.snodes
         num_concurrent_reads = 0
         for reading_node in relevant_reading_nodes:
+            # A read of an earlier mutation of the same buffer (the output of an
+            # index_put_ into it, say) reads the same memory under another name.
             relevant_reads = [
                 read
                 for read in reading_node.read_writes.reads
-                if read.name == real_name
+                if self.mutation_real_name.get(read.name, read.name) == real_name
             ]
             if not relevant_reads:
                 continue
@@ -11712,8 +11716,14 @@ class Scheduler:
         if not node.is_gpu():
             return f"{node.get_device()} ops"
 
-        if isinstance(node.node, ir.DeviceCopy):
-            return "DeviceCopy ops"
+        # Decided on the FX node so that MultiOutput children, which share their
+        # parent's fx_node, are split together with it.
+        if isinstance(ir_node, ir.DeviceCopy) or (
+            isinstance(ir_node, ir.ExternKernel)
+            and (fx_node := getattr(ir_node, "fx_node", None)) is not None
+            and fx_node_crosses_devices(fx_node)
+        ):
+            return "cross-device ops"
 
         if isinstance(node.node, ir.Switch):
             return "Switch ops"

@@ -11,7 +11,7 @@ from __future__ import annotations
 import enum
 import operator
 from collections.abc import Iterable
-from typing import Any, Literal, overload, TYPE_CHECKING
+from typing import Any, cast, Literal, overload, TYPE_CHECKING
 
 import torch
 from torch._dynamo.source import GetItemSource
@@ -25,7 +25,7 @@ from ..utils import (
     raise_args_mismatch,
     unpack_iterable,
 )
-from .base import ValueMutationNew, VariableTracker
+from .base import _RICHCOMPARE_OPS, ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
@@ -114,7 +114,7 @@ class ConstantVariable(VariableTracker):
 
         return ConstantVariable(value, **kwargs)
 
-    def __init__(self, value: Any, **kwargs: Any) -> None:
+    def __init__(self, value: Any = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         if not ConstantVariable.is_base_literal(value):
             raise AssertionError(
@@ -232,11 +232,17 @@ class ConstantVariable(VariableTracker):
         """Dynamo tracing rule for long_hash, float_hash, unicode_hash, etc."""
         from torch.fx.experimental.proxy_tensor import _coor_enabled
 
+        from .user_defined import _CONSTANT_BASE_TYPES
+
         if isinstance(self.value, torch.device) and _coor_enabled():
             # Drop the index so an explicit cuda:N lands in the same bucket as a
             # rank-relative CurrentDeviceVariable; see its hash_impl.
             return hash(torch.device(self.value.type)), False
-        return hash(self.value), False
+
+        value_type = cast(Any, type(self.value))
+        mro = value_type.__mro__
+        base = next((c for c in mro if c in _CONSTANT_BASE_TYPES), value_type)
+        return base.__hash__(self.value), False
 
     def tp_richcompare_impl(
         self, tx: InstructionTranslatorBase, other: VariableTracker, op: str
@@ -383,7 +389,7 @@ class ConstantVariable(VariableTracker):
             if name in ("split", "rsplit", "splitlines"):
                 return ConstantVariable.create(result, mutation_type=ValueMutationNew())
             return ConstantVariable.create(result)
-        elif isinstance(self.value, (float, int)) and hasattr(self.value, name):
+        elif istype(self.value, (float, int)) and hasattr(self.value, name):
             if not (args or kwargs):
                 try:
                     return ConstantVariable.create(getattr(self.value, name)())
@@ -395,10 +401,16 @@ class ConstantVariable(VariableTracker):
                     )
             # operator's own module attributes (__format__, __reduce_ex__, ...)
             # are not operators; only its aliases like `__add__ = add` are.
-            is_operator = name in operator.__dict__ and len(args) == 1 and not kwargs
+            is_operator = (
+                name in operator.__dict__
+                and name not in _RICHCOMPARE_OPS
+                and len(args) == 1
+                and not kwargs
+            )
             # __round__ is handled below: builtin round() passes ndigits=None by
-            # keyword, which the C method rejects.
-            if not is_operator and name != "__round__":
+            # keyword, which the C method rejects. Rich comparisons can return
+            # NotImplemented and go through the generic path.
+            if not is_operator and name not in ("__round__", *_RICHCOMPARE_OPS):
                 try:
                     result = getattr(self.value, name)(*const_args, **const_kwargs)
                 except Exception as e:
