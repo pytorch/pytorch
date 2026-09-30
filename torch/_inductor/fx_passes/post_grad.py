@@ -23,6 +23,7 @@ from torch._inductor.custom_graph_pass import (
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import (
+    canonicalize_dim,
     is_boolean_dtype,
     is_expandable_to,
     is_integer_dtype,
@@ -1250,11 +1251,8 @@ def is_valid_splitwithsizes_cat(match):
     # and its positive twin name the same axis
     split_dim = get_arg_value(split_node, 2, "dim")
     cat_dim = get_arg_value(cat_node, 1, "dim")
-    # rank comes from the split's input: the split node's own meta value is
-    # a list of per-part tensors, not a Tensor
-    if not _dim_matches(
-        split_dim, cat_dim, _meta_rank(get_arg_value(split_node, 0))
-    ):
+    rank = cat_node.meta["val"].ndim
+    if _canonicalize_dim_arg(rank, split_dim) != _canonicalize_dim_arg(rank, cat_dim):
         return False
     get_item_args = OrderedSet(
         get_arg_value(get_item_node, 1) for get_item_node in get_item_nodes
@@ -1277,24 +1275,9 @@ def is_valid_splitwithsizes_cat(match):
     return True
 
 
-def _meta_rank(node: torch.fx.Node):
-    """Rank of the node's fake-tensor meta value, when present."""
-    val = node.meta.get("val")
-    return val.ndim if isinstance(val, torch.Tensor) else None
-
-
-def _dim_matches(split_dim, cat_dim, rank):
-    """True when two dim arguments name the same axis, normalizing a negative
-    dim against the input rank (``-1`` and ``rank - 1`` are the same axis)."""
-    if split_dim == cat_dim:
-        return True
-    if not isinstance(split_dim, int) or not isinstance(cat_dim, int):
-        return False
-    if rank is None:
-        return False
-    norm_split = split_dim + rank if split_dim < 0 else split_dim
-    norm_cat = cat_dim + rank if cat_dim < 0 else cat_dim
-    return norm_split == norm_cat
+def _canonicalize_dim_arg(rank, dim):
+    # a dim left at its default comes through as None; that default is 0
+    return canonicalize_dim(rank, dim if dim is not None else 0)
 
 
 def same_meta(node1: torch.fx.Node, node2: torch.fx.Node):
@@ -1956,30 +1939,33 @@ def decompose_auto_functionalized(graph):
         raise AssertionError("auto_functionalized_v2 was not removed")
 
 
-@register_lowering_pattern(
-    CallFunction(
-        aten.cat,
-        ListOf(
-            CallFunction(
-                operator.getitem,
+# see cat_splitwithsizes above for why both arities are registered
+for _cat_arity, _split_arity in itertools.product((1, 2), (2, 3)):
+
+    @register_lowering_pattern(
+        CallFunction(
+            aten.cat,
+            ListOf(
                 CallFunction(
-                    aten.split_with_sizes,
-                    KeywordArg("input_"),
+                    operator.getitem,
+                    CallFunction(
+                        aten.split_with_sizes,
+                        KeywordArg("input_"),
+                        Ignored(),
+                        *([Ignored()] * (_split_arity - 2)),
+                        _users=MULTIPLE,
+                    ),
                     Ignored(),
-                    Ignored(),
-                    _users=MULTIPLE,
                 ),
-                Ignored(),
             ),
+            *([Ignored()] * (_cat_arity - 1)),
         ),
-        Ignored(),
-    ),
-    pass_number=2,
-    extra_check=is_valid_splitwithsizes_cat,
-    output_metadata_is_input="input_",
-)
-def splitwithsizes_cat_replace(match, input_):
-    return input_
+        pass_number=2,
+        extra_check=is_valid_splitwithsizes_cat,
+        output_metadata_is_input="input_",
+    )
+    def splitwithsizes_cat_replace(match, input_):
+        return input_
 
 
 def is_valid_cat_splitwithsizes(match):
@@ -1996,18 +1982,12 @@ def is_valid_cat_splitwithsizes(match):
     cat_inputs = list(get_arg_value(cat_node, 0))
 
     # the dim of the cat and split should match; a negative dim and its
-    # positive twin name the same axis
-    dim = get_arg_value(split_node, 2, "dim")
-    cat_dim = get_arg_value(cat_node, 1, "dim")
-    rank = next(
-        (
-            c.meta["val"].ndim
-            for c in cat_inputs
-            if isinstance(c.meta.get("val"), torch.Tensor)
-        ),
-        None,
-    )
-    if not _dim_matches(dim, cat_dim, rank):
+    # positive twin name the same axis. rank comes from the cat output since
+    # inputs can be legacy 1D empties
+    rank = cat_node.meta["val"].ndim
+    dim = _canonicalize_dim_arg(rank, get_arg_value(split_node, 2, "dim"))
+    cat_dim = _canonicalize_dim_arg(rank, get_arg_value(cat_node, 1, "dim"))
+    if dim != cat_dim:
         return False
 
     split_sizes = get_arg_value(split_node, 1, "split_sizes")
@@ -2028,24 +2008,28 @@ def is_valid_cat_splitwithsizes(match):
     return True
 
 
-@register_lowering_pattern(
-    CallFunction(
-        aten.split_with_sizes,
+# dim defaults to 0 for both ops, and aot autograd does not fill in defaults,
+# so every omitted trailing dim arg needs its own pattern arity
+for _split_arity, _cat_arity in itertools.product((2, 3), (1, 2)):
+
+    @register_lowering_pattern(
         CallFunction(
-            aten.cat,
-            KeywordArg("input_"),
+            aten.split_with_sizes,
+            CallFunction(
+                aten.cat,
+                KeywordArg("input_"),
+                *([Ignored()] * (_cat_arity - 1)),
+                _users=MULTIPLE,
+            ),
             Ignored(),
-            _users=MULTIPLE,
+            *([Ignored()] * (_split_arity - 2)),
         ),
-        Ignored(),
-        Ignored(),
-    ),
-    pass_number=2,
-    extra_check=is_valid_cat_splitwithsizes,
-    output_metadata_is_input="input_",
-)
-def cat_splitwithsizes_replace(match, input_):
-    return input_
+        pass_number=2,
+        extra_check=is_valid_cat_splitwithsizes,
+        output_metadata_is_input="input_",
+    )
+    def cat_splitwithsizes_replace(match, input_):
+        return input_
 
 
 # reciprocal(sqrt(x)) -> rsqrt(x): an unconditional algebraic identity

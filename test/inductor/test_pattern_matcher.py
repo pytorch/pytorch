@@ -1272,7 +1272,6 @@ class TestPatternMatcher(TestCase):
         ]
         self.common(fn, args, 0, 0)
 
-
     def test_cat_splitwithsizes_negative_dim(self):
         # cat on dim=1, split on dim=-1 name the same axis on a 2D input:
         # the pair must be eliminated exactly as with positive dims (#196905).
@@ -1300,20 +1299,47 @@ class TestPatternMatcher(TestCase):
 
         self.common(fn, args, 1, 2)
 
-        # a true mismatch still rejects: cat dim 1 vs split dim 0
+        # negative dims on both sides, on a 3D input where the normalization
+        # has to use the real rank
         def fn(a, b, c):
-            cat = torch.ops.aten.cat.default([a, b, c], 1)
+            cat = torch.ops.aten.cat.default([a, b, c], -2)
             split_with_sizes = torch.ops.aten.split_with_sizes.default(
-                cat, [2, 3, 5], 0
+                cat, [2, 3, 5], -2
             )
             return [s**2 for s in split_with_sizes]
 
         args = [
-            torch.randn(10, 2, device=GPU_TYPE),
-            torch.randn(10, 3, device=GPU_TYPE),
-            torch.randn(10, 5, device=GPU_TYPE),
+            torch.randn(2, 2, 4, device=GPU_TYPE),
+            torch.randn(2, 3, 4, device=GPU_TYPE),
+            torch.randn(2, 5, 4, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 2)
+
+        # a true mismatch still rejects: on 3D, cat dim=-1 vs split dim=1
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], -1)
+            split_with_sizes = torch.ops.aten.split_with_sizes.default(cat, [1, 1], 1)
+            return [s**2 for s in split_with_sizes]
+
+        args = [
+            torch.randn(4, 2, 2, device=GPU_TYPE),
+            torch.randn(4, 2, 3, device=GPU_TYPE),
+            torch.randn(4, 2, 5, device=GPU_TYPE),
         ]
         self.common(fn, args, 0, 0)
+
+        # a dim left at its default shows up as None in the graph; that
+        # default is 0 and must match an explicit cat(dim=0)
+        def fn(a, b, c):
+            cat = torch.ops.aten.cat.default([a, b, c], 0)
+            return torch.split_with_sizes(cat, [2, 3, 5])
+
+        args = [
+            torch.randn(2, device=GPU_TYPE),
+            torch.randn(3, device=GPU_TYPE),
+            torch.randn(5, device=GPU_TYPE),
+        ]
+        self.common(fn, args, 1, 2)
 
     def test_splitwithsizes_cat_negative_dim(self):
         # the sibling direction: split on dim=1, cat on dim=-1 is the same
@@ -1340,18 +1366,13 @@ class TestPatternMatcher(TestCase):
 
         self.common(fn, args, 1, 4)
 
-        # cat dim 1 vs split dim 0 is a true mismatch and must not collapse
+        # cat dim -1 vs split dim 0 is a true mismatch and must not collapse
         def fn(a):
             split_with_sizes = torch.ops.aten.split_with_sizes.default(a, [1, 1], 0)
             getitem = split_with_sizes[0]
             getitem_1 = split_with_sizes[1]
             cat = torch.ops.aten.cat.default([getitem, getitem_1], -1)
             return cat**2
-
-        args = [
-            torch.randn(2, 32, device=GPU_TYPE),
-        ]
-        self.common(fn, args, 0, 0)
 
         args = [
             torch.randn(2, 32, device=GPU_TYPE),
