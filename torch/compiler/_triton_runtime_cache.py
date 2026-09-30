@@ -80,7 +80,7 @@ def _compatibility(context: Any) -> dict[str, Any]:
 
     try:
         # The header holds context as JSON, so import compares it in that form.
-        context = json.loads(json.dumps(context, sort_keys=True))
+        context = json.loads(json.dumps(context, sort_keys=True, allow_nan=False))
     except (TypeError, ValueError) as exc:
         raise RuntimeError(
             "Triton runtime-cache context must be JSON-serializable"
@@ -142,6 +142,8 @@ def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) ->
         raise RuntimeError(
             f"Triton cache directory {root} is not a directory"
         ) from None
+    except OSError as exc:
+        raise RuntimeError(f"Cannot create Triton cache directory {root}") from exc
     excluded = {_cache_key(key) for key in exclude}
     suffix = sysconfig.get_config_var("EXT_SUFFIX")
     if not suffix:
