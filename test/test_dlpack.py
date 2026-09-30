@@ -370,7 +370,7 @@ class TestTorchDlPack(TestCase):
             x.__dlpack__(stream=0)
 
     @skipMeta
-    @onlyOn(["xpu", "cuda"])
+    @onlyCUDA
     @deviceCountAtLeast(2)
     def test_dlpack_tensor_on_different_device(self, devices):
         dev0, dev1 = devices[:2]
@@ -849,11 +849,11 @@ class TestTorchDlPack(TestCase):
     @onlyNativeDeviceTypes
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/3074")
     def test_dlpack_exchange_api_sliced(self, device):
-        # Regression: toDLPackNonOwning must split storage_base/byte_offset for
-        # sliced tensors. On MPS, DLTensor.data is an opaque id<MTLBuffer> so
-        # pointer arithmetic on it produces a corrupted handle; on CPU/CUDA the
-        # split form is also valid per the DLPack spec. Asserts the split form
-        # uniformly across native devices.
+        # Regression: on MPS, DLTensor.data is an opaque id<MTLBuffer>, so
+        # toDLPackNonOwning must export the storage base and carry the view
+        # offset in byte_offset rather than doing pointer arithmetic on the
+        # handle. Every other backend keeps exporting data_ptr() with
+        # byte_offset == 0, which consumers such as CuteDSL rely on.
         api_capsule = torch.Tensor.__dlpack_c_exchange_api__
         base = torch.arange(24, dtype=torch.float32, device=device).reshape(4, 6)
         sliced = base[1:3, :]  # storage_offset = 6, elemsize = 4 -> byte_offset = 24
@@ -866,7 +866,8 @@ class TestTorchDlPack(TestCase):
 
         namespace py = pybind11;
 
-        void check_sliced_dltensor(at::Tensor sliced, py::object api_obj) {
+        void check_sliced_dltensor(
+            at::Tensor base, at::Tensor sliced, py::object api_obj) {
             const DLPackExchangeAPI* api =
                 static_cast<const DLPackExchangeAPI*>(
                     PyCapsule_GetPointer(api_obj.ptr(), "dlpack_exchange_api"));
@@ -881,12 +882,21 @@ class TestTorchDlPack(TestCase):
             TORCH_CHECK(result == 0,
                         "dltensor_from_py_object_no_sync failed with code ", result);
 
-            void* expected_base = sliced.storage().mutable_data();
-            uint64_t expected_offset =
-                sliced.storage_offset() * c10::elementSize(sliced.scalar_type());
+            // base covers the whole storage, so its data_ptr() is the storage
+            // base (on MPS, the unmodified id<MTLBuffer>).
+            void* expected_data;
+            uint64_t expected_offset;
+            if (sliced.device().type() == at::kMPS) {
+                expected_data = base.mutable_data_ptr();
+                expected_offset =
+                    sliced.storage_offset() * c10::elementSize(sliced.scalar_type());
+            } else {
+                expected_data = sliced.mutable_data_ptr();
+                expected_offset = 0;
+            }
 
-            TORCH_CHECK(dltensor.data == expected_base,
-                        "data should be storage base, got offset pointer");
+            TORCH_CHECK(dltensor.data == expected_data,
+                        "unexpected DLTensor.data for a sliced tensor");
             TORCH_CHECK(dltensor.byte_offset == expected_offset,
                         "byte_offset should be ", expected_offset,
                         ", got ", dltensor.byte_offset);
@@ -903,38 +913,7 @@ class TestTorchDlPack(TestCase):
             with_cuda=device.startswith("cuda"),
             with_sycl=device.startswith("xpu"),
         )
-        module.check_sliced_dltensor(sliced, api_capsule)
-
-    @skipMeta
-    @onlyNativeDeviceTypes
-    def test_dlpack_capsule_byte_offset_sliced(self, device):
-        # Both capsule paths (Tensor.__dlpack__ and to_dlpack) export the
-        # storage base in data and the view offset in byte_offset, so the
-        # offset survives the round trip as a storage_offset.
-        base = torch.arange(24, dtype=torch.float32, device=device).reshape(4, 6)
-        sliced = base[1:3, :]
-        self.assertNotEqual(sliced.storage_offset(), 0)
-
-        for imported in (from_dlpack(sliced), from_dlpack(to_dlpack(sliced))):
-            self.assertEqual(imported.storage_offset(), sliced.storage_offset())
-            self.assertEqual(imported, sliced)
-
-        # A tensor that owns its whole storage still exports byte_offset == 0.
-        self.assertEqual(from_dlpack(base).storage_offset(), 0)
-
-    @skipIfTorchDynamo("__dlpack__ doesn't work with dynamo")
-    @onlyCPU
-    def test_numpy_consumes_byte_offset(self, device):
-        # NumPy is the reference third-party consumer: it must honor the
-        # non-zero byte_offset that views now export.
-        import numpy as np
-
-        if not hasattr(np, "from_dlpack"):
-            self.skipTest("NumPy too old for DLPack (needs >= 1.22)")
-
-        base = torch.arange(24, dtype=torch.float32, device=device).reshape(4, 6)
-        sliced = base[1:3, :]
-        self.assertEqual(torch.from_numpy(np.from_dlpack(sliced)), sliced)
+        module.check_sliced_dltensor(base, sliced, api_capsule)
 
     @skipMeta
     @onlyOn(["xpu", "cuda"])
@@ -1027,21 +1006,22 @@ instantiate_device_type_tests(
 )
 class TestReadOnlyDLPack(TestCase):
     # These tests exercise the read-only DLPack export path and the
-    # ReadOnlyTensorWrapper subclass. The behavior (const data pointer export,
-    # the READ_ONLY flag, copy-on-write preservation, op rejection) is device
+    # ReadOnlyTensorWrapper subclass. The behavior (const_data_ptr export, the
+    # READ_ONLY flag, copy-on-write preservation, op rejection) is device
     # independent, so they run on CPU.
 
     def test_read_only_export_does_not_materialize_cow(self):
-        # Exporting a copy-on-write tensor read-only must not materialize it:
-        # the export goes through Storage::data(), which unlike
-        # Storage::mutable_data() does not call maybe_materialize().
+        # Exporting a copy-on-write tensor read-only must not materialize it,
+        # because the export goes through const_data_ptr().
         base = torch.arange(8, dtype=torch.float32)
         clone = base._lazy_clone()
         self.assertTrue(torch._C._is_cow_tensor(base))
         self.assertTrue(torch._C._is_cow_tensor(clone))
 
-        # const_data_ptr() does not materialize COW either, so it can be read
-        # before and after the export.
+        # const_data_ptr() is the pointer the read-only export actually hands
+        # out (storage base + view offset) and does not materialize COW, so it
+        # is the right thing to compare against. _data_address would only match
+        # when storage_offset() == 0.
         data_before = clone.const_data_ptr()
         clone.__dlpack__(max_version=(1, 0), read_only=True)
 
@@ -1051,9 +1031,9 @@ class TestReadOnlyDLPack(TestCase):
         self.assertEqual(clone.const_data_ptr(), data_before)
 
     def test_writable_export_materializes_cow(self):
-        # Control: the default (writable) export goes through
-        # Storage::mutable_data(), which materializes a copy-on-write tensor.
-        # This guards against the read-only test passing for the wrong reason.
+        # Control: the default (writable) export goes through data_ptr(), which
+        # materializes a copy-on-write tensor. This guards against the read-only
+        # test passing for the wrong reason.
         base = torch.arange(8, dtype=torch.float32)
         clone = base._lazy_clone()
         self.assertTrue(torch._C._is_cow_tensor(clone))
