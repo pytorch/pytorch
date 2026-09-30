@@ -39,6 +39,7 @@ class PRNGKey(torch.Tensor):
 
     _data: torch.Tensor
 
+    # pyrefly: ignore [bad-override]
     __torch_function__ = torch._C._disabled_torch_function_impl
 
     @staticmethod
@@ -62,6 +63,7 @@ class PRNGKey(torch.Tensor):
         return cls(inner_tensors["_data"])
 
     @classmethod
+    # pyrefly: ignore [bad-override]
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
@@ -73,12 +75,11 @@ class PRNGKey(torch.Tensor):
         kwargs = torch.utils._pytree.tree_map(unwrap, kwargs)
         return func(*args, **kwargs)
 
+    # pyrefly: ignore [bad-override]
     def __repr__(self):
         return f"{type(self).__name__}({self._data})"
 
-    def _unbind(
-        self, shape: tuple, splits: tuple, outputs_per_elem: int
-    ) -> "PRNGKey":
+    def _unbind(self, shape: tuple, splits: tuple, outputs_per_elem: int) -> "PRNGKey":
         raise NotImplementedError
 
     def _split(self, num: int) -> "PRNGKey":
@@ -87,14 +88,10 @@ class PRNGKey(torch.Tensor):
     def _fold_in(self, data: int | torch.Tensor) -> "PRNGKey":
         raise NotImplementedError
 
-    def _uniform(
-        self, out: torch.Tensor, low: float, high: float
-    ) -> torch.Tensor:
+    def _uniform(self, out: torch.Tensor, low: float, high: float) -> torch.Tensor:
         raise NotImplementedError
 
-    def _normal(
-        self, out: torch.Tensor, mean: float, std: float
-    ) -> torch.Tensor:
+    def _normal(self, out: torch.Tensor, mean: float, std: float) -> torch.Tensor:
         raise NotImplementedError
 
     def _randint(
@@ -140,7 +137,7 @@ _IMPLS: dict[str, type[PRNGKey]] = {"philox4x32-10": Philox4x32_10Key}
 
 def key(
     seed: int, *, device: torch.device | None = None, impl: str = "philox4x32-10"
-) -> torch.Tensor:
+) -> PRNGKey:
     r"""Create a PRNG key from a seed.
 
     A key is a tensor that encodes the state needed to deterministically
@@ -855,3 +852,91 @@ def bits(
     if dtype is None:
         dtype = torch.int32
     return randint(key, *shape, low=None, high=None, dtype=dtype)
+
+
+class StatefulPRNG:
+    """Mutable wrapper around stateless PRNG keys.
+
+    Holds a :class:`PRNGKey` internally and advances it after each generation,
+    providing a traditional generator interface backed by the stateless APIs.
+
+    The underlying PRNG produces values 4 at a time (2 for 64-bit dtypes), and
+    the key advances in whole draws. Consecutive calls therefore continue the
+    stream exactly when each size is a multiple of that count; a size that is
+    not discards the remainder of its final draw. Those values are skipped, not
+    replayed, so the stream never repeats either way::
+
+        # 100 is a multiple of 4: together these match uniform(key, (200,)).
+        first = g.uniform(100)
+        second = g.uniform(100)
+
+        # 5 is not, so 3 values are skipped between the two calls.
+        first = g.uniform(5)
+        second = g.uniform(5)
+
+    Example::
+
+        g = StatefulPRNG(42)
+        a = g.normal(100)  # first 100 values
+        b = g.normal(100)  # next 100 values (different from a)
+        g.manual_seed(42)  # reset
+        c = g.normal(100)  # same as a
+    """
+
+    _key: PRNGKey
+
+    def __init__(self, seed: int = 0, *, impl: str = "philox4x32-10", device=None):
+        self._impl = impl
+        self._key = key(seed, impl=impl, device=device)
+
+    def manual_seed(self, seed: int) -> "StatefulPRNG":
+        self._key = key(seed, impl=self._impl, device=self._key.device)
+        return self
+
+    @property
+    def key(self) -> PRNGKey:
+        return self._key
+
+    def uniform(
+        self,
+        *shape,
+        low: float = 0.0,
+        high: float = 1.0,
+        dtype: torch.dtype | None = None,
+    ) -> torch.Tensor:
+        result = uniform(
+            self._key,
+            *shape,
+            low=low,
+            high=high,
+            dtype=dtype,
+        )
+        self._advance(result)
+        return result
+
+    def normal(
+        self,
+        *shape,
+        mean: float = 0.0,
+        std: float = 1.0,
+        dtype: torch.dtype | None = None,
+    ) -> torch.Tensor:
+        result = normal(
+            self._key,
+            *shape,
+            mean=mean,
+            std=std,
+            dtype=dtype,
+        )
+        self._advance(result)
+        return result
+
+    def _advance(self, result: torch.Tensor):
+        # The offset counts philox calls, not elements: each call yields 4
+        # values (2 for 64-bit dtypes). A size that is not a whole number of
+        # calls rounds up, discarding the rest of the final call rather than
+        # replaying it.
+        elems_per_call = 2 if result.element_size() == 8 else 4
+        data = self._key._data.view(torch.int64).clone()
+        data[..., 1] += -(-result.numel() // elems_per_call)
+        self._key = type(self._key)(data.view(torch.uint64))
