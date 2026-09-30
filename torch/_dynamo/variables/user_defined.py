@@ -26,7 +26,6 @@ import builtins
 import collections
 import contextlib
 import dataclasses
-import decimal
 import enum
 import fractions
 import functools
@@ -438,7 +437,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
     @functools.cache
     def _constant_fold_classes() -> set[type[object]]:
         return {
-            decimal.Decimal,
             fractions.Fraction,
             torch.device,
             torch.finfo,
