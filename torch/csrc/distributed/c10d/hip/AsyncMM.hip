@@ -4,6 +4,8 @@
 #include <c10/hip/HIPGuard.h>
 #include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
 
+#include <limits>
+
 // ROCm-only native async-TP GEMM. The CUDA (CUTLASS) implementation lives in
 // cuda/AsyncMM.cu; this file holds the AMD Composable Kernel (CK) tile
 // implementation and is compiled only on ROCm builds. Keeping the two backends
@@ -26,14 +28,12 @@
 
 namespace {
 
-template <typename LayoutB>
 struct AsyncGemmConfig
 {
     static constexpr ck_tile::index_t M_Tile = 256;
     static constexpr ck_tile::index_t N_Tile = 256;
-    // Row-major B regressed with K_Tile=64 in the reference tuning sweep.
-    static constexpr ck_tile::index_t K_Tile =
-        std::is_same_v<LayoutB, ck_tile::tensor_layout::gemm::RowMajor> ? 32 : 64;
+    // K_Tile=64 regressed row-major B in the reference tuning sweep.
+    static constexpr ck_tile::index_t K_Tile = 32;
 
     static constexpr ck_tile::index_t M_Warp = 2;
     static constexpr ck_tile::index_t N_Warp = 2;
@@ -80,7 +80,6 @@ struct AsyncInputMMKernel
 // gfx942 and gfx950 have 4 shader engines per XCC.
 constexpr int kShaderEnginesPerXcc = 4;
 
-template <typename LayoutB>
 void async_input_mm_impl(
     const at::Tensor& a,
     const at::Tensor& b,
@@ -97,11 +96,12 @@ void async_input_mm_impl(
   using ElementA = ck_tile::bf16_t;
   using LayoutA = ck_tile::tensor_layout::gemm::RowMajor;
   using ElementB = ck_tile::bf16_t;
+  using LayoutB = ck_tile::tensor_layout::gemm::RowMajor;
   using ElementC = ck_tile::bf16_t;
   using LayoutC = ck_tile::tensor_layout::gemm::RowMajor;
   using ElementAccumulator = float;
 
-  using GemmConfig = AsyncGemmConfig<LayoutB>;
+  using GemmConfig = AsyncGemmConfig;
 
   using GemmShape = ck_tile::TileGemmShape<
       ck_tile::sequence<GemmConfig::M_Tile, GemmConfig::N_Tile, GemmConfig::K_Tile>,
@@ -183,7 +183,6 @@ void async_input_mm_impl(
   async_scheduler.tile_idx_pivot_m = a_chunk_pivot * tiles_per_chunk;
   async_scheduler.num_chunks = num_chunks;
 
-  constexpr bool is_b_row_major = std::is_same_v<LayoutB, ck_tile::tensor_layout::gemm::RowMajor>;
   ck_tile::UniversalGemmHostArgs<1, 1, 0> host_args(
       {a.const_data_ptr()},
       {b.const_data_ptr()},
@@ -194,7 +193,7 @@ void async_input_mm_impl(
       N,
       K,
       {K},
-      {is_b_row_major ? N : K},
+      {N},
       {},
       N,
       async_scheduler);
@@ -213,14 +212,15 @@ void async_input_mm_impl(
 #if ROCM_VERSION >= 70000
   C10_CUDA_CHECK(hipDeviceGetAttribute(&num_xcc, hipDeviceAttributeNumberOfXccs, a.get_device()));
 #endif
-  // Chunk copies feeding this kernel run as shader kernels on ROCm, and their
-  // workgroups are spread over every shader engine. Keep one CU per shader
+  // The host path copies chunks in pieces of at most 1 MiB, which HIP runs as
+  // shader kernels spread over every shader engine. Keep one CU per shader
   // engine out of the persistent grid, or blocks spinning on unsignaled chunks
-  // can starve the copies and deadlock.
-  const int max_grid = std::max(
-      at::cuda::getCurrentDeviceProperties()->multiProcessorCount * std::max(occupancy, 1) -
+  // can starve those copies and deadlock.
+  const int gemm_cus = std::max(
+      at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
           num_xcc * kShaderEnginesPerXcc,
       1);
+  const int max_grid = gemm_cus * std::max(occupancy, 1);
   const dim3 grids(std::min<int>(TilePartitioner::GridSize(M, N), max_grid));
 
   ck_tile::stream_config stream_cfg{at::cuda::getCurrentCUDAStream(), false, 0};
@@ -262,6 +262,11 @@ at::Tensor async_input_mm_out(
   TORCH_CHECK_EQ(b.sizes()[0], K);
   TORCH_CHECK_EQ(out.sizes()[0], M);
   TORCH_CHECK_EQ(out.sizes()[1], N);
+  // CK indexes tensors with 32-bit integers.
+  constexpr int64_t kMaxNumel = std::numeric_limits<int32_t>::max();
+  TORCH_CHECK(
+      a.numel() <= kMaxNumel && b.numel() <= kMaxNumel && out.numel() <= kMaxNumel,
+      "async_input_mm: `a`, `b` and `out` must each have at most ", kMaxNumel, " elements");
 
   TORCH_CHECK(
       a_chunk_signals.dim() == 1 && a_chunk_signals.numel() > 0 &&
@@ -278,13 +283,9 @@ at::Tensor async_input_mm_out(
       "async_input_mm: `a_chunk_pivot` must be in [0, ", num_chunks, "), got ", a_chunk_pivot);
 
 #if defined(USE_ROCM_ASYNC_MM)
-  if (b.is_contiguous()) {
-    async_input_mm_impl<ck_tile::tensor_layout::gemm::RowMajor>(
-        a, b, a_chunk_signals, a_chunk_pivot, out);
-  } else {
-    async_input_mm_impl<ck_tile::tensor_layout::gemm::ColumnMajor>(
-        a, b, a_chunk_signals, a_chunk_pivot, out);
-  }
+  // The CK kernel is 1.6x (gfx942) to 6x (gfx950) slower with column-major B
+  // than with row-major B, which outweighs copying B to row-major.
+  async_input_mm_impl(a, b.contiguous(), a_chunk_signals, a_chunk_pivot, out);
 #else
   TORCH_CHECK(
       false,
