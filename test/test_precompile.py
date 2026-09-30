@@ -5640,6 +5640,37 @@ class TestTritonRuntimeCacheTransport(TestCase):
             with self.assertRaisesRegex(RuntimeError, "custom cache manager"):
                 export_runtime_cache(context=self.CONTEXT)
 
+    def test_export_of_a_cache_triton_never_created(self):
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp, "triton")
+            with _triton_cache_namespace(root):
+                header, payload = _bundle_header(
+                    export_runtime_cache(context=self.CONTEXT)
+                )
+            self.assertEqual(
+                (header["records"], header["files"], payload), ([], [], b"")
+            )
+            self.assertTrue(root.is_dir())
+            occupied = pathlib.Path(tmp, "file")
+            occupied.write_text("not a directory")
+            with (
+                _triton_cache_namespace(occupied),
+                self.assertRaisesRegex(RuntimeError, "not a directory"),
+            ):
+                export_runtime_cache(context=self.CONTEXT)
+
+    def test_export_records_context_as_json(self):
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp, _triton_cache_namespace(tmp):
+            _write_triton_runtime_entries()
+            header, _ = _bundle_header(export_runtime_cache(context={"cuda": (12, 4)}))
+            self.assertEqual(header["compatibility"]["context"], {"cuda": [12, 4]})
+            with self.assertRaisesRegex(RuntimeError, "JSON-serializable"):
+                export_runtime_cache(context=object())
+
 
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
