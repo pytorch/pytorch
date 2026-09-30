@@ -33,7 +33,6 @@ from torch.cuda._memory_viz import (
     _profile_to_snapshot,
     profile_plot,
     segment_plot,
-    segments,
     trace_plot,
 )
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
@@ -6816,9 +6815,11 @@ class TestCudaAllocator(TestCase):
                         self.assertEqual(x.untyped_storage().data_ptr(), b["address"])
             self.assertTrue(found_it)
 
-            # Rendering downloads flamegraph.pl; the collapsed stacks it would
-            # render already carry the frames checked here.
-            self.assertIn("test_cuda.py", segments(ss, format_flamegraph=lambda s: s))
+            if not IS_WINDOWS:
+                with tempfile.NamedTemporaryFile() as f:
+                    torch.cuda.memory._save_segment_usage(f.name)
+                    with open(f.name) as f2:
+                        self.assertTrue("test_cuda.py" in f2.read())
             del unused
             del x
             torch._C._cuda_clearCublasWorkspaces()
