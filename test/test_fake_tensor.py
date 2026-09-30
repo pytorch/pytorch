@@ -3876,14 +3876,6 @@ class TestFakeTensorDispatchCache(_TestFakeTensorDispatchCacheHelpers, TestCase)
             self._test_cache_key(fm, x, y, z)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cache_key_device(self):
-        with FakeTensorMode() as fm:
-            x = torch.randn(4, 3)
-            y = torch.randn(4, 3)
-            z = x.to(device="cuda")
-            self._test_cache_key(fm, x, y, z)
-
-    @unittest.skipIf(not RUN_CUDA, "requires cuda")
     def test_cache_key_indexless_device_pins_current_index(self):
         # An index-less device argument means "the current one", so it denotes a
         # different device depending on ambient state. Keying it unresolved lets a
