@@ -712,6 +712,22 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   }
   auto head_dim_limit = 128;
   auto dprops = at::cuda::getCurrentDeviceProperties();
+  // cuDNN versions before 9.26 can produce non-finite query gradients on SM90
+  // for non-causal attention when the key/value sequence length is 64 modulo
+  // 128. The failure depends on the runtime attention scores, which are not
+  // available during backend selection, so conservatively reject the affected
+  // shape whenever a query gradient can be requested. See #196678.
+  if (cudnn_version < 92600 && dprops->major == 9 && dprops->minor == 0 &&
+      !params.is_causal && params.query.requires_grad() &&
+      s_k % 128 == 64) {
+    if (debug) {
+      TORCH_WARN(
+          "cuDNN SDPA before version 9.26 can produce non-finite query "
+          "gradients on SM90 for non-causal attention when the key/value "
+          "sequence length is 64 modulo 128.");
+    }
+    return false;
+  }
   if (TORCH_GUARD_OR_FALSE(s_q.sym_eq(1)) &&
       is_cudnn_attention_decode_disabled()) {
     if (debug) {
