@@ -273,6 +273,11 @@ Tensor& _scaled_gemm(
     TORCH_WARN(
         "scaled_mm: fast_accum is not supported in XPU for now. It would silently set use_fast_accum to false.");
   }
+  // FP8-out only (CUDA semantics); reciprocal since oneDNN DST scale divides.
+  std::optional<Tensor> dst_scale = std::nullopt;
+  if (scale_result && isFloat8Type(out.scalar_type())) {
+    dst_scale = scale_result->reciprocal();
+  }
   at::native::onednn::scaled_matmul(
       mat1,
       mat2,
@@ -282,7 +287,7 @@ Tensor& _scaled_gemm(
       scaling_choice_a,
       scaling_choice_b,
       bias,
-      scale_result,
+      dst_scale,
       false /* use_fast_accum */,
       alpha);
 
@@ -474,11 +479,6 @@ Tensor& _scaled_mm_out_xpu(
     // already match oneDNN's expected row-major layout. Just ensure contiguous.
     scale_b_internal = scale_b.is_contiguous() ? scale_b : scale_b.contiguous();
   }
-  // FP8-out only (CUDA semantics); reciprocal since oneDNN DST scale divides.
-  std::optional<Tensor> dst_scale = std::nullopt;
-  if (scale_result && isFloat8Type(out.scalar_type())) {
-    dst_scale = scale_result->reciprocal();
-  }
   return _scaled_gemm(
       mat1,
       mat2,
@@ -489,7 +489,7 @@ Tensor& _scaled_mm_out_xpu(
       bias,
       false /* use_fast_accum */,
       out,
-      dst_scale);
+      scale_result);
 }
 
 Tensor _scaled_mm_xpu(
