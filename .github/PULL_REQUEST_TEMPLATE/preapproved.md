@@ -13,9 +13,9 @@ Go through the following checklist
 ---
 
 
-## Approved by
+## Supported by
 
-Pre-approved by @<!-- Maintainer handle who agreed to this PR. -->
+Supported by @<!-- Maintainer handle who agreed to this PR. -->
 
 ## BC-breaking?
 
