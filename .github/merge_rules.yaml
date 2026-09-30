@@ -495,7 +495,6 @@
   - ngimel
   - dolpm
   - sanrise
-  - NicolasHug
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -542,9 +541,8 @@
   - torch/_C/__init__.pyi.in
   approved_by:
   - EikanWang
+  - jgong5
   - gujinghui
-  - guangyey
-  - etaf
   mandatory_checks_name:
   - EasyCLA
   - Lint

@@ -93,11 +93,6 @@ def get_freeable_input_buf(
     """
     Create and keep track of all input buffers that can be freed during the program
 
-    This is a naming-based ownership estimate.
-    Assumptions:
-    Inputs that ``is_nonfreeable_buffers`` are treated as persistent
-    All other graph inputs are assumed freeable after their last use.
-
     Returns:
         A dictionary containing all freeable input buffers, keyed by their names.
     """
@@ -526,27 +521,6 @@ def estimate_region_peak_memory(
     `cur_memory` (live bytes at the window boundary) and returns
     the maximum live bytes.
     """
-    peak, _, _ = estimate_region_memory(
-        nodes_in_window,
-        region_start=region_start,
-        region_end=region_end,
-        step_of=step_of,
-        graph_outputs=graph_outputs,
-        cur_memory=cur_memory,
-    )
-    return peak
-
-
-def estimate_region_memory(
-    nodes_in_window: Iterable[BaseSchedulerNode],
-    *,
-    region_start: int,
-    region_end: int,
-    step_of: Callable[[BaseSchedulerNode], int],
-    graph_outputs: OrderedSet[str],
-    cur_memory: int = 0,
-) -> tuple[int, list[int], list[int]]:
-    """Estimate the peak and live memory around each step in a schedule region."""
     R = region_end - region_start + 1
     region = [SNodeMemory(0, 0) for _ in range(R)]
 
@@ -578,16 +552,12 @@ def estimate_region_memory(
 
     cur = cur_memory
     peak = cur
-    live_before = [0] * (R + 1)
-    live_after = [0] * R
-    for i, af in enumerate(region):
-        live_before[i] = cur
+    for af in region:
         cur += af.size_alloc
-        live_after[i] = cur
-        peak = max(peak, cur)
+        if cur > peak:
+            peak = cur
         cur -= af.size_free
-    live_before[R] = cur
-    return peak, live_before, live_after
+    return peak
 
 
 @dataclasses.dataclass

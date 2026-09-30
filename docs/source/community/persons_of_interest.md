@@ -238,7 +238,7 @@ orphan: true
 
 ### AArch64 CPU
 
-- (emeritus) Sunita Nadampalli ([snadampal](https://github.com/snadampal))
+- Sunita Nadampalli ([snadampal](https://github.com/snadampal))
 
 ### Out-of-tree Backend Integration (PrivateUse1)
 

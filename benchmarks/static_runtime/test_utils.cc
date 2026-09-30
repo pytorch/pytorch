@@ -115,10 +115,8 @@ std::unique_ptr<StaticRuntimeTestContext> makeTestContext(
     const std::string& source) {
   try {
     return std::make_unique<ModuleStaticRuntimeTestContext>(source);
-    // Could not parse as TorchScript, assume it's IR. The parser raises
-    // c10::Error, which derives from std::exception but not from
-    // std::runtime_error.
-  } catch (const std::exception&) {
+    // Could not parse as TorchScript, assume it's IR
+  } catch (const std::runtime_error&) {
     return std::make_unique<GraphStaticRuntimeContext>(source);
   }
 }

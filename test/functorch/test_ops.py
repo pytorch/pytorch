@@ -45,7 +45,6 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
-    IS_S390X,
     noncontiguous_like,
     parametrize,
     run_tests,
@@ -514,19 +513,6 @@ class TestOperators(TestCase):
                 "pca_lowrank",
                 {torch.float32: tol(atol=3e-05, rtol=4e-06)},
                 device_type="cpu",
-            ),
-            *(
-                [
-                    tol1(
-                        "grid_sampler_2d",
-                        {
-                            torch.float32: tol(atol=1e-04, rtol=1e-04)
-                        },  # Adjust values as needed
-                        device_type="cpu",
-                    )
-                ]
-                if IS_S390X
-                else []
             ),
         ),
     )
