@@ -62,7 +62,7 @@ from ..exc import (
     unimplemented,
 )
 from ..graph_bytecode_inputs import get_external_object_by_index
-from ..guards import GuardBuilder, install_guard
+from ..guards import GuardBuilder, install_guard, install_not_in_instance_dict_guard
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
@@ -3783,6 +3783,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # Step 6: __getattr__ fallback.
         result = self.call_getattr_fallback(tx, name)
         if result is not None:
+            if (
+                self.source
+                and isinstance(self, variables.UnspecializedNNModuleVariable)
+                and hasattr(self.value, "__dict__")
+                and name not in self.value.__dict__
+            ):
+                # A pending deletion in the traced code can reach here with the
+                # name still in the live dict; guarding absence then would fail
+                # on the frame it was created.
+                install_not_in_instance_dict_guard(self.source, name)
             return result
 
         # Step 7: AttributeError.

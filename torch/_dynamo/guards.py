@@ -6443,6 +6443,20 @@ def make_dupe_guard(
     return None
 
 
+def install_not_in_instance_dict_guard(source: Source, name: str) -> None:
+    """
+    Guard that `name` stays absent from the instance __dict__ of the object at
+    `source`. Python reads the instance __dict__ before nn.Module.__getattr__
+    (or a user __getattr__), so a value resolved from the registries or through
+    such a hook is only valid while the dict lacks `name`.
+    """
+    install_guard(
+        source.make_guard(
+            functools.partial(GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=name)
+        )
+    )
+
+
 def install_guard(*guards: Guard, skip: int = 0) -> None:
     """
     Add dynamo guards to the current tracing context.
