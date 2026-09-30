@@ -200,20 +200,6 @@ def repair_wheel(
         # ROCm SDK wheel packages (currently pre-10.0 rocSHMEM's libnuma).
         for lib in bundled_libs:
             shutil.copy(lib.src, torch_lib / lib.dest_name)
-            # Some bundled deps are dlopen'd by their *bare* soname at runtime,
-            # not just via NEEDED. In particular rocSHMEM's NUMAWrapper global
-            # ctor does dlopen("libnuma.so"). The original build_rocm.sh shipped
-            # OS deps under bare names; this pipeline keeps them versioned
-            # (e.g. libnuma.so.1), so add a bare-name symlink next to the
-            # versioned file. Without it that dlopen fails and rocSHMEM calls
-            # exit() at load, tripping a rocprofiler-sdk atexit deadlock that
-            # hangs `import torch` on no-GPU/no-kfd hosts. See
-            # pytorch/pytorch#189110.
-            if ".so." in lib.dest_name:
-                bare = lib.dest_name.split(".so.", 1)[0] + ".so"
-                bare_path = torch_lib / bare
-                if not bare_path.exists():
-                    bare_path.symlink_to(lib.dest_name)
         # Set RPATH on top-level (_C.so etc.) and lib/ shared objects
         for sofile in torch_dir.glob("*.so*"):
             if sofile.is_file():
@@ -261,8 +247,12 @@ def main() -> None:
         force_rpath = True
     elif is_rocm:
         rocm_home = Path(os.environ.get("ROCM_HOME", "/opt/rocm"))
-        # ROCm SDK wheel packages provide the runtime libraries. Resolve them
-        # through RPATHs rather than copying the legacy /opt/rocm libraries.
+        # A classic install has no _rocm_sdk_* siblings, so SDK RPATHs
+        # would not resolve. CI images always use the TheRock layout.
+        if "_rocm_sdk" not in str(rocm_home):
+            sys.exit(
+                f"Only the TheRock SDK layout is supported (ROCM_HOME={rocm_home})"
+            )
         rpaths = rocm_rpaths(rocm_home)
         c_so_rpath = f"{rpaths}:$ORIGIN:$ORIGIN/lib"
         lib_so_rpath = f"{rpaths}:$ORIGIN"
