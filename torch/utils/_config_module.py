@@ -25,6 +25,8 @@ from typing import (
     Literal,
     NoReturn,
     Optional,
+    overload,
+    Self,
     TYPE_CHECKING,
     TypeVar,
     Union,
@@ -202,6 +204,28 @@ def _read_env_variable(name: str) -> bool | str | None:
     return value
 
 
+class _ConfigAttr:
+    """Routes config reads and writes through the descriptor, to avoid failed attribute
+    lookups on the hot path for variables we know exist."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+    @overload
+    def __get__(self, obj: None, objtype: type["ConfigModule"]) -> Self: ...
+
+    @overload
+    def __get__(self, obj: "ConfigModule", objtype: type["ConfigModule"]) -> Any: ...
+
+    def __get__(self, obj: "ConfigModule | None", objtype: type["ConfigModule"]) -> Any:
+        if obj is None:
+            return self
+        return objtype.__getattr__(obj, self.name)
+
+    def __set__(self, obj: "ConfigModule", value: Any) -> None:
+        obj.__setattr__(self.name, value)
+
+
 def install_config_module(module: ModuleType) -> None:
     """
     Converts a module-level config into a `ConfigModule()`.
@@ -283,6 +307,7 @@ def install_config_module(module: ModuleType) -> None:
     visit(module, module, "")
     module._config = config  # type: ignore[attr-defined]
     module._compile_ignored_keys = compile_ignored_keys  # type: ignore[attr-defined]
+    cls: type[ConfigModule] = ConfigModuleInstance
     if any(entry.implies for entry in config.values()):
 
         class ImplicationConfigModuleInstance(_ImplicationConfigModule):
@@ -295,9 +320,15 @@ def install_config_module(module: ModuleType) -> None:
             name for name in sources if config[name].justknob is not None
         }
         module._implication_hash = repr(sorted(implications.items())).encode()  # type: ignore[attr-defined]
-        module.__class__ = ImplicationConfigModuleInstance
-    else:
-        module.__class__ = ConfigModuleInstance
+        cls = ImplicationConfigModuleInstance
+
+    # Set short-circuit attribute access descriptors for top-level config variables,
+    # skipping names that would shadow an existing class attribute.
+    for name in config:
+        if "." not in name and not hasattr(cls, name):
+            setattr(cls, name, _ConfigAttr(name))
+
+    module.__class__ = cls
     module._hash_dirty_var = ContextVar(f"{module.__name__}._hash_dirty", default=True)  # type: ignore[attr-defined]  # pyrefly: ignore[missing-attribute]
     module._hash_cache_var = ContextVar(  # pyrefly: ignore[missing-attribute]
         f"{module.__name__}._hash_cache", default=None
@@ -576,11 +607,11 @@ class ConfigModule(ModuleType):
                 raise AttributeError(f"{self.__name__}.{name} does not exist")
 
             # Issue deprecation warning on read (once per config)
-            self._warn_if_deprecated(name, config)
+            if config.deprecated:
+                self._warn_if_deprecated(name, config)
 
-            alias_val = self._get_alias_val(config)
-            if alias_val is not _UNSET_SENTINEL:
-                return alias_val
+            if config.alias is not None:
+                return self._get_alias_val(config)
 
             if config.env_value_force is not _UNSET_SENTINEL:
                 return config.env_value_force
@@ -1398,6 +1429,8 @@ class _ImplicationConfigModule(ConfigModule):
         return super().__getattr__(name)
 
     def __getattr__(self, name: str) -> Any:
+        if name not in self._implications:
+            return super().__getattr__(name)
         return self._get_resolved_value(name, {})
 
     def __setattr__(self, name: str, value: object) -> None:

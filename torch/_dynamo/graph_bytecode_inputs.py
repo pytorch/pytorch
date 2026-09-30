@@ -22,7 +22,7 @@ keep_alive: list[object] = []
 
 
 def has_user_objects() -> bool:
-    return bool(index_to_bytecode_constructor)
+    return len(index_to_bytecode_constructor) > int(current_stream_unused)
 
 
 def stash_graph_created_object(obj: object) -> object:
@@ -31,6 +31,41 @@ def stash_graph_created_object(obj: object) -> object:
 
 
 CURRENT_STREAM_INDEX = 0
+
+# True while the graph hasn't referenced the current stream pre-registered at
+# CURRENT_STREAM_INDEX.  Pre-graph bytecode then skips looking it up per call, saving
+# several µs.
+current_stream_unused = False
+
+
+class _UnusedCurrentStream:
+    pass
+
+
+unused_current_stream = _UnusedCurrentStream()
+
+
+def register_current_stream(stream: object, source: Source) -> None:
+    global current_stream_unused
+    if index_to_bytecode_constructor:
+        raise AssertionError(
+            f"Current stream must be registered at index {CURRENT_STREAM_INDEX}"
+        )
+
+    def construct(cg: PyCodegen) -> None:
+        if current_stream_unused:
+            cg.load_import_from(__name__, "unused_current_stream")
+        else:
+            cg(source)
+
+    index_to_bytecode_constructor.append(construct)
+    index_to_external_object_weakref.append(weakref.ref(stream))
+    current_stream_unused = True
+
+
+def mark_current_stream_used() -> None:
+    global current_stream_unused
+    current_stream_unused = False
 
 
 def set_external_object_by_index(index: int, value: object) -> None:
@@ -59,6 +94,8 @@ def store_user_object_weakrefs(*args: object) -> None:
 
 
 def reset_user_object_tracking() -> None:
+    global current_stream_unused
+    current_stream_unused = False
     index_to_bytecode_constructor.clear()
     index_to_external_object_weakref.clear()
     keep_alive.clear()
