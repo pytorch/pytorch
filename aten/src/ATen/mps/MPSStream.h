@@ -3,6 +3,9 @@
 #pragma once
 
 #include <cstdint>
+#include <mutex>
+#include <optional>
+#include <string>
 #include <utility>
 
 #include <ATen/mps/MPSDevice.h>
@@ -132,12 +135,24 @@ class TORCH_API MPSStream {
   bool _enableCommitAndContinue = true;
   // Buffer that contains last raised error
   MTLBuffer_t _errorBuffer = nil;
+  // First execution error reported by an asynchronously committed command buffer
+  // (e.g. out of memory), rethrown by checkLastError() at the next sync point
+  struct CommandBufferError {
+    bool is_oom;
+    int32_t code;
+    std::string message;
+  };
+  std::mutex _commandBufferErrorMutex;
+  std::optional<CommandBufferError> _commandBufferError;
 
   // use synchronize() to access any of these commit functions outside MPSStream
   void commit();
   void commitAndWait();
   void commitAndContinue();
   void flush();
+  // records execution errors of the current command buffer once it completes
+  void addErrorHandler();
+  void recordCommandBufferError(CommandBufferError error);
 };
 
 /**

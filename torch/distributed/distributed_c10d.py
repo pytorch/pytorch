@@ -6,6 +6,7 @@ import collections.abc
 import contextlib
 import ctypes
 import hashlib
+import importlib.util
 import io
 import itertools
 import logging
@@ -192,37 +193,78 @@ _GLOO_AVAILABLE = True
 _UCC_AVAILABLE = True
 _XCCL_AVAILABLE = True
 
-try:
+# find_spec does not import the package. Importing torchcomms here would
+# dlopen the native extension whenever the wheel is installed, including CPU
+# doctests that share a venv with install_torchcomms.
+_TORCHCOMM_AVAILABLE = importlib.util.find_spec("torchcomms") is not None
+_torchcomms_loaded: dict[str, Callable[..., object]] | None = None
+_torchcomms_natives_bound = False
+if TYPE_CHECKING:
+    # Real types for checkers only. These imports are not executed, so they
+    # do not dlopen torchcomms.
+    # pyrefly: ignore [missing-import]
+    from torchcomms import new_comm
+
+    # pyrefly: ignore [missing-import]
+    from torchcomms._backend_wrapper import _BackendWrapper
+
+    # pyrefly: ignore [missing-import]
+    from torchcomms.hooks import FlightRecorderHook as _TorchCommsFlightRecorderHook
+else:
+    # None until torchcomms is used. Tests may patch these before that.
+    _BackendWrapper = None
+    new_comm = None
+    _TorchCommsFlightRecorderHook = None
+
+
+def _import_torchcomms() -> dict[str, Callable[..., object]]:
+    """Load torchcomms natives. Only call when torchcomms is actually used."""
+    global _torchcomms_loaded, _torchcomms_natives_bound
+    global _BackendWrapper, new_comm, _TorchCommsFlightRecorderHook
+    if _torchcomms_loaded is not None:
+        return _torchcomms_loaded
     try:
         # pyrefly: ignore [missing-import]
         from torchcomms._comms import (
-            _BackendWrapper,
-            _is_backend_registered as _torchcomms_is_backend_registered,
+            _BackendWrapper as BackendWrapper,
+            _is_backend_registered as is_backend_registered,
         )
     except ImportError:
         # pyrefly: ignore [missing-import]
-        from torchcomms._backend_wrapper import _BackendWrapper
+        from torchcomms._backend_wrapper import _BackendWrapper as BackendWrapper
 
-        def _torchcomms_is_backend_registered(backend: str) -> bool:
+        def is_backend_registered(backend: str) -> bool:
             return False
 
     # pyrefly: ignore [missing-import]
-    from torchcomms import is_backend_built as _torchcomms_is_backend_built, new_comm
+    from torchcomms import is_backend_built, new_comm as imported_new_comm
 
     # Aliased: the unqualified name is the c10d hook imported above, which is
     # attached to a ProcessGroup rather than to a TorchComms comm.
     # pyrefly: ignore [missing-import]
-    from torchcomms.hooks import FlightRecorderHook as _TorchCommsFlightRecorderHook
+    from torchcomms.hooks import FlightRecorderHook as TorchCommsFlightRecorderHook
 
-    _TORCHCOMM_AVAILABLE = True
-except ImportError:
-    _TORCHCOMM_AVAILABLE = False
+    _BackendWrapper = BackendWrapper
+    new_comm = imported_new_comm
+    _TorchCommsFlightRecorderHook = TorchCommsFlightRecorderHook
+    _torchcomms_natives_bound = True
+    _torchcomms_loaded = {
+        "is_backend_built": is_backend_built,
+        "is_backend_registered": is_backend_registered,
+    }
+    return _torchcomms_loaded
 
-    def _torchcomms_is_backend_built(backend: str) -> bool:
+
+def _torchcomms_is_backend_built(backend: str) -> bool:
+    if not _TORCHCOMM_AVAILABLE:
         return False
+    return bool(_import_torchcomms()["is_backend_built"](backend))
 
-    def _torchcomms_is_backend_registered(backend: str) -> bool:
+
+def _torchcomms_is_backend_registered(backend: str) -> bool:
+    if not _TORCHCOMM_AVAILABLE:
         return False
+    return bool(_import_torchcomms()["is_backend_registered"](backend))
 
 
 def _use_torchcomms_enabled() -> bool:
@@ -230,7 +272,22 @@ def _use_torchcomms_enabled() -> bool:
     return _TORCHCOMM_AVAILABLE and dist_config.use_torchcomms
 
 
+def _resolve_torchcomms_backend(backend: str) -> str:
+    backend = backend.lower()
+    if (
+        backend == "nccl"
+        and torch.version.hip is not None
+        and (
+            _torchcomms_is_backend_registered("rccl")
+            or _torchcomms_is_backend_built("rccl")
+        )
+    ):
+        return "rccl"
+    return backend
+
+
 def _is_torchcomms_backend(backend: str) -> bool:
+    backend = _resolve_torchcomms_backend(backend)
     return _use_torchcomms_enabled() and (
         _torchcomms_is_backend_registered(backend)
         or _torchcomms_is_backend_built(backend)
@@ -262,6 +319,7 @@ def _torchcomms_handles_backend(backend) -> bool:
         name = part.split(":", 1)[1] if ":" in part else part
         if not name:
             continue
+        name = _resolve_torchcomms_backend(name)
         if not (
             _torchcomms_is_backend_registered(name)
             or _torchcomms_is_backend_built(name)
@@ -346,6 +404,9 @@ def _create_torchcomms_backend(
     """Create a c10d BackendWrapper for one TorchComms backend instance."""
     if not _TORCHCOMM_AVAILABLE:
         raise RuntimeError("TorchComms is not available")
+    # Tests patch ``new_comm`` before this runs. Import only when it is unset.
+    if not _torchcomms_natives_bound and new_comm is None:
+        _import_torchcomms()
 
     torch_device = _resolve_torchcomms_device(device, device_id)
 
@@ -365,7 +426,7 @@ def _create_torchcomms_backend(
     os.environ["TORCHCOMM_SIZE"] = str(group_size)
     try:
         comm = new_comm(
-            backend,
+            _resolve_torchcomms_backend(backend),
             torch_device,
             name=group_name,
             store=store,
@@ -2514,7 +2575,10 @@ def init_process_group(
             See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
         device_id (torch.device | int, optional): a single, specific device
             this process will work on, allowing for backend-specific
-            optimizations.  Currently this has two effects, only under
+            optimizations. Both accelerator devices (e.g. ``cuda:0``) and
+            CPU devices (e.g. ``cpu:0``) are accepted; on CPU, this currently
+            only validates and records the device, without any of the NCCL-specific
+            optimizations described below. Currently this has two effects, only under
             NCCL: the communicator is immediately formed (calling
             ``ncclCommInit*`` immediately rather than the normal lazy
             call) and sub-groups will use ``ncclCommSplit`` when
@@ -2943,9 +3007,10 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
-    if device_id is not None and (device_id.index is None or device_id.type == "cpu"):
+    if device_id is not None and device_id.index is None:
         raise ValueError(
-            "init_process_group device_id parameter must be an accelerator with an index"
+            "init_process_group device_id parameter must be a device with a "
+            "valid index, e.g. cpu:0 or cuda:0"
         )
 
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
@@ -3043,7 +3108,7 @@ def _new_process_group_helper(
                 if os.environ.get("TORCH_DISTRIBUTED_USE_TORCHCOMMS")
                 else "dist_config.use_torchcomms",
                 _resolve_torchcomms_device(device, device_id),
-                backend_str,
+                _resolve_torchcomms_backend(backend_str),
             )
             backend_class = _create_torchcomms_backend(
                 backend_str,
@@ -3270,11 +3335,15 @@ def destroy_process_group(
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
     else:
-        if _TORCHCOMM_AVAILABLE:
+        # Import only if a torchcomms comm exists, or tests already patched
+        # _BackendWrapper. An installed wheel alone must not dlopen here.
+        if _world.comms or _BackendWrapper is not None:
+            if _BackendWrapper is None:
+                _import_torchcomms()
             # A single comm may be shared across multiple device types (e.g. a
             # gloo group reports both 'cuda' and 'cpu' device types backed by the
             # same _BackendWrapper). Deduplicate by comm identity so we finalize
-            # each comm exactly once — finalize() is not idempotent and raises
+            # each comm exactly once. finalize() is not idempotent and raises
             # "already finalized" on a second call.
             finalized_comm_ids: set[int] = set()
             for device_type in pg._device_types:

@@ -2754,7 +2754,7 @@ class TestMPS(TestCaseMPS):
         # Compare against CPU using a copy of the model
         import copy
         y_cpu = copy.deepcopy(model).cpu()(x.detach().cpu())
-        self.assertEqual(y_cpu, y_mps.cpu(), atol=1e-3, rtol=1e-3)
+        self.assertEqual(y_cpu, y_mps.cpu())
         y_mps.sum().backward()
         self.assertIsNotNone(x.grad)
 
@@ -3886,6 +3886,20 @@ class TestMPS(TestCaseMPS):
         helper((2, 3), 0.2)
         helper((100, 300), 1.0)
         helper((100, 300), 0.2)
+
+    # An `out=` wider than the common dtype must not widen the computation:
+    # CPU computes at the common dtype and casts the result on store
+    @parametrize("op_name", ["addcmul", "addcdiv"])
+    @parametrize("out_dtype", [torch.float16, torch.float32])
+    def test_addc_ops_out_dtype(self, op_name, out_dtype):
+        op = getattr(torch, op_name)
+        cpu_args = [torch.randn(4, 5, dtype=torch.float16).clamp_min(0.5) for _ in range(3)]
+        mps_args = [t.to("mps") for t in cpu_args]
+        cpu_out = torch.empty(4, 5, dtype=out_dtype)
+        out = torch.empty(4, 5, dtype=out_dtype, device="mps")
+        op(*cpu_args, value=2.5, out=cpu_out)
+        op(*mps_args, value=2.5, out=out)
+        self.assertEqual(out, cpu_out)
 
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_lerp_scalar_weight_dtype(self, dtype):
@@ -5658,6 +5672,100 @@ class TestMPS(TestCaseMPS):
             error_type = TypeError if dtype == torch.float8_e4m3fn else RuntimeError
             self.assertRaises(error_type, lambda: loss(a_mps, a_mps))
             self.assertRaises(RuntimeError, lambda: loss(a_cpu, a_cpu))
+
+    # MPSGraph refuses to mix element types across an operand pair and aborts the process rather
+    # than raising, so a mixed-dtype input/target used to crash. OpInfo cannot reach this: every
+    # sample_inputs_loss operand is built from a single dtype.
+    MIXED_DTYPES = [(torch.float32, torch.float16), (torch.float16, torch.float32),
+                    (torch.float32, torch.bfloat16), (torch.bfloat16, torch.float32),
+                    (torch.float16, torch.bfloat16), (torch.bfloat16, torch.float16)]
+
+    @parametrize("dtypes", MIXED_DTYPES)
+    @parametrize("reduction", ["mean", "sum", "none"])
+    def test_loss_mixed_dtype(self, dtypes, reduction):
+        in_dtype, target_dtype = dtypes
+        for fn in (F.mse_loss, F.smooth_l1_loss, F.huber_loss, F.l1_loss):
+            cpu_x = torch.tensor([0.5, 2.0, -3.0, 1.25], dtype=in_dtype)
+            cpu_t = torch.tensor([1.0, 1.0, 1.0, 1.0], dtype=target_dtype)
+            res = fn(cpu_x.to("mps"), cpu_t.to("mps"), reduction=reduction)
+            ref = fn(cpu_x, cpu_t, reduction=reduction)
+            self.assertEqual(res.dtype, ref.dtype, f"{fn.__name__} result dtype")
+            self.assertEqual(res, ref, f"{fn.__name__} with {in_dtype}/{target_dtype}")
+
+    @parametrize("dtypes", MIXED_DTYPES)
+    @parametrize("reduction", ["mean", "sum", "none"])
+    def test_loss_mixed_dtype_backward(self, dtypes, reduction):
+        # huber is excluded: its backward builds a plain TensorIterator, so mismatched operands
+        # are rejected rather than promoted (see test_huber_loss_backward_mixed_dtype_errors).
+        in_dtype, target_dtype = dtypes
+        for fn in (F.mse_loss, F.smooth_l1_loss, F.l1_loss):
+            def grad_of(device):
+                x = torch.tensor([0.5, 2.0, -3.0, 1.25], dtype=in_dtype, device=device, requires_grad=True)
+                t = torch.tensor([1.0, 1.0, 1.0, 1.0], dtype=target_dtype, device=device)
+                out = fn(x, t, reduction=reduction)
+                out.backward(torch.ones_like(out))
+                return x.grad
+            self.assertEqual(grad_of("mps"), grad_of("cpu"), f"{fn.__name__} grad")
+
+    @parametrize("dtypes", MIXED_DTYPES)
+    def test_addr_mixed_dtype(self, dtypes):
+        # addr also took its result dtype from `self` instead of the promoted type
+        self_dtype, vec_dtype = dtypes
+        cpu_self = torch.tensor([[1.0, 1.0], [1.0, 1.0]], dtype=self_dtype)
+        cpu_v1 = torch.tensor([1.0, 2.0], dtype=vec_dtype)
+        cpu_v2 = torch.tensor([3.0, 4.0], dtype=vec_dtype)
+        for beta, alpha in ((1, 1), (0.6, 0.2), (0, 1)):
+            res = torch.addr(cpu_self.to("mps"), cpu_v1.to("mps"), cpu_v2.to("mps"), beta=beta, alpha=alpha)
+            ref = torch.addr(cpu_self, cpu_v1, cpu_v2, beta=beta, alpha=alpha)
+            self.assertEqual(res.dtype, ref.dtype)
+            self.assertEqual(res, ref)
+
+    def test_huber_loss_backward_mixed_dtype_errors(self):
+        x = torch.tensor([0.5, 2.0], device="mps")
+        t = torch.tensor([1.0, 1.0], dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(RuntimeError, "expected all tensors to have the same dtype"):
+            torch.ops.aten.huber_loss_backward(torch.ones_like(x), x, t, 1, 1.0)
+
+    @parametrize("in_dtype", [torch.float16, torch.bfloat16])
+    def test_batch_norm_mixed_dtype_backward(self, in_dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/154887
+        # test_nn covers the forward; this checks eval-mode gradients against CPU, since grad_weight is
+        # computed at the parameter dtype rather than the input dtype
+        cpu_x = torch.rand((2, 3, 4), dtype=in_dtype)
+        cpu_p = [torch.rand((3,)) for _ in range(4)]
+        cpu_p[1] += 1  # running_var must be positive
+
+        def run(device):
+            x = cpu_x.to(device).clone().requires_grad_()
+            mean, var, weight, bias = (t.to(device).clone().requires_grad_(i > 1) for i, t in enumerate(cpu_p))
+            F.batch_norm(x, mean, var, weight=weight, bias=bias).sum().backward()
+            return x.grad, weight.grad, bias.grad
+
+        self.assertEqual(run("mps"), run("cpu"))
+
+        # Without weight, only the stats dtype distinguishes these two backward graphs
+        for stats_dtype in (torch.float32, in_dtype):
+            grads = []
+            for device in ("mps", "cpu"):
+                x = cpu_x.to(device).clone().requires_grad_()
+                F.batch_norm(x, cpu_p[0].to(device, stats_dtype), cpu_p[1].to(device, stats_dtype)).sum().backward()
+                grads.append(x.grad)
+            self.assertEqual(*grads)
+
+        # training-mode backward with float32 save_mean/save_invstd
+        args = (cpu_x, cpu_x, cpu_p[2], None, None, cpu_p[0], cpu_p[1], True, 1e-5, [True] * 3)
+        mps_args = (a.to("mps") if isinstance(a, torch.Tensor) else a for a in args)
+        res = torch.ops.aten.native_batch_norm_backward(*mps_args)
+        self.assertEqual(res, torch.ops.aten.native_batch_norm_backward(*args))
+
+    def test_addbmm_mixed_dtype_errors(self):
+        # addbmm has no promotion on any backend, so it must raise rather than abort
+        m = torch.ones(2, 2, device="mps")
+        b = torch.ones(1, 2, 2, dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(RuntimeError, "must have the same dtype|Input dtypes must be the same"):
+            torch.addbmm(m, b, b)
+        with self.assertRaisesRegex(RuntimeError, "must have the same dtype|Input dtypes must be the same"):
+            torch.addbmm(m, torch.ones(1, 2, 2, device="mps"), b)
 
     # Binary Cross Enropy
     def test_bce_loss_simple(self):
@@ -8999,6 +9107,9 @@ class TestMPS(TestCaseMPS):
         helper(6)
         helper(3)
         helper(8)
+        # both sides of the n <= 4 register-kernel cutoff
+        helper(4)
+        helper(5)
         helper(1025, atol=1e-4)
 
     # Test tril
@@ -16563,7 +16674,6 @@ class TestConsistency(TestCaseMPS):
         for mps_sample in op.sample_inputs(
                 device,
                 dtype,
-                requires_grad=(op.supports_autograd and (dtype.is_floating_point or dtype.is_complex)),
                 include_conjugated_inputs=include_conjugated_inputs,
                 set_seed=True):
 
