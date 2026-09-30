@@ -10,6 +10,7 @@
 #include <fmt/format.h>
 #include <miniz.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <iostream>
@@ -86,11 +87,12 @@ std::string normalize_path_separator(const std::string& orig_path) {
   path.
   On Windows, when we input: "C:\Users\Test\file.txt", the output should be:
   "C:/Users/Test/file.txt". And then, we can process the output like on Linux.
+
+  Always convert '\\' to '/' (including on Linux). Zip member names can embed
+  Windows separators to hide a ".." component from a separator-sensitive check.
   */
   std::string normalized_path = orig_path;
-#ifdef _WIN32
   std::replace(normalized_path.begin(), normalized_path.end(), '\\', '/');
-#endif
   normalized_path = remove_duplicate_separator_of_path(normalized_path);
   return normalized_path;
 }
@@ -108,6 +110,57 @@ bool path_starts_with_directory(
       append_separator_if_needed(normalized_directory);
   return normalized_path == normalized_directory ||
       c10::starts_with(normalized_path, normalized_directory_with_sep);
+}
+
+// path_starts_with_directory is a string prefix test. A member can keep that
+// prefix and still climb out of the extraction directory with "..".
+bool zip_member_contains_dot_dot(const std::string& path) {
+  const fs::path p(normalize_path_separator(path));
+  for (const auto& part : p) {
+    if (part == "..") {
+      return true;
+    }
+  }
+  return false;
+}
+
+// relative_or_joined is either a zip member name or temp_dir + "/" + member.
+// The result is lexically under temp_dir, with no ".." component.
+std::string sandbox_extract_path(
+    const std::string& temp_dir,
+    const std::string& relative_or_joined) {
+  const std::string normalized = normalize_path_separator(relative_or_joined);
+  TORCH_CHECK(
+      !zip_member_contains_dot_dot(normalized),
+      "Refusing to extract zip entry with path traversal ('..'): ",
+      relative_or_joined);
+
+  fs::path root(normalize_path_separator(temp_dir));
+  fs::path out(normalized);
+  if (out.is_absolute()) {
+    const std::string root_s =
+        strip_trailing_separator(root.lexically_normal().string());
+    const std::string root_with_sep = append_separator_if_needed(root_s);
+    TORCH_CHECK(
+        c10::starts_with(normalized, root_with_sep) || normalized == root_s,
+        "Refusing to extract zip entry with absolute path: ",
+        relative_or_joined);
+  } else {
+    out = root / out;
+  }
+  out = out.lexically_normal();
+  // Callers split on '/'. lexically_normal() uses the native separator.
+  const std::string root_s = strip_trailing_separator(
+      normalize_path_separator(root.lexically_normal().string()));
+  const std::string out_s = normalize_path_separator(out.string());
+  const std::string root_with_sep = append_separator_if_needed(root_s);
+  TORCH_CHECK(
+      out_s == root_s || c10::starts_with(out_s, root_with_sep),
+      "Zip extract path escapes temporary directory: ",
+      relative_or_joined,
+      " -> ",
+      out_s);
+  return out_s;
 }
 
 void list_files_recursive(
@@ -653,10 +706,14 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
     }
 
     if (!metadata_filename.empty()) {
+      TORCH_CHECK(
+          !zip_member_contains_dot_dot(metadata_filename),
+          "Refusing to extract zip entry with path traversal ('..'): ",
+          metadata_filename);
       // Create temporary directory for extraction
       std::string temp_dir = normalize_path_separator(create_temp_dir());
       std::string output_path_str =
-          normalize_path_separator(temp_dir + k_separator + metadata_filename);
+          sandbox_extract_path(temp_dir, metadata_filename);
 
       // Create the parent directory if it doesn't exist
       size_t parent_path_idx = output_path_str.find_last_of(k_separator);
@@ -861,6 +918,10 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
           if (lastSlash != std::string::npos) {
             filename = cur_filename.substr(lastSlash + 1);
           }
+          TORCH_CHECK(
+              !filename.empty() && filename != "." && filename != "..",
+              "Invalid constant filename in zip entry: ",
+              cur_filename);
           output_path_str.append(k_separator)
               .append(model_directory)
               .append(k_separator)
@@ -868,7 +929,8 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
         }
 
         std::string output_file_path =
-            normalize_path_separator(output_path_str);
+            sandbox_extract_path(temp_dir_, output_path_str);
+        output_path_str = output_file_path;
         LOG(INFO) << "Extract file: " << zip_filename_str << " to "
                   << output_file_path;
 
