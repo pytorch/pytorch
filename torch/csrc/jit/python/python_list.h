@@ -151,7 +151,9 @@ class ScriptList final {
       ++i;
     }
 
-    TORCH_CHECK_VALUE(idx != -1, "list.remove(x): x not in list");
+    if (idx == -1) {
+      throw py::value_error();
+    }
 
     list.erase(list.begin() + idx);
   }
@@ -195,7 +197,9 @@ class ScriptList final {
       idx += len();
     }
 
-    TORCH_CHECK_INDEX(idx >= 0 && idx <= len(), "list index out of range");
+    if (idx < 0 || idx > len()) {
+      throw std::out_of_range("list index out of range");
+    }
 
     list_.insert(list_.begin() + idx, value);
   }
@@ -213,7 +217,9 @@ class ScriptList final {
       idx += sz;
     }
 
-    TORCH_CHECK_INDEX(idx >= 0 && idx < sz, "list index out of range");
+    if (idx < 0 || idx >= sz) {
+      throw std::out_of_range("list index out of range");
+    }
 
     return idx;
   }

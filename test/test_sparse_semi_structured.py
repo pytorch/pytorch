@@ -37,7 +37,6 @@ from torch.testing._internal.common_dtype import all_types_and_complex
 from torch.testing._internal.common_utils import (
     _restore_fp32_precision,
     _snapshot_fp32_precision,
-    HardwareClassification,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -95,6 +94,10 @@ atol_rtol_kw = {
 def sparse24_largest_mask_2d(original):
     sparse = SparseSemiStructuredTensorCUTLASS.prune_dense_static_sort(original)
     return sparse.to_dense().bool()
+
+
+def sparsify24_dense(original):
+    return sparse24_largest_mask_2d(original) * original
 
 
 def rand_sparse_semi_structured_mask(
@@ -184,8 +187,6 @@ def rand_sparse_semi_structured_all_patterns(r, c, dtype, device):
 
 
 class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
-    hw_classification = HardwareClassification.CUDA
-
     def setUp(self):
         if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) == 0:
             self.skipTest("semi-structured sparsity has no available backend!")
@@ -340,8 +341,6 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
 
 
 class TestSparseSemiStructured(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
     def setUp(self):
         super().setUp()
         if len(SEMI_STRUCTURED_SUPPORTED_BACKENDS) == 0:
@@ -680,9 +679,26 @@ class TestSparseSemiStructured(TestCase):
             A_sparse = to_sparse_semi_structured(A)
 
 
-class TestSparseSemiStructuredTraining(TestCase):
-    hw_classification = HardwareClassification.CUDA
+def create_random_mask(shape) -> torch.Tensor:
+    r = random.Random(0)
+    mask = torch.zeros(shape, dtype=torch.bool)
+    for line in range(mask.shape[0]):
+        for col in range(0, mask.shape[1], 4):
+            sparsity = r.choice(
+                [
+                    [False, False, True, True],
+                    [False, True, False, True],
+                    [True, False, False, True],
+                    [False, True, True, False],
+                    [True, False, True, False],
+                    [True, True, False, False],
+                ]
+            )
+            mask[line, col : col + 4] = torch.tensor(sparsity, dtype=torch.bool)
+    return mask
 
+
+class TestSparseSemiStructuredTraining(TestCase):
     def setUp(self):
         super().setUp()
         if not _IS_SM8X:
@@ -1084,8 +1100,6 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
          - torch._sparse_semi_structured_linear
     """
 
-    hw_classification = HardwareClassification.CUDA
-
     def setUp(self):
         super().setUp()
         SparseSemiStructuredTensor._FORCE_CUTLASS = True
@@ -1356,8 +1370,6 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         torch._cslt_compress
         torch._cslt_sparse_mm
     """
-
-    hw_classification = HardwareClassification.CUDA
 
     def setUp(self):
         super().setUp()
@@ -1890,12 +1902,10 @@ class TestComputeCompressedSwizzledBitmaskDevice(TestCase):
         _compute_compressed_swizzled_bitmask
     """
 
-    hw_classification = HardwareClassification.ACCELERATOR
-
-    def test_compute_compressed_swizzled_bitmask_matches_input_device(self, device):
-        """Ensure _compute_compressed_swizzled_bitmask output device matches input device."""
+    def test_compute_compressed_swizzled_bitmask_matches_input_device_cpu(self):
+        """Ensure _compute_compressed_swizzled_bitmask output device matches input device on CPU."""
         dense = rand_sparse_semi_structured_mask(
-            128, 128, dtype=torch.float32, device=device
+            128, 128, dtype=torch.float32, device="cpu"
         )
         compressed_swizzled_bitmask = _compute_compressed_swizzled_bitmask(dense)
         self.assertEqual(compressed_swizzled_bitmask.device, dense.device)
@@ -1913,7 +1923,6 @@ if "cusparselt" in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
     instantiate_device_type_tests(
         TestSparseSemiStructuredCUSPARSELT, globals(), only_for="cuda"
     )
-instantiate_device_type_tests(TestComputeCompressedSwizzledBitmaskDevice, globals())
 
 if __name__ == "__main__":
     run_tests()

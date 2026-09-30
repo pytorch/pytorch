@@ -83,7 +83,6 @@ class Multinomial(Distribution):
         batch_shape = torch.Size(batch_shape)
         new.total_count = self.total_count
         new._categorical = self._categorical.expand(batch_shape)
-        new._binomial = self._binomial.expand(batch_shape + self.event_shape)
         super(Multinomial, new).__init__(
             batch_shape, self.event_shape, validate_args=False
         )
@@ -125,11 +124,7 @@ class Multinomial(Distribution):
         return counts.type_as(self.probs)
 
     def entropy(self):
-        # keep n in the dtype of the distribution, lgamma of an integer tensor would
-        # otherwise be evaluated in the default dtype
-        n = torch.tensor(
-            self.total_count, dtype=self.probs.dtype, device=self.probs.device
-        )
+        n = torch.tensor(self.total_count)
 
         cat_entropy = self._categorical.entropy()
         term1 = n * cat_entropy - torch.lgamma(n + 1)

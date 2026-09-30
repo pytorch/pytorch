@@ -105,16 +105,19 @@ void initScriptListBindings(PyObject* module) {
               return toPyObject(self->contains(
                   toIValue(std::move(elem), self->type()->getElementType())));
             } catch (const py::cast_error&) {
-              TORCH_CHECK_TYPE(
-                  false, "list.__contains__(): argument is of the wrong type");
+              throw py::type_error();
             }
           })
       .def(
           "__getitem__",
           [](const std::shared_ptr<ScriptList>& self,
              ScriptList::diff_type idx) {
-            auto value = self->getItem(idx);
-            return toPyObject(value);
+            try {
+              auto value = self->getItem(idx);
+              return toPyObject(value);
+            } catch (const std::out_of_range&) {
+              throw py::index_error();
+            }
           },
           py::return_value_policy::
               reference_internal) // Return value is a reference to an object
@@ -148,9 +151,10 @@ void initScriptListBindings(PyObject* module) {
               self->setItem(
                   idx,
                   toIValue(std::move(value), self->type()->getElementType()));
+            } catch (const std::out_of_range&) {
+              throw py::index_error();
             } catch (const py::cast_error&) {
-              TORCH_CHECK_TYPE(
-                  false, "list.__setitem__(): value is of the wrong type");
+              throw py::type_error();
             }
           })
       .def(
@@ -165,9 +169,10 @@ void initScriptListBindings(PyObject* module) {
               throw py::error_already_set();
             }
 
-            TORCH_CHECK(
-                slicelength == value.size(),
-                "Left and right hand size of slice assignment have different sizes");
+            if (slicelength != value.size()) {
+              throw std::runtime_error(
+                  "Left and right hand size of slice assignment have different sizes");
+            }
 
             for (const auto i : c10::irange(slicelength)) {
               try {
@@ -175,8 +180,7 @@ void initScriptListBindings(PyObject* module) {
                     static_cast<ptrdiff_t>(start),
                     toIValue(value[i], self->type()->getElementType()));
               } catch (const py::cast_error&) {
-                TORCH_CHECK_TYPE(
-                    false, "list.__setitem__(): value is of the wrong type");
+                throw py::type_error();
               }
               start += step;
             }
@@ -184,7 +188,13 @@ void initScriptListBindings(PyObject* module) {
       .def(
           "__delitem__",
           [](const std::shared_ptr<ScriptList>& self,
-             ScriptList::diff_type idx) { self->delItem(idx); })
+             ScriptList::diff_type idx) {
+            try {
+              self->delItem(idx);
+            } catch (const std::out_of_range&) {
+              throw py::index_error();
+            }
+          })
       .def(
           "__iter__",
           [](const std::shared_ptr<ScriptList>& self) { return self->iter(); },
@@ -198,8 +208,7 @@ void initScriptListBindings(PyObject* module) {
                   toIValue(std::move(value), self->type()->getElementType()));
 
             } catch (const py::cast_error&) {
-              TORCH_CHECK_TYPE(
-                  false, "list.count(): argument is of the wrong type");
+              throw py::type_error();
             }
           })
       .def(
@@ -209,8 +218,7 @@ void initScriptListBindings(PyObject* module) {
               return self->remove(
                   toIValue(std::move(value), self->type()->getElementType()));
             } catch (const py::cast_error&) {
-              TORCH_CHECK_TYPE(
-                  false, "list.remove(): argument is of the wrong type");
+              throw py::type_error();
             }
           })
       .def(
@@ -220,8 +228,7 @@ void initScriptListBindings(PyObject* module) {
               return self->append(
                   toIValue(std::move(value), self->type()->getElementType()));
             } catch (const py::cast_error&) {
-              TORCH_CHECK_TYPE(
-                  false, "list.append(): argument is of the wrong type");
+              throw py::type_error();
             }
           })
       .def(
@@ -233,8 +240,7 @@ void initScriptListBindings(PyObject* module) {
             try {
               self->extend(toIValue(std::move(list), self->type()));
             } catch (const py::cast_error&) {
-              TORCH_CHECK_TYPE(
-                  false, "list.extend(): argument is of the wrong type");
+              throw py::type_error();
             }
           })
       .def(
@@ -250,8 +256,7 @@ void initScriptListBindings(PyObject* module) {
                     self->type()->getElementType()));
               }
             } catch (const py::cast_error&) {
-              TORCH_CHECK_TYPE(
-                  false, "list.extend(): argument is of the wrong type");
+              throw py::type_error();
             }
 
             self->extend(toIValue(py::cast(iter_list), self->type()));
@@ -275,8 +280,7 @@ void initScriptListBindings(PyObject* module) {
                   toIValue(std::move(obj), self->type()->getElementType()),
                   idx);
             } catch (const py::cast_error&) {
-              TORCH_CHECK_TYPE(
-                  false, "list.insert(): argument is of the wrong type");
+              throw py::type_error();
             }
           })
       .def(py::pickle(

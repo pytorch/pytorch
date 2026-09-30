@@ -8,11 +8,7 @@ from torch._dynamo.utils import same
 from torch._inductor import config, memory
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_triton_code
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    serialTest,
-)
+from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -59,7 +55,6 @@ class Foo(torch.nn.Module):
 # generate a different wrapper. Override the threshold to make these tests
 # happy.
 @config.patch("score_fusion_memory_threshold", 1)
-@instantiate_parametrized_tests
 class TestOperatorReorderForPeakMemory(TestCase):
     def setUp(self):
         super().setUp()
@@ -245,11 +240,10 @@ class TestOperatorReorderForPeakMemory(TestCase):
             outp = compiled_model(self.inputs)
             self.assertTrue(same(outp, outp_corr))
 
-    @parametrize("increase_gb", (None, 0.0))
     @mock.patch.object(config, "allow_buffer_reuse", False)
     @unittest.skipUnless(TRITON_AVAILABLE, "Triton is not available")
     @config.patch("test_configs.track_memory_lifecycle", "assert")
-    def test_mutation_size_propagation(self, increase_gb):
+    def test_mutation_size_propagation(self):
         """
         This tests correct size propagation in the case of mutations.
         In this example, buf1 is a mutation of buf0; we should have:
@@ -309,13 +303,10 @@ class TestOperatorReorderForPeakMemory(TestCase):
         a = [torch.randn(32, 32, device=GPU_TYPE) for _ in range(4)]
         p = torch.ones(a[0].size(), dtype=torch.bfloat16, device=GPU_TYPE)
 
-        with (
-            mock.patch.object(
-                memory,
-                "assign_memory_planning_info_for_scheduler_buffers",
-                assign_memory_planning_info_for_scheduler_buffers_with_records,
-            ),
-            config.patch(fusion_memory_timeline_peak_memory_increase_gb=increase_gb),
+        with mock.patch.object(
+            memory,
+            "assign_memory_planning_info_for_scheduler_buffers",
+            assign_memory_planning_info_for_scheduler_buffers_with_records,
         ):
             f_compiled = torch.compile(f)
             f_compiled(a, p)

@@ -417,9 +417,8 @@ Value* findArgumentAsInputParam(
     if (input->debugName() == name)
       return input;
   }
-  TORCH_CHECK(
-      false,
-      "Attribute is not part of model parameters. Cannot handle SetAttr and GetAttr nodes for : ",
+  throw std::runtime_error(
+      "Attribute is not part of model parameters. Cannot handle SetAttr and GetAttr nodes for : " +
       name);
 }
 

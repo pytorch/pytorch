@@ -199,8 +199,11 @@ class FSDPParam:
     _sharded_post_forward_param_data: torch.Tensor | None  # 1D
     _sharded_post_forward_param: nn.Parameter | None  # ND
     _unsharded_param: nn.Parameter  # ND
-    unsharded_accumulated_grad: torch.Tensor | None  # ND
     _sharding_spec: DTensorSpec
+    # Sharding specs for sharded grads, whose dtype can differ from the param's.
+    # Cached per dtype so each backward doesn't build a DTensorSpec per param,
+    # which costs CPU time with many params. Reset when _sharding_spec changes.
+    _sharding_spec_by_dtype: dict[torch.dtype, DTensorSpec]
     _unsharded_dtensor_spec: (
         DTensorSpec | None
     )  # set for DTensor params (SPMD or TP/EP)
@@ -210,6 +213,14 @@ class FSDPParam:
     _unsharded_inner_tensors: list[torch.Tensor]
     _release_all_gather_outputs_after_post_all_gather: bool
     _orig_param_uid: int
+    # An unset grad_dtype still requires gradients to match the parameter dtype,
+    # so sharded_grad_dtype stores that dtype as a concrete cast target and the
+    # override flag records whether grad_dtype was set. Unset and an explicit
+    # grad_dtype matching the parameter dtype have the same value, but only
+    # unset follows dtype conversions. None is an explicit unrestricted policy,
+    # so the override flag cannot be inferred from the dtype.
+    _has_sharded_grad_dtype_override: bool
+    sharded_grad_dtype: torch.dtype | None
 
     def __init__(
         self,
@@ -236,7 +247,6 @@ class FSDPParam:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
         self.all_gather_outputs: list[torch.Tensor] = []
-        self.unsharded_accumulated_grad = None
         self._param_fqn: str | None = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
@@ -274,6 +284,9 @@ class FSDPParam:
             raise NotImplementedError(
                 f"FSDP does not support non-contiguous parameters yet: {param.shape=} {param.stride()=}"
             )
+        # Capture the policy before parameter rewrites (e.g. spmd_types -> DTensor).
+        self._has_sharded_grad_dtype_override = param._has_grad_dtype_override
+        self.sharded_grad_dtype = param.grad_dtype
         if fsdp_placement is None:
             fsdp_placement = Shard(0)
         elif fsdp_placement.dim < 0:
@@ -302,6 +315,7 @@ class FSDPParam:
         self.is_dtensor = isinstance(param, DTensor)
         self._orig_param_uid = _get_orig_param_uid(param)
         param_data = self._init_sharding_spec(param, fsdp_placement, shard_dim)
+        self._sharding_spec_by_dtype = {}
         if not param_data.is_contiguous():
             raise AssertionError(
                 f"Expected contiguous tensor, got {param_data.shape=} {param_data.stride()=}"
@@ -360,6 +374,8 @@ class FSDPParam:
             self.to_sharded_dtensor(sharded_param),
             requires_grad=param.requires_grad,
         )
+        if self._has_sharded_grad_dtype_override:
+            self.sharded_param.grad_dtype = self.sharded_grad_dtype
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
         self._setattr_on_modules(self.sharded_param)
@@ -802,11 +818,8 @@ class FSDPParam:
     def init_dtype_attrs(self, mp_policy: MixedPrecisionPolicy):
         param_dtype, reduce_dtype = (mp_policy.param_dtype, mp_policy.reduce_dtype)
         self.orig_dtype = self.sharded_param.dtype
-        # Clamp `reduce_dtype` to `None` if no casting is required: since
-        # gradients are computed in `param_dtype`, if `reduce_dtype` matches,
-        # then we do not need extra casting
-        if reduce_dtype == param_dtype:
-            reduce_dtype = None
+        if not self._has_sharded_grad_dtype_override:
+            self.sharded_grad_dtype = self.orig_dtype
         # Clamp `param_dtype` to `None` if no casting is required or if the
         # parameter is non-floating-point (mixed precision is only meaningful
         # for floating-point parameters)
@@ -814,7 +827,6 @@ class FSDPParam:
             param_dtype = None
         self.param_dtype = param_dtype
         self.reduce_dtype = reduce_dtype
-        # None indicates that the mixed precision is not enabled
 
     def _init_extensions(self) -> None:
         inner_tensor = self._sharded_local_tensor
@@ -923,33 +935,21 @@ class FSDPParam:
         if self.is_spmd_types:
             pass  # keep as plain tensor; spmd_types restored before module compute
         elif self._unsharded_dtensor_spec is not None:
-            unsharded_dtensor_spec = self._get_unsharded_dtensor_spec(unsharded_param)
+            unsharded_dtensor_spec = _get_dtensor_spec_with_dtype(
+                self._unsharded_dtensor_spec, unsharded_param.dtype
+            )
             unsharded_param = _from_local_no_grad(
                 unsharded_param, unsharded_dtensor_spec
             )
         self._unsharded_param = nn.Parameter(
             unsharded_param, requires_grad=self.sharded_param.requires_grad
         )
+        self._unsharded_param.grad_dtype = self.unsharded_grad_dtype
         self._release_all_gather_outputs_if_needed()
 
     def _release_all_gather_outputs_if_needed(self) -> None:
         if self._release_all_gather_outputs_after_post_all_gather:
             self.free_all_gather_outputs()
-
-    def _get_unsharded_dtensor_spec(self, unsharded_param: torch.Tensor) -> DTensorSpec:
-        if self._unsharded_dtensor_spec is None:
-            raise AssertionError("Expected _unsharded_dtensor_spec for DTensor param")
-        tensor_meta = self._unsharded_dtensor_spec.tensor_meta
-        if tensor_meta is None or tensor_meta.dtype == unsharded_param.dtype:
-            return self._unsharded_dtensor_spec
-        return replace(
-            self._unsharded_dtensor_spec,
-            tensor_meta=TensorMeta(
-                tensor_meta.shape,
-                tensor_meta.stride,
-                unsharded_param.dtype,
-            ),
-        )
 
     def _unflatten_all_gather_outputs(self) -> tuple[torch.Tensor, ...]:
         return tuple(
@@ -999,6 +999,7 @@ class FSDPParam:
             self.to_sharded_post_forward_dtensor(sharded_post_forward_tensor),
             requires_grad=self.sharded_param.requires_grad,
         )
+        self._sharded_post_forward_param.grad_dtype = self.sharded_grad_dtype
         self._setattr_on_modules(self._sharded_post_forward_param)
         self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED_POST_FORWARD
@@ -1034,10 +1035,11 @@ class FSDPParam:
             _raise_assert_with_print(
                 f"Expects size {self.sharded_size} but got {tensor.shape}"
             )
-        return _from_local_no_grad(
-            tensor,
-            self._sharding_spec,
-        )
+        spec = self._sharding_spec_by_dtype.get(tensor.dtype)
+        if spec is None:
+            spec = _get_dtensor_spec_with_dtype(self._sharding_spec, tensor.dtype)
+            self._sharding_spec_by_dtype[tensor.dtype] = spec
+        return _from_local_no_grad(tensor, spec)
 
     def to_sharded_post_forward_dtensor(self, tensor: torch.Tensor) -> DTensor:
         if tensor.shape != self.sharded_post_forward_size:
@@ -1056,33 +1058,6 @@ class FSDPParam:
             tensor_meta=self._sharding_spec.tensor_meta,
         )
         return _from_local_no_grad(tensor, post_forward_sharding_spec)
-
-    def to_accumulated_grad_if_needed(self) -> None:
-        # Access `_unsharded_param` to bypass the sharded state check since we
-        # prefer to reshard before upcasting the gradient to save memory.
-        # It is created by `init_unsharded_param` and dropped by
-        # `free_unsharded_param`, so a parameter that has not been all-gathered
-        # does not have it. Such a parameter has no unsharded gradient to upcast,
-        # which is the case this method already returns early for.
-        unsharded_param = getattr(self, "_unsharded_param", None)
-        if (
-            self.reduce_dtype is None
-            or unsharded_param is None
-            or unsharded_param.grad is None
-            or unsharded_param.grad.dtype == self.reduce_dtype
-        ):
-            return
-        unsharded_grad = unsharded_param.grad
-        unsharded_param.grad = None
-        self.unsharded_accumulated_grad = unsharded_grad.to(self.reduce_dtype)
-
-    def accumulate_unsharded_grad_if_needed(self) -> None:
-        if (
-            self.unsharded_accumulated_grad is not None
-            and self.unsharded_param.grad is not None
-        ):
-            self.unsharded_accumulated_grad += self.unsharded_param.grad
-            self.unsharded_param.grad = None
 
     def alloc_all_gather_outputs(self) -> None:
         for tensor in self.all_gather_outputs:
@@ -1181,6 +1156,15 @@ class FSDPParam:
         return self._unsharded_param
 
     @property
+    def unsharded_grad_dtype(self) -> torch.dtype | None:
+        if self.reduce_dtype is not None:
+            return self.reduce_dtype
+        if self._has_sharded_grad_dtype_override:
+            return self.sharded_grad_dtype
+        # Use the original parameter dtype recorded at lazy initialization.
+        return self.orig_dtype
+
+    @property
     def unsharded_grad_data(self) -> torch.Tensor:
         grad = self.unsharded_param.grad
         if grad is None:
@@ -1188,15 +1172,19 @@ class FSDPParam:
         return self._get_grad_inner_tensor(grad)
 
     @property
-    def unsharded_accumulated_grad_data(self) -> torch.Tensor:
-        grad = self.unsharded_accumulated_grad
-        if grad is None:
-            raise AssertionError("Expects unsharded_accumulated_grad to not be None")
-        return self._get_grad_inner_tensor(grad)
+    def unsharded_accumulated_grad(self) -> torch.Tensor | None:
+        # The autograd leaf owns accumulation even while its parameter data is
+        # resharded. Never fold reduced history into this native-dtype buffer.
+        param = getattr(self, "_unsharded_param", None)
+        return param.grad if param is not None else None
 
     @property
     def unsharded_zero_grad_data(self) -> torch.Tensor:
-        return self._get_grad_inner_tensor(torch.zeros_like(self.unsharded_param))
+        # Use the dtype autograd would produce so group gradients stay uniform
+        param = self.unsharded_param
+        return self._get_grad_inner_tensor(
+            torch.zeros_like(param, dtype=param.grad_dtype)
+        )
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:
         if self.is_spmd_types:
@@ -1276,20 +1264,33 @@ class FSDPParam:
                 f"Expects to be in one of {states}, not {self.sharded_state}"
             )
 
+    def _capture_grad_dtype_policy(self, param: nn.Parameter) -> None:
+        # Parameters rebuilt by nn.Module._apply or load_state_dict(assign=True)
+        # lose grad_dtype, and an override cannot be unset, so only an explicit
+        # grad_dtype on the parameter updates the policy.
+        if param._has_grad_dtype_override:
+            self._has_sharded_grad_dtype_override = True
+            self.sharded_grad_dtype = param.grad_dtype
+
     def reset_sharded_param(self):
         # For ops like `nn.Module._apply` or `load_state_dict(assign=True)`
         # that change the sharded parameter tensor, we may need to re-pad the
         # sharded local tensor and re-save the reference.
         module_info = self._module_info
         new_param = getattr(module_info.module, module_info.param_name)
+        self._capture_grad_dtype_policy(self.sharded_param)
         if new_param is not self.sharded_param:
             if torch.__future__.get_swap_module_params_on_conversion():
                 raise AssertionError(
                     f"Expects swap_tensors to preserve object but got {new_param} "
                     f"instead of {self.sharded_param}"
                 )
+            self._capture_grad_dtype_policy(new_param)
             self.sharded_param = new_param
-
+        if not self._has_sharded_grad_dtype_override:
+            self.sharded_grad_dtype = new_param.dtype
+        elif not new_param._has_grad_dtype_override:
+            new_param.grad_dtype = self.sharded_grad_dtype
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return
@@ -1342,9 +1343,20 @@ class FSDPParam:
                     "Expected sharded_param._local_tensor to be contiguous"
                 )
         self._sharding_spec = self.sharded_param._spec
+        self._sharding_spec_by_dtype.clear()
 
     def __repr__(self):
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"
+
+
+def _get_dtensor_spec_with_dtype(spec: DTensorSpec, dtype: torch.dtype) -> DTensorSpec:
+    tensor_meta = spec.tensor_meta
+    if tensor_meta is None or tensor_meta.dtype == dtype:
+        return spec
+    return replace(
+        spec,
+        tensor_meta=TensorMeta(tensor_meta.shape, tensor_meta.stride, dtype),
+    )
 
 
 def alloc_storage(tensor: torch.Tensor) -> None:

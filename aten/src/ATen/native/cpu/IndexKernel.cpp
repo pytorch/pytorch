@@ -255,8 +255,6 @@ void index_fill_kernel(
       }
     };
 
-    // Lower grain size to allow for more parallelism and match cpu_index_kernel
-    const int index_parallel_grain_size = 3000;
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
       auto idx_stride = strides[1];
       if (idx_stride) {
@@ -266,7 +264,7 @@ void index_fill_kernel(
         handle_zero_idx_stride(data, strides, n);
       }
     };
-    iter.for_each(loop, index_parallel_grain_size);
+    iter.for_each(loop);
   });
 }
 

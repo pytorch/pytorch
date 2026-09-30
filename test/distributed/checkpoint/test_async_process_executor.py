@@ -23,9 +23,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorContinuousTestBase,
     DTensorTestBase,
-    NUM_DEVICES,
     with_comms,
 )
 
@@ -223,10 +221,8 @@ class TestAsyncProcessExecutorPrefixStore(TestCase):
                 dist.destroy_process_group()
 
 
-class TestProcessGroupInitInfo(DTensorContinuousTestBase):
+class TestProcessGroupInitInfo(DTensorTestBase):
     """Test suite for _ProcessGroupInitInfo."""
-
-    world_size = NUM_DEVICES
 
     @with_comms
     def test_process_group_init_info_with_default_pg(self) -> None:
