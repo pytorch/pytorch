@@ -30,10 +30,13 @@ if TYPE_CHECKING:
 
 _MAGIC = b"TORCH_TRITON_RUNTIME_CACHE\0"
 _VERSION = 1
-# Written into a cache directory once it holds exactly the bundle with this
-# digest, so a directory is either empty, fully hydrated, or rejected.
+# Marks a cache directory that holds every entry of the bundle with this
+# digest. Export marks its source too, so a process can import the bundle it
+# produced; import still compares each entry byte for byte, so later compiles
+# into the same directory do not invalidate the mark.
 _READY = ".runtime_cache_bundle"
 _BINARY_SUFFIXES = (".cubin", ".hsaco", ".zebin")
+_NATIVE_SUFFIXES = (".so", ".pyd", ".dll", ".dylib")
 _AUTOTUNE_SUFFIX = ".autotune.json"
 
 
@@ -49,16 +52,14 @@ def runtime_cache_root(*, require_explicit: bool = False) -> Path:
 
     configured = os.environ.get("TRITON_CACHE_DIR")
     root = Path(configured or knobs.cache.dir)
-    if (
-        not root.is_absolute()
-        or not configured
-        and (require_explicit or not (root / _READY).is_file())
+    if not root.is_absolute() or (
+        not configured and (require_explicit or not (root / _READY).is_file())
     ):
         raise RuntimeError(
             "Triton runtime-cache transport requires an explicit absolute "
             "TRITON_CACHE_DIR"
         )
-    if configured and root != Path(knobs.cache.dir):
+    if configured and os.path.normpath(configured) != os.path.normpath(knobs.cache.dir):
         raise RuntimeError(
             "Triton runtime-cache transport requires Triton to use TRITON_CACHE_DIR"
         )
@@ -78,7 +79,7 @@ def _compatibility(context: Any) -> dict[str, Any]:
 
     return {
         "triton_key": hashlib.sha256(triton_key().encode()).hexdigest(),
-        "python": sys.version,
+        "python": list(sys.version_info[:3]),
         "cache_tag": sys.implementation.cache_tag,
         "soabi": sysconfig.get_config_var("SOABI"),
         "extension_suffix": sysconfig.get_config_var("EXT_SUFFIX"),
@@ -107,13 +108,22 @@ def _cache_key(key: object) -> str:
     return key
 
 
+def _read_json(path: Path, data: bytes) -> Any:
+    try:
+        return json.loads(data)
+    except ValueError as exc:
+        raise RuntimeError(f"Unreadable Triton runtime-cache entry: {path}") from exc
+
+
 def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) -> bytes:
     """Snapshot the committed entries of a capture-private Triton cache.
 
     The caller must have drained all compile work, and must have set this cache
     directory before the first kernel was imported or launched. ``exclude``
     names cache keys the caller ships by other means; their entries are left
-    out. The source directory is marked as holding this bundle.
+    out. Every other file must belong to a committed entry, except the stage
+    files of a compile that failed before Triton committed it. The source
+    directory is marked as holding this bundle.
     """
     root = runtime_cache_root(require_explicit=True)
     excluded = {_cache_key(key) for key in exclude}
@@ -125,11 +135,12 @@ def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) ->
     records: list[dict[str, Any]] = []
     payloads: dict[tuple[str, str], bytes] = {}
 
-    def add_file(key: str, name: str) -> None:
+    def add_file(key: str, name: str) -> bytes:
         path = root / key / _member_name(name)
         if path.is_symlink() or not path.is_file():
             raise RuntimeError(f"Incomplete Triton runtime-cache entry: {path}")
         payloads[key, name] = path.read_bytes()
+        return payloads[key, name]
 
     for directory in sorted(root.iterdir()):
         # The marker, and its temporary copy if an earlier export failed.
@@ -140,17 +151,21 @@ def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) ->
             continue
         if directory.is_symlink() or not directory.is_dir():
             raise RuntimeError(f"Invalid Triton runtime-cache directory: {directory}")
+        consumed: set[str] = set()
+        names: set[str] = set()
         for path in sorted(directory.iterdir()):
             name = path.name
             # FileCacheManager.put writes through tmp.pid_* and holds no lock
             # file open once an entry is committed.
-            if name == "lock" or path.is_dir() and name.startswith("tmp.pid_"):
+            if name == "lock" or (path.is_dir() and name.startswith("tmp.pid_")):
                 continue
+            names.add(name)
             if name.startswith("__grp__"):
                 if path.is_symlink() or not path.is_file():
                     raise RuntimeError(f"Invalid Triton runtime-cache group: {path}")
                 group = _member_name(name.removeprefix("__grp__"))
-                children = json.loads(path.read_text())["child_paths"]
+                entry = _read_json(path, path.read_bytes())
+                children = entry.get("child_paths") if isinstance(entry, dict) else None
                 if not isinstance(children, dict) or group not in children:
                     raise RuntimeError(f"Incomplete Triton runtime-cache group: {path}")
                 members = list(children)
@@ -160,28 +175,48 @@ def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) ->
                     )
                 for member, original in children.items():
                     member = _member_name(member)
-                    if Path(original) != directory / member:
+                    # Triton records paths under knobs.cache.dir, which may
+                    # spell the same directory differently.
+                    if not isinstance(original, str) or os.path.normpath(
+                        original
+                    ) != os.path.normpath(directory / member):
                         raise RuntimeError(
                             f"Triton runtime-cache group points outside its entry: "
                             f"{path}"
                         )
                     add_file(key, member)
+                consumed.update(members)
+                consumed.add(name)
                 records.append(
                     {"kind": "kernel", "key": key, "group": group, "members": members}
                 )
             elif name.endswith(suffix):
                 add_file(key, name)
+                consumed.add(name)
                 records.append({"kind": "native", "key": key, "name": name})
             elif name.endswith(_AUTOTUNE_SUFFIX):
-                add_file(key, name)
-                choice = json.loads(payloads[key, name])
+                choice = _read_json(path, add_file(key, name))
                 if not isinstance(choice, dict) or not isinstance(
                     choice.get("configs_timings"), list
                 ):
                     raise RuntimeError(
                         f"Unrecognized Triton autotuning cache entry: {path}"
                     )
+                consumed.add(name)
                 records.append({"kind": "autotune", "key": key, "name": name})
+        leftover = sorted(names - consumed)
+        # Triton commits a kernel's stage files one by one and its group last,
+        # so a compile that failed, such as an autotuning config ptxas
+        # rejected, leaves stage files that Triton never reads.
+        if leftover and (
+            consumed
+            or any(
+                name.endswith(_BINARY_SUFFIXES + _NATIVE_SUFFIXES) for name in leftover
+            )
+        ):
+            raise RuntimeError(
+                f"Unrecognized Triton runtime-cache files in {directory}: {leftover}"
+            )
 
     files = []
     contents = []
@@ -209,7 +244,7 @@ def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) ->
         sort_keys=True,
         separators=(",", ":"),
     ).encode()
-    bundle = _MAGIC + struct.pack("!Q", len(header)) + header + b"".join(contents)
+    bundle = b"".join([_MAGIC, struct.pack("!Q", len(header)), header, *contents])
     temporary = root / f"{_READY}.tmp"
     try:
         temporary.write_text(hashlib.sha256(bundle).hexdigest())
@@ -317,7 +352,7 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
     root = runtime_cache_root()
     try:
         records, payloads = _decode(bundle, context)
-    except (KeyError, TypeError, ValueError) as exc:
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
         raise RuntimeError("Malformed Triton runtime-cache bundle") from exc
     digest = hashlib.sha256(bundle).hexdigest()
 
@@ -345,7 +380,7 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
                 if (
                     path.is_symlink()
                     or not path.is_file()
-                    or json.loads(path.read_text())
+                    or _read_json(path, path.read_bytes())
                     != json.loads(_group_contents(root, record))
                 ):
                     raise RuntimeError(
