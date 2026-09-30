@@ -5411,10 +5411,53 @@ def _bundle_header(bundle):
     return json.loads(bundle[start : start + size]), bundle[start + size :]
 
 
+def _replace_bundle_header(bundle, edit):
+    from torch.compiler._triton_runtime_cache import _MAGIC
+
+    header, payload = _bundle_header(bundle)
+    edit(header)
+    encoded = json.dumps(header).encode()
+    return _MAGIC + struct.pack("!Q", len(encoded)) + encoded + payload
+
+
 @unittest.skipUnless(has_triton_package(), "requires Triton")
 @instantiate_parametrized_tests
 class TestTritonRuntimeCacheTransport(TestCase):
     CONTEXT = {"build": "test"}
+
+    def _bundle(self, directory, **kwargs):
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with _triton_cache_namespace(directory):
+            key, native = _write_triton_runtime_entries()
+            return export_runtime_cache(context=self.CONTEXT, **kwargs), key, native
+
+    def test_roundtrip_hydrates_a_fresh_cache(self):
+        from triton.runtime.cache import get_cache_manager
+
+        from torch.compiler._triton_runtime_cache import import_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            producer = pathlib.Path(tmp, "producer")
+            consumer = pathlib.Path(tmp, "consumer")
+            bundle, key, native = self._bundle(producer)
+            with _triton_cache_namespace(producer):
+                import_runtime_cache(bundle, context=self.CONTEXT)
+            with _triton_cache_namespace(consumer):
+                import_runtime_cache(bundle, context=self.CONTEXT)
+                import_runtime_cache(bundle, context=self.CONTEXT)
+                for name in (native, "kernel.cubin", "kernel.autotune.json"):
+                    self.assertEqual(
+                        (consumer / key / name).read_bytes(),
+                        (producer / key / name).read_bytes(),
+                    )
+                self.assertEqual(
+                    get_cache_manager("ab" * 32).get_group("kernel.json"),
+                    {
+                        name: str(consumer / key / name)
+                        for name in ("kernel.json", "kernel.cubin")
+                    },
+                )
 
     def test_export_leaves_out_excluded_keys(self):
         from triton.runtime.cache import get_cache_manager
@@ -5447,6 +5490,77 @@ class TestTritonRuntimeCacheTransport(TestCase):
                     payload[file["offset"] : file["offset"] + file["size"]],
                     pathlib.Path(tmp, file["key"], file["name"]).read_bytes(),
                 )
+
+    @parametrize(
+        "damage",
+        ("checksum", "context", "occupied", "member_path", "incomplete_group"),
+    )
+    def test_import_rejects_a_damaged_bundle_without_writing(self, damage):
+        error = {
+            "checksum": "Corrupt Triton runtime-cache member",
+            "context": "Incompatible Triton runtime-cache ABI",
+            "occupied": "does not hold this runtime cache",
+            "member_path": "Invalid Triton runtime-cache member name",
+            "incomplete_group": "Incomplete or unreferenced",
+        }[damage]
+        from torch.compiler._triton_runtime_cache import import_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, _, _ = self._bundle(pathlib.Path(tmp, "producer"))
+            consumer = pathlib.Path(tmp, "consumer")
+            consumer.mkdir()
+            context = self.CONTEXT
+            if damage == "checksum":
+                bundle = bundle[:-1] + bytes([bundle[-1] ^ 1])
+            elif damage == "context":
+                context = {"build": "other"}
+            elif damage == "occupied":
+                (consumer / "partial").write_bytes(b"partial")
+            elif damage == "member_path":
+
+                def edit(header):
+                    header["files"][0]["name"] = "../escape"
+
+                bundle = _replace_bundle_header(bundle, edit)
+            else:
+
+                def edit(header):
+                    kernel = next(r for r in header["records"] if r["kind"] == "kernel")
+                    kernel["members"].append("kernel.ptx")
+
+                bundle = _replace_bundle_header(bundle, edit)
+            before = sorted(os.listdir(tmp)), sorted(consumer.iterdir())
+            with (
+                _triton_cache_namespace(consumer),
+                self.assertRaisesRegex(RuntimeError, error),
+            ):
+                import_runtime_cache(bundle, context=context)
+            self.assertEqual(
+                (sorted(os.listdir(tmp)), sorted(consumer.iterdir())), before
+            )
+
+    @parametrize("kind", ("native", "kernel", "autotune"))
+    @parametrize("damage", ("missing", "corrupt"))
+    def test_import_verifies_an_already_hydrated_cache(self, kind, damage):
+        from torch.compiler._triton_runtime_cache import import_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, key, native = self._bundle(pathlib.Path(tmp, "producer"))
+            consumer = pathlib.Path(tmp, "consumer")
+            with _triton_cache_namespace(consumer):
+                import_runtime_cache(bundle, context=self.CONTEXT)
+                name = {
+                    "native": native,
+                    "kernel": "kernel.cubin",
+                    "autotune": "kernel.autotune.json",
+                }[kind]
+                member = consumer / key / name
+                if damage == "missing":
+                    member.unlink()
+                else:
+                    member.write_bytes(b"corrupt")
+                with self.assertRaisesRegex(RuntimeError, "Incomplete or incompatible"):
+                    import_runtime_cache(bundle, context=self.CONTEXT)
 
     @parametrize("damage", ("missing_binary", "unrecognized_autotune"))
     def test_export_rejects_an_incomplete_cache(self, damage):
