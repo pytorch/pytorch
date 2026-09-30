@@ -1,6 +1,6 @@
 # Distributed development
 
-- Avoid sleeps in distributed/race code; synchronize with events, barriers,
+- Avoid sleeps in code and tests; synchronize with events, barriers,
   futures, or handshakes instead of timing assumptions.
 - Keep top-level interfaces backend-generic: no hardcoded `"nccl"` behavior in
   `distributed_c10d.py`. Put backend-specific logic in backend implementations;
