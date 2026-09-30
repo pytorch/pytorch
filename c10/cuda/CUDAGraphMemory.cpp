@@ -84,7 +84,10 @@ AllocationContext CaptureTracker::allocationContext(
     cudaStream_t request_stream) const {
   const auto info = c10::cuda::captureInfoMayInitCtx(request_stream);
   AllocationContext context{
-      info.status != CaptureStatus::None, std::nullopt, request_stream};
+      info.status != CaptureStatus::None,
+      std::nullopt,
+      request_stream,
+      request_stream};
   if (info.status != CaptureStatus::Active) {
     return context;
   }
@@ -110,32 +113,34 @@ void CaptureTracker::recordAllocation(
     return;
   }
   block_allocation_captures_.insert_or_assign(
-      block, *context.tracked_capture_id);
+      block,
+      AllocationRecord{*context.tracked_capture_id, context.request_stream});
 }
 
-void CaptureTracker::recordFree(const void* block, cudaStream_t free_stream) {
-  TORCH_INTERNAL_ASSERT(hasActiveCaptures());
+std::optional<CaptureTracker::AllocationRecord> CaptureTracker::recordFree(
+    const void* block,
+    std::optional<CaptureId_t> free_capture_id) {
   auto allocation_it = block_allocation_captures_.find(block);
   if (allocation_it == block_allocation_captures_.end()) {
-    return;
+    return std::nullopt;
   }
 
-  const AllocationContext free_context = allocationContext(free_stream);
-  if (free_context.tracked_capture_id.has_value()) {
+  const AllocationRecord allocation = allocation_it->second;
+  if (free_capture_id.has_value()) {
     const auto allocation_capture_it =
-        capture_tree_.find(allocation_it->second);
-    const auto free_capture_it =
-        capture_tree_.find(*free_context.tracked_capture_id);
+        capture_tree_.find(allocation.capture_id);
+    const auto free_capture_it = capture_tree_.find(*free_capture_id);
     if (allocation_capture_it != capture_tree_.end() &&
         free_capture_it != capture_tree_.end() &&
         allocation_capture_it->second.root_capture_id ==
             free_capture_it->second.root_capture_id &&
         !isFreeInAllocationCaptureOrAncestor(
-            allocation_it->second, *free_context.tracked_capture_id)) {
+            allocation.capture_id, *free_capture_id)) {
       ++free_capture_it->second.invalid_capture_free_count;
     }
   }
   block_allocation_captures_.erase(allocation_it);
+  return allocation;
 }
 
 bool CaptureTracker::isFreeInAllocationCaptureOrAncestor(
@@ -172,7 +177,7 @@ int CaptureTracker::eraseCaptureTree(CaptureId_t root_capture_id) {
   }
   for (auto it = block_allocation_captures_.begin();
        it != block_allocation_captures_.end();) {
-    if (capture_ids.count(it->second)) {
+    if (capture_ids.count(it->second.capture_id)) {
       it = block_allocation_captures_.erase(it);
     } else {
       ++it;
