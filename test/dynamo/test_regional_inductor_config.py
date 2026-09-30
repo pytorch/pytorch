@@ -9,7 +9,7 @@ from torch._higher_order_ops.invoke_subgraph import (
     NestedCompileRegionOptions,
 )
 from torch._inductor.test_case import run_tests
-from torch._inductor.utils import run_fw_bw_and_get_code
+from torch._inductor.utils import run_and_get_code, run_fw_bw_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -236,6 +236,49 @@ class NestedRegionInductorConfigTests(torch._inductor.test_case.TestCase):
             result = torch.compile(fn, backend="inductor", fullgraph=True)(x)
         self.assertEqual(result, expected)
         self.assertEqual(pass_calls, [])
+
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(graph_partition=True)
+    @torch._inductor.config.patch("triton.cudagraphs", True)
+    def test_region_body_cpu_op_is_not_cudagraph_partitioned(self):
+        @torch.compiler.nested_compile_region
+        def region(x):
+            return torch.sin(x).cpu().to(GPU_TYPE)
+
+        def fn(x):
+            return torch.cos(region(x))
+
+        x = torch.randn(16, 16, device=GPU_TYPE)
+        result, codes = run_and_get_code(
+            torch.compile(fn, backend="inductor", fullgraph=True), x
+        )
+
+        self.assertEqual(result, fn(x))
+        self.assertIn("repeated_subgraph0(", codes[0])
+        partition = self._generated_fn_body(codes[0], "def partition_0(args):")
+        self.assertNotIn("repeated_subgraph0(", partition)
+
+    @requires_gpu_and_triton
+    @torch._dynamo.config.patch(inline_single_use_invoke_subgraph=False)
+    @torch._inductor.config.patch(graph_partition=True)
+    @torch._inductor.config.patch("triton.cudagraphs", True)
+    @torch._inductor.config.patch("triton.cudagraph_min_partition_size", 3)
+    def test_region_body_kernels_count_toward_min_partition_size(self):
+        # The region call site is a couple of scheduler nodes, but its body
+        # holds four kernels, which is what the partition size should weigh.
+        @torch.compiler.nested_compile_region
+        def region(x, weight0, weight1, weight2, weight3):
+            return ((x @ weight0) @ weight1 @ weight2) @ weight3
+
+        inputs = [torch.randn(16, 16, device=GPU_TYPE) for _ in range(5)]
+        result, codes = run_and_get_code(
+            torch.compile(region, backend="inductor", fullgraph=True), *inputs
+        )
+
+        self.assertEqual(result, region(*inputs))
+        partition = self._generated_fn_body(codes[0], "def partition_0(args):")
+        self.assertIn("repeated_subgraph0(", partition)
 
 
 if __name__ == "__main__":
