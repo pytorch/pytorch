@@ -5447,7 +5447,6 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         self._run_local_m_reduce_result_feeds_main_output(m, n, group)
 
     def _run_local_m_reduce_result_feeds_main_output(self, m, n, group):
-
         def epilogue_fn(acc):
             x = acc.float().view(-1, group, n)
             scale = x.sum(1, keepdim=True)
