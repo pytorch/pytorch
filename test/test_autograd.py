@@ -59,6 +59,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
+    onlyOn,
     skipMeta,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -15535,7 +15536,6 @@ def _set_device_index(target_device):
 
 
 def _sleep_if_supported(cycles):
-    # Spin the device for a while if the current accelerator exposes _sleep.
     acc = torch.accelerator.current_accelerator()
     device_module = torch.get_device_module(acc)
     if hasattr(device_module, "_sleep"):
@@ -15866,11 +15866,9 @@ class TestAutogradStreamSynchronization(TestCase):
         for _ in range(2):
             test()
 
-    @expectedFailureMPS
+    @onlyOn(["cuda", "xpu"])
     @skipCUDANonDefaultStreamIf(True)
     def test_side_stream_backward_overlap(self, device):
-        if device == "cpu":
-            self.skipTest("requires accelerator")
         # In case 2/3, we would designate the consumer as the accumulation
         # stream and naively, one might have the consumer wait for the producer
         # as soon as we've added to the InputBuffer the first time.
