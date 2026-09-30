@@ -5,7 +5,6 @@ import collections
 import collections.abc
 import contextlib
 import enum
-import fractions
 import functools
 import inspect
 import itertools
@@ -3561,11 +3560,27 @@ partial_fn = functools.partial(fn, scale=2)
                 self.i += 1
                 return self.i
 
+        class Num:
+            def __init__(self, v):
+                self.v = v
+
+            def __mul__(self, other):
+                return Num(self.v * other.v)
+
+            def __add__(self, other):
+                return Num(self.v + other.v)
+
+            def __radd__(self, other):
+                return Num(other + self.v)
+
+            def __eq__(self, other):
+                return isinstance(other, Num) and self.v == other.v
+
         def func(x):
-            fracs = [fractions.Fraction(1, 3), fractions.Fraction(2, 5)]
+            nums = [Num(1), Num(2)]
             return (
                 x + 1,
-                math.sumprod(fracs, fracs),
+                math.sumprod(nums, nums),
                 math.sumprod((i for i in range(4)), [1, 2, 3, 4]),
                 math.sumprod(Seq(3), Seq(3)),
             )
