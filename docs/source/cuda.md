@@ -604,9 +604,9 @@ current stream, and subsequent work on the caller stream waits for the callbacks
 This also applies to a single stream and to work queued before a callback raises.
 When all supplied streams are on the caller's device, the helper switches
 directly between them and restores the caller stream once at the end to reduce
-launch skew. Cross-device execution uses `torch.cuda.stream` to restore the
-per-device stream state. Neither path synchronizes the host. After an exception,
-remaining callbacks are not invoked.
+overheads. Cross-device execution uses the `torch.cuda.stream` context manager
+to restore the per-device stream state. Neither path synchronizes the host.
+After an exception, remaining callbacks are not invoked.
 
 ```python
 from torch.cuda.green_contexts import execute_in_green_contexts
