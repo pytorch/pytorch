@@ -5947,7 +5947,7 @@ class DistributedTest:
                 object_list = [None]
             dist.broadcast_object_list(object_list)
 
-            map_location = {"cuda:0": f"cuda:{self.rank:d}"}
+            map_location = {f"{device_type}:0": f"{device_type}:{self.rank:d}"}
             checkpoint = torch.load(
                 io.BytesIO(object_list[0]), map_location=map_location
             )
@@ -6040,10 +6040,9 @@ class DistributedTest:
         )
         def test_post_localSGD_optimizer_step_reload(self):
             torch.accelerator.set_device_index(self.rank)
-            with _rank_temp_file() as tmp_file:
-                self._test_post_localSGD_optimizer_step_reload(
-                    self._create_periodic_model_averager, tmp_file
-                )
+            self._test_post_localSGD_optimizer_step_reload(
+                self._create_periodic_model_averager
+            )
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND not in DistTestCases.backend_feature["ddp"],
@@ -10632,10 +10631,10 @@ class DistributedTest:
                 object_list = [None]
             # This test never calls set_device, so the collective device has to be
             # named explicitly or every rank would broadcast on cuda:0.
-            coll_device = torch.device(f"cuda:{rank:d}")
+            coll_device = torch.device(device_type, rank)
             dist.broadcast_object_list(object_list, device=coll_device)
 
-            map_location = {"cuda:0": f"cuda:{rank:d}"}
+            map_location = {f"{device_type}:0": f"{device_type}:{rank:d}"}
             with self.assertLogs("torch.distributed") as captured:
                 # The checkpoint holds the hook function and its state, not just
                 # tensors, so it cannot be loaded with weights_only.
