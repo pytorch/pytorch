@@ -218,6 +218,7 @@ jobs:
           selected-test-configs: ${{ inputs.selected-test-configs }}
           ignore-test-config-labels: ${{ inputs.ignore-test-config-labels }}
           job-name: ${{ steps.setup-linux.outputs.job-name }}
+          lf-runners: ${{ inputs.lf_runners }}
 
       - name: Configure AWS credentials
         id: aws-creds
