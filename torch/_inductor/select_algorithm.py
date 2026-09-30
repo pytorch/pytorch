@@ -80,7 +80,6 @@ from .codegen.triton_utils import (
 )
 from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
-from .extern_kernels import extern_kernels, KernelNamespace  # noqa: F401
 from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
@@ -124,6 +123,13 @@ if TYPE_CHECKING:
 
     from .codegen.common import CSE
 
+
+class KernelNamespace:
+    pass
+
+
+# these objects are imported from the generated wrapper code
+extern_kernels = KernelNamespace()
 
 WORKSPACE_ARG_PLACEHOLDER = "ws_placeholder"
 
@@ -2800,7 +2806,7 @@ class TritonTemplate(KernelTemplate):
     ) -> None:
         super().__init__(name, hash=hashlib.sha256(source.encode("utf-8")).hexdigest())
         self.grid = grid
-        self._source = source
+        self.template = self._template_from_string(source)
         # A module that registers templates can be initialized more than once in
         # a single process (e.g. a double-import path). Tolerate re-registration
         # under an existing name as long as the template source matches, but
@@ -2820,12 +2826,6 @@ class TritonTemplate(KernelTemplate):
         # immediately instead of using layout constraints. This is used by
         # FlexAttention templates which require frozen layouts.
         self.always_freeze_layout = always_freeze_layout
-
-    @functools.cached_property
-    def template(self) -> Any:
-        # Compiled on first use: many templates are registered at import time and
-        # most compiles never render them.
-        return self._template_from_string(self._source)
 
     # When this flag is on, we ensure that the cached results and the generated result if cache
     # was not used are the same.
