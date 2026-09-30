@@ -7452,13 +7452,6 @@ class Scheduler:
                                 )
                         except CantSplit:
                             continue
-                        except Exception as e:
-                            fusion_log.debug(
-                                "Exception in compiling %s: %s",
-                                "prologue" if not epilogue_fusion else "epilogue",
-                                e,
-                            )
-                            continue
 
                     min_ms_fused = float("inf")
                     ms_fused_choice: TritonTemplateCallerBase | None = None
@@ -7672,13 +7665,6 @@ class Scheduler:
                                 (choice, *self.compile_kernel(node_list_fused))
                             )
                 except CantSplit:
-                    continue
-                except Exception as e:
-                    fusion_log.debug(
-                        "Exception in compiling %s: %s",
-                        "prologue" if not epilogue_fusion else "epilogue",
-                        e,
-                    )
                     continue
                 template_choices += 1
 
