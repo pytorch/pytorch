@@ -11,8 +11,15 @@ import torch
 import torch._logging.structured
 import torch.distributed as dist
 from torch._inductor.codecache import WritableTempFile
+from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_SANDCASTLE,
+    parametrize,
+)
 from torch.utils._triton import has_triton
 
 
@@ -152,6 +159,7 @@ class ToyModel(torch.nn.Module):
         return x
 
 
+@instantiate_parametrized_tests
 @mock.patch.dict(os.environ, {"TRITON_ALLOW_NON_CONSTEXPR_GLOBALS": "1"})
 class FxGraphRunnableTest(TestCase):
     def setUp(self):
@@ -175,11 +183,15 @@ class FxGraphRunnableTest(TestCase):
         trace_log.removeHandler(self.handler)
         trace_log.setLevel(self.old_level)
 
-    def _exec_and_verify_payload(self):
-        # Write captured payload & run it in a fresh Python process
+    def _get_payload(self):
         payload = self.buffer.getvalue().strip()
         self.assertTrue(payload, "Expected fx_graph_runnable payload but got nothing")
         self.assertIn("def forward", payload)  # sanity-check for actual FX code
+        return payload
+
+    def _exec_and_verify_payload(self):
+        # Write captured payload & run it in a fresh Python process
+        payload = self._get_payload()
 
         with WritableTempFile("w", suffix=".py") as tmp:
             tmp.write(payload)
@@ -200,6 +212,19 @@ class FxGraphRunnableTest(TestCase):
             return x + 1
 
         torch.compile(f)(torch.randn(4))  # noqa: UNSPECIFIED_BACKEND
+        self._exec_and_verify_payload()
+
+    def test_inference_graph_preserves_is_inference(self):
+        args = [torch.randn(4)]
+
+        def f(x):
+            return (x + 1,)
+
+        gm = make_fx(f)(*args)
+        compiled = compile_fx_inner(gm, args, is_inference=True)
+        compiled(args)
+
+        self.assertIn("is_inference=True", self._get_payload())
         self._exec_and_verify_payload()
 
     @unittest.skipUnless(has_triton(), "Triton not available")
@@ -551,14 +576,15 @@ class FxGraphRunnableTest(TestCase):
         self._exec_and_verify_payload()
 
     @torch._dynamo.config.patch(assume_static_by_default=False)
-    def test_repeat_interleave_with_output_size(self):
+    @parametrize("dtype", (torch.int32, torch.int64))
+    def test_repeat_interleave_with_output_size(self, dtype):
         def f(data, repeats, output_size):
             indices = torch.repeat_interleave(repeats, output_size=output_size.item())
             return data[indices]
 
         num_segments = 128
         data = torch.randn(1000, 16)
-        repeats = torch.randint(5, 15, (num_segments,), dtype=torch.int64)
+        repeats = torch.randint(5, 15, (num_segments,), dtype=dtype)
         output_size = repeats.sum()
 
         torch.compile(f, dynamic=True)(data, repeats, output_size)  # noqa: UNSPECIFIED_BACKEND
@@ -572,6 +598,19 @@ class FxGraphRunnableTest(TestCase):
         # Verify the fixup code is present
         self.assertIn("# Fixup: ensure sum(repeats) == output_size", payload)
         self.assertIn("_repeats.fill_", payload)
+
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_repeat_interleave_with_empty_repeats(self):
+        def f(data, repeats, output_size):
+            indices = torch.repeat_interleave(repeats, output_size=output_size.item())
+            return data[indices]
+
+        data = torch.randn(1, 16)
+        repeats = torch.empty(0, dtype=torch.int32)
+        output_size = repeats.sum()
+
+        torch.compile(f, dynamic=True)(data, repeats, output_size)  # noqa: UNSPECIFIED_BACKEND
+        self._exec_and_verify_payload()
 
     def test_repeat_interleave_with_constant_output_size(self):
         def f(data, repeats):
