@@ -1145,10 +1145,6 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 
         return expected
 
-# NB: we're running these tests only on CUDA because there are some
-# inconsistencies between CUDA and CPU, and running on CUDA makes it easier
-# to ignore the CPU case when inconsistencies arise.  Ideally we deal
-# with the inconsistencies but this takes time.
 class _TestMetaBase(TestCase):
     # Copies inputs to inplace operations to avoid inplace modifications
     #   to leaves requiring gradient
