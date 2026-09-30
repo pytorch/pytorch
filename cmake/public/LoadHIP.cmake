@@ -363,9 +363,11 @@ if(PYTORCH_FOUND_HIP)
   if(UNIX)
     find_package_and_print_version(rccl)
     find_package_and_print_version(hsa-runtime64 REQUIRED)
-    # hipFile is Linux-only and ships with ROCm 7.14 and later, where it is required.
+    # hipFile and amd_smi are Linux-only dependencies and ship with
+    # ROCm 7.14 and later, where they are required.
     if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "7.14.0")
       find_package_and_print_version(hipfile REQUIRED)
+      find_package_and_print_version(amd_smi REQUIRED)
     endif()
   endif()
 
