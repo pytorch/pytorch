@@ -1114,10 +1114,31 @@ class TestReductions(TestCase):
         def create_input(shape, device, dtype):
             if dtype.is_floating_point:
                 return torch.randn(*shape, device=device, dtype=dtype)
-            else:
-                low = 0 if dtype == torch.bool else -1000
-                high = 2 if dtype == torch.bool else 1000
-                return torch.randint(low, high, shape, device=device, dtype=dtype)
+
+            if dtype == torch.bool:
+                return torch.randint(0, 2, shape, device=device, dtype=dtype)
+
+            info = torch.iinfo(dtype)
+
+            if dtype.is_unsigned:
+                values = torch.tensor(
+                    [0, 1, info.max // 2, info.max - 1, info.max],
+                    device=device,
+                    dtype=dtype,
+                )
+                indices = torch.randint(
+                    0, values.numel(), shape, device=device
+                )
+                return values[indices]
+
+            return torch.randint(
+                max(info.min, -1000),
+                min(info.max, 1000) + 1,
+                shape,
+                device=device,
+                dtype=dtype,
+            )
+            
         x = create_input((100, 100), device, dtype)
         self.compare_with_numpy(torchfn, reffn, x)
         # non contiguous
@@ -1159,18 +1180,18 @@ class TestReductions(TestCase):
                         self.assertEqual(i, index)
                 self.assertEqual(torchfn(x), nan)
 
-    @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool, torch.half)
+    @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool, torch.half, torch.uint8, torch.uint16, torch.uint32, torch.uint64)
     @dtypesIfCUDA(torch.half, torch.float, torch.long, torch.bool)
     @dtypesIfXPU(torch.half, torch.float, torch.long, torch.bool)
-    @dtypes(torch.half, torch.float, torch.double)
+    @dtypes(torch.half, torch.float, torch.double, torch.uint8, torch.uint16, torch.uint32, torch.uint64)
     @skipIfMPS
     def test_max(self, device, dtype):
         self._test_minmax_helper(torch.max, np.amax, device, dtype)
 
-    @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool, torch.half)
+    @dtypesIfCPU(torch.float, torch.double, torch.long, torch.bool, torch.half, torch.uint8, torch.uint16, torch.uint32, torch.uint64)
     @dtypesIfCUDA(torch.half, torch.float, torch.long, torch.bool)
     @dtypesIfXPU(torch.half, torch.float, torch.long, torch.bool)
-    @dtypes(torch.half, torch.float, torch.double)
+    @dtypes(torch.half, torch.float, torch.double, torch.uint8, torch.uint16, torch.uint32, torch.uint64)
     @skipIfMPS
     def test_min(self, device, dtype):
         self._test_minmax_helper(torch.min, np.amin, device, dtype)
