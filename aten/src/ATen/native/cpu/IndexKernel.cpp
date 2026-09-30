@@ -34,6 +34,7 @@ void index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArrayRef 
     AT_EXPAND(AT_FLOAT8_TYPES),
     AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
     kComplexHalf,
+    kBComplex32,
     kHalf,
     kBool,
     kBFloat16);
@@ -201,6 +202,7 @@ void index_put_kernel(TensorIterator& iter, IntArrayRef index_size, IntArrayRef 
     kFloat8_e4m3fnuz,
     kFloat8_e5m2fnuz,
     kComplexHalf,
+    kBComplex32,
     kHalf,
     kBool,
     kBFloat16);
@@ -212,7 +214,7 @@ void index_fill_kernel(
   int64_t self_dim_size,
   int64_t self_dim_stride,
   const Scalar& source) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf, kBComplex32,
     iter.dtype(), "index_fill_cpu", [&] {
     auto fill_val = source.to<scalar_t>();
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
@@ -253,6 +255,8 @@ void index_fill_kernel(
       }
     };
 
+    // Lower grain size to allow for more parallelism and match cpu_index_kernel
+    const int index_parallel_grain_size = 3000;
     auto loop = [&](char** data, const int64_t* strides, int64_t n) {
       auto idx_stride = strides[1];
       if (idx_stride) {
@@ -262,7 +266,7 @@ void index_fill_kernel(
         handle_zero_idx_stride(data, strides, n);
       }
     };
-    iter.for_each(loop);
+    iter.for_each(loop, index_parallel_grain_size);
   });
 }
 
@@ -271,7 +275,7 @@ void index_copy_kernel(
   int64_t dim,
   int64_t self_dim_size,
   int64_t self_dim_stride) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(ScalarType::Half, ScalarType::Bool, ScalarType::BFloat16, kComplexHalf, kBComplex32,
     iter.dtype(), "index_copy_cpu", [&] {
     auto handle_nonzero_idx_stride = [&](char** data, const int64_t* strides, int64_t n) {
       auto* self_data_bytes = data[0];
@@ -346,7 +350,7 @@ void cpu_masked_fill_kernel(TensorIterator& iter, scalar_t value) {
 }
 
 void masked_fill_kernel(TensorIterator& iter, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(kComplexHalf, kBool, kBFloat16, kHalf,
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND5(kComplexHalf, kBComplex32, kBool, kBFloat16, kHalf,
     iter.dtype(), "masked_fill", [&] {
       scalar_t scalar_val = value.to<scalar_t>();
       auto mask_dtype = iter.input_dtype(0);
@@ -433,6 +437,7 @@ void masked_select_serial_kernel(TensorIterator& iter, int64_t result_stride) {
     AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
     AT_EXPAND(AT_FLOAT8_TYPES),
     kComplexHalf,
+    kBComplex32,
     kHalf,
     kBool,
     kBFloat16);
@@ -476,6 +481,7 @@ void masked_select_kernel(TensorIterator& iter, int64_t result_stride) {
     AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
     AT_EXPAND(AT_FLOAT8_TYPES),
     kComplexHalf,
+    kBComplex32,
     kHalf,
     kBool,
     kBFloat16);
@@ -789,15 +795,23 @@ void flip_kernel(TensorIterator& iter, const bool quantized) {
       return;
     }
 
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kHalf, kBFloat16, iter.dtype(), "flip_cpu",
-        [&iter] { cpu_kernel_vec(iter,
-          [](scalar_t a, scalar_t /*dummy input*/) -> scalar_t {
-            return a;
-        },
-          [](Vectorized<scalar_t> a, Vectorized<scalar_t> /*dummy input*/) -> Vectorized<scalar_t> {
-            return a;
-        });
-    });
+    AT_DISPATCH_V2(
+        iter.dtype(),
+        "flip_cpu",
+        AT_WRAP([&iter] {
+          cpu_kernel_vec(iter,
+            [](scalar_t a, scalar_t /*dummy input*/) -> scalar_t {
+              return a;
+            },
+            [](Vectorized<scalar_t> a, Vectorized<scalar_t> /*dummy input*/) -> Vectorized<scalar_t> {
+              return a;
+            });
+        }),
+        AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX),
+        AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+        kBool,
+        kHalf,
+        kBFloat16);
   }
 }
 

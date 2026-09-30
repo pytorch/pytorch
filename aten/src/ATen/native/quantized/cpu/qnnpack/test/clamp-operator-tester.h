@@ -113,7 +113,7 @@ class ClampOperatorTester {
       for (size_t i = 0; i < batchSize(); i++) {
         for (size_t c = 0; c < channels(); c++) {
           const uint8_t x = input[i * inputStride() + c];
-          const uint8_t y = std::min(std::max(x, qmin()), qmax());
+          const uint8_t y = std::clamp(x, qmin(), qmax());
           outputRef[i * channels() + c] = y;
         }
       }

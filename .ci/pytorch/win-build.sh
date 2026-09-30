@@ -4,7 +4,7 @@
 # If you want to build with CUDA, run this with USE_CUDA=1
 # If you want to build without CUDA, run this with USE_CUDA=0
 
-if [ ! -f setup.py ]; then
+if [ ! -f pyproject.toml ]; then
   echo "ERROR: Please run this build script from PyTorch root directory."
   exit 1
 fi
@@ -14,6 +14,8 @@ SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source "$SCRIPT_PARENT_DIR/common.sh"
 # shellcheck source=./common-build.sh
 source "$SCRIPT_PARENT_DIR/common-build.sh"
+
+export FLASH_ATTENTION_MAX_JOBS="${FLASH_ATTENTION_MAX_JOBS:-4}"
 
 export TMP_DIR="${PWD}/build/win_tmp"
 TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")

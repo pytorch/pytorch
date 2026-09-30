@@ -128,7 +128,7 @@ def _get_source_debug_name(source: Source | None) -> str:
             return "<unknown source>"
 
 
-def _esc_str(s: Any, apply_repr: bool = False) -> str:
+def _esc_str(s: object, apply_repr: bool = False) -> str:
     """
     Escapes curly brackets for format strings.
     e.g. "frozenset({0})" becomes "frozenset({{0}})".
@@ -152,12 +152,26 @@ class LocalSource(Source):
 
     # Whether we know this input is dynamic (based on example_inputs)
     # For non tensors, we simply look at the first index of the tuple
-    dynamism: frozenset[str] | None = None
+    dynamism: frozenset[tuple[str, tuple[bool, ...]]] | None = None
 
     # Whether the item at this source is the _content_ of a cell that is
     # dereferenced from the root frame, i.e., it's a part of the `co_cellvars`
     # or `co_freevars`.
     is_derefed_cell_contents: bool = False
+
+    # Whether this local is the function's varargs (``*args``) parameter.
+    # Set from ``co_flags & CO_VARARGS`` at frame-entry time. Element accesses
+    # like ``args[N]`` produce a ``GetItemSource`` whose base has this flag.
+    # Useful for distinguishing ``*args`` from a regular list-typed input.
+    # ``repr=False`` so the vast majority of locals (which are not varargs) do
+    # not get a noisy ``is_varargs=False`` in every debug string.
+    is_varargs: bool = dataclasses.field(default=False, repr=False)
+
+    # Whether this local is the function's varkw (``**kwargs``) parameter.
+    # Set from ``co_flags & CO_VARKEYWORDS`` at frame-entry time. Element
+    # accesses like ``kwargs["k"]`` produce a ``DictGetItemSource`` whose base
+    # has this flag. ``repr=False`` for the same reason as ``is_varargs``.
+    is_varkw: bool = dataclasses.field(default=False, repr=False)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.is_derefed_cell_contents:
@@ -375,9 +389,9 @@ class TypeDictSource(ChainedSource):
     @property
     def _name_template(self) -> str:
         # type(ob).__dict__ can return a proxy of the dict. But in the C++
-        # guard accessor, we are use type->tp_dict which is a dict. So,
+        # guard accessor, we use type->tp_dict which is a dict. So,
         # forcefully pass a dict object to ensure that the GuardManager
-        # registers that its working on a dict object.
+        # registers that it's working on a dict object.
         return "dict({0}.__dict__)"
 
 
@@ -715,6 +729,32 @@ class DefaultsSource(ChainedSource):
         codegen.append_output(codegen.create_load_const(self.idx_key))
         codegen.append_output(create_binary_subscr())
 
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        base_value = self.base.get_value(globals, locals, cache, on_error=on_error)
+        try:
+            defaults = getattr(base_value, self.field)
+        except AttributeError as error:
+            if on_error is not None:
+                on_error(self, base_value, error)
+            raise
+        try:
+            value = defaults[self.idx_key]
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, defaults, error)
+            raise
+        cache[self] = value
+        return value
+
     @functools.cached_property
     def _name_template(self) -> str:
         return self._name
@@ -722,7 +762,7 @@ class DefaultsSource(ChainedSource):
 
 @dataclass_with_cached_hash(frozen=True)
 class GetItemSource(ChainedSource):
-    index: Any
+    index: object
     index_is_slice: bool = False
 
     def __post_init__(self) -> None:
@@ -744,6 +784,13 @@ class GetItemSource(ChainedSource):
     def unpack_slice(self) -> slice:
         if not self.index_is_slice:
             raise AssertionError("unpack_slice called but index is not a slice")
+        if not (
+            isinstance(self.index, tuple)
+            and len(self.index) == 2
+            and self.index[0] is slice
+            and isinstance(self.index[1], tuple)
+        ):
+            raise AssertionError(f"Expected an encoded slice, got {self.index!r}")
         slice_class, slice_args = self.index
         return slice_class(*slice_args)
 
@@ -764,7 +811,7 @@ class GetItemSource(ChainedSource):
 
 @dataclass_with_cached_hash(frozen=True)
 class ConstDictKeySource(ChainedSource):
-    index: Any
+    index: int
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -803,10 +850,30 @@ class NonSerializableSetGetItemSource(ChainedSource):
         codegen.append_output(codegen.create_load_const(self.index))
         codegen.extend_output(create_call_function(2, False))
 
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        base_value = self.base.get_value(globals, locals, cache, on_error=on_error)
+        try:
+            value = utils.set_getitem(base_value, self.index)
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, base_value, error)
+            raise
+        cache[self] = value
+        return value
+
     @functools.cached_property
     def _name_template(self) -> str:
         # set ordering might not be stable
-        return f"list({{0}})[{_esc_str(self.index, apply_repr=True)}]"
+        return f"___set_getitem({{0}}, {_esc_str(self.index, apply_repr=True)})"
 
     def is_dict_key(self) -> bool:
         return False
@@ -818,7 +885,7 @@ class DictGetItemSource(ChainedSource):
     # Key to access in the dictionary. It can be one of the following types
     # 1) ConstDictKeySource
     # 2) constant - like string, integer
-    index: Any
+    index: object
 
     def __post_init__(self) -> None:
         from .variables import ConstantVariable
@@ -849,6 +916,31 @@ class DictGetItemSource(ChainedSource):
             index = repr(self.index)
         return f"{base}[{index}]"
 
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        base_value = self.base.get_value(globals, locals, cache, on_error=on_error)
+        index = (
+            self.index.get_value(globals, locals, cache, on_error=on_error)
+            if isinstance(self.index, Source)
+            else self.index
+        )
+        try:
+            value = base_value[index]
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, base_value, error)
+            raise
+        cache[self] = value
+        return value
+
     @functools.cached_property
     def _name_template(self) -> str:
         if isinstance(self.index, ConstDictKeySource):
@@ -864,7 +956,7 @@ class DictSubclassGetItemSource(ChainedSource):
     # Key to access in the dictionary. It can be one of the following types
     # 1) ConstDictKeySource
     # 2) constant - like string, integer
-    index: Any
+    index: object
 
     def __post_init__(self) -> None:
         from .variables import ConstantVariable
@@ -894,6 +986,34 @@ class DictSubclassGetItemSource(ChainedSource):
             codegen.append_output(codegen.create_load_const(self.index))
 
         codegen.extend_output(create_call_function(2, False))
+
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        base_value = self.base.get_value(globals, locals, cache, on_error=on_error)
+        index = (
+            self.index.get_value(globals, locals, cache, on_error=on_error)
+            if isinstance(self.index, Source)
+            else self.index
+        )
+        try:
+            if isinstance(self.index, ConstDictKeySource):
+                value = dict.__getitem__(base_value, index)
+            else:
+                value = base_value[index]
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, base_value, error)
+            raise
+        cache[self] = value
+        return value
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -963,6 +1083,22 @@ class TupleIteratorGetItemSource(GetItemSource):
         return (
             f"___tuple_iterator_getitem({{0}}, {_esc_str(self.index, apply_repr=True)})"
         )
+
+
+@dataclass_with_cached_hash(frozen=True)
+class ListReverseIteratorBackingListSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                utils.__name__, "list_reverseiterator_backing_list"
+            )
+        )
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        return "___list_reverseiterator_backing_list({0})"
 
 
 @dataclass_with_cached_hash(frozen=True)
@@ -1072,11 +1208,6 @@ class ImportSource(Source):
 
     module_name: str
 
-    def __post_init__(self) -> None:
-        from .guards import GuardBuilder, install_guard
-
-        install_guard(self.make_guard(GuardBuilder.ID_MATCH))
-
     @functools.cached_property
     def _name_template(self) -> str:
         return f"__import__('{self.module_name}')"
@@ -1160,6 +1291,27 @@ class SubclassAttrListSource(ChainedSource):
         return "{0}.__tensor_flatten__()[0]"
 
 
+# Guard-only source that yields the inner tensor of an AsyncCollectiveTensor
+# (ACT) and the base value unchanged for a plain Tensor. Used to guard on the
+# unwrapped tensor so a graph traced on an ACT can be reused when the resolved
+# plain Tensor is passed at runtime. See
+# torch._dynamo.variables.builder.VariableBuilder.wrap_tensor.
+@dataclass_with_cached_hash(frozen=True)
+class UnwrapCollectiveTensorSource(ChainedSource):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from(
+                "torch._dynamo.guards", "unwrap_async_collective_tensor"
+            )
+        )
+        codegen(self.base)
+        codegen.extend_output(create_call_function(1, False))
+
+    @property
+    def _name_template(self) -> str:
+        return "___unwrap_async_collective_tensor({0})"
+
+
 # NB: We don't expect you to actually ever generate guards against this
 # source, it is ephemeral
 @dataclass_with_cached_hash(frozen=True)
@@ -1174,6 +1326,30 @@ class CallMethodItemSource(ChainedSource):
     @property
     def _name_template(self) -> str:
         return "{0}.item()"
+
+
+@dataclass_with_cached_hash(frozen=True)
+class ContextVarGetSource(ChainedSource):
+    has_default: bool = False
+    default_value: object = None
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        def load_get_method():
+            codegen(self.base)
+            codegen.extend_output(codegen.create_load_attrs("get"))
+
+        codegen.add_push_null(load_get_method)
+        if self.has_default:
+            codegen.append_output(codegen.create_load_const(self.default_value))
+            codegen.extend_output(create_call_function(1, False))
+        else:
+            codegen.extend_output(create_call_function(0, False))
+
+    @functools.cached_property
+    def _name_template(self) -> str:
+        if self.has_default:
+            return f"{{0}}.get({_esc_str(self.default_value, apply_repr=True)})"
+        return "{0}.get()"
 
 
 # This is a synthetic source that is associated with the singleton
@@ -1285,6 +1461,15 @@ def is_from_source(source: Source, target: Source) -> bool:
         return True
     if isinstance(source, ChainedSource):
         return is_from_source(source.base, target)
+    return False
+
+
+@functools.lru_cache
+def is_from_attr_proxy_source(source: Source) -> bool:
+    if isinstance(source, AttrProxySource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_attr_proxy_source(source.base)
     return False
 
 

@@ -2,6 +2,10 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
+#include <c10/util/strides.h>
+
+#include <utility>
+#include <vector>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/CPUFunctions.h>
@@ -24,6 +28,15 @@ inline bool check_valid_strides_and_return_transposed(const Tensor& mat) {
   int alignment = 16 / mat.element_size();
   bool is_cpu = mat.device().is_cpu();
   TORCH_CHECK(is_cpu || uint64_t(mat.data_ptr()) % 16 == 0, "expected data_ptr to be aligned to 16 bytes");
+  // 3D inputs: per-batch pointer is base + i*stride(0)*element_size. cuBLAS and cutlass
+  // grouped GEMM kernels use TMA which requires 16-byte-aligned pointers, so
+  // the per-batch step must preserve the alignment of the base pointer.
+  if (!is_cpu && mat.dim() == 3) {
+    TORCH_CHECK(tensor_strides[0] % alignment == 0,
+        "batch stride must yield 16-byte-aligned per-batch pointers, got stride(0)=",
+        tensor_strides[0], " with element size ", mat.element_size(),
+        " (sizes=", tensor_sizes, ", strides=", tensor_strides, ")");
+  }
   if ((tensor_strides[end_dim - 1] == 1) && (tensor_strides[end_dim] >= std::max<int64_t>(1, tensor_sizes[end_dim - 1]))) {
     TORCH_CHECK(tensor_strides[end_dim] % alignment == 0, "strides should be multiple of 16 bytes");
     return true;
@@ -35,7 +48,14 @@ inline bool check_valid_strides_and_return_transposed(const Tensor& mat) {
   }
 }
 
-inline at::Tensor create_grouped_gemm_output_tensor(const Tensor& mat_a,
+// Compute the size and stride of a grouped-gemm output. Strides match the
+// layout `create_grouped_gemm_output_tensor` allocates: on CUDA the last dim
+// is padded to a 16-byte-aligned stride for TMA transfers; on ROCm the
+// returned stride vector is empty, denoting default contiguous strides (the
+// allocator uses at::empty/at::zeros there). Shared by the eager allocator and
+// the structured TORCH_META_FUNC so the shape/stride math stays single-sourced.
+inline std::pair<c10::SmallVector<int64_t, 3>, std::vector<int64_t>>
+compute_grouped_gemm_output_size_stride(const Tensor& mat_a,
 const Tensor& mat_b,
 const std::optional<at::Tensor>& offs,
 c10::ScalarType out_dtype
@@ -61,24 +81,36 @@ c10::ScalarType out_dtype
     }
   }
 
+  std::vector<int64_t> out_stride;
   #ifndef USE_ROCM
-  // For TMA transfers, strides of output tensor have to be either
-  // 1, or aligned to 16 bytes.
+  // For TMA transfers, strides of output tensor have to be either 1, or aligned
+  // to 16 bytes. Pad the last dim up to that alignment and take the contiguous
+  // strides of the padded shape (so the second-to-last stride picks up the pad).
   const auto last_dim = out_size.size() - 1;
   const auto alignment = 16 / c10::elementSize(out_dtype);
-  const int64_t size_padded = (out_size[last_dim] + alignment - 1) / alignment * alignment;
-  std::vector<int64_t> out_stride;
-  if (a_is_2d != b_is_2d) {
-    out_stride = {size_padded, 1};
-  } else {
-    out_stride = {out_size[1] * size_padded, size_padded, 1};
-  }
+  auto padded_size = out_size;
+  padded_size[last_dim] = (out_size[last_dim] + alignment - 1) / alignment * alignment;
+  const auto strides = c10::contiguous_strides(padded_size);
+  out_stride.assign(strides.begin(), strides.end());
+  #endif
+  return {out_size, out_stride};
+}
+
+inline at::Tensor create_grouped_gemm_output_tensor(const Tensor& mat_a,
+const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+c10::ScalarType out_dtype
+) {
+  auto [out_size, out_stride] =
+      compute_grouped_gemm_output_size_stride(mat_a, mat_b, offs, out_dtype);
+
+  #ifndef USE_ROCM
   return at::empty_strided(out_size, out_stride, mat_a.options().dtype(out_dtype));
   #else
   // For ROCm 2D-2D case (output is 3D), zero-initialize to handle K=0 or small K
   // groups correctly. When K=0, the mathematically correct result is zeros,
   // but CK kernel may not write to the output region.
-  if (a_is_2d && b_is_2d) {
+  if (mat_a.dim() == 2 && mat_b.dim() == 2) {
     return at::zeros(out_size, mat_a.options().dtype(out_dtype));
   }
   return at::empty(out_size, mat_a.options().dtype(out_dtype));
@@ -107,6 +139,7 @@ std::optional<c10::ScalarType> out_dtype) {
   if (offs.has_value()) {
     TORCH_CHECK(offs->dim() == 1, "offs has to be 1D");
     TORCH_CHECK(offs->dtype() == at::kInt, "Offsets have to be int32");
+    TORCH_CHECK(offs->stride(0) == 1, "Offsets must have stride (1,)");
   }
   TORCH_CHECK(!bias.has_value(), "Bias not supported yet");
 }

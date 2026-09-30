@@ -138,7 +138,7 @@ struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 };
 
 struct MTIAHooks : public at::MTIAHooksInterface {
-  explicit MTIAHooks(at::MTIAHooksArgs) {}
+  MTIAHooks() {}
   void init() const override {}
 
   bool hasMTIA() const override {
@@ -188,6 +188,10 @@ struct MTIAHooks : public at::MTIAHooksInterface {
     torch::utils::device_lazy_init(at::kMTIA);
 
     return current_streams[device];
+  }
+
+  bool isCurrentStreamCapturing() const override {
+    return false;
   }
 
   void setCurrentStream(const c10::Stream& stream) const override {

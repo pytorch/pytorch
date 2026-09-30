@@ -36,6 +36,7 @@ from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     compiled_fsdp_test,
     FSDPTest,
+    FSDPTestContinuous,
     FSDPTestMultiThread,
     MLP,
     MLPStack,
@@ -401,8 +402,8 @@ class TestReplicate1DTrainingCore(FSDPTest):
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         delay_in_ms = 100
-        orig_all_gather = dist.all_gather_into_tensor
-        orig_reduce_scatter = dist.reduce_scatter_tensor
+        orig_all_gather = dist.all_gather_single
+        orig_reduce_scatter = dist.reduce_scatter_single
 
         def delayed_all_gather(*args, **kwargs):
             torch.get_device_module(device_type)._sleep(
@@ -833,7 +834,7 @@ class TestReplicateSharedParams(FSDPTest):
             self.assertEqual(losses[0], losses[1])
 
 
-class TestReplicateGradientAccumulation(FSDPTest):
+class TestReplicateGradientAccumulation(FSDPTestContinuous):
     @property
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())

@@ -5,7 +5,6 @@ import inspect
 import logging
 import operator
 import re
-import types
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -18,7 +17,7 @@ import torch
 import torch.fx._pytree as fx_pytree
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_value
+from torch._library.opaque_object import is_custom_class_obj
 from torch.export import ExportedProgram
 from torch.export._tree_utils import reorder_kwargs
 from torch.export.exported_program import (
@@ -103,6 +102,12 @@ def _assign_attr(
         for to_module in to_modules:
             if not hasattr(to_module, item):
                 setattr(to_module, item, torch.nn.Module())
+            # Collect `item` and every call-name variant `item@N` present in
+            # _modules, regardless of contiguity. Export passes (e.g.
+            # replace_set_grad_with_hop_pass) can relocate intermediate calls
+            # into HOP subgraphs, leaving non-contiguous indices (e.g. base + @3
+            # with @1/@2 absent); scanning contiguously from @1 would stop at the
+            # gap and never populate the surviving higher-index copies.
             ts.update(
                 t_call  # type: ignore[misc]
                 for k, t_call in to_module._modules.items()
@@ -134,7 +139,7 @@ def _assign_attr(
                     torch.Tensor,
                     torch.ScriptObject,
                 ),
-            ) and not is_opaque_value(from_obj):
+            ) and not is_custom_class_obj(from_obj):
                 raise AssertionError(
                     f"expected torch.Tensor, torch.ScriptObject, or opaque type for CONSTANT attr_kind, got {type(from_obj)}"
                 )
@@ -323,6 +328,28 @@ class FlatArgsAdapter(abc.ABC):
     def get_flat_arg_paths(self) -> list[str]:
         """Returns a list of paths that are used to access the flat args."""
         return []
+
+
+class _UnflattenedForward:
+    """
+    Non-data descriptor for UnflattenedModule.forward. The runtime call stays
+    variadic, but inspect.signature reports the exported top-level input names
+    so re-export binds example inputs like the original module. Binding happens
+    at attribute access, so shallow copies such as DataParallel replicas call
+    their own state rather than the instance the signature was configured on.
+    """
+
+    def __get__(self, module, owner=None):
+        if module is None:
+            return UnflattenedModule._forward_impl
+
+        def forward(*args, **kwargs):
+            return module._forward_impl(*args, **kwargs)
+
+        signature = module.__dict__.get("_forward_signature")
+        if signature is not None:
+            forward.__signature__ = signature  # type: ignore[attr-defined]
+        return forward
 
 
 class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
@@ -694,37 +721,28 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
         return flat_args
 
     def _configure_forward_signature(self):
+        self._forward_signature = None
         signature = self.module_call_graph[0].signature
-        if signature is None or signature.forward_arg_names is None:
+        # A flat args adapter accepts input trees that differ from the export,
+        # so the exported input names must not constrain signature binding.
+        if (
+            self.flat_args_adapter is not None
+            or signature is None
+            or signature.forward_arg_names is None
+        ):
             return
-
-        self_arg_name = "__unflattened_self"
-        while self_arg_name in signature.forward_arg_names:
-            self_arg_name += "_"
-
         try:
-            parameters = [
-                inspect.Parameter(
-                    self_arg_name, inspect.Parameter.POSITIONAL_OR_KEYWORD
-                ),
-                *[
+            self._forward_signature = inspect.Signature(
+                [
                     inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD)
                     for name in signature.forward_arg_names
-                ],
-            ]
-            forward_signature = inspect.Signature(parameters)
+                ]
+            )
         except ValueError:
             log.debug(
                 "Unable to install an introspection signature for UnflattenedModule.forward",
                 exc_info=True,
             )
-            return
-
-        def forward(self, *args, **kwargs):
-            return self._forward_impl(*args, **kwargs)
-
-        forward.__signature__ = forward_signature  # type: ignore[attr-defined]
-        self.forward = types.MethodType(forward, self)
 
     def _forward_impl(self, *args, **kwargs):
         flat_args = self.process_forward_inputs(*args, **kwargs)
@@ -747,8 +765,7 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
             )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
 
-    def forward(self, *args, **kwargs):
-        return self._forward_impl(*args, **kwargs)
+    forward = _UnflattenedForward()  # pyrefly: ignore [bad-assignment]
 
     def finalize(self):
         self.__dict__["graph_module"] = torch.fx.GraphModule(self, self.graph)
@@ -1915,7 +1932,7 @@ def _sink_params(
 
         inputs_to_state_of_scope[node] = state_name
 
-    # Record name of remove inputs for return purpose.
+    # Record name of removed inputs for return purpose.
     inputs_removed: set[str] = set()
 
     for node, state_name in inputs_to_state_of_scope.items():

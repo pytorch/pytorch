@@ -11,6 +11,7 @@ from torch._higher_order_ops.auto_functionalize import (
     auto_functionalized,
     auto_functionalized_v2,
 )
+from torch._inductor import inductor_prims
 from torch._inductor.fx_passes.reinplace import reinplace_inplaceable_ops_core
 from torch._inductor.test_case import run_tests, TestCase as InductorTestCase
 from torch.testing._internal.common_utils import (
@@ -136,6 +137,159 @@ class TestReinplacingPassCorrectness(InductorTestCase):
             return x
 
         self._test(f)
+
+    def test_dont_reinplace_scatter_from_overlapping_view(self):
+        # https://github.com/pytorch/pytorch/issues/197829
+        def f(x):
+            x[1:] = x[:-1].clone()
+            return x
+
+        # On CPU the overlapping copy is wrong at any size. On a GPU it only
+        # shows with many blocks, and not on every run.
+        x = torch.randn(64, 8)
+        x2 = x.clone()
+        self.assertEqual(f(x), torch.compile(f)(x2))
+        self.assertEqual(x, x2)
+
+    def test_dont_reinplace_index_put_that_reads_its_input(self):
+        # https://github.com/pytorch/pytorch/issues/198567
+        def f(x):
+            r = x + 1
+            return torch.put(r, r, r, accumulate=True)
+
+        # r[i] = n - 1 - i, so every element is scattered to the other end: an
+        # index_put_ reinplaced onto r would read indices and values it has
+        # already written.
+        n = 256
+        x = torch.arange(n - 2, -2, -1, device=device)
+        self.assertEqual(f(x), torch.compile(f)(x))
+
+    @parametrize(
+        "op",
+        [
+            subtest(aten.index_put.default, name="index_put"),
+            subtest(aten._unsafe_index_put.default, name="unsafe_index_put"),
+        ],
+    )
+    @parametrize("aliased", ["indices", "values_view", "none"])
+    def test_index_put_reinplace_with_aliased_operand(self, op, aliased):
+        inplace_op = {
+            aten.index_put.default: aten.index_put_.default,
+            aten._unsafe_index_put.default: inductor_prims._unsafe_index_put_,
+        }[op]
+
+        def f(x, idx, val):
+            x = x + 1
+            if aliased == "indices":
+                idx = x
+            elif aliased == "values_view":
+                # a different node, but the same storage as x
+                idx, val = idx[:4], x[4:]
+            return op(x, [idx], val, True)
+
+        inputs = (
+            torch.tensor([6, 4, 2, 0, 5, 3, 1, -1]),
+            torch.tensor([0, 2, 4, 6, 1, 3, 5, 7]),
+            torch.ones(8, dtype=torch.int64),
+        )
+        gm = make_fx(f, tracing_mode="fake")(*inputs)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes]
+        if aliased == "none":
+            self.assertIn(inplace_op, targets)
+            self.assertNotIn(op, targets)
+        else:
+            self.assertIn(op, targets)
+            self.assertNotIn(inplace_op, targets)
+            # Only run the graph when it is still functional:
+            # prims._unsafe_index_put_ can't be run outside of Inductor.
+            self.assertEqual(gm(*inputs), f(*inputs))
+
+    def test_view_index_put_should_reinplace_copy_to_base(self):
+        def f(input_pos, val, cache):
+            cache_view = aten.reshape.default(cache, [4, -1])
+            val_view = aten.reshape.default(val, [-1])
+            updated = aten.index_put.default(cache_view, [input_pos], val_view)
+            updated_base = aten.reshape.default(updated, [4, 3, 4])
+            return aten.copy_.default(cache, updated_base)
+
+        input_pos = torch.tensor([1], device=device)
+        val = torch.randn(3, 4, device=device)
+        cache = torch.randn(4, 3, 4, device=device)
+
+        expected_cache = cache.clone()
+        expected = f(input_pos, val, expected_cache)
+
+        gm = make_fx(f, tracing_mode="fake")(input_pos, val, cache)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put_.default, targets)
+        self.assertNotIn(aten.index_put.default, targets)
+        self.assertNotIn(aten.copy_.default, targets)
+
+        actual_cache = cache.clone()
+        actual = gm(input_pos, val, actual_cache)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_cache, expected_cache)
+
+    def test_view_index_put_keeps_copy_when_later_view_is_live(self):
+        def f(input_pos, val, cache):
+            cache_view = aten.reshape.default(cache, [4, -1])
+            live_view = aten.select.int(cache, 0, 0)
+            val_view = aten.reshape.default(val, [-1])
+            updated = aten.index_put.default(cache_view, [input_pos], val_view)
+            live_use = aten.sin.default(live_view)
+            updated_base = aten.reshape.default(updated, [4, 3, 4])
+            copied = aten.copy_.default(cache, updated_base)
+            return live_use, copied
+
+        input_pos = torch.tensor([1], device=device)
+        val = torch.randn(3, 4, device=device)
+        cache = torch.randn(4, 3, 4, device=device)
+
+        gm = make_fx(f, tracing_mode="fake")(input_pos, val, cache)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put.default, targets)
+        self.assertIn(aten.copy_.default, targets)
+        self.assertNotIn(aten.index_put_.default, targets)
+
+    def test_view_index_put_rejects_non_inverse_copy_back_view(self):
+        def f(input_pos, val, cache):
+            cache_view = aten.transpose.int(cache, 0, 1)
+            updated = aten.index_put.default(cache_view, [input_pos], val)
+            copied_view = aten.as_strided.default(updated, [2, 3], [1, 2])
+            return aten.copy_.default(cache, copied_view)
+
+        input_pos = torch.tensor([1], device=device)
+        val = torch.tensor([[10.0, 20.0]], device=device)
+        cache = torch.arange(6, device=device, dtype=torch.float32).reshape(2, 3)
+
+        expected_cache = cache.clone()
+        expected = f(input_pos, val, expected_cache)
+
+        gm = make_fx(f, tracing_mode="fake")(input_pos, val, cache)
+        reinplace_inplaceable_ops_core(gm.graph)
+        gm.graph.lint()
+        gm.recompile()
+
+        targets = [node.target for node in gm.graph.nodes]
+        self.assertIn(aten.index_put.default, targets)
+        self.assertIn(aten.copy_.default, targets)
+        self.assertNotIn(aten.index_put_.default, targets)
+
+        actual_cache = cache.clone()
+        actual = gm(input_pos, val, actual_cache)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_cache, expected_cache)
 
     def test_counters_functionalize_old(self):
         ReinplaceCounters.clear()
@@ -444,8 +598,7 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     @parametrize(
         "factory_op",
         [
-            # Skipping because of https://github.com/pytorch/pytorch/issues/170160
-            # subtest(torch.ones_like, name="ones_like"),
+            subtest(torch.ones_like, name="ones_like"),
             subtest(torch.empty_like, name="empty_like"),
         ],
     )

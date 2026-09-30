@@ -799,7 +799,7 @@ def element_wise_eq(n: Node) -> list[Any]:
     For element-wise operations and handles broadcasting.
     Note that after applying broadcasting to the arguments
     we are able to determine if certain dimensions have not been broadcast
-    if they are symbolicallu equal.
+    if they are symbolically equal.
 
     in this case, we can establish equality between those dimensions and the
     corresponding output dimensions.
@@ -875,7 +875,7 @@ def flatten_refinement_rule(n: Node) -> list[Any]:
 @register_algebraic_expressions_inference_rule(Conv2d)
 def conv_rule(n: Node, module_instance: Any) -> TensorType | None:
     """
-    Represents the output in terms of an algrbraic expression w.r.t
+    Represents the output in terms of an algebraic expression w.r.t
     the input when possible
     """
     if not isinstance(n.args[0], Node):

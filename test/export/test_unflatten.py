@@ -10,8 +10,9 @@ import torch
 import torch._dynamo as torchdynamo
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import export, FlatArgsAdapter, unflatten
-from torch.export.unflatten import _disable_interpreter
+from torch.export.unflatten import _assign_attr, _AttrKind, _disable_interpreter
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
@@ -23,6 +24,8 @@ from torch.utils._pytree import TreeSpec
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestUnflatten(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def compare_outputs(self, eager, unflattened, args):
         orig_output = eager(*args)
         unflattened_output = unflattened(*args)
@@ -220,6 +223,33 @@ class TestUnflatten(TestCase):
             id(getattr(unflattened_module.blocks, "0")),
             id(getattr(unflattened_module.blocks, "2")),
         )
+
+    def test_assign_attr_noncontiguous_call_indices(self):
+        """_assign_attr must populate every @N call-name variant present in
+        _modules, even when the indices are non-contiguous.
+
+        When a multi-called submodule has some calls inside a torch.no_grad() /
+        set_grad_enabled region, replace_set_grad_with_hop_pass relocates those
+        intermediate call copies (e.g. @1, @2) into a wrap_with_set_grad_enabled
+        HOP subgraph, leaving non-contiguous indices at the top level (e.g. base
+        + @3). A contiguous scan starting at @1 stops at the first gap and never
+        reaches the surviving @3 copy, leaving its parameters unassigned; that
+        copy later fails in _sink_params with a missing-attribute error.
+        """
+        for attr_kind, make_obj in (
+            (_AttrKind.PARAMETER, lambda: torch.nn.Parameter(torch.randn(4))),
+            (_AttrKind.BUFFER, lambda: torch.ones(4)),
+        ):
+            root = torch.nn.Module()
+            # base + @3, with @1/@2 absent (relocated into a HOP subgraph).
+            root._modules["leaf"] = torch.nn.Module()
+            root._modules["leaf@3"] = torch.nn.Module()
+
+            obj = make_obj()
+            _assign_attr(obj, root, "leaf.bias", attr_kind)
+
+            self.assertIs(root._modules["leaf"].bias, obj)
+            self.assertIs(root._modules["leaf@3"].bias, obj)
 
     def test_assert_tensor_metadata_stack(self):
         class N(torch.nn.Module):
@@ -422,6 +452,59 @@ class TestUnflatten(TestCase):
                 dynamic_shapes=dynamic_shapes,
             )
             torch.testing.assert_close(reexported.module()(x), model(x))
+
+    def test_unflatten_forward_binds_to_replicas(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.leaf = Leaf()
+
+            def forward(self, x):
+                return self.leaf(x)
+
+        x = torch.rand(2, 2)
+        unflattened = unflatten(export(Mod(), (x,)))
+        # DataParallel replicas are shallow copies with their own __dict__;
+        # forward must dispatch through the replica, not the source module.
+        replica = unflattened._replicate_for_data_parallel()
+        replica.leaf = torch.nn.Identity()
+
+        torch.testing.assert_close(unflattened(x), x + 1)
+        torch.testing.assert_close(replica(x), x)
+
+    def test_unflatten_flat_args_adapter_reexport(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        class KeepTwoFlatArgsAdapter(FlatArgsAdapter):
+            def adapt(
+                self,
+                target_spec: TreeSpec,
+                input_spec: TreeSpec,
+                input_args: List[Any],
+                metadata: dict[str, Any],
+                obj: Optional[Any] = None,
+            ) -> List[Any]:
+                while len(input_args) > 2:
+                    input_args.pop(-1)
+                return input_args
+
+        inps = (torch.rand(2, 2), torch.rand(2, 2))
+        ep = export(Mod(), inps)
+        unflattened = unflatten(ep, KeepTwoFlatArgsAdapter())
+        # The adapter accepts a different input tree, so binding stays variadic.
+        self.assertEqual(
+            str(inspect.signature(unflattened.forward)), "(*args, **kwargs)"
+        )
+
+        new_inps = (*inps, torch.rand(2, 3))
+        reexported = export(unflattened, new_inps)
+        torch.testing.assert_close(reexported.module()(*new_inps), Mod()(*inps))
 
     def test_unflatten_wrong_input(self):
         class Mod(torch.nn.Module):

@@ -5,6 +5,8 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/accumulate.h>
 
+#include <utility>
+
 #if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 #include <ATen/native/sparse/cuda/SparseSemiStructuredPack.h>
@@ -83,7 +85,7 @@ std::tuple<Tensor, Tensor> _sparse_semi_structured_apply_typed(Tensor input, Ten
            at::cuda::getCurrentCUDAStream()>>>(p);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
-  return std::make_tuple(packed, packed_trans);
+  return std::make_tuple(std::move(packed), std::move(packed_trans));
 }
 #endif
 
