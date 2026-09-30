@@ -841,6 +841,7 @@ class MetalKernel(SIMDKernel):
             # Metal compiler miscompiles the bf16 simd argmax/argmin for some reduction
             # sizes (wrong indices), so combine bf16 partials in fp32. Not done for fp16,
             # where it is correct and fp32 partials make the kernel up to 4x slower.
+            # See https://github.com/pytorch/pytorch/pull/199132
             acc_dtype = torch.float32 if src_dtype == torch.bfloat16 else src_dtype
             data_acc_buf = self._new_idxvar(acc_dtype, shmem_buf_size)
             idx_acc_buf = self._new_idxvar(dtype, shmem_buf_size)
