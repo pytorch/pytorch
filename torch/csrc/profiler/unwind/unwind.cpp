@@ -46,6 +46,7 @@ Stats stats() {
 #include <climits>
 #include <cstring>
 #include <limits>
+#include <numeric>
 #include <vector>
 
 #include <c10/util/irange.h>
@@ -279,7 +280,7 @@ struct UnwindCache {
     uint64_t low = 0;
     uint64_t high = all_libraries_.size();
     while (low + 1 < high) {
-      auto mid = (low + high) / 2;
+      auto mid = std::midpoint(low, high);
       if (addr < all_libraries_.at(mid).first_addr()) {
         high = mid;
       } else {
@@ -366,6 +367,9 @@ struct Symbolizer {
       return;
     }
     has_pending_results_ = true;
+    // placeholder so repeated addresses in this batch are not re-queried
+    // before the pending results have been read back
+    frame_map_[addr] = Frame{"??", "??", 0};
     auto& entry = getOrCreate(maybe_library->first);
     entry.queried.push_back(addr);
     auto libaddress = maybe_library->second - 1;

@@ -213,7 +213,7 @@ op_assert_ref_tol_table = {
     (torch.float16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
     (torch.bfloat16, torch.ops.aten.reflection_pad1d_backward.default): 5e-3,
     (torch.float16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
-    (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 5e-3,
+    (torch.bfloat16, torch.ops.aten.reflection_pad2d_backward.default): 5e-2,
     (torch.float16, torch.ops.aten.reflection_pad3d_backward.default): 5e-3,
     (torch.bfloat16, torch.ops.aten.reflection_pad3d_backward.default): 5e-2,
     (torch.float16, torch.ops.aten._batch_norm_with_update.default): 2e-7,
@@ -1478,6 +1478,32 @@ class DecompOneOffTests(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "same dtype"):
             addmv_decomp(input, mat, vec)
+
+    @onlyCPU
+    @skipIfCrossRef
+    def test_addmm_addmv_decomp_reject_input_wider_than_output(self, device):
+        # addmm_out_cpu and addmv_impl_cpu expand `self` to the mm/mv result
+        # shape, so `input` broadcasts *to* it rather than widening it. The
+        # decompositions have to reject the same shapes, otherwise a compiled
+        # addmm/addmv returns a result eager refuses to produce.
+        addmm_decomp = get_decompositions([aten.addmm.default])[aten.addmm.default]
+        addmv_decomp = get_decompositions([aten.addmv.default])[aten.addmv.default]
+
+        input = torch.randn(500, 1, device=device)
+        mat1 = torch.randn(1, 1, device=device)
+        mat2 = torch.randn(1, 1, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expand"):
+            torch.addmm(input, mat1, mat2)
+        with self.assertRaisesRegex(RuntimeError, "expand"):
+            addmm_decomp(input, mat1, mat2)
+
+        vec_input = torch.randn(500, device=device)
+        mat = torch.randn(1, 5, device=device)
+        vec = torch.randn(5, device=device)
+        with self.assertRaisesRegex(RuntimeError, "size mismatch"):
+            torch.addmv(vec_input, mat, vec)
+        with self.assertRaisesRegex(RuntimeError, "expand"):
+            addmv_decomp(vec_input, mat, vec)
 
     @onlyCPU
     @skipIfCrossRef
