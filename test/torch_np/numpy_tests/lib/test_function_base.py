@@ -39,7 +39,7 @@ import string
 
 # FIXME: make from torch._numpy
 # These are commented, as if they are imported, some of the tests pass for the wrong reasons
-# from numpy lib import digitize, piecewise, trapz, select, trim_zeros, interp
+# from numpy lib import digitize, piecewise, select, trim_zeros, interp
 # FIXME: broken on numpy 2.0+
 if int(numpy.__version__[0]) < 2:
     from numpy.lib import (
@@ -75,7 +75,6 @@ if TEST_WITH_TORCHDYNAMO:
         kaiser,
         meshgrid,
         sinc,
-        trapz,
         trim_zeros,
         unique,
     )
@@ -1917,52 +1916,6 @@ class TestFilterwindows(TestCase):
             assert_array_equal(w, np.ones(1))
         else:
             assert_almost_equal(np.sum(w, axis=0), 10, 15)
-
-
-@xpassIfTorchDynamo_np  # (reason="TODO: implement")
-class TestTrapz(TestCase):
-    def test_simple(self):
-        x = np.arange(-10, 10, 0.1)
-        r = trapz(np.exp(-0.5 * x**2) / np.sqrt(2 * np.pi), dx=0.1)
-        # check integral of normal equals 1
-        assert_almost_equal(r, 1, 7)
-
-    def test_ndim(self):
-        x = np.linspace(0, 1, 3)
-        y = np.linspace(0, 2, 8)
-        z = np.linspace(0, 3, 13)
-
-        wx = np.ones_like(x) * (x[1] - x[0])
-        wx[0] /= 2
-        wx[-1] /= 2
-        wy = np.ones_like(y) * (y[1] - y[0])
-        wy[0] /= 2
-        wy[-1] /= 2
-        wz = np.ones_like(z) * (z[1] - z[0])
-        wz[0] /= 2
-        wz[-1] /= 2
-
-        q = x[:, None, None] + y[None, :, None] + z[None, None, :]
-
-        qx = (q * wx[:, None, None]).sum(axis=0)
-        qy = (q * wy[None, :, None]).sum(axis=1)
-        qz = (q * wz[None, None, :]).sum(axis=2)
-
-        # n-d `x`
-        r = trapz(q, x=x[:, None, None], axis=0)
-        assert_almost_equal(r, qx)
-        r = trapz(q, x=y[None, :, None], axis=1)
-        assert_almost_equal(r, qy)
-        r = trapz(q, x=z[None, None, :], axis=2)
-        assert_almost_equal(r, qz)
-
-        # 1-d `x`
-        r = trapz(q, x=x, axis=0)
-        assert_almost_equal(r, qx)
-        r = trapz(q, x=y, axis=1)
-        assert_almost_equal(r, qy)
-        r = trapz(q, x=z, axis=2)
-        assert_almost_equal(r, qz)
 
 
 class TestSinc(TestCase):

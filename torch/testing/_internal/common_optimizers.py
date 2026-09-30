@@ -270,6 +270,15 @@ def get_error_inputs_for_all_optims(device, dtype):
             ),
             ErrorOptimizerInput(
                 OptimizerInput(
+                    params={sample_param, sample_param2},
+                    kwargs={},
+                    desc="warn on a bare unordered set of params",
+                ),
+                error_type=FutureWarning,
+                error_regex="optimizer parameters need to be organized in ordered collections",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
                     params=[{"params": sample_param}, {"params": sample_param}],
                     kwargs={},
                     desc="duplicate parameters should not occur across param groups either",
@@ -833,6 +842,24 @@ def optim_error_inputs_func_asgd(device, dtype):
                 ),
                 error_type=ValueError,
                 error_regex="Invalid weight_decay value: -0.5",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, lambd=-0.5),
+                    desc="lambd should > 0",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid lambd value: -0.5",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, alpha=-0.5),
+                    desc="alpha should > 0",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid alpha value: -0.5",
             ),
         ]
     return error_inputs

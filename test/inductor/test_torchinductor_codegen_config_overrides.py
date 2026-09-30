@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import importlib
+import unittest.mock
 from collections.abc import Callable
 from typing import Any
 from unittest import skipIf
@@ -17,6 +18,7 @@ from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
+    requires_block_ptr,
     requires_gpu,
 )
 
@@ -93,6 +95,7 @@ class CodegenInductorTest(InductorTestCase):
 
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
+    @requires_block_ptr
     def test_cse_make_block_ptr_reduction(self):
         def func(a, b):
             tmp0 = a * b
@@ -118,6 +121,46 @@ class CodegenInductorTest(InductorTestCase):
         )
         self.count_code("= tl.make_block_ptr(in_ptr", code, 2)
         self.count_code("= tl.load(block_ptr", code, 2)
+
+    @requires_gpu()
+    @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
+    def test_block_ptr_falls_back_when_api_missing(self):
+        # use_block_ptr=True but the Triton block-pointer API is gone: codegen
+        # must not emit tl.make_block_ptr and must fall back to masked indexing
+        # with correct numerics. Runs on any Triton by mocking the capability
+        # probe, so unlike the block-ptr tests above it is not requires_block_ptr.
+        def func(a, b):
+            tmp0 = a * b
+            tmp1 = a + b
+            c = tmp0 + tmp1
+            return c.sum(dim=0)
+
+        config_patches = {
+            "triton.use_block_ptr": True,
+            "triton.tile_reductions": True,
+            "triton.prefer_nd_tiling": True,
+            "triton.max_tiles": 3,
+            "split_reductions": False,
+            # Disable caches so the mocked gate cannot be defeated by a
+            # block-pointer kernel cached under the same config key.
+            "force_disable_caches": True,
+        }
+        a = torch.randn((512, 4096), device=torch.device(GPU_TYPE))
+        b = torch.randn((512, 4096), device=torch.device(GPU_TYPE))
+        # Patch the triton_utils binding: has_triton_block_ptr is imported by
+        # value there (triton_utils.py) and functools.cache'd.
+        with unittest.mock.patch(
+            "torch._inductor.codegen.triton_utils.has_triton_block_ptr",
+            lambda: False,
+        ):
+            _, code = self.run_and_compare(
+                func,
+                a,
+                b,
+                config_patches=config_patches,
+                atol=1e-4,
+            )
+        self.count_code("tl.make_block_ptr", code, 0)
 
     @requires_gpu()
     @skipIf(GPU_TYPE == "mps", "Triton is not available for MPS")
