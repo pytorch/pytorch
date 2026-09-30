@@ -446,6 +446,9 @@ class HuggingfaceRunner(BenchmarkRunner):
             model, example_inputs = benchmark_cls.get_model_and_inputs(
                 model_name, device
             )
+            if is_training and "input_ids" in example_inputs:
+                example_inputs["labels"] = example_inputs["input_ids"].clone()
+                model.config.get_text_config().use_cache = False
             model.generation_config.disable_compile = True
 
             # Set this flag so that when we test for speedup, we use
