@@ -55,6 +55,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_UBSAN,
     TEST_XPU,
     TestCase,
+    validate_test_name,
 )
 
 
@@ -209,7 +210,7 @@ log = logging.getLogger(__name__)
 #
 # The first instantiated test calls the original test_car() with the OpInfo
 #   for torch.add as its "op" argument, the string 'cpu' for its "device" argument,
-#   and the dtype torch.float32 for is "dtype" argument. The second instantiated
+#   and the dtype torch.float32 for its "dtype" argument. The second instantiated
 #   test calls the test_car() with the OpInfo for torch.sub, a CUDA device string
 #   like 'cuda:0' or 'cuda:1' for its "device" argument, and the dtype
 #   torch.int64 for its "dtype argument."
@@ -318,6 +319,37 @@ def _update_param_kwargs(param_kwargs, name, value):
     # Leave param_kwargs as-is when value is None.
 
 
+class Capability:
+    """Structured namespace of device capability identifiers.
+
+    Each constant is a ``"<category>.<name>"`` string. The inner classes group
+    them by category so tests can reference capabilities as
+    ``Capability.dtype.fp8`` instead of bare strings.
+
+    Tests declare requirements with :func:`requires_capabilities`::
+
+        @requires_capabilities(
+            Capability.dtype.fp8, Capability.attention.flash_attention
+        )
+        def test_foo(self, device): ...
+
+    Device test bases declare what they support by overriding
+    :meth:`DeviceTypeTestBase._capabilities` with the same constants as keys.
+    """
+
+    class dtype:
+        """Data type capabilities (fp8, bf16, etc.)."""
+
+        fp8 = "dtype.fp8"
+        bf16 = "dtype.bf16"
+
+    class attention:
+        """Attention backend capabilities."""
+
+        flash_attention = "attention.flash_attention"
+        mem_efficient_attention = "attention.mem_efficient_attention"
+
+
 class DeviceTypeTestBase(TestCase):
     device_type: str = "generic_device_type"
 
@@ -385,6 +417,19 @@ class DeviceTypeTestBase(TestCase):
     #   @ops-generated dtype variants and other parametrized arguments are
     #   ignored for now.
     test_exclusions: ClassVar[dict[str, Any] | None] = None
+
+    # Returns the capability map used by @requires_capabilities.
+    # Subclasses (CPUTestBase, CUDATestBase, etc.) override _capabilities() to
+    # declare supported capabilities. This method evaluates the support checks.
+    @classmethod
+    def get_capabilities(cls) -> dict[str, bool]:
+        return {k: bool(fn()) for k, fn in cls._capabilities().items()}
+
+    # Returns a capability map from capability identifier to a callable that
+    # determines whether the current device supports it.
+    @classmethod
+    def _capabilities(cls) -> dict[str, Callable[[], bool]]:
+        return {}
 
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
@@ -717,6 +762,7 @@ class DeviceTypeTestBase(TestCase):
             test_name = (
                 f"{name}{test_suffix}{device_suffix}{_dtype_test_suffix(dtype_kwarg)}"
             )
+            validate_test_name(test_name)
 
             instantiate_test_helper(
                 cls=cls,
@@ -740,6 +786,15 @@ class CPUTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+    @classmethod
+    def _capabilities(cls):
+        return {
+            Capability.dtype.fp8: lambda: True,
+            Capability.dtype.bf16: lambda: True,
+            Capability.attention.flash_attention: lambda: True,
+            Capability.attention.mem_efficient_attention: lambda: False,
+        }
+
 
 class CUDATestBase(DeviceTypeTestBase):
     device_type = "cuda"
@@ -752,6 +807,22 @@ class CUDATestBase(DeviceTypeTestBase):
 
     def has_cudnn(self):
         return not self.no_cudnn
+
+    @classmethod
+    def _capabilities(cls):
+        from torch.testing._internal.common_cuda import (
+            PLATFORM_SUPPORTS_FLASH_ATTENTION,
+            PLATFORM_SUPPORTS_FP8,
+            PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+            SM80OrLater,
+        )
+
+        return {
+            Capability.dtype.fp8: lambda: PLATFORM_SUPPORTS_FP8,
+            Capability.dtype.bf16: lambda: SM80OrLater,
+            Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION,
+            Capability.attention.mem_efficient_attention: lambda: PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        }
 
     @classmethod
     def get_primary_device(cls):
@@ -829,10 +900,32 @@ class MPSTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+    @classmethod
+    def _capabilities(cls):
+        return {
+            Capability.dtype.fp8: lambda: False,
+            Capability.dtype.bf16: lambda: True,
+            Capability.attention.flash_attention: lambda: False,
+            Capability.attention.mem_efficient_attention: lambda: False,
+        }
+
 
 class XPUTestBase(DeviceTypeTestBase):
     device_type = "xpu"
     primary_device: ClassVar[str]
+
+    @classmethod
+    def _capabilities(cls):
+        from torch.testing._internal.common_xpu import (
+            PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+        )
+
+        return {
+            Capability.dtype.fp8: lambda: True,
+            Capability.dtype.bf16: lambda: True,
+            Capability.attention.flash_attention: lambda: PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU,
+            Capability.attention.mem_efficient_attention: lambda: True,
+        }
 
     @classmethod
     def get_primary_device(cls):
@@ -945,6 +1038,21 @@ def get_device_type_test_bases():
 device_type_test_bases = get_device_type_test_bases()
 
 
+def _get_device_type_normalizer() -> Callable[[str], str]:
+    """Returns a function that normalizes a device type name for test filtering.
+
+    Replaces your privateuse1 backend name with 'privateuse1'. This handles the case
+    where PrivateUse1TestBase.device_type has been changed from "privateuse1" to the
+    actual backend name (e.g., "openreg") by setUpClass being called during previous
+    instantiate_device_type_tests calls.
+    """
+    if not _is_privateuse1_backend_available():
+        return lambda x: x
+
+    privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    return lambda x: x.replace(privateuse1_backend_name, "privateuse1")
+
+
 def filter_desired_device_types(device_type_test_bases, except_for=None, only_for=None):
     # device type cannot appear in both except_for and only_for
     intersect = set(except_for if except_for else []) & set(
@@ -955,30 +1063,18 @@ def filter_desired_device_types(device_type_test_bases, except_for=None, only_fo
             f"device ({intersect}) appeared in both except_for and only_for"
         )
 
-    # Replace your privateuse1 backend name with 'privateuse1'
-    # This handles the case where PrivateUse1TestBase.device_type has been
-    # changed from "privateuse1" to the actual backend name (e.g., "openreg")
-    # by setUpClass being called during previous instantiate_device_type_tests calls
-    if _is_privateuse1_backend_available():
-        privateuse1_backend_name = torch._C._get_privateuse1_backend_name()
+    func_replace = _get_device_type_normalizer()
 
-        def func_replace(x: str) -> str:
-            return x.replace(privateuse1_backend_name, "privateuse1")
-
-        except_for = (
-            ([func_replace(x) for x in except_for] if except_for is not None else None)
-            if not isinstance(except_for, str)
-            else func_replace(except_for)
-        )
-        only_for = (
-            ([func_replace(x) for x in only_for] if only_for is not None else None)
-            if not isinstance(only_for, str)
-            else func_replace(only_for)
-        )
-    else:
-
-        def func_replace(x: str) -> str:
-            return x
+    except_for = (
+        ([func_replace(x) for x in except_for] if except_for is not None else None)
+        if not isinstance(except_for, str)
+        else func_replace(except_for)
+    )
+    only_for = (
+        ([func_replace(x) for x in only_for] if only_for is not None else None)
+        if not isinstance(only_for, str)
+        else func_replace(only_for)
+    )
 
     if except_for:
         device_type_test_bases = filter(
@@ -1065,8 +1161,14 @@ def get_desired_device_type_test_bases(
         os.getenv(PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY, "")
     )
     if env_custom_only_for:
+        # Replace privateuse1 backend name with 'privateuse1' to ensure
+        # consistent device type filtering
+        func_replace = _get_device_type_normalizer()
+
+        normalized_custom = [func_replace(x) for x in env_custom_only_for]
         desired_device_type_test_bases += filter(
-            lambda x: x.device_type in env_custom_only_for, test_bases
+            lambda x: func_replace(x.device_type) in normalized_custom,
+            test_bases,
         )
         desired_device_type_test_bases = list(set(desired_device_type_test_bases))
 
@@ -1086,6 +1188,49 @@ def get_desired_device_type_test_bases(
     )
 
 
+def requires_capabilities(*caps: str):
+    """Declare that a test method requires device capabilities.
+
+    Wraps the test to call ``type(self).get_capabilities()`` at runtime
+    and skip if any required capability is unsupported by the device.
+
+    Raises AssertionError if a capability is not declared in the
+    device's ``_capabilities()`` map.
+    """
+    caps_set = set(caps)
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            device_caps = type(self).get_capabilities()
+
+            unsupported = set()
+            missing = set()
+            for c in caps_set:
+                if c in device_caps:
+                    if not device_caps[c]:
+                        unsupported.add(c)
+                else:
+                    missing.add(c)
+
+            if missing:
+                raise AssertionError(
+                    f"Device '{type(self).device_type}' has not declared capabilities: "
+                    f"{', '.join(sorted(missing))}. "
+                    f"Add them to {type(self).__name__}._capabilities()."
+                )
+            if unsupported:
+                raise unittest.SkipTest(
+                    f"Device '{type(self).device_type}' has unsupported capabilities: "
+                    f"{', '.join(sorted(unsupported))}"
+                )
+            return fn(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 # Adds 'instantiated' device-specific test cases to the given scope.
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class. This function should be used instead of
@@ -1094,6 +1239,8 @@ def get_desired_device_type_test_bases(
 #
 # See note "Writing Test Templates"
 # TODO: remove "allow_xpu" option after Intel GPU support all test case instantiate by this function.
+
+
 def instantiate_device_type_tests(
     generic_test_class,
     scope,
@@ -1595,6 +1742,70 @@ class skipPRIVATEUSE1If(skipIf):
         super().__init__(dep, reason, device_type=device_type)
 
 
+def _cgroup_available_memory():
+    """Memory still usable inside this process's cgroup, or None if uncapped.
+
+    psutil reports the host's memory. In a container that is not the ceiling the
+    OOM killer enforces, and the two can differ by an order of magnitude: a 41GiB
+    CI pod on a 768GiB node looks like it has hundreds of gigabytes free, so a
+    largeTensorTest asking for 180GB is admitted and then killed mid-test.
+    """
+    # (limit, usage, stat, stat-key prefix), cgroup v2 first then v1. These fixed
+    # paths are this process's own cgroup under a private cgroup namespace, which
+    # is what Kubernetes and Docker on cgroup v2 give us. Under a host namespace
+    # they are the root's, which reads as uncapped, and the host figure stands --
+    # the same answer as before this check existed.
+    for limit_path, usage_path, stat_path, prefix in (
+        (
+            "/sys/fs/cgroup/memory.max",
+            "/sys/fs/cgroup/memory.current",
+            "/sys/fs/cgroup/memory.stat",
+            "",
+        ),
+        (
+            "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+            "/sys/fs/cgroup/memory/memory.usage_in_bytes",
+            "/sys/fs/cgroup/memory/memory.stat",
+            "total_",
+        ),
+    ):
+        try:
+            with open(limit_path) as f:
+                raw = f.read().strip()
+            # v2 spells "no limit" as "max"; v1 uses a value at least as large as
+            # physical memory, which cannot constrain us either way.
+            if raw == "max":
+                return None
+            limit = int(raw)
+            if limit >= psutil.virtual_memory().total:
+                return None
+            with open(usage_path) as f:
+                usage = int(f.read().strip())
+            stat = {}
+            with open(stat_path) as f:
+                for line in f:
+                    key, _, value = line.partition(" ")
+                    stat[key] = int(value)
+        except (OSError, ValueError):
+            continue
+
+        # Page cache counts towards usage but is reclaimed under pressure rather
+        # than triggering a kill, so charging it would understate what is free.
+        # A shard that has read a lot of test data can hold gigabytes of it.
+        cache = stat.get(f"{prefix}inactive_file", 0)
+        return max(limit - max(usage - cache, 0), 0)
+    return None
+
+
+def _available_cpu_memory():
+    """Host memory available, clamped to what this cgroup will actually allow."""
+    available = psutil.virtual_memory().available
+    cgroup_available = _cgroup_available_memory()
+    if cgroup_available is None:
+        return available
+    return min(available, cgroup_available)
+
+
 def _has_sufficient_memory(device, size):
     device_ = torch.device(device)
     device_type = device_.type
@@ -1650,14 +1861,14 @@ def _has_sufficient_memory(device, size):
     if IS_S390X:
         effective_size = effective_size * 2
 
-    if psutil.virtual_memory().available < effective_size:
+    if _available_cpu_memory() < effective_size:
         gc.collect()
         # Sync and cleanup MPS memory before checking available memory
         if device_type == "mps":
             torch.mps.synchronize()
             torch.mps.empty_cache()
 
-    return psutil.virtual_memory().available >= effective_size
+    return _available_cpu_memory() >= effective_size
 
 
 def _parse_size(size):
@@ -2113,6 +2324,17 @@ def expectedFailureMPS(fn):
 
 def expectedFailureMPSComplex(fn):
     return expectedFailure("mps", torch.complex64)(fn)
+
+
+def expectedFailureMPSPre27(fn):
+    import platform
+
+    version = float(".".join(platform.mac_ver()[0].split(".")[:2]) or -1)
+    if not version or version < 1.0:  # cpu or other unsupported device
+        return fn
+    if version < 27.0:
+        return expectedFailure("mps")(fn)
+    return fn
 
 
 def expectedFailureMPSPre15(fn):
