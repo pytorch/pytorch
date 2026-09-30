@@ -848,6 +848,21 @@ class TestStatelessRNGCompile(TestCase):
         compiled = torch.compile(f, fullgraph=True, mode="reduce-overhead")
         self.assertEqual(compiled(x), expected)
 
+    @onlyAccelerator
+    def test_key_input_with_cudagraphs(self, device):
+        # Regression test: after warmup, cudagraphs copies inputs with
+        # _foreach_copy_, which didn't support the uint64 key.
+        if not HAS_TRITON:
+            self.skipTest("CUDA inductor codegen requires triton")
+
+        def f(key):
+            return random.uniform(key, (2, 3))
+
+        compiled = torch.compile(f, fullgraph=True, mode="reduce-overhead")
+        for seed in range(3):
+            key = random.key(seed, device=device)
+            self.assertEqual(compiled(key), f(key))
+
 
 class TestStatelessRNGInteger(TestCase):
     @parametrize("dtype", all_int_dtypes)
