@@ -1150,9 +1150,7 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
 # to ignore the CPU case when inconsistencies arise.  Ideally we deal
 # with the inconsistencies but this takes time.
 @unMarkDynamoStrictTest
-class TestMeta(TestCase):
-    hw_classification = HardwareClassification.CUDA
-
+class _TestMetaBase(TestCase):
     # Copies inputs to inplace operations to avoid inplace modifications
     #   to leaves requiring gradient
     def _get_safe_inplace(self, inplace_variant):
@@ -1164,6 +1162,61 @@ class TestMeta(TestCase):
                 return inplace_variant(t.clone(), *args, **kwargs)
 
         return _fn
+
+    def _run_dispatch_meta_test(self, device, dtype, op, symbolic_meta, inplace, all_stride_variants=False):
+        if "_scaled_mm" in op.name:
+            raise unittest.SkipTest("_scaled_mm dose not support meta device")
+        if inplace:
+            func = op.get_inplace()
+            if not func:
+                self.skipTest("No inplace variable for this op")
+            if op.promotes_int_to_float and not dtype.is_floating_point:
+                self.skipTest("Op promotes to float, which is impossible for inplace with non-float input")
+        else:
+            func = op.get_op()
+
+        if func in meta_dispatch_early_skips:
+            self.skipTest("Function is in dispatch early skips")
+
+        if inplace:
+            func = self._get_safe_inplace(func)
+
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample_input in samples:
+            if inplace and sample_input.broadcasts_input:
+                continue
+
+            sample_args = [sample_input.input] + list(sample_input.args)
+            kwargs = sample_input.kwargs
+
+            if all_stride_variants and sum(isinstance(arg, torch.Tensor) for arg in sample_args) <= 5:
+                # test inputs <= 5 tensors to avoid combinatorial explosion
+                strided_args = get_strided_args(sample_args)
+            else:
+                strided_args = [sample_args]
+
+            for args in strided_args:
+                with MetaCrossRefDispatchMode.push(
+                    self, dtype=dtype, device=device,
+                    symbolic_meta=symbolic_meta, inplace=inplace,
+                     supports_out=op.supports_out):
+                    expected = func(*args, **kwargs)
+
+                    if not inplace and isinstance(expected, torch.Tensor) and op.supports_out:
+                        func(*args, **kwargs, out=expected)
+
+    def _assert_fft_meta_stride_matches_eager(self, op, *args):
+        to_meta = MetaConverter()
+        meta_args = tree_map_only(torch.Tensor, to_meta, args)
+        ref_out = op(*args)
+        meta_out = op(*meta_args)
+        self.assertEqual(ref_out.size(), meta_out.size())
+        self.assertEqual(ref_out.stride(), meta_out.stride())
+
+
+@unMarkDynamoStrictTest
+class TestMeta(_TestMetaBase):
+    hw_classification = HardwareClassification.ACCELERATOR
 
     @skipIfCrossRef
     @suppress_warnings
@@ -1310,49 +1363,6 @@ class TestMeta(TestCase):
             with MetaCrossRefFunctionMode(self, dtype=dtype, device=device, inplace=True):
                 expected = func(*args, **kwargs)
 
-    def _run_dispatch_meta_test(self, device, dtype, op, symbolic_meta, inplace, all_stride_variants=False):
-        if "_scaled_mm" in op.name:
-            raise unittest.SkipTest("_scaled_mm dose not support meta device")
-        if inplace:
-            func = op.get_inplace()
-            if not func:
-                self.skipTest("No inplace variable for this op")
-            if op.promotes_int_to_float and not dtype.is_floating_point:
-                self.skipTest("Op promotes to float, which is impossible for inplace with non-float input")
-        else:
-            func = op.get_op()
-
-        if func in meta_dispatch_early_skips:
-            self.skipTest("Function is in dispatch early skips")
-
-        if inplace:
-            func = self._get_safe_inplace(func)
-
-        samples = op.sample_inputs(device, dtype, requires_grad=False)
-        for sample_input in samples:
-            if inplace and sample_input.broadcasts_input:
-                continue
-
-            sample_args = [sample_input.input] + list(sample_input.args)
-            kwargs = sample_input.kwargs
-
-            if all_stride_variants and sum(isinstance(arg, torch.Tensor) for arg in sample_args) <= 5:
-                # test inputs <= 5 tensors to avoid combinatorial explosion
-                strided_args = get_strided_args(sample_args)
-            else:
-                strided_args = [sample_args]
-
-            for args in strided_args:
-                with MetaCrossRefDispatchMode.push(
-                    self, dtype=dtype, device=device,
-                    symbolic_meta=symbolic_meta, inplace=inplace,
-                     supports_out=op.supports_out):
-                    expected = func(*args, **kwargs)
-
-                    if not inplace and isinstance(expected, torch.Tensor) and op.supports_out:
-                        func(*args, **kwargs, out=expected)
-
-
     @skipIfCrossRef
     @suppress_warnings
     @skipOps((
@@ -1473,7 +1483,6 @@ class TestMeta(TestCase):
     def test_dispatch_symbolic_meta_outplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=False)
 
-
     @skipIfCrossRef
     @suppress_warnings
     @skipOps((
@@ -1528,6 +1537,77 @@ class TestMeta(TestCase):
     @ops(itertools.chain(op_db, foreach_op_db))
     def test_dispatch_symbolic_meta_inplace(self, device, dtype, op):
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=True)
+
+    def test_meta__fused_moving_avg_obs_fq_helper(self, device):
+        from torch.ao.quantization import FusedMovingAvgObsFakeQuantize
+
+        to_meta = MetaConverter()
+
+        x = torch.randn(5, 5, device=device)
+        running_min_op = torch.tensor(float("inf"), device=device)
+        running_max_op = torch.tensor(float("-inf"), device=device)
+        avg_const = 0.01
+        scale = torch.tensor([1.0], device=device)
+        zero_point = torch.tensor([0], dtype=torch.int, device=device)
+
+        mod = FusedMovingAvgObsFakeQuantize()
+        torch.ao.quantization.enable_fake_quant(mod)
+        torch.ao.quantization.enable_observer(mod)
+        mod.to(device)
+
+        meta_x = to_meta(x)
+
+        args = [
+            x,
+            mod.observer_enabled,
+            mod.fake_quant_enabled,
+            running_min_op,
+            running_max_op,
+            scale,
+            zero_point,
+            avg_const,
+            0,
+            255,
+            0,
+        ]
+
+        meta_args = args.copy()
+        meta_args[0] = meta_x
+
+        kwargss = [
+            {},
+            {"per_row_fake_quant": False, "symmetric_quant": False},
+            {"per_row_fake_quant": False, "symmetric_quant": True},
+        ]
+
+        for kwargs in kwargss:
+            ref_out = aten._fused_moving_avg_obs_fq_helper.default(*args, **kwargs)
+            meta_out = aten._fused_moving_avg_obs_fq_helper.default(
+                *meta_args, **kwargs
+            )
+
+            self.assertEqual(ref_out[0].size(), meta_out[0].size())
+            self.assertEqual(ref_out[0].stride(), meta_out[0].stride())
+            self.assertEqual(ref_out[1].size(), meta_out[1].size())
+            self.assertEqual(ref_out[1].stride(), meta_out[1].stride())
+
+    def test_cdist_forward(self, device):
+        to_meta = MetaConverter()
+        x1 = torch.rand([3, 2], device=device)
+        x2 = torch.rand([2, 2], device=device)
+        p = 2.0
+        for compute_mode in (None, 1, 2):
+            ref = aten._cdist_forward.default(x1, x2, p, compute_mode)
+            res = aten._cdist_forward.default(to_meta(x1), to_meta(x2), p, compute_mode)
+            self.assertEqual(res.device.type, "meta")
+            self.assertEqual(ref.shape, res.shape)
+
+
+@unMarkDynamoStrictTest
+class TestMetaCudaRef(_TestMetaBase):
+    # Tests whose reference stride/output comes from the CUDA kernel, so the
+    # whole class is restricted to CUDA via only_for='cuda'.
+    hw_classification = HardwareClassification.CUDA
 
     @skipIfCrossRef
     @suppress_warnings
@@ -1627,14 +1707,6 @@ class TestMeta(TestCase):
             self.assertEqual(ref_out.size(), meta_out.size())
             self.assertEqual(ref_out.stride(), meta_out.stride())
 
-    def _assert_fft_meta_stride_matches_eager(self, op, *args):
-        to_meta = MetaConverter()
-        meta_args = tree_map_only(torch.Tensor, to_meta, args)
-        ref_out = op(*args)
-        meta_out = op(*meta_args)
-        self.assertEqual(ref_out.size(), meta_out.size())
-        self.assertEqual(ref_out.stride(), meta_out.stride())
-
     def test_fft_multi_dim_cufft_stride_matches_meta(self, device):
         self._assert_fft_meta_stride_matches_eager(
             aten._fft_c2c.default,
@@ -1650,70 +1722,6 @@ class TestMeta(TestCase):
             0,
             5,
         )
-
-    def test_meta__fused_moving_avg_obs_fq_helper(self, device):
-        from torch.ao.quantization import FusedMovingAvgObsFakeQuantize
-
-        to_meta = MetaConverter()
-
-        x = torch.randn(5, 5, device=device)
-        running_min_op = torch.tensor(float("inf"), device=device)
-        running_max_op = torch.tensor(float("-inf"), device=device)
-        avg_const = 0.01
-        scale = torch.tensor([1.0], device=device)
-        zero_point = torch.tensor([0], dtype=torch.int, device=device)
-
-        mod = FusedMovingAvgObsFakeQuantize()
-        torch.ao.quantization.enable_fake_quant(mod)
-        torch.ao.quantization.enable_observer(mod)
-        mod.to(device)
-
-        meta_x = to_meta(x)
-
-        args = [
-            x,
-            mod.observer_enabled,
-            mod.fake_quant_enabled,
-            running_min_op,
-            running_max_op,
-            scale,
-            zero_point,
-            avg_const,
-            0,
-            255,
-            0,
-        ]
-
-        meta_args = args.copy()
-        meta_args[0] = meta_x
-
-        kwargss = [
-            {},
-            {"per_row_fake_quant": False, "symmetric_quant": False},
-            {"per_row_fake_quant": False, "symmetric_quant": True},
-        ]
-
-        for kwargs in kwargss:
-            ref_out = aten._fused_moving_avg_obs_fq_helper.default(*args, **kwargs)
-            meta_out = aten._fused_moving_avg_obs_fq_helper.default(
-                *meta_args, **kwargs
-            )
-
-            self.assertEqual(ref_out[0].size(), meta_out[0].size())
-            self.assertEqual(ref_out[0].stride(), meta_out[0].stride())
-            self.assertEqual(ref_out[1].size(), meta_out[1].size())
-            self.assertEqual(ref_out[1].stride(), meta_out[1].stride())
-
-    def test_cdist_forward(self, device):
-        to_meta = MetaConverter()
-        x1 = torch.rand([3, 2], device=device)
-        x2 = torch.rand([2, 2], device=device)
-        p = 2.0
-        for compute_mode in (None, 1, 2):
-            ref = aten._cdist_forward.default(x1, x2, p, compute_mode)
-            res = aten._cdist_forward.default(to_meta(x1), to_meta(x2), p, compute_mode)
-            self.assertEqual(res.device.type, "meta")
-            self.assertEqual(ref.shape, res.shape)
 
 
 @instantiate_parametrized_tests
@@ -2876,7 +2884,8 @@ class TestMetaKernelRegistrations(TestCase):
         self.assertEqual(diff_b2.shape, expected_bias_shape)
 
 
-instantiate_device_type_tests(TestMeta, globals(), only_for="cuda")
+instantiate_device_type_tests(TestMeta, globals())
+instantiate_device_type_tests(TestMetaCudaRef, globals(), only_for="cuda")
 
 
 def print_op_str_if_not_supported(op_str):
