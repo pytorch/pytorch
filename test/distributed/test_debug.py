@@ -672,7 +672,7 @@ class TestC10dHealthCheckHandler(TestCase):
     ) -> None:
         mock_fetch_all.side_effect = [
             (
-                ["http://h0:1", "http://h1:1"],
+                ["http://h0:1", "http://h1:1"],  # @lint-ignore
                 [
                     Response(
                         200,
@@ -684,8 +684,8 @@ class TestC10dHealthCheckHandler(TestCase):
                     ),
                 ],
             ),
-            (["http://h0:1"], [Response(200, "custom dump initiated")]),
-            (["http://h0:1"], [Response(200, "nccl2 dump initiated")]),
+            (["http://h0:1"], [Response(200, "custom dump initiated")]),  # @lint-ignore
+            (["http://h0:1"], [Response(200, "nccl2 dump initiated")]),  # @lint-ignore
         ]
         mock_summary.return_value = None
 
