@@ -46,6 +46,33 @@ class MyException(OSError):
     pass
 
 
+# The writable BaseException attributes live on the wrapped ExceptionVariable
+# rather than in the instance __dict__, so both the in-region read and the
+# object escaping the compiled region need explicit handling.
+WRITABLE_BASE_EXCEPTION_ATTRS = [
+    "args",
+    "__cause__",
+    "__context__",
+    "__suppress_context__",
+]
+
+
+def exception_attr_value(attr):
+    """A value valid for *attr*, built inside the traced region."""
+    if attr == "args":
+        return ("y",)
+    if attr == "__suppress_context__":
+        return True
+    return ValueError("inner")
+
+
+def comparable(value):
+    """Exceptions compare by identity, so compare type and args instead."""
+    if isinstance(value, BaseException):
+        return type(value), value.args
+    return value
+
+
 class ExceptionTests(torch._dynamo.test_case.TestCase):
     def test_exception(self):
         def fn(x):
@@ -101,6 +128,58 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires LOAD_FAST_CHECK")
+    def test_exception_target_cleanup(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            try:
+                return exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_exception_target_cleanup_double_delete(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            try:
+                del exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+            return x
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires LOAD_FAST_CHECK")
+    def test_exception_target_cleanup_graph_break(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            x = x * 2
+            torch._dynamo.graph_break()
+            try:
+                return exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+
+        x = torch.ones(1)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_exception4(self):
         def fn(x):
@@ -206,6 +285,65 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             try:
                 raise ValueError("v") from dict
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_scalar_type_error(self):
+        def fn(x):
+            try:
+                try:
+                    raise ValueError("v")
+                except 42:  # noqa: B030
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_tuple_with_bad_member_type_error(self):
+        # The raised exception deliberately does not match the tuple's valid
+        # member (ValueError), so the bad member (42) is reached regardless
+        # of match order.
+        def fn(x):
+            try:
+                try:
+                    raise RuntimeError("v")
+                except (ValueError, 42):  # noqa: B030
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_instance_type_error(self):
+        def fn(x):
+            try:
+                try:
+                    raise ValueError("v")
+                except object():
+                    pass
+            except TypeError as e:
+                return x.sin(), str(e)
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_except_string_type_error(self):
+        def fn(x):
+            try:
+                try:
+                    raise ValueError("v")
+                except "string":  # noqa: B030
+                    pass
             except TypeError as e:
                 return x.sin(), str(e)
 
@@ -391,6 +529,18 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         inp = torch.ones(3)
         out = f(inp)
         self.assertTrue(torch.equal(out, inp + 1))
+
+    def test_observed_exception_with_non_string_args(self):
+        def fn(x):
+            try:
+                type("A", (), {"__doc__": "x\udcdcy"})
+            except UnicodeEncodeError:
+                return x + 1
+            return x
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
     @make_dynamo_test
     def test_isinstance_CustomException(self):
@@ -1436,6 +1586,50 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(s, str(("hello", 42)))
         self.assertEqual(r, "ValueError('hello', 42)")
 
+    @parametrize(
+        "args", [(), ("k",), ("",), ("it's a key",), (42,), (("k", 1),), ("k", 1)]
+    )
+    def test_str_keyerror(self, args):
+        def fn(t):
+            try:
+                raise KeyError(*args)
+            except KeyError as e:
+                return t.sin(), str(e), f"key error: {e}", repr(e), e.args
+
+        t = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
+
+    @parametrize("key", ["missing", "", "it's a key", 42, ("k", 1)])
+    def test_str_keyerror_dict_lookup(self, key):
+        def fn(t):
+            try:
+                {}[key]
+            except KeyError as e:
+                return t.sin(), str(e), f"key error: {e}", repr(e), e.args
+
+        t = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
+
+    def test_str_keyerror_custom_key(self):
+        class Key:
+            def __str__(self):
+                return "key str"
+
+            def __repr__(self):
+                return "key repr"
+
+        def fn(t):
+            try:
+                raise KeyError(Key())
+            except KeyError as e:
+                return t.sin(), str(e), f"key error: {e}"
+
+        t = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(t), fn(t))
+
     def test_frozen_dataclass_setattr_raises(self):
         @dataclasses.dataclass(frozen=True)
         class TestDataClass:
@@ -1782,6 +1976,72 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         opt_fn(x)  # diverges: Dynamo does not raise
+
+    @parametrize("attr", WRITABLE_BASE_EXCEPTION_ATTRS)
+    def test_exception_attr_read_after_write(self, attr):
+        def fn(x):
+            e = CustomException("x")
+            setattr(e, attr, exception_attr_value(attr))
+            return getattr(e, attr), x + 1
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(comparable(opt_fn(x)[0]), comparable(fn(x)[0]))
+
+    @parametrize(
+        "attr",
+        [a for a in WRITABLE_BASE_EXCEPTION_ATTRS if a != "__suppress_context__"],
+    )
+    def test_exception_attr_write_survives_escape(self, attr):
+        def fn(x):
+            e = CustomException("x")
+            setattr(e, attr, exception_attr_value(attr))
+            return e
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        got, expected = getattr(opt_fn(x), attr), getattr(fn(x), attr)
+        self.assertEqual(comparable(got), comparable(expected))
+
+    @unittest.expectedFailure
+    def test_exception_store_attr_survives_escape(self):
+        # STORE_ATTR rather than the setattr builtin, and several writes at once.
+        def fn(x):
+            e = CustomException("x")
+            e.args = ("y",)
+            e.__suppress_context__ = True
+            return e
+
+        x = torch.randn(4)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        expected = fn(x)
+        self.assertEqual(got.args, expected.args)
+        self.assertEqual(got.__suppress_context__, expected.__suppress_context__)
+
+    # ExceptionVariable.reconstruct skips any ConstantVariable-valued attribute,
+    # so a deliberate write is indistinguishable from the untouched default.
+    @unittest.expectedFailure
+    def test_builtin_exception_constant_attr_survives_escape(self):
+        def fn(x):
+            e = ValueError("x")
+            e.__suppress_context__ = True
+            return e
+
+        x = torch.randn(4)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(got.__suppress_context__, fn(x).__suppress_context__)
+
+    def test_escaping_exception_defaults_unchanged(self):
+        def fn(x):
+            return CustomException("x")
+
+        x = torch.randn(4)
+        got = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        expected = fn(x)
+        self.assertEqual(got.args, expected.args)
+        self.assertEqual(got.__suppress_context__, expected.__suppress_context__)
+        self.assertIsNone(got.__cause__)
+        self.assertIsNone(got.__context__)
 
 
 instantiate_parametrized_tests(ExceptionTests)
