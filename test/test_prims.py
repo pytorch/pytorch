@@ -300,6 +300,29 @@ class TestPrimsDevice(TestCase):
         self.assertEqual(ref1, res3)
         self.assertEqual(ref2, res4)
 
+    @dtypes(torch.float32)
+    def test_functional_rng_wrappers_non_current_device(self, device, dtype):
+        device_type = torch.device(device).type
+        if device_type == "cpu":
+            self.skipTest("requires an accelerator")
+        device_mod = torch.get_device_module(device_type)
+        if device_mod.device_count() < 2:
+            self.skipTest("requires two devices")
+        other = torch.device(device_type, 1)
+
+        torch.manual_seed(123)
+        ref = torch.rand(10, device=other, dtype=dtype)
+
+        torch.manual_seed(123)
+        with device_mod.device(0):
+            current_before = device_mod.get_rng_state(0)
+            rng_state, res = torch._prims.rng_prims.run_and_save_rng_state(torch.rand, 10, device=other, dtype=dtype)
+            self.assertEqual(res, ref)
+            self.assertEqual(device_mod.get_rng_state(0), current_before)
+            replay = torch._prims.rng_prims.run_with_rng_state(rng_state, torch.rand, 10, device=other, dtype=dtype)
+            self.assertEqual(replay, ref)
+            self.assertEqual(device_mod.get_rng_state(0), current_before)
+
 
 class TestPrimsBasic(TestCase):
     hw_classification = HardwareClassification.GENERIC
