@@ -22,13 +22,19 @@ from torch._inductor.custom_graph_pass import (
 )
 from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
-from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
+from torch._prims_common import (
+    is_boolean_dtype,
+    is_expandable_to,
+    is_integer_dtype,
+    make_contiguous_strides_for,
+)
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
+from ..kernel.symmetric_mm import quack_symmetric_mm
 from ..lowering import lowerings as L
 from ..pattern_matcher import (
     _return_true,
@@ -53,6 +59,7 @@ from ..pattern_matcher import (
 )
 from ..utils import (
     decode_device,
+    ensure_cute_available,
     get_all_devices,
     get_gpu_type,
     is_bf16x9_matmul,
@@ -90,6 +97,52 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
+
+_QUACK_SYMMETRIC_ALIGNMENT = 8
+_QUACK_SYMMETRIC_MIN_M = 4096
+
+
+def _is_quack_symmetric_mm(match: Match) -> bool:
+    x = match.kwargs["x"].meta["val"]
+    if x.ndim not in (2, 3):
+        return False
+    dims = [1, 0] if x.ndim == 2 else [0, 2, 1]
+    # Contiguity and divisibility are TMA requirements. The dtype, architecture,
+    # minimum size, and aspect ratio limits are backed by BF16 GB200 benchmarks.
+    return (
+        match.kwargs["dims"] == dims
+        and x.device.type == "cuda"
+        and torch.version.hip is None
+        and not config.cpp_wrapper
+        and not config.fx_wrapper
+        and ensure_cute_available()
+        and x.dtype == torch.bfloat16
+        and statically_known_true(
+            sym_eq(x.stride(), make_contiguous_strides_for(x.shape))
+        )
+        and statically_known_true(x.shape[-2] >= _QUACK_SYMMETRIC_MIN_M)
+        and statically_known_true(x.shape[-1] >= x.shape[-2])
+        and statically_known_true(x.shape[-2] % _QUACK_SYMMETRIC_ALIGNMENT == 0)
+        and statically_known_true(x.shape[-1] % _QUACK_SYMMETRIC_ALIGNMENT == 0)
+        and torch.cuda.get_device_capability(x.device)[0] == 10
+    )
+
+
+@register_graph_pattern(
+    CallFunction(
+        [aten.mm.default, aten.bmm.default],
+        KeywordArg("x"),
+        CallFunction(
+            aten.permute.default,
+            KeywordArg("x"),
+            KeywordArg("dims"),
+        ),
+    ),
+    pass_dict=pass_patterns[0],  # pyrefly: ignore [bad-argument-type]
+    extra_check=_is_quack_symmetric_mm,
+)
+def _replace_quack_symmetric_mm(match: Match, x, dims):
+    match.replace_by_example(quack_symmetric_mm, [x])
 
 
 def _remove_profiler_ops(graph: torch.fx.Graph) -> None:
@@ -1454,6 +1507,25 @@ def remove_noop_ops(graph: torch.fx.Graph):
         if isinstance(out, torch.fx.Node):
             output_storages.add(get_node_storage(out))
 
+    # Storages mutated in this graph. At this point the graph is functional except for
+    # the input mutations AOT emits (copy_, plus set_ / resize_storage_bytes_ for FSDP).
+    # A non-view noop (aten.copy / aten.clone) of a mutated storage must stay a real copy,
+    # otherwise its users can observe the mutated value instead of the snapshot, e.g.
+    #   dst[0:, :] = src[0:, :]; src.add_(1)
+    # became `copy_(src, add); copy_(dst, src)` and copied the *updated* src into dst.
+    # Views and chained noops resolve to the same storage, and this does not depend on
+    # node order, so it also holds for the joint graph.
+    mutation_targets = (
+        aten.copy_.default,
+        aten.set_.source_Tensor,
+        torch.ops.inductor.resize_storage_bytes_.default,
+    )
+    mutated_storages = OrderedSet(
+        get_node_storage(n.args[0])
+        for target in mutation_targets
+        for n in graph.find_nodes(op="call_function", target=target)
+    )
+
     for node in graph.nodes:
         if node.target in noop_registry:
             cond, src_index = noop_registry[node.target]
@@ -1493,6 +1565,10 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 and node in output_node.args
                 and (src in inputs or src in output_node.args)
             ):
+                continue
+
+            # Keep a real copy of a storage that is mutated in this graph.
+            if not node_is_view and src_storage in mutated_storages:
                 continue
 
             is_valid, args, kwargs = get_fake_args_kwargs(node)
@@ -2221,6 +2297,81 @@ def _fuse_addcdiv_to_fma(match: Match, inp, t1, t2, value) -> None:
 
     counters["inductor"]["addcdiv_fma_fused"] += 1
     match.replace_by_example(repl, [inp, t1, t2, value])
+
+
+def _is_var_std_reduction_dedup_enabled(match: Match) -> bool:
+    return config.var_std_reduction_dedup
+
+
+def register_var_std_reduction_dedup_pattern():
+    """
+    Merge var and std reductions that have the same dimensions and correction.
+    """
+    _var_std_inp = KeywordArg("inp")
+    _var_std_dims = KeywordArg("dims")
+    var_reduc = CallFunction(
+        aten.var.correction,
+        _var_std_inp,
+        _var_std_dims,
+        correction=KeywordArg("var_correction"),
+        keepdim=KeywordArg("keepdim"),
+    )
+    # _users=1 (default) means this won't match std_mean/var_mean decompositions
+    # where the convert feeds both a var and a mean.
+    std_reduc = CallFunction(
+        aten.var.correction,
+        CallFunction(
+            prims.convert_element_type.default, _var_std_inp, KeywordArg("cvt_dtype")
+        ),
+        _var_std_dims,
+        correction=KeywordArg("cvt_correction"),
+        keepdim=KeywordArg("cvt_keepdim"),
+    )
+
+    @register_graph_pattern(
+        MultiOutputPattern([var_reduc, std_reduc]),
+        # pyrefly: ignore [bad-argument-type]
+        pass_dict=pass_patterns[2],
+        extra_check=_is_var_std_reduction_dedup_enabled,
+    )
+    def merge_std_var(
+        match,
+        inp,
+        dims,
+        var_correction,
+        cvt_correction,
+        cvt_dtype,
+        keepdim,
+        cvt_keepdim,
+    ):
+        for correction in (var_correction, cvt_correction):
+            if isinstance(correction, torch.fx.Node):
+                return
+            if isinstance(correction, torch.SymInt | torch.SymFloat):
+                return
+        var_c = 1.0 if var_correction is None else float(var_correction)
+        cvt_c = 1.0 if cvt_correction is None else float(cvt_correction)
+        if var_c != cvt_c:
+            return
+        if keepdim != cvt_keepdim:
+            return
+
+        var_node, std_node = match.output_nodes()
+        var_dtype = var_node.meta["val"].dtype
+
+        def replacement(inp):
+            cvt_inp = prims.convert_element_type.default(inp, cvt_dtype)
+            var_result = aten.var.correction(
+                cvt_inp, dims, correction=cvt_correction, keepdim=keepdim
+            )
+            var_casted = prims.convert_element_type.default(var_result, var_dtype)
+            return (var_casted, var_result)
+
+        counters["inductor"]["var_std_reduction_dedup"] += 1
+        match.replace_by_example(replacement, [inp])
+
+
+register_var_std_reduction_dedup_pattern()
 
 
 def register_partial_reduction_pattern():

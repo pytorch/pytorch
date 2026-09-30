@@ -25,7 +25,7 @@ from ...select_algorithm import (
     SymbolicGridFn,
     TritonTemplate,
 )
-from ...utils import can_use_tma
+from ...utils import can_use_tma, use_flex_tdm_descriptor
 from .common import (
     _flex_kernel_options_example,
     _flex_kernel_tuning_options,
@@ -474,12 +474,6 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # Intel GPU enables TMA by default
-        cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
-
-        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
-            cur_kernel_options["USE_TMA"] = False
-
         # Shrink default tiles to fit smaller pow2 sparse block sizes;
         # user-pinned tiles and non-pow2 sparse sizes still error out below.
         block_m, block_n = conf.block_m, conf.block_n
@@ -491,6 +485,7 @@ def flex_attention(
             block_n = min(block_n, SPARSE_KV_BLOCK_SIZE)
         cur_kernel_options.setdefault("BLOCK_M", block_m)
         cur_kernel_options.setdefault("BLOCK_N", block_n)
+
         # Blocksparse options
         cur_kernel_options.setdefault("SPARSE_Q_BLOCK_SIZE", SPARSE_Q_BLOCK_SIZE)
         cur_kernel_options.setdefault("SPARSE_KV_BLOCK_SIZE", SPARSE_KV_BLOCK_SIZE)
@@ -511,6 +506,44 @@ def flex_attention(
                     SPARSE_KV_BLOCK_SIZE,
                 )
             continue
+
+        # Descriptor selection runs after the tile rejection above so a config
+        # that is about to be discarded cannot install descriptor range bounds.
+        #
+        # A default of True means "absent": omission keeps automatic selection,
+        # while any explicit falsy value (False, 0, None) forces pointer loads.
+        tdm_requested = bool(cur_kernel_options.get("USE_TMA", True))
+
+        # ROCm reports device type "cuda", so route it exclusively. The generic
+        # probe excludes HIP only in its CUDA arm, so it can read true on a ROCm
+        # host and would then enable descriptors under NVIDIA's rules, skipping
+        # the ROCm floor, the gfx1250 probe and the operand policy.
+        if torch.version.hip is not None and query.get_device().type == "cuda":
+            cur_kernel_options["USE_TMA"] = tdm_requested and use_flex_tdm_descriptor(
+                query,
+                key,
+                value,
+                block_shapes=[
+                    (
+                        cur_kernel_options["BLOCK_M"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["QK_HEAD_DIM_ROUNDED"],
+                    ),
+                    (
+                        cur_kernel_options["BLOCK_N"],
+                        cur_kernel_options["V_HEAD_DIM_ROUNDED"],
+                    ),
+                ],
+            )
+        else:
+            # Intel GPU enables TMA by default
+            cur_kernel_options.setdefault("USE_TMA", bool(torch.xpu.is_available()))
+
+            if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+                cur_kernel_options["USE_TMA"] = False
 
         # ROCm specific kernargs
         for attrib in ["kpack", "matrix_instr_nonkdim", "waves_per_eu"]:
