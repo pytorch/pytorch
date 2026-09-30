@@ -193,14 +193,15 @@ def _is_registered_backend(compiler_fn: CompilerFn) -> bool:
     Check if the given compiler function is a registered backend.
     Custom backends (user-provided callables not in the registry) return False.
     """
-    # Ensure backends are loaded
+    # Checked before _lazy_import so the default inductor path doesn't import
+    # every backend module.
+    if isinstance(compiler_fn, torch._TorchCompileInductorWrapper):
+        return True
+
     _lazy_import()
 
     # Check if it's directly a registered backend function
     if compiler_fn in _COMPILER_FNS.values():
-        return True
-
-    if isinstance(compiler_fn, torch._TorchCompileInductorWrapper):
         return True
 
     # _TorchCompileWrapper wraps either a registered backend or a custom callable

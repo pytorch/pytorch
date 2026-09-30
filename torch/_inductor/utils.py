@@ -3116,12 +3116,6 @@ def use_nv_universal_gemm_template(
         - GroupedGemm currently only supports TN layout (column-major B).
           Any other layout will act as a noop and fall back to ATen.
     """
-    if not ensure_cute_available():
-        return False
-
-    if not ensure_nv_universal_gemm_available():
-        return False
-
     if not _use_autotune_backend("NVGEMM"):
         return False
 
@@ -3152,7 +3146,8 @@ def use_nv_universal_gemm_template(
     if any(t.get_name() in V.graph.unaligned_buffers for t in tensors_to_check):
         return False
 
-    return True
+    # Checked last: finding cutlass.operators imports the cutlass package.
+    return ensure_cute_available() and ensure_nv_universal_gemm_available()
 
 
 def _use_cutlass_for_op(op_name: str) -> bool:
