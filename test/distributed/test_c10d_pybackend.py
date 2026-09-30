@@ -356,55 +356,11 @@ class RecordingBackend(C10DBackend):
 
 
 class ConfigRecordingBackend(RecordingBackend):
-    """Explicit config support independent of the backend name."""
+    """Existing collective methods consume opts.config."""
 
-    def broadcastConfig(self, *args):
-        return self.broadcast(*args)
-
-    def allreduceConfig(self, *args):
-        return self.allreduce(*args)
-
-    def allreduce_sparseConfig(self, *args):
-        return self.allreduce_sparse(*args)
-
-    def allreduce_coalescedConfig(self, *args):
-        return self.allreduce_coalesced(*args)
-
-    def reduceConfig(self, *args):
-        return self.reduce(*args)
-
-    def allgatherConfig(self, *args):
-        return self.allgather(*args)
-
-    def all_gather_singleConfig(self, *args):
-        return self.all_gather_single(*args)
-
-    def allgather_coalescedConfig(self, *args):
-        return self.allgather_coalesced(*args)
-
-    def all_gather_single_coalescedConfig(self, *args):
-        return self.all_gather_single_coalesced(*args)
-
-    def gatherConfig(self, *args):
-        return self.gather(*args)
-
-    def gather_singleConfig(self, *args):
-        return self.gather_single(*args)
-
-    def reduce_scatterConfig(self, *args):
-        return self.reduce_scatter(*args)
-
-    def reduce_scatter_singleConfig(self, *args):
-        return self.reduce_scatter_single(*args)
-
-    def reduce_scatter_single_coalescedConfig(self, *args):
-        return self.reduce_scatter_single_coalesced(*args)
-
-    def all_to_all_singleConfig(self, *args):
-        return self.all_to_all_single(*args)
-
-    def alltoallConfig(self, *args):
-        return self.alltoall(*args)
+    @property
+    def supports_collective_config(self):
+        return True
 
 
 def create_process_group(backend):

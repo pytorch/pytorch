@@ -238,16 +238,16 @@ The argument is supported by `broadcast`, `all_reduce`, `all_reduce_coalesced`,
 `reduce`, `all_gather`, `all_gather_single`, `all_gather_coalesced`,
 `gather_single`, `reduce_scatter`, `reduce_scatter_single`, and
 `all_to_all_single`, including their aliases. For `all_to_all_single`, omit
-the split-size lists to use equal splits. Backends without a config-method
-override, operations captured for coalescing, and NCCL2 time estimation reject
+the split-size lists to use equal splits. Backends without collective-config
+support, operations captured for coalescing, and NCCL2 time estimation reject
 non-`None` configurations.
 External NCCL group scopes, including those opened by the legacy backend,
 are unsupported.
 Passing `None` preserves existing behavior and does not require nccl4py.
-The raw c10d schemas have an optional `config=None` argument. Backend config
-methods (for example, `allreduceConfig`) reject a non-`None` config by default
-and otherwise call the existing collective method. NCCL2 overrides the config
-methods for supported operations.
+The raw c10d schemas have an optional `config=None` argument. Backends opt in with
+`supports_collective_config` and handle `opts.config` in their existing collective
+methods. An opted-in backend must reject configurations on unsupported operations;
+backends that do not opt in reject every non-`None` config.
 
 `torch.compile` and `torch.export` support configured `all_reduce`, `all_gather`,
 `all_gather_single`, `reduce_scatter`, `reduce_scatter_single`, and

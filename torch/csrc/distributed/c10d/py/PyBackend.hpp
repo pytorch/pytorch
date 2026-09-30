@@ -14,134 +14,6 @@ class PyBackend : public Backend {
  public:
   using Backend::Backend;
 
-  c10::intrusive_ptr<Work> broadcastConfig(
-      std::vector<at::Tensor>& tensors,
-      const BroadcastOptions& opts = BroadcastOptions()) override {
-    WORK_OVERRIDE(Backend, broadcastConfig, tensors, opts);
-  }
-
-  c10::intrusive_ptr<Work> allreduceConfig(
-      std::vector<at::Tensor>& tensors,
-      const AllreduceOptions& opts = AllreduceOptions()) override {
-    WORK_OVERRIDE(Backend, allreduceConfig, tensors, opts);
-  }
-
-  c10::intrusive_ptr<Work> allreduce_sparseConfig(
-      std::vector<at::Tensor>& tensors,
-      const AllreduceOptions& opts = AllreduceOptions()) override {
-    WORK_OVERRIDE(Backend, allreduce_sparseConfig, tensors, opts);
-  }
-
-  c10::intrusive_ptr<Work> allreduce_coalescedConfig(
-      std::vector<at::Tensor>& tensors,
-      const AllreduceCoalescedOptions& opts =
-          AllreduceCoalescedOptions()) override {
-    WORK_OVERRIDE(Backend, allreduce_coalescedConfig, tensors, opts);
-  }
-
-  c10::intrusive_ptr<Work> reduceConfig(
-      std::vector<at::Tensor>& tensors,
-      const ReduceOptions& opts = ReduceOptions()) override {
-    WORK_OVERRIDE(Backend, reduceConfig, tensors, opts);
-  }
-
-  c10::intrusive_ptr<Work> allgatherConfig(
-      std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
-      const AllgatherOptions& opts = AllgatherOptions()) override {
-    WORK_OVERRIDE(Backend, allgatherConfig, outputTensors, inputTensors, opts);
-  }
-
-  c10::intrusive_ptr<Work> all_gather_singleConfig(
-      at::Tensor& outputBuffer,
-      at::Tensor& inputBuffer,
-      const AllgatherOptions& opts = AllgatherOptions()) override {
-    WORK_OVERRIDE(
-        Backend, all_gather_singleConfig, outputBuffer, inputBuffer, opts);
-  }
-
-  c10::intrusive_ptr<Work> allgather_coalescedConfig(
-      std::vector<std::vector<at::Tensor>>& outputTensorLists,
-      std::vector<at::Tensor>& inputTensors,
-      const AllgatherOptions& opts = AllgatherOptions()) override {
-    WORK_OVERRIDE(
-        Backend,
-        allgather_coalescedConfig,
-        outputTensorLists,
-        inputTensors,
-        opts);
-  }
-
-  c10::intrusive_ptr<Work> all_gather_single_coalescedConfig(
-      std::vector<at::Tensor>& outputs,
-      std::vector<at::Tensor>& inputs,
-      const AllgatherOptions& opts = AllgatherOptions()) override {
-    WORK_OVERRIDE(
-        Backend, all_gather_single_coalescedConfig, outputs, inputs, opts);
-  }
-
-  c10::intrusive_ptr<Work> gatherConfig(
-      std::vector<std::vector<at::Tensor>>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
-      const GatherOptions& opts = GatherOptions()) override {
-    WORK_OVERRIDE(Backend, gatherConfig, outputTensors, inputTensors, opts);
-  }
-
-  c10::intrusive_ptr<Work> gather_singleConfig(
-      at::Tensor& outputBuffer,
-      at::Tensor& inputBuffer,
-      const GatherOptions& opts = GatherOptions()) override {
-    WORK_OVERRIDE(
-        Backend, gather_singleConfig, outputBuffer, inputBuffer, opts);
-  }
-
-  c10::intrusive_ptr<Work> reduce_scatterConfig(
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<std::vector<at::Tensor>>& inputTensors,
-      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
-    WORK_OVERRIDE(
-        Backend, reduce_scatterConfig, outputTensors, inputTensors, opts);
-  }
-
-  c10::intrusive_ptr<Work> reduce_scatter_singleConfig(
-      at::Tensor& outputBuffer,
-      at::Tensor& inputBuffer,
-      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
-    WORK_OVERRIDE(
-        Backend, reduce_scatter_singleConfig, outputBuffer, inputBuffer, opts);
-  }
-
-  c10::intrusive_ptr<Work> reduce_scatter_single_coalescedConfig(
-      std::vector<at::Tensor>& outputs,
-      std::vector<at::Tensor>& inputs,
-      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
-    WORK_OVERRIDE(
-        Backend, reduce_scatter_single_coalescedConfig, outputs, inputs, opts);
-  }
-
-  c10::intrusive_ptr<Work> all_to_all_singleConfig(
-      at::Tensor& outputBuffer,
-      at::Tensor& inputBuffer,
-      std::vector<int64_t>& outputSplitSizes,
-      std::vector<int64_t>& inputSplitSizes,
-      const AllToAllOptions& opts = AllToAllOptions()) override {
-    WORK_OVERRIDE(
-        Backend,
-        all_to_all_singleConfig,
-        outputBuffer,
-        inputBuffer,
-        outputSplitSizes,
-        inputSplitSizes,
-        opts);
-  }
-
-  c10::intrusive_ptr<Work> alltoallConfig(
-      std::vector<at::Tensor>& outputTensors,
-      std::vector<at::Tensor>& inputTensors,
-      const AllToAllOptions& opts = AllToAllOptions()) override {
-    WORK_OVERRIDE(Backend, alltoallConfig, outputTensors, inputTensors, opts);
-  }
-
   // -- Collectives (return intrusive_ptr<Work>) --
   // Use WORK_OVERRIDE for methods where C++ and Python names match.
 
@@ -210,6 +82,13 @@ class PyBackend : public Backend {
       std::vector<at::Tensor>& inputTensors,
       const GatherOptions& opts = GatherOptions()) override {
     WORK_OVERRIDE(Backend, gather, outputTensors, inputTensors, opts);
+  }
+
+  c10::intrusive_ptr<Work> gather_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const GatherOptions& opts = GatherOptions()) override {
+    WORK_OVERRIDE(Backend, gather_single, outputBuffer, inputBuffer, opts);
   }
 
   c10::intrusive_ptr<Work> scatter(
@@ -490,6 +369,18 @@ class PyBackend : public Backend {
   // them with @property. get_override won't find @property descriptors, so
   // we use py::getattr to access them through normal Python attribute
   // resolution, which handles both @property and regular methods.
+
+  bool supports_collective_config() const override {
+    pybind11::gil_scoped_acquire gil;
+    auto self = pybind11::cast(this);
+    auto attr = pybind11::type::of(self).attr("supports_collective_config");
+    auto base =
+        pybind11::type::of<Backend>().attr("supports_collective_config");
+    if (attr.is(base)) {
+      return Backend::supports_collective_config();
+    }
+    return self.attr("supports_collective_config").cast<bool>();
+  }
 
   bool supportsSplitting() const override {
     return getPropertyOverride(
