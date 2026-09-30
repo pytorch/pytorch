@@ -2046,6 +2046,57 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         with torch.compiler.set_stance("fail_on_recompile"):
             f(torch.randn(3, 3))
 
+    def test_set_stance_fail_on_recompile_with_nonrecursive_disable(self):
+        scale = [1]
+
+        def inner(x):
+            return x * scale[0]
+
+        @torch._dynamo.disable(recursive=False)
+        def skipped(x):
+            return inner(x.cos())
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return skipped(x.sin())
+
+        x = torch.randn(3)
+        f(x)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(f(x), x.sin().cos())
+            scale[0] = 2
+            with self.assertRaisesRegex(RuntimeError, "function name: 'inner'"):
+                f(x)
+
+    def test_refuse_recompile_with_nonrecursive_disable(self):
+        # An installed precompile artifact binds this callback into its context.
+        from torch._dynamo.eval_frame import (
+            _RecompileRefusedError,
+            _RefuseRecompileCallback,
+        )
+
+        scale = [1]
+
+        def inner(x):
+            return x * scale[0]
+
+        @torch._dynamo.disable(recursive=False)
+        def skipped(x):
+            return inner(x.cos())
+
+        def f(x):
+            return skipped(x.sin())
+
+        x = torch.randn(3)
+        context = torch._dynamo.optimize(backend="eager")
+        context(f)(x)
+        context.callback = _RefuseRecompileCallback(context.callback)
+        refusing = context(f)
+        self.assertEqual(refusing(x), x.sin().cos())
+        scale[0] = 2
+        with self.assertRaisesRegex(_RecompileRefusedError, "function name: 'inner'"):
+            refusing(x)
+
     def test_set_stance_forbid_in_graph(self):
         @torch.compiler.set_stance("force_eager")
         def a(x):

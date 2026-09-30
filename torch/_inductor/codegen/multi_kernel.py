@@ -400,6 +400,9 @@ class MultiKernelCall:
         Unit test may mock this method to force a specific kernel to
         be picked.
         """
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("multi-kernel autotuning")
 
         def wrap_fn(kernel, index):
             def inner():

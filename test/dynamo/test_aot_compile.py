@@ -2274,26 +2274,55 @@ from user code:
             return c
 
         example_inputs = (torch.ones(3), torch.ones(3))
-        expected = foo(*example_inputs)  # noqa: F841
+        expected = foo(*example_inputs)
 
         def backend(gm, example_inputs):
             return CustomCompiledFunction(gm, example_inputs)
 
         with torch.compiler.set_stance("fail_on_recompile"):
-            with self.assertRaisesRegex(
-                PackageError,
-                "CLOSURE_MATCH guard cannot be serialized.",
-            ):
-                compiled_fn = torch.compile(  # noqa: F841
-                    foo,
-                    fullgraph=True,
-                    backend=backend,
-                    options={
-                        "guard_filter_fn": lambda guard_entries: [
-                            True for g in guard_entries
-                        ]
-                    },
-                ).aot_compile((example_inputs, {}))
+            # Keeping every guard keeps the CLOSURE_MATCH on the wrapped
+            # function, which is saved by its code and globals module.
+            compiled_fn = torch.compile(
+                foo,
+                fullgraph=True,
+                backend=backend,
+                options={
+                    "guard_filter_fn": lambda guard_entries: [
+                        True for g in guard_entries
+                    ]
+                },
+            ).aot_compile((example_inputs, {}))
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with open(self.path(), "rb") as f:
+            loaded = torch.compiler.load_compiled_function(f)
+        self.assertEqual(loaded(*example_inputs), expected)
+
+    def test_guard_filter_override_aot_refuses_a_function_no_module_owns(self):
+        namespace: dict[str, object] = {}
+        exec("def inc(x):\n    return x + 1\n", namespace)
+        inc = namespace["inc"]
+
+        def foo(x):
+            return inc(x) * 2
+
+        def backend(gm, example_inputs):
+            return CustomCompiledFunction(gm, example_inputs)
+
+        # A loading process has no module to find inc's globals in.
+        with self.assertRaisesRegex(
+            PackageError, "CLOSURE_MATCH guard cannot be serialized."
+        ):
+            torch.compile(
+                foo,
+                fullgraph=True,
+                backend=backend,
+                options={
+                    "guard_filter_fn": lambda guard_entries: [
+                        True for g in guard_entries
+                    ]
+                },
+            ).aot_compile(((torch.ones(3),), {}))
 
     def test_aot_compile_basic_fn_inductor(self):
         def fn(x, y):

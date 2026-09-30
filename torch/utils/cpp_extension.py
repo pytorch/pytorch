@@ -844,6 +844,9 @@ class BuildExtension(_LazyBuildExt):
             self.force = True
 
     def build_extensions(self) -> None:
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("C++ extension compilation")
         compiler_name, compiler_version = self._check_abi()
 
         cuda_ext = False
@@ -2108,6 +2111,9 @@ def _check_and_build_extension_h_precompiler_headers(
             f.close()
 
     def build_precompile_header(pch_cmd) -> None:
+        from torch.compiler._no_compile import check_compilation_allowed
+
+        check_compilation_allowed("C++ extension precompiled header compilation")
         try:
             subprocess.check_output(shlex.split(pch_cmd), stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
@@ -2961,6 +2967,27 @@ def _run_ninja_build(build_directory: str, verbose: bool, error_prefix: str) -> 
             if uk not in vc_env:
                 vc_env[uk] = v
         env = vc_env
+    from torch.compiler._no_compile import (
+        check_compilation_allowed,
+        is_compilation_forbidden,
+    )
+
+    if is_compilation_forbidden():
+        # Every fresh process reaches this even for a prebuilt extension, since
+        # JIT_EXTENSION_VERSIONER starts empty; only ninja knows whether the
+        # build is up to date.
+        dry_run = subprocess.run(
+            ['ninja', '-n'],
+            shell=IS_WINDOWS and IS_HIP_EXTENSION,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=build_directory,
+            env=env)
+        if dry_run.returncode == 0 and b'no work to do' in dry_run.stdout:
+            return
+        check_compilation_allowed(
+            "C++ extension compilation",
+            dry_run.stdout.decode(*SUBPROCESS_DECODE_ARGS).strip())
     try:
         sys.stdout.flush()
         sys.stderr.flush()
