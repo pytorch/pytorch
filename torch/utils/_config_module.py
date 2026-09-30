@@ -26,12 +26,11 @@ from typing import (
     NoReturn,
     Optional,
     overload,
-    Self,
     TYPE_CHECKING,
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated
+from typing_extensions import deprecated, Self
 
 from torch._utils_internal import justknobs_check
 
