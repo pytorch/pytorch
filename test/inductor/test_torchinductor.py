@@ -17802,6 +17802,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             lambda msg: f"{msg}\nRef:\n{ref_grad_list}\nAct:\n{act_grad_list}",
         )
 
+    def test_weight_norm_1d_and_reduced_dtypes(self):
+        # https://github.com/pytorch/pytorch/issues/198676
+        def fn(v, g):
+            return torch._weight_norm(v, g, 0)
+
+        opt_fn = torch.compile(fn)
+        dtypes = [torch.float32, torch.float16, torch.bfloat16]
+        if is_mps_backend(self.device):
+            # MPS eager keeps the norm and the arithmetic in g.dtype
+            dtypes = [torch.float32]
+        for v_shape, g_shape in (((8,), (8,)), ((8, 5), (8, 1))):
+            for dtype in dtypes:
+                kw = {"device": self.device, "dtype": dtype}
+                v = torch.randn(v_shape, requires_grad=True, **kw)
+                g = torch.randn(g_shape, requires_grad=True, **kw)
+                grad_out = torch.randn(v_shape, **kw)
+                ref = fn(v, g)
+                ref_grad = torch.autograd.grad(ref, (v, g), grad_out)
+                act = opt_fn(v, g)
+                act_grad = torch.autograd.grad(act, (v, g), grad_out)
+                self.assertEqual((ref, ref_grad), (act, act_grad))
+
     def test_chunk_recompiles(self):
         def f(x):
             return x.chunk(4)
