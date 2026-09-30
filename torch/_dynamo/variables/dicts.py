@@ -40,6 +40,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     DictGetItemSource,
+    GlobalSource,
     is_constant_source,
     is_from_local_source,
 )
@@ -877,6 +878,40 @@ class ConstDictVariable(VariableTracker):
         if type_attr is not NO_SUCH_SUBOBJ and _is_method_type(type_attr):
             return variables.CallMethodVariable(self, name)
         return super().tp_getattro_impl(tx, name)
+
+
+def globals_dict_variable(
+    tx: "InstructionTranslatorBase", f_globals: dict[str, Any]
+) -> VariableTracker:
+    from ..symbolic_convert import _registered_module_for_globals
+    from .user_defined import GlobalsNamespaceVariable
+
+    if f_globals in tx.output.side_effects:
+        tracked = tx.output.side_effects[f_globals]
+        if not isinstance(tracked, GlobalsNamespaceVariable):
+            unimplemented(
+                gb_type="globals() namespace already tracked as dict",
+                context=tx.f_code.co_name,
+                explanation="Dynamo cannot safely reinterpret a tracked globals dict.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=True,
+            )
+        return tracked
+
+    registered_module = _registered_module_for_globals(
+        f_globals.get("__name__"), f_globals
+    )
+    if registered_module is not None:
+        module_name, _ = registered_module
+        source = AttrSource(tx.import_source(module_name), "__dict__")
+    else:
+        globals_name = tx.output.install_global_by_id("___unnamed_scope", f_globals)
+        source = GlobalSource(globals_name)
+
+    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+    return tx.output.side_effects.track_mutable(
+        f_globals, GlobalsNamespaceVariable(f_globals, source=source)
+    )
 
 
 class OrderedDictVariable(ConstDictVariable):

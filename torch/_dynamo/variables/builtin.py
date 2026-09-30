@@ -166,7 +166,11 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
+from .user_defined import (
+    GlobalsNamespaceVariable,
+    UserDefinedObjectVariable,
+    UserDefinedVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -1634,6 +1638,18 @@ class BuiltinVariable(BaseBuiltinVariable):
         if len(args) != 0:
             raise_observed_exception(TypeError, tx)
         return self._call_frame_locals_snapshot(tx)
+
+    def call_globals(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker:
+        if args or kwargs:
+            raise_observed_exception(TypeError, tx)
+        from .dicts import globals_dict_variable
+
+        return globals_dict_variable(tx, tx.f_globals)
 
     @staticmethod
     def _call_frame_locals_snapshot(tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -3470,6 +3486,9 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if args and isinstance(args[0], GlobalsNamespaceVariable):
+            return args[0]._reject_mapping_operation(tx, name)
+
         if name == "__new__":
             if args:
                 # dict.__new__ (tp_new) ignores extra args — only the first
@@ -3836,12 +3855,20 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         name_var: VariableTracker,
         val: VariableTracker,
     ) -> VariableTracker | None:
-        if isinstance(
+        if isinstance(obj, variables.BaseUserFunctionVariable):
+            if name_var.is_python_constant():
+                name = name_var.as_python_constant()
+                if isinstance(name, str):
+                    member = obj.lookup_tp_getset_member(name)
+                    if member is not None:
+                        member.setter(obj, tx, val)
+                        return ConstantVariable.create(None)
+            return obj.call_method(tx, "__setattr__", [name_var, val], {})
+        elif isinstance(
             obj,
             (
                 variables.DefaultDictVariable,
                 variables.UserDefinedObjectVariable,
-                variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
                 variables.TracebackVariable,
                 variables.DequeVariable,

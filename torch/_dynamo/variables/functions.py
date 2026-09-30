@@ -439,16 +439,24 @@ class BaseUserFunctionVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__setattr__":
-            if args[0].is_constant_match("__annotations__"):
-                self.annotations = args[1]
-                return ConstantVariable.create(None)
+            if args[0].is_python_constant():
+                attr = args[0].as_python_constant()
+                if isinstance(attr, str):
+                    member = self.lookup_tp_getset_member(attr)
+                    if member is not None:
+                        member.setter(self, tx, args[1])
+                        return ConstantVariable.create(None)
             return self.get_dict_vt(tx).call_method(
                 tx, "__setitem__", list(args), kwargs
             )
         elif name == "__delattr__":
-            if args[0].is_constant_match("__annotations__"):
-                self.annotations = None
-                return ConstantVariable.create(None)
+            if args[0].is_python_constant():
+                attr = args[0].as_python_constant()
+                if isinstance(attr, str):
+                    member = self.lookup_tp_getset_member(attr)
+                    if member is not None:
+                        member.setter(self, tx, None)
+                        return ConstantVariable.create(None)
             return self.get_dict_vt(tx).call_method(tx, "__delitem__", list(args), {})
         return super().call_method(tx, name, list(args), kwargs)
 
@@ -570,6 +578,13 @@ class BaseUserFunctionVariable(VariableTracker):
             c = self.read_func_slot(tx, "__closure__")
         return c if c is not None else ConstantVariable.create(None)
 
+    def _get_globals(self, tx: "InstructionTranslatorBase") -> "VariableTracker | None":
+        if self.python_type() is not types.FunctionType:
+            return None
+        from .dicts import globals_dict_variable
+
+        return globals_dict_variable(tx, self.get_globals())
+
     def _get_name(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return ConstantVariable.create(self.get_name())
 
@@ -625,6 +640,7 @@ class BaseUserFunctionVariable(VariableTracker):
             getset_set("__module__"),
         ),
         "__closure__": Member(_get_closure, readonly_setter),
+        "__globals__": Member(_get_globals, readonly_setter),
     }
 
     def lookup_instance_dict(
