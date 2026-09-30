@@ -1,8 +1,7 @@
-#include <torch/csrc/utils/python_fake_tensor.h>
-
+#include <torch/csrc/FakeTensorMode.h>
 #include <torch/csrc/PyInterpreter.h>
 
-namespace torch {
+namespace torch::fake_tensor {
 
 py::object getCppFakeTensorModePyObj(
     const std::shared_ptr<c10::FakeTensorMode>& mode) {
@@ -43,4 +42,4 @@ py::object getCppFakeTensorModePyObj(
   return wrapper;
 }
 
-} // namespace torch
+} // namespace torch::fake_tensor
