@@ -594,12 +594,7 @@ class TestDistBackend(MultiProcessTestCase):
 
     @classmethod
     def _run(cls, rank, test_name, file_name, pipe, **kwargs):
-        acc = torch.accelerator.current_accelerator()
-        if (
-            acc is None
-            or BACKEND != dist.get_default_backend_for_device(acc)
-            or not torch.accelerator.is_available()
-        ):
+        if BACKEND in ("nccl", "xccl") and not torch.accelerator.is_available():
             sys.exit(TEST_SKIPS["no_accelerator"].exit_code)
         self = cls(test_name)
         self.rank = rank
@@ -10629,8 +10624,8 @@ class DistributedTest:
             else:
                 object_list = [None]
             # This test never calls set_device, so the collective device has to be
-            # named explicitly or every rank would broadcast on cuda:0.
-            coll_device = torch.device(device_type, rank)
+            # named explicitly or every rank would broadcast on device:0.
+            coll_device = torch.device(f"{device_type}:{rank:d}")
             dist.broadcast_object_list(object_list, device=coll_device)
 
             map_location = {f"{device_type}:0": f"{device_type}:{rank:d}"}
