@@ -3931,7 +3931,17 @@ class CppCodeCache:
     be compiled, while compilation flags are set by CppBuilder."""
 
     cache: dict[str, Callable[[], CDLL | ModuleType]] = {}
-    cache_clear = staticmethod(cache.clear)
+    # Shared by subclasses and never cleared: a key hashes the source and build
+    # command, and every miss rewrites its entry for the current cache directory.
+    _binary_paths: dict[str, str] = {}
+
+    @staticmethod
+    def cache_clear() -> None:
+        from torch.compiler._runtime_cache import clear_cpp_kernels
+
+        CppCodeCache.cache.clear()
+        clear_cpp_kernels()
+
     cpp_compile_command_flags: dict[str, Any] = {}
 
     @staticmethod
@@ -4055,14 +4065,24 @@ class CppCodeCache:
             optimized_path = os.devnull
 
         if key not in cls.cache:
+            from torch.compiler._runtime_cache import (
+                has_frozen_cpp_kernel,
+                restore_cpp_kernel,
+            )
             from torch.utils._filelock import FileLock
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             future: Future[Any] | None = None
             lib = None
 
-            # if requested, pre-compile any headers
-            if config.cpp_cache_precompile_headers and not _IS_WINDOWS:
+            # if requested, pre-compile any headers. A frozen binary is restored
+            # below and never built, so it needs no header, and precompiling one
+            # on a host with an empty header cache fails under no_compilation().
+            if (
+                config.cpp_cache_precompile_headers
+                and not _IS_WINDOWS
+                and not has_frozen_cpp_kernel(key)
+            ):
                 if header := cls._get_uncompiled_header(device_type):
                     main_build_option.precompiled_header = _precompile_header(
                         header,
@@ -4126,6 +4146,9 @@ class CppCodeCache:
                     main_builder.get_target_file_path()
                 )
 
+            cls._binary_paths[key] = binary_path
+            restore_cpp_kernel(key, binary_path)
+
             def load_fn() -> Any:
                 nonlocal lib
                 if lib is None:
@@ -4153,6 +4176,9 @@ class CppCodeCache:
 
             cls.cache[key] = load_fn
 
+        from torch.compiler._runtime_cache import record_cpp_kernel
+
+        record_cpp_kernel(key, cls._binary_paths[key], cls.cache[key])
         return cls.cache[key]
 
     @classmethod
