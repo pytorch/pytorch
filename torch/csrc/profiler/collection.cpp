@@ -70,9 +70,8 @@ TensorMetadata::TensorMetadata(
   SOFT_ASSERT(r.weak_self_.has_value());
 }
 
-OpArgData parseArgData(
-    const std::vector<op_input_t>& input_shapes,
-    const std::vector<op_input_t>& concreteInputs) {
+OpArgData parseArgData(const DecodedInputs& inputs) {
+  const auto& input_shapes = inputs.shapes;
   if (input_shapes.empty()) {
     return OpArgData{.hasData = false};
   }
@@ -82,7 +81,7 @@ OpArgData parseArgData(
   std::vector<std::vector<int64_t>> shapesForKinetoEvent(input_shapes.size());
 
   std::vector<std::string> dtypes(input_shapes.size());
-  std::vector<c10::IValue> concrete_inputs_list;
+  std::vector<c10::IValue> concrete_inputs_list(input_shapes.size());
 
   for (const auto& i : c10::irange(input_shapes.size())) {
     std::visit(
@@ -106,30 +105,20 @@ OpArgData parseArgData(
               strides[i] = std::move(stride);
               dtypes[i] = "TensorList";
             },
-            [&](const c10::IValue&) { dtypes[i] = "Scalar"; },
+            [&](const c10::IValue& val) {
+              concrete_inputs_list[i] = val;
+              dtypes[i] = "Scalar";
+            },
             [&](const auto&) {}),
         input_shapes[i]);
-  }
-
-  // If we recorded concrete inputs, then parse them
-  if (input_shapes.size() == concreteInputs.size() && !concreteInputs.empty()) {
-    concrete_inputs_list.resize(input_shapes.size());
-
-    for (const auto& i : c10::irange(input_shapes.size())) {
-      std::visit(
-          c10::overloaded(
-              [&](const c10::IValue& val) { concrete_inputs_list[i] = val; },
-              [&](const auto&) {}),
-          input_shapes[i]);
-      std::visit(
-          c10::overloaded(
-              [&](const c10::IValue& val) {
-                concrete_inputs_list[i] = val;
-                dtypes[i] = "ScalarList";
-              },
-              [&](const auto&) {}),
-          concreteInputs[i]);
-    }
+    std::visit(
+        c10::overloaded(
+            [&](const c10::IValue& val) {
+              concrete_inputs_list[i] = val;
+              dtypes[i] = "ScalarList";
+            },
+            [&](const auto&) {}),
+        inputs.concrete[i]);
   }
 
   return OpArgData{
@@ -144,37 +133,6 @@ OpArgData parseArgData(
 // ============================================================================
 // == PyTorch Ops =============================================================
 // ============================================================================
-
-namespace {
-struct TagToIOType {
-  InputOutputEncoder::Tag tag;
-  InputOutputEncoder::IOType io_type;
-};
-
-constexpr int tagCount = ((int)InputOutputEncoder::Tag::TERMINATOR) + 1;
-constexpr std::array<TagToIOType, tagCount> tag_map = {{
-    {InputOutputEncoder::Tag::Tensor, InputOutputEncoder::IOType::Shapes},
-    {InputOutputEncoder::Tag::UndefinedTensor,
-     InputOutputEncoder::IOType::Shapes},
-    {InputOutputEncoder::Tag::TensorListBegin,
-     InputOutputEncoder::IOType::Shapes},
-    {InputOutputEncoder::Tag::ScalarList,
-     InputOutputEncoder::IOType::ConcreteInputs},
-    {InputOutputEncoder::Tag::Scalar, InputOutputEncoder::IOType::Shapes},
-    {InputOutputEncoder::Tag::Other, InputOutputEncoder::IOType::Shapes},
-    {InputOutputEncoder::Tag::TERMINATOR, InputOutputEncoder::IOType::None},
-}};
-
-constexpr bool allTagsMapped(int idx = 0) {
-  return tag_map[idx].tag == InputOutputEncoder::Tag::TERMINATOR ||
-      ((idx == (int)tag_map[idx].tag) && allTagsMapped(idx + 1));
-}
-static_assert(allTagsMapped(), "tag_map is out of order");
-
-constexpr InputOutputEncoder::IOType tagToIOType(InputOutputEncoder::Tag tag) {
-  return tag_map[(int)tag].io_type;
-}
-} // namespace
 
 // ----------------------------
 // |  Input / Output encoder  |
@@ -248,20 +206,12 @@ bool InputOutputEncoder::isSupportedScalarList(
   return true;
 }
 
-// This function returns a lambda which is a custom-iterator-like getter.
-// Each invocation of the lambda returns input values for one op.
-//
-// io_type is used to filter the ivalues between 'Shapes' and 'Concrete Args'.
-// Shapes are used to represent the shapes of tensors. We save only the shapes
-//   of the tensors because tensors can be large.
-// Concrete args are separated to clarify that they are the actual values.
-auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
+auto InputOutputEncoder::getInputDecoder() {
   return [this,
           tag_it = tags_.begin(),
           tensor_metadata_it = tensor_metadata_.begin(),
           tensor_size_strides_it = tensor_sizes_strides_.begin(),
-          ivals_it = ivalues_.begin(),
-          io_type]() mutable {
+          ivals_it = ivalues_.begin()]() mutable {
     auto decode_tensor = [&]() -> TensorMetadata {
       std::vector<int64_t> sizes;
       std::vector<int64_t> strides;
@@ -294,20 +244,18 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
       return {raw_metadata, sizes, strides};
     };
 
-    std::vector<op_input_t> out;
-    auto push_value = [&out, io_type](const Tag& tag, op_input_t input) {
-      if (io_type == tagToIOType(tag)) {
-        out.emplace_back(std::move(input));
-      } else {
-        out.emplace_back(std::nullopt);
-      }
+    DecodedInputs out;
+    auto push_value = [&out](
+                          op_input_t shape_input, op_input_t concrete_input) {
+      out.shapes.emplace_back(std::move(shape_input));
+      out.concrete.emplace_back(std::move(concrete_input));
     };
 
     bool terminate = false;
     while (!terminate && tag_it != tags_.end()) {
       switch (*tag_it) {
         case Tag::Tensor:
-          push_value(*tag_it, decode_tensor());
+          push_value(decode_tensor(), std::nullopt);
           break;
 
         case Tag::TensorListBegin: {
@@ -322,20 +270,23 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
             arg.emplace_back(decode_tensor());
           }
           if (found_undefined) {
-            push_value(*tag_it, std::nullopt);
+            push_value(std::nullopt, std::nullopt);
           } else {
-            push_value(Tag::TensorListBegin, std::move(arg));
+            push_value(std::move(arg), std::nullopt);
           }
         } break;
 
         case Tag::ScalarList:
+          push_value(std::nullopt, *ivals_it++);
+          break;
+
         case Tag::Scalar:
-          push_value(*tag_it, *ivals_it++);
+          push_value(*ivals_it++, std::nullopt);
           break;
 
         case Tag::UndefinedTensor:
         case Tag::Other:
-          push_value(*tag_it, std::nullopt);
+          push_value(std::nullopt, std::nullopt);
           break;
 
         case Tag::TERMINATOR:
@@ -350,14 +301,6 @@ auto InputOutputEncoder::getIValueGenerator(const IOType& io_type) {
     }
     return out;
   };
-}
-
-auto InputOutputEncoder::getInputShapeGenerator() {
-  return getIValueGenerator(IOType::Shapes);
-}
-
-auto InputOutputEncoder::getConcreteInputGenerator() {
-  return getIValueGenerator(IOType::ConcreteInputs);
 }
 
 void InputOutputEncoder::clear() {
@@ -548,8 +491,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
     }
   }
 
-  auto input_shape_getter = inputs_outputs_.getInputShapeGenerator();
-  auto concrete_input_getter = inputs_outputs_.getConcreteInputGenerator();
+  auto input_decoder = inputs_outputs_.getInputDecoder();
 
   auto jit_stack = StealOrDefault(jit_stack_);
   auto jit_module = StealOrDefault(jit_modules_);
@@ -563,8 +505,7 @@ void ThreadLocalSubqueue::TorchOpStorage::materialize(
         std::move(event->basic_fields_),
         ThreadLocalSubqueue::TorchOpStorage::OpList::correlationID(event),
         time_converter(event->end_time_),
-        input_shape_getter(),
-        concrete_input_getter(),
+        input_decoder(),
         jit_stack(),
         jit_module(),
         extra_args(),
