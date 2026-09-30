@@ -19485,7 +19485,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @parametrize("slice_pointwise", (False, True))
     @skip_if_halide
     @skip_if_pallas
-    @skip_if_mps
     def test_argmin_argmax_fused_reduction_logical_index(self, slice_pointwise):
         # https://github.com/pytorch/pytorch/issues/193661
         def fn(x):
