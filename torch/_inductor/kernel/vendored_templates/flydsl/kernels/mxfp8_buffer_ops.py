@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: MIT
+# Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
+#
 # Vendored from the MXFP8 grouped GEMM
 # package in ROCm/AMD-TorchTitan-Ops (`amd_titan/_ops/fwdgemm/_buffer_ops.py`),
 # whose own upstream is the `flydsl-groupped-gemm` development repo. Kept as a

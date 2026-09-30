@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: MIT
+# Copyright (C) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
 #
 # RAGGED MXFP8 FORWARD grouped GEMM, 4-wave AGPR body.
 #
@@ -59,6 +60,9 @@ BLOCK_R = 256  # DEFAULT output rows (tokens) per tile; see pick_block_r
 BLOCK_C_DEFAULT = 256  # output cols (N) per tile; 128 also supported, see pick_tile
 BLOCK_M = 128  # contraction elements per pipeline step (= BLOCK_K)
 
+# Largest element count one operand can have: FlyDSL packs shapes as int32.
+_INT32_MAX = 2**31 - 1
+
 
 def pick_block_r(m_total: int, e: int) -> int:
     """Row tile height, from the AVERAGE group size.
@@ -98,7 +102,7 @@ def pick_block_r(m_total: int, e: int) -> int:
     return best_block_r
 
 
-def pick_tile(m_total: int, e: int, n: int) -> tuple:
+def pick_tile(m_total: int, e: int, n: int, num_cus: int | None = None) -> tuple:
     """(BLOCK_R, BLOCK_C) for this shape, shrinking both when the grid starves.
 
     `pick_block_r` answers a local question and does not look at how many
@@ -108,8 +112,14 @@ def pick_tile(m_total: int, e: int, n: int) -> tuple:
 
     Halving a tile dimension doubles the block count, and at a starved grid that
     trade is strongly positive even though the narrower tile is worse per block.
-    THE THRESHOLD IS ONE FULL WAVE, and the shrink stops at (128, 128): going
-    on to BLOCK_R=64 gains too little to pay for another branch here.
+    THE THRESHOLD IS ONE FULL WAVE -- one workgroup per CU, the same cap the
+    persistent grid uses -- and the shrink stops at (128, 128): going on to
+    BLOCK_R=64 gains too little to pay for another branch here.
+
+    `num_cus` defaults to the current device's CU count. It is read rather than
+    assumed because gfx950 parts differ: a full MI350X has 256 CUs, but a
+    partitioned one (e.g. the 128-CU mi350 CI runners) has half that, and a
+    hard-coded 256 would shrink tiles on grids that already fill the device.
     """
     br = pick_block_r(m_total, e)
     # BLOCK_C is always 256 to start: a tile that overhangs N is not free, but
@@ -120,9 +130,12 @@ def pick_tile(m_total: int, e: int, n: int) -> tuple:
     bc = BLOCK_C_DEFAULT
     if e <= 0 or n <= 0:
         return br, bc
+    if num_cus is None:
+        num_cus = _current_device_cu_count()
+    starved = max(1, int(num_cus))
     # Row tiles are per-group, so the average group is what the grid sees.
     tiles = max(1, e * ceildiv(max(m_total // e, 1), br)) * ceildiv(n, bc)
-    if tiles >= _STARVED_TILES:
+    if tiles >= starved:
         return br, bc
     # Only a tile that is 256 in BOTH dims can be halved: halving one that is
     # already 128 lands on (128, 128). SHRINK ONE STEP AT A TIME, re-checking;
@@ -134,16 +147,20 @@ def pick_tile(m_total: int, e: int, n: int) -> tuple:
     )
     if bc == 256 and n % 128 == 0:
         bc = 128
-        if tiles_at(br, bc) >= _STARVED_TILES:
+        if tiles_at(br, bc) >= starved:
             return br, bc
     if br == 256:
         br = 128
-        if tiles_at(br, bc) >= _STARVED_TILES:
+        if tiles_at(br, bc) >= starved:
             return br, bc
     return br, bc
 
 
-_STARVED_TILES = 256  # one full wave on MI350X's 256 CUs; see pick_tile
+def _current_device_cu_count() -> int:
+    return torch.cuda.get_device_properties(
+        torch.cuda.current_device()
+    ).multi_processor_count
+
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
@@ -833,6 +850,15 @@ def make_mxfp8_grouped_gemm_param(
     Raises ``ValueError`` rather than tripping the asserts inside ``_compile``,
     so the Inductor heuristics can prune a config without catching
     ``AssertionError``.
+
+    Also rejects shapes whose operands cannot be passed at all. FlyDSL's CABI
+    packs each shape entry as int32 and every operand goes over as a 1-D view
+    (see `_row_windows`). The M-dependent operands are split into row windows
+    at launch, but B is ``(E, N, K)`` and is passed whole: it cannot be windowed
+    over rows, and windowing it over experts would need the device-resident
+    offsets on the host to know which rows each expert slice owns. So a B past
+    int32 is refused HERE, where the caller can still fall back, rather than
+    raising ``struct.error`` from inside the dispatch.
     """
     if k <= 0 or n <= 0 or group_count <= 0:
         raise ValueError(f"degenerate shape K={k}, N={n}, E={group_count}")
@@ -851,6 +877,17 @@ def make_mxfp8_grouped_gemm_param(
         # A 128-wide tile is only ever chosen to remove overhang; taking it on
         # an N it does not divide adds overhang instead of removing it.
         raise ValueError(f"BLOCK_C 128 needs N ({n}) to be a multiple of 128")
+    # B's scales are (E, N, K//32), smaller than B, so bounding B covers both.
+    if group_count * n * k > _INT32_MAX:
+        raise ValueError(
+            f"B (E={group_count}, N={n}, K={k}) has {group_count * n * k} "
+            f"elements, past the int32 operand limit {_INT32_MAX}"
+        )
+    # `_row_windows` needs at least one whole row tile per window.
+    if max(k, n) * block_r > _INT32_MAX:
+        raise ValueError(
+            f"a {block_r}-row tile at K={k} N={n} exceeds the int32 operand limit"
+        )
     return MXFP8GroupedGemmParam(
         k=int(k),
         n=int(n),
@@ -1026,7 +1063,7 @@ def _row_windows(M, K, N, offs, block_r=BLOCK_R):
     """
     # Bound the widest M-dependent operand: A is (M, K), out is (M, N), and A's
     # scales are (M, K//32).
-    rows_max = (2**31 - 1) // max(K, N)
+    rows_max = _INT32_MAX // max(K, N)
     # Align down to the row-tile size so a window boundary never splits a tile;
     # the tiling inside each window is then identical to the unsplit case.
     rows_max = (rows_max // block_r) * block_r

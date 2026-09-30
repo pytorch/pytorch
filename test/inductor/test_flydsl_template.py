@@ -1320,6 +1320,48 @@ class TestFlyDSLTemplate(TestCase):
             covered += rows
         self.assertEqual(covered, total_m)
 
+    def test_flydsl_mxfp8_grouped_mm_rejects_oversized_weight(self):
+        """B is passed whole, so an (E, N, K) past int32 must fail validation."""
+        import importlib
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        module = importlib.import_module(
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels."
+            "mxfp8_grouped_gemm_gfx950"
+        )
+        # 256 experts x N=2048 x K=7168 is ~3.76e9 elements.
+        with self.assertRaisesRegex(ValueError, "int32"):
+            module.make_mxfp8_grouped_gemm_param(7168, 2048, 256, 256, 256)
+        self.assertIsNone(
+            module.make_mxfp8_grouped_gemm_param_and_validate(7168, 2048, 256, 256, 256)
+        )
+        # The same layer with fewer experts per rank still fits.
+        self.assertIsNotNone(
+            module.make_mxfp8_grouped_gemm_param_and_validate(7168, 2048, 32, 256, 256)
+        )
+
+    def test_flydsl_mxfp8_grouped_mm_tile_starvation_follows_cu_count(self):
+        """The starvation threshold is the device's CU count, not a constant."""
+        import importlib
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        module = importlib.import_module(
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels."
+            "mxfp8_grouped_gemm_gfx950"
+        )
+        # 8 groups of 512 rows at N=2048: 16 row tiles x 8 col tiles = 128
+        # blocks at the default (256, 256) tile -- one full wave on a 128-CU
+        # partition, half a wave on a full 256-CU MI350X.
+        m, e, n = 8 * 512, 8, 2048
+        self.assertEqual(module.pick_tile(m, e, n, num_cus=128), (256, 256))
+        self.assertEqual(module.pick_tile(m, e, n, num_cus=256), (256, 128))
+        with mock.patch.object(module, "_current_device_cu_count", return_value=128):
+            self.assertEqual(module.pick_tile(m, e, n), (256, 256))
+
 
 def _mxfp_case(mxfp_format, shape, device, a_is_transposed=False, b_is_transposed=True):
     operands, scales, references = [], [], []

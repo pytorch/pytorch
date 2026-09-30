@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
-# Vendored, unmodified apart from this header, from the MXFP8 grouped GEMM
-# package in ROCm/AMD-TorchTitan-Ops
-# (`amd_titan/_ops/fwdgemm/_fp8_gemm_utils.py`).
 # Copyright (c) 2025 FlyDSL Project Contributors
+#
+# Derived from ROCm/FlyDSL `kernels/gemm/fp8_gemm_utils.py` (Apache-2.0), and
+# MODIFIED from it in two ways, both described below: unused helpers are
+# removed, and `wait_barrier` also waits on lgkmcnt(0).
 #
 # FP8-GEMM data-path helpers for the flydsl_8wave candidate. Self-contained:
 # the only dependency is the `flydsl` pip wheel (flydsl.*).
