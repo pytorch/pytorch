@@ -7415,9 +7415,12 @@ class ShapeEnv:
         if not isinstance(expr, Relational):
             return None
 
-        def evaluate_side(term: sympy.Expr) -> sympy.Integer | SingletonInt | None:
+        def evaluate_side(term: sympy.Basic) -> sympy.Integer | SingletonInt | None:
             if isinstance(term, sympy.Integer):
                 return term
+            if not isinstance(term, sympy.Expr):
+                # Boolean operands (e.g. Eq(Eq(u0, 1), True)) have no coefficient.
+                return None
             coeff, sym = term.as_coeff_Mul()
             val = self.backed_var_to_val.get(sym)
             if not isinstance(val, SingletonInt) or not (
