@@ -1,12 +1,16 @@
 # Owner(s): ["module: mps"]
 import importlib
 import os
+import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 import torch
+from torch._inductor import config as inductor_config
+from torch._inductor.codegen.mps import MetalKernel
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
@@ -354,6 +358,9 @@ class MPSBasicTests(TestCase):
             ),
         )
 
+    def test_metal_kernel_device_type(self):
+        self.assertEqual(MetalKernel.device_type, "mps")
+
 
 @unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
 class MPSBasicTestsAOTI(TestCase):
@@ -498,6 +505,102 @@ class MPSBasicTestsAOTI(TestCase):
                 target_count,
                 exactly=True,
             ).run(src_code)
+
+    def test_shader_compile_error_raises(self):
+        # A shader that fails to compile must surface as an exception rather
+        # than killing the process. The shader library is built lazily inside
+        # the generated handle getter, so the failure lands on the first run,
+        # not at compile time. Without AOTI_TORCH_ERROR_CODE_CHECK the null
+        # library handle reaches aoti_torch_mps_get_kernel_function, which
+        # dereferences it and segfaults.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x - y
+
+        inp = (torch.ones(3, 3, device="mps"), torch.ones(3, 3, device="mps"))
+        ep = torch.export.export(M().to("mps"), inp)
+
+        with patch(
+            "torch._inductor.codegen.mps._embed_headers",
+            return_value="__DELIBERATE_MSL_SYNTAX_ERROR__;",
+        ):
+            path = torch._inductor.aoti_compile_and_package(ep)
+
+        m = torch._inductor.aoti_load_package(path)
+        # The Metal compiler diagnostic must reach Python, not just some error.
+        with self.assertRaisesRegex(RuntimeError, "__DELIBERATE_MSL_SYNTAX_ERROR__"):
+            m(*inp)
+
+    def test_kernel_function_lookup_error_raises(self):
+        # Covers the second shim call, which the test above never reaches
+        # because it fails at the first. Renaming the kernel symbol leaves a
+        # library that compiles but contains no "generated_kernel", so the
+        # lookup fails. Without AOTI_TORCH_ERROR_CODE_CHECK the null function
+        # handle reaches aoti_torch_mps_run_command_block and segfaults.
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return x * y
+
+        inp = (torch.ones(3, 3, device="mps"), torch.ones(3, 3, device="mps"))
+        ep = torch.export.export(M().to("mps"), inp)
+
+        headers = (
+            "#include <metal_stdlib>\n"
+            "using namespace metal;\n"
+            "#define generated_kernel renamed_kernel\n"
+        )
+        with patch("torch._inductor.codegen.mps._embed_headers", return_value=headers):
+            path = torch._inductor.aoti_compile_and_package(ep)
+
+        m = torch._inductor.aoti_load_package(path)
+        with self.assertRaisesRegex(
+            RuntimeError, "Failed to create function state object"
+        ):
+            m(*inp)
+
+    def test_compiled_model_does_not_depend_on_unused_openmp(self):
+        # An MPS model runs on the GPU and calls no OpenMP function, but
+        # _get_openmp_args asks for OpenMP on every macOS build, so without
+        # -dead_strip_dylibs the library ends up in the load commands under the
+        # absolute path it had on this machine. The artifact then loads nowhere
+        # else. Reading the load commands rather than the link line is what
+        # makes this fail if the flag stops having the effect it is added for.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        example_inputs = (torch.randn(8, device="mps"),)
+        ep = torch.export.export(Model(), example_inputs)
+        # Without libtorch is the configuration the stray dependency actually
+        # hurts, an artifact meant to be opened somewhere else, and it is the
+        # only one the flag is added for. At the default the flag does not
+        # apply and this would be asserting against a build it says nothing
+        # about.
+        with inductor_config.patch({"aot_inductor.link_libtorch": False}):
+            so_path = torch._export.aot_compile(ep.module(), example_inputs)
+
+        listed = subprocess.run(
+            ["otool", "-L", so_path], capture_output=True, check=True
+        ).stdout.decode()
+        deps = [
+            line.split(" (compatibility", 1)[0].strip()
+            for line in listed.splitlines()
+            if " (compatibility" in line
+        ]
+        if not deps:
+            raise AssertionError(f"otool reported no dependencies for {so_path}")
+
+        # Named rather than counted, because a bare count tells whoever reads
+        # the failure nothing about which library came back.
+        openmp = [d for d in deps if "omp" in os.path.basename(d).lower()]
+        if openmp:
+            raise AssertionError(f"unused OpenMP dependency in {so_path}: {openmp}")
+
+        # The other half of the property: a library the model does reach has to
+        # survive. Every Mach-O object links libSystem, so if that is gone the
+        # flag is stripping things it should not.
+        if not any(os.path.basename(d).startswith("libSystem") for d in deps):
+            raise AssertionError(f"expected libSystem among {deps}")
 
 
 if __name__ == "__main__":
