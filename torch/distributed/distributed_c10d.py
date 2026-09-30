@@ -1960,19 +1960,6 @@ def _check_tensor_list(param: object, param_name: str) -> None:
         )
 
 
-def _check_collective_config(
-    group: ProcessGroup | C10DBackend | None, tensor: torch.Tensor
-) -> None:
-    group = group or _get_default_group()
-    backend = (
-        group if isinstance(group, C10DBackend) else group._get_backend(tensor.device)
-    )
-    if backend.name() != "nccl2":
-        raise RuntimeError(
-            "Per-collective configuration is only supported by the nccl2 backend"
-        )
-
-
 def _group_or_default_group(group: ProcessGroup | None = None) -> ProcessGroup:
     if group is None or group is GroupMember.WORLD:
         group = _get_default_group()
@@ -4064,7 +4051,6 @@ def broadcast(
     opts.rootTensor = 0
     opts.asyncOp = async_op
     if config is not None:
-        _check_collective_config(group, tensor)
         opts.config = config
     sm90_or_more = not (
         tensor.is_cuda and torch.cuda.get_device_capability(tensor.device)[0] >= 9
@@ -4197,7 +4183,6 @@ def all_reduce(
     opts.reduceOp = op
     opts.asyncOp = async_op
     if config is not None:
-        _check_collective_config(group, tensor)
         opts.config = config
     if group is None:
         group = _get_default_group()
@@ -4303,7 +4288,6 @@ def all_reduce_coalesced(
     opts.reduceOp = op
     opts.asyncOp = async_op
     if config is not None:
-        _check_collective_config(group, tensors[0])
         opts.config = config
     group = group or _get_default_group()
     work = group.allreduce_coalesced(tensors, opts)
@@ -4380,7 +4364,6 @@ def reduce(
     opts.rootRank = group_dst
     opts.asyncOp = async_op
     if config is not None:
-        _check_collective_config(group, tensor)
         opts.config = config
     work = group.reduce([tensor], opts)
     if async_op:
@@ -5379,7 +5362,6 @@ def all_gather(
     opts = AllgatherOptions()
     opts.asyncOp = async_op
     if config is not None:
-        _check_collective_config(group, tensor)
         opts.config = config
     work = group.allgather(  # pyrefly: ignore[missing-attribute]
         [tensor_list], [tensor], opts
@@ -5491,7 +5473,6 @@ def all_gather_single(
     opts = AllgatherOptions()
     opts.asyncOp = async_op
     if config is not None:
-        _check_collective_config(group, input_tensor)
         opts.config = config
 
     group = group or _get_default_group()
@@ -5687,7 +5668,6 @@ def all_gather_coalesced(
     opts = AllgatherOptions()
     opts.asyncOp = async_op
     if config is not None:
-        _check_collective_config(group, input_tensor_list[0])
         opts.config = config
     work = group.allgather_coalesced(output_tensor_lists, input_tensor_list, opts)
 
@@ -5923,7 +5903,6 @@ def gather_single(
     opts.rootRank = group_dst
     opts.asyncOp = async_op
     if config is not None:
-        _check_collective_config(group, tensor)
         opts.config = config
     work = group.gather_single(output_tensor, tensor, opts)
 
@@ -6163,7 +6142,6 @@ def reduce_scatter(
     opts.reduceOp = op
     opts.asyncOp = async_op
     if config is not None:
-        _check_collective_config(group, output)
         opts.config = config
 
     group = group or _get_default_group()
@@ -6293,7 +6271,6 @@ def reduce_scatter_single(
     opts.reduceOp = op
     opts.asyncOp = async_op
     if config is not None:
-        _check_collective_config(group, input)
         opts.config = config
 
     group = group or _get_default_group()
@@ -6510,7 +6487,6 @@ def all_to_all_single(
     _check_single_tensor(input, "input")
     _ensure_all_tensors_same_dtype(output, input)
     if config is not None:
-        _check_collective_config(group, input)
         opts.config = config
 
     if input.is_complex():

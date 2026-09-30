@@ -3257,6 +3257,49 @@ class CollectiveConfigTest(TestCase):
                 dist.all_reduce(tensor, config=object(), async_op=async_op)
             self.assertEqual(tensor, torch.ones(2))
 
+    def test_native_backend_config_rejection(self):
+        with self._group("gloo"):
+            backend = c10d._get_default_group()._get_backend(torch.device("cpu"))
+            tensor = torch.ones(2)
+            output = torch.zeros_like(tensor)
+            cases = {
+                "broadcast": ("BroadcastOptions", ([tensor],)),
+                "allreduce": ("AllreduceOptions", ([tensor],)),
+                "allreduce_sparse": ("AllreduceOptions", ([tensor],)),
+                "allreduce_coalesced": ("AllreduceCoalescedOptions", ([tensor],)),
+                "reduce": ("ReduceOptions", ([tensor],)),
+                "allgather": ("AllgatherOptions", ([[output]], [tensor])),
+                "all_gather_single": ("AllgatherOptions", (output, tensor)),
+                "_allgather_base": ("AllgatherOptions", (output, tensor)),
+                "allgather_coalesced": ("AllgatherOptions", ([[output]], [tensor])),
+                "all_gather_single_coalesced": (
+                    "AllgatherOptions",
+                    ([output], [tensor]),
+                ),
+                "gather": ("GatherOptions", ([[output]], [tensor])),
+                "gather_single": ("GatherOptions", (output, tensor)),
+                "gather_into_tensor": ("GatherOptions", (output, tensor)),
+                "reduce_scatter": ("ReduceScatterOptions", ([output], [[tensor]])),
+                "reduce_scatter_single": ("ReduceScatterOptions", (output, tensor)),
+                "_reduce_scatter_base": ("ReduceScatterOptions", (output, tensor)),
+                "reduce_scatter_single_coalesced": (
+                    "ReduceScatterOptions",
+                    ([output], [tensor]),
+                ),
+                "all_to_all_single": ("AllToAllOptions", (output, tensor, [], [])),
+                "alltoall_base": ("AllToAllOptions", (output, tensor, [], [])),
+                "alltoall": ("AllToAllOptions", ([output], [tensor])),
+            }
+            for name, (options, args) in cases.items():
+                with self.subTest(name=name):
+                    opts = getattr(c10d, options)()
+                    opts.config = object()
+                    with self.assertRaisesRegex(
+                        RuntimeError, "only supported by the nccl2 backend"
+                    ):
+                        getattr(backend, name)(*args, opts)
+                    self.assertEqual(output, torch.zeros_like(tensor))
+
     @parametrize("name", ["all_gather", "all_gather_single"])
     @parametrize("async_op", [False, True])
     @parametrize("config_kind", ["omitted", "none", "object"])

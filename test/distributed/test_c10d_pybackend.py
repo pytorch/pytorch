@@ -405,6 +405,15 @@ class TestPyBackend(TestCase):
             self.assertIsInstance(result, dist.Work)
         result.wait()
 
+    def test_collective_config_backend_owned_validation(self) -> None:
+        # Direct backend calls own config validation; Python only forwards it.
+        backend = RecordingBackend(0, 1, "custom-backend")
+        config = object()
+        args, kwargs = _collective_inputs("gather_single")
+        dist.gather_single(*args, group=backend, config=config, **kwargs)
+        self.assertEqual([call[0] for call in backend.calls], ["gather_single"])
+        self.assertIs(backend.calls[0][-1].config, config)
+
     @parametrize("name", _CONFIG_COLLECTIVES)
     def test_collective_config_unsupported_backend(self, name) -> None:
         backend = RecordingBackend(0, 1)
