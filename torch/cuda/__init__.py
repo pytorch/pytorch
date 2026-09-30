@@ -20,7 +20,8 @@ import threading
 import traceback
 import warnings
 from collections.abc import Callable
-from functools import lru_cache
+from enum import auto, Enum
+from functools import cache, lru_cache
 from typing import Any, cast, NewType, Optional, TYPE_CHECKING
 
 import torch
@@ -371,7 +372,7 @@ DEVICE_REQUIREMENT_POST_JETSON_SBSA_UNIFICATION: dict[
 }
 
 # TORCH_CUDA_ARCH_LIST for PyTorch releases, keyed by host arch.
-# Kept in sync with .ci/manywheel/build_cuda.sh by the validator in
+# Kept in sync with .ci/wheel/linux/build_env_setup.py by the validator in
 # .github/scripts/generate_binary_build_matrix.py.
 PYTORCH_RELEASES_CODE_CC: dict[str, dict[str, set[int]]] = {
     "12.6": {
@@ -789,13 +790,29 @@ def _primary_context_devices() -> list[int]:
     return [d for d in range(device_count()) if torch._C._cuda_hasPrimaryContext(d)]
 
 
+class _StrayContextCheckType(Enum):
+    DISABLED = auto()
+    WARN = auto()
+    ERROR = auto()
+
+
+@cache
+def _get_stray_context_mode() -> _StrayContextCheckType:
+    mode = os.environ.get("TORCH_CUDA_CHECK_STRAY_CONTEXT", "").lower()
+    if mode == "warn":
+        return _StrayContextCheckType.WARN
+    if mode == "error":
+        return _StrayContextCheckType.ERROR
+    return _StrayContextCheckType.DISABLED
+
+
 def _check_stray_context(expected: int) -> None:
     # Diagnostic, off unless TORCH_CUDA_CHECK_STRAY_CONTEXT is "warn" or "error".
     # Invoked from set_device so it runs once when a process pins its device, not
     # on the hot device-guard path. The check is creator-agnostic (it inspects
     # end state), so it catches stray contexts from any source.
-    mode = os.environ.get("TORCH_CUDA_CHECK_STRAY_CONTEXT", "").lower()
-    if mode not in ("warn", "error"):
+    mode = _get_stray_context_mode()
+    if mode == _StrayContextCheckType.DISABLED:
         return
     stray = [d for d in _primary_context_devices() if d != expected]
     if not stray:
@@ -803,11 +820,11 @@ def _check_stray_context(expected: int) -> None:
     msg = (
         f"set_device({expected}) found an existing CUDA primary context on "
         f"device(s) {stray}. Something created a CUDA context before this process "
-        f"pinned its device (e.g. a tensor op or a pin_memory=True allocation run "
+        "pinned its device (e.g. a tensor op or a pin_memory=True allocation run "
         f"before set_device). On a rank whose device is not among {stray}, each "
-        f"stray context wastes hundreds of MB on that shared device."
+        "stray context wastes hundreds of MB on that shared device."
     )
-    if mode == "error":
+    if mode == _StrayContextCheckType.ERROR:
         raise RuntimeError(msg)
     warnings.warn(msg, stacklevel=3)
 
