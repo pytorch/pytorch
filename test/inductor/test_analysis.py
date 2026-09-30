@@ -9,7 +9,12 @@ from unittest.mock import patch
 
 import torch
 import torch.nn.functional as F
-from torch._inductor.analysis.device_info import _device_mapping, lookup_device_info
+from torch._inductor.analysis.device_info import (
+    _device_mapping,
+    DeviceInfo,
+    lookup_device_info,
+    register_device_info,
+)
 from torch._inductor.analysis.profile_analysis import (
     _augment_trace_helper,
     _create_extern_mapping,
@@ -281,6 +286,13 @@ class TestUtils(TestCase):
         self.assertIsNotNone(upper)
         self.assertEqual(lookup_device_info("AMD Instinct MI300X"), upper)
         self.assertEqual(lookup_device_info("amd instinct mi300x"), upper)
+
+    def test_register_device_info_normalizes_name(self):
+        info = DeviceInfo(tops={}, dram_bw_gbs=123.0, dram_gb=1.0)
+        with patch.dict(_device_mapping):
+            register_device_info("test device", info)
+            self.assertIs(lookup_device_info("TEST DEVICE"), info)
+            self.assertIs(lookup_device_info("test device"), info)
 
 
 def has_supported_gpu():

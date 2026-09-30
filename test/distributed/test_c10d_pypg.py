@@ -483,7 +483,7 @@ class TestPyProcessGroup(TestCase):
             # nothing in queue so instantly resolves
             event1 = torch.cuda.Event()
             event1.record()
-            time.sleep(0.1)
+            event1.synchronize()
             self.assertTrue(event1.query())
 
             work = BlockWork()
