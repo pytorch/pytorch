@@ -3,6 +3,7 @@
 import copy
 import os
 import unittest
+from unittest import mock
 
 import torch
 from torch import nn
@@ -362,20 +363,22 @@ class TestPartitionedScatterOpt(TestCase):
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
 
     def test_masked_accumulate_index_shaped_mask(self):
+        """The embedding_dense_backward(scale_grad_by_freq=True) counts shape:
+        1-D output, so values and mask are both index-shaped."""
         torch.manual_seed(3)
-        n, D, A, B = 8, 4, 64, 128
+        n, A, B = 8, 64, 128
 
         def f(out, mask, idx, vals):
             return torch.ops.aten._unsafe_masked_index_put_accumulate(
                 out, mask, [idx], vals
             )
 
-        out = torch.zeros(n, D)
+        out = torch.zeros(n)
         idx = torch.randint(0, n, (A, B), dtype=torch.int64)
         mask = torch.ones(A, B, dtype=torch.bool)
         idx[0, 0] = -5
         mask[0, 0] = False
-        vals = torch.randn(A, B, D)
+        vals = torch.randn(A, B)
 
         self._check_accuracy(f, (out, mask, idx, vals), atol=1e-3, rtol=1e-3)
         self.assertEqual(counters["inductor"]["partitioned_scatter_applied"], 1)
@@ -549,6 +552,41 @@ class TestPartitionedScatterOpt(TestCase):
         _scan_candidates(graph, ctx)
         self.assertIn(plain, ctx.candidates)
         self.assertNotIn(scaled, ctx.candidates)
+
+    def test_atomic_fallback_checks_accumulation_dtype(self):
+        """Where bf16 atomics fall back (sm<90, XPU) aten.index_add is only ever
+        bf16, so the gate must look at the dtype the rewrite emits: fp32 partials
+        are native atomics, bf16 partials would fall back onto a P-times buffer."""
+        N, n, D = 8192, 8, 4
+
+        graph = torch.fx.Graph()
+        out_node = graph.placeholder("out")
+        idx_node = graph.placeholder("idx")
+        vals_node = graph.placeholder("vals")
+        index_add = graph.call_function(
+            torch.ops.aten.index_add.default, (out_node, 0, idx_node, vals_node)
+        )
+        out_node.meta["val"] = torch.empty(n, D, dtype=torch.bfloat16, device="meta")
+        idx_node.meta["val"] = torch.empty(N, dtype=torch.int64, device="meta")
+        vals_node.meta["val"] = torch.empty(N, D, dtype=torch.bfloat16, device="meta")
+
+        def bf16_atomics_fall_back(dtype):
+            return dtype in (torch.bfloat16, torch.int64, torch.bool)
+
+        with mock.patch(
+            "torch._inductor.utils.needs_fallback_due_to_atomic_add_limitations",
+            bf16_atomics_fall_back,
+        ):
+            for fp32_acc in (True, False):
+                ctx = ScatterPassContext()
+                with config.patch(partitioned_scatter_fp32_accumulation=fp32_acc):
+                    candidate = _evaluate_candidate(index_add, True, ctx)
+                if fp32_acc:
+                    self.assertIsNotNone(candidate)
+                    self.assertEqual(candidate.acc_dtype, torch.float32)
+                else:
+                    self.assertIsNone(candidate)
+                    self.assertEqual(ctx.skip_reasons["atomic_fallback"], 1)
 
     def test_partials_widened_only_when_flag_is_set(self):
         """The flag decides the partial buffers' dtype and nothing else, so

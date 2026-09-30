@@ -9,8 +9,8 @@ Algorithm:
   4. Add result to the original input
 
 With partitioned_scatter_fp32_accumulation, narrow float partials accumulate in
-fp32 and round once at the output: more accurate than the narrow atomics eager
-runs, for more temporary memory.
+fp32 and round once at the output: more accurate than the narrow atomics of the
+unpartitioned lowering and independent of P, for more temporary memory.
 """
 
 import logging
@@ -91,13 +91,15 @@ def _is_summing_scatter(node: fx.Node) -> bool:
     return reduce in ("sum", "add")
 
 
-def _scatter_falls_back(dtype: torch.dtype) -> bool:
-    """True when the lowering will not emit a contended atomic_add."""
+def _scatter_falls_back(acc_dtype: torch.dtype) -> bool:
+    """True when the rewritten scatter, which runs in acc_dtype, would not lower
+    to an atomic_add. Checked on acc_dtype rather than the input dtype: a bf16
+    scatter that falls back on sm<90 or XPU is a native fp32 atomic once widened."""
     if torch.are_deterministic_algorithms_enabled():
         return True
     from torch._inductor.utils import needs_fallback_due_to_atomic_add_limitations
 
-    return needs_fallback_due_to_atomic_add_limitations(dtype)
+    return needs_fallback_due_to_atomic_add_limitations(acc_dtype)
 
 
 def _accumulation_dtype(dtype: torch.dtype) -> torch.dtype:
@@ -243,7 +245,8 @@ def _evaluate_candidate(
         _record_skip(ctx, "bool_dtype", node_name)
         return None
 
-    if _scatter_falls_back(input_meta["dtype"]):
+    acc_dtype = _accumulation_dtype(input_meta["dtype"])
+    if _scatter_falls_back(acc_dtype):
         _record_skip(ctx, "atomic_fallback", node_name)
         return None
 
@@ -330,7 +333,6 @@ def _evaluate_candidate(
         )
         return None
 
-    acc_dtype = _accumulation_dtype(input_meta["dtype"])
     if is_scatter_reduce:
         writes_per_slot = index_numel / output_size
     else:

@@ -1398,7 +1398,12 @@ partitioned_scatter_min_contention_ratio: float = 4.0
 partitioned_scatter_non_model_floor_bytes: int = 1_500_000_000
 
 # Accumulate the partial sums in fp32 when the scatter dtype is a narrower float,
-# rounding once in the reduce
+# rounding once in the reduce. On by default because narrow partials stall once a
+# hot slot outgrows the addend's ulp, and how far they stall depends on
+# num_partitions, which the memory budget picks: the result would vary with free
+# GPU memory. fp32 partials give the same result for any P, and let bf16 scatters
+# be rewritten where bf16 atomic_add falls back (sm<90, XPU). Costs 2x the
+# expanded buffer's bytes for bf16/fp16, charged against the memory budget.
 partitioned_scatter_fp32_accumulation: bool = (
     os.environ.get("TORCHINDUCTOR_PARTITIONED_SCATTER_FP32_ACCUMULATION", "1") == "1"
 )
