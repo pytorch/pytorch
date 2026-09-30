@@ -12,13 +12,17 @@ import shutil
 import sys
 import tempfile
 import time
-import unittest
 from concurrent.futures import wait
 from concurrent.futures._base import ALL_COMPLETED
 from concurrent.futures.thread import ThreadPoolExecutor
 from unittest import mock
 
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def write(max: int, sleep: float, file: str):
@@ -28,7 +32,9 @@ def write(max: int, sleep: float, file: str):
             time.sleep(sleep)
 
 
-class TailLogTest(unittest.TestCase):
+class TailLogTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=f"{self.__class__.__name__}_")
@@ -262,3 +268,7 @@ class TailLogTest(unittest.TestCase):
         tail.stop()
 
         mock_logger.exception.assert_called_once()
+
+
+if __name__ == "__main__":
+    run_tests()

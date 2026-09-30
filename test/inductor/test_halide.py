@@ -70,6 +70,17 @@ def make_halide(cls):
 
 @unittest.skipUnless(HAS_HALIDE, "requires halide")
 class HalideTests(TestCase):
+    def test_prims_nextafter_fallback(self):
+        x = torch.tensor([0.0, 1.0])
+        y = torch.tensor([1.0, 2.0])
+        expected = torch.ops.prims.nextafter.default(x, y)
+        actual = torch.compile(
+            torch.ops.prims.nextafter.default,
+            fullgraph=True,
+            options={"cpu_backend": "halide"},
+        )(x, y)
+        self.assertEqual(actual, expected)
+
     def test_codecache(self):
         fn = HalideCodeCache.generate_halide(
             HalideMeta(
