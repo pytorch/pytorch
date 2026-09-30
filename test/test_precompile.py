@@ -8,10 +8,13 @@ import inspect
 import io
 import json
 import os
+import pathlib
 import pickle
 import stat
+import struct
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import textwrap
 import threading
@@ -49,6 +52,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_TRITON
+from torch.utils._triton import has_triton_package
 
 
 # A module-level (global) model + a function referencing it, to exercise the
@@ -5367,6 +5371,126 @@ def _no_compilation_single_graph(x):
 
 def _no_compilation_inductor_graph(x):
     return x * 2 + 1
+
+
+@contextlib.contextmanager
+def _triton_cache_namespace(directory):
+    import triton
+
+    with (
+        triton.knobs.cache.scope(),
+        mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": str(directory)}),
+    ):
+        triton.knobs.cache.dir = str(directory)
+        triton.knobs.cache.manager_class = None
+        yield
+
+
+def _write_triton_runtime_entries():
+    # The three kinds of entry Triton's FileCacheManager commits at runtime.
+    from triton.runtime.cache import get_cache_manager
+
+    cache = get_cache_manager("ab" * 32)
+    native = "launcher" + sysconfig.get_config_var("EXT_SUFFIX")
+    files = {
+        "kernel.json": cache.put(b'{"name":"kernel"}', "kernel.json"),
+        "kernel.cubin": cache.put(b"kernel binary", "kernel.cubin"),
+    }
+    cache.put_group("kernel.json", files)
+    cache.put(b"native binary", native)
+    choice = {"key": [32], "configs_timings": [[{"kwargs": {"BLOCK": 32}}, [1.0]]]}
+    cache.put(json.dumps(choice), "kernel.autotune.json", binary=False)
+    return cache.key, native
+
+
+def _bundle_header(bundle):
+    from torch.compiler._triton_runtime_cache import _MAGIC
+
+    start = len(_MAGIC) + 8
+    (size,) = struct.unpack("!Q", bundle[len(_MAGIC) : start])
+    return json.loads(bundle[start : start + size]), bundle[start + size :]
+
+
+@unittest.skipUnless(has_triton_package(), "requires Triton")
+@instantiate_parametrized_tests
+class TestTritonRuntimeCacheTransport(TestCase):
+    CONTEXT = {"build": "test"}
+
+    def test_export_leaves_out_excluded_keys(self):
+        from triton.runtime.cache import get_cache_manager
+
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp, _triton_cache_namespace(tmp):
+            key, native = _write_triton_runtime_entries()
+            shipped = get_cache_manager("cd" * 32)
+            files = {
+                "other.json": shipped.put(b"{}", "other.json"),
+                "other.cubin": shipped.put(b"other binary", "other.cubin"),
+            }
+            shipped.put_group("other.json", files)
+            header, payload = _bundle_header(
+                export_runtime_cache(context=self.CONTEXT, exclude=[shipped.key])
+            )
+            with self.assertRaisesRegex(RuntimeError, "Invalid .* key"):
+                export_runtime_cache(context=self.CONTEXT, exclude=["../escape"])
+            self.assertEqual(
+                sorted((record["kind"], record["key"]) for record in header["records"]),
+                [("autotune", key), ("kernel", key), ("native", key)],
+            )
+            self.assertEqual(
+                sorted(file["name"] for file in header["files"]),
+                sorted((native, "kernel.autotune.json", "kernel.cubin", "kernel.json")),
+            )
+            for file in header["files"]:
+                self.assertEqual(
+                    payload[file["offset"] : file["offset"] + file["size"]],
+                    pathlib.Path(tmp, file["key"], file["name"]).read_bytes(),
+                )
+
+    @parametrize("damage", ("missing_binary", "unrecognized_autotune"))
+    def test_export_rejects_an_incomplete_cache(self, damage):
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp, _triton_cache_namespace(tmp):
+            key, _ = _write_triton_runtime_entries()
+            if damage == "missing_binary":
+                pathlib.Path(tmp, key, "kernel.cubin").unlink()
+                error = "Incomplete Triton runtime-cache entry"
+            else:
+                pathlib.Path(tmp, key, "kernel.autotune.json").write_text("{}")
+                error = "Unrecognized Triton autotuning cache entry"
+            with self.assertRaisesRegex(RuntimeError, error):
+                export_runtime_cache(context=self.CONTEXT)
+
+    def test_export_succeeds_after_a_failed_export(self):
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp, _triton_cache_namespace(tmp):
+            _write_triton_runtime_entries()
+            with (
+                mock.patch("os.replace", side_effect=OSError("disk full")),
+                self.assertRaisesRegex(OSError, "disk full"),
+            ):
+                export_runtime_cache(context=self.CONTEXT)
+            pathlib.Path(tmp, ".runtime_cache_bundle.tmp").write_text("partial")
+            header, _ = _bundle_header(export_runtime_cache(context=self.CONTEXT))
+            self.assertEqual(len(header["records"]), 3)
+
+    def test_export_requires_a_private_file_cache(self):
+        import triton
+        from triton.runtime.cache import FileCacheManager
+
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp, _triton_cache_namespace(tmp):
+            with mock.patch.dict(os.environ):
+                del os.environ["TRITON_CACHE_DIR"]
+                with self.assertRaisesRegex(RuntimeError, "explicit absolute"):
+                    export_runtime_cache(context=self.CONTEXT)
+            triton.knobs.cache.manager_class = type("Custom", (FileCacheManager,), {})
+            with self.assertRaisesRegex(RuntimeError, "custom cache manager"):
+                export_runtime_cache(context=self.CONTEXT)
 
 
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
