@@ -4459,7 +4459,13 @@ def _full(fill_value, device, dtype, size):
     elif isinstance(value, sympy.Basic):
 
         def inner_fn(index):
-            if dtype == torch.bool:
+            if dtype in (
+                torch.bool,
+                torch.uint8,
+                torch.uint16,
+                torch.uint32,
+                torch.uint64,
+            ):
                 return ops.value_expr(value, dtype)
             return ops.index_expr(value, dtype)
 

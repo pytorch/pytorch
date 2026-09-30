@@ -2340,7 +2340,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.codegen_tensor_item(node.inputs[0].get_dtype(), data, f"{node.sym}_raw")
 
         if len(node.keypath) == 0:
-            self.writeline(f"auto {node.sym} = {node.sym}_raw;")
+            is_symint = symbol_is_type(node.sym, SymT.UNBACKED_INT)
+            cpp_type = "int64_t" if is_symint else "auto"
+            self.writeline(f"{cpp_type} {node.sym} = {node.sym}_raw;")
         elif len(node.keypath) == 1 and isinstance(node.keypath[0], ConvertIntKey):
             self.writeline(f"int64_t {node.sym} = {node.sym}_raw ? 1 : 0;")
         elif len(node.keypath) == 1 and isinstance(node.keypath[0], DivideByKey):

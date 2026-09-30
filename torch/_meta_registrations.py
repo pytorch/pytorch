@@ -6077,6 +6077,29 @@ def full(size, fill_value, *args, **kwargs):
         dtype = utils.get_dtype(fill_value)
     kwargs["dtype"] = dtype
 
+    # Generated C++ can overflow while evaluating a compound symbolic expression
+    # before reaching its runtime check, so only direct symbols are checked here.
+    if (
+        isinstance(fill_value, (torch.SymInt, torch.SymFloat))
+        and fill_value.node.expr.is_Symbol
+        and utils.is_integer_dtype(dtype)
+    ):
+        dtype_info = torch.iinfo(dtype)
+
+        def error_msg():
+            return f"value cannot be converted to type {dtype} without overflow"
+
+        if isinstance(fill_value, torch.SymInt):
+            if dtype != torch.uint64:
+                lower = dtype_info.min if dtype.is_signed else -dtype_info.max
+                torch._check(lower <= fill_value, error_msg)
+                torch._check(fill_value <= dtype_info.max, error_msg)
+        else:
+            lower = dtype_info.min if dtype.is_signed else 0
+            upper = float(dtype_info.max + 1)
+            torch._check(lower <= fill_value, error_msg)
+            torch._check(fill_value < upper, error_msg)
+
     return torch.empty(size, *args, **kwargs)
 
 
