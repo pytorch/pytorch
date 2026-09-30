@@ -632,6 +632,70 @@ class TestMaxAutotune(TestCase):
         self.assertIn("ctas_per_cga=(2, 1, 1)", codes[0])
         self.assertIn("make_tensor_descriptor(out_ptr0", codes[0])
 
+    @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
+    @parametrize("tail_case", ((127, 1), (200, 2)))
+    def test_blackwell_bmm_template_1cta_rank3_tma_output(
+        self, tail_case: tuple[int, int]
+    ) -> None:
+        m, epilogue_subtile = tail_case
+        # M is not a multiple of BLOCK_M, so a rank-2 output descriptor would let
+        # each tile's M tail spill into the next batch. Small integers keep the
+        # result exact in bf16.
+        bsz, k, n = 3, 256, 136
+        a = torch.randint(-1, 2, (bsz, m, k), device=GPU_TYPE).to(torch.bfloat16)
+        b = torch.randint(-1, 2, (bsz, k, n), device=GPU_TYPE).to(torch.bfloat16)
+        expected = torch.bmm(a.float(), b.float()).bfloat16()
+
+        class Rank3Output1CTABlackwellBMMHeuristic(
+            CUDABlackwellBMMTemplateConfigHeuristic
+        ):
+            bmm_configs = (
+                BlackwellBMMConfig(
+                    128, 128, 64, 4, 8, epilogue_subtile=epilogue_subtile
+                ),
+            )
+
+        def lowering(a_node, b_node):
+            choices = V.choices.get_template_configs(
+                MMKernelInputs([a_node, b_node]),
+                [blackwell_ws_persistent_tma_bmm_template],
+                "bmm",
+            )
+            self.assertEqual(len(choices), 1)
+            return choices[0].output_node()
+
+        with (
+            override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[
+                    (blackwell_ws_persistent_tma_bmm_template.uid, "bmm")
+                ],
+                override_heuristic_class=Rank3Output1CTABlackwellBMMHeuristic,
+            ),
+            mock.patch.dict(
+                lowerings,
+                {torch.ops.inductor_test.blackwell_bmm.default: lowering},
+            ),
+            config.patch(
+                compile_threads=1,
+                **{"triton.enable_template_tma_store": True},
+            ),
+        ):
+            compiled = torch.compile(blackwell_bmm, fullgraph=True)
+            actual, codes = run_and_get_code(compiled, a, b)
+            # Poison the freed output so the next call's allocation, which
+            # reuses it, would expose any element the kernel fails to write.
+            poisoned_ptr = actual.data_ptr()
+            actual.fill_(float("nan"))
+            del actual
+            actual = compiled(a, b)
+
+        self.assertEqual(actual.data_ptr(), poisoned_ptr)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertIn("TWO_CTAS : tl.constexpr = False", codes[0])
+        self.assertIn("RANK3_TMA_OUTPUT : tl.constexpr = True", codes[0])
+        self.assertIn("make_tensor_descriptor(out_ptr0", codes[0])
+
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic, search_space):
