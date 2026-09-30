@@ -265,6 +265,16 @@ class MiscTests(torch._inductor.test_case.TestCase):
             self.assertIsInstance(result, int)
             self.assertEqual(result, fn(x))
 
+    def test_native_channel_shuffle_irfft_noncontiguous(self):
+        # Regression test for #198424.
+        def fn(t):
+            t = torch.fft.irfft(t, n=29, dim=-2, norm="forward")
+            return torch.native_channel_shuffle(t, 3)
+
+        x = torch.rand([1, 3, 8, 8], dtype=torch.float64)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled_fn(x), fn(x))
+
     def test_get_cache_entry(self):
         def f(x):
             return x + 1

@@ -81,7 +81,7 @@ Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
               c, " channels and ", groups, " groups.");
   int64_t oc = c / groups;
 
-  auto input_reshaped = self.view({b, groups, oc, -1});
+  auto input_reshaped = self.reshape({b, groups, oc, -1});
   // TODO: contiguous can be made to preserve the memory format
   // of the input. However since the above reshape clobbers h and w
   // it may not be safe to do that, since channels_last contiguous

@@ -4883,6 +4883,21 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                                     "channel_shuffle expects input with > 2 dims,.*"):
             torch.native_channel_shuffle(torch.empty([1, 2], device="meta"), 2)
 
+    def test_native_channel_shuffle_noncontiguous_meta(self):
+        input_tensor = torch.empty((1, 4, 2, 3), device="meta").transpose(-2, -1)
+        output = torch.native_channel_shuffle(input_tensor, 2)
+        self.assertEqual(output.shape, input_tensor.shape)
+        self.assertEqual(output.stride(), (24, 6, 2, 1))
+
+    def test_native_channel_shuffle_noncontiguous_values(self):
+        x = torch.rand(1, 4, 2, 3)
+        y = x.transpose(-2, -1)
+        self.assertFalse(y.is_contiguous())
+        torch.testing.assert_close(
+            torch.native_channel_shuffle(y, 2),
+            torch.native_channel_shuffle(y.contiguous(), 2),
+        )
+
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
     def test_native_channel_shuffle_return_alias_of_self(self):
         groups = 3
