@@ -106,25 +106,25 @@ set(TORCH_PYTHON_COMPILE_DEFINITIONS)
 
 set(TORCH_PYTHON_COMPILE_OPTIONS)
 
-set(TORCH_PYTHON_LINK_FLAGS "")
+set(TORCH_PYTHON_LINK_OPTIONS)
 
 if(MSVC)
-    string(APPEND TORCH_PYTHON_LINK_FLAGS " /NODEFAULTLIB:LIBCMT.LIB")
+    list(APPEND TORCH_PYTHON_LINK_OPTIONS "/NODEFAULTLIB:LIBCMT.LIB")
     # Python headers use #pragma comment(lib, "pythonXX") which makes MSVC search
     # for the library by bare name.  Add the directory so the linker can find it.
     foreach(_pylib IN LISTS Python_LIBRARIES)
       if(_pylib MATCHES "python[0-9].*\\.lib$")
         get_filename_component(_pylib_dir "${_pylib}" DIRECTORY)
-        string(APPEND TORCH_PYTHON_LINK_FLAGS " /LIBPATH:\"${_pylib_dir}\"")
+        list(APPEND TORCH_PYTHON_LINK_OPTIONS "/LIBPATH:${_pylib_dir}")
         break()
       endif()
     endforeach()
     list(APPEND TORCH_PYTHON_LINK_LIBRARIES ${Python_LIBRARIES} onnx_library)
     if(NOT CMAKE_BUILD_TYPE MATCHES "Release")
-      string(APPEND TORCH_PYTHON_LINK_FLAGS " /DEBUG:FULL")
+      list(APPEND TORCH_PYTHON_LINK_OPTIONS "/DEBUG:FULL")
     endif()
 elseif(APPLE)
-    string(APPEND TORCH_PYTHON_LINK_FLAGS " -undefined dynamic_lookup")
+    list(APPEND TORCH_PYTHON_LINK_OPTIONS "LINKER:-undefined,dynamic_lookup")
 else()
     list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
       -fno-strict-aliasing
@@ -406,19 +406,19 @@ endif()
 # Preserve CUDA_GENCODE flags
 if(USE_CUDA)
   torch_cuda_get_nvcc_gencode_flag(_ARCH_FLAGS)
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_DEFINITIONS "CUDA_ARCH_FLAGS=${_ARCH_FLAGS_readable}")
 endif()
 
 # Preserve HIP arch flags
 if(USE_ROCM)
   string(REPLACE ";" " " PYTORCH_ROCM_ARCH_readable "${PYTORCH_ROCM_ARCH}")
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_FLAGS "-DCUDA_ARCH_FLAGS=\"${PYTORCH_ROCM_ARCH_readable}\"")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/Module.cpp PROPERTIES COMPILE_DEFINITIONS "CUDA_ARCH_FLAGS=${PYTORCH_ROCM_ARCH_readable}")
 endif()
 
 # Preserve XPU arch flags
 if(USE_XPU)
   string(REPLACE "," " " _ARCH_FLAGS_readable "${TORCH_XPU_ARCH_LIST}")
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/xpu/Module.cpp PROPERTIES COMPILE_FLAGS "-DXPU_ARCH_FLAGS=\"${_ARCH_FLAGS_readable}\"")
+  set_source_files_properties(${TORCH_SRC_DIR}/csrc/xpu/Module.cpp PROPERTIES COMPILE_DEFINITIONS "XPU_ARCH_FLAGS=${_ARCH_FLAGS_readable}")
 endif()
 
 target_compile_definitions(torch_python PRIVATE THP_BUILD_MAIN_LIB)
@@ -449,8 +449,8 @@ if(${CMAKE_BUILD_TYPE} STREQUAL "RelWithAssert")
    target_compile_definitions(torch_python PRIVATE PYBIND11_NO_ASSERT_GIL_HELD_INCREF_DECREF)
 endif()
 
-if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
-    set_target_properties(torch_python PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
+if(TORCH_PYTHON_LINK_OPTIONS)
+    target_link_options(torch_python PRIVATE ${TORCH_PYTHON_LINK_OPTIONS})
 endif()
 
 install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
@@ -583,10 +583,10 @@ if(NOT ${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     target_link_libraries(nnapi_backend PRIVATE torch)
   endif()
   target_link_libraries(nnapi_backend PRIVATE torch_python pybind::pybind11 fmt::fmt-header-only)
-  if(MSVC AND TORCH_PYTHON_LINK_FLAGS)
-    set_target_properties(nnapi_backend PROPERTIES LINK_FLAGS "${TORCH_PYTHON_LINK_FLAGS}")
+  if(MSVC AND TORCH_PYTHON_LINK_OPTIONS)
+    target_link_options(nnapi_backend PRIVATE ${TORCH_PYTHON_LINK_OPTIONS})
   endif()
 endif()
 
 set(TORCH_PYTHON_COMPILE_OPTIONS ${TORCH_PYTHON_COMPILE_OPTIONS} PARENT_SCOPE)
-set(TORCH_PYTHON_LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS} PARENT_SCOPE)
+set(TORCH_PYTHON_LINK_OPTIONS "${TORCH_PYTHON_LINK_OPTIONS}" PARENT_SCOPE)
