@@ -427,8 +427,8 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                 _torch_name_rule_map,
             ),
             unittest.mock.patch(
-                "torch._dynamo.trace_rules.get_torch_obj_rule_map",
-                torch._dynamo.trace_rules.get_torch_obj_rule_map.__wrapped__,  # bypass functools.lru_cache
+                "torch._dynamo.trace_rules._get_torch_obj_rule_map",
+                torch._dynamo.trace_rules._get_torch_obj_rule_map.__wrapped__,  # bypass functools.lru_cache
             ),
         ):
             x = torch.rand(3)
@@ -476,8 +476,8 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                 _torch_name_rule_map,
             ),
             unittest.mock.patch(
-                "torch._dynamo.trace_rules.get_torch_obj_rule_map",
-                torch._dynamo.trace_rules.get_torch_obj_rule_map.__wrapped__,
+                "torch._dynamo.trace_rules._get_torch_obj_rule_map",
+                torch._dynamo.trace_rules._get_torch_obj_rule_map.__wrapped__,
             ),
         ):
             # First adding the module to SKIP_DIRS so that it will be skipped by default.
