@@ -58,10 +58,11 @@ void registerOpaqueType(const std::string& type_name) {
   std::lock_guard<std::mutex> lock(getOpaqueTypesMutex());
   auto& global_opaque_types = getOpaqueTypes();
   auto [_, inserted] = global_opaque_types.insert(type_name);
-  if (!inserted) {
-    throw std::runtime_error(
-        "Type '" + type_name + "' is already registered as an opaque type");
-  }
+  TORCH_CHECK(
+      inserted,
+      "Type '",
+      type_name,
+      "' is already registered as an opaque type");
 }
 
 void unregisterOpaqueType(const std::string& type_name) {
@@ -73,13 +74,12 @@ void unregisterOpaqueType(const std::string& type_name) {
 bool isRegisteredOpaqueType(const std::string& type_name) {
   std::lock_guard<std::mutex> lock(getOpaqueTypesMutex());
   auto& global_opaque_types = getOpaqueTypes();
-  return global_opaque_types.find(type_name) != global_opaque_types.end();
+  return global_opaque_types.contains(type_name);
 }
 
 TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
       {"Generator", c10::TypeFactory::get<GeneratorType>()},
-      {"Dimname", c10::TypeFactory::get<StringType>()},
       {"ScalarType", c10::TypeFactory::get<ScalarTypeType>()},
       {"Layout", c10::TypeFactory::get<LayoutType>()},
       {"MemoryFormat", c10::TypeFactory::get<MemoryFormatType>()},
@@ -337,7 +337,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
         });
         return;
       }
-      throw(ErrorReport(L.cur()) << "Unexpected specifier '" << field << "'");
+      throw(ErrorReport(L.cur()) << "Unexpected specifier '" << field << '\'');
     }
     if (device.has_value() || requires_grad.has_value()) {
       throw(

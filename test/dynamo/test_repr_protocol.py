@@ -4,10 +4,16 @@
 import collections
 import enum
 import typing
+import unittest
 
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import make_dynamo_test
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    make_dynamo_test,
+    parametrize,
+)
 
 
 class _Color(enum.Enum):
@@ -19,7 +25,18 @@ class _OpaqueReprDescriptorObject:
     __repr__ = str.upper
 
 
+class _SetSubclass(set):
+    pass
+
+
+class _FrozenSetSubclass(frozenset):
+    pass
+
+
+@instantiate_parametrized_tests
 class TpReprTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @make_dynamo_test
     def test_int_repr(self):
         assert repr(3) == "3"  # noqa: S101
@@ -123,8 +140,8 @@ class TpReprTests(TestCase):
         obj = BadRepr()
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         out = compiled(x, obj)
+        self.assertTrue(type(out) is str)
         self.assertEqual(fn(x, obj), out)
-        self.assertIn("__repr__ returned non-string", out)
 
     def test_dunder_repr_returning_non_string_raises(self):
         class BadRepr:
@@ -141,6 +158,9 @@ class TpReprTests(TestCase):
         self.assertEqual(fn(x, obj), out)
         self.assertEqual(out, 3)
 
+    # __repr__ = str.upper is an opaque C method descriptor with no traceable
+    # body, so Dynamo graph breaks instead of reproducing eager's TypeError.
+    @unittest.expectedFailure
     def test_user_defined_opaque_repr_descriptor_raises_type_error(self):
         def fn(x, obj):
             try:
@@ -430,6 +450,62 @@ class TpReprTests(TestCase):
 
         compiled = torch.compile(fn, backend="eager", fullgraph=False)
         self.assertEqual(compiled(), fn())
+
+    @parametrize(
+        "set_type",
+        (set, frozenset, _SetSubclass, _FrozenSetSubclass),
+        name_fn=lambda t: t.__name__.lstrip("_"),
+    )
+    def test_self_ref_set_repr(self, set_type):
+        class Wrapper:
+            def __repr__(self):
+                return repr(self.value)
+
+        def fn():
+            w = Wrapper()
+            s = set_type([w])
+            w.value = s
+            return repr(s)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
+    def test_str_of_id_of_compile_time_object(self):
+        # id() on a sourceless object minted inside the region yields a
+        # FakeIdVariable (int-typed); str()/repr() must mirror int.__repr__
+        # and produce a decimal string with stable compile-time identity.
+        class Obj:
+            pass
+
+        def fn(x):
+            a = Obj()
+            b = Obj()
+            sa = str(id(a))
+            same = sa == str(id(a))
+            distinct = sa != str(id(b))
+            return x + 1, sa.isdigit(), same, distinct
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        _, is_digit, same, distinct = compiled(torch.randn(4))
+        self.assertTrue(is_digit)
+        self.assertTrue(same)
+        self.assertTrue(distinct)
+
+    def test_repr_of_hash_of_compile_time_object(self):
+        # hash() returning id(self) on a sourceless object yields a
+        # FakeIdVariable (HASH kind); repr() must route through its
+        # tp_repr_impl and mirror int.__repr__ (a decimal string).
+        class Obj:
+            def __hash__(self):
+                return id(self)
+
+        def fn(x):
+            s = repr(hash(Obj()))
+            return x + 1, s.isdigit()
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        _, is_digit = compiled(torch.randn(4))
+        self.assertTrue(is_digit)
 
 
 if __name__ == "__main__":

@@ -65,7 +65,7 @@ static std::string getSchemaInputTypesString(const FunctionSchema& schema) {
   if (forward_args.size() == 1) {
     input_types << "()";
   }
-  return input_types.str();
+  return std::move(input_types).str();
 }
 
 std::string ClassType::getForwardPreHookErrorMessage(size_t pre_hook_idx) const {

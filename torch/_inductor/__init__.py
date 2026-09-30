@@ -9,7 +9,12 @@ from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
 
 import torch.fx
 
-from .standalone_compile import CompiledArtifact, DynamicShapesType  # noqa: TC001
+from .standalone_compile import (
+    compile_to_python,
+    CompiledArtifact,
+    DynamicShapesType,
+    load_from_python,
+)
 
 
 if TYPE_CHECKING:
@@ -22,6 +27,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "compile",
+    "compile_to_python",
+    "load_from_python",
     "list_mode_options",
     "list_options",
     "cudagraph_mark_step_begin",
@@ -125,7 +132,7 @@ def aoti_compile_and_package(
             "as we can get this information from exported_program.example_inputs."
         )
 
-    assert (
+    if not (
         package_path is None
         or (
             isinstance(package_path, (io.IOBase, IO))
@@ -136,9 +143,10 @@ def aoti_compile_and_package(
             isinstance(package_path, (str, os.PathLike))
             and os.fspath(package_path).endswith(".pt2")
         )
-    ), (
-        f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
-    )
+    ):
+        raise AssertionError(
+            f"Expect package path to be a file ending in .pt2, is None, or is a buffer. Instead got {package_path}"
+        )
 
     inductor_configs = inductor_configs or {}
     inductor_configs["aot_inductor.package"] = True
@@ -183,18 +191,23 @@ def _aoti_compile_and_package_inner(
     """
 
     if check_accuracy:
-        assert kwargs is None or len(kwargs) == 0, (
-            "when checking for accuracy, the inputs must have been flattened and kwargs is None"
-        )
+        if not (kwargs is None or len(kwargs) == 0):
+            raise AssertionError(
+                "when checking for accuracy, the inputs must have been flattened and kwargs is None"
+            )
 
     from .package import package_aoti
 
-    assert isinstance(gm, torch.fx.GraphModule)
+    if not isinstance(gm, torch.fx.GraphModule):
+        raise AssertionError(f"expected torch.fx.GraphModule, got {type(gm)}")
 
     kwargs = kwargs or {}
 
     aoti_files = aot_compile(gm, args, kwargs, options=inductor_configs)
-    assert isinstance(aoti_files, list)
+    if not isinstance(aoti_files, list):
+        raise AssertionError(
+            f"expected aoti_files to be a list, got {type(aoti_files)}"
+        )
 
     if package_path is None:
         path = [
@@ -211,7 +224,10 @@ def _aoti_compile_and_package_inner(
         package_path = path[0] + ".pt2"
 
     res = package_aoti(package_path, aoti_files)
-    assert res == package_path
+    if res != package_path:
+        raise AssertionError(
+            f"expected res == package_path, got {res} != {package_path}"
+        )
 
     if load_and_run or check_accuracy:
         compiled_model = aoti_load_package(package_path)
@@ -239,10 +255,15 @@ def _aoti_compile_and_package_inner(
 
 
 def aoti_load_package(
-    path: FileLike, run_single_threaded: bool = False, device_index: int = -1
+    path: FileLike,
+    run_single_threaded: bool = False,
+    device_index: int = -1,
+    *,
+    num_runners: int = 1,
+    use_stream_affinity: bool = False,
 ) -> AOTICompiledModel:
     """
-    Loads the model from the PT2 package.
+    Loads a model from a PT2 package or an extracted PT2 package directory.
 
     If multiple models were packaged into the PT2, this will load the default
     model. To load a specific model, you can directly call the load API
@@ -255,7 +276,7 @@ def aoti_load_package(
         compiled_model2 = load_package("my_package.pt2", "model2")
 
     Args:
-        path: Path to the .pt2 package
+        path: Path to the .pt2 package or extracted package directory.
         run_single_threaded (bool): Whether the model should be run without
             thread synchronization logic. This is useful to avoid conflicts with
             CUDAGraphs.
@@ -263,11 +284,20 @@ def aoti_load_package(
             to be loaded. By default, `device_index=-1` is used, which corresponds
             to the device `cuda` when using CUDA. Passing `device_index=1` would
             load the package to `cuda:1`, for example.
+        num_runners (int): Number of model instances available for concurrent
+            execution.
+        use_stream_affinity (bool): Whether each non-null device stream should
+            retain a stable model instance. Intended for controlled
+            multi-stream benchmarking; this may reduce host-side pipelining.
     """
     from torch._inductor.package import load_package
 
     return load_package(
-        path, run_single_threaded=run_single_threaded, device_index=device_index
+        path,
+        run_single_threaded=run_single_threaded,
+        num_runners=num_runners,
+        device_index=device_index,
+        use_stream_affinity=use_stream_affinity,
     )
 
 

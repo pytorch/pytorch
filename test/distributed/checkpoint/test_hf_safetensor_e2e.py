@@ -19,7 +19,9 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorContinuousTestBase,
     DTensorTestBase,
+    NUM_DEVICES,
     skip_if_lt_x_gpu,
     with_comms,
 )
@@ -253,14 +255,14 @@ class TestSingleRankSaveLoad(TestCase):
             self.assertEqual(
                 original.shape,
                 loaded.shape,
-                f"Shape mismatch for {tensor_name}: {original.shape} vs {loaded.shape}",
+                lambda msg: f"{msg}\nShape mismatch for {tensor_name}: {original.shape} vs {loaded.shape}",
             )
 
             # Verify dtypes match
             self.assertEqual(
                 original.dtype,
                 loaded.dtype,
-                f"Dtype mismatch for {tensor_name}: {original.dtype} vs {loaded.dtype}",
+                lambda msg: f"{msg}\nDtype mismatch for {tensor_name}: {original.dtype} vs {loaded.dtype}",
             )
 
             # Verify dequantized values match original values
@@ -351,10 +353,12 @@ for p1 in TWO_D_PLACEMENTS:
 
 
 @instantiate_parametrized_tests
-class TestDTensorReshardPlacementChange(DTensorTestBase):
+class TestDTensorReshardPlacementChange(DTensorContinuousTestBase):
     """
     Test DCP reshard for DTensor with placements changes and without world_size change and mesh_tensor change.
     """
+
+    world_size = NUM_DEVICES
 
     @with_comms
     @skip_if_lt_x_gpu(2)
@@ -468,10 +472,12 @@ class TestDTensorReshardPlacementChange(DTensorTestBase):
             )
 
 
-class TestDTensorReshardMeshChange(DTensorTestBase):
+class TestDTensorReshardMeshChange(DTensorContinuousTestBase):
     """
     Test DCP reshard for DTensor with placements changes and mesh_tensor change.
     """
+
+    world_size = NUM_DEVICES
 
     @with_comms
     @with_temp_dir

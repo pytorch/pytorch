@@ -10,7 +10,10 @@ from dataclasses import dataclass
 import torch
 import torch.nn as nn
 from torch import distributed as dist
-from torch.distributed.fsdp._common_utils import _get_param_to_fqns
+from torch.distributed.fsdp._common_utils import (
+    _get_param_to_fqns,
+    _override_module_mixed_precision,
+)
 from torch.distributed.utils import _apply_to_tensors, _replace_by_prefix
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -196,11 +199,37 @@ class TestUtils(TestCase):
         self.assertLess(
             ratio,
             25.0,
-            f"_get_param_to_fqns scaling ratio {ratio:.2f}x when 8x-ing "
+            lambda msg: f"{msg}\n_get_param_to_fqns scaling ratio {ratio:.2f}x when 8x-ing "
             f"model size (elapsed_n={elapsed_n:.4f}s, elapsed_8n={elapsed_8n:.4f}s), "
             f"expected <25x for O(N) but got ~64x indicating O(N^2) "
             f"(see https://github.com/pytorch/pytorch/issues/168329)",
         )
+
+    def test_override_module_mixed_precision_default_dict_isolation(self):
+        class SubModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = nn.Linear(4, 4)
+
+        model1 = SubModule()
+        model2 = SubModule()
+
+        # Call without explicit wrap_override_dict
+        _override_module_mixed_precision(model1, [nn.Linear])
+        self.assertTrue(hasattr(model1.lin, "_wrap_overrides"))
+        self.assertEqual(model1.lin._wrap_overrides, {"mixed_precision": None})
+
+        # Mutate the dictionary on model1
+        model1.lin._wrap_overrides["mixed_precision"] = torch.float16
+        model1.lin._wrap_overrides["custom_key"] = 123
+
+        # Call again on model2 without explicit wrap_override_dict
+        _override_module_mixed_precision(model2, [nn.Linear])
+        self.assertTrue(hasattr(model2.lin, "_wrap_overrides"))
+        # Verify model2 does not inherit mutations from model1
+        self.assertEqual(model2.lin._wrap_overrides, {"mixed_precision": None})
+        self.assertNotIn("custom_key", model2.lin._wrap_overrides)
+        self.assertIsNot(model1.lin._wrap_overrides, model2.lin._wrap_overrides)
 
 
 devices = ("cuda", "hpu", "xpu")

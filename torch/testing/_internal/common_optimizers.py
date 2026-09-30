@@ -270,6 +270,15 @@ def get_error_inputs_for_all_optims(device, dtype):
             ),
             ErrorOptimizerInput(
                 OptimizerInput(
+                    params={sample_param, sample_param2},
+                    kwargs={},
+                    desc="warn on a bare unordered set of params",
+                ),
+                error_type=FutureWarning,
+                error_regex="optimizer parameters need to be organized in ordered collections",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
                     params=[{"params": sample_param}, {"params": sample_param}],
                     kwargs={},
                     desc="duplicate parameters should not occur across param groups either",
@@ -834,6 +843,24 @@ def optim_error_inputs_func_asgd(device, dtype):
                 error_type=ValueError,
                 error_regex="Invalid weight_decay value: -0.5",
             ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, lambd=-0.5),
+                    desc="lambd should > 0",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid lambd value: -0.5",
+            ),
+            ErrorOptimizerInput(
+                OptimizerInput(
+                    params=None,
+                    kwargs=dict(lr=1e-2, alpha=-0.5),
+                    desc="alpha should > 0",
+                ),
+                error_type=ValueError,
+                error_regex="Invalid alpha value: -0.5",
+            ),
         ]
     return error_inputs
 
@@ -852,6 +879,16 @@ def optim_inputs_func_lbfgs(device, dtype=None):
             params=None,
             kwargs={"line_search_fn": "strong_wolfe"},
             desc="strong_wolfe",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"maximize": True},
+            desc="maximize",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"maximize": True, "line_search_fn": "strong_wolfe"},
+            desc="maximize_strong_wolfe",
         ),
     ]
 
@@ -890,6 +927,16 @@ def optim_inputs_func_muon(device, dtype=None):
             },
             desc="passing alternative ns_coefficients",
         ),
+        OptimizerInput(
+            params=None,
+            kwargs={"adjust_lr_fn": "match_rms_adamw"},
+            desc="match_rms_adamw lr adjustment",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"adjust_lr_fn": "spectral_unclamped"},
+            desc="spectral_unclamped lr adjustment",
+        ),
     ]
 
 
@@ -916,7 +963,7 @@ def optim_error_inputs_func_muon(device, dtype):
             OptimizerInput(
                 params=[param],
                 kwargs={"adjust_lr_fn": "arbitrary"},
-                desc="only support `original` and `match_rms_adamw`",
+                desc="unsupported adjust_lr_fn",
             ),
             error_type=ValueError,
             error_regex="Adjust learning rate function arbitrary is not supported",
@@ -1611,7 +1658,7 @@ optim_db: list[OptimizerInfo] = [
             "maximize",
             "capturable",
         ),
-        supports_fused_on=("cpu", "cuda"),
+        supports_fused_on=("cpu", "cuda", "xpu"),
         supports_sparse=True,
         metadata_for_sparse=(
             {"lr": 0.1, "weight_decay": 0, "lr_decay": 0},
@@ -1623,9 +1670,9 @@ optim_db: list[OptimizerInfo] = [
         decorators=(
             DecorateInfo(
                 #  Note on tolerances:
-                #  difference comes from the fact that the non fused kernel have
+                #  difference comes from the fact that the non-fused kernels have
                 #  more dtype cast operations. We have another test test_fused_cpu_matches_cuda
-                #  to make sure there is no discrepancies between cuda fused kernel
+                #  to make sure there are no discrepancies between cuda fused kernel
                 #  and cpu fused kernel
                 toleranceOverride(
                     {
@@ -1707,9 +1754,9 @@ optim_db: list[OptimizerInfo] = [
             ),
             DecorateInfo(
                 #  Note on tolerances:
-                #  difference comes from the fact that the non fused kernel have
+                #  difference comes from the fact that the non-fused kernels have
                 #  more dtype cast operations. We have another test test_fused_cpu_matches_cuda
-                #  to make sure there is no discrepancies between cuda fused kernel
+                #  to make sure there are no discrepancies between cuda fused kernel
                 #  and cpu fused kernel
                 toleranceOverride(
                     {
@@ -1792,9 +1839,9 @@ optim_db: list[OptimizerInfo] = [
             DecorateInfo(
                 toleranceOverride(
                     #  Note on tolerances:
-                    #  difference comes from the fact that the non fused kernel have
+                    #  difference comes from the fact that the non-fused kernels have
                     #  more dtype cast operations. We have another test test_fused_cpu_matches_cuda
-                    #  to make sure there is no discrepancies between cuda fused kernel
+                    #  to make sure there are no discrepancies between cuda fused kernel
                     #  and cpu fused kernel
                     {
                         torch.bfloat16: tol(atol=5e-3, rtol=5e-3),

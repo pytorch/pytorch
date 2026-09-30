@@ -1,64 +1,64 @@
 """Operator registry for mapping operation names to operator instances."""
 
-from torchfuzz.operators.arg import ArgOperator
-from torchfuzz.operators.argsort import ArgsortOperator
+import importlib
+import inspect
+from types import ModuleType
+
 from torchfuzz.operators.base import Operator
-from torchfuzz.operators.constant import ConstantOperator
-from torchfuzz.operators.gather import GatherOperator
-from torchfuzz.operators.index_select import IndexSelectOperator
-from torchfuzz.operators.item import ItemOperator
-from torchfuzz.operators.layout import (
-    CatOperator,
-    ChunkOperator,
-    FlattenOperator,
-    ReshapeOperator,
-    SqueezeOperator,
-    StackOperator,
-    UnsqueezeOperator,
-    ViewOperator,
-)
-from torchfuzz.operators.masked_select import MaskedSelectOperator
-from torchfuzz.operators.matrix_multiply import (
-    AddmmOperator,
-    BmmOperator,
-    MatmulOperator,
-    MMOperator,
-)
-from torchfuzz.operators.nn_functional import (
-    BatchNormOperator,
-    DropoutOperator,
-    ELUOperator,
-    EmbeddingOperator,
-    GELUOperator,
-    GroupNormOperator,
-    LayerNormOperator,
-    LeakyReLUOperator,
-    LinearOperator,
-    MultiHeadAttentionForwardOperator,
-    ReLUOperator,
-    RMSNormOperator,
-    ScaledDotProductAttentionOperator,
-    SigmoidOperator,
-    SiLUOperator,
-    SoftmaxOperator,
-    TanhOperator,
-)
-from torchfuzz.operators.nonzero import NonzeroOperator
-from torchfuzz.operators.scalar_pointwise import (
-    ScalarAddOperator,
-    ScalarDivOperator,
-    ScalarMulOperator,
-    ScalarSubOperator,
-)
-from torchfuzz.operators.tensor_pointwise import (
-    AddOperator,
-    ClampOperator,
-    CumsumOperator,
-    DivOperator,
-    MulOperator,
-    SubOperator,
-)
-from torchfuzz.operators.unique import UniqueOperator
+
+
+_OPERATOR_MODULES: list[str] = [
+    "activations",
+    "arg",
+    "argsort",
+    "bitwise",
+    "comparison",
+    "constant",
+    "elementwise_math",
+    "gather",
+    "index_select",
+    "item",
+    "layout",
+    "logical",
+    "loss_functions",
+    "manipulation_indexing",
+    "masked_select",
+    "matrix_multiply",
+    "nn_functional",
+    "nonzero",
+    "reduction",
+    "scalar_pointwise",
+    "special_functions",
+    "tensor_creation",
+    "tensor_pointwise",
+    "unique",
+]
+
+
+def _concrete_operator_classes(module: ModuleType) -> list[type[Operator]]:
+    """Discover all concrete Operator subclasses defined in a module.
+
+    Filters out:
+    - Non-Operator classes
+    - The Operator ABC itself
+    - Re-exported classes (whose __module__ doesn't match)
+    - Abstract classes
+    - Classes with names ending in "Base" (reserved for abstract bases)
+    """
+    out: list[type[Operator]] = []
+    for _name, cls in inspect.getmembers(module, inspect.isclass):
+        if not issubclass(cls, Operator):
+            continue
+        if cls is Operator:
+            continue
+        if cls.__module__ != module.__name__:
+            continue
+        if inspect.isabstract(cls):
+            continue
+        if cls.__name__.endswith("Base"):
+            continue
+        out.append(cls)
+    return out
 
 
 class OperatorRegistry:
@@ -70,74 +70,13 @@ class OperatorRegistry:
         self._register_default_operators()
 
     def _register_default_operators(self):
-        """Register the default set of operators."""
-        # Individual tensor pointwise operators (preferred)
-        self.register(AddOperator())
-        self.register(MulOperator())
-        self.register(SubOperator())
-        self.register(DivOperator())
-        self.register(ClampOperator())
-        self.register(CumsumOperator())
-
-        # Individual scalar pointwise operators (preferred)
-        self.register(ScalarAddOperator())
-        self.register(ScalarMulOperator())
-        self.register(ScalarSubOperator())
-        self.register(ScalarDivOperator())
-
-        # Leaf Input operators
-        self.register(ConstantOperator())
-        self.register(ArgOperator())
-
-        # # Data-dependent operators
-        self.register(NonzeroOperator())
-        self.register(MaskedSelectOperator())
-        self.register(GatherOperator())
-        self.register(IndexSelectOperator())
-        self.register(ArgsortOperator())
-        self.register(ItemOperator())
-        self.register(UniqueOperator())
-
-        # Tensor layout operators
-        self.register(ViewOperator())
-        self.register(ReshapeOperator())
-        self.register(FlattenOperator())
-        self.register(SqueezeOperator())
-        self.register(UnsqueezeOperator())
-        self.register(CatOperator())
-        self.register(StackOperator())
-        self.register(ChunkOperator())
-
-        # Matrix multiplication operators
-        self.register(MMOperator())
-        self.register(AddmmOperator())
-        self.register(BmmOperator())
-        self.register(MatmulOperator())
-
-        # Neural network functional operators
-        self.register(EmbeddingOperator())
-        self.register(LinearOperator())
-        self.register(ScaledDotProductAttentionOperator())
-        self.register(MultiHeadAttentionForwardOperator())
-
-        # Activation functions
-        self.register(ReLUOperator())
-        self.register(LeakyReLUOperator())
-        self.register(ELUOperator())
-        self.register(GELUOperator())
-        self.register(SiLUOperator())
-        self.register(SigmoidOperator())
-        self.register(TanhOperator())
-        self.register(SoftmaxOperator())
-
-        # Normalization layers
-        self.register(LayerNormOperator())
-        self.register(RMSNormOperator())
-        self.register(BatchNormOperator())
-        self.register(GroupNormOperator())
-
-        # Regularization
-        self.register(DropoutOperator())
+        """Register the default set of operators via introspection."""
+        for module_name in _OPERATOR_MODULES:
+            module = importlib.import_module(
+                f".{module_name}", package="torchfuzz.operators"
+            )
+            for cls in _concrete_operator_classes(module):
+                self.register(cls())  # pyrefly: ignore[missing-argument]
 
     def register(self, operator: Operator):
         """Register an operator in the registry."""

@@ -31,6 +31,7 @@ from tools.testing.target_determination.heuristics.previously_failed_in_pr impor
 )
 from tools.testing.target_determination.heuristics.utils import (
     _get_pr_merge_base,
+    python_test_file_to_test_name,
     query_changed_files,
 )
 from tools.testing.test_run import TestRun
@@ -194,6 +195,19 @@ class TestChangedFiles(TestTD):
         mock_get_pr_number.assert_called_once_with()
         mock_get_merge_base.assert_called_once_with()
         mock_query_changed_files_from_github.assert_called_once_with(123)
+
+    def test_python_test_file_to_test_name_handles_git_paths(self) -> None:
+        self.assertEqual(
+            python_test_file_to_test_name(
+                {
+                    "test/test_jit.py",
+                    "test\\test_nn.py",
+                    "torch/test_not_a_test.py",
+                    "test/test_not_python.txt",
+                }
+            ),
+            {"test_jit", "test_nn"},
+        )
 
 
 class TestParsePrevTests(TestTD):
