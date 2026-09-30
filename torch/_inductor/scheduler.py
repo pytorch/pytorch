@@ -960,26 +960,59 @@ class NestedReduction:
         ``None`` when the candidate cannot be emitted safely. See Note
         [Sub-parent reduction epilogues].
         """
+        return cls.sub_parent_epilogue_result(nodes, numel, rnumel).plan
+
+    @classmethod
+    def sub_parent_epilogue_result(
+        cls,
+        nodes: Sequence[BaseSchedulerNode],
+        numel: sympy.Expr,
+        rnumel: sympy.Expr,
+    ) -> SubParentFusionResult:
+        """Classify and plan a sub-parent candidate in one pass.
+
+        Args:
+            nodes: Candidate scheduler nodes.
+            numel: Parent non-reduction extent.
+            rnumel: Parent reduction extent.
+
+        Returns:
+            The candidate classification and any valid plan.
+        """
+        if not all(isinstance(node, SchedulerNode) for node in nodes):
+            return SubParentFusionResult(False, None)
+        scheduler_nodes = typing.cast("Sequence[SchedulerNode]", nodes)
         parent_rnumel = V.graph.sizevars.simplify(rnumel)
         if not cls._mutations_survive_hoisting(nodes):
-            return None
-        if not all(isinstance(node, SchedulerNode) for node in nodes):
-            return None
-        scheduler_nodes = typing.cast("Sequence[SchedulerNode]", nodes)
+            grouping = cls._sub_parent_epilogue_candidate_nodes(
+                scheduler_nodes,
+                numel,
+                rnumel,
+            )
+            return SubParentFusionResult(
+                grouping is not None,
+                None,
+                reason="mutation prevents safe stage hoisting" if grouping else None,
+            )
 
         # TODO: Consider an alternative to rediscovering the reduction here.
         reduction_nodes = tuple(node for node in scheduler_nodes if node.is_reduction())
         if not reduction_nodes:
-            return None
-        parent_source_names = cls._dependency_names(reduction_nodes, dep_type=MemoryDep)
+            return SubParentFusionResult(False, None)
+        planning_rnumel = parent_rnumel if config.polyhedral_fusion else rnumel
 
         grouping = cls._sub_parent_epilogue_candidate_nodes(
             scheduler_nodes,
             numel,
-            rnumel,
+            planning_rnumel,
         )
         if grouping is None:
-            return None
+            return SubParentFusionResult(False, None)
+
+        plan_failure = SubParentFusionResult(
+            True, None, reason="sub-parent epilogue planning failed"
+        )
+        parent_source_names = cls._dependency_names(reduction_nodes, dep_type=MemoryDep)
         output_groups = grouping.output_groups
         sub_parent_factor = grouping.factor
         epilogue_nodes = tuple(node for group in output_groups for node in group.nodes)
@@ -998,7 +1031,7 @@ class NestedReduction:
             )
             & epilogue_read_names
         )
-        full_numel = V.graph.sizevars.simplify(numel * rnumel)
+        full_numel = V.graph.sizevars.simplify(numel * planning_rnumel)
         parent_write_names = OrderedSet(
             dep.name
             for node in parent_nodes
@@ -1015,9 +1048,21 @@ class NestedReduction:
             )
         )
         parent_source_names -= broadcast_source_names
-        internal_relations = cls._sub_parent_internal_access_relations(output_groups)
+        read_group_indices: dict[MemoryDep, OrderedSet[int]] = {}
+        internal_relations = cls._sub_parent_internal_access_relations(
+            output_groups,
+            read_group_indices=read_group_indices,
+        )
         if internal_relations is None:
-            return None
+            return plan_failure
+        known_extent_subs: dict[sympy.Expr, sympy.Expr] = {}
+        if config.polyhedral_fusion:
+            rate_extent_subs = cls.try_get_sub_parent_extent_subs(
+                parent_rnumel, sub_parent_factor
+            )
+            if rate_extent_subs is None:
+                return plan_failure
+            known_extent_subs.update(rate_extent_subs)
         source_relations = cls._try_get_sub_parent_access_relations(
             parent_nodes,
             epilogue_nodes,
@@ -1025,49 +1070,82 @@ class NestedReduction:
             parent_rnumel,
             parent_source_names,
             sub_parent_factor,
+            known_extent_subs=known_extent_subs or None,
         )
-        if not source_relations:
-            return None
+        if source_relations is None:
+            return plan_failure
+        if config.polyhedral_fusion and not cls._sub_parent_dense_relations_are_admitted(
+            source_relations,
+            output_groups,
+            read_group_indices,
+            V.graph.sizevars.simplify(sympy_subs(parent_rnumel, known_extent_subs)),
+            sub_parent_factor,
+        ):
+            return plan_failure
+        output_relations = ()
+        if config.polyhedral_fusion:
+            output_relations = cls.sub_parent_output_access_relations(
+                parent_nodes,
+                numel,
+                parent_rnumel,
+                known_extent_subs,
+                sub_parent_factor,
+            )
+            if output_relations is None:
+                return plan_failure
+        if not (source_relations or output_relations):
+            return plan_failure
         broadcast_relations = cls._sub_parent_broadcast_access_relations(
             parent_nodes,
             epilogue_nodes,
             broadcast_source_names,
         )
         if broadcast_relations is None:
-            return None
+            return plan_failure
+        access_relations = (
+            *source_relations,
+            *broadcast_relations,
+            *internal_relations,
+            *output_relations,
+        )
+        if (
+            config.polyhedral_fusion
+            and not cls.sub_parent_relations_are_replay_compatible(access_relations)
+        ):
+            return plan_failure
         planned_source_names = OrderedSet(
-            relation.source_accesses[0].name for relation in source_relations
+            relation.source_accesses[0].name
+            for relation in (*source_relations, *output_relations)
         )
         ordered_parent_nodes = cls._order_sub_parent_parent_nodes(
             parent_nodes,
             planned_source_names & parent_write_names,
             numel,
-            rnumel,
+            planning_rnumel,
         )
         if ordered_parent_nodes is None:
-            return None
+            return plan_failure
         if not cls._sub_parent_epilogue_outputs_unread(
             scheduler_nodes, epilogue_node_set
         ):
-            return None
-        return StagedReductionPlan(
-            parent_nodes=ordered_parent_nodes.nodes,
-            parent_numel=numel,
-            parent_rnumel=parent_rnumel,
-            nested_stage=None,
-            sub_parent_stages=(
-                SubParentEpilogueStage(
-                    factor=sub_parent_factor,
-                    access_relations=(
-                        *source_relations,
-                        *broadcast_relations,
-                        *internal_relations,
+            return plan_failure
+        return SubParentFusionResult(
+            True,
+            StagedReductionPlan(
+                parent_nodes=ordered_parent_nodes.nodes,
+                parent_numel=numel,
+                parent_rnumel=parent_rnumel,
+                nested_stage=None,
+                sub_parent_stages=(
+                    SubParentEpilogueStage(
+                        factor=sub_parent_factor,
+                        access_relations=access_relations,
+                        output_groups=output_groups,
                     ),
-                    output_groups=output_groups,
                 ),
-            ),
-            required_post_reduction_index=(
-                ordered_parent_nodes.required_post_reduction_index
+                required_post_reduction_index=(
+                    ordered_parent_nodes.required_post_reduction_index
+                ),
             ),
         )
 
@@ -1264,6 +1342,24 @@ class NestedReduction:
         """
         if V.graph.sizevars.statically_known_equals(node_numel, 0):
             return None
+        if config.polyhedral_fusion:
+            ratio = sympy.cancel(
+                sympy.sympify(full_numel) / sympy.sympify(node_numel)
+            )
+            factor_expr, output_lanes_expr = sympy.fraction(ratio)
+            if isinstance(factor_expr, (int, sympy.Integer)) and isinstance(
+                output_lanes_expr, (int, sympy.Integer)
+            ):
+                factor = int(factor_expr)
+                output_lanes = int(output_lanes_expr)
+                if (
+                    is_power_of_2(factor)
+                    and 1 <= output_lanes < factor
+                    and V.graph.sizevars.statically_known_equals(
+                        factor * node_numel, output_lanes * full_numel
+                    )
+                ):
+                    return factor, output_lanes
 
         # TODO: Generalize once other rates have end-to-end legality and codegen coverage.
         for rate in cls.SUB_PARENT_RATES:
@@ -1293,7 +1389,7 @@ class NestedReduction:
             domain_context.grouped_numel * domain_context.grouped_rnumel
         )
         rate = cls._sub_parent_epilogue_rate(node_numel, full_numel)
-        if rate is None:
+        if rate not in cls.SUB_PARENT_RATES:
             return None
         factor, output_lanes = rate
         if domain_context.group_size % factor != 0:
@@ -1577,6 +1673,82 @@ class NestedReduction:
         return False
 
     @classmethod
+    def _sub_parent_logical_extent(
+        cls,
+        access: MemoryDep,
+        parent_numel: sympy.Expr,
+        extent_subs: dict[sympy.Expr, sympy.Expr],
+    ) -> sympy.Expr | None:
+        """Return the proved feature extent of an access in the parent X/R frame."""
+        sizevars = V.graph.sizevars
+        access_numel = sizevars.simplify(
+            sympy_product(sympy_subs(size, extent_subs) for size in access.size)
+        )
+        if not sizevars.statically_known_multiple_of(access_numel, parent_numel):
+            return None
+        extent = sizevars.simplify(FloorDiv(access_numel, parent_numel))
+        return extent if sizevars.statically_known_gt(extent, 0) else None
+
+    @classmethod
+    def _sub_parent_affine_relation_is_admissible(
+        cls,
+        access_stride: int,
+        base_offset: sympy.Expr,
+        extent: sympy.Expr,
+        parent_rnumel: sympy.Expr,
+        sub_parent_factor: int,
+    ) -> bool:
+        """Check mapped bounds and the supported lane or dense geometry."""
+        sizevars = V.graph.sizevars
+        if access_stride <= 0 or not sizevars.statically_known_gt(extent, 0):
+            return False
+        base_offset = sizevars.simplify(base_offset)
+        if not sizevars.statically_known_geq(base_offset, 0):
+            return False
+        last_parent_r = sizevars.simplify(
+            base_offset + access_stride * (extent - 1)
+        )
+        if not sizevars.statically_known_lt(last_parent_r, parent_rnumel):
+            return False
+
+        if access_stride == sub_parent_factor:
+            return sizevars.statically_known_lt(base_offset, sub_parent_factor)
+        if access_stride != 1:
+            return False
+
+        # Dense projection is currently emitted only for the existing CUDA /
+        # Triton geometry. Keep exact-width conversions after symbolic proof.
+        parent_width_expr = sizevars.simplify(parent_rnumel)
+        if not isinstance(parent_width_expr, (int, sympy.Integer)):
+            return False
+        parent_width = int(parent_width_expr)
+        if not is_power_of_2(parent_width) or not is_power_of_2(
+            sub_parent_factor
+        ):
+            return False
+        if parent_width % sub_parent_factor:
+            return False
+        child_lane_width = parent_width // sub_parent_factor
+        if not is_power_of_2(child_lane_width):
+            return False
+
+        extent_expr = sizevars.simplify(extent)
+        base_offset_expr = sizevars.simplify(base_offset)
+        if not isinstance(extent_expr, (int, sympy.Integer)) or not isinstance(
+            base_offset_expr, (int, sympy.Integer)
+        ):
+            return False
+        extent = int(extent_expr)
+        offset = int(base_offset_expr)
+        return (
+            extent < parent_width
+            and extent % child_lane_width == 0
+            and offset >= 0
+            and offset % child_lane_width == 0
+            and offset + extent <= parent_width
+        )
+
+    @classmethod
     def _try_get_sub_parent_access_relations(
         cls,
         parent_nodes: Sequence[SchedulerNode],
@@ -1591,9 +1763,10 @@ class NestedReduction:
         """Find exact parent inputs reused by the sub-parent stage.
 
         Independent epilogue inputs remain ordinary derived-domain loads. Shared
-        parent inputs must have one normalized parent access, and every epilogue
-        access must preserve the X/R boundary and equal it under
-        ``parent_r = factor * child_r + lane``.
+        parent inputs must have one normalized parent access. Each epilogue access
+        is proved either as an interleaved lane projection or, when explicitly
+        enabled, as a dense translation relation in a common row/feature
+        frame.
         ``known_extent_subs`` carries divisibility already proved by a surrounding
         nested-reduction topology.
         """
@@ -1707,22 +1880,286 @@ class NestedReduction:
                     ),
                     None,
                 )
-                if lane_value is None:
+                if lane_value is not None:
+                    expected = parent_index.subs(
+                        parent_r, sub_parent_factor * child_r + lane_value
+                    )
+                    if V.graph.sizevars.statically_known_equals(child_index, expected):
+                        access_relations.add(
+                            SubParentAccessRelation(
+                                source_accesses=source_deps,
+                                consumer_access=dep,
+                                access_stride=sub_parent_factor,
+                                base_offset=sympy.Integer(lane_value),
+                                extent=sympy_subs(child_rnumel, extent_subs),
+                                requires_live_source=requires_live_source,
+                            )
+                        )
+                        continue
+
+                if not config.polyhedral_fusion:
                     return None
-                expected = parent_index.subs(
-                    parent_r, sub_parent_factor * child_r + lane_value
+                if V.graph.sizevars.statically_known_equals(child_index, parent_index):
+                    access_relations.add(
+                        SubParentAccessRelation(
+                            source_accesses=source_deps,
+                            consumer_access=dep,
+                            requires_live_source=requires_live_source,
+                        )
+                    )
+                    continue
+                proof = cls.prove_sub_parent_translation(
+                    source_deps,
+                    dep,
+                    parent_numel,
+                    parent_rnumel,
+                    sub_parent_factor,
+                    extent_subs,
                 )
-                if not V.graph.sizevars.statically_known_equals(child_index, expected):
+                if proof is None:
+                    return None
+                dense_extent = cls._sub_parent_logical_extent(
+                    dep, parent_numel, extent_subs
+                )
+                if dense_extent is None:
+                    return None
+                if not cls._sub_parent_affine_relation_is_admissible(
+                    1,
+                    proof.translation[1],
+                    dense_extent,
+                    V.graph.sizevars.simplify(
+                        sympy_subs(parent_rnumel, extent_subs)
+                    ),
+                    sub_parent_factor,
+                ):
                     return None
                 access_relations.add(
                     SubParentAccessRelation(
                         source_accesses=source_deps,
                         consumer_access=dep,
-                        parent_lane=lane_value,
+                        access_stride=1,
+                        base_offset=proof.translation[1],
+                        extent=dense_extent,
                         requires_live_source=requires_live_source,
                     )
                 )
         return tuple(access_relations)
+
+    @classmethod
+    def prove_sub_parent_translation(
+        cls,
+        source_accesses: Sequence[MemoryDep],
+        consumer_access: MemoryDep,
+        parent_numel: sympy.Expr,
+        parent_rnumel: sympy.Expr,
+        sub_parent_factor: int,
+        extent_subs: dict[sympy.Expr, sympy.Expr],
+    ) -> TranslationProof | None:
+        """Prove a translated access in the parent X/R coordinate frame.
+
+        Args:
+            source_accesses: Parent accesses for the shared source.
+            consumer_access: Sub-parent access to validate.
+            parent_numel: Parent non-reduction extent.
+            parent_rnumel: Parent reduction extent.
+            sub_parent_factor: Number of sub-parent lanes.
+            extent_subs: Proven extent substitutions.
+
+        Returns:
+            The translation proof, or None if the access is unsupported.
+        """
+        from .utils import sympy_index_symbol
+
+        row = sympy_index_symbol("_sub_parent_translation_row")
+        feature = sympy_index_symbol("_sub_parent_translation_feature")
+
+        def common_frame(
+            dep: MemoryDep, feature_extent: sympy.Expr
+        ) -> MemoryDep | None:
+            """Express an access in the shared row/feature frame."""
+            if dep.is_indirect() or dep.mode is not None:
+                return None
+            framed = MemoryDep(
+                dep.name,
+                sympy_subs(dep.index, extent_subs),
+                dep.var_names,
+                tuple(sympy_subs(size, extent_subs) for size in dep.size),
+                dep.mode,
+            )
+            return framed.normalize_with_ranges(
+                (row, feature),
+                (parent_numel, feature_extent),
+            )
+
+        consumer_feature_numel = cls._sub_parent_logical_extent(
+            consumer_access, parent_numel, extent_subs
+        )
+        if consumer_feature_numel is None or not V.graph.sizevars.statically_known_lt(
+            consumer_feature_numel, parent_rnumel
+        ):
+            return None
+
+        source_frames = tuple(
+            common_frame(source, parent_rnumel) for source in source_accesses
+        )
+        consumer_frame = common_frame(consumer_access, consumer_feature_numel)
+        if consumer_frame is None or any(frame is None for frame in source_frames):
+            return None
+        if any(
+            not cls._sub_parent_access_preserves_x_boundary(
+                source,
+                parent_numel,
+                parent_rnumel,
+                extent_subs,
+            )
+            for source in source_accesses
+        ) or not cls._sub_parent_access_preserves_x_boundary(
+            consumer_access,
+            parent_numel,
+            consumer_feature_numel,
+            extent_subs,
+        ):
+            return None
+        proof = SubParentAccessRelation.prove_translation(
+            typing.cast("tuple[MemoryDep, ...]", source_frames),
+            typing.cast("MemoryDep", consumer_frame),
+            sizevars=V.graph.sizevars,
+        )
+        if proof is None:
+            return None
+        translation = proof.translation
+        if len(translation) != 2 or not V.graph.sizevars.statically_known_equals(
+            translation[0], 0
+        ):
+            return None
+        mapped_parent_rnumel = V.graph.sizevars.simplify(
+            sympy_subs(parent_rnumel, extent_subs)
+        )
+        if not cls._sub_parent_affine_relation_is_admissible(
+            1,
+            translation[1],
+            consumer_feature_numel,
+            mapped_parent_rnumel,
+            sub_parent_factor,
+        ):
+            return None
+        return proof
+
+    @staticmethod
+    def sub_parent_layout_access(
+        output: ir.IRNode, source: MemoryDep
+    ) -> MemoryDep | None:
+        """Express a graph-output view in the source loop-variable frame.
+
+        Args:
+            output: Graph output to inspect.
+            source: Parent source dependency.
+
+        Returns:
+            A matching memory dependency, or None if the view is unsupported.
+        """
+        layout = output.get_layout()
+        sizes = tuple(layout.size)
+        strides = tuple(layout.stride)
+        active_axes = tuple(
+            index
+            for index, size in enumerate(sizes)
+            if not V.graph.sizevars.statically_known_equals(size, 1)
+        )
+        if len(active_axes) != source.num_vars:
+            return None
+        if output.get_name() != source.name:
+            return None
+        index = layout.offset + sum(
+            (
+                stride * var
+                for stride, var in zip(
+                    (strides[axis] for axis in active_axes), source.var_names
+                )
+            ),
+            sympy.S.Zero,
+        )
+        return MemoryDep(
+            source.name,
+            index,
+            source.var_names,
+            tuple(sizes[axis] for axis in active_axes),
+        )
+
+    @classmethod
+    def sub_parent_output_access_relations(
+        cls,
+        parent_nodes: Sequence[SchedulerNode],
+        parent_numel: sympy.Expr,
+        parent_rnumel: sympy.Expr,
+        extent_subs: dict[sympy.Expr, sympy.Expr],
+        sub_parent_factor: int,
+    ) -> tuple[SubParentAccessRelation, ...] | None:
+        """Record translated graph-output views of parent-produced buffers.
+
+        Args:
+            parent_nodes: Nodes that produce the parent buffers.
+            parent_numel: Parent non-reduction extent.
+            parent_rnumel: Parent reduction extent.
+            extent_subs: Proven extent substitutions.
+            sub_parent_factor: Number of sub-parent lanes.
+
+        Returns:
+            Output access relations, or None if they cannot be proved.
+        """
+        if not config.polyhedral_fusion:
+            return ()
+        writes_by_name: dict[str, list[MemoryDep]] = defaultdict(list)
+        for node in parent_nodes:
+            for write in node.read_writes.writes:
+                if isinstance(write, MemoryDep):
+                    writes_by_name[write.name].append(write)
+
+        relations: list[SubParentAccessRelation] = []
+        for output in V.graph.graph_outputs:
+            name = output.get_name()
+            writes = writes_by_name.get(name, ())
+            if not writes:
+                continue
+            if len(writes) != 1:
+                return None
+            source = writes[0]
+            output_access = cls.sub_parent_layout_access(output, source)
+            if output_access is None:
+                continue
+            output_rnumel = V.graph.sizevars.simplify(
+                sympy_product(output_access.size[-1:])
+            )
+            if not V.graph.sizevars.statically_known_lt(
+                output_rnumel, parent_rnumel
+            ):
+                continue
+            proof = cls.prove_sub_parent_translation(
+                (source,),
+                output_access,
+                parent_numel,
+                parent_rnumel,
+                sub_parent_factor,
+                extent_subs,
+            )
+            if proof is None:
+                return None
+            output_extent = cls._sub_parent_logical_extent(
+                output_access, parent_numel, extent_subs
+            )
+            if output_extent is None:
+                return None
+            relations.append(
+                SubParentAccessRelation(
+                    source_accesses=(source,),
+                    consumer_access=output_access,
+                    access_stride=1,
+                    base_offset=proof.translation[1],
+                    extent=output_extent,
+                    requires_live_source=False,
+                )
+            )
+        return tuple(relations)
 
     @staticmethod
     def _sub_parent_epilogue_outputs_unread(
@@ -1752,6 +2189,7 @@ class NestedReduction:
     def _sub_parent_internal_access_relations(
         cls,
         output_groups: Sequence[SubParentOutputGroup],
+        read_group_indices: dict[MemoryDep, OrderedSet[int]] | None = None,
     ) -> tuple[SubParentAccessRelation, ...] | None:
         """Record values forwarded between sub-parent epilogue nodes.
 
@@ -1771,6 +2209,8 @@ class NestedReduction:
         for group_index, group in enumerate(output_groups):
             for node_index, node in enumerate(group.nodes):
                 for dep in node.read_writes.reads:
+                    if read_group_indices is not None and isinstance(dep, MemoryDep):
+                        read_group_indices.setdefault(dep, OrderedSet()).add(group_index)
                     if dep.name not in writes_by_name:
                         continue
                     if not isinstance(dep, MemoryDep):
@@ -1802,11 +2242,45 @@ class NestedReduction:
                     SubParentAccessRelation(
                         source_accesses=(write,),
                         consumer_access=read,
-                        parent_lane=None,
                         requires_live_source=True,
                     )
                 )
         return tuple(relations)
+
+    @staticmethod
+    def _sub_parent_dense_relations_are_admitted(
+        relations: Sequence[SubParentAccessRelation],
+        output_groups: Sequence[SubParentOutputGroup],
+        read_group_indices: dict[MemoryDep, OrderedSet[int]],
+        parent_rnumel: sympy.Expr,
+        sub_parent_factor: int,
+        allow_unmatched: bool = False,
+    ) -> bool:
+        """Require dense reads to cover the complete output-group width."""
+        child_width = V.graph.sizevars.simplify(
+            FloorDiv(parent_rnumel, sub_parent_factor)
+        )
+        for relation in relations:
+            if relation.access_stride != 1:
+                continue
+            group_indices = read_group_indices.get(relation.consumer_access)
+            if not group_indices:
+                if allow_unmatched:
+                    continue
+                return False
+            if len(group_indices) != 1:
+                return False
+            group_index = next(iter(group_indices))
+            if not 0 <= group_index < len(output_groups):
+                return False
+            expected_extent = V.graph.sizevars.simplify(
+                child_width * output_groups[group_index].output_lanes
+            )
+            if not V.graph.sizevars.statically_known_equals(
+                relation.extent, expected_extent
+            ):
+                return False
+        return True
 
     @staticmethod
     def _sub_parent_consumer_is_trailing_broadcast(
@@ -1904,7 +2378,6 @@ class NestedReduction:
                 SubParentAccessRelation(
                     source_accesses=(source,),
                     consumer_access=consumer,
-                    parent_lane=None,
                     requires_live_source=True,
                 )
                 for consumer in consumers
@@ -2051,19 +2524,18 @@ class NestedReduction:
                 domain_context.grouped_numel,
                 grouped_reduction.get_ranges()[0],
             )
-            sub_parent_compatible = (
-                is_consumer
-                and cls._nested_sub_parent_rate(sn, domain_context) is not None
+            sub_parent_rate = (
+                cls._nested_sub_parent_rate(sn, domain_context) if is_consumer else None
             )
             # Reachable only when group_size equals a sub-parent factor, so
             # G is 2 or 4. unroll_reductions_threshold turns groups that small
             # into pointwise ops, so this needs a lowered threshold to fire.
-            if reduced_compatible and sub_parent_compatible:
+            if reduced_compatible and sub_parent_rate in cls.SUB_PARENT_RATES:
                 return None
-            if sub_parent_compatible:
-                domain = cls.PointwiseDomain.SUB_PARENT
-            elif reduced_compatible:
+            if reduced_compatible:
                 domain = cls.PointwiseDomain.REDUCED
+            elif sub_parent_rate is not None:
+                domain = cls.PointwiseDomain.SUB_PARENT
             elif cls._pointwise_node_matches_domain(
                 sn,
                 full_numel,
@@ -2177,7 +2649,9 @@ class NestedReduction:
                 else {}
             ),
         )
-        if not source_relations:
+        if not source_relations or any(
+            relation.access_stride == 1 for relation in source_relations
+        ):
             return None
         live_source_names = OrderedSet(
             relation.consumer_access.name
@@ -2214,15 +2688,78 @@ class NestedReduction:
         if broadcast_relations is None:
             return None
 
+        access_relations = (
+            *source_relations,
+            *broadcast_relations,
+            *internal_relations,
+        )
+        if not cls.sub_parent_relations_are_replay_compatible(access_relations):
+            return None
+
         return SubParentEpilogueStage(
             factor=sub_parent_factor,
-            access_relations=(
-                *source_relations,
-                *broadcast_relations,
-                *internal_relations,
-            ),
+            access_relations=access_relations,
             output_groups=output_groups,
         )
+
+    @staticmethod
+    def sub_parent_relations_are_replay_compatible(
+        relations: Sequence[SubParentAccessRelation],
+    ) -> bool:
+        """Check whether relations can be represented by the replay resolver.
+
+        Args:
+            relations: Access relations to validate.
+
+        Returns:
+            True if all relations use compatible replay forms.
+        """
+        has_dense_mapping = any(
+            relation.access_stride == 1 for relation in relations
+        )
+        # Dense replay closes the parent body; live lane sources cannot cross it.
+        if has_dense_mapping and any(
+            relation.access_stride is not None
+            and relation.access_stride != 1
+            and relation.requires_live_source
+            for relation in relations
+        ):
+            return False
+
+        relations_by_name: dict[str, list[SubParentAccessRelation]] = (
+            collections.defaultdict(list)
+        )
+        for relation in relations:
+            relations_by_name[relation.consumer_access.name].append(relation)
+
+        for name_relations in relations_by_name.values():
+            affine_relations = [
+                relation
+                for relation in name_relations
+                if relation.access_stride is not None
+            ]
+            if affine_relations and len(affine_relations) != len(name_relations):
+                return False
+            if not affine_relations:
+                continue
+            strides = OrderedSet(
+                relation.access_stride
+                for relation in affine_relations
+            )
+            if len(strides) != 1:
+                return False
+            source_sets = OrderedSet(
+                frozenset(relation.source_accesses)
+                for relation in affine_relations
+            )
+            # ``requires_live_source`` is relation-specific: the same source
+            # name may be forwarded for one output and remain an external or
+            # graph-output access for another.  The codegen descriptor retains
+            # that distinction, so differing roles are not a reason to reject
+            # an otherwise compatible affine group.
+            if len(source_sets) != 1:
+                return False
+        return True
 
     @classmethod
     def _min_block_unprofitable_for_kernel(
@@ -2620,10 +3157,10 @@ class SubParentAccessRelation:
 
     ``source_accesses`` are raw-frame aliases for the same logical source, such as
     flat and grouped reads of one input. Fusion proves each consumer against these
-    accesses; codegen validates their per-name replay consequences. ``parent_lane``
-    selects one part of a parent-width value; without a lane, codegen derives direct
-    use or reduced-width broadcast from the live value's shape. Sharing a buffer
-    name alone does not establish this relation.
+    accesses; codegen validates their per-name replay consequences. The optional
+    affine fields identify the parent R coordinate for each child R coordinate:
+    ``parent_r = access_stride * child_r + base_offset`` over ``extent`` values.
+    Sharing a buffer name alone does not establish this relation.
 
     TODO: Consider alternate designs: infer these relations from codegen access
     expressions, as ordinary CSE does, or retain exact internal read/write
@@ -2633,9 +3170,10 @@ class SubParentAccessRelation:
 
     source_accesses: tuple[MemoryDep, ...]
     consumer_access: MemoryDep
-    parent_lane: int | None
-    requires_live_source: bool
-    translation: tuple[sympy.Expr, ...] = ()
+    access_stride: int | None = None
+    requires_live_source: bool = False
+    base_offset: sympy.Expr | None = None
+    extent: sympy.Expr | None = None
 
     def __post_init__(self) -> None:
         """Validate that all accesses refer to one nonempty source relation."""
@@ -2643,6 +3181,19 @@ class SubParentAccessRelation:
         names.add(self.consumer_access.name)
         if not self.source_accesses or len(names) != 1:
             raise AssertionError("sub-parent accesses must share one buffer name")
+        has_affine_field = any(
+            field is not None for field in (self.access_stride, self.base_offset, self.extent)
+        )
+        if has_affine_field and any(
+            field is None for field in (self.access_stride, self.base_offset, self.extent)
+        ):
+            raise AssertionError("sub-parent affine relation must be complete")
+        if self.access_stride is not None and self.access_stride <= 0:
+            raise ValueError("sub-parent affine access stride must be positive")
+        if self.base_offset is not None and sympy.sympify(self.base_offset).is_negative is True:
+            raise ValueError("sub-parent affine base offset must be nonnegative")
+        if self.extent is not None and sympy.sympify(self.extent).is_positive is False:
+            raise ValueError("sub-parent affine extent must be positive")
 
     @classmethod
     def prove_translation(
@@ -2729,6 +3280,20 @@ class OrderedParentNodes:
 
     nodes: tuple[SchedulerNode, ...]
     required_post_reduction_index: int | None
+
+
+@dataclasses.dataclass(frozen=True)
+class SubParentFusionResult:
+    """Reusable semantic result for one sub-parent fusion consideration."""
+
+    is_candidate: bool
+    plan: StagedReductionPlan | None
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        """Validate candidate and plan consistency."""
+        if self.plan is not None and not self.is_candidate:
+            raise AssertionError("a sub-parent plan must belong to a candidate")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -10393,12 +10958,12 @@ class Scheduler:
         # normalize_with_ranges maps through a flat row-major ordinal; it does
         # not prove that raw loop axes preserve codegen's X/R boundary.
         for stage in plan.sub_parent_stages:
-            lane_relations = tuple(
+            affine_relations = tuple(
                 relation
                 for relation in stage.access_relations
-                if relation.parent_lane is not None
+                if relation.access_stride is not None
             )
-            if not lane_relations:
+            if not affine_relations:
                 continue
             if plan.nested_stage is None:
                 extent_subs = NestedReduction.try_get_sub_parent_extent_subs(
@@ -10416,6 +10981,30 @@ class Scheduler:
                     if plan.parent_rnumel != normalized_parent_rnumel
                     else {}
                 )
+            mapped_parent_rnumel = V.graph.sizevars.simplify(
+                sympy_subs(plan.parent_rnumel, extent_subs)
+            )
+            if plan.nested_stage is None and any(
+                relation.access_stride == 1 for relation in affine_relations
+            ):
+                read_group_indices: dict[MemoryDep, OrderedSet[int]] = {}
+                if (
+                    NestedReduction._sub_parent_internal_access_relations(
+                        stage.output_groups,
+                        read_group_indices=read_group_indices,
+                    )
+                    is None
+                ):
+                    return None
+                if not NestedReduction._sub_parent_dense_relations_are_admitted(
+                    affine_relations,
+                    stage.output_groups,
+                    read_group_indices,
+                    mapped_parent_rnumel,
+                    stage.factor,
+                    allow_unmatched=True,
+                ):
+                    return None
             child_frame = (
                 (
                     plan.parent_numel,
@@ -10430,7 +11019,21 @@ class Scheduler:
                     ),
                 )
             )
-            for relation in lane_relations:
+            for relation in affine_relations:
+                if not NestedReduction._sub_parent_affine_relation_is_admissible(
+                    relation.access_stride,
+                    typing.cast("sympy.Expr", relation.base_offset),
+                    typing.cast("sympy.Expr", relation.extent),
+                    mapped_parent_rnumel,
+                    stage.factor,
+                ):
+                    return None
+                consumer_frame = child_frame
+                if plan.nested_stage is None and relation.access_stride == 1:
+                    consumer_frame = (
+                        child_frame[0],
+                        typing.cast("sympy.Expr", relation.extent),
+                    )
                 if any(
                     not NestedReduction._sub_parent_access_preserves_x_boundary(
                         source,
@@ -10441,8 +11044,8 @@ class Scheduler:
                     for source in relation.source_accesses
                 ) or not NestedReduction._sub_parent_access_preserves_x_boundary(
                     relation.consumer_access,
-                    child_frame[0],
-                    child_frame[1],
+                    consumer_frame[0],
+                    consumer_frame[1],
                     extent_subs,
                 ):
                     return None
@@ -10871,21 +11474,14 @@ class Scheduler:
             existing_standalone_epilogue = isinstance(node1, FusedStagedReduction)
             _, (numel, rnumel) = node1.group
             nodes = [*node1.get_nodes(), *node2.get_nodes()]
-            plan = NestedReduction.sub_parent_epilogue_plan(nodes, numel, rnumel)
-            if plan is None:
-                # A recognizable staged candidate must not fall back to
-                # ordinary fusion when complete planning fails.
-                if all(isinstance(node, SchedulerNode) for node in nodes):
-                    scheduler_nodes = typing.cast("Sequence[SchedulerNode]", nodes)
-                    if (
-                        NestedReduction._sub_parent_epilogue_candidate_nodes(
-                            scheduler_nodes, numel, rnumel
-                        )
-                        is not None
-                    ):
-                        why("sub-parent epilogue planning failed")
-                        return False
-            elif not existing_standalone_epilogue:
+            result = NestedReduction.sub_parent_epilogue_result(
+                nodes, numel, rnumel
+            )
+            plan = result.plan
+            if plan is None and result.is_candidate:
+                why("sub-parent epilogue planning failed: %s", result.reason)
+                return False
+            if plan is not None and not existing_standalone_epilogue:
                 # Path 3: initially form reduction -> sub-parent epilogue.
                 new_nodes_are_epilogue = all(
                     node in plan.sub_parent_stages[0].epilogue_nodes
