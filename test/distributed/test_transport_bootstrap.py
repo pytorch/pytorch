@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import json
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -168,7 +167,7 @@ class TestRankBootstrap(TestCase):
                         peer_rank=peer,
                     )
             self.assertEqual(factory.call_count, 2)
-        attempts = json.dumps(["transport", "test", 5, 10, "attempts", 10])
+        attempts = "transport/test/5/10/attempts/10"
         self.assertEqual(store.get(attempts), b"2")
 
     def test_implicit_rank_lookup(self):
@@ -183,7 +182,7 @@ class TestRankBootstrap(TestCase):
         ):
             new_transport_rank("test", store=store, peer_rank=8)
         get_rank.assert_called_once_with()
-        attempts = json.dumps(["transport", "test", 4, 8, "attempts", 4])
+        attempts = "transport/test/4/8/attempts/4"
         self.assertEqual(store.get(attempts), b"1")
 
 
