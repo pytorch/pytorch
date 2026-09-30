@@ -12965,18 +12965,20 @@ finally:
 
 
 class TestLocalizedMemPool(TestCase):
+    def _require_localization(self, device: str) -> None:
+        from torch.cuda.green_contexts import is_localization_supported
+
+        torch.cuda.init()
+        if not is_localization_supported(torch.device(device).index):
+            self.skipTest("requires CUDA 13.4 and a multi-domain GPU")
+
     @parametrize("no_split", [False, True])
     @serialTest()
     def test_localized_allocation(self, device: str, no_split: bool) -> None:
-        from torch.cuda.green_contexts import (
-            get_num_locality_domains,
-            is_localization_supported,
-        )
+        from torch.cuda.green_contexts import get_num_locality_domains
 
-        torch.cuda.init()
+        self._require_localization(device)
         device_id = torch.device(device).index
-        if not is_localization_supported(device_id):
-            self.skipTest("requires CUDA 13.4 and a multi-domain GPU")
         if torch.cuda.get_allocator_backend() != "native":
             self.skipTest("requires the native caching allocator")
         for domain in range(get_num_locality_domains(device_id)):
@@ -12995,15 +12997,10 @@ class TestLocalizedMemPool(TestCase):
             torch.cuda.current_stream(device).synchronize()
 
     def test_invalid_locality_domain(self, device: str) -> None:
-        from torch.cuda.green_contexts import (
-            get_num_locality_domains,
-            is_localization_supported,
-        )
+        from torch.cuda.green_contexts import get_num_locality_domains
 
-        torch.cuda.init()
+        self._require_localization(device)
         device_id = torch.device(device).index
-        if not is_localization_supported(device_id):
-            self.skipTest("requires CUDA 13.4 and a multi-domain GPU")
         for domain in (-1, get_num_locality_domains(device_id)):
             with self.assertRaisesRegex(ValueError, "Invalid locality_domain_id"):
                 torch.cuda.LocalizedMemPool(domain, device=device)
