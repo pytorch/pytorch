@@ -1761,10 +1761,21 @@ lib_impl_autograd.impl(
 lib_impl_autograd.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
 
 
-def _reject_collective_config(*args, **kwargs):
-    raise NotImplementedError(
-        "per-collective configuration is not supported while tracing"
-    )
+def _raw_collective_config(func, args, kwargs):
+    for index, argument in enumerate(func._schema.arguments):
+        if argument.name == "config":
+            return args[index] if index < len(args) else (kwargs or {}).get("config")
+    return None
+
+
+def _trace_raw_collective(mode, func, types, args, kwargs):
+    if _raw_collective_config(func, args, kwargs) is not None:
+        raise NotImplementedError(
+            "Raw c10d configuration calls cannot be traced; use torch.distributed collective APIs"
+        )
+    from torch.fx.experimental.proxy_tensor import proxy_call
+
+    return proxy_call(mode, func, mode.pre_dispatch, args, kwargs or {})
 
 
 lib_impl_c10d = torch.library.Library("c10d", "IMPL")
@@ -1785,14 +1796,10 @@ for _op in (
     "alltoall_",
     "alltoall_base_",
 ):
-    torch.library.register_fake(
-        f"c10d::{_op}.config", _reject_collective_config, lib=lib_impl_c10d
-    )
-    lib_impl_c10d.impl(f"{_op}.config", _reject_collective_config, "Functionalize")
     torch.library.register_torch_dispatch(
-        f"c10d::{_op}.config",
+        f"c10d::{_op}",
         ProxyTorchDispatchMode,
-        _reject_collective_config,
+        _trace_raw_collective,
         lib=lib_impl_c10d,
     )
 

@@ -233,7 +233,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     int64_t,
                     int64_t,
                     bool,
-                    int64_t)>();
+                    int64_t,
+                    OptionalCollectiveConfig)>();
     // It's awakward to unbox the opts here and box them again in the custom C++
     // op. But it's also complicated to make opts as a CustomClassHolder. Leave
     // it as it is now.
@@ -268,7 +269,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const c10::intrusive_ptr<::c10d::ReduceOp>&,
                     const std::optional<at::Tensor>& sparse_indices,
                     bool,
-                    int64_t)>();
+                    int64_t,
+                    OptionalCollectiveConfig)>();
 
     auto work = std::get<1>(callCollective(
         op,
@@ -298,7 +300,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              const c10::intrusive_ptr<::c10d::ReduceOp>&,
                              bool,
-                             int64_t)>();
+                             int64_t,
+                             OptionalCollectiveConfig)>();
 
     auto work = callCollective(
         op,
@@ -329,7 +332,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              int64_t,
                              int64_t,
                              bool,
-                             int64_t)>();
+                             int64_t,
+                             OptionalCollectiveConfig)>();
     auto work = callCollective(
         op,
         opts.config,
@@ -362,7 +366,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              at::TensorList,
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              bool,
-                             int64_t)>();
+                             int64_t,
+                             OptionalCollectiveConfig)>();
 
     auto work = std::get<1>(callCollective(
         op,
@@ -399,7 +404,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 at::Tensor&,
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                 bool,
-                int64_t)>();
+                int64_t,
+                OptionalCollectiveConfig)>();
 
     auto work = std::get<1>(callCollective(
         op,
@@ -441,7 +447,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const std::vector<std::vector<at::Tensor>>&,
                              const at::TensorList&,
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                             bool)>();
+                             bool,
+                             OptionalCollectiveConfig)>();
 
     auto work = callCollective(
         op,
@@ -475,7 +482,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 const at::TensorList,
                 const at::TensorList,
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
-                bool)>();
+                bool,
+                OptionalCollectiveConfig)>();
 
     auto work = callCollective(
         op,
@@ -516,7 +524,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                              int64_t,
                              bool,
-                             int64_t)>();
+                             int64_t,
+                             OptionalCollectiveConfig)>();
     auto work = callCollective(
         op,
         opts.config,
@@ -553,7 +562,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                 int64_t,
                 bool,
-                int64_t)>();
+                int64_t,
+                OptionalCollectiveConfig)>();
 
     auto work = std::get<1>(callCollective(
         op,
@@ -627,7 +637,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     const c10::intrusive_ptr<::c10d::ReduceOp>&,
                     bool,
-                    int64_t)>();
+                    int64_t,
+                    OptionalCollectiveConfig)>();
     auto work = std::get<1>(callCollective(
         op,
         opts.config,
@@ -660,7 +671,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                 const c10::intrusive_ptr<::c10d::ReduceOp>&,
                 bool,
-                int64_t)>();
+                int64_t,
+                OptionalCollectiveConfig)>();
     auto work = std::get<1>(callCollective(
         op,
         opts.config,
@@ -704,7 +716,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                 const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                 const c10::intrusive_ptr<::c10d::ReduceOp>&,
                 bool,
-                int64_t)>();
+                int64_t,
+                OptionalCollectiveConfig)>();
 
     auto work = callCollective(
         op,
@@ -751,7 +764,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                              std::vector<int64_t>,
                              std::vector<int64_t>,
                              bool,
-                             int64_t)>();
+                             int64_t,
+                             OptionalCollectiveConfig)>();
     auto work = callCollective(
         op,
         opts.config,
@@ -796,7 +810,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     const at::TensorList&,
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     bool,
-                    int64_t)>();
+                    int64_t,
+                    OptionalCollectiveConfig)>();
     auto work = std::get<1>(callCollective(
         op,
         opts.config,
@@ -1400,14 +1415,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       const c10::TypedOperatorHandle<Return(Args...)>& op,
       const OptionalCollectiveConfig& config,
       CallArgs&&... args) {
-    if (!config.has_value()) {
-      return op.call(std::forward<CallArgs>(args)...);
-    }
-    const c10::OperatorHandle config_op =
-        c10::Dispatcher::singleton().findSchemaOrThrow(
-            op.operator_name().name.c_str(), "config");
-    return config_op.typed<Return(Args..., OptionalCollectiveConfig)>().call(
-        std::forward<CallArgs>(args)..., config);
+    return op.call(std::forward<CallArgs>(args)..., config);
   }
 };
 
