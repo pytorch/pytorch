@@ -78,6 +78,13 @@ def runtime_cache_root(*, require_explicit: bool = False) -> Path:
 def _compatibility(context: Any) -> dict[str, Any]:
     from torch._inductor.runtime.triton_compat import triton_key
 
+    try:
+        # The header holds context as JSON, so import compares it in that form.
+        context = json.loads(json.dumps(context, sort_keys=True))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "Triton runtime-cache context must be JSON-serializable"
+        ) from exc
     return {
         "triton_key": hashlib.sha256(triton_key().encode()).hexdigest(),
         "python": list(sys.version_info[:3]),
@@ -127,6 +134,14 @@ def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) ->
     directory is marked as holding this bundle.
     """
     root = runtime_cache_root(require_explicit=True)
+    try:
+        # Triton creates the directory on first use, and a capture may launch
+        # no Triton kernel.
+        root.mkdir(parents=True, exist_ok=True)
+    except FileExistsError:
+        raise RuntimeError(
+            f"Triton cache directory {root} is not a directory"
+        ) from None
     excluded = {_cache_key(key) for key in exclude}
     suffix = sysconfig.get_config_var("EXT_SUFFIX")
     if not suffix:
