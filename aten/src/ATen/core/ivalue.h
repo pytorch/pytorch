@@ -12,6 +12,7 @@
 #include <c10/macros/Export.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
+#include <functional>
 #include <limits>
 #include <type_traits>
 #include <unordered_map>
@@ -505,21 +506,19 @@ struct TORCH_API IValue final {
   // Tuple
   IValue(c10::intrusive_ptr<ivalue::Tuple> v);
 
+  template <typename... Ts>
+  using enable_if_ivalue_compatible =
+      std::enable_if<std::conjunction<
+          std::negation<std::is_lvalue_reference<Ts>>...,
+          std::is_constructible<IValue, Ts>...>::value>;
+
   template <
       typename... Args,
-      std::enable_if_t<
-          !std::disjunction_v<
-              std::is_lvalue_reference<Args>...,
-              std::negation<std::is_constructible<IValue, Args>>...>,
-          std::nullptr_t> = nullptr>
+      typename = typename enable_if_ivalue_compatible<Args...>::type>
   IValue(const std::tuple<Args...>& t);
   template <
       typename... Args,
-      std::enable_if_t<
-          !std::disjunction_v<
-              std::is_lvalue_reference<Args>...,
-              std::negation<std::is_constructible<IValue, Args>>...>,
-          std::nullptr_t> = nullptr>
+      typename = typename enable_if_ivalue_compatible<Args...>::type>
   IValue(std::tuple<Args...>&& t);
   bool isTuple() const {
     return Tag::Tuple == tag;
@@ -1058,9 +1057,9 @@ struct TORCH_API IValue final {
   // ToOptional: convert a IValue to the Optional obj that accepts both T and
   // None
   template <typename T>
-  std::optional<T> toOptional();
+  std::optional<T> toOptional() &&;
   template <typename T>
-  std::optional<T> toOptional() const;
+  std::optional<T> toOptional() const&;
 
   /// @private [doxygen private]
   /// this is a shallow comparison of two IValues to test the object identity
@@ -1128,9 +1127,10 @@ struct TORCH_API IValue final {
         // Opaque tensors such as the ones constructed by the MKL-DNN backend
         // don't have storage so we just use their TensorImpls.
         // TODO: Find way to expose alias info for opaque tensors.
-        return reinterpret_cast<size_t>(ten.unsafeGetTensorImpl());
+        return std::hash<const void*>()(ten.unsafeGetTensorImpl());
       } else {
-        return reinterpret_cast<size_t>(ten.storage().unsafeGetStorageImpl());
+        return std::hash<const void*>()(
+            ten.storage().unsafeGetStorageImpl());
       }
     }
     size_t operator()(const IValue& val) const {
