@@ -788,6 +788,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str blocks_s = "blocks";
   py::str is_expandable_s = "is_expandable";
   py::str expandable_segment_base_s = "expandable_segment_base";
+  py::str expandable_reservation_size_s = "expandable_reservation_size";
+  py::str expandable_segment_size_s = "expandable_segment_size";
   py::str frames_s = "frames";
   py::str forward_frames_s = "forward_frames";
   py::str time_us_s = "time_us";
@@ -827,6 +829,10 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
     segmentDict[is_expandable_s] = segmentInfo.is_expandable;
     segmentDict[expandable_segment_base_s] =
         segmentInfo.expandable_segment_base;
+    segmentDict[expandable_reservation_size_s] =
+        segmentInfo.expandable_reservation_size;
+    segmentDict[expandable_segment_size_s] =
+        segmentInfo.expandable_segment_size;
     add_frame_key(segmentDict, segmentInfo.context_when_allocated);
 
     auto address = segmentInfo.address;
@@ -1004,6 +1010,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       segmentDict[segment_pool_id] = seg.owner_private_pool_id;
       segmentDict[is_expandable_s] = false;
       segmentDict[expandable_segment_base_s] = size_t(0);
+      segmentDict[expandable_reservation_size_s] = size_t(0);
+      segmentDict[expandable_segment_size_s] = size_t(0);
       add_frame_key(segmentDict, seg.context_when_allocated);
 
       py::dict blockDict;
@@ -1535,10 +1543,19 @@ static void registerCudaPluggableAllocator(PyObject* module) {
          at::cuda::MempoolId_t mempool_id,
          bool is_small,
          size_t address,
+         size_t reserve_size,
+         size_t segment_size,
          const std::vector<std::pair<size_t, size_t>>& mapped_ranges) {
         auto stream = at::cuda::getCurrentCUDAStream(device);
         c10::cuda::CUDACachingAllocator::restoreExpandableSegment(
-            device, stream, mempool_id, is_small, address, mapped_ranges);
+            device,
+            stream,
+            mempool_id,
+            is_small,
+            address,
+            reserve_size,
+            segment_size,
+            mapped_ranges);
       });
 
   m.def(
