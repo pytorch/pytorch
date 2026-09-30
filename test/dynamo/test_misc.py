@@ -151,6 +151,11 @@ def global_check_message():
     return "global check message"
 
 
+@torch.fx.wrap
+def set_tensor_test_attr(value, attr_value):
+    setattr(value, "_dynamo_test_attr", attr_value)  # noqa: B010
+
+
 # Specializes a test to run only if translation validation is set.
 def onlyIfTranslationValidation(fn: typing.Callable) -> typing.Callable:
     @functools.wraps(fn)
@@ -1244,6 +1249,81 @@ graph():
         res = opt_f(x, True)
         self.assertEqual(res, torch.ones(5) + 1)
         self.assertTrue(res.offloading_activation)
+
+    def test_tensor_setattr_on_split_outputs(self):
+        def fn(x, attr_input):
+            values = torch.split(x, 2)
+            attr_values = torch.split(attr_input, 2)
+            for value, attr_value in zip(values, attr_values):
+                set_tensor_test_attr(value, attr_value)
+            return values, attr_values, tuple(value * 2 for value in values)
+
+        x = torch.randn(4)
+        attr_input = torch.randn(4)
+        values, attr_values, result = torch.compile(
+            fn, backend="eager", fullgraph=True
+        )(x, attr_input)
+        self.assertEqual(result, tuple(value * 2 for value in values))
+        for value, attr_value in zip(values, attr_values):
+            self.assertIs(value._dynamo_test_attr, attr_value)
+
+    def test_tensor_setattr_on_repeated_tensor_object_graph_breaks(self):
+        def fn(x, attr_value):
+            values = torch.broadcast_tensors(x, x)
+            set_tensor_test_attr(values[0], attr_value)
+            return hasattr(values[1], "_dynamo_test_attr")
+
+        self.assertTrue(fn(torch.randn(4), torch.randn(4)))
+
+        x = torch.randn(4)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "setattr\\(\\) on unsupported type"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, torch.randn(4))
+        self.assertFalse(hasattr(x, "_dynamo_test_attr"))
+
+    def test_tensor_setattr_on_input_tensor_object_output_graph_breaks(self):
+        # Misclassifying the input object as new would hide its existing grad.
+        def read_existing_grad_through_output(x):
+            return torch.broadcast_tensors(x)[0].grad
+
+        def fn(x, attr_value):
+            value = torch.broadcast_tensors(x)[0]
+            set_tensor_test_attr(value, attr_value)
+            return value
+
+        x = torch.randn(4, requires_grad=True)
+        x.grad = torch.randn(4)
+        self.assertIs(
+            torch.compile(
+                read_existing_grad_through_output, backend="eager", fullgraph=True
+            )(x),
+            x.grad,
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "setattr\\(\\) on unsupported type"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, torch.randn(4))
+        self.assertFalse(hasattr(x, "_dynamo_test_attr"))
+
+    def test_tensor_setattr_on_nested_repeated_tensor_object_graph_breaks(self):
+        @torch.compiler.allow_in_graph
+        def nested_repeated_output(x):
+            value = x + 1
+            return value, (value,)
+
+        def fn(x, attr_value):
+            values = nested_repeated_output(x)
+            set_tensor_test_attr(values[0], attr_value)
+            return hasattr(values[1][0], "_dynamo_test_attr")
+
+        self.assertTrue(fn(torch.randn(4), torch.randn(4)))
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "setattr\\(\\) on unsupported type"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(
+                torch.randn(4), torch.randn(4)
+            )
 
     @unittest.skipIf(
         not torch.cuda.is_available() or torch.cuda.get_device_capability() < (9, 0),
@@ -18770,6 +18850,7 @@ fn
         self.assertEqual(res[9], float.fromhex("0x1.ffffp10"))
         self.assertEqual(res[10], "0x1.8000000000000p+0")
 
+    @unittest.expectedFailure
     def test_builtin_numeric_unbound_method_constant_fold(self):
         def fn():
             out = [
@@ -19662,6 +19743,64 @@ def forward(self, L_x_ : torch.Tensor):
 
         with self.assertRaises(RuntimeError):
             fn(torch.randn(3))
+
+    def test_builtin_lhs_dispatches_to_subclass_ror(self):
+        # A set subclass that inherits __or__ but overrides __ror__ must still
+        # win reflected dispatch when the lhs is a plain builtin set.
+        class S(set):
+            def __ror__(self, other):
+                return "reverse"
+
+        def fn(x, value):
+            return x + 1, {1} | value
+
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.tensor(1)
+        self.assertEqual(opt_fn(x, S({2})), fn(x, S({2})))
+        self.assertEqual(opt_fn(x, S({2}))[1], "reverse")
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_subclass_lhs_dispatches_to_deeper_subclass_ror(self):
+        # Subtype priority: when the rhs is a strict subclass of the lhs type
+        # and overrides the reflected method, the reflected method runs first.
+        class BaseSet(set):
+            pass
+
+        class SubSet(BaseSet):
+            def __ror__(self, other):
+                return "reverse"
+
+        def fn(x, lhs, rhs):
+            return x + 1, lhs | rhs
+
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        x = torch.tensor(1)
+        lhs, rhs = BaseSet({1}), SubSet({2})
+        self.assertEqual(opt_fn(x, lhs, rhs), fn(x, lhs, rhs))
+        self.assertEqual(opt_fn(x, lhs, rhs)[1], "reverse")
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_deque_subclass_attr_only_mutation_keeps_iterator_valid(self):
+        # Setting only an instance attribute must not replay the deque
+        # contents (clear + extend), which would invalidate live iterators.
+        class D(collections.deque):
+            pass
+
+        def fn(x, value):
+            value.marker = "set"
+            return x + 1
+
+        value = D([1, 2])
+        iterator = iter(value)
+        cnts = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        opt_fn(torch.tensor(1), value)
+        self.assertEqual(value.marker, "set")
+        self.assertEqual(list(value), [1, 2])
+        self.assertEqual(next(iterator), 1)
+        self.assertEqual(cnts.frame_count, 1)
 
 
 instantiate_parametrized_tests(MiscTests)

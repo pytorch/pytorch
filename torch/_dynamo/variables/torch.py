@@ -2899,6 +2899,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         stream_var.proxy,
                         stream_var.value,
                         stream_var.user_object_index,
+                        current_device=stream_var.current_device,
                         source=stream_var.source,
                     )
                 return stream_var
@@ -3590,13 +3591,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         f"Expected BaseListVariable from autograd.grad with dict inputs, "
                         f"got {type(result)}"
                     )
-                items: dict[VariableTracker, VariableTracker] = dict(
-                    zip(
-                        inputs_var.items.keys(),
-                        result.items,
-                        strict=True,
-                    )
-                )
+                keys: list[VariableTracker] = [k.vt for k in inputs_var.items]
+                items = dict(zip(keys, result.items, strict=True))
                 return ConstDictVariable(items)
             return result
 
