@@ -39,8 +39,8 @@ class CaptureTracker {
     size_t invalid_capture_free_count{0};
   };
 
-  // Walk from the allocation capture to the root. Allow only the same capture
-  // or an ancestor capture to free the block.
+  // Within one capture tree, allow only the allocation capture or an ancestor
+  // capture to free the block. Unrelated capture trees are independent.
   bool isFreeInAllocationCaptureOrAncestor(
       CaptureId_t allocation_capture_id,
       CaptureId_t free_capture_id) const;
