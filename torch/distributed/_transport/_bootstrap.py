@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import timedelta
 from typing import Any, TYPE_CHECKING
 
@@ -75,9 +74,9 @@ def new_transport_rank(
         raise ValueError("peer_rank must be a nonnegative integer")
     if peer_rank == rank:
         raise ValueError("peer_rank must differ from the local rank")
-    pair = ["transport", backend.lower(), min(rank, peer_rank), max(rank, peer_rank)]
-    attempt = store.add(json.dumps([*pair, "attempts", rank]), 1)
-    store = dist.PrefixStore(json.dumps([*pair, attempt]), store)
+    pair = f"transport/{backend.lower()}/{min(rank, peer_rank)}/{max(rank, peer_rank)}"
+    attempt = store.add(f"{pair}/attempts/{rank}", 1)
+    store = dist.PrefixStore(f"{pair}/{attempt}", store)
     transport = new_transport(backend, device, **kwargs)
     try:
         # Store.set accepts bytes; the stub only declares str.
