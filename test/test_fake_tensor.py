@@ -151,6 +151,95 @@ class FakeTensorTest(TestCase):
             self.assertEqual(z.device, torch.device("cpu"))
             self.assertTrue(is_fake_tensor(z))
 
+    def test_sparse_compressed_tensor_creation(self):
+        def csr():
+            crow = torch.tensor([0, 2, 4])
+            col = torch.tensor([0, 1, 0, 1])
+            return torch.sparse_csr_tensor(crow, col, torch.randn(4), size=(2, 2))
+
+        def csc():
+            ccol = torch.tensor([0, 2, 4])
+            row = torch.tensor([0, 1, 0, 1])
+            return torch.sparse_csc_tensor(ccol, row, torch.randn(4), size=(2, 2))
+
+        def bsr():
+            crow = torch.tensor([0, 1, 2])
+            col = torch.tensor([0, 1])
+            return torch.sparse_bsr_tensor(crow, col, torch.randn(2, 2, 2), size=(4, 4))
+
+        def bsc():
+            ccol = torch.tensor([0, 1, 2])
+            row = torch.tensor([0, 1])
+            return torch.sparse_bsc_tensor(ccol, row, torch.randn(2, 2, 2), size=(4, 4))
+
+        for fn in [csr, csc, bsr, bsc]:
+            ref = fn()
+            ref_values_shape = ref.values().shape
+            with FakeTensorMode():
+                t = fn()
+                self.assertTrue(is_fake_tensor(t))
+                self.assertEqual(t.layout, ref.layout)
+                self.assertEqual(t.shape, ref.shape)
+                self.assertEqual(t.device, ref.device)
+                self.assertEqual(t.values().shape, ref_values_shape)
+                d = t.to_dense()
+                self.assertTrue(is_fake_tensor(d))
+                self.assertEqual(d.shape, ref.shape)
+                self.assertEqual(d.layout, torch.strided)
+
+    def test_sparse_compressed_tensor_creation_pin_memory(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("real pin_memory needs an accelerator")
+        with FakeTensorMode():
+            crow = torch.tensor([0, 2, 4])
+            col = torch.tensor([0, 1, 0, 1])
+            t = torch.sparse_csr_tensor(
+                crow, col, torch.randn(4), size=(2, 2), pin_memory=True
+            )
+            self.assertTrue(is_fake_tensor(t))
+            self.assertEqual(t.layout, torch.sparse_csr)
+            self.assertEqual(t.shape, (2, 2))
+            self.assertEqual(t.device, torch.device("cpu"))
+
+    @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
+    def test_sparse_compressed_tensor_creation_device(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors and not RUN_CUDA:
+            self.skipTest("propagate_real_tensors requires real CUDA tensors")
+        cuda0 = torch.device("cuda:0")
+        with FakeTensorMode():
+            crow = torch.tensor([0, 2, 4])
+            col = torch.tensor([0, 1, 0, 1])
+            v = torch.randn(4)
+            t = torch.sparse_csr_tensor(crow, col, v, size=(2, 2), device="cuda")
+            self.assertEqual(t.device, cuda0)
+            self.assertEqual(t.values().device, cuda0)
+            self.assertEqual(t.crow_indices().device, cuda0)
+            self.assertEqual(t.to_dense().device, cuda0)
+
+    @unittest.skipIf(not torch.backends.cuda.is_built(), "requires CUDA build")
+    def test_sparse_compressed_tensor_creation_device_mismatch(self):
+        # the python ctor moves inputs to the requested device, so only the op trips this
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("runs the real op, which reports its own device errors")
+        error = "need to be on the same device"
+        with FakeTensorMode():
+            crow = torch.tensor([0, 2, 4])
+            col = torch.tensor([0, 1, 0, 1])
+            v = torch.randn(4)
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.ops.aten.sparse_compressed_tensor.comp_plain_value_size(
+                    crow, col, v, [2, 2], layout=torch.sparse_csr, device="cuda"
+                )
+            cuda_args = [crow.to("cuda"), col.to("cuda"), v.to("cuda")]
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.ops.aten.sparse_compressed_tensor.comp_plain_value_size(
+                    *cuda_args, [2, 2], layout=torch.sparse_csr, device="cuda:1"
+                )
+            with self.assertRaisesRegex(RuntimeError, error):
+                torch.ops.aten.sparse_compressed_tensor.comp_plain_value_size(
+                    *cuda_args, [2, 2], layout=torch.sparse_csr
+                )
+
     def test_nansum_nanmean_empty_dim(self):
         # nansum/nanmean reduce over all dimensions when dim=() or dim=[] is
         # passed, matching eager. The meta kernel used to preserve the input
@@ -3672,6 +3761,30 @@ class FakeTensorDispatchCache(TestCase):
             y = torch.randn(4, 3)
             z = x.to(device="cuda")
             self._test_cache_key(fm, x, y, z)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cache_key_indexless_device_pins_current_index(self):
+        # An index-less device argument means "the current one", so it denotes a
+        # different device depending on ambient state. Keying it unresolved lets a
+        # call made while cuda:0 is current serve one made while cuda:1 is, and the
+        # cached output then carries the wrong device. Patching current_device is
+        # enough to see it: the resolution happens in the key, so this needs one GPU.
+        func = aten.zeros.default
+        state = _CacheKeyState()
+        with FakeTensorMode() as fm:
+            args = [[4, 3]]
+            kwargs = {"device": torch.device("cuda")}
+            with patch.object(torch.cuda, "current_device", return_value=0):
+                key_dev0 = fm._cache_key(state, func, args, kwargs)
+            with patch.object(torch.cuda, "current_device", return_value=1):
+                key_dev1 = fm._cache_key(state, func, args, kwargs)
+            # An explicit index is already unambiguous and must be unaffected.
+            explicit = {"device": torch.device("cuda", 0)}
+            with patch.object(torch.cuda, "current_device", return_value=1):
+                key_explicit = fm._cache_key(state, func, args, explicit)
+
+        self.assertNotEqual(key_dev0, key_dev1)
+        self.assertEqual(key_dev0, key_explicit)
 
     def test_cache_key_memory_format(self):
         with FakeTensorMode() as fm:
