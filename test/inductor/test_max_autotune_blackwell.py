@@ -948,7 +948,7 @@ class TestBlackwellTMALoadFusion(TestCase):
                         "max_autotune_gemm_backends": "TRITON",
                         "triton.enable_persistent_tma_matmul": True,
                         "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
-                        "benchmark_epilogue_fusion": True,
+                        "benchmark_template_fusion": True,
                         **patches,
                     }
                 ),
@@ -1105,7 +1105,7 @@ class TestBlackwellTMALoadFusion(TestCase):
             epilogue_subtile=2 if case == "subtile" else 1,
         )
         patches = {
-            "benchmark_epilogue_fusion": case != "no_benchmark",
+            "benchmark_template_fusion": case != "no_benchmark",
             "triton.template_reduction_epilogue": case != "disabled",
             "triton.enable_template_tma_store": case == "two_ctas",
             "cpp_wrapper": case == "cpp_wrapper",
@@ -1394,7 +1394,7 @@ class TestBlackwellTMALoadFusion(TestCase):
                 BlackwellGPUGemmConfig(128, 64, 64, 3, 8),
                 **{
                     "triton.template_reduction_epilogue": True,
-                    "benchmark_epilogue_fusion": True,
+                    "benchmark_template_fusion": True,
                 },
             )
         self.assertTrue(timed and None not in timed, timed)
@@ -1426,7 +1426,7 @@ class TestBlackwellTMALoadFusion(TestCase):
                 tol=1e-5,
                 **{
                     "triton.template_reduction_epilogue": True,
-                    "benchmark_epilogue_fusion": True,
+                    "benchmark_template_fusion": True,
                 },
             )
         deferred = [n for n in benchmarked if not any(x.is_reduction() for x in n)]

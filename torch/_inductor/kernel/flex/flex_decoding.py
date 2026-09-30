@@ -324,6 +324,8 @@ def create_flex_decoding_kernel(*args, **kwargs):
     )
 
     query = ir.ExternKernel.realize_input(query)
+    # Decide the layout before reading strides: the as_strided view below bakes them in.
+    ir.as_storage_and_layout(query, freeze=True)
     stride_b, stride_hq, stride_seq_len_q, stride_qk_head_dim = query.get_stride()
 
     # Reshape query for GQA: [B, Hq, Mq, D] -> [B, Hkv, G, Mq, D]
