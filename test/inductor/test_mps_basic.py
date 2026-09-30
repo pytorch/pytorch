@@ -62,6 +62,13 @@ class MPSBasicTests(TestCase):
     def test_log(self):
         self.common(lambda x: x.log(), (torch.rand(1024),))
 
+    def test_prims_nextafter(self):
+        x = torch.tensor([0.0, 1.0], device=self.device)
+        y = torch.tensor([1.0, 2.0], device=self.device)
+        expected = torch.ops.prims.nextafter.default(x, y)
+        actual = torch.compile(torch.ops.prims.nextafter.default, fullgraph=True)(x, y)
+        self.assertEqual(actual, expected)
+
     def test_acos(self):
         self.common(lambda x: x.acos(), (torch.rand(1024),))
 
