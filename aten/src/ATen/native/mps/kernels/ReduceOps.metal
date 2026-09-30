@@ -174,6 +174,34 @@ struct SumOp {
   }
 };
 
+template <typename TO>
+struct ProdOp {
+  using acc_t = opmath_t<TO>;
+  static inline acc_t identity() {
+    return cast_to<acc_t>(1);
+  }
+  template <typename TI>
+  static inline acc_t load(TI v) {
+    return static_cast<acc_t>(v);
+  }
+  static inline acc_t combine(acc_t a, acc_t b) {
+    return c10::metal::mul(a, b);
+  }
+  static inline acc_t simd_reduce(acc_t v) {
+    return c10::metal::simd_prod(v);
+  }
+  static inline acc_t threadgroup_reduce(
+      threadgroup acc_t* shared,
+      acc_t v,
+      uint tid,
+      uint tptg) {
+    return c10::metal::threadgroup_prod(shared, v, tid, tptg);
+  }
+  static inline TO finalize(acc_t v, float) {
+    return static_cast<TO>(v);
+  }
+};
+
 // =============================================================================
 // value reductions: amin/amax (Op = MinOp/MaxOp on T, identity load) and
 // all/any (Op = MinOp/MaxOp on uchar, predicate load).
@@ -955,6 +983,29 @@ REGISTER_NORM(bfloat, float);
 REGISTER_NORM_L2_COMBINE(float);
 REGISTER_NORM_L2_COMBINE(half);
 REGISTER_NORM_L2_COMBINE(bfloat);
+
+#define REGISTER_PROD(TI, TO) REGISTER_REDUCTION("prod_", TI, TO, ProdOp<TO>)
+
+REGISTER_PROD(float, float);
+REGISTER_PROD(float, half);
+REGISTER_PROD(float, bfloat);
+REGISTER_PROD(half, half);
+REGISTER_PROD(half, float);
+REGISTER_PROD(bfloat, bfloat);
+REGISTER_PROD(bfloat, float);
+REGISTER_PROD(long, long);
+REGISTER_PROD(int, int);
+REGISTER_PROD(int, long);
+REGISTER_PROD(short, short);
+REGISTER_PROD(short, long);
+REGISTER_PROD(char, char);
+REGISTER_PROD(char, long);
+REGISTER_PROD(uchar, uchar);
+REGISTER_PROD(uchar, long);
+REGISTER_PROD(float2, float2);
+REGISTER_PROD(float2, half2);
+REGISTER_PROD(half2, half2);
+REGISTER_PROD(half2, float2);
 
 #define REGISTER_VALUE_REDUCTION_IMPL(TI, TO, NAME, OP, LOAD) \
   REGISTER_REDUCTION(NAME "_", TI, TO, ValueOp<OP, LOAD, TO>)
