@@ -8,14 +8,14 @@ on:
   # NB: GitHub has an upper limit of 10 inputs here
   workflow_dispatch:
     inputs:
-      runner_config:
-        description: "AArch64 runner instance type"
+      runner:
+        description: "AArch64 runner"
         required: true
         type: choice
-        default: m8g
+        default: mt-l-barm64g4-94-344
         options:
-          - m8g
-          - m7g
+          - mt-l-barm64g4-94-344
+          - mt-l-barm64g3-62-226
       training:
         # CPU for training is not typical, but leave the option open here
         description: Run training (off by default)?
@@ -73,7 +73,6 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
-      runner_config: ${{ github.event.inputs.runner_config || 'm8g' }}
 
   linux-jammy-aarch64-py3_11-inductor-build:
     name: linux-jammy-aarch64-py3.11-inductor
@@ -87,45 +86,45 @@ jobs:
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       test-matrix: |
         { include: [
-          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 1, num_shards: 9, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 2, num_shards: 9, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 3, num_shards: 9, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 4, num_shards: 9, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 5, num_shards: 9, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 6, num_shards: 9, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 7, num_shards: 9, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 8, num_shards: 9, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 9, num_shards: 9, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_timm_perf_cpu_aarch64", shard:  1, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_timm_perf_cpu_aarch64", shard:  2, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_timm_perf_cpu_aarch64", shard:  3, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_timm_perf_cpu_aarch64", shard:  4, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_timm_perf_cpu_aarch64", shard:  5, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_timm_perf_cpu_aarch64", shard:  6, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_timm_perf_cpu_aarch64", shard:  7, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_timm_perf_cpu_aarch64", shard:  8, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_timm_perf_cpu_aarch64", shard:  9, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_timm_perf_cpu_aarch64", shard: 10, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_timm_perf_cpu_aarch64", shard: 11, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_timm_perf_cpu_aarch64", shard: 12, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_timm_perf_cpu_aarch64", shard: 13, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_timm_perf_cpu_aarch64", shard: 14, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_timm_perf_cpu_aarch64", shard: 15, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  1, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  2, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  3, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  4, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  5, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  6, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  7, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  8, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  9, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_torchbench_perf_cpu_aarch64", shard: 10, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_torchbench_perf_cpu_aarch64", shard: 11, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_torchbench_perf_cpu_aarch64", shard: 12, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_torchbench_perf_cpu_aarch64", shard: 13, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_torchbench_perf_cpu_aarch64", shard: 14, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
-          { config: "inductor_torchbench_perf_cpu_aarch64", shard: 15, num_shards: 15, runner: "${{ needs.get-label-type.outputs.runner-label }}" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 1, num_shards: 9, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 2, num_shards: 9, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 3, num_shards: 9, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 4, num_shards: 9, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 5, num_shards: 9, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 6, num_shards: 9, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 7, num_shards: 9, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 8, num_shards: 9, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_huggingface_perf_cpu_aarch64", shard: 9, num_shards: 9, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  1, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  2, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  3, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  4, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  5, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  6, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  7, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  8, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard:  9, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard: 10, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard: 11, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard: 12, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard: 13, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard: 14, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_timm_perf_cpu_aarch64", shard: 15, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  1, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  2, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  3, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  4, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  5, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  6, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  7, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  8, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard:  9, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard: 10, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard: 11, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard: 12, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard: 13, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard: 14, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
+          { config: "inductor_torchbench_perf_cpu_aarch64", shard: 15, num_shards: 15, runner: "${{ github.event.inputs.runner || 'mt-l-barm64g4-94-344' }}" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
       build-additional-packages: "vision audio torchao"
