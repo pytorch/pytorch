@@ -954,6 +954,20 @@ def _wait_batch_p2p(work: list[dist.Work]):
         w.wait()
 
 
+def _wait_and_release_fwd_send(
+    stage: _PipelineStageBase,
+    microbatch_index: int,
+    ops: list[dist.P2POp],
+    work_batches: list[list[dist.Work]],
+) -> None:
+    """Wait for a forward send and release its communication and stage references."""
+    for work in work_batches:
+        _wait_batch_p2p(work)
+        work.clear()
+    ops.clear()
+    stage.release_fwd_send_outputs(microbatch_index)
+
+
 class PipelineScheduleSingle(_PipelineSchedule):
     """
     Base class for single-stage schedules.
@@ -1170,7 +1184,9 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
         self._initialize_stage(arg_mbs[0], kwarg_mbs[0], maybe_first_target)
 
         # Delay send waits
-        fwd_sends_to_wait: list[list[dist.Work]] = []
+        pending_fwd_sends: list[
+            tuple[int, list[dist.P2POp], list[list[dist.Work]]]
+        ] = []
 
         # Run microbatches
         for i in range(self._n_microbatches):
@@ -1184,15 +1200,17 @@ class _ScheduleForwardOnly(PipelineScheduleSingle):
 
                 ops = self._stage.get_fwd_send_ops(i)
                 works = _sorted_batch_p2p(ops, desc="fwd_send")
-                fwd_sends_to_wait.extend(works.values())
+                pending_fwd_sends.append((i, ops, list(works.values())))
+                del ops, works
 
             logger.debug("[%s] Forwarded microbatch %s", self._stage.stage_index, i)
 
         # Wait for all forward sends to finish
-        # This should not have performance impact because by the time the first
-        # backward arrives all the forward sends should have been finished.
-        for work in fwd_sends_to_wait:
-            _wait_batch_p2p(work)
+        for microbatch_index, send_ops, work_batches in pending_fwd_sends:
+            _wait_and_release_fwd_send(
+                self._stage, microbatch_index, send_ops, work_batches
+            )
+        pending_fwd_sends.clear()
 
 
 class ScheduleGPipe(PipelineScheduleSingle):
@@ -1225,7 +1243,9 @@ class ScheduleGPipe(PipelineScheduleSingle):
         )
 
         # Delay send waits
-        fwd_sends_to_wait: list[list[dist.Work]] = []
+        fwd_sends_to_wait: list[
+            tuple[int, list[dist.P2POp], list[list[dist.Work]]]
+        ] = []
 
         # Run microbatches
         for i in range(self._n_microbatches):
@@ -1241,17 +1261,22 @@ class ScheduleGPipe(PipelineScheduleSingle):
 
                 ops = self._stage.get_fwd_send_ops(i)
                 works = _sorted_batch_p2p(ops, desc="fwd_send")
-                fwd_sends_to_wait.extend(works.values())
+                fwd_sends_to_wait.append((i, ops, list(works.values())))
+                del ops, works
 
             logger.debug("[%s] Forwarded microbatch %s", self._stage.stage_index, i)
 
             self._maybe_compute_loss(self._stage, output, target_mbs, i, loss_kwargs)
+            del output
 
         # Wait for all forward sends to finish
         # This should not have performance impact because by the time the first
         # backward arrives all the forward sends should have been finished.
-        for work in fwd_sends_to_wait:
-            _wait_batch_p2p(work)
+        for microbatch_index, send_ops, work_batches in fwd_sends_to_wait:
+            _wait_and_release_fwd_send(
+                self._stage, microbatch_index, send_ops, work_batches
+            )
+        fwd_sends_to_wait.clear()
 
         # Run backward
         # Delay send waits
@@ -1408,7 +1433,13 @@ or equal to the number of stages ({self._num_stages})."
             # finished, otherwise, we are heavily communication bound, in which
             # case it doesn't create a lot of benefit to compute next chunk
             # eagerly either)
-            _wait_batch_p2p(send_work)
+            if fwd_mb_index > 0:
+                _wait_and_release_fwd_send(
+                    self._stage,
+                    fwd_mb_index - 1,
+                    fwd_sends,
+                    [send_work],
+                )
 
             # Send activations
             fwd_sends = self._stage.get_fwd_send_ops(fwd_mb_index)
@@ -1422,6 +1453,7 @@ or equal to the number of stages ({self._num_stages})."
             self._maybe_compute_loss(
                 self._stage, output, target_mbs, fwd_mb_index, loss_kwargs
             )
+            del output
             fwd_mb_index += 1
 
         # Now we should have send ops left over, to be fused with first 1B of 1B1F phase below.
@@ -1432,7 +1464,14 @@ or equal to the number of stages ({self._num_stages})."
             bwd_recvs = self._stage.get_bwd_recv_ops(bwd_mb_index)
 
             # Now, we need to fire the fwd_sends and bwd_recvs together
-            _wait_batch_p2p(_batch_p2p(fwd_sends + bwd_recvs, desc="fwd_send_bwd_recv"))
+            send_work = _batch_p2p(fwd_sends + bwd_recvs, desc="fwd_send_bwd_recv")
+            _wait_and_release_fwd_send(
+                self._stage,
+                fwd_mb_index - 1,
+                fwd_sends,
+                [send_work],
+            )
+            bwd_recvs.clear()
 
             # Backward one chunk
             loss = self._maybe_get_loss(self._stage, bwd_mb_index)
@@ -1468,6 +1507,7 @@ or equal to the number of stages ({self._num_stages})."
             self._maybe_compute_loss(
                 self._stage, output, target_mbs, fwd_mb_index, loss_kwargs
             )
+            del output
 
             # Get the fwd send ops, but don't fire, leave it for the next iter (wrap-around)
             fwd_sends = self._stage.get_fwd_send_ops(fwd_mb_index)
@@ -2516,6 +2556,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
             try:
                 ops: list[dist.P2POp] = []
                 recv_requests: list[tuple[_PipelineStageBase, bool, int]] = []
+                fwd_send_to_release: tuple[_PipelineStageBase, int] | None = None
                 if action is not None:
                     computation_type = action.computation_type
                     mb_index = action.microbatch_index
@@ -2537,6 +2578,8 @@ class PipelineScheduleMulti(_PipelineSchedule):
                             stage, output, target_mbs, mb_index, loss_kwargs
                         )
                         ops.extend(stage.get_fwd_send_ops(mb_index))
+                        del output
+                        fwd_send_to_release = (stage, mb_index)
                     elif computation_type == _ComputationType.FULL_BACKWARD:
                         # perform backward computation
                         stage = stage_index_to_stage[stage_index]
@@ -2653,7 +2696,13 @@ class PipelineScheduleMulti(_PipelineSchedule):
 
                 # do the communication
                 ops.extend(_build_recv_ops(recv_requests))
-                _wait_batch_p2p(_batch_p2p(ops))
+                work = _batch_p2p(ops)
+                _wait_batch_p2p(work)
+                work.clear()
+                ops.clear()
+                if fwd_send_to_release is not None:
+                    stage, mb_index = fwd_send_to_release
+                    stage.release_fwd_send_outputs(mb_index)
             except Exception as e:
                 logger.error(
                     "[Rank %s] pipeline schedule %s caught the following exception '%s' \
@@ -2996,8 +3045,19 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 "Must call _prepare_schedule_with_comms() before calling _step_microbatches()"
             )
 
-        # send ops should be waited on before step() exists, mainly for hygiene
-        send_ops: list[list[dist.Work]] = []
+        # Send ops should be waited on before step() exits, mainly for hygiene.
+        pending_fwd_sends: dict[
+            tuple[int, int],
+            tuple[_PipelineStageBase, list[dist.P2POp], list[list[dist.Work]]],
+        ] = {}
+        pending_bwd_sends: list[tuple[list[dist.P2POp], list[dist.Work]]] = []
+
+        def _wait_fwd_send(stage_idx: int, mb_index: int) -> None:
+            pending = pending_fwd_sends.pop((stage_idx, mb_index), None)
+            if pending is None:
+                return
+            stage, ops, work_batches = pending
+            _wait_and_release_fwd_send(stage, mb_index, ops, work_batches)
 
         def _perform_action(action: _Action) -> None:
             comp_type = action.computation_type
@@ -3028,9 +3088,18 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             # However, I was wondering if I should avoid calling batched operators at all in the case that there is
             # only one operator per batch.  I could iterate through the 'fwd_send_ops' one by one and run them.
             if comp_type == SEND_F:
-                send_ops.append(_batch_p2p(stage.get_fwd_send_ops(mb_index)))
+                key = (stage_idx, mb_index)
+                if key in pending_fwd_sends:
+                    raise AssertionError(f"Duplicate forward send for {key}")
+                ops = stage.get_fwd_send_ops(mb_index)
+                pending_fwd_sends[key] = (
+                    stage,
+                    ops,
+                    [_batch_p2p(ops)],
+                )
             elif comp_type == SEND_B:
-                send_ops.append(_batch_p2p(stage.get_bwd_send_ops(mb_index)))
+                ops = stage.get_bwd_send_ops(mb_index)
+                pending_bwd_sends.append((ops, _batch_p2p(ops)))
             elif comp_type == RECV_F:
                 if (stage_idx, mb_index) in self.fwd_recv_ops:
                     raise AssertionError(
@@ -3222,11 +3291,11 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 ):
                     if action.computation_type in self._comp_type_to_function_map:
                         ctx = _PipelineContext(
-                            self,
-                            arg_mbs,
-                            kwarg_mbs,
-                            target_mbs,
-                            losses,
+                            schedule_ref=self,
+                            arg_mbs=arg_mbs,
+                            kwarg_mbs=kwarg_mbs,
+                            target_mbs=target_mbs,
+                            losses=losses,
                         )
                         self._comp_type_to_function_map[action.computation_type](
                             action, ctx
@@ -3252,9 +3321,13 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 )
                 raise e
 
-        # Mostly these operations should have finished long ago, but there isn't an obvious time when to wait for them
-        while send_ops:
-            _wait_batch_p2p(send_ops.pop())
+        for stage_idx, microbatch_index in list(pending_fwd_sends):
+            _wait_fwd_send(stage_idx, microbatch_index)
+        while pending_bwd_sends:
+            ops, work = pending_bwd_sends.pop()
+            _wait_batch_p2p(work)
+            work.clear()
+            ops.clear()
 
         if len(self.unshard_ops) != 0:
             raise AssertionError("Unused unshard operations")
