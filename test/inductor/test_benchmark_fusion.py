@@ -252,7 +252,7 @@ if HAS_GPU_AND_TRITON:
                     {
                         "benchmark_kernel": True,
                         "benchmark_fusion": True,
-                        "benchmark_epilogue_fusion": True,
+                        "benchmark_template_fusion": True,
                     }
                 )
             )
@@ -284,7 +284,7 @@ if HAS_GPU_AND_TRITON:
                 res, code = run_and_get_code(foo_c, m, inp)
 
             torch._dynamo.reset()
-            with config.patch(benchmark_epilogue_fusion=False):
+            with config.patch(benchmark_template_fusion=False):
                 foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
                 with torch.no_grad():
                     res2, code2 = run_and_get_code(foo_c, m, inp)
@@ -296,7 +296,7 @@ if HAS_GPU_AND_TRITON:
         @config.patch(
             {
                 "max_autotune_gemm_backends": "TRITON",
-                "benchmark_epilogue_fusion": False,
+                "benchmark_template_fusion": False,
             }
         )
         def test_equivalent_template_code(self):
