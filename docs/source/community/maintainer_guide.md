@@ -9,12 +9,14 @@ The contributor side of this process, including which parts of it are still bein
 [Issue and PR Workflow](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#issue-and-pr-workflow).
 Parts of this process that are not automated yet are marked with **TEMPORARY:** below.
 
-## Expectations of Module Maintainers
+## tl;dr: Expectations of Module Maintainers
 
 - Ensure owned modules follow the PyTorch [design principles](design.md)
-- Fully triage issues within 1 week of creation
+- Fully triage issues within 1 week of creation. Example triage queue for autograd module [here](https://github.com/pytorch/pytorch/issues?q=is%3Aissue%20is%3Aopen%20label%3Atriaged%20label%3A%22module%3A%20autograd%22%20-label%3A%22needs%20reproduction%22%20-label%3A%22needs%20research%22%20-label%3A%22needs%20design%22%20-label%3Aactionable%20-label%3A%22won%27t%20fix%22)
+  (update the query to the specific module you're interested in).
 - Ensure PRs assigned to your module or to you are moved through the review process (pre-review, review, or closed
-  while further discussion happens on the issue)
+  while further discussion happens on the issue). Example pre-review queue [here](https://github.com/pytorch/pytorch/pulls?q=is%3Apr%20is%3Aopen%20-is%3Adraft%20review-requested%3A%40me%20label%3Atriaged%20-label%3A%22in%20progress%22%20-label%3A%22ready%20for%20review%22) and review queue
+  [here](https://github.com/pytorch/pytorch/pulls?q=is%3Apr%20is%3Aopen%20review-requested%3A%40me%20label%3A%22ready%20for%20review%22).
 - Provide guidance, reviews, as well as assistance in closing high priority issues and pull requests
 - Ensure proper documentation related to newly added APIs for owned modules
 - Respond within 1 week for cross module issues from other module maintainers
@@ -68,8 +70,9 @@ re-evaluation. They comment on the issue and mention the maintainer who applied 
 Pre-review is a quick review of the direction of the PR, to ensure it is worth the author's time to get it through
 automated review and finalize it.
 
-**TEMPORARY:** the pre-review automation is not live yet. A maintainer with write access adds the `in progress` label
-once they accept the pre-review.
+To accept the pre-review, react with a thumbs-up to the PR description or comment `@pytorchbot pre-review accept`.
+A team assigned as reviewer accepts once any of its members other than the author does. Once every assigned reviewer
+accepts, the bot adds the `in progress` label.
 
 - It is the responsibility of the author to provide all the information needed for a quick assessment.
 - As the maintainer, you should be able to do a pre-review in under a minute. It is always ok to reject a PR at

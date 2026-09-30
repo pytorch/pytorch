@@ -93,7 +93,6 @@ This workflow is being rolled out. The following parts are still in progress:
 | The `no automated triage` and `no automated review` labels | The labels exist, but the bots do not act on them yet. |
 | Requesting re-evaluation of an issue by removing its label. This needs `@pytorchbot` to support removing labels: today `@pytorchbot label` can only add labels, for any label, and there is no command to remove one. | Comment on the issue with the new information and mention the maintainer who applied the label. |
 | PR triage: a bot assigns one reviewer per module and adds `triaged` | Reviewers are requested through [CODEOWNERS](CODEOWNERS) and the `module: *` labels. |
-| Pre-review: the assigned reviewers accept the PR, then a bot adds `in progress` | A maintainer with write access adds `in progress` once they agree with the direction of the PR. |
 | Automated review | It runs on PRs labeled `in progress` and replaces that label with `ready for review` when it passes, but it does not post its findings on the PR yet. Run the [pr-review skill](.claude/skills/pr-review/SKILL.md) locally to see what it checks. A "Request changes" review does not move the PR back to `in progress` automatically yet. |
 | [GreenLight](#greenlight) | It only approves PRs for a small set of authors. |
 | Bots closing issues and PRs with a comment giving the reason | Maintainers close issues and PRs that do not meet the pre-conditions manually, with a reason. The stale bot closes PRs without a comment. |
@@ -102,11 +101,11 @@ This workflow is being rolled out. The following parts are still in progress:
 
 ```mermaid
 flowchart LR
-    new([New issue]) --> ai[AI triage]
-    ai -- success --> triaged(["Triaged<br/>triaged + module: * / oncall: * labels"])
-    ai -- "fails, or 'no automated triage'" --> manual[Manual triage] --> triaged
-    triaged --> mtriage["Module-level triage<br/>any module maintainer"]
-    mtriage --> full(["Fully triaged<br/>needs reproduction / needs research /<br/>needs design / actionable / won't fix"])
+    new[New issue] --> ai(AI triage)
+    ai -- success --> triaged["Triaged<br/>#quot;triaged#quot; + #quot;module: *#quot; / #quot;oncall: *#quot; labels"]
+    ai -- "fails, or #quot;no automated triage#quot;" --> manual(Manual triage) --> triaged
+    triaged --> mtriage("Module-level triage<br/>any module maintainer")
+    mtriage --> full["Fully triaged<br/>#quot;needs reproduction#quot; / #quot;needs research#quot; /<br/>#quot;needs design#quot; / #quot;actionable#quot; / #quot;won't fix#quot;"]
     full -- "remove the label to request<br/>re-evaluation" --> triaged
     classDef state fill:#f3f4f6,stroke:#6b7280,color:#000
     classDef aiproc fill:#dbeafe,stroke:#2563eb,color:#000
@@ -116,7 +115,7 @@ flowchart LR
     class manual,mtriage humanproc
 ```
 
-Rounded boxes are states. Rectangles are processes that move an item between states: blue for AI-based processes and orange for human-based ones.
+Rectangles are states. Rounded boxes are processes that move an item between states: blue for AI-based processes and orange for human-based ones.
 
 1. **Triage**: a bot triages every new issue. A maintainer does it instead if the bot fails or the issue has the `no automated triage` label. A triaged issue has the `triaged` label and one or more `module: *` or `oncall: *` labels.
 2. **Module-level triage**: a maintainer of one of these modules closes the issue or adds one of the labels below, at which point the issue is fully triaged.
@@ -144,23 +143,23 @@ Two other labels are orthogonal to the states above:
 
 ```mermaid
 flowchart TD
-    draft([Draft PR]) -- author marks ready --> ready([Ready PR])
-    ready --> ai["AI triage<br/>CODEOWNERS, module: *, linked issue"]
-    ai -- fails pre-conditions --> closed([Closed])
-    ai -- success --> triaged(["Triaged PR<br/>triaged, one reviewer per module"])
-    ai -- "fails, or 'no automated triage'" --> htriage[Manual triage] --> triaged
-    triaged --> pre[Pre-review]
+    draft[Draft PR] -- author marks ready --> ready[Ready PR]
+    ready --> ai("AI triage<br/>CODEOWNERS, #quot;module: *#quot;, linked issue")
+    ai -- fails pre-conditions --> closed[Closed]
+    ai -- success --> triaged["Triaged PR<br/>#quot;triaged#quot;, one reviewer per module"]
+    ai -- "fails, or #quot;no automated triage#quot;" --> htriage(Manual triage) --> triaged
+    triaged --> pre(Pre-review)
     pre -- any assigned reviewer rejects --> closed
     pre -- needs clarification --> draft
-    pre -- every assigned reviewer accepts --> dev(["In progress<br/>in progress"])
-    dev --> auto[Automated review] -- passes --> rfr(["Ready for review<br/>ready for review"])
+    pre -- every assigned reviewer accepts --> dev["In development by author<br/>#quot;in progress#quot;"]
+    dev --> auto(Automated review) -- passes --> rfr["Ready for review by maintainer<br/>#quot;ready for review#quot;"]
     auto -- changes needed --> dev
-    dev -- "'no automated review'" --> rfr
-    rfr --> review[Human review]
+    dev -- "#quot;no automated review#quot;" --> rfr
+    rfr --> review(Human review)
     review -- needs significant changes --> dev
-    review -- any reviewer accepts --> accepted([Accepted])
-    ready --> gl["GreenLight<br/>merge_rules.yaml authors only"] --> accepted
-    accepted -- "@pytorchbot merge" --> merged([Merged])
+    review -- any reviewer accepts --> accepted[Accepted]
+    ready --> gl("GreenLight<br/>merge_rules.yaml authors only") --> accepted
+    accepted -- "@pytorchbot merge" --> merged[Merged]
     classDef state fill:#f3f4f6,stroke:#6b7280,color:#000
     classDef aiproc fill:#dbeafe,stroke:#2563eb,color:#000
     classDef humanproc fill:#fef3c7,stroke:#d97706,color:#000
@@ -169,13 +168,13 @@ flowchart TD
     class htriage,pre,review humanproc
 ```
 
-Rounded boxes are states. Rectangles are processes that move an item between states: blue for AI-based processes and orange for human-based ones.
+Rectangles are states. Rounded boxes are processes that move an item between states: blue for AI-based processes and orange for human-based ones.
 
 | Stage | Label | Who acts next | How to move on |
 |---|---|---|---|
 | Draft | (GitHub draft) | Author | Mark the PR as ready for review once the description and code are ready to be looked at. |
 | Ready | | Triage bot, or a maintainer if the bot fails or the PR has `no automated triage` | PRs that do not meet the pre-conditions below are closed. Otherwise one reviewer per module or team is assigned and `triaged` is added. |
-| Pre-review | `triaged` | Assigned reviewers | Every assigned reviewer must accept the pre-review for the PR to move to `in progress`. If any rejects it, it is closed or moved back to draft. |
+| Pre-review | `triaged` | Assigned reviewers | Every assigned reviewer must accept the pre-review, by reacting with a thumbs-up to the PR description or commenting `@pytorchbot pre-review accept`, for the PR to move to `in progress`. If any rejects it, it is closed or moved back to draft. |
 | In progress | `in progress` | Author | Iterate until the automated review passes; `in progress` is then replaced by `ready for review`. With the `no automated review` label, this step is skipped. |
 | Ready for review | `ready for review` | Assigned reviewers | One of the assigned reviewers does the full review. If significant changes are needed, they request changes and the PR goes back to `in progress`. |
 | Accepted | (approved review) | Author | Fix all CI failures and comment `@pytorchbot merge`. |
