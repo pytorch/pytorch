@@ -399,7 +399,9 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
     appears in one rename, and the directory is marked as holding the bundle
     only once every entry is in place. The directory itself is kept, so it may
     be a mount point and keeps its owner and permissions. It must be empty or
-    hold only this bundle, so each bundle needs its own directory.
+    hold only this bundle, so each bundle needs its own directory. An import
+    killed partway leaves its staging directory, which is ignored and can be
+    removed once no import is running.
     """
     root = runtime_cache_root()
     try:
@@ -476,4 +478,4 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
         (staging / _READY).write_text(digest)
         os.replace(staging / _READY, marker)
     finally:
-        shutil.rmtree(staging)
+        shutil.rmtree(staging, ignore_errors=True)
