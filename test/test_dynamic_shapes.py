@@ -272,6 +272,20 @@ def create_symfloat(shape_env, f: float) -> SymFloat:
 class TestPySymInt(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
+    def test_symint_array_ref_error_message(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 3, duck=False)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "SymIntArrayRef expected to contain only concrete integers.*"
+            "Found symbolic SymInt at index 0: s[0-9]+ in SymIntArrayRef "
+            r"\[s[0-9]+, 5, 10\].*"
+            "FakeTensorMode.*SymInt support.*Python dispatcher.*"
+            "specialize or guard",
+        ):
+            torch.empty((s0, 5, 10))
+
     def test_arith_ops(self):
         shape_env = ShapeEnv()
         symints = []
@@ -2689,6 +2703,34 @@ class TestFloorDiv(TestCase):
             else:
                 self.assertEqual(op.is_integer, None)
                 self.assertTrue(op.is_real)
+
+
+class TestSympyMod(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_sympy_mod_plain_int_operands(self):
+        # Regression test: when neither operand is symbolic, callers such as
+        # the inductor lowering for operator.mod pass plain Python ints
+        # instead of sympy objects. This used to crash with
+        # AttributeError: 'int' object has no attribute 'is_nonnegative'.
+        self.assertEqual(sym_node._sympy_mod(20, 8), 4)
+
+    def test_sympy_mod_plain_int_operands_negative(self):
+        # Mixed-sign operands must match Python's modulo semantics (result
+        # takes the sign of the divisor), which routes through PythonMod
+        # rather than sympy's Mod.
+        self.assertEqual(sym_node._sympy_mod(-7, 3), -7 % 3)
+        self.assertEqual(sym_node._sympy_mod(7, -3), 7 % -3)
+
+    def test_sympy_mod_mixed_operands(self):
+        # Only one operand being a plain int must still be normalized.
+        self.assertEqual(sym_node._sympy_mod(20, sympy.Integer(8)), 4)
+        self.assertEqual(sym_node._sympy_mod(sympy.Integer(20), 8), 4)
+
+    def test_sympy_mod_sympy_operands(self):
+        # Pre-existing behavior for actual sympy.Basic operands must be
+        # unaffected by the plain-scalar normalization above.
+        self.assertEqual(sym_node._sympy_mod(sympy.Integer(20), sympy.Integer(8)), 4)
 
 
 class TestDimConstraints(TestCase):
@@ -5729,6 +5771,34 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         self.assertEqual(cnt.frame_count, 1)
         run(torch.rand(2, 10), torch.rand(2, 10))
         self.assertEqual(cnt.frame_count, 2)
+
+    @skipIfTorchDynamo()
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_backed_size_oblivious_expand_outplace_hint_one(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        operations = (
+            ("binary", lambda lhs, rhs: (torch.logical_and(lhs, rhs),)),
+            ("tensor_list", torch.broadcast_tensors),
+        )
+        for name, operation in operations:
+            with self.subTest(name=name):
+                shape_env = ShapeEnv(specialize_zero_one=False)
+                s0 = create_symint(
+                    shape_env,
+                    1,
+                    duck=False,
+                    do_not_specialize_zero_one=True,
+                )
+                with FakeTensorMode(shape_env=shape_env):
+                    lhs = torch.empty((s0, 8), dtype=torch.bool)
+                    rhs = torch.empty((1, 8), dtype=torch.bool)
+                    outputs = operation(lhs, rhs)
+
+                for output in outputs:
+                    self.assertIsInstance(output.shape[0], torch.SymInt)
+                    self.assertEqual(output.shape[0].node.expr, s0.node.expr)
+                self.assertEqual(shape_env.guards, [])
 
     @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
     def test_unbacked_view_extra(self):

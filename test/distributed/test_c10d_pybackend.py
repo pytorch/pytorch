@@ -514,14 +514,39 @@ class TestPyBackend(TestCase):
             [call[0] for call in backend.calls], [_CONFIG_COLLECTIVES[name]]
         )
 
+    def test_collop_rejects_config(self) -> None:
+        from torch.distributed.distributed_c10d import _CollOp
+
+        tensor = torch.ones(2)
+        for kwargs in ({}, {"config": None}):
+            op = _CollOp(dist.all_reduce, tensor, **kwargs)
+            self.assertIs(op.tensor, tensor)
+        for config in (object(), {}, 0, False):
+            with self.assertRaisesRegex(NotImplementedError, "with coalescing"):
+                _CollOp(dist.all_reduce, tensor, config=config)
+
+    def test_uncaptured_config_in_coalescing_scope(self) -> None:
+        backend = RecordingBackend(0, 1, "nccl2")
+        group = create_process_group(backend)
+        other_backend = RecordingBackend(0, 1, "nccl2")
+        other = create_process_group(other_backend)
+        config = object()
+        with _coalescing_manager(group):
+            dist.all_reduce(torch.ones(2), group=other, config=config)
+            dist.broadcast(torch.ones(2), group_src=0, group=group, config=config)
+        self.assertEqual([call[0] for call in backend.calls], ["broadcast"])
+        self.assertIs(backend.calls[0][-1].config, config)
+        self.assertIs(other_backend.calls[0][-1].config, config)
+        self.assertNotIn(group, _world.pg_coalesce_state)
+
     def test_collective_config_time_estimator_cleanup(self) -> None:
         backend = RecordingBackend(0, 1, "nccl2")
         group = create_process_group(backend)
         tensor = torch.zeros(2)
-        with self.assertRaisesRegex(NotImplementedError, "during time estimation"):
+        with self.assertRaisesRegex(RuntimeError, "body failed"):
             with _time_estimator(group, torch.device("cpu")):
                 self.assertTrue(backend.time_estimate_started)
-                dist.all_reduce(tensor, group=group, config=object())
+                raise RuntimeError("body failed")
         self.assertFalse(backend.time_estimate_started)
         self.assertEqual(backend.calls, [])
         dist.all_reduce(tensor, group=group, config=object())
