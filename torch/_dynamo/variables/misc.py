@@ -49,6 +49,8 @@ from ..bytecode_transformation import (
 )
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import (
+    handle_observed_exception,
+    ObservedAttributeError,
     raise_observed_exception,
     raise_type_error,
     raise_value_error,
@@ -92,8 +94,13 @@ from .functions import (
     UserFunctionVariable,
     UserMethodVariable,
 )
-from .object_protocol import generic_repr, generic_str, mro_attr_source
-from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
+from .object_protocol import generic_getattr, generic_repr, generic_str, mro_attr_source
+from .user_defined import (
+    call_random_fn,
+    is_data_descriptor,
+    is_standard_setattr,
+    UserDefinedObjectVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -142,8 +149,82 @@ class SuperVariable(VariableTracker):
     ) -> VariableTracker:
         no_keywords(tx, "super", kwargs)
         check_positional(tx, "super", len(args), 1, 2)
-        self.typevar = args[0]
-        self.objvar = args[1] if len(args) == 2 else None
+        typevar = args[0]
+        if not issubclass(typevar.python_type(), type):
+            raise_type_error(
+                tx, f"super() argument 1 must be type, not {typevar.python_type_name()}"
+            )
+        type_arg = typevar.as_python_constant()
+        objvar = args[1] if len(args) == 2 else None
+        if objvar is not None and objvar.is_constant_none():
+            objvar = None
+        if objvar is not None:
+            obj_type = objvar.python_type()
+            obj_is_type = issubclass(obj_type, type)
+            checked_type = objvar.as_python_constant() if obj_is_type else obj_type
+            # supercheck uses subtype checks without metaclass hooks.
+            valid = type.__subclasscheck__(
+                type_arg, checked_type
+            ) or type.__subclasscheck__(type_arg, obj_type)
+            if not valid:
+                try:
+                    if isinstance(objvar, UserDefinedObjectVariable):
+                        class_attr = objvar.lookup_class_mro_attr("__class__")
+                        if objvar._object_has_getattribute:
+                            getattribute = objvar.lookup_class_mro_attr(
+                                "__getattribute__"
+                            )
+                            getter = objvar.resolve_type_attr(
+                                tx, "__getattribute__", getattribute, None
+                            )
+                            classvar = getter.call_function(
+                                tx, [ConstantVariable.create("__class__")], {}
+                            )
+                        elif class_attr is object.__dict__["__class__"]:
+                            classvar = objvar.tp_getattro_impl(tx, "__class__")
+                        else:
+                            attr_source = (
+                                objvar.get_source_by_walking_mro(tx, "__class__")
+                                if objvar.cls_source is not None
+                                else None
+                            )
+                            if is_data_descriptor(class_attr):
+                                classvar = objvar.resolve_data_descriptor(
+                                    tx, "__class__", class_attr, attr_source
+                                )
+                            else:
+                                classvar = objvar.lookup_instance_dict(tx, "__class__")
+                                if classvar is None:
+                                    classvar = objvar.resolve_type_attr(
+                                        tx, "__class__", class_attr, attr_source
+                                    )
+                    else:
+                        classvar = generic_getattr(
+                            tx, objvar, "__class__", ConstantVariable.create(None)
+                        )
+                    class_type = classvar.get_real_python_backed_value()
+                except ObservedAttributeError:
+                    handle_observed_exception(tx)
+                    classvar = objvar.call_getattr_fallback(tx, "__class__")
+                    class_type = (
+                        classvar.get_real_python_backed_value()
+                        if classvar is not None
+                        else None
+                    )
+                valid = isinstance(class_type, type) and type.__subclasscheck__(
+                    type_arg, class_type
+                )
+            if not valid:
+                msg = "super(type, obj): obj must be an instance or subtype of type"
+                if sys.version_info >= (3, 13):
+                    kind = "type" if obj_is_type else "instance of"
+                    msg = (
+                        f"super(type, obj): obj ({kind} {checked_type.__name__[:200]}) "
+                        f"is not an instance or subtype of type ({type_arg.__name__[:200]})."
+                    )
+                raise_type_error(tx, msg)
+        self.typevar = typevar
+        self.objvar = objvar
         return ConstantVariable.create(None)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
