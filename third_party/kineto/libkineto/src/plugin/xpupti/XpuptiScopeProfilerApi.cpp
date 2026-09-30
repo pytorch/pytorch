@@ -20,6 +20,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -52,6 +53,19 @@ std::vector<pti_device_handle_t> selectDeviceHandles(
   return selected;
 }
 
+std::vector<pti_device_properties_t> getMetricsDevices(
+    std::string_view errorHint) {
+  uint32_t deviceCount = 0;
+  XPUPTI_CALL(ptiMetricsGetDevices(nullptr, &deviceCount), errorHint);
+  if (deviceCount == 0) {
+    return {};
+  }
+  std::vector<pti_device_properties_t> devices(deviceCount);
+  XPUPTI_CALL(ptiMetricsGetDevices(devices.data(), &deviceCount), errorHint);
+  devices.resize(deviceCount);
+  return devices;
+}
+
 XpuptiScopeProfilerApi::safe_pti_scope_collection_handle_t::
     safe_pti_scope_collection_handle_t(std::exception_ptr& exceptFromDestructor)
     : exceptFromDestructor_(exceptFromDestructor) {
@@ -68,15 +82,12 @@ XpuptiScopeProfilerApi::safe_pti_scope_collection_handle_t::
 }
 
 void XpuptiScopeProfilerApi::enableScopeProfiler(const Config& cfg) {
-  uint32_t deviceCount = 0;
-  XPUPTI_CALL(ptiMetricsGetDevices(nullptr, &deviceCount));
+  const auto devices = getMetricsDevices();
+  const auto deviceCount = static_cast<uint32_t>(devices.size());
 
   if (deviceCount == 0) {
     KINETO_THROW(std::runtime_error, "No XPU devices available");
   }
-
-  auto devices = std::make_unique<pti_device_properties_t[]>(deviceCount);
-  XPUPTI_CALL(ptiMetricsGetDevices(devices.get(), &deviceCount));
 
   auto devicesHandles = std::make_unique<pti_device_handle_t[]>(deviceCount);
   for (uint32_t i = 0; i < deviceCount; ++i) {
