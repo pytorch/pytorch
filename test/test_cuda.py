@@ -6086,6 +6086,46 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_graph_allocator_explicit_stream_preserves_deferred_free(self):
+        torch.cuda.empty_cache()
+        capture_stream = torch.cuda.Stream()
+        auxiliary_stream = torch.cuda.Stream()
+        allocation_stream = torch.cuda.Stream()
+        g = torch.cuda.CUDAGraph()
+
+        # Warm the unrelated stream's cache to avoid cudaMalloc during capture.
+        raw_ptr = torch.cuda.caching_allocator_alloc(256, stream=allocation_stream)
+        torch.cuda.caching_allocator_delete(raw_ptr)
+
+        with torch.cuda.stream(capture_stream):
+            g.capture_begin()
+            temporary = torch.ones(64, device="cuda")
+            temporary_ptr = temporary.data_ptr()
+            auxiliary_stream.wait_stream(capture_stream)
+            with torch.cuda.stream(auxiliary_stream):
+                output = temporary + 1
+            temporary.record_stream(auxiliary_stream)
+            del temporary
+
+            # This request must not drain frees from the ongoing capture.
+            raw_ptr = torch.cuda.caching_allocator_alloc(256, stream=allocation_stream)
+            self.addCleanup(torch.cuda.caching_allocator_delete, raw_ptr)
+            replacement = torch.full((64,), 3, device="cuda")
+            capture_stream.wait_stream(auxiliary_stream)
+            g.capture_end()
+
+        self.assertNotEqual(temporary_ptr, replacement.data_ptr())
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(output, torch.full_like(output, 2))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     @skipIfRocmVersionLessThan((7, 14))
     @unittest.skipUnless(
         TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
