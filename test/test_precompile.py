@@ -6247,7 +6247,10 @@ class TestPrecompileRuntimeCache(TestCase):
         from torch.compiler import _runtime_cache
 
         no_compilation = torch.compiler.precompile.no_compilation
-        source = 'extern "C" long frozen_cpp_kernel(long x) { return x + 7; }'
+        export = "__declspec(dllexport) " if IS_WINDOWS else ""
+        source = (
+            f'extern "C" {export}long frozen_cpp_kernel(long x) {{ return x + 7; }}'
+        )
         with fresh_cache():
             lib = CppCodeCache.load(source)
             with open(lib._name, "rb") as binary:
@@ -7079,7 +7082,7 @@ class TestPrecompileRuntimeCache(TestCase):
                 + "# payload\n" * 200000
                 + "this is not valid Python ("
             )
-            source.write_text(code)
+            source.write_bytes(code.encode())
             blob = {
                 "format": _CACHE_FORMAT,
                 "version": _CACHE_VERSION,
