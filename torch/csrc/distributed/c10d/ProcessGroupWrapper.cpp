@@ -590,12 +590,24 @@ bool ProcessGroupWrapper::supportsSplitting() const {
   return backend_->supportsSplitting();
 }
 
+bool ProcessGroupWrapper::isInitialized() {
+  return backend_->isInitialized();
+}
+
 bool ProcessGroupWrapper::supportsCoalescing() const {
   return backend_->supportsCoalescing();
 }
 
 bool ProcessGroupWrapper::supportsTimeEstimation() const {
   return backend_->supportsTimeEstimation();
+}
+
+void ProcessGroupWrapper::startTimeEstimate() {
+  backend_->startTimeEstimate();
+}
+
+float ProcessGroupWrapper::endTimeEstimate() {
+  return backend_->endTimeEstimate();
 }
 
 bool ProcessGroupWrapper::supportsShrinking() const {

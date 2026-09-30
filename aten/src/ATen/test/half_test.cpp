@@ -83,6 +83,14 @@ TEST(TestHalf, HalfNumericLimits) {
   ASSERT_NE(limits::signaling_NaN(), limits::signaling_NaN());
 }
 
+TEST(TestBFloat16, BFloat16NumericLimits) {
+  using limits = std::numeric_limits<BFloat16>;
+  ASSERT_EQ(limits::infinity(), std::numeric_limits<float>::infinity());
+  ASSERT_NE(limits::quiet_NaN(), limits::quiet_NaN());
+  ASSERT_NE(limits::signaling_NaN(), limits::signaling_NaN());
+  ASSERT_NE(limits::signaling_NaN(), limits::infinity());
+}
+
 // Check the declared type of members of numeric_limits<Half> matches
 // the declared type of that member on numeric_limits<float>
 
