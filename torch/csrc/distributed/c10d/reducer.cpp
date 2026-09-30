@@ -1634,8 +1634,13 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
   // _foreach_copy_ below. Only safe when grads are the parameters' own .grad
   // tensors, i.e. not under distributed autograd (which manages grads through
   // an rpc context and writes them back per callback).
+#ifdef _WIN32
+  const bool in_rpc_context = false;
+#else
+  const bool in_rpc_context = rpc_context_.context_ptr.load() != nullptr;
+#endif
   const bool batch_copy_out = batched_grad_copy_ && !gradient_as_bucket_view_ &&
-      !optim_in_backward_ && rpc_context_.context_ptr.load() == nullptr;
+      !optim_in_backward_ && !in_rpc_context;
   std::vector<at::Tensor> batched_grad_dsts;
   std::vector<at::Tensor> batched_grad_srcs;
   if (batch_copy_out) {
