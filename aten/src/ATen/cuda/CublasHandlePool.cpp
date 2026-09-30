@@ -244,6 +244,10 @@ struct CaptureWorkspaces {
   std::mutex mutex;
   std::map<std::tuple<c10::CaptureId_t, cublasHandle_t, void*>, CaptureWorkspace>
       map;
+  // The capture each handle is bound to. A thread's capture handle can serve
+  // concurrent captures, so ending one must not unbind it from another's
+  // workspace.
+  std::map<cublasHandle_t, c10::CaptureId_t> bound;
   // The last entry is the largest. Earlier, smaller entries stay alive because
   // kernels captured with them still use them at replay.
   std::map<
@@ -777,6 +781,10 @@ static cublasHandle_t getCaptureCublasHandle(
     workspace_ptr = it->second.workspace.get();
     workspace_size = it->second.size;
   }
+  // Bound under the lock so releaseCaptureCublasWorkspaces on another thread
+  // cannot unbind the handle between the check and the rebind.
+  std::lock_guard<std::mutex> lock(workspaces.mutex);
+  workspaces.bound[handle] = capture_id;
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
   TORCH_CUDABLAS_CHECK(
       cublasSetWorkspace(handle, workspace_ptr, workspace_size));
@@ -967,20 +975,28 @@ void releaseCaptureCublasWorkspaces(c10::CaptureId_t capture_id) {
         ++it;
       }
     }
-  }
-  for (auto& [handle, handle_workspaces] : released) {
-    // A handle kept past the capture must not write into memory the graph owns.
-    const cublasStatus_t status = cublasSetWorkspace(handle, nullptr, 0);
-    if (C10_UNLIKELY(status != CUBLAS_STATUS_SUCCESS)) {
-      // Keep the allocations rather than leave the handle bound to freed
-      // memory. It is bound to whichever stream's workspace it used last.
-      for (auto& workspace : handle_workspaces) {
-        (void)workspace.release_context();
+    for (auto& [handle, handle_workspaces] : released) {
+      // A handle another capture has since bound to its own workspace does not
+      // reference this capture's memory, so only unbind handles still on it.
+      auto bound = workspaces.bound.find(handle);
+      if (bound == workspaces.bound.end() || bound->second != capture_id) {
+        continue;
       }
-      TORCH_WARN_ONCE(
-          "Failed to unbind a capture cuBLAS workspace: ",
-          at::cuda::blas::_cublasGetErrorEnum(status),
-          ". Retaining the workspace to keep the handle binding valid.");
+      workspaces.bound.erase(bound);
+      // A handle kept past the capture must not write into memory the graph
+      // owns.
+      const cublasStatus_t status = cublasSetWorkspace(handle, nullptr, 0);
+      if (C10_UNLIKELY(status != CUBLAS_STATUS_SUCCESS)) {
+        // Keep the allocations rather than leave the handle bound to freed
+        // memory. It is bound to whichever stream's workspace it used last.
+        for (auto& workspace : handle_workspaces) {
+          (void)workspace.release_context();
+        }
+        TORCH_WARN_ONCE(
+            "Failed to unbind a capture cuBLAS workspace: ",
+            at::cuda::blas::_cublasGetErrorEnum(status),
+            ". Retaining the workspace to keep the handle binding valid.");
+      }
     }
   }
 }
