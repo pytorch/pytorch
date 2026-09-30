@@ -5444,6 +5444,12 @@ class TestTritonRuntimeCacheTransport(TestCase):
             consumer = pathlib.Path(tmp, "consumer")
             if consumer_exists:
                 consumer.mkdir()
+                consumer.chmod(0o750)
+                mode = 0o750
+            else:
+                probe = pathlib.Path(tmp, "probe")
+                probe.mkdir()
+                mode = stat.S_IMODE(probe.stat().st_mode)
             # Triton writes group paths with the directory as spelled.
             spelled = f"{tmp}//producer"
             bundle, key, native = self._bundle(spelled)
@@ -5452,6 +5458,7 @@ class TestTritonRuntimeCacheTransport(TestCase):
             with _triton_cache_namespace(consumer):
                 import_runtime_cache(bundle, context=self.CONTEXT)
                 import_runtime_cache(bundle, context=self.CONTEXT)
+                self.assertEqual(stat.S_IMODE(consumer.stat().st_mode), mode)
                 for name in (native, "kernel.cubin", "kernel.autotune.json"):
                     self.assertEqual(
                         (consumer / key / name).read_bytes(),
@@ -5501,57 +5508,90 @@ class TestTritonRuntimeCacheTransport(TestCase):
         "damage",
         (
             "checksum",
+            "truncated",
+            "trailing",
+            "malformed",
             "context",
             "occupied",
+            "extent",
+            "duplicate_file",
+            "duplicate_record",
             "member_path",
             "group_member",
+            "native_suffix",
+            "no_binary",
             "incomplete_group",
         ),
     )
     def test_import_rejects_a_damaged_bundle_without_writing(self, damage):
         error = {
             "checksum": "Corrupt Triton runtime-cache member",
+            "truncated": "Truncated Triton runtime-cache bundle",
+            "trailing": "Unexpected trailing",
+            "malformed": "Malformed Triton runtime-cache bundle",
             "context": "Incompatible Triton runtime-cache ABI",
             "occupied": "does not hold this runtime cache",
+            "extent": "Invalid Triton runtime-cache payload extent",
+            "duplicate_file": "Duplicate Triton runtime-cache member",
+            "duplicate_record": "Duplicate Triton runtime-cache record",
             "member_path": "Invalid Triton runtime-cache member name",
             "group_member": "Invalid Triton runtime-cache member name",
+            "native_suffix": "Invalid Triton runtime-cache native member",
+            "no_binary": "has no binary",
             "incomplete_group": "Incomplete or unreferenced",
         }[damage]
-        from torch.compiler._triton_runtime_cache import import_runtime_cache
+        from torch.compiler._triton_runtime_cache import _MAGIC, import_runtime_cache
+
+        def kernel(header):
+            return next(r for r in header["records"] if r["kind"] == "kernel")
+
+        def rename(header, old, new):
+            for entry in header["records"] + header["files"]:
+                if entry.get("name") == old:
+                    entry["name"] = new
+
+        def shift(header):
+            header["files"][1]["offset"] += 1
+
+        def duplicate_file(header):
+            last = header["files"][-1]
+            header["files"].append(dict(last, offset=last["offset"] + last["size"]))
 
         with tempfile.TemporaryDirectory() as tmp:
-            bundle, _, _ = self._bundle(pathlib.Path(tmp, "producer"))
+            bundle, _, native = self._bundle(pathlib.Path(tmp, "producer"))
             consumer = pathlib.Path(tmp, "consumer")
             consumer.mkdir()
             context = self.CONTEXT
-            if damage == "checksum":
+            edits = {
+                "extent": shift,
+                "duplicate_file": duplicate_file,
+                "duplicate_record": lambda h: h["records"].append(h["records"][-1]),
+                "member_path": lambda h: h["files"][0].update(name="../escape"),
+                "group_member": lambda h: rename(
+                    h, "kernel.autotune.json", "__grp__kernel.autotune.json"
+                ),
+                "native_suffix": lambda h: rename(h, native, "launcher.txt"),
+                "no_binary": lambda h: kernel(h)["members"].remove("kernel.cubin"),
+                "incomplete_group": lambda h: kernel(h)["members"].append("kernel.ptx"),
+            }
+            if damage in edits:
+                header, payload = _bundle_header(bundle)
+                last = header["files"][-1]["offset"]
+                bundle = _replace_bundle_header(bundle, edits[damage])
+                if damage == "duplicate_file":
+                    bundle += payload[last:]
+            elif damage == "checksum":
                 bundle = bundle[:-1] + bytes([bundle[-1] ^ 1])
+            elif damage == "truncated":
+                bundle = bundle[: len(_MAGIC) + 8 + 10]
+            elif damage == "trailing":
+                bundle += b"\0"
+            elif damage == "malformed":
+                bundle = _MAGIC + struct.pack("!Q", 2) + b"[]"
             elif damage == "context":
                 context = {"build": "other"}
-            elif damage == "occupied":
-                (consumer / "partial").write_bytes(b"partial")
-            elif damage == "member_path":
-
-                def edit(header):
-                    header["files"][0]["name"] = "../escape"
-
-                bundle = _replace_bundle_header(bundle, edit)
-            elif damage == "group_member":
-
-                def edit(header):
-                    name = "__grp__kernel.autotune.json"
-                    for entry in header["records"] + header["files"]:
-                        if entry.get("name") == "kernel.autotune.json":
-                            entry["name"] = name
-
-                bundle = _replace_bundle_header(bundle, edit)
             else:
-
-                def edit(header):
-                    kernel = next(r for r in header["records"] if r["kind"] == "kernel")
-                    kernel["members"].append("kernel.ptx")
-
-                bundle = _replace_bundle_header(bundle, edit)
+                (consumer / "partial").write_bytes(b"partial")
             before = sorted(os.listdir(tmp)), sorted(consumer.iterdir())
             with (
                 _triton_cache_namespace(consumer),
@@ -5628,19 +5668,25 @@ class TestTritonRuntimeCacheTransport(TestCase):
             self.assertEqual(patched.call_count, 2)
             self.assertEqual([p for p in os.listdir(tmp) if ".hydrate-" in p], [])
 
-    def test_import_reports_a_failed_rename(self):
+    @parametrize("consumer_exists", (False, True))
+    def test_import_reports_a_failed_rename(self, consumer_exists):
         from torch.compiler._triton_runtime_cache import import_runtime_cache
 
         with tempfile.TemporaryDirectory() as tmp:
             bundle, _, _ = self._bundle(pathlib.Path(tmp, "producer"))
+            consumer = pathlib.Path(tmp, "consumer")
+            if consumer_exists:
+                consumer.mkdir()
             before = sorted(os.listdir(tmp))
             with (
-                _triton_cache_namespace(pathlib.Path(tmp, "consumer")),
+                _triton_cache_namespace(consumer),
                 mock.patch("os.replace", side_effect=PermissionError("read-only")),
                 self.assertRaisesRegex(PermissionError, "read-only"),
             ):
                 import_runtime_cache(bundle, context=self.CONTEXT)
             self.assertEqual(sorted(os.listdir(tmp)), before)
+            if consumer_exists:
+                self.assertEqual(list(consumer.iterdir()), [])
 
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
     def test_export_holds_every_entry_triton_commits(self):
@@ -5832,6 +5878,37 @@ class TestTritonRuntimeCacheTransport(TestCase):
             triton.knobs.cache.manager_class = type("Custom", (FileCacheManager,), {})
             with self.assertRaisesRegex(RuntimeError, "custom cache manager"):
                 export_runtime_cache(context=self.CONTEXT)
+
+    def test_export_of_a_cache_triton_never_created(self):
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp, "triton")
+            with _triton_cache_namespace(root):
+                header, payload = _bundle_header(
+                    export_runtime_cache(context=self.CONTEXT)
+                )
+            self.assertEqual(
+                (header["records"], header["files"], payload), ([], [], b"")
+            )
+            self.assertTrue(root.is_dir())
+            occupied = pathlib.Path(tmp, "file")
+            occupied.write_text("not a directory")
+            with (
+                _triton_cache_namespace(occupied),
+                self.assertRaisesRegex(RuntimeError, "not a directory"),
+            ):
+                export_runtime_cache(context=self.CONTEXT)
+
+    def test_export_records_context_as_json(self):
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp, _triton_cache_namespace(tmp):
+            _write_triton_runtime_entries()
+            header, _ = _bundle_header(export_runtime_cache(context={"cuda": (12, 4)}))
+            self.assertEqual(header["compatibility"]["context"], {"cuda": [12, 4]})
+            with self.assertRaisesRegex(RuntimeError, "JSON-serializable"):
+                export_runtime_cache(context=object())
 
 
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
