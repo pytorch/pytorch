@@ -18,7 +18,7 @@ import threading
 import time
 import traceback
 from collections import defaultdict
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterable
 from contextlib import contextmanager, nullcontext
 from typing import Any
 
@@ -1985,6 +1985,31 @@ def _partition_joint_graph_into_fw_bw(
     if callable(torch._functorch.config.joint_custom_pass):
         # pyrefly: ignore [bad-assignment]
         fx_g = torch._functorch.config.joint_custom_pass(fx_g, joint_inputs)
+
+    # The partitioner must not recompute reads of inputs the forward mutates, and
+    # the graph only shows such a mutation when it is kept in-graph as a copy_.
+    # Stash the placeholder names on meta rather than widening the partition_fn
+    # signature, which custom partitioners also implement. Use inner_meta, not
+    # fw_metadata: its input_info is indexed like the joint graph's placeholders,
+    # with tensor subclasses split into inner tensors, except that the placeholders
+    # start with the effect tokens.
+    _placeholders = fx_g.graph.find_nodes(op="placeholder")
+
+    def _input_names(indices: Iterable[int]) -> list[str]:
+        names = []
+        for i in indices:
+            pos = num_tokens + i
+            if not 0 <= pos < len(_placeholders):
+                raise AssertionError(
+                    f"input position {i} (+{num_tokens} tokens) is outside the "
+                    f"{len(_placeholders)} placeholders of the joint graph"
+                )
+            names.append(_placeholders[pos].name)
+        return names
+
+    fx_g.meta["aot_mutated_input_names"] = _input_names(
+        i for i, info in enumerate(inner_meta.input_info) if info.mutates_data
+    )
 
     fw_module, bw_module = partition_fn(
         fx_g,
