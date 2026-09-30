@@ -3258,6 +3258,7 @@ class SubgraphLowering(GraphLowering):
         while isinstance(root, SubgraphLowering):
             root = root.parent
         root.constants[name] = data
+        root.allocated_constant_name[name] = self.allocated_constant_name[name]
         return name
 
     def init_wrapper_code(
