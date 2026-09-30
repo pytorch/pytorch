@@ -5764,6 +5764,31 @@ class TestTritonRuntimeCacheTransport(TestCase):
                 import_runtime_cache(bundle, context=self.CONTEXT)
             self.assertEqual(list(consumer.iterdir()), [])
 
+    @parametrize("code", ("EPERM", "EIO"))
+    def test_import_without_hard_links(self, code):
+        import hashlib
+
+        from torch.compiler._triton_runtime_cache import import_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, _, _ = self._bundle(pathlib.Path(tmp, "producer"))
+            consumer = pathlib.Path(tmp, "consumer")
+            marker = consumer / ".runtime_cache_bundle"
+            error = OSError(getattr(errno, code), "no link")
+            with (
+                _triton_cache_namespace(consumer),
+                mock.patch("os.link", side_effect=error),
+            ):
+                if code == "EPERM":
+                    import_runtime_cache(bundle, context=self.CONTEXT)
+                    digest = hashlib.sha256(bundle).hexdigest()
+                    self.assertEqual(marker.read_text(), digest)
+                else:
+                    with self.assertRaisesRegex(OSError, "no link"):
+                        import_runtime_cache(bundle, context=self.CONTEXT)
+                    self.assertFalse(marker.exists())
+            self.assertFalse(any(".hydrate-" in p.name for p in consumer.iterdir()))
+
     @parametrize("leftover", ("none", "foreign"))
     def test_import_completes_an_interrupted_import(self, leftover):
         from torch.compiler._triton_runtime_cache import import_runtime_cache
