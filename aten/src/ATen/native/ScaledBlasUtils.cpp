@@ -407,13 +407,13 @@ void validate_scaled_mm_v2_inputs(
     c10::SymInt expected_b_elems;
     // Layout the count belongs to. ROCm accepts two layouts that differ only
     // in padding, so the count alone is ambiguous without naming one.
-    const char* scale_layout = "";
+    [[maybe_unused]] const char* scale_layout = "";
     // The arch/version gate for SWIZZLE_32_8 lives in the kernel, which can
     // query the device, so a request for it on an unsupported arch reaches this
     // size check first whenever the two layouts' counts differ. Name the
     // requirement, in `check_mx_swizzle`'s words, so that case is not
     // misdiagnosed as a plain size mismatch.
-    const char* scale_layout_hint = is_mx_32_8
+    [[maybe_unused]] const char* scale_layout_hint = is_mx_32_8
         ? "; SWIZZLE_32_8 block scales require gfx950 with ROCm 7.13 (MX FP4) or ROCm 7.14 (MX FP8)"
         : "";
     // ROCm and NVIDIA use different blockwise scale shapes; detect at runtime
