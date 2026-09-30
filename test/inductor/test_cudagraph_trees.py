@@ -5341,6 +5341,11 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
         @torch._inductor.config.patch("graph_partition", True)
+        # Keep the single-kernel matmul partition cudagraphable so the test
+        # isolates the eigh skip from the max-autotune partition size threshold.
+        @torch._inductor.config.patch(
+            "triton.max_autotune_cudagraph_min_partition_size", 0
+        )
         @skipIfRocm
         def test_graph_partition_max_autotune_skips_linalg_eigh(self):
             from torch._inductor.utils import is_cudagraph_unsafe_fx_node
