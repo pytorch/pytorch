@@ -168,6 +168,15 @@ class DeviceInterface:
         return None
 
     @staticmethod
+    def get_lookup_architecture(device: torch.types.Device = None) -> str | None:
+        """Stable lookup-table architecture id, or None to leave lookup off.
+
+        The string must stay the same across runs. A product label is not an
+        architecture id. CUDA overrides this with ``gcnArchName``.
+        """
+        return None
+
+    @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> Any:
         raise NotImplementedError
 
@@ -349,6 +358,13 @@ class CudaInterface(DeviceInterface):
     @staticmethod
     def is_available() -> bool:
         return torch.cuda.is_available()
+
+    @staticmethod
+    def get_lookup_architecture(device: torch.types.Device = None) -> str | None:
+        arch = getattr(CudaInterface.get_device_properties(device), "gcnArchName", None)
+        if isinstance(arch, str) and arch:
+            return arch
+        return None
 
     @staticmethod
     def get_compute_capability(device: torch.types.Device = None) -> int | str:
