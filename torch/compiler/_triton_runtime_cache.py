@@ -5,6 +5,11 @@ The bundle holds the entries Triton's ``FileCacheManager`` commits under
 autotuning results. Importing it rebuilds that layout in a fresh cache directory
 before the first kernel launch, so ``@triton.jit`` and ``@triton.autotune``
 kernels hit the cache instead of compiling or benchmarking.
+
+The header does not record the GPU target. Triton's kernel and autotuning keys
+hash it, so on another target the entries are never read and those kernels
+compile on first use. Checking the target on import would start the GPU runtime
+before the application does.
 """
 
 from __future__ import annotations
@@ -328,10 +333,35 @@ def _decode(
         if (key, name) in record_names:
             raise RuntimeError(f"Duplicate Triton runtime-cache record: {key}/{name}")
         record_names.add((key, name))
-        references.update((key, _member_name(member)) for member in members)
+        for member in members:
+            # Import writes group files after members, so one would be clobbered.
+            if _member_name(member).startswith("__grp__"):
+                raise RuntimeError(
+                    f"Invalid Triton runtime-cache member name: {member!r}"
+                )
+            references.add((key, member))
     if references != payloads.keys():
         raise RuntimeError("Incomplete or unreferenced Triton runtime-cache payload")
     return records, payloads
+
+
+def _group_matches(path: Path, root: Path, record: dict[str, Any]) -> bool:
+    if path.is_symlink() or not path.is_file():
+        return False
+    group = _read_json(path, path.read_bytes())
+    children = group.get("child_paths") if isinstance(group, dict) else None
+    expected = {name: root / record["key"] / name for name in record["members"]}
+    # Triton records paths under knobs.cache.dir, which may spell the same
+    # directory differently.
+    return (
+        isinstance(children, dict)
+        and children.keys() == expected.keys()
+        and all(
+            isinstance(child, str)
+            and os.path.normpath(child) == os.path.normpath(expected[name])
+            for name, child in children.items()
+        )
+    )
 
 
 def _group_contents(root: Path, record: dict[str, Any]) -> str:
@@ -378,12 +408,7 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
         for record in records:
             if record["kind"] == "kernel":
                 path = root / record["key"] / ("__grp__" + record["group"])
-                if (
-                    path.is_symlink()
-                    or not path.is_file()
-                    or _read_json(path, path.read_bytes())
-                    != json.loads(_group_contents(root, record))
-                ):
+                if not _group_matches(path, root, record):
                     raise RuntimeError(
                         "Incomplete or incompatible hydrated Triton cache group: "
                         f"{path}"
@@ -411,6 +436,8 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
                 root.rmdir()
                 os.replace(staging, root)
             if staging.exists():
+                if not root.is_dir() or not any(root.iterdir()):
+                    raise
                 # Another process hydrated the directory first.
                 validate_ready()
     finally:

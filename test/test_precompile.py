@@ -5433,7 +5433,8 @@ class TestTritonRuntimeCacheTransport(TestCase):
             key, native = _write_triton_runtime_entries()
             return export_runtime_cache(context=self.CONTEXT, **kwargs), key, native
 
-    def test_roundtrip_hydrates_a_fresh_cache(self):
+    @parametrize("consumer_exists", (False, True))
+    def test_roundtrip_hydrates_a_fresh_cache(self, consumer_exists):
         from triton.runtime.cache import get_cache_manager
 
         from torch.compiler._triton_runtime_cache import import_runtime_cache
@@ -5441,8 +5442,12 @@ class TestTritonRuntimeCacheTransport(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             producer = pathlib.Path(tmp, "producer")
             consumer = pathlib.Path(tmp, "consumer")
-            bundle, key, native = self._bundle(producer)
-            with _triton_cache_namespace(producer):
+            if consumer_exists:
+                consumer.mkdir()
+            # Triton writes group paths with the directory as spelled.
+            spelled = f"{tmp}//producer"
+            bundle, key, native = self._bundle(spelled)
+            with _triton_cache_namespace(spelled):
                 import_runtime_cache(bundle, context=self.CONTEXT)
             with _triton_cache_namespace(consumer):
                 import_runtime_cache(bundle, context=self.CONTEXT)
@@ -5494,7 +5499,14 @@ class TestTritonRuntimeCacheTransport(TestCase):
 
     @parametrize(
         "damage",
-        ("checksum", "context", "occupied", "member_path", "incomplete_group"),
+        (
+            "checksum",
+            "context",
+            "occupied",
+            "member_path",
+            "group_member",
+            "incomplete_group",
+        ),
     )
     def test_import_rejects_a_damaged_bundle_without_writing(self, damage):
         error = {
@@ -5502,6 +5514,7 @@ class TestTritonRuntimeCacheTransport(TestCase):
             "context": "Incompatible Triton runtime-cache ABI",
             "occupied": "does not hold this runtime cache",
             "member_path": "Invalid Triton runtime-cache member name",
+            "group_member": "Invalid Triton runtime-cache member name",
             "incomplete_group": "Incomplete or unreferenced",
         }[damage]
         from torch.compiler._triton_runtime_cache import import_runtime_cache
@@ -5521,6 +5534,15 @@ class TestTritonRuntimeCacheTransport(TestCase):
 
                 def edit(header):
                     header["files"][0]["name"] = "../escape"
+
+                bundle = _replace_bundle_header(bundle, edit)
+            elif damage == "group_member":
+
+                def edit(header):
+                    name = "__grp__kernel.autotune.json"
+                    for entry in header["records"] + header["files"]:
+                        if entry.get("name") == "kernel.autotune.json":
+                            entry["name"] = name
 
                 bundle = _replace_bundle_header(bundle, edit)
             else:
@@ -5565,6 +5587,60 @@ class TestTritonRuntimeCacheTransport(TestCase):
                     RuntimeError, "Incomplete or incompatible|Unreadable"
                 ):
                     import_runtime_cache(bundle, context=self.CONTEXT)
+
+    @parametrize("winner", ("same", "different"))
+    def test_import_that_loses_the_rename_checks_the_winner(self, winner):
+        from triton.runtime.cache import get_cache_manager
+
+        from torch.compiler._triton_runtime_cache import (
+            export_runtime_cache,
+            import_runtime_cache,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, _, _ = self._bundle(pathlib.Path(tmp, "producer"))
+            other = bundle
+            if winner == "different":
+                with _triton_cache_namespace(pathlib.Path(tmp, "other")):
+                    _write_triton_runtime_entries()
+                    get_cache_manager("cd" * 32).put(
+                        b"other native",
+                        "other" + sysconfig.get_config_var("EXT_SUFFIX"),
+                    )
+                    other = export_runtime_cache(context=self.CONTEXT)
+            consumer = pathlib.Path(tmp, "consumer")
+            replace = os.replace
+
+            def race(source, destination):
+                patched.side_effect = replace
+                import_runtime_cache(other, context=self.CONTEXT)
+                return replace(source, destination)
+
+            with (
+                _triton_cache_namespace(consumer),
+                mock.patch("os.replace", side_effect=race) as patched,
+            ):
+                if winner == "same":
+                    import_runtime_cache(bundle, context=self.CONTEXT)
+                else:
+                    with self.assertRaisesRegex(RuntimeError, "its own empty"):
+                        import_runtime_cache(bundle, context=self.CONTEXT)
+            self.assertEqual(patched.call_count, 2)
+            self.assertEqual([p for p in os.listdir(tmp) if ".hydrate-" in p], [])
+
+    def test_import_reports_a_failed_rename(self):
+        from torch.compiler._triton_runtime_cache import import_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, _, _ = self._bundle(pathlib.Path(tmp, "producer"))
+            before = sorted(os.listdir(tmp))
+            with (
+                _triton_cache_namespace(pathlib.Path(tmp, "consumer")),
+                mock.patch("os.replace", side_effect=PermissionError("read-only")),
+                self.assertRaisesRegex(PermissionError, "read-only"),
+            ):
+                import_runtime_cache(bundle, context=self.CONTEXT)
+            self.assertEqual(sorted(os.listdir(tmp)), before)
 
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
     def test_export_holds_every_entry_triton_commits(self):
@@ -5706,6 +5782,8 @@ class TestTritonRuntimeCacheTransport(TestCase):
             self.assertEqual(len(header["records"]), 3)
 
     def test_export_succeeds_after_a_failed_export(self):
+        import hashlib
+
         from torch.compiler._triton_runtime_cache import export_runtime_cache
 
         with tempfile.TemporaryDirectory() as tmp, _triton_cache_namespace(tmp):
@@ -5715,9 +5793,16 @@ class TestTritonRuntimeCacheTransport(TestCase):
                 self.assertRaisesRegex(OSError, "disk full"),
             ):
                 export_runtime_cache(context=self.CONTEXT)
-            pathlib.Path(tmp, ".runtime_cache_bundle.tmp").write_text("partial")
-            header, _ = _bundle_header(export_runtime_cache(context=self.CONTEXT))
+            marker = pathlib.Path(tmp, ".runtime_cache_bundle")
+            leftover = pathlib.Path(tmp, ".runtime_cache_bundle.tmp")
+            self.assertFalse(marker.exists())
+            self.assertFalse(leftover.exists())
+            leftover.write_text("partial")
+            bundle = export_runtime_cache(context=self.CONTEXT)
+            header, _ = _bundle_header(bundle)
             self.assertEqual(len(header["records"]), 3)
+            self.assertEqual(marker.read_text(), hashlib.sha256(bundle).hexdigest())
+            self.assertFalse(leftover.exists())
 
     def test_export_requires_a_private_file_cache(self):
         import triton
@@ -7803,6 +7888,24 @@ class TestPrecompileRuntimeCache(TestCase):
                         "started a GPU runtime", str(failure.exception.__cause__)
                     )
             self.assertEqual(fake.exclusions, [])
+
+    @unittest.skipUnless(TEST_CUDA, "requires CUDA")
+    def test_gpu_runtime_starts_on_first_cuda_use(self):
+        probe = textwrap.dedent(
+            """
+            import torch
+            from torch.compiler._runtime_cache import _gpu_runtime_started
+
+            before = _gpu_runtime_started()
+            torch.ones(1, device="cuda")
+            print(before, _gpu_runtime_started())
+            """
+        )
+        out = subprocess.run(
+            [sys.executable, "-c", probe], capture_output=True, text=True, timeout=600
+        )
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(out.stdout.split()[-2:], ["False", "True"])
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_one_triton_runtime_cache_per_directory(self):

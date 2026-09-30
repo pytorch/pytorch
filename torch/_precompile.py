@@ -3279,8 +3279,8 @@ def capture_runtime() -> contextlib.AbstractContextManager[None]:
     is already forbidden, while this process already has an active scope, or,
     with Triton installed, for an invalid ``TRITON_CACHE_DIR``, for a missing one
     once a GPU runtime has started, or with Triton's autotuning cache disabled
-    while ``TRITON_CACHE_DIR`` is set. A scope inherited across ``fork`` belongs to the
-    parent and does not block the child.
+    while ``TRITON_CACHE_DIR`` is set. A scope inherited across ``fork`` belongs
+    to the parent and does not block the child.
     """
     from torch.compiler._runtime_cache import capture_runtime as _capture_runtime
 
