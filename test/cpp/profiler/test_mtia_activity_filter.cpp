@@ -98,8 +98,6 @@ TEST(MtiaActivityFilterTest, CollectiveSelectionUsesFiltersAndAvailability) {
       libkineto::ActivityType::CPU_INSTANT_EVENT,
       libkineto::ActivityType::USER_ANNOTATION,
       libkineto::ActivityType::EXTERNAL_CORRELATION,
-      libkineto::ActivityType::XPU_RUNTIME,
-      libkineto::ActivityType::XPU_DRIVER,
       libkineto::ActivityType::CUDA_RUNTIME,
       libkineto::ActivityType::CUDA_DRIVER,
       libkineto::ActivityType::PYTHON_FUNCTION,
