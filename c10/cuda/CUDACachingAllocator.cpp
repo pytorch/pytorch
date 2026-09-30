@@ -41,7 +41,6 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <deque>
 #include <functional>
 #include <memory>
@@ -692,17 +691,13 @@ struct ExpandableSegment {
     auto begin = segmentLeft(range.ptr);
     auto end = segmentRight(range.ptr + range.size);
 
-    // The header is sent as raw bytes and the resulting handle is the key of
-    // ipcMemHandle_to_devptr in the receiver, so zero the padding as well:
-    // `ShareHeader header{}` only initializes the members.
-    ShareHeader header;
-    std::memset(static_cast<void*>(&header), 0, sizeof(header));
+    ShareHeader header{};
     header.pid = get_self_pid();
     header.segment_size = segment_size_;
     header.num_handles = end - begin;
     header.handle_type = handle_type_;
 
-    buf.write(reinterpret_cast<const char*>(&header), sizeof(ShareHeader));
+    writeShareHeader(buf, header);
     for (auto i : c10::irange(begin, end)) {
       auto& maybe_handle = handles_.at(i);
       TORCH_INTERNAL_ASSERT(maybe_handle.has_value());
@@ -723,9 +718,8 @@ struct ExpandableSegment {
         TORCH_CHECK(
             handle.shareable_handle != std::nullopt,
             "shareable_handle is null");
-        buf.write(
-            reinterpret_cast<const char*>(&*handle.shareable_handle),
-            sizeof(int));
+        const int fd = std::get<int>(*handle.shareable_handle);
+        buf.write(reinterpret_cast<const char*>(&fd), sizeof(fd));
       } else {
 #ifdef USE_ROCM
         TORCH_INTERNAL_ASSERT(
@@ -741,9 +735,9 @@ struct ExpandableSegment {
         TORCH_CHECK(
             handle.shareable_handle != std::nullopt,
             "shareable_handle is null");
-        buf.write(
-            reinterpret_cast<const char*>(&*handle.shareable_handle),
-            sizeof(CUmemFabricHandle));
+        const auto& exported =
+            std::get<CUmemFabricHandle>(*handle.shareable_handle);
+        buf.write(reinterpret_cast<const char*>(&exported), sizeof(exported));
 #endif
       }
     }
@@ -754,8 +748,7 @@ struct ExpandableSegment {
       c10::DeviceIndex device,
       std::vector<c10::DeviceIndex> peers,
       std::istream& buf) {
-    ShareHeader header{};
-    buf.read(reinterpret_cast<char*>(&header), sizeof(ShareHeader));
+    ShareHeader header = readShareHeader(buf);
     // Sanitize the handle_type from the wire header: guard against corrupted
     // or future-version payloads that somehow slipped past the version gate.
     TORCH_CHECK(
@@ -1115,10 +1108,9 @@ struct ExpandableSegment {
     // unmapHandles can skip cuMemUnmap on ranges that were never mapped.
     bool mapped = false;
   };
+  // In-memory form of the IPC share header. It is never copied as raw bytes:
+  // writeShareHeader/readShareHeader define the wire format.
   struct ShareHeader {
-    // All fields have in-class default initializers so that
-    // ShareHeader header{}; and a single missing pair of braces cannot leak
-    // indeterminate bytes over IPC.
 #ifdef _WIN32
     int pid = 0;
 #else
@@ -1129,6 +1121,44 @@ struct ExpandableSegment {
     Expandable_Segments_Handle_Type handle_type =
         Expandable_Segments_Handle_Type::UNSPECIFIED;
   };
+  // Wire format of the share header (native byte order; IPC stays on one
+  // host). The fields are written one by one with fixed widths, so the bytes
+  // don't depend on how the compiler lays out ShareHeader. The reserved bytes
+  // keep the offsets of the existing (version 3) format; they are written as
+  // zeros and ignored when read.
+  //   [0, 4)    int32   pid
+  //   [4, 8)            reserved
+  //   [8, 16)   uint64  segment_size
+  //   [16, 24)  uint64  num_handles
+  //   [24, 28)  int32   handle_type
+  //   [28, 32)          reserved
+  static void writeShareHeader(std::ostream& buf, const ShareHeader& header) {
+    auto put = [&buf](auto value) {
+      buf.write(reinterpret_cast<const char*>(&value), sizeof(value));
+    };
+    put(static_cast<int32_t>(header.pid));
+    put(uint32_t{0});
+    put(static_cast<uint64_t>(header.segment_size));
+    put(static_cast<uint64_t>(header.num_handles));
+    put(static_cast<int32_t>(header.handle_type));
+    put(uint32_t{0});
+  }
+  static ShareHeader readShareHeader(std::istream& buf) {
+    auto get = [&buf](auto value) {
+      buf.read(reinterpret_cast<char*>(&value), sizeof(value));
+      TORCH_CHECK(buf, "truncated IPC share header for an expandable segment");
+      return value;
+    };
+    ShareHeader header{};
+    header.pid = get(int32_t{});
+    (void)get(uint32_t{});
+    header.segment_size = get(uint64_t{});
+    header.num_handles = get(uint64_t{});
+    header.handle_type =
+        static_cast<Expandable_Segments_Handle_Type>(get(int32_t{}));
+    (void)get(uint32_t{});
+    return header;
+  }
   std::vector<std::optional<Handle>> handles_;
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
