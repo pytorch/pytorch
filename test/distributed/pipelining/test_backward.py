@@ -1,8 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import copy
-from contextlib import nullcontext
 import weakref
+from contextlib import nullcontext
 
 from model_registry import MLPModule, MultiInterMediateModel
 
