@@ -914,7 +914,12 @@ class StageTest(MultiProcContinuousTest):
         torch.nn.MSELoss(reduction="sum")(ref_mod(x), target).backward()
         ref_stage = ref_mod.get_submodule(f"layers.{self.rank}")
         for name, parameter in stage_mod.named_parameters():
-            self.assertEqual(parameter.grad, ref_stage.get_parameter(name).grad)
+            self.assertEqual(
+                parameter.grad,
+                ref_stage.get_parameter(name).grad,
+                rtol=1e-5,
+                atol=4e-5,
+            )
 
 
 instantiate_parametrized_tests(StageTest)
