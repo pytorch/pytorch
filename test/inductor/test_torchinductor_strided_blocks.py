@@ -1710,6 +1710,19 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
         actual = compiled_fn(t)
         self.assertTrue((actual == 4).all())
 
+    @largeTensorTest("3GB", inductor=True)
+    def test_large_input_small_output_uses_tma_store(self):
+        def fn(a):
+            return a[: 128 * 512].reshape(128, 512) + 4
+
+        t = torch.zeros(2**31, dtype=torch.int8, device=GPU_TYPE)
+        actual, (code,) = run_and_get_code(torch.compile(fn), t)
+        self.assertEqual(actual, fn(t))
+        self.assertIn("tl.program_id(0).to(tl.int64)", code)
+        self.assertNotIn("tl.make_tensor_descriptor(in_ptr0", code)
+        self.assertIn("tl.make_tensor_descriptor(out_ptr0", code)
+        self.assertIn(".store([(xoffset).to(tl.int32)]", code)
+
     def test_slice_constant_offset_disables_tma(self):
         """TMA requires 16-byte aligned base; x[1:] with float32 yields 4-byte offset."""
 

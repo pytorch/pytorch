@@ -14,11 +14,7 @@ from unittest import mock
 import torch.distributed as dist
 import torch.distributed.elastic.utils.store as store_util
 from torch.distributed.elastic.utils.logging import get_logger
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    run_tests,
-    TestCase,
-)
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class MockStore:
@@ -56,8 +52,6 @@ class MockStore:
 
 
 class StoreUtilTest(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_get_all_rank_0(self):
         world_size = 3
 
@@ -257,8 +251,6 @@ class StoreUtilTest(TestCase):
 
 
 class UtilTest(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     def test_get_logger_different(self):
         logger1 = get_logger("name1")
         logger2 = get_logger("name2")

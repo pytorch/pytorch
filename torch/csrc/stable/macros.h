@@ -2,7 +2,6 @@
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/headeronly/macros/Macros.h>
 
-#include <ctime>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
