@@ -785,8 +785,8 @@ std::vector<at::Tensor> unsqueezeVarStackInputs(
     const int64_t dim) {
   std::vector<at::Tensor> result;
   result.reserve(inputs.size());
-  for (const auto i : c10::irange(inputs.size())) {
-    result.push_back(at::native::unsqueeze(inputs[i], dim));
+  for (const auto& input : inputs) {
+    result.push_back(at::native::unsqueeze(input, dim));
   }
   return result;
 }
