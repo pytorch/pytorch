@@ -3,10 +3,10 @@
 import sympy
 
 import torch
+from torch.utils._ordered_set import OrderedSet
 
 from .ir import Pointwise, TensorBox
 from .virtualized import ops
-from torch.utils._ordered_set import OrderedSet
 
 
 # Out-of-tree backends (e.g. PrivateUse1 devices) register after torch is
