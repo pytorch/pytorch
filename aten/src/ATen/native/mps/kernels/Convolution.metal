@@ -318,19 +318,27 @@ kernel void conv1d_depthwise(
     constant Conv2DParams& p [[buffer(3)]],
     device const T* bias [[buffer(4)]],
     uint3 pos [[thread_position_in_grid]]) {
-  const int x = int(pos.x), o = int(pos.y);
+  const int x = int(pos.x) * kConv1dDepthwiseOutputsPerThread, o = int(pos.y);
   device const T* row =
       input + (int64_t(pos.z) * p.C_in + o / p.C_out_per_group) * p.W;
-  float acc = p.has_bias ? float(bias[o]) : 0.0f;
+  float acc[kConv1dDepthwiseOutputsPerThread];
+  for (int j = 0; j < kConv1dDepthwiseOutputsPerThread; ++j) {
+    acc[j] = p.has_bias ? float(bias[o]) : 0.0f;
+  }
   for (int tap = 0; tap < p.kW; ++tap) {
-    const int i = x * p.sW + tap * p.dW - p.padW;
-    if (i >= 0 && i < p.W) {
-      acc += float(row[i]) * float(weight[o * p.kW + tap]);
+    const float w = float(weight[o * p.kW + tap]);
+    for (int j = 0; j < kConv1dDepthwiseOutputsPerThread; ++j) {
+      const int i = (x + j) * p.sW + tap * p.dW - p.padW;
+      if (i >= 0 && i < p.W) {
+        acc[j] += float(row[i]) * w;
+      }
     }
   }
-  output
-      [OUT_NLC ? (int64_t(pos.z) * p.outW + x) * p.C_out + o
-               : (int64_t(pos.z) * p.C_out + o) * p.outW + x] = T(acc);
+  for (int j = 0; j < kConv1dDepthwiseOutputsPerThread && x + j < p.outW; ++j) {
+    output
+        [OUT_NLC ? (int64_t(pos.z) * p.outW + x + j) * p.C_out + o
+                 : (int64_t(pos.z) * p.C_out + o) * p.outW + x + j] = T(acc[j]);
+  }
 }
 
 #define INSTANTIATE_CONV1D_DEPTHWISE(DT, OUT, OUT_NLC)                 \
@@ -860,7 +868,7 @@ INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 1, 1, 1, 64, 64)
 INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 1, 2, 2, dyn, -1)
 INSTANTIATE_CONV3D_MPP_STANDARD(3, 3, 3, 2, 2, 2, dyn, -1)
 
-template <typename T, bool NLC, bool OUT_NLC, int NSG>
+template <typename T, bool NLC, bool OUT_NLC, int BO, int NSG>
 kernel void conv1d_mpp(
     device T* input [[buffer(0)]],
     device T* weight [[buffer(1)]],
@@ -873,8 +881,8 @@ kernel void conv1d_mpp(
   using strides = array<int32_t, 2>;
   using tensor2d = tensor<device T, extents, tensor_inline>;
   constexpr auto desc = matmul2d_descriptor(
-      64,
-      64,
+      OUT_NLC ? 64 : BO,
+      OUT_NLC ? BO : 64,
       static_cast<int>(dynamic_extent),
       OUT_NLC && !NLC,
       OUT_NLC || NLC,
@@ -889,8 +897,8 @@ kernel void conv1d_mpp(
     acc[i] = 0.0f;
   }
   const int cg = p.C_in_per_group, og = p.C_out_per_group;
-  const int group = int(tgid.x) / ((og + 63) / 64);
-  const int o_off = int(tgid.x) % ((og + 63) / 64) * 64;
+  const int group = int(tgid.x) / ((og + BO - 1) / BO);
+  const int o_off = int(tgid.x) % ((og + BO - 1) / BO) * BO;
   const int x_off = int(tgid.y) * 64;
   const bool merged = NLC && p.dW == 1 && p.C_in == cg;
   const int K = merged ? p.kW * cg : cg;
@@ -941,27 +949,32 @@ kernel void conv1d_mpp(
   out.store(dst_tile);
 }
 
-#define INSTANTIATE_CONV1D_MPP(DT, IN, NLC, OUT, OUT_NLC, NSG)                \
-  template                                                                    \
-      [[host_name("conv1d_mpp_" #IN "_" #OUT "_s" #NSG "_" #DT)]] kernel void \
-      conv1d_mpp<DT, NLC, OUT_NLC, NSG>(                                      \
-          device DT*,                                                         \
-          device DT*,                                                         \
-          device DT*,                                                         \
-          constant Conv2DParams&,                                             \
-          device const DT*,                                                   \
-          device DT*,                                                         \
-          uint3);
+#define INSTANTIATE_CONV1D_MPP(DT, IN, NLC, OUT, OUT_NLC, BO, NSG)   \
+  template [[host_name("conv1d_mpp_" #IN "_" #OUT "_b" #BO "_s" #NSG \
+                       "_" #DT)]] kernel void                        \
+  conv1d_mpp<DT, NLC, OUT_NLC, BO, NSG>(                             \
+      device DT*,                                                    \
+      device DT*,                                                    \
+      device DT*,                                                    \
+      constant Conv2DParams&,                                        \
+      device const DT*,                                              \
+      device DT*,                                                    \
+      uint3);
 
-#define INSTANTIATE_CONV1D_MPP_LAYOUTS(DT, NSG)           \
-  INSTANTIATE_CONV1D_MPP(DT, ncl, false, ncl, false, NSG) \
-  INSTANTIATE_CONV1D_MPP(DT, ncl, false, nlc, true, NSG)  \
-  INSTANTIATE_CONV1D_MPP(DT, nlc, true, ncl, false, NSG)  \
-  INSTANTIATE_CONV1D_MPP(DT, nlc, true, nlc, true, NSG)
+#define INSTANTIATE_CONV1D_MPP_NCL(DT, BO, NSG)               \
+  INSTANTIATE_CONV1D_MPP(DT, ncl, false, ncl, false, BO, NSG) \
+  INSTANTIATE_CONV1D_MPP(DT, ncl, false, nlc, true, BO, NSG)
+
+#define INSTANTIATE_CONV1D_MPP_LAYOUTS(DT, NSG)              \
+  INSTANTIATE_CONV1D_MPP_NCL(DT, 64, NSG)                    \
+  INSTANTIATE_CONV1D_MPP(DT, nlc, true, ncl, false, 64, NSG) \
+  INSTANTIATE_CONV1D_MPP(DT, nlc, true, nlc, true, 64, NSG)
 
 #define INSTANTIATE_CONV1D_MPP_ALL(DT)  \
   INSTANTIATE_CONV1D_MPP_LAYOUTS(DT, 2) \
-  INSTANTIATE_CONV1D_MPP_LAYOUTS(DT, 4)
+  INSTANTIATE_CONV1D_MPP_LAYOUTS(DT, 4) \
+  INSTANTIATE_CONV1D_MPP_NCL(DT, 16, 2) \
+  INSTANTIATE_CONV1D_MPP_NCL(DT, 32, 2)
 
 INSTANTIATE_CONV1D_MPP_ALL(float)
 INSTANTIATE_CONV1D_MPP_ALL(half)

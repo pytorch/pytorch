@@ -491,7 +491,7 @@ static void conv3d_im2col_matmul(const Tensor& input,
 }
 
 enum class Conv1dKernel {
-  // One thread per output element.
+  // kConv1dDepthwiseOutputsPerThread consecutive outputs per thread.
   Depthwise,
   // One matmul2d per tap over the NCL input.
   MppNcl,
@@ -499,6 +499,7 @@ enum class Conv1dKernel {
   MppNlc,
   // One matmul2d over all taps of a zero-padded NLC input.
   MppNlcMerged,
+  Im2colMatmul,
   // conv3d_metal_forward with unit depth and height.
   Conv3d,
 };
@@ -527,6 +528,11 @@ static Conv1dKernel conv1d_pick_kernel(const Tensor& input,
   // Depthwise, or a single-channel conv whose output can't fill a 64x64 matmul2d tile.
   if (channels_per_group == 1 && (groups > 1 || std::min(out_channels, out_length) < 64)) {
     return Conv1dKernel::Depthwise;
+  }
+  const auto reduction = channels_per_group * kernel_size;
+  if (groups == 1 && channels_per_group > 0 &&
+      (out_length == 1 || (reduction >= 2048 && input.size(0) * input.size(0) * out_length * 32 <= reduction))) {
+    return Conv1dKernel::Im2colMatmul;
   }
   // conv3d_metal_forward handles empty input channels.
   if (channels_per_group == 0 || !has_mpp()) {
@@ -568,12 +574,15 @@ static void conv1d_metal_forward(const Tensor& input_t,
   };
   const auto dtype = scalarToMetalTypeString(input_t);
   const auto out_layout = output_t.is_contiguous() ? "ncl" : "nlc";
-  const int simdgroups = weight_t.size(1) * kernel_size >= 1536 ? 2 : 4;
   Tensor input, weight;
   std::optional<Tensor> head;
   auto input_length = length;
   std::string kernel_name;
   const auto kernel = conv1d_pick_kernel(input_t, weight_t, output_t, padding, stride, dilation, groups);
+  const auto out_channels_per_group = output_t.size(1) / groups;
+  const auto small_tile = out_channels_per_group <= 16 ? 16 : 32;
+  const auto out_tile = kernel == Conv1dKernel::MppNcl && out_channels_per_group <= 32 ? small_tile : 64;
+  const int simdgroups = out_tile < 64 || weight_t.size(1) * kernel_size >= 1536 ? 2 : 4;
   switch (kernel) {
     case Conv1dKernel::Depthwise:
       input = input_t.contiguous();
@@ -588,20 +597,43 @@ static void conv1d_metal_forward(const Tensor& input_t,
             std::min(length + padding, c10::metal::ceil_div(padding, int64_t(64)) * 64 + (kernel_size - 1) * dilation);
         head = at::constant_pad_nd(input.narrow(3, 0, head_length - padding), {padding, 0});
       }
-      kernel_name = fmt::format("conv1d_mpp_ncl_{}_s{}_{}", out_layout, simdgroups, dtype);
+      kernel_name = fmt::format("conv1d_mpp_ncl_{}_b{}_s{}_{}", out_layout, out_tile, simdgroups, dtype);
       break;
     case Conv1dKernel::MppNlc:
       input = padded_nlc_input();
       input_length = length + 2 * padding;
       weight = tap_major_weight();
-      kernel_name = fmt::format("conv1d_mpp_nlc_{}_s{}_{}", out_layout, simdgroups, dtype);
+      kernel_name = fmt::format("conv1d_mpp_nlc_{}_b64_s{}_{}", out_layout, simdgroups, dtype);
       break;
     case Conv1dKernel::MppNlcMerged:
       input = padded_nlc_input();
       input_length = length + 2 * padding;
       weight = weight_t.squeeze(2).transpose(1, 2).contiguous();
-      kernel_name = fmt::format("conv1d_mpp_nlc_{}_s{}_{}", out_layout, simdgroups, dtype);
+      kernel_name = fmt::format("conv1d_mpp_nlc_{}_b64_s{}_{}", out_layout, simdgroups, dtype);
       break;
+    case Conv1dKernel::Im2colMatmul: {
+      const auto x = padding > 0 ? at::constant_pad_nd(input_t.select(2, 0), {padding, padding}) : input_t.select(2, 0);
+      const auto batch = x.size(0);
+      const auto out_length = output_t.size(3);
+      const auto st = x.strides();
+      const auto windows =
+          x.as_strided({batch, out_length, x.size(1), kernel_size}, {st[0], stride * st[2], st[1], dilation * st[2]});
+      const auto weights = weight_t.reshape({weight_t.size(0), -1});
+      const bool has_bias = bias_opt && bias_opt->defined();
+      const auto bias = has_bias ? bias_opt->to(input_t.scalar_type()) : Tensor();
+      if (out_length == 1 || !output_t.is_contiguous()) {
+        auto rows = output_t.select(2, 0).transpose(1, 2).view({-1, weights.size(0)});
+        const auto columns = windows.reshape({rows.size(0), -1});
+        has_bias ? at::addmm_out(rows, bias, columns, weights.t()) : at::mm_out(rows, columns, weights.t());
+        return;
+      }
+      const auto columns = stride > 1 ? windows.flatten(2).mT() : windows.permute({0, 2, 3, 1}).flatten(1, 2);
+      for (const auto n : c10::irange(batch)) {
+        auto out = output_t.select(2, 0).select(0, n);
+        has_bias ? at::addmm_out(out, bias.view({-1, 1}), weights, columns[n]) : at::mm_out(out, weights, columns[n]);
+      }
+      return;
+    }
     case Conv1dKernel::Conv3d:
       conv3d_metal_forward(input_t.unsqueeze(2),
                            weight_t.unsqueeze(2),
@@ -637,10 +669,11 @@ static void conv1d_metal_forward(const Tensor& input_t,
       [encoder setComputePipelineState:pipeline];
       mtl_setArgs(encoder, input, weight, output_t, params, bias, head);
       if (kernel == Conv1dKernel::Depthwise) {
-        [encoder dispatchThreads:MTLSizeMake(params.outW, params.C_out, input_t.size(0))
-            threadsPerThreadgroup:MTLSizeMake(std::min(params.outW, 256), 1, 1)];
+        const auto threads = c10::metal::ceil_div(params.outW, kConv1dDepthwiseOutputsPerThread);
+        [encoder dispatchThreads:MTLSizeMake(threads, params.C_out, input_t.size(0))
+            threadsPerThreadgroup:MTLSizeMake(std::min(threads, 256), 1, 1)];
       } else {
-        [encoder dispatchThreadgroups:MTLSizeMake(c10::metal::ceil_div(params.C_out_per_group, 64) * groups,
+        [encoder dispatchThreadgroups:MTLSizeMake(c10::metal::ceil_div(params.C_out_per_group, out_tile) * groups,
                                                   c10::metal::ceil_div(params.outW, 64),
                                                   input_t.size(0))
                 threadsPerThreadgroup:MTLSizeMake(simdgroups * 32, 1, 1)];
