@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import threading
 from pathlib import Path
@@ -16,6 +17,23 @@ if TYPE_CHECKING:
 
 # Serialize cold compiles process-wide; warm cache hits bypass this lock.
 _compiled_cache_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def temporary_env(updates: dict[str, str | None]):
+    """Temporarily override process environment variables."""
+    old_values = {key: os.environ.get(key) for key in updates}
+    os.environ.update(
+        {key: value for key, value in updates.items() if value is not None}
+    )
+    try:
+        yield
+    finally:
+        for key, old_value in old_values.items():
+            if old_value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old_value
 
 
 def run_cached_flydsl(

@@ -13,7 +13,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # shellcheck source=./rocm_utils.sh
   source "$(dirname "${BASH_SOURCE[0]}")/rocm_utils.sh"
-  export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH};gfx1033"
 
   if command -v sccache >/dev/null; then
     SCCACHE_PATH="$(command -v sccache)"
@@ -64,6 +63,11 @@ if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *s390x* ]]; then
+  # Build for z15 to enable full ZVECTOR support
+  export CFLAGS="$CFLAGS -march=z15"
+  export CXXFLAGS="$CXXFLAGS -march=z15"
+fi
 
 # mkl-static/mkl-include are pip-installed into the active Python environment
 # (a conda env or a venv), not provided by conda. Detect MKL directly rather
@@ -286,7 +290,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
   # native-AOT stage 2: export DSL kernels, relink torch_cuda with them embedded, and
   # patch the library back into the wheel test jobs get (tools/native_aot/build_stage2.py).
   #
-  # CUDA-only, as in .ci/manywheel/build.sh: --wheel makes stage 2 refuse a torch that
+  # CUDA-only, as in .ci/wheel/linux/build.sh: --wheel makes stage 2 refuse a torch that
   # does not import, and in the ASan and TSan images `import torch` cannot work.
   if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
     # Installed HERE, not in .ci/docker/requirements-ci.txt, which every image
