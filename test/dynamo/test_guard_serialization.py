@@ -4691,6 +4691,86 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self.assertTrue(ref.check({"x": x}))
         self.assertFalse(loaded.check({"x": x}))
 
+    def test_dim_markings_round_trip(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        torch._dynamo.mark_dynamic(x, 0)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
+        subset, superset = torch.randn(4, 2), torch.randn(4, 2)
+        torch._dynamo.mark_dynamic(subset, 0)
+        torch._dynamo.mark_dynamic(superset, [0, 1])
+        self._test_check_fn(ref, loaded, {"x": subset}, True)
+        self._test_check_fn(ref, loaded, {"x": torch.randn(4, 2)}, True)
+        self._test_check_fn(ref, loaded, {"x": superset}, False)
+
+    def test_dim_marking_range_round_trip(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        torch._dynamo.mark_dynamic(x, 0, min=2, max=8)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
+        same, wider = torch.randn(4, 2), torch.randn(4, 2)
+        torch._dynamo.mark_dynamic(same, 0, min=2, max=8)
+        torch._dynamo.mark_dynamic(wider, 0, min=2, max=9)
+        self._test_check_fn(ref, loaded, {"x": same}, True)
+        self._test_check_fn(ref, loaded, {"x": wider}, False)
+
+    def test_unbacked_markings_round_trip(self):
+        def fn(x):
+            return x + 1
+
+        def marked(**kwargs):
+            t = torch.randn(4, 2)
+            torch._dynamo.decorators.mark_unbacked(t, 0, **kwargs)
+            return t
+
+        x = marked(min=2, max=8, shape_id="s")
+        ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
+        same = marked(min=2, max=8, shape_id="s")
+        self._test_check_fn(ref, loaded, {"x": same}, True)
+        wider = marked(min=2, max=9, shape_id="s")
+        self._test_check_fn(ref, loaded, {"x": wider}, False)
+        renamed = marked(min=2, max=8, shape_id="t")
+        self._test_check_fn(ref, loaded, {"x": renamed}, False)
+
+    def test_weak_and_strict_markings_round_trip(self):
+        def fn(x):
+            return x + 1
+
+        marks = {
+            "maybe_mark_dynamic": torch._dynamo.maybe_mark_dynamic,
+            "strict_unbacked": functools.partial(
+                torch._dynamo.decorators.mark_unbacked, strict=True
+            ),
+        }
+        for name, mark in marks.items():
+            with self.subTest(name):
+                x = torch.randn(4, 2)
+                mark(x, 0)
+                ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
+                same, superset = torch.randn(4, 2), torch.randn(4, 2)
+                mark(same, 0)
+                mark(superset, 0)
+                mark(superset, 1)
+                self._test_check_fn(ref, loaded, {"x": same}, True)
+                self._test_check_fn(ref, loaded, {"x": superset}, False)
+
+    def test_static_markings_round_trip(self):
+        def fn(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+        torch._dynamo.mark_static(x, 1)
+        ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
+        same, superset = torch.randn(3, 2), torch.randn(3, 2)
+        torch._dynamo.mark_static(same, 1)
+        torch._dynamo.mark_static(superset, [0, 1])
+        self._test_check_fn(ref, loaded, {"x": same}, True)
+        self._test_check_fn(ref, loaded, {"x": superset}, False)
+
     def test_builtin_match(self):
         def fn(x):
             # usage of getattr() here installs a BUILTIN_MATCH guard
