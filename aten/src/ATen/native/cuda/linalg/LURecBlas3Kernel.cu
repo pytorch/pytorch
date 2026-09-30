@@ -1284,6 +1284,11 @@ void ldl_factor_panels(const Tensor& LD, const Tensor& pivots, const Tensor& inf
     // D2H to update the step on the host
     auto curr_step = panel_step_holder.item().toInt();
     if (step + curr_nb < n) {
+      // TODO: LD22 is symmetric/Hermitian, so updating its lower triangle suffices.
+      // cuBLAS syrkx/herkx with W = op(U12) as an m x k matrix (a transpose, e.g. via
+      // cublas<t>geam) beats this gemm by 1.2-1.9x for n >= 16384 on H100 (1.6-1.9x
+      // at n = 24576). That requires the panel kernel to stop reading the upper
+      // triangle of LD22 (candidate column, swaps).
       at::cuda::blas::gemm(
         'n', 'n',
         n - step - curr_nb, n - step - curr_nb, curr_step - step,
