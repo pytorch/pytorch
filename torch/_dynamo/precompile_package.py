@@ -45,7 +45,12 @@ from torch.utils._config_module import ConfigModule
 from .aot_compile import _BUILTINS_DICT_PREFIX, _IMPORT_ALIAS_PREFIX
 from .convert_frame import ConvertFrame
 from .exc import PackageError
-from .guards import CheckFunctionManager, is_portable_identity_guard, strip_local_scope
+from .guards import (
+    CheckFunctionManager,
+    is_portable_function_guard,
+    is_portable_identity_guard,
+    strip_local_scope,
+)
 from .package import CompilePackage
 from .source import (
     AttrSource,
@@ -220,18 +225,23 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
     enum. A ``<locals>`` class, a module missing from ``sys.modules``, a
     ``functools.wraps`` wrapper and a NamedTuple class nested in a class (the
     guard-state pickler rebuilds it as a fresh class) are still dropped.
-    Dropping one gives up on noticing that the guarded object was rebound,
-    mutated or collected: rebind a global function between capture and load
-    and the artifact serves the graph traced against the old one, with no
-    error (``test_default_guard_filter_through_serialize_guards``). Every dropped
+    A CLOSURE_MATCH on a plain function is kept when
+    ``is_portable_function_guard`` finds that an importable module owns the
+    function's globals: the save rewrites it into a FUNCTION_CODE_MATCH, which
+    the loaded artifact checks against the function's code and that module by
+    value. Dropping a guard gives up on noticing that the guarded object was
+    rebound, mutated or collected: rebind a global function whose globals no
+    importable module owns between capture and load, and the artifact serves
+    the graph traced against the old one, with no error
+    (``test_default_guard_filter_through_serialize_guards``). Every dropped
     slot is reported in ``PrecompileSummary.dropped_guards``, once however many
     variants dropped it.
 
     The criterion is the pre-check's own: apart from those portable identity
-    guards, a guard is dropped if its type is refused or a derived type is (a
-    CONSTANT_MATCH on a code object runs through ID_MATCH), and TYPE_MATCH and
-    BUILTIN_MATCH are kept whatever they derive, as the pre-check accepts them
-    before it looks at derived types.
+    and function guards, a guard is dropped if its type is refused or a
+    derived type is (a CONSTANT_MATCH on a code object runs through ID_MATCH),
+    and TYPE_MATCH and BUILTIN_MATCH are kept whatever they derive, as the
+    pre-check accepts them before it looks at derived types.
     That keeps BUILTIN_MATCH, an ``id_match_unchecked`` deriving ID_MATCH that
     the loaded artifact still checks against the loading process's builtins.
 
@@ -276,6 +286,7 @@ def default_guard_filter_fn(guard_entries: Sequence[GuardFilterEntry]) -> list[b
                 g.has_value
                 and is_portable_identity_guard(g.guard_type, derived, g.value)
             )
+            or (g.has_value and is_portable_function_guard(g.guard_type, g.value))
             or (
                 g.guard_type not in unsupported
                 and not any(d in unsupported for d in derived)
@@ -1264,6 +1275,7 @@ _SHAPE_BEARING_GUARD_TYPES = frozenset(
         "EMPTY_NN_MODULE_HOOKS_DICT",
         "EQUALS_MATCH",
         "FAKE_SCRIPT_TYPE_MATCH",
+        "FUNCTION_CODE_MATCH",
         "HASATTR",
         "MAPPING_KEYS_CHECK",
         "NONE_MATCH",
