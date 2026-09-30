@@ -162,7 +162,7 @@ def replicate(
             replica = module._replicate_for_data_parallel()
             # This is a temporary fix for DDP. DDP needs to access the
             # replicated model parameters. It used to do so through
-            # `mode.parameters()`. The fix added in #33907 for DP stops the
+            # `module.parameters()`. The fix added in #33907 for DP stops the
             # `parameters()` API from exposing the replicated parameters.
             # Hence, we add a `_former_parameters` dict here to support DDP.
             replica._former_parameters = OrderedDict()

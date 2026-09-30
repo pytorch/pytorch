@@ -19,7 +19,7 @@ __all__ = [
 
 
 def fuse_conv_bn(is_qat, conv, bn):
-    r"""Return the fused the conv and bn modules.
+    r"""Return the fused conv and bn modules.
     Given the conv and bn modules, fuses them and returns the fused module
 
     Args:
@@ -69,7 +69,7 @@ def fuse_conv_bn(is_qat, conv, bn):
 
 
 def fuse_conv_bn_relu(is_qat, conv, bn, relu):
-    r"""Return the fused conv and bv modules.
+    r"""Return the fused conv and bn modules.
 
     Given the conv and bn modules, fuses them and returns the fused module
 

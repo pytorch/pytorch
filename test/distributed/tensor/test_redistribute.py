@@ -36,6 +36,7 @@ from torch.distributed.tensor._redistribute import (
     _FlattenedTransformInfo,
     _gen_transform_infos,
     _optimize_transform_infos,
+    _redistribute_cost_sort_key,
     _TransformInfo,
     disable_redistribute_transform_optimization,
     redistribute_local_tensor,
@@ -43,6 +44,7 @@ from torch.distributed.tensor._redistribute import (
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _MaskPartial, _StridedShard
+from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -112,6 +114,67 @@ class RedistributeTest(DTensorContinuousTestBase):
                 torch.ones(dtensor.to_local().size(), dtype=dtype),
             )
             self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @parametrize("dtype", [torch.float32, torch.cfloat])
+    def test_shard_to_partial_sum_forward_backward(self, dtype):
+        device_mesh = self.build_device_mesh()
+        partial_spec = [Partial("sum")]
+        input_sizes = [
+            (3, self.world_size - 1),
+            (3, self.world_size * 3),
+            (3, self.world_size * 3 + 1),
+            (3, self.world_size * 3 + 2),
+        ]
+
+        for input_size in input_sizes:
+            input_tensor = torch.randn(
+                input_size, device=self.device_type, requires_grad=True, dtype=dtype
+            )
+            shard_spec = [Shard(1)]
+            shard_dtensor = distribute_tensor(input_tensor, device_mesh, shard_spec)
+
+            comm_mode = CommDebugMode()
+            with comm_mode:
+                partial_dtensor = shard_dtensor.redistribute(device_mesh, partial_spec)
+            self.assertEqual(partial_dtensor.placements, partial_spec)
+            self.assertEqual(partial_dtensor.to_local().shape, input_tensor.shape)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(partial_dtensor.full_tensor(), input_tensor)
+
+            grad_output = DTensor.from_local(
+                torch.ones_like(input_tensor),
+                device_mesh,
+                [Replicate()],
+                run_check=False,
+            )
+            with comm_mode:
+                partial_dtensor.backward(grad_output)
+            self.assertEqual(shard_dtensor.grad.placements, shard_spec)
+            self.assertEqual(
+                shard_dtensor.grad.to_local(),
+                torch.ones_like(shard_dtensor.to_local()),
+            )
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    def test_shard_to_partial_sum_graph_based(self):
+        device_mesh = self.build_device_mesh()
+        input_tensor = torch.randn(3, self.world_size * 3 + 1, device=self.device_type)
+        shard_dtensor = distribute_tensor(input_tensor, device_mesh, [Shard(1)])
+
+        with use_min_cost_redistribution_plan():
+            partial_dtensor = shard_dtensor.redistribute(device_mesh, [Partial("sum")])
+
+        self.assertEqual(partial_dtensor.full_tensor(), input_tensor)
+
+    def test_shard_to_non_sum_partial_raises(self):
+        device_mesh = self.build_device_mesh()
+        input_tensor = torch.randn(3, 12, device=self.device_type)
+        shard_dtensor = distribute_tensor(input_tensor, device_mesh, [Shard(1)])
+
+        with self.assertRaisesRegex(
+            RuntimeError, "only Shard to Partial\\(sum\\) redistribution"
+        ):
+            shard_dtensor.redistribute(device_mesh, [Partial("avg")])
 
     def test_replicate_to_replicate_forward_backward(self):
         device_mesh = self.build_device_mesh()
@@ -597,7 +660,7 @@ class RedistributeTest(DTensorContinuousTestBase):
         # to unshard on the last mesh dim. With batch=1 on the first dimension,
         # the all_gather should use a pure view operation.
         self._test_all_gather_optimization(
-            global_shape=(1, 8192, 6144),
+            global_shape=(1, 32, 24),
             placements_src=[Shard(1), Shard(1)],
             placements_dst=[Shard(1), Replicate()],
             should_use_view=True,
@@ -612,7 +675,7 @@ class RedistributeTest(DTensorContinuousTestBase):
         # Even though batch=1 on first dimension, gather_dim will be 2 (not 1),
         # so we can't use the view optimization.
         self._test_all_gather_optimization(
-            global_shape=(1, 8192, 6144),
+            global_shape=(1, 32, 24),
             placements_src=[Shard(2), Shard(2)],
             placements_dst=[Shard(2), Replicate()],
             should_use_view=False,
@@ -627,7 +690,7 @@ class RedistributeTest(DTensorContinuousTestBase):
         # This should fall back to split+cat since the view optimization
         # doesn't apply when batch > 1.
         self._test_all_gather_optimization(
-            global_shape=(4, 8192, 6144),
+            global_shape=(4, 32, 24),
             placements_src=[Shard(1), Shard(1)],
             placements_dst=[Shard(1), Replicate()],
             should_use_view=False,
@@ -643,6 +706,40 @@ class RedistributeTest(DTensorContinuousTestBase):
         self.assertEqual(shard_tensor.placements[0].dim, 1)
         reshard_tensor = shard_tensor.redistribute(device_mesh, shard_minus_spec)
         self.assertEqual(reshard_tensor.placements[0].dim, 1)
+
+    def test_shard_to_replicate_local_tensor_contiguous(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/173041.
+        # When the sharded dim is not evenly divisible by world_size the unpad
+        # step in Shard._to_replicate_tensor uses narrow(), which on a non-leading
+        # dim produces a non-contiguous view. The resulting local tensor then
+        # breaks downstream view ops (e.g. inside parallelized nn.Linear).
+        device_mesh = self.build_device_mesh()
+
+        # world_size=4 here, so sizes like 13/14/15/31 are uneven on the sharded dim.
+        test_cases = [
+            # (shape, shard_dim)
+            ((4, 13, 8), 1),
+            ((4, 14, 8), 1),
+            ((4, 15, 8), 1),
+            ((3, 31, 10), 1),  # shape from the original issue repro
+            ((4, 8, 13), 2),
+            ((13, 8), 0),
+            ((8, 13), 1),
+        ]
+
+        for shape, shard_dim in test_cases:
+            full_tensor = torch.randn(shape, device=self.device_type)
+            dt_rep = distribute_tensor(full_tensor, device_mesh, [Replicate()])
+            dt_shard = dt_rep.redistribute(device_mesh, [Shard(shard_dim)])
+            dt_back_rep = dt_shard.redistribute(device_mesh, [Replicate()])
+
+            self.assertTrue(
+                dt_back_rep._local_tensor.is_contiguous(),
+                lambda msg: f"{msg}\nLocal tensor should be contiguous after Shard({shard_dim})->Replicate "
+                f"for shape {shape}. Got stride {dt_back_rep._local_tensor.stride()}",
+            )
+            self.assertTrue(dt_back_rep.is_contiguous())
+            self.assertEqual(dt_back_rep.to_local(), full_tensor)
 
     def test_redistribute_uneven_sharding(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).reshape(2, 2))
@@ -814,7 +911,7 @@ class RedistributeTest(DTensorContinuousTestBase):
             # Non-Partial to Partial is NOT allowed
             ([Shard(0), Replicate()], [Shard(0), Partial()], False),
             ([Shard(0), Replicate()], [Replicate(), Partial()], False),
-            ([Shard(0), Shard(1)], [Replicate(), Partial()], False),
+            ([Shard(0), Shard(1)], [Replicate(), Partial()], True),
             # Partial to partial is allowed, if only the reduction ops is the same
             ([Shard(0), Partial("prod")], [Replicate(), Partial("sum")], False),
         ]
@@ -1494,8 +1591,21 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
                         )
                         self.assertTrue(
                             src_to_dst_cost <= src_to_int_cost + int_to_dst_cost,
-                            f"{tensor_shape=}, {src_order=}, {dst_order=}, {intermediate_order=}",
+                            lambda msg: f"{msg}\n{tensor_shape=}, {src_order=}, {dst_order=}, {intermediate_order=}",
                         )
+
+    def test_redistribute_cost_sort_key_uses_unbacked_hint(self):
+        shape_env = ShapeEnv()
+        unbacked = shape_env.create_unbacked_symint()
+        shape_env.var_to_hint_override[unbacked.node.expr] = 8
+
+        lower_cost = 1000000.0 * (unbacked / 87.7) + 7.2
+        higher_cost = 1000000.0 * (2 * unbacked / 87.7) + 7.8
+
+        self.assertLess(
+            _redistribute_cost_sort_key(lower_cost),
+            _redistribute_cost_sort_key(higher_cost),
+        )
 
     def test_redistribute_partial_to_different_partial_not_supported(self):
         # Test that redistributing from one Partial type to another raises an error
@@ -1507,7 +1617,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             (Partial("sum"),),
             tensor_meta=TensorMeta(
                 local_tensor.size(),
-                local_tensor.stride,
+                local_tensor.stride(),
                 local_tensor.dtype,
             ),
         )
@@ -1516,7 +1626,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
             (Partial("avg"),),
             tensor_meta=TensorMeta(
                 local_tensor.size(),
-                local_tensor.stride,
+                local_tensor.stride(),
                 local_tensor.dtype,
             ),
         )
@@ -1613,7 +1723,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
         self.assertEqual(
             ascending_all_gather_count,
             1,
-            f"ascending order: expected 1 all_gather (with full flattening), got {ascending_all_gather_count}",
+            lambda msg: f"{msg}\nascending order: expected 1 all_gather (with full flattening), got {ascending_all_gather_count}",
         )
 
         # Test case 2: non-ascending order (1, 0, 2) - should NOT use flattened all_gather
@@ -1638,7 +1748,7 @@ class DistributeWithDeviceOrderTest(DTensorContinuousTestBase):
         self.assertEqual(
             non_ascending_all_gather_count,
             3,
-            f"non-ascending order: expected 3 all_gathers (no flattening), got {non_ascending_all_gather_count}",
+            lambda msg: f"{msg}\nnon-ascending order: expected 3 all_gathers (no flattening), got {non_ascending_all_gather_count}",
         )
 
         # Both should produce the same fully replicated tensor
@@ -1974,6 +2084,19 @@ class DistributeWithStridedShardTest(DTensorContinuousTestBase):
         with self.assertRaises(RuntimeError):
             src_dt.redistribute(mesh_2d, [Partial("sum"), Replicate()])
 
+        # Retaining _StridedShard after replacing its inner shard makes the
+        # greedy planner's logical shape inconsistent with the local shard.
+        src_dt = distribute_tensor(
+            input_2d,
+            mesh_2d,
+            [_StridedShard(0, split_factor=2), Shard(0)],
+        )
+        with self.assertRaises(RuntimeError):
+            src_dt.redistribute(
+                mesh_2d,
+                [_StridedShard(0, split_factor=2), Partial("sum")],
+            )
+
 
 class TransformInfoTest(TestCase):
     """Tests for _TransformInfo._comm_type_key method."""
@@ -2017,7 +2140,7 @@ class TransformInfoTest(TestCase):
             self.assertEqual(
                 info._comm_type_key(),
                 expected_key,
-                f"_StridedShard transform {placements} should map to '{expected_key}'",
+                lambda msg: f"{msg}\n_StridedShard transform {placements} should map to '{expected_key}'",
             )
 
 
@@ -2781,7 +2904,7 @@ class MultiDimRedistributeOptimizationTest(DTensorContinuousTestBase):
                     self.assertEqual(
                         actual_count,
                         expected_count,
-                        f"{desc}: expected {expected_count} {op}, got {actual_count}",
+                        lambda msg: f"{msg}\n{desc}: expected {expected_count} {op}, got {actual_count}",
                     )
 
                 # Verify placements
@@ -3060,7 +3183,7 @@ class UnevenFlattenedReduceScatterTest(DTensorContinuousTestBase):
         self.assertEqual(
             local_result.size(0),
             expected_size,
-            f"Rank {rank}: expected size {expected_size}, got {local_result.size(0)}",
+            lambda msg: f"{msg}\nRank {rank}: expected size {expected_size}, got {local_result.size(0)}",
         )
 
         # Check value for non-empty ranks
@@ -3069,7 +3192,7 @@ class UnevenFlattenedReduceScatterTest(DTensorContinuousTestBase):
             self.assertEqual(
                 local_result[0, 0].item(),
                 expected_val,
-                f"Rank {rank}: expected value {expected_val}, got {local_result[0, 0].item()}",
+                lambda msg: f"{msg}\nRank {rank}: expected value {expected_val}, got {local_result[0, 0].item()}",
             )
 
 

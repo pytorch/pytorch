@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/AccumulateType.h>
+#include <ATen/OpMathType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -44,7 +45,11 @@ C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void elementwise_kernel_with_index(index_t N, func_t f, typename function_traits<func_t>::result_type *data) {
   #pragma unroll
   for (int i = 0; i < thread_work_size; i++) {
-    index_t idx = block_work_size * blockIdx.x + num_threads() * i + threadIdx.x;
+    // Widen before multiplying: block_work_size * blockIdx.x is otherwise
+    // computed in 32-bit unsigned arithmetic and wraps for N >= 2**32,
+    // leaving the tail of the output unwritten.
+    index_t idx = static_cast<index_t>(block_work_size) * blockIdx.x +
+        num_threads() * i + threadIdx.x;
     if (idx < N) {
       data[idx] = f(idx);
     }
@@ -124,7 +129,7 @@ Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
     // skip
   } else if (steps == 1) {
     r.fill_(start);
-  } else if (isIntegralType(r.scalar_type(), 0)) {
+  } else if (isIntegralType(r.scalar_type(), /*includeBool=*/false)) {
     AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
@@ -141,9 +146,13 @@ Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
     });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, r.scalar_type(), "linspace_cuda", [&]() {
+      // Rounding the step to half or bfloat16 before multiplying it by the index
+      // compounds that rounding across the range, so accumulate in the opmath
+      // type. Matches the CPU and MPS kernels.
+      using step_t = at::opmath_type<scalar_t>;
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
+      step_t step = (static_cast<step_t>(scalar_end) - static_cast<step_t>(scalar_start)) / static_cast<step_t>(steps - 1);
       const int64_t halfway = steps / 2;
       gpu_kernel_with_index(r, [scalar_start, scalar_end, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
         if (ind < halfway) {
@@ -179,7 +188,7 @@ Tensor& logspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
     } else {
       r.fill_(std::pow(base, start.to<double>()));
     }
-  } else if (isIntegralType(r.scalar_type(), 0)) {
+  } else if (isIntegralType(r.scalar_type(), /*includeBool=*/false)) {
     AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "logspace_cuda", [&]() {
       float scalar_base = static_cast<float>(base); // Use float to avoid promotion to double
       scalar_t scalar_start = start.to<scalar_t>();
@@ -195,10 +204,12 @@ Tensor& logspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
     });
   } else {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, r.scalar_type(), "logspace_cuda", [&]() {
-      scalar_t scalar_base = static_cast<scalar_t>(base);
+      // See linspace_cuda_out: keep the step, and hence the pow, in the opmath type
+      using step_t = at::opmath_type<scalar_t>;
+      step_t scalar_base = static_cast<step_t>(base);
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
+      step_t step = (static_cast<step_t>(scalar_end) - static_cast<step_t>(scalar_start)) / static_cast<step_t>(steps - 1);
       const int64_t halfway = steps / 2;
       gpu_kernel_with_index(r, [scalar_start, scalar_end, scalar_base, steps, step, halfway]GPU_LAMBDA(int64_t ind) -> scalar_t {
         if (ind < halfway) {
@@ -252,31 +263,9 @@ Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& st
   AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "arange_cuda", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto xstart = start.to<accscalar_t>();
-    auto xend = end.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
 
-    arange_check_bounds(start, end, step);
-
-    // we use double precision for (start - end) / step
-    // to compute size_d for consistency across devices.
-    // The problem with using accscalar_t is that accscalar_t might be float32 on gpu for a float32 scalar_t,
-    // but double on cpu for the same,
-    // and the effective output size starts differing on CPU vs GPU because of precision issues, which
-    // we dont want.
-    // the corner-case we do want to take into account is int64_t, which has higher precision than double
-    double size_d;
-    if constexpr (std::is_same_v<scalar_t, int64_t>) {
-      TORCH_CHECK_VALUE(xstep != 0, "step must be nonzero");
-      int64_t sgn = (xstep > 0) - (xstep < 0);
-      size_d = std::ceil((xend - xstart + xstep - sgn) / xstep);
-    } else {
-      size_d = std::ceil(static_cast<double>(end.to<double>() - start.to<double>())
-                          / step.to<double>());
-    }
-
-    TORCH_CHECK(size_d >= 0 && size_d <= static_cast<double>(std::numeric_limits<int64_t>::max()),
-              "invalid size, possible overflow?");
-    int64_t size = static_cast<int64_t>(size_d);
+    int64_t size = compute_arange_size<scalar_t>(start, end, step);
     int64_t numel = result.numel();
 
     if (numel != size) {

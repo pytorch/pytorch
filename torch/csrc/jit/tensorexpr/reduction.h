@@ -62,9 +62,9 @@ class TORCH_API Reducer {
   static ExprHandle getReduceBody(
       const std::function<ExprHandle(const VarHandle&)>& func,
       const std::vector<VarHandle>& vars) {
-    if (vars.size() != 1) {
-      throw malformed_input("mismatch between reduce body and arg size (1)");
-    }
+    TORCH_CHECK(
+        vars.size() == 1,
+        "MALFORMED INPUT: mismatch between reduce body and arg size (1)");
 
     return func(vars[0]);
   }
@@ -72,9 +72,9 @@ class TORCH_API Reducer {
   static ExprHandle getReduceBody(
       const std::function<ExprHandle(const VarHandle&, const VarHandle&)>& func,
       const std::vector<VarHandle>& vars) {
-    if (vars.size() != 2) {
-      throw malformed_input("mismatch between reduce body and arg size (2)");
-    }
+    TORCH_CHECK(
+        vars.size() == 2,
+        "MALFORMED INPUT: mismatch between reduce body and arg size (2)");
     return func(vars[0], vars[1]);
   }
 
@@ -83,9 +83,9 @@ class TORCH_API Reducer {
           ExprHandle(const VarHandle&, const VarHandle&, const VarHandle&)>&
           func,
       const std::vector<VarHandle>& vars) {
-    if (vars.size() != 3) {
-      throw malformed_input("mismatch between reduce body and arg size (3)");
-    }
+    TORCH_CHECK(
+        vars.size() == 3,
+        "MALFORMED INPUT: mismatch between reduce body and arg size (3)");
     return func(vars[0], vars[1], vars[2]);
   }
 
@@ -96,9 +96,9 @@ class TORCH_API Reducer {
           const VarHandle&,
           const VarHandle&)>& func,
       const std::vector<VarHandle>& vars) {
-    if (vars.size() != 4) {
-      throw malformed_input("mismatch between reduce body and arg size (4)");
-    }
+    TORCH_CHECK(
+        vars.size() == 4,
+        "MALFORMED INPUT: mismatch between reduce body and arg size (4)");
     return func(vars[0], vars[1], vars[2], vars[3]);
   }
 
@@ -132,7 +132,7 @@ class TORCH_API Reducer {
 };
 
 // An expression representing a Reduction operation (e.g. Sum, Max) broken into
-// it's component parts: initialization, accumulation var, acquisition of value
+// its component parts: initialization, accumulation var, acquisition of value
 // to be reduced and interaction.
 //
 // This is intended to be expanded in the loopnest and not make it to codegen.
@@ -243,7 +243,7 @@ inline ExprHandle maximumVal(ScalarType type) {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, MAX_BY_TYPE_CASE)
 #undef MAX_BY_TYPE_CASE
     default:
-      throw unsupported_dtype();
+      TORCH_CHECK(false, "UNSUPPORTED DTYPE");
   }
   return ExprHandle();
 }
@@ -256,7 +256,7 @@ inline ExprHandle minimumVal(ScalarType type) {
     AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, MAX_BY_TYPE_CASE)
 #undef MAX_BY_TYPE_CASE
     default:
-      throw unsupported_dtype();
+      TORCH_CHECK(false, "UNSUPPORTED DTYPE");
   }
 }
 

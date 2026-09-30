@@ -31,13 +31,13 @@ from torch.testing._internal.common_distributed import (
     sm_is_or_higher_than,
 )
 from torch.testing._internal.common_fsdp import get_devtype
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import IS_LINUX, run_tests
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils.checkpoint import checkpoint
 
 
-device_type = str(get_devtype())
+device_type = get_devtype().type
 
 DIM = 2000
 
@@ -178,6 +178,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
         )
         dist.destroy_process_group()
 
+    @unittest.skipIf(IS_LINUX, "https://github.com/pytorch/pytorch/issues/160597")
     def test_compile_cpu(self):
         # Test the coalesced_op with CPU.
         torch._inductor.config._fuse_ddp_communication_passes = [
@@ -252,6 +253,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
         self._test_compile(no_sync=False, no_compile_forward=True, device=device_type)
 
     def test_ddp_optimizer_splits_graph(self):
+        if self.world_size < 2:
+            self.skipTest("DDP bucketing requires world_size >= 2")
         dist.init_process_group(
             backend="gloo",
             rank=self.rank,
@@ -319,6 +322,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
         pattern_matcher=False,
     )
     def test_bucketing_coalesced_op(self):
+        if self.world_size < 2:
+            self.skipTest("DDP bucketing requires world_size >= 2")
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
@@ -361,6 +366,8 @@ class ReplicateTest(MultiProcessInductorTestCase):
         pattern_matcher=False,
     )
     def test_bucketing_concat_op(self):
+        if self.world_size < 2:
+            self.skipTest("DDP bucketing requires world_size >= 2")
         # Gradient is None
         code = self._test_bucketing()
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
@@ -389,10 +396,9 @@ class ReplicateTest(MultiProcessInductorTestCase):
 class DDP_TP_Test(InductorTestCase):
     def setUp(self):
         super().setUp()
-        # Hmm, why a specific set_device call for rank 0?
         self.rank = 0
         self.world_size = 4
-        torch.get_device_module(device_type).set_device(device_type)
+        torch.get_device_module(device_type).set_device(self.rank)
 
         store = FakeStore()
         dist.init_process_group(

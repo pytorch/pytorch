@@ -42,7 +42,6 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
 
   if (n * m <= kSinglePassThreshold) {
     auto key = "eye_" + scalarToMetalTypeString(result);
-    id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
     id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc(key);
 
     // Map x to the smaller stride for coalesced writes
@@ -52,14 +51,15 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
     auto grid_x = swap ? static_cast<NSUInteger>(n) : static_cast<NSUInteger>(m);
     auto grid_y = swap ? static_cast<NSUInteger>(m) : static_cast<NSUInteger>(n);
 
-    dispatch_sync(mpsStream->queue(), ^() {
+    dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       @autoreleasepool {
+        auto computeEncoder = mpsStream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
         mtl_setArgs(computeEncoder, result, y_stride, x_stride);
 
         auto maxTg = [pso maxTotalThreadsPerThreadgroup];
         auto tg_x = std::min(grid_x, maxTg);
-        auto tg_y = std::min(grid_y, std::max(maxTg / tg_x, static_cast<NSUInteger>(1)));
+        auto tg_y = std::clamp(grid_y, 1UL, maxTg / tg_x);
         [computeEncoder dispatchThreads:MTLSizeMake(grid_x, grid_y, 1)
                   threadsPerThreadgroup:MTLSizeMake(tg_x, tg_y, 1)];
       }
@@ -69,11 +69,11 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
     int64_t sz = std::min(n, m);
     int64_t diag_stride = stride0 + stride1;
     auto key = "eye_diag_" + scalarToMetalTypeString(result);
-    id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
     id<MTLComputePipelineState> pso = lib.getPipelineStateForFunc(key);
 
-    dispatch_sync(mpsStream->queue(), ^() {
+    dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
       @autoreleasepool {
+        auto computeEncoder = mpsStream->commandEncoder();
         [computeEncoder setComputePipelineState:pso];
         mtl_setArgs(computeEncoder, result, diag_stride);
         mtl_dispatch1DJob(computeEncoder, pso, sz);

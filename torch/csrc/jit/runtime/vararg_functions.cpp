@@ -67,7 +67,7 @@ void addFormattedArg(
       } else {
         tmp << static_cast<float>(ival.toDouble());
       }
-      ss << tmp.str();
+      ss << std::move(tmp).str();
       break;
     case 'c':
       TORCH_CHECK(
@@ -113,7 +113,7 @@ void format(Stack& stack, size_t num_inputs) {
 
   // static const std::regex unsupported_options("\\{(.*?)\\}");
   auto format = peek(stack, 0, num_inputs).toStringRef();
-  // // Temporally comment out the warning message because of
+  // // Temporarily comment out the warning message because of
   // // "StdRegexIsAwful" internal Lint error, to prevent sev
   // // of std::regex from PT mobile.
   // if (std::regex_search(format, unsupported_options)) {
@@ -137,7 +137,7 @@ void format(Stack& stack, size_t num_inputs) {
   }
 
   drop(stack, num_inputs);
-  push(stack, ss.str());
+  push(stack, std::move(ss).str());
 }
 
 void einsum(Stack& stack, size_t num_inputs) {
@@ -199,7 +199,7 @@ void einsum(Stack& stack, size_t num_inputs) {
     parse_sublist(args.back().toIntList(), num_inputs - 1);
   }
 
-  const auto equation = ss.str();
+  const auto equation = std::move(ss).str();
   std::vector<at::Tensor> operands;
 
   // Parse input operands
@@ -257,7 +257,7 @@ void percentFormat(Stack& stack, size_t num_inputs) {
   }
   TORCH_CHECK(used_args == args_size, "Too many arguments for format string");
   drop(stack, num_inputs);
-  push(stack, ss.str());
+  push(stack, std::move(ss).str());
 }
 
 void listUnpack(Stack& stack, size_t num_outputs) {

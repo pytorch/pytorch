@@ -8,9 +8,12 @@ import torch
 import torch._dynamo.test_case
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import CompileCounter
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 class IdTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _assert_id_equals(self, obj):
         """Assert Dynamo's id(obj) matches eager Python's id(obj)."""
         expected = id(obj)
@@ -315,6 +318,10 @@ class IdTests(torch._dynamo.test_case.TestCase):
         self._assert_id_graph_breaks(fn)
 
     def test_id_sourceless_comparison(self):
+        """FakeIdVariable comparisons are not guaranteed to be sound (the
+        compile-time fake id may not match runtime values), so we
+        unconditionally graph-break."""
+
         def fn(x):
             a = [1, 2]
             b = [3, 4]
@@ -322,7 +329,9 @@ class IdTests(torch._dynamo.test_case.TestCase):
                 return x + 1.0
             return x + 2.0
 
-        self._assert_id_dict_key_works(fn, torch.randn(4))
+        x = torch.randn(4)
+        result = torch.compile(fn, backend="eager")(x)
+        self.assertEqual(result, fn(x))
 
     # =====================================================================
     # Category 4: id() as dict key should not graph break
