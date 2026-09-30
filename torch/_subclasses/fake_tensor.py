@@ -132,6 +132,25 @@ def _is_indexed_device_type(device_type: str) -> bool:
     ]
 
 
+def _pin_device_index(device: torch.device) -> torch.device:
+    """``device`` with its index resolved, if it has one to resolve.
+
+    An index-less accelerator device means "the current one", so it denotes a
+    different physical device depending on ambient state. Anything that has to
+    compare or key on a device has to pin it first, or two calls made under
+    different current devices look identical when they are not.
+
+    Deliberately does not initialize the device context the way
+    FakeTensor._normalize_fake_device does around it: callers include cache-key
+    construction, which must not allocate.
+    """
+    if device.index is not None or not _is_indexed_device_type(device.type):
+        return device
+    if device.type != "mps" and getattr(torch, device.type).is_initialized():
+        return torch.device(device.type, getattr(torch, device.type).current_device())
+    return torch.device(device.type, 0)
+
+
 # Small helper that increments recursion count, and
 # resets it when the object goes out of scope.  Useful
 # if you don't want to increase indentation which is
@@ -935,14 +954,7 @@ class FakeTensor(Tensor):
         if device.type in ("cuda", "xpu"):
             init_gpu_context(device)
 
-        if _is_indexed_device_type(device.type) and device.index is None:
-            if device.type != "mps" and getattr(torch, device.type).is_initialized():
-                device = torch.device(
-                    f"{device.type}:{getattr(torch, device.type).current_device()}"
-                )
-            else:
-                device = torch.device(f"{device.type}:0")
-        return device
+        return _pin_device_index(device)
 
     @staticmethod
     def __new__(
@@ -1846,7 +1858,10 @@ class FakeTensorMode(TorchDispatchMode):
             if self.cache_crosscheck_enabled:
                 # For debugging / testing: Validate that the output synthesized
                 # from the cache matches the output created by normal dispatch.
-                with disable_fake_tensor_cache(self):
+                with (
+                    disable_fake_tensor_cache(self),
+                    torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing(),
+                ):
                     self._crosscheck_cache_output(output, func, types, args, kwargs)
             return output
 
@@ -2067,6 +2082,14 @@ class FakeTensorMode(TorchDispatchMode):
                 result.append(type(arg))
                 result.append(hash(arg))
                 id_hashed_objects.append(arg.orig_callable)
+            elif isinstance(arg, torch.device):
+                # Pin the index: an index-less device is resolved against the
+                # current device when the output is built (see
+                # FakeTensor._normalize_fake_device), so hashing it unresolved
+                # lets a `cuda` call made while cuda:0 is current serve one made
+                # while cuda:1 is, and the cached output carries the wrong device.
+                result.append(type(arg))
+                result.append(_pin_device_index(arg))
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
                 # hash to the same value, but can produce different dtypes for the
@@ -2406,16 +2429,22 @@ class FakeTensorMode(TorchDispatchMode):
         Create a new FakeTensor from the cache entry.
         """
 
-        if entry.is_output_tuple:
-            outputs = [
-                self._get_output_tensor_from_cache_entry(state, output_info, key, args)
-                for output_info in entry.output_infos
-            ]
-            return tuple(outputs)
-        else:
-            return self._get_output_tensor_from_cache_entry(
-                state, entry.output_infos[0], key, args
-            )
+        # Reconstructing a cached FakeTensor may run symbolic checks inside
+        # empty_strided()/set_().  Those checks are cache internals, not user
+        # operations, so they must not be recorded by an active proxy tracer.
+        with torch.fx.experimental.proxy_tensor.disable_proxy_modes_tracing():
+            if entry.is_output_tuple:
+                outputs = [
+                    self._get_output_tensor_from_cache_entry(
+                        state, output_info, key, args
+                    )
+                    for output_info in entry.output_infos
+                ]
+                return tuple(outputs)
+            else:
+                return self._get_output_tensor_from_cache_entry(
+                    state, entry.output_infos[0], key, args
+                )
 
     def _crosscheck_cache_output(
         self,
@@ -2980,9 +3009,10 @@ class FakeTensorMode(TorchDispatchMode):
                     t.real_tensor = real_t
                     for s, real_s in zip(t.size(), real_t.size()):
                         go(s, real_s)  # type: ignore[arg-type]
-                    for s, real_s in zip(t.stride(), real_t.stride()):
-                        go(s, real_s)  # type: ignore[arg-type]
-                    go(t.storage_offset(), real_t.storage_offset())  # type: ignore[arg-type]
+                    if t.layout == torch.strided:
+                        for s, real_s in zip(t.stride(), real_t.stride()):
+                            go(s, real_s)  # type: ignore[arg-type]
+                        go(t.storage_offset(), real_t.storage_offset())  # type: ignore[arg-type]
                 elif isinstance(t, py_sym_types) and free_unbacked_symbols(t):
                     if isinstance(t.node.expr, sympy.Symbol):
                         if self.shape_env is None:
@@ -3210,7 +3240,14 @@ class FakeTensorMode(TorchDispatchMode):
         # python meta registrations, prims, decomps, and c++ meta fns (structured kernels)
         # It's possible that the kernel will return NotImplementedError
         try:
-            with in_kernel_invocation_manager(self):
+            # sparse invariant checks read index data, which meta tensors lack
+            suppress_invariants = (
+                torch.sparse.check_sparse_tensor_invariants(False)
+                if torch.sparse.check_sparse_tensor_invariants.is_enabled()
+                and any(is_sparse_any(t) for t in flat_arg_fake_tensors)
+                else contextlib.nullcontext()
+            )
+            with in_kernel_invocation_manager(self), suppress_invariants:
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
             return maybe_run_unsafe_fallback(not_implemented_error)
@@ -3411,6 +3448,9 @@ class FakeTensorMode(TorchDispatchMode):
         aten.set_.source_Storage_storage_offset,
         aten._sparse_coo_tensor_with_dims_and_tensors.default,
         aten.stack.default,
+        aten.arange.default,
+        aten.arange.start,
+        aten.arange.start_step,
     )
 
     _unbacked_special_fake_handling_ops = ordered_set(

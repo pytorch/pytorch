@@ -1180,6 +1180,27 @@ instantiate_device_type_tests(TestDecomp, globals())
 class DecompOneOffTests(TestCase):
     @onlyNativeDeviceTypes
     @skipIfCrossRef
+    def test_polar_decomposition_is_functional(self, device):
+        # A decomposition is inlined into a graph that must stay functional, so
+        # it may not build its result and then write the parts into it.
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        table = torch._decomp.get_decompositions([torch.ops.aten.polar])
+        dist = torch.rand(8, device=device)
+        angle = torch.randn(8, device=device)
+
+        gm = make_fx(torch.polar, decomposition_table=table)(dist, angle)
+        targets = [
+            node.target
+            for node in gm.graph.nodes
+            if isinstance(node.target, torch._ops.OpOverload)
+        ]
+        self.assertNotIn(torch.ops.aten.polar.default, targets)
+        self.assertEqual([t for t in targets if t._schema.is_mutable], [])
+        self.assertEqual(gm(dist, angle), torch.polar(dist, angle))
+
+    @onlyNativeDeviceTypes
+    @skipIfCrossRef
     def test_contiguous_softmax(self, device):
         size = (2, 4, 3, 3)
         stride = (9, 18, 3, 1)
@@ -1478,6 +1499,32 @@ class DecompOneOffTests(TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "same dtype"):
             addmv_decomp(input, mat, vec)
+
+    @onlyCPU
+    @skipIfCrossRef
+    def test_addmm_addmv_decomp_reject_input_wider_than_output(self, device):
+        # addmm_out_cpu and addmv_impl_cpu expand `self` to the mm/mv result
+        # shape, so `input` broadcasts *to* it rather than widening it. The
+        # decompositions have to reject the same shapes, otherwise a compiled
+        # addmm/addmv returns a result eager refuses to produce.
+        addmm_decomp = get_decompositions([aten.addmm.default])[aten.addmm.default]
+        addmv_decomp = get_decompositions([aten.addmv.default])[aten.addmv.default]
+
+        input = torch.randn(500, 1, device=device)
+        mat1 = torch.randn(1, 1, device=device)
+        mat2 = torch.randn(1, 1, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expand"):
+            torch.addmm(input, mat1, mat2)
+        with self.assertRaisesRegex(RuntimeError, "expand"):
+            addmm_decomp(input, mat1, mat2)
+
+        vec_input = torch.randn(500, device=device)
+        mat = torch.randn(1, 5, device=device)
+        vec = torch.randn(5, device=device)
+        with self.assertRaisesRegex(RuntimeError, "size mismatch"):
+            torch.addmv(vec_input, mat, vec)
+        with self.assertRaisesRegex(RuntimeError, "expand"):
+            addmv_decomp(vec_input, mat, vec)
 
     @onlyCPU
     @skipIfCrossRef
