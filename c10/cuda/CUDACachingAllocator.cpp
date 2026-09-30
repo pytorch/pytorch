@@ -1775,8 +1775,9 @@ class DeviceCachingAllocator {
   void prepare_for_malloc(
       const std::shared_ptr<GatheredContext>& context,
       cudaStream_t stream,
-      bool is_capturing) {
-    if (C10_LIKELY(!is_capturing)) {
+      bool has_active_captures) {
+    // Deferred frees span streams; a noncapturing request must not drain them.
+    if (C10_LIKELY(!has_active_captures)) {
       // Processes end-of-life events for outstanding allocations used on
       // multiple streams (checks if their GPU-side uses are complete and
       // recycles their memory if so)
@@ -1816,7 +1817,7 @@ class DeviceCachingAllocator {
     if (has_active_captures) {
       allocation_context = capture_tracker_.allocationContext(stream);
     }
-    prepare_for_malloc(context, stream, allocation_context.is_capturing);
+    prepare_for_malloc(context, stream, has_active_captures);
 
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, stream);
@@ -2118,7 +2119,7 @@ class DeviceCachingAllocator {
     if (has_active_captures) {
       allocation_context = capture_tracker_.allocationContext(stream);
     }
-    prepare_for_malloc(context, stream, allocation_context.is_capturing);
+    prepare_for_malloc(context, stream, has_active_captures);
 
     const size_t size = round_size(orig_size);
     const cudaStream_t block_reuse_stream =
@@ -2675,6 +2676,15 @@ class DeviceCachingAllocator {
       // ignore uses on the allocation stream, since those don't require any
       // special synchronization
       return;
+    }
+    if (C10_UNLIKELY(capture_tracker_.hasActiveCaptures())) {
+      const auto use_context =
+          capture_tracker_.allocationContext(stream.stream());
+      if (use_context.block_reuse_stream == block->stream) {
+        // Ignore uses in the allocation's reuse domain, since they don't
+        // require separate stream-lifetime tracking.
+        return;
+      }
     }
     block->stream_uses.insert(stream);
     if (C10_UNLIKELY(is_capture_context())) {
