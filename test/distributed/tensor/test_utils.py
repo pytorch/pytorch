@@ -42,8 +42,10 @@ from torch.distributed.tensor.placement_types import (
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
+    DTensorContinuousTestBase,
     DTensorTestBase,
     generate_shard_orders,
+    LocalDTensorContinuousTestBase,
     LocalDTensorTestBase,
     patched_distribute_tensor as _distribute_tensor,
     shard_order_to_placement,
@@ -389,10 +391,8 @@ class LocalTest(TestCase):
             self.assertEqual(global_offset, (expected_shard_offset, 0))
 
 
-class UtilTest(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 8
+class UtilTest(DTensorContinuousTestBase):
+    world_size = 8
 
     def _compute_start_end_offsets(self, global_offset, local_size, n_dim):
         offset = []
@@ -2019,7 +2019,9 @@ class TestIsTensorShardable(LocalTensorTestBase):
         self.assertFalse(is_tensor_evenly_shardable([16, 8], spec))
 
 
-UtilTestWithLocalTensor = create_local_tensor_test_class(UtilTest)
+UtilTestWithLocalTensor = create_local_tensor_test_class(
+    UtilTest, base_class=LocalDTensorContinuousTestBase
+)
 TestStridedShardingWithLocalTensor = create_local_tensor_test_class(TestStridedSharding)
 Test2DStridedLocalShardWithLocalTensor = create_local_tensor_test_class(
     Test2DStridedLocalShard

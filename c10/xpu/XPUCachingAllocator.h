@@ -20,6 +20,15 @@ class XPUAllocator : public DeviceAllocator {
 
 C10_XPU_API extern std::atomic<XPUAllocator*> allocator;
 
+struct AllocatorState {
+  virtual ~AllocatorState() = default;
+};
+
+struct CheckpointDelta {
+  std::vector<void*> ptrs_freed;
+  std::vector<c10::DataPtr> dataptrs_allocd;
+};
+
 struct AllocatorConfigInfo {
   bool expandable_segments;
   std::string last_allocator_settings;
@@ -96,7 +105,7 @@ C10_XPU_API std::shared_ptr<void> getIpcDevPtr(std::string handle);
 C10_XPU_API void createOrIncrefPool(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id,
-    XPUAllocator* allocator = nullptr);
+    std::shared_ptr<XPUAllocator> allocator_ptr = nullptr);
 
 C10_XPU_API void beginAllocateToPool(
     c10::DeviceIndex device,
@@ -115,9 +124,35 @@ C10_XPU_API void releasePool(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id);
 
+C10_XPU_API void setNoSplit(
+    c10::DeviceIndex device,
+    c10::MempoolId_t mempool_id);
+
+// Register/unregister a pool as an OOM fallback. Callers must explicitly
+// call setUseOnOOM(..., false) before releasing the pool.
+C10_XPU_API void setUseOnOOM(
+    c10::DeviceIndex device,
+    c10::MempoolId_t mempool_id,
+    bool use_on_oom);
+
 C10_XPU_API int getPoolUseCount(
     c10::DeviceIndex device,
     c10::MempoolId_t mempool_id);
+
+C10_XPU_API std::shared_ptr<AllocatorState> getCheckpointState(
+    c10::DeviceIndex device,
+    MempoolId_t id);
+
+C10_XPU_API CheckpointDelta setCheckpointPoolState(
+    c10::DeviceIndex device,
+    std::shared_ptr<AllocatorState> as);
+
+C10_XPU_API bool isHistoryEnabled();
+
+C10_XPU_API bool checkPoolLiveAllocations(
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id,
+    const std::unordered_set<void*>& expected_live_allocations);
 
 } // namespace c10::xpu::XPUCachingAllocator
 
