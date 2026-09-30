@@ -100,6 +100,10 @@
 #   ACL_ROOT_DIR             Arm Compute Library location (read from env in
 #                            cmake/Modules/FindACL.cmake)
 #   LIBRARY_PATH / LD_LIBRARY_PATH   searched for libraries (compiler/linker native)
+#   CAFFE2_CUSTOM_PROTOC_EXECUTABLE  host protoc to use instead of the one built
+#                            from third_party/protobuf. Required when cross-compiling,
+#                            where the built protoc targets an architecture the build
+#                            host cannot execute (see cmake/ProtoBuf.cmake)
 #
 # Handled outside this module (NOT forwarded here; see also the everyday knobs
 # above, which are all handled via pyproject.toml or natively):
@@ -148,6 +152,7 @@ set(_ENV_PASSTHROUGH
   MKLDNN_CPU_RUNTIME
   MSVC_Z7_OVERRIDE
   CAFFE2_USE_MSVC_STATIC_RUNTIME
+  CAFFE2_CUSTOM_PROTOC_EXECUTABLE
   Numa_INCLUDE_DIR
   Numa_LIBRARIES
   ONNX_ML
@@ -207,7 +212,41 @@ endforeach()
 # (do not merely fill when undefined) so a value left by an earlier env-less
 # configure -- an option() default or a ninja-triggered reconfigure -- cannot
 # permanently shadow the environment.
+# Names this module forwarded, and their EFFECTIVE values at the end of configure,
+# written for native-AOT stage 2: it reconfigures this build before relinking, and has to
+# know whether that changed any setting. It cannot read CMakeCache.txt for this -- a
+# dependent option that loses availability keeps its stale value there (retyped INTERNAL)
+# while the build uses the force value -- so record what the build actually used.
+set(ENVFWD_EFFECTIVE_FILE "env_forwarded.txt")
+
+# The list lives in the cache rather than this configure's scope: a configure forwards
+# only what its own environment holds, so a later reconfigure from a barer shell would
+# record fewer names and stage 2 would read a missing name as a changed setting.
+function(_envfwd_note _name)
+  set(_seen "${ENVFWD_FORWARDED_NAMES}")
+  list(APPEND _seen "${_name}")
+  list(REMOVE_DUPLICATES _seen)
+  list(SORT _seen)
+  set(ENVFWD_FORWARDED_NAMES "${_seen}" CACHE INTERNAL
+      "Variables EnvVarForwarding has forwarded into this build")
+endfunction()
+
+function(_envfwd_write_effective)
+  set(_names "${ENVFWD_FORWARDED_NAMES}")
+  set(_lines "")
+  foreach(_n IN LISTS _names)
+    # One line per name, so a newline inside a value would corrupt the comparison.
+    string(REPLACE "\n" "\\n" _v "${${_n}}")
+    string(APPEND _lines "${_n}=${_v}\n")
+  endforeach()
+  file(WRITE "${CMAKE_BINARY_DIR}/${ENVFWD_EFFECTIVE_FILE}" "${_lines}")
+endfunction()
+
+# End of the top-level scope, so the value recorded is the one the build settled on.
+cmake_language(DEFER DIRECTORY "${CMAKE_SOURCE_DIR}" CALL _envfwd_write_effective)
+
 function(_envfwd_apply _name _value)
+  _envfwd_note("${_name}")
   if(NOT DEFINED ${_name} OR NOT "${${_name}}" STREQUAL "${_value}")
     set(${_name} "${_value}" CACHE STRING "From environment" FORCE)
   endif()
@@ -250,6 +289,7 @@ foreach(_alias IN LISTS _LOW_PRIORITY_ALIASES)
   list(GET _parts 0 _env_name)
   list(GET _parts 1 _cmake_name)
   if(DEFINED ENV{${_env_name}} AND NOT DEFINED ${_cmake_name})
+    _envfwd_note("${_cmake_name}")
     set(${_cmake_name} "$ENV{${_env_name}}" CACHE STRING "From env alias ${_env_name}" FORCE)
   endif()
 endforeach()

@@ -281,7 +281,9 @@ class Guard:
     stack: CapturedTraceback | None = None
     user_stack: traceback.StackSummary | None = None
     _hash: int | None = None
-    _unserializable: bool = False
+    # The local-scope type a TYPE_MATCH or FAKE_SCRIPT_TYPE_MATCH found, if any;
+    # serialize_guards refuses it.
+    _unserializable: type | None = None
     _force_dict_keys_match: bool = False
 
     def __hash__(self) -> int:
@@ -1440,10 +1442,18 @@ class Source:
         globals: dict[str, Any],
         locals: dict[str, Any],
         cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
     ) -> Any:
+        """Resolve this source, reporting only errors raised by this source's operation."""
         if self in cache:
             return cache[self]
-        value = eval(self._name_template, globals, locals)
+        try:
+            value = eval(self._name_template, globals, locals)
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, None, error)
+            raise
         cache[self] = value
         return value
 
@@ -1498,6 +1508,8 @@ class ChainedSource(Source):
         globals: dict[str, Any],
         locals: dict[str, Any],
         cache: dict[Source, Any],
+        *,
+        on_error: Callable[[Source, Any, Exception], None] | None = None,
     ) -> Any:
         if self in cache:
             return cache[self]
@@ -1506,9 +1518,18 @@ class ChainedSource(Source):
         while tmpvar in locals:
             tmpvar = f"tmp{counter}"
             counter += 1
-        locals[tmpvar] = self.base.get_value(globals, locals, cache)
-        value = eval(self._name_template.format(tmpvar), globals, locals)
-        del locals[tmpvar]
+        # Resolve dependencies outside the try so on_error sees the exact
+        # Source operation that failed, rather than an enclosing source.
+        base_value = self.base.get_value(globals, locals, cache, on_error=on_error)
+        locals[tmpvar] = base_value
+        try:
+            value = eval(self._name_template.format(tmpvar), globals, locals)
+        except Exception as error:
+            if on_error is not None:
+                on_error(self, base_value, error)
+            raise
+        finally:
+            del locals[tmpvar]
         cache[self] = value
         return value
 
