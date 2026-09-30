@@ -49,7 +49,7 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "13.4": "9",
 }
 
-ROCM_ARCHES = ["7.14", "10.0"]
+ROCM_ARCHES = ["10.0", "10.1"]
 
 XPU_ARCHES = ["xpu"]
 
@@ -93,8 +93,9 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     ),
     # dependency on latest patch version for (major, minor)
-    "7.14": ("rocm[libraries,device-all]==7.14.*"),
     "10.0": ("rocm[libraries,device-all]==10.0.*"),
+    # release candidate; switch to ==10.1.* once 10.1 is released
+    "10.1": ("rocm[libraries,device-all]==10.1.0rc3"),
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.2 | "
         "intel-cmplr-lib-ur==2026.1.2 | "
