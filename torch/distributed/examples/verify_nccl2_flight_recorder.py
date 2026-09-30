@@ -117,7 +117,7 @@ def main() -> None:
         start_method="spawn",
         dump_dir=dump_dir,
         dump_interval=dump_interval,
-        enabled_dumps={"nccl2_health_check", "stacks"},
+        enabled_dumps={"c10d_health_check", "stacks"},
     )
 
     tensor = torch.full((1024,), float(rank + 1), device=device)
@@ -130,7 +130,7 @@ def main() -> None:
         print(f"Dump directory: {dump_dir}", flush=True)
         print(
             "Local timeout dumps are disabled; per-rank files must come from "
-            "the NCCL2 health handler.",
+            "the c10d health handler observing NCCL2.",
             flush=True,
         )
 
@@ -145,7 +145,8 @@ def main() -> None:
     # timeout, the next health poll, and the asynchronous file writes.
     time.sleep(timeout_seconds + 3 * dump_interval + 5)
 
-    store = dist.distributed_c10d._get_process_group_store(dist.group.WORLD)
+    world_pg = dist.distributed_c10d._get_default_group()
+    store = dist.distributed_c10d._get_process_group_store(world_pg)
     done_key = f"verify_nccl2_fr/{os.path.basename(dump_dir)}"
     error: str | None = None
     if rank == 0:
@@ -154,9 +155,9 @@ def main() -> None:
                 dump_prefix, world_size, timeout=2 * dump_interval + 10
             )
             _validate_dumps(paths)
-            health_dumps = glob.glob(os.path.join(dump_dir, "nccl2_health_check_*.txt"))
+            health_dumps = glob.glob(os.path.join(dump_dir, "c10d_health_check_*.txt"))
             if not health_dumps:
-                raise RuntimeError("no periodic NCCL2 health-check dump found")
+                raise RuntimeError("no periodic c10d health-check dump found")
             print("NCCL2 debug-server Flight Recorder test passed.", flush=True)
             print(
                 "Analyze with:\n"

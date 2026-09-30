@@ -640,24 +640,24 @@ class TestTorchCommsHealthCheckHandler(TestCase):
         self.assertIn("Error: 503", result)
 
 
-class TestNCCL2HealthCheckHandler(TestCase):
+class TestC10dHealthCheckHandler(TestCase):
     def setUp(self) -> None:
         super().setUp()
-        from torch.distributed.debug._debug_handlers import NCCL2HealthCheckHandler
+        from torch.distributed.debug._debug_handlers import C10dHealthCheckHandler
 
-        self.handler = NCCL2HealthCheckHandler()
+        self.handler = C10dHealthCheckHandler()
 
     def test_registration(self) -> None:
         from torch.distributed.debug._debug_handlers import default_handlers
 
         routes = self.handler.routes()
         self.assertEqual(len(routes), 1)
-        self.assertEqual(routes[0].path, "/nccl2_health_check")
+        self.assertEqual(routes[0].path, "/c10d_health_check")
         links = self.handler.nav_links()
         self.assertEqual(len(links), 1)
-        self.assertEqual(links[0].path, "/nccl2_health_check")
-        self.assertEqual(links[0].label, "NCCL2 Health")
-        self.assertEqual(self.handler.dump_filename(), "nccl2_health_check")
+        self.assertEqual(links[0].path, "/c10d_health_check")
+        self.assertEqual(links[0].label, "c10d Health")
+        self.assertEqual(self.handler.dump_filename(), "c10d_health_check")
         self.assertTrue(
             any(
                 isinstance(handler, type(self.handler))
@@ -667,22 +667,38 @@ class TestNCCL2HealthCheckHandler(TestCase):
 
     @patch("torch.distributed.debug._debug_handlers.fetch_all")
     @patch("torch.distributed.debug._debug_handlers.format_fetch_summary")
-    def test_unhealthy_rank_triggers_all_rank_nccl2_dump(
+    def test_unhealthy_ranks_trigger_backend_dumps(
         self, mock_summary, mock_fetch_all
     ) -> None:
         mock_fetch_all.side_effect = [
-            (["http://h0:1"], [Response(200, '{"healthy": false}')]),
-            (["http://h0:1"], [Response(200, "dump initiated")]),
+            (
+                ["http://h0:1", "http://h1:1"],
+                [
+                    Response(
+                        200,
+                        '{"healthy": false, "unhealthy_backends": ["nccl2"]}',
+                    ),
+                    Response(
+                        200,
+                        '{"healthy": false, "unhealthy_backends": ["custom"]}',
+                    ),
+                ],
+            ),
+            (["http://h0:1"], [Response(200, "custom dump initiated")]),
+            (["http://h0:1"], [Response(200, "nccl2 dump initiated")]),
         ]
         mock_summary.return_value = None
 
         result = self.handler.dump()
 
         self.assertIn("Unhealthy rank detected", result)
-        self.assertEqual(mock_fetch_all.call_count, 2)
+        self.assertIn("Backend: custom", result)
+        self.assertIn("Backend: nccl2", result)
+        self.assertEqual(mock_fetch_all.call_count, 3)
         calls = mock_fetch_all.call_args_list
-        self.assertEqual(calls[0].args[0], "nccl2_health_check")
-        self.assertEqual(calls[1].args[:2], ("fr_dump_file", "backend=nccl2"))
+        self.assertEqual(calls[0].args[0], "c10d_health_check")
+        self.assertEqual(calls[1].args[:2], ("fr_dump_file", "backend=custom"))
+        self.assertEqual(calls[2].args[:2], ("fr_dump_file", "backend=nccl2"))
 
 
 if __name__ == "__main__":
