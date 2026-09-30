@@ -101,7 +101,7 @@ class CppWrapperMps(CppWrapperGpu):
             raise NotImplementedError("No threads or group_size provided")
 
         # Check if threads is a single value or an array-like structure
-        threads_str = str(threads)
+        threads_str = threads
         is_single_value = (
             threads_str.startswith("{")
             and threads_str.endswith("}")
@@ -121,7 +121,7 @@ class CppWrapperMps(CppWrapperGpu):
                 )
             else:
                 # Extract group size value if it's also in braces
-                group_size_str = str(group_size)
+                group_size_str = group_size
                 if group_size_str.startswith("{") and group_size_str.endswith("}"):
                     group_size_value = group_size_str[1:-1].strip()
                 else:
@@ -168,7 +168,7 @@ class CppWrapperMps(CppWrapperGpu):
                 )
                 new_args.append("}")
             else:
-                group_size_str = str(group_size)
+                group_size_str = group_size
                 group_size_size = get_array_size(group_size_str)
                 new_args.append("{")
                 new_args.append(f"    uint64_t {threads_var}[] = {threads};")
@@ -239,9 +239,6 @@ class CppWrapperMps(CppWrapperGpu):
                 AOTIMetalShaderLibraryHandle lib_handle = nullptr;
                 AOTIMetalKernelFunctionHandle kern_handle = nullptr;
 
-                aoti_torch_mps_create_shader_library(mps_lib_0_source, &lib_handle);
-                aoti_torch_mps_get_kernel_function(lib_handle, "generated_kernel", &kern_handle);
-
                 // RAII wrapper with custom deleter
                 auto lib_deleter = [](AOTIMetalShaderLibraryHandle h) {
                     if (h) aoti_torch_mps_delete_shader_library(h);
@@ -250,8 +247,16 @@ class CppWrapperMps(CppWrapperGpu):
                 using LibDeleter = decltype(lib_deleter);
                 using LibPtr = std::unique_ptr<AOTIMetalShaderLibraryOpaque, LibDeleter>;
 
+                AOTI_TORCH_ERROR_CODE_CHECK(
+                    aoti_torch_mps_create_shader_library(mps_lib_0_source, &lib_handle));
+                // Owns the library now; the kernel function check below can throw.
+                LibPtr lib(lib_handle, lib_deleter);
+
+                AOTI_TORCH_ERROR_CODE_CHECK(
+                    aoti_torch_mps_get_kernel_function(lib_handle, "generated_kernel", &kern_handle));
+
                 // Return pair of kernel handle and library smart pointer for cleanup
-                return std::make_pair(kern_handle, LibPtr(lib_handle, lib_deleter));
+                return std::make_pair(kern_handle, std::move(lib));
             }();
             return kernel_handle.first;
         }
@@ -287,9 +292,6 @@ AOTIMetalKernelFunctionHandle get_{lib_name}_handle() {{
         AOTIMetalShaderLibraryHandle lib_handle = nullptr;
         AOTIMetalKernelFunctionHandle kern_handle = nullptr;
 
-        aoti_torch_mps_create_shader_library({lib_name}_source, &lib_handle);
-        aoti_torch_mps_get_kernel_function(lib_handle, "generated_kernel", &kern_handle);
-
         // RAII wrapper with custom deleter
         auto lib_deleter = [](AOTIMetalShaderLibraryHandle h) {{
             if (h) aoti_torch_mps_delete_shader_library(h);
@@ -298,8 +300,16 @@ AOTIMetalKernelFunctionHandle get_{lib_name}_handle() {{
         using LibDeleter = decltype(lib_deleter);
         using LibPtr = std::unique_ptr<AOTIMetalShaderLibraryOpaque, LibDeleter>;
 
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_mps_create_shader_library({lib_name}_source, &lib_handle));
+        // Owns the library now; the kernel function check below can throw.
+        LibPtr lib(lib_handle, lib_deleter);
+
+        AOTI_TORCH_ERROR_CODE_CHECK(
+            aoti_torch_mps_get_kernel_function(lib_handle, "generated_kernel", &kern_handle));
+
         // Return pair of kernel handle and library smart pointer for cleanup
-        return std::make_pair(kern_handle, LibPtr(lib_handle, lib_deleter));
+        return std::make_pair(kern_handle, std::move(lib));
     }}();
     return kernel_handle.first;
 }}

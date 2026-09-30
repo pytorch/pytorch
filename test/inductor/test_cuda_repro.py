@@ -48,13 +48,18 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfRocmArch,
     skipIfXpu,
+    subtest,
     TEST_CUDA,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
     TEST_XPU,
     xfailIfROCm,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU, IS_BIG_GPU
+from torch.testing._internal.inductor_utils import (
+    HAS_GPU,
+    IS_BIG_GPU,
+    requires_block_ptr,
+)
 
 
 if TEST_WITH_ROCM:
@@ -142,6 +147,29 @@ class CudaReproTests(TestCase):
         self.assertEqual(actual_mantissa, expected_mantissa, equal_nan=True)
         self.assertEqual(actual_exponent, expected_exponent)
 
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_frexp_subnormal(self):
+        # https://github.com/pytorch/pytorch/issues/195007
+        def fn(x):
+            return torch.frexp(x)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        for dtype, int_dtype, mbits, nbits in (
+            (torch.float32, torch.int32, 23, 32),
+            (torch.float64, torch.int64, 52, 64),
+        ):
+            # subnormals, +-0.0, and the smallest normal, both signs
+            pos = [0, 1, 2, 3, 127, (1 << mbits) - 1, 1 << mbits]
+            bits = pos + [p - (1 << (nbits - 1)) for p in pos]
+            x = torch.tensor(bits, dtype=int_dtype, device=device_type).view(dtype)
+            expected_mantissa, expected_exponent = fn(x)
+            actual_mantissa, actual_exponent = compiled(x)
+            # compare bit patterns to catch a lost -0.0 sign
+            self.assertEqual(
+                actual_mantissa.view(int_dtype), expected_mantissa.view(int_dtype)
+            )
+            self.assertEqual(actual_exponent, expected_exponent)
+
     def test_index_put_issue(self):
         def forward(
             self,
@@ -217,6 +245,202 @@ class CudaReproTests(TestCase):
 
         self.assertEqual(compiled_out["ten0"], eager_out["ten0"])
         self.assertEqual(compiled_out["ten1"], eager_out["ten1"])
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_effn_attn_uniform_zero_bias(self):
+        batch_size, num_heads, seq_len, head_dim = 2, 4, 128, 64
+
+        def fn(query, key, value):
+            additive_mask = torch.full(
+                (batch_size, num_heads, seq_len, seq_len),
+                0.0,
+                device=query.device,
+                dtype=query.dtype,
+            )
+            return aten._scaled_dot_product_efficient_attention.default(
+                query, key, value, additive_mask, False
+            )[0]
+
+        query, key, value = (
+            torch.randn(
+                batch_size,
+                num_heads,
+                seq_len,
+                head_dim,
+                device=device_type,
+            )
+            for _ in range(3)
+        )
+
+        def compile_and_capture_bias(fn, *args, strict=False):
+            biases = []
+
+            def capture_bias(graph):
+                nodes = graph.find_nodes(
+                    op="call_function",
+                    target=aten._scaled_dot_product_efficient_attention.default,
+                )
+                biases.extend(node.args[3] for node in nodes)
+
+            torch._dynamo.reset()
+            with (
+                config.patch(
+                    numerics="strict" if strict else "default",
+                    joint_custom_post_pass=capture_bias,
+                ),
+                sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+            ):
+                compiled = torch.compile(fn, fullgraph=True)
+                actual = compiled(*args)
+            self.assertEqual(len(biases), 1)
+            return actual, biases[0], compiled
+
+        expected = fn(query, key, value)
+        actual, bias, _ = compile_and_capture_bias(fn, query, key, value)
+        self.assertEqual(actual, expected)
+        self.assertIsNone(bias)
+
+        strict_actual, strict_bias, _ = compile_and_capture_bias(
+            fn, query, key, value, strict=True
+        )
+        self.assertEqual(strict_actual, expected)
+        self.assertIsInstance(strict_bias, torch.fx.Node)
+
+        # Only compiler-proven zero masks may be removed; a runtime mask must
+        # remain an FX input because its contents can change between calls.
+        def runtime_mask_fn(query, key, value, attention_mask):
+            return F.scaled_dot_product_attention(
+                query, key, value, attn_mask=attention_mask
+            )
+
+        padding_mask = torch.zeros(
+            batch_size,
+            1,
+            seq_len,
+            seq_len,
+            device=device_type,
+        )
+        padding_mask[..., -1] = torch.finfo(padding_mask.dtype).min
+        expected = runtime_mask_fn(query, key, value, padding_mask)
+        actual, runtime_bias, compiled_runtime_mask_fn = compile_and_capture_bias(
+            runtime_mask_fn, query, key, value, padding_mask
+        )
+        self.assertEqual(actual, expected)
+        self.assertIsInstance(runtime_bias, torch.fx.Node)
+
+        # Reuse the same compiled graph with different mask contents.
+        padding_mask.zero_()
+        with sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION):
+            self.assertEqual(
+                compiled_runtime_mask_fn(query, key, value, padding_mask),
+                runtime_mask_fn(query, key, value, padding_mask),
+            )
+
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+        "Does not support mem_eff_attention",
+    )
+    def test_effn_attn_uniform_zero_bias_backward(self):
+        batch_size, num_heads, seq_len, head_dim = 2, 4, 128, 64
+
+        def fn(query, key, value):
+            additive_mask = torch.full(
+                (batch_size, num_heads, seq_len, seq_len),
+                0.0,
+                device=query.device,
+                dtype=query.dtype,
+            )
+            return aten._scaled_dot_product_efficient_attention.default(
+                query, key, value, additive_mask, True
+            )[0]
+
+        inputs = tuple(
+            torch.randn(
+                batch_size,
+                num_heads,
+                seq_len,
+                head_dim,
+                device=device_type,
+                requires_grad=True,
+            )
+            for _ in range(3)
+        )
+        eager_inputs = tuple(
+            tensor.detach().clone().requires_grad_() for tensor in inputs
+        )
+        compiled_inputs = tuple(
+            tensor.detach().clone().requires_grad_() for tensor in inputs
+        )
+        expected = fn(*eager_inputs)
+        expected.sum().backward()
+
+        biases = {}
+
+        def capture_biases(graph):
+            for target, bias_index in (
+                (aten._scaled_dot_product_efficient_attention.default, 3),
+                (aten._scaled_dot_product_efficient_attention_backward.default, 4),
+            ):
+                nodes = graph.find_nodes(op="call_function", target=target)
+                self.assertEqual(len(nodes), 1)
+                biases[target] = nodes[0].args[bias_index]
+
+        torch._dynamo.reset()
+        with (
+            config.patch(joint_custom_post_pass=capture_biases),
+            sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+        ):
+            compiled = torch.compile(fn, fullgraph=True)
+            actual = compiled(*compiled_inputs)
+            actual.sum().backward()
+
+        self.assertEqual(actual, expected)
+        for actual_input, expected_input in zip(compiled_inputs, eager_inputs):
+            self.assertEqual(actual_input.grad, expected_input.grad)
+        # check zero bias is removed.
+        self.assertIsNone(biases[aten._scaled_dot_product_efficient_attention.default])
+        self.assertIsNone(
+            biases[aten._scaled_dot_product_efficient_attention_backward.default]
+        )
+
+        def bias_grad_fn(query, key, value, bias_seed):
+            additive_mask = bias_seed * 0.0
+            return aten._scaled_dot_product_efficient_attention.default(
+                query, key, value, additive_mask, True
+            )[0]
+
+        bias_seed = torch.randn(
+            batch_size,
+            num_heads,
+            seq_len,
+            seq_len,
+            device=device_type,
+            requires_grad=True,
+        )
+        bias_grad_bias = []
+
+        def capture_bias_grad_bias(graph):
+            nodes = graph.find_nodes(
+                op="call_function",
+                target=aten._scaled_dot_product_efficient_attention_backward.default,
+            )
+            self.assertEqual(len(nodes), 1)
+            bias_grad_bias.append(nodes[0].args[4])
+
+        torch._dynamo.reset()
+        with (
+            config.patch(joint_custom_post_pass=capture_bias_grad_bias),
+            sdpa_kernel(SDPBackend.EFFICIENT_ATTENTION),
+        ):
+            compiled = torch.compile(bias_grad_fn, fullgraph=True)
+            compiled(*compiled_inputs, bias_seed).sum().backward()
+        # check zero bias is NOT removed due to rqurie bias grad.
+        self.assertEqual(len(bias_grad_bias), 1)
+        self.assertIsInstance(bias_grad_bias[0], torch.fx.Node)
+        self.assertIsNotNone(bias_seed.grad)
 
     def test_effn_attn_bias_padding(self):
         batch_size, num_heads, seq_len, head_dim = 2, 32, 512, 128
@@ -1838,7 +2062,6 @@ class CudaReproTests(TestCase):
                     atol=1e-3,
                 )
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163765")
     @torch._inductor.config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_mean_ratio_chain(self):
         torch.manual_seed(12345)
@@ -2197,6 +2420,39 @@ class CudaReproTests(TestCase):
         self.assertEqual(foo_c(t[1:]), foo(t_orig[1:]))
         self.assertEqual(t, t_orig)
 
+    def test_misaligned_saved_for_backward_input(self):
+        # A user input saved for backward but unused in forward compute reaches
+        # the backward graph as a primal. The backward compile must not assume
+        # it is aligned just because the first call's example was: unlike
+        # params/buffers, its address changes every call.
+        N = 1024
+
+        class ScaleGradient(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, value, weight):
+                ctx.save_for_backward(weight)
+                return value.expand(N).clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (weight,) = ctx.saved_tensors
+                return (grad_output * weight).sum().reshape(1), None
+
+        compiled = torch.compile(ScaleGradient.apply, dynamic=False)
+
+        def run(weight):
+            value = torch.ones(1, device=device_type, requires_grad=True)
+            compiled(value, weight).sum().backward()
+            self.assertEqual(value.grad, weight.sum().to(value.dtype).reshape(1))
+
+        aligned = torch.ones(N, device=device_type, dtype=torch.int32)
+        self.assertEqual(aligned.data_ptr() % 16, 0)
+        run(aligned)
+
+        misaligned = torch.ones(N + 1, device=device_type, dtype=torch.int32)[1:]
+        self.assertNotEqual(misaligned.data_ptr() % 16, 0)
+        run(misaligned)
+
     def test_non_commutative_scan_op(self):
         from torch._higher_order_ops.associative_scan import associative_scan
 
@@ -2314,7 +2570,10 @@ class CudaReproTests(TestCase):
         self.assertIn("reduction_hint=ReductionHint.INNER", persistent_code)
         self.assertNotIn("for roffset", persistent_code)
 
-    @parametrize("use_block_ptr", [False, True])
+    @parametrize(
+        "use_block_ptr",
+        [subtest(False), subtest(True, decorators=[requires_block_ptr])],
+    )
     @parametrize("dynamic_batch", [False, True])
     @config.patch(
         {
@@ -2761,14 +3020,12 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         )
         self.assertEqual(foo(x0), result)
 
-    @unittest.skipIf(
-        not config.is_fbcode(),
-        "bfloat16 atomic add is only supported in fbcode today #97016",
-    )
     @skipCUDAIf(
-        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+        not SM90OrLater and not TEST_WITH_ROCM,
+        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
     )
-    def test_atomic_add_bfloat16(self):
+    @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
+    def test_index_add_bfloat16_dim0(self):
         def f(x, y):
             return torch.index_select(x, 0, y)
 
@@ -2821,47 +3078,79 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
             self.assertEqual(torch.compile(f)(x, y), out)
 
     @skipCUDAIf(
-        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
+        not SM90OrLater and not TEST_WITH_ROCM,
+        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
     )
-    @unittest.skipIf(
-        config.is_fbcode(),
-        "bfloat16 atomic add is supported in fbcode, so we won't fallback",
-    )
-    def test_index_add_fallback(self):
-        def f(x, y):
-            return torch.index_select(x, 0, y)
-
-        x = torch.randn(
-            2000, 384, dtype=torch.bfloat16, device=device_type, requires_grad=True
-        )
-        y = torch.ones(713268, dtype=torch.int64, device=device_type)
-        x_ref = x.clone().detach().requires_grad_(True)
-        y_ref = y.clone().detach()
-
-        out, (_, bw_code) = run_fw_bw_and_get_code(lambda: torch.compile(f)(x, y))
-        fc = FileCheck()
-        fc.check("aten.index_add")
-        fc.run(bw_code)
-
-        self.assertEqual(f(x_ref, y_ref), out)
-
-    @skipCUDAIf(
-        not SM90OrLater, "uses bfloat16 atomic add instrs which requires SM >= 90"
-    )
-    @unittest.skipIf(
-        config.is_fbcode(),
-        "bfloat16 atomic add is supported in fbcode, so we won't fallback",
-    )
-    def test_index_add_fallback_direct(self):
+    @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
+    def test_index_add_bfloat16_direct(self):
         def f(x, idx, src):
-            return torch.index_add(x, 0, idx, src)
+            return torch.index_add(x, -1, idx, src, alpha=0.5)
 
-        x = torch.randn(16, 256, dtype=torch.bfloat16, device=device_type)
-        idx = torch.randperm(8, device=device_type)
-        src = torch.randn(8, 256, dtype=torch.bfloat16, device=device_type)
+        x = torch.zeros(16, 256, dtype=torch.bfloat16, device=device_type).T
+        idx = torch.tensor(
+            [0, 1, 1, 2, 2, 2, 7, 7], dtype=torch.int32, device=device_type
+        )
+        src = torch.ones(8, 256, dtype=torch.bfloat16, device=device_type).T
 
         out = f(x, idx, src)
-        compiled_out = torch.compile(f)(x, idx, src)
+        compiled_out, (code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True), x, idx, src
+        )
+
+        FileCheck().check("tl.atomic_add").check_not(
+            "torch.ops.aten.index_add.default"
+        ).run(code)
+        self.assertEqual(out, compiled_out)
+
+    @skipCUDAIf(
+        not SM90OrLater and not TEST_WITH_ROCM,
+        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
+    )
+    @skipIfXpu(msg="XPU does not support bfloat16 atomic add; index_add falls back")
+    def test_index_add_bfloat16_scalar_index(self):
+        def f(x, idx, src):
+            return torch.index_add(x, 1, idx, src)
+
+        x = torch.zeros(8, 16, dtype=torch.bfloat16, device=device_type)
+        idx = torch.tensor(3, device=device_type)
+        src = torch.ones(8, 1, dtype=torch.bfloat16, device=device_type)
+
+        out = f(x, idx, src)
+        compiled_out, (code,) = run_and_get_code(
+            torch.compile(f, fullgraph=True), x, idx, src
+        )
+
+        FileCheck().check("tl.atomic_add").check_not(
+            "torch.ops.aten.index_add.default"
+        ).run(code)
+        self.assertEqual(out, compiled_out)
+
+    @skipIfXpu(msg="XPU deterministic mode does not use the aten.index_put_ fallback")
+    @skipCUDAIf(
+        not SM90OrLater and not TEST_WITH_ROCM,
+        "requires ROCm or NVIDIA SM90+ bfloat16 atomic add support",
+    )
+    @unittest.skipIf(
+        config.is_fbcode(),
+        "fbcode uses its bfloat16 atomic add lowering",
+    )
+    def test_index_add_bfloat16_deterministic(self):
+        def f(x, idx, src):
+            return torch.index_add(x, 1, idx, src)
+
+        x = torch.zeros(32, 16, dtype=torch.bfloat16, device=device_type)
+        idx = torch.arange(8, device=device_type)
+        src = torch.ones(32, 8, dtype=torch.bfloat16, device=device_type)
+
+        with DeterministicGuard(True):
+            out = f(x, idx, src)
+            compiled_out, (code,) = run_and_get_code(
+                torch.compile(f, fullgraph=True), x, idx, src
+            )
+
+        FileCheck().check("aten.index_put_").check_not("tl.atomic_add").check_not(
+            "torch.ops.aten.index_add.default"
+        ).run(code)
         self.assertEqual(out, compiled_out)
 
     @requires_multigpu()
@@ -2909,7 +3198,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163701")
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         counters.clear()
@@ -2992,6 +3280,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(default_output, max_autotune_output)
 
+    @tf32_on_and_off(0.005)
     def test_adaptive_avg_pool3d_issue_157248(self):
         """Test for GitHub issue #157248: Conv2d-unsqueeze-AdaptiveAvgPool3d produces incorrect results"""
 
@@ -3032,11 +3321,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     compiled_output = compiled_model(input_tensor)
 
                 # They should be identical (or very close)
-                self.assertTrue(
-                    torch.allclose(eager_output, compiled_output, rtol=1e-5, atol=1e-5),
-                    lambda msg: f"{msg}\nResults differ for input shape {(batch, channels, h, w)}. "
-                    f"Max diff: {torch.max(torch.abs(eager_output - compiled_output)):.6f}",
-                )
+                self.assertEqual(eager_output, compiled_output)
 
     @parametrize(
         "quantiles_shape,quantiles_strides,batch_size",
@@ -3131,9 +3416,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertEqual(eager_out, compile_out)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/163689")
     @skipIfXpu(
-        msg="Explicit attn_mask should not be set when is_causal=True - torch-xpu-ops: 2802"
+        msg="_scaled_dot_product_efficient_attention returns log_sumexp in the query "
+        "dtype instead of float32, tripping Inductor's fake kernel metadata check"
     )
     def test_qwen2_7b_sdpa_input_alignment_requires_recompile(self):
         # SDPA constraints ensures inputs have alignment (8).
@@ -3179,7 +3464,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                     v,
                     attn_bias,
                     dropout_p=0.0,
-                    is_causal=True,
+                    is_causal=False,
                     scale=scale,
                     compute_log_sumexp=True,
                 )

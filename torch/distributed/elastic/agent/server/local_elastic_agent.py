@@ -156,8 +156,13 @@ class LocalElasticAgent(SimpleElasticAgent):
     <https://docs.python.org/3/library/string.html#template-strings>`_ as the
     ``log_line_prefix_template`` argument.
     The following macros (identifiers) are substituted at runtime:
-    ``${role_name}, ${local_rank}, ${rank}``. For example, to prefix each log line with
+    ``${role_name}, ${local_rank}, ${rank}, ${hostname}``.
+    For example, to prefix each log line with
     global rank instead of the local rank, set ``log_line_prefix_template = "[${rank}]:``.
+    ``${hostname}`` expands to the name of the node the agent runs on, which
+    identifies the offending node in a multi-node job; for example
+    ``log_line_prefix_template = "${hostname}:${rank}: "`` renders as
+    ``r12i0n8:3: foobar``.
 
 
     Example launching function
@@ -410,6 +415,10 @@ class LocalElasticAgent(SimpleElasticAgent):
         log_line_prefixes: dict[int, str] | None = (
             {} if self._log_line_prefix_template else None
         )
+        # Short name (e.g. "r12i0n8") rather than _get_fq_hostname(): the fq name
+        # eats horizontal space in every log line, and degrades to an unhelpful
+        # reverse-DNS record (e.g. "...ip6.arpa") when the node has no PTR entry.
+        hostname = socket.gethostname() if self._log_line_prefix_template else ""
         for worker in worker_group.workers:
             local_rank = worker.local_rank
             worker_env = {
@@ -442,6 +451,7 @@ class LocalElasticAgent(SimpleElasticAgent):
                     role_name=spec.role,
                     rank=worker.global_rank,
                     local_rank=local_rank,
+                    hostname=hostname,
                 )
                 # pyrefly: ignore [unsupported-operation]
                 log_line_prefixes[local_rank] = log_line_prefix
@@ -477,34 +487,38 @@ class LocalElasticAgent(SimpleElasticAgent):
     def _set_local_rank_env(
         self, worker_env: dict[str, str | None], local_rank: int, spec: WorkerSpec
     ) -> None:
-        # Set CUDA_VISIBLE_DEVICES and LOCAL_RANK based on virtual_local_rank mode.
+        # Set GPU visibility and LOCAL_RANK based on virtual_local_rank mode.
         # Virtual mode: Each worker sees only its assigned GPU as device 0, LOCAL_RANK=0
         # Traditional mode: Workers see all GPUs, LOCAL_RANK matches actual local rank
 
         if spec.virtual_local_rank:
-            # Set LOCAL_RANK=0 and use CUDA_VISIBLE_DEVICES to control the actual GPU access.
-
+            # Set LOCAL_RANK=0 and restrict each worker to its assigned GPU.
             worker_env["LOCAL_RANK"] = "0"
 
-            # Map local_rank through existing CUDA_VISIBLE_DEVICES
-            # HIP uses CUDA_VISIBLE_DEVICES as a compatibility hack:
-            # https://rocm.docs.amd.com/en/latest/conceptual/gpu-isolation.html#cuda-visible-devices
-            parent_visible_devices = os.getenv("CUDA_VISIBLE_DEVICES")
+            # HIP_VISIBLE_DEVICES takes precedence over CUDA_VISIBLE_DEVICES on
+            # ROCm, so use it as the source of the parent mapping when present.
+            parent_hip_visible_devices = os.getenv("HIP_VISIBLE_DEVICES")
+            if parent_hip_visible_devices:
+                visible_devices_env = "HIP_VISIBLE_DEVICES"
+                parent_visible_devices = parent_hip_visible_devices
+            else:
+                visible_devices_env = "CUDA_VISIBLE_DEVICES"
+                parent_visible_devices = os.getenv(visible_devices_env)
+
             if parent_visible_devices is not None:
-                # Parse comma-separated list of GPU IDs
                 available_gpus = parent_visible_devices.split(",")
                 if local_rank >= len(available_gpus):
                     raise ValueError(
                         f"local_rank {local_rank} exceeds available GPUs in "
-                        f"CUDA_VISIBLE_DEVICES={parent_visible_devices}"
+                        f"{visible_devices_env}={parent_visible_devices}"
                     )
-
                 visible_gpu = available_gpus[local_rank].strip()
             else:
-                # No restriction, use local_rank directly
                 visible_gpu = str(local_rank)
 
             worker_env["CUDA_VISIBLE_DEVICES"] = visible_gpu
+            if parent_hip_visible_devices:
+                worker_env["HIP_VISIBLE_DEVICES"] = visible_gpu
             return
 
         # In traditional mode, don't override CUDA_VISIBLE_DEVICES
