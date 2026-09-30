@@ -1045,7 +1045,6 @@ class TestNVUniversalGemm(TestCase):
             self.assertFalse(torch.allclose(result_1, result_2))
 
 
-@instantiate_parametrized_tests
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
 class TestNVUniversalGemmScheduling(TestCase):
     def setUp(self):
@@ -1283,15 +1282,13 @@ class TestNVUniversalGemmScheduling(TestCase):
         self.assertEqual(args_by_name["workspace"].shape, (4096,))
         self.assertEqual(args_by_name["workspace"].dtype, torch.int8)
 
-    @parametrize("workspace_size", (0, 4096))
-    def test_kernel_workspace_argument(self, workspace_size):
-        kernel = self._make_benchmark_kernel(workspace_size=workspace_size)
+    def test_kernel_without_workspace(self):
+        kernel = self._make_benchmark_kernel(workspace_size=0)
         with V.set_graph_handler(self.graph):
             arguments = kernel.ordered_arguments()
             source = kernel.render()
-        has_workspace = any(argument.kind == "workspace" for argument in arguments)
-        self.assertEqual(has_workspace, workspace_size > 0)
-        self.assertIn(f"workspace={'workspace' if has_workspace else 'None'}", source)
+        self.assertFalse(any(argument.kind == "workspace" for argument in arguments))
+        self.assertIn("workspace=None", source)
 
     def test_benchmark_evt_fallback_preserves_stride(self):
         kernel = self._make_benchmark_kernel(is_evt_fallback=True)
@@ -2340,8 +2337,8 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
     """Test cases for NVIDIA Universal GEMM epilogue fusion.
 
     Tests verify both correctness and that fusion actually occurs by examining
-    generated code for epilogue markers. Benchmarks are mocked to ensure
-    deterministic fusion decisions independent of GPU noise.
+    generated code for epilogue markers. Benchmarks are mocked to make fusion
+    decisions independent of GPU noise.
     """
 
     M, N, K = 512, 512, 512

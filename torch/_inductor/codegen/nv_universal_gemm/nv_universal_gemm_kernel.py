@@ -1343,8 +1343,14 @@ class NVUniversalGemmKernel(Kernel):
         )
 
         arguments = self.ordered_arguments()
-        input_tensor_names = [f"in_ptr{i}" for i, _ in enumerate(self.input_nodes)]
-        output_buffers = self.ordered_output_buffers()
+        input_tensor_names = [
+            argument.name for argument in arguments if argument.kind == "input"
+        ]
+        output_buffers = [
+            cast(str, argument.buffer_name)
+            for argument in arguments
+            if argument.kind == "output"
+        ]
         input_params = [argument.name for argument in arguments]
         input_params.append("stream=None")
         params_str = ", ".join(input_params)
