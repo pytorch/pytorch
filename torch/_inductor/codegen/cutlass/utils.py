@@ -603,10 +603,7 @@ def cutlass_standalone_runner_compile_command(
     iface = get_interface_for_device(device_type)
     if iface.support_debug_trace():
         extra_args.append("-DCUTLASS_DEBUG_TRACE_LEVEL=1")
-    cutlass_compile_command = (
-        iface.get_compile_command
-    )
-    compile_command = cutlass_compile_command(
+    compile_command = iface.get_compile_command(
         [str(srcpath)], str(exepath), "exe", extra_args=extra_args
     )
     return compile_command
