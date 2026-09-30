@@ -18,7 +18,13 @@ from unittest import mock
 
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import ErrorType, ReconfigureOptions
+from torch._C._distributed_c10d import (
+    _get_handler,
+    _Request,
+    _Response,
+    ErrorType,
+    ReconfigureOptions,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
@@ -33,6 +39,34 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TestCase,
 )
+
+
+def _nccl2_health() -> bool:
+    class Request(_Request):
+        def __init__(self) -> None:
+            _Request.__init__(self)
+
+        def body(self) -> bytes:
+            return b""
+
+        def params(self) -> dict[str, str]:
+            return {}
+
+    class Response(_Response):
+        def __init__(self) -> None:
+            _Response.__init__(self)
+
+        def set_content(self, content: str, content_type: str) -> None:
+            self.content = content
+
+        def set_status(self, status: int) -> None:
+            self.status = status
+
+    response = Response()
+    _get_handler("nccl2_health_check")(Request(), response)
+    if response.status != 200:
+        raise AssertionError(f"health handler returned status {response.status}")
+    return bool(json.loads(response.content)["healthy"])
 
 
 class ProcessGroupNCCL2Test(MultiProcContinuousTest):
@@ -617,6 +651,7 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
             while time.time() < deadline and backend.get_error() == ErrorType.SUCCESS:
                 time.sleep(0.5)
             self.assertEqual(backend.get_error(), ErrorType.TIMEOUT)
+            self.assertFalse(_nccl2_health())
             # The next collective on the timed-out group raises rather than
             # silently proceeding on a dead communicator.
             with self.assertRaises(RuntimeError):

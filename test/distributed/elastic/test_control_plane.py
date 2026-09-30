@@ -17,6 +17,7 @@ from torch.distributed.elastic.control_plane import (
     worker_main,
 )
 from torch.monitor import _WaitCounter
+from torch.testing._internal.common_distributed import requires_nccl
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
     requires_cuda,
@@ -186,6 +187,13 @@ class WorkerServerTest(TestCase):
                 resp = pool.request("POST", path)
                 self.assertEqual(resp.status, 200, msg=path)
                 self.assertIn("pg_status", json.loads(resp.data))
+
+    @requires_nccl()
+    def test_nccl2_health_check(self) -> None:
+        with local_worker_server() as pool:
+            resp = pool.request("POST", "/handler/nccl2_health_check")
+            self.assertEqual(resp.status, 200)
+            self.assertEqual(json.loads(resp.data), {"healthy": True})
 
     def test_tcp(self) -> None:
         import requests

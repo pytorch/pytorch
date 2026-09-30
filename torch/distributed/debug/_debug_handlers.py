@@ -731,6 +731,74 @@ class TorchCommsHealthCheckHandler(DebugHandler):
         return "torchcomms_health_check"
 
 
+NCCL2_HEALTH_CHECK_TEMPLATE = HEALTH_CHECK_TEMPLATE.replace(
+    "TorchComms Health Check", "NCCL2 Health Check"
+)
+
+
+class NCCL2HealthCheckHandler(DebugHandler):
+    """NCCL2 health check that triggers Flight Recorder dumps."""
+
+    def routes(self) -> list[Route]:
+        return [Route("/nccl2_health_check", self._handle)]
+
+    def nav_links(self) -> list[NavLink]:
+        return [NavLink("/nccl2_health_check", "NCCL2 Health")]
+
+    def templates(self) -> dict[str, str]:
+        return {"nccl2_health_check.html": NCCL2_HEALTH_CHECK_TEMPLATE}
+
+    def _handle(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("nccl2_health_check", timeout=self.fetch_timeout)
+        dump_triggered = False
+        dump_addrs: list[str] = []
+        dump_resps: list[Response] = []
+        if TorchCommsHealthCheckHandler._any_unhealthy(resps):
+            dump_addrs, dump_resps = fetch_all(
+                "fr_dump_file", "backend=nccl2", timeout=self.fetch_timeout
+            )
+            dump_triggered = True
+        return req.frontend.render_template(
+            "nccl2_health_check.html",
+            fetch_summary=format_fetch_summary(addrs, resps),
+            addrs=addrs,
+            resps=resps,
+            dump_triggered=dump_triggered,
+            dump_addrs=dump_addrs,
+            dump_resps=dump_resps,
+        )
+
+    def dump(self) -> str | None:
+        addrs, resps = fetch_all("nccl2_health_check", timeout=self.fetch_timeout)
+        parts: list[str] = []
+        summary = format_fetch_summary(addrs, resps)
+        if summary:
+            parts.append(summary)
+            parts.append("")
+        for i, (addr, resp) in enumerate(zip(addrs, resps)):
+            parts.append(f"=== Rank {i}: {addr} ===")
+            parts.append(
+                resp.text if resp.status_code == 200 else f"Error: {resp.status_code}"
+            )
+        if TorchCommsHealthCheckHandler._any_unhealthy(resps):
+            parts.append("")
+            parts.append("=== Unhealthy rank detected, triggering FR dump ===")
+            dump_addrs, dump_resps = fetch_all(
+                "fr_dump_file", "backend=nccl2", timeout=self.fetch_timeout
+            )
+            for i, (addr, resp) in enumerate(zip(dump_addrs, dump_resps)):
+                parts.append(f"--- Rank {i}: {addr} ---")
+                parts.append(
+                    resp.text
+                    if resp.status_code == 200
+                    else f"Error: {resp.status_code}"
+                )
+        return "\n".join(parts)
+
+    def dump_filename(self) -> str:
+        return "nccl2_health_check"
+
+
 def default_handlers() -> list[DebugHandler]:
     return [
         IndexHandler(),
@@ -739,6 +807,7 @@ def default_handlers() -> list[DebugHandler]:
         FlightRecorderHandler(),
         TorchCommsFlightRecorderHandler(),
         TorchCommsHealthCheckHandler(),
+        NCCL2HealthCheckHandler(),
         ProfilerHandler(),
         WaitCountersHandler(),
         TCPStoreHandler(),

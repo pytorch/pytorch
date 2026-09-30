@@ -631,6 +631,12 @@ void ProcessGroupNCCL::abortProcess(const std::string& reason) {
   TC_LOG(ERROR, this) << "Aborting process on rank " << rank_ << " due to "
                       << reason;
   runAbortHooks();
+  const auto waitMs = getCvarInt({"TORCHCOMM_HEALTH_CHECK_WAIT_MS"}, 15000);
+  TC_LOG(ERROR, this)
+      << "Waiting " << waitMs
+      << "ms for health check and flight recorder dump before aborting";
+  // NOLINTNEXTLINE(facebook-hte-BadCall-sleep_for)
+  std::this_thread::sleep_for(std::chrono::milliseconds(waitMs));
   ::abort();
 }
 
@@ -672,6 +678,7 @@ void ProcessGroupNCCL::handleBlockingWaitFailure(
   if (options_c10d_->enable_reconfigure) {
     revokeNcclComm();
   } else {
+    runAbortHooks();
     abortNcclComm();
   }
 }

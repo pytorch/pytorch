@@ -782,6 +782,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/NanCheck.cu",
     "torch/csrc/distributed/c10d/gloo/ProcessGroupGlooCuda.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupNCCL.cpp",
+    "torch/csrc/distributed/c10d/nccl2/HealthCheck.cpp",
     "torch/csrc/distributed/c10d/nccl2/TracingGuard.cpp",
     "torch/csrc/distributed/c10d/nccl2/Utils.cpp",
     "torch/csrc/distributed/c10d/nccl2/NcclApi.cpp",
