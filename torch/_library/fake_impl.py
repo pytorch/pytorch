@@ -75,10 +75,10 @@ class FakeImplHolder:
                     f"can have fake impls defined on them."
                 )
 
+        schema = lookup_op(self.qualname)._schema
         # Store the kernel in this holder
         kernel = Kernel(func, source)
         self.kernels.append(kernel)
-        schema = lookup_op(self.qualname)._schema
 
         def deregister_fake_kernel():
             self.kernels.remove(kernel)
