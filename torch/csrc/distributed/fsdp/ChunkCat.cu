@@ -6,17 +6,19 @@
 #include <torch/csrc/distributed/fsdp/ChunkCat.h>
 #include <torch/library.h>
 
+#include <algorithm>
+
 namespace torch::distributed::fsdp {
 namespace {
 
-// The device code and pack_vecs are copied from
-// aten/src/ATen/native/cuda/TensorShape.cu, where they are not exported. See
-// NOTE [CUDA kernel for chunk_cat] there.
-constexpr int64_t BLOCK_SIZE = 128;
-constexpr int64_t BYTES_PER_THREAD = 16;
-constexpr int64_t BYTES_PER_BLOCK = BYTES_PER_THREAD * BLOCK_SIZE;
+// The device code and pack_vecs are copied verbatim from
+// aten/src/ATen/native/cuda/TensorShape.cu, where they are not exported, apart
+// from namespace qualification.
+static constexpr int64_t BLOCK_SIZE = 128;
+static constexpr int64_t BYTES_PER_THREAD = 16;
+static constexpr int64_t BYTES_PER_BLOCK = BYTES_PER_THREAD * BLOCK_SIZE;
 
-__host__ __device__ inline int64_t div_up(int64_t a, int64_t b) {
+static __host__ __device__ inline int64_t div_up(int64_t a, int64_t b) {
   return (a + b - 1) / b;
 }
 
@@ -49,11 +51,11 @@ __device__ inline void stream_store128(T* addr, const uint4& val) {
 }
 
 template <typename T>
-__device__ inline bool is_aligned(const void* addr) {
+static __device__ inline bool is_aligned(const void* addr) {
   return reinterpret_cast<uintptr_t>(addr) % sizeof(T) == 0;
 }
 
-__device__ __inline__ void get_aligned_region(
+static __device__ __inline__ void get_aligned_region(
     char* ptr,
     const int64_t chunk_size,
     const int64_t alignment,
@@ -64,117 +66,7 @@ __device__ __inline__ void get_aligned_region(
   aligned_size = (chunk_size - align_off) / alignment * alignment;
 }
 
-template <typename dst_t, typename src_t>
-__device__ __inline__ void copy_chunk_with_pad(
-    dst_t* dst_ptr,
-    src_t* src_ptr,
-    int64_t max_chunk_size,
-    int64_t actual_chunk_size,
-    int64_t thread_idx,
-    int64_t num_threads) {
-  if (!std::is_same_v<dst_t, src_t>) {
-    const int64_t max_num_elems = max_chunk_size / sizeof(dst_t);
-    const int64_t actual_num_elems = actual_chunk_size / sizeof(src_t);
-    int64_t elem_index = thread_idx;
-    while (elem_index < actual_num_elems) {
-      dst_ptr[elem_index] =
-          c10::static_cast_with_inter_type<dst_t, src_t>::apply(
-              src_ptr[elem_index]);
-      elem_index += num_threads;
-    }
-    while (elem_index < max_num_elems) {
-      dst_ptr[elem_index] = c10::static_cast_with_inter_type<dst_t, int>::apply(0);
-      elem_index += num_threads;
-    }
-    return;
-  }
-  char* dst = reinterpret_cast<char*>(dst_ptr);
-  char* src = reinterpret_cast<char*>(src_ptr);
-  if (max_chunk_size < num_threads) {
-    char val = static_cast<char>(0);
-    if (thread_idx < actual_chunk_size) {
-      val = src[thread_idx];
-    }
-    if (thread_idx < max_chunk_size) {
-      dst[thread_idx] = val;
-    }
-    return;
-  }
-  int64_t align_off, aligned_size;
-  get_aligned_region(
-      dst, actual_chunk_size, BYTES_PER_THREAD, align_off, aligned_size);
-  int64_t align_end = align_off + aligned_size;
-  for (int64_t i = align_off + thread_idx * BYTES_PER_THREAD; i < align_end;
-       i += num_threads * BYTES_PER_THREAD) {
-    uint4 val;
-    if (is_aligned<uint4>(src + i)) {
-      stream_load128(val, src + i);
-    } else {
-      for (size_t j = 0; j < BYTES_PER_THREAD; ++j) {
-        reinterpret_cast<char*>(&val)[j] = src[i + j];
-      }
-    }
-    stream_store128(&dst[i], val);
-  }
-  if (thread_idx < align_off && thread_idx < max_chunk_size) {
-    char val = (char)0;
-    if (thread_idx < actual_chunk_size) {
-      val = src[thread_idx];
-    }
-    dst[thread_idx] = val;
-  }
-  while (align_end + thread_idx < max_chunk_size) {
-    char val = (char)0;
-    if (align_end + thread_idx < actual_chunk_size) {
-      val = src[align_end + thread_idx];
-    }
-    dst[align_end + thread_idx] = val;
-    align_end += num_threads;
-  }
-}
-
-template <typename dst_t, typename src_t>
-__global__ void chunk_cat_cuda_kernel(
-    src_t** src,
-    dst_t* dst,
-    int64_t* block_idx_to_tensor_idx,
-    int64_t* tensor_idx_to_start_tensor_bytes,
-    int64_t* start_block_idx_per_tensor_chunk,
-    int64_t* actual_tensor_sizes,
-    int64_t* pad_tensor_chunk_sizes,
-    int64_t* num_blocks_per_tensor_chunk,
-    int64_t slice_size,
-    int64_t chunk_size,
-    int64_t dst_to_src_ratio) {
-  const int64_t slice_idx = blockIdx.z;
-  const int64_t chunk_idx = blockIdx.y;
-  const int64_t tensor_idx = block_idx_to_tensor_idx[blockIdx.x];
-  const int64_t tile_idx =
-      blockIdx.x - start_block_idx_per_tensor_chunk[tensor_idx];
-  const int64_t num_threads =
-      num_blocks_per_tensor_chunk[tensor_idx] * BLOCK_SIZE;
-  const int64_t thread_idx = tile_idx * BLOCK_SIZE + threadIdx.x;
-  char* src_addr = reinterpret_cast<char**>(src)[tensor_idx] +
-      slice_idx * actual_tensor_sizes[tensor_idx] +
-      chunk_idx * pad_tensor_chunk_sizes[tensor_idx] / dst_to_src_ratio;
-  char* dst_addr = reinterpret_cast<char*>(dst) + slice_idx * slice_size +
-      chunk_idx * chunk_size + tensor_idx_to_start_tensor_bytes[tensor_idx];
-  const int64_t actual_copy_size = std::min(
-      pad_tensor_chunk_sizes[tensor_idx] / dst_to_src_ratio,
-      std::max(
-          (int64_t)0,
-          actual_tensor_sizes[tensor_idx] -
-              chunk_idx * pad_tensor_chunk_sizes[tensor_idx] /
-                  dst_to_src_ratio));
-  copy_chunk_with_pad<dst_t, src_t>(
-      reinterpret_cast<dst_t*>(dst_addr),
-      reinterpret_cast<src_t*>(src_addr),
-      pad_tensor_chunk_sizes[tensor_idx],
-      actual_copy_size,
-      thread_idx,
-      num_threads);
-}
-
+// Pack multiple std::vector<int64_t> into a single cuda tensor.
 std::pair<at::Tensor, std::vector<int64_t*>> pack_vecs(
     std::vector<const std::vector<int64_t>*> vecs,
     const at::Device& device) {
@@ -203,6 +95,143 @@ std::pair<at::Tensor, std::vector<int64_t*>> pack_vecs(
     offset += vec->size();
   }
   return std::make_pair(std::move(packed), std::move(ptrs));
+}
+
+// Copy `max_chunk_size` bytes from `src` to `dst` by `num_threads`, and pad
+// zero when `src` size (i.e., actual_chunk_size) is less than `max_chunk_size`.
+// Assume elements of src and dst have the same data type.
+template <typename dst_t, typename src_t>
+__device__ __inline__ void copy_chunk_with_pad(
+    dst_t* dst_ptr,
+    src_t* src_ptr,
+    int64_t max_chunk_size,
+    int64_t actual_chunk_size,
+    int64_t thread_idx,
+    int64_t num_threads) {
+  // Supports type cast
+  if (!std::is_same_v<dst_t, src_t>) {
+    const int64_t max_num_elems = max_chunk_size / sizeof(dst_t);
+    const int64_t actual_num_elems = actual_chunk_size / sizeof(src_t);
+    int64_t elem_index = thread_idx;
+    while (elem_index < actual_num_elems) {
+      dst_ptr[elem_index] =
+          c10::static_cast_with_inter_type<dst_t, src_t>::apply(
+              src_ptr[elem_index]);
+      elem_index += num_threads;
+    }
+    while (elem_index < max_num_elems) {
+      dst_ptr[elem_index] =
+          c10::static_cast_with_inter_type<dst_t, int>::apply(0);
+      elem_index += num_threads;
+    }
+    return;
+  }
+  char* dst = reinterpret_cast<char*>(dst_ptr);
+  char* src = reinterpret_cast<char*>(src_ptr);
+  // Fast path when the number of threads is larger than the number of bytes to
+  // be copied (i.e., max_chunk_size). In this case, each thread only copies 1
+  // byte. For 0 <= thread_idx < actual_chunk_size, the thread copies data from
+  // `src`. For actual_chunk_size <= thread_idx < max_chunk_size, the thread set
+  // the val=0 for padding.
+  if (max_chunk_size < num_threads) {
+    char val = static_cast<char>(0);
+    if (thread_idx < actual_chunk_size) {
+      val = src[thread_idx];
+    }
+    if (thread_idx < max_chunk_size) {
+      dst[thread_idx] = val;
+    }
+    return;
+  }
+  // Split dst array into three parts:
+  // [dst, dst+align_off), [dst+align_off, dst+align_end), [dst+align_end,
+  // dst+max_chunk_size) The second part is aligned with BYTES_PER_THREAD(=16
+  // bytes) to enable `stream_store128`.
+  int64_t align_off, aligned_size;
+  get_aligned_region(
+      dst, actual_chunk_size, BYTES_PER_THREAD, align_off, aligned_size);
+  int64_t align_end = align_off + aligned_size;
+  for (int64_t i = align_off + thread_idx * BYTES_PER_THREAD; i < align_end;
+       i += num_threads * BYTES_PER_THREAD) {
+    uint4 val;
+    if (is_aligned<uint4>(src + i)) {
+      stream_load128(val, src + i);
+    } else {
+      for (size_t j = 0; j < BYTES_PER_THREAD; ++j) {
+        reinterpret_cast<char*>(&val)[j] = src[i + j];
+      }
+    }
+    stream_store128(&dst[i], val);
+  }
+  // Copy data for the first part of dst array [dst, dst+align_off).
+  // Check `thread_idx<max_chunk_sze` for the edge case that max_chunk_size <
+  // align_off.
+  if (thread_idx < align_off && thread_idx < max_chunk_size) {
+    char val = (char)0;
+    if (thread_idx < actual_chunk_size) {
+      val = src[thread_idx];
+    }
+    dst[thread_idx] = val;
+  }
+  // Copy data for the third part of dst array [dst+align_end,
+  // dst+max_chunk_size).
+  while (align_end + thread_idx < max_chunk_size) {
+    char val = (char)0;
+    if (align_end + thread_idx < actual_chunk_size) {
+      val = src[align_end + thread_idx];
+    }
+    dst[align_end + thread_idx] = val;
+    align_end += num_threads;
+  }
+}
+
+// NOTE [CUDA kernel for chunk_cat]
+// chunk_cat_cuda adopts a "jagged grid" strategy, inspired by NOTE [CUDA fast
+// path for split_with_sizes_copy.out]. In addition, chunk_cat_cuda supports
+// padding via copy_chunk_with_pad when src chunk size is less than dst chunk
+// size.
+template <typename dst_t, typename src_t>
+static __global__ void chunk_cat_cuda_kernel(
+    src_t** src,
+    dst_t* dst,
+    int64_t* block_idx_to_tensor_idx,
+    int64_t* tensor_idx_to_start_tensor_bytes,
+    int64_t* start_block_idx_per_tensor_chunk,
+    int64_t* actual_tensor_sizes,
+    int64_t* pad_tensor_chunk_sizes,
+    int64_t* num_blocks_per_tensor_chunk,
+    int64_t slice_size,
+    int64_t chunk_size,
+    int64_t dst_to_src_ratio) {
+  const int64_t slice_idx = blockIdx.z;
+  const int64_t chunk_idx = blockIdx.y;
+  const int64_t tensor_idx = block_idx_to_tensor_idx[blockIdx.x];
+  const int64_t tile_idx =
+      blockIdx.x - start_block_idx_per_tensor_chunk[tensor_idx];
+  // Number of threads for the `tensor_idx`-th tensor chunk.
+  const int64_t num_threads =
+      num_blocks_per_tensor_chunk[tensor_idx] * BLOCK_SIZE;
+  const int64_t thread_idx = tile_idx * BLOCK_SIZE + threadIdx.x;
+  char* src_addr = reinterpret_cast<char**>(src)[tensor_idx] +
+      slice_idx * actual_tensor_sizes[tensor_idx] +
+      chunk_idx * pad_tensor_chunk_sizes[tensor_idx] / dst_to_src_ratio;
+  char* dst_addr = reinterpret_cast<char*>(dst) + slice_idx * slice_size +
+      chunk_idx * chunk_size + tensor_idx_to_start_tensor_bytes[tensor_idx];
+  // Compute the actual number of bytes to copy from src.
+  const int64_t actual_copy_size = std::min(
+      pad_tensor_chunk_sizes[tensor_idx] / dst_to_src_ratio,
+      std::max(
+          (int64_t)0,
+          actual_tensor_sizes[tensor_idx] -
+              chunk_idx * pad_tensor_chunk_sizes[tensor_idx] /
+                  dst_to_src_ratio));
+  copy_chunk_with_pad<dst_t, src_t>(
+      reinterpret_cast<dst_t*>(dst_addr),
+      reinterpret_cast<src_t*>(src_addr),
+      pad_tensor_chunk_sizes[tensor_idx],
+      actual_copy_size,
+      thread_idx,
+      num_threads);
 }
 
 template <typename dst_t, typename src_t>
@@ -249,8 +278,8 @@ void chunk_cat_mixed_dtype_cuda(
       std::any_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
         return t.scalar_type() != tensors[0].scalar_type();
       });
-  const bool use_fused_kernel = mixed_dtypes && dim == 0 && num_chunks >= 1 &&
-      out.is_contiguous() &&
+  const bool use_fused_kernel =
+      mixed_dtypes && dim == 0 && num_chunks >= 1 && out.is_contiguous() &&
       std::all_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
         return t.dim() > 0 && t.numel() > 0 && t.device() == out.device() &&
             t.is_contiguous() &&
@@ -285,6 +314,10 @@ void chunk_cat_mixed_dtype_cuda(
     const int64_t num_blocks = div_up(pad_tensor_chunk_size, BYTES_PER_BLOCK);
     auto& blocks =
         tensor.scalar_type() == out_dtype ? copy_blocks : cast_blocks;
+    // The cast launch below reads bf16 and writes fp32
+    TORCH_INTERNAL_ASSERT(
+        tensor.scalar_type() == out_dtype ||
+        (tensor.scalar_type() == at::kBFloat16 && out_dtype == at::kFloat));
     srcs.push_back(reinterpret_cast<int64_t>(tensor.const_data_ptr()));
     tensor_idx_to_start_tensor_bytes.push_back(chunk_size);
     start_block_idx_per_tensor_chunk.push_back(
