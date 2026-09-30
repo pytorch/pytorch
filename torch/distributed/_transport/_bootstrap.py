@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import base64
 import json
-import uuid
 from datetime import timedelta
 from typing import Any, TYPE_CHECKING
 
@@ -62,9 +60,8 @@ def new_transport_rank(
 
     Calls are matched in order per rank pair and backend: the Nth call on each
     peer connects to the other's Nth call, including failed calls. One Store can
-    therefore connect a rank to every other rank. A nonce handshake prevents
-    accepting stale peer publications. Bootstrap failures attempt to close the
-    partially created transport.
+    therefore connect a rank to every other rank. Bootstrap failures attempt to
+    close the partially created transport.
     """
     if not isinstance(bootstrap_timeout, timedelta):
         bootstrap_timeout = timedelta(seconds=bootstrap_timeout)
@@ -83,17 +80,9 @@ def new_transport_rank(
     store = dist.PrefixStore(json.dumps([*pair, attempt]), store)
     transport = new_transport(backend, device, **kwargs)
     try:
-        endpoint = transport.bind(timeout=timeout)
-        nonce = uuid.uuid4().hex
-        store.set(f"endpoint/{nonce}", base64.b64encode(endpoint).decode("ascii"))
-        store.set(str(rank), nonce)
+        store.set(str(rank), transport.bind(timeout=timeout))
         store.wait([str(peer_rank)], bootstrap_timeout)
-        peer_nonce = store.get(str(peer_rank)).decode("ascii")
-        endpoint = base64.b64decode(store.get(f"endpoint/{peer_nonce}"), validate=True)
-        # Confirm the peer observed this attempt, not a stale publication.
-        store.set(f"ack/{nonce}/{peer_nonce}", "ready")
-        store.wait([f"ack/{peer_nonce}/{nonce}"], bootstrap_timeout)
-        transport.connect(endpoint, timeout=timeout)
+        transport.connect(store.get(str(peer_rank)), timeout=timeout)
     except BaseException as error:
         try:
             transport.close(timeout=timeout)

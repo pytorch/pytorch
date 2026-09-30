@@ -105,13 +105,9 @@ class TestRankBootstrap(TestCase):
             self.assertEqual(transport.connect.call_args.kwargs["timeout"], 2)
             transport.close.assert_not_called()
 
-    def test_stale_peer_times_out_and_closes(self):
-        store = dist.HashStore()
-        prefixed = dist.PrefixStore(json.dumps(["transport", "test", 0, 1, 1]), store)
-        prefixed.set("1", "old")
-        prefixed.set("endpoint/old", "b2xkIGVuZHBvaW50")
+    def test_missing_peer_times_out_and_closes(self):
         transport = Mock(spec=Transport)
-        transport.bind.return_value = b"new endpoint"
+        transport.bind.return_value = b"endpoint"
         with (
             patch(
                 "torch.distributed._transport._bootstrap.new_transport",
@@ -121,7 +117,7 @@ class TestRankBootstrap(TestCase):
         ):
             new_transport_rank(
                 "test",
-                store=store,
+                store=dist.HashStore(),
                 rank=0,
                 peer_rank=1,
                 bootstrap_timeout=0.05,
