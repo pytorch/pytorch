@@ -920,10 +920,10 @@ ldl_diagonal_panel_fused_kernel(
   scalar_t* __restrict__ dLD, int n, int lda,
   int nb, int curr_step, int* dcurr_step,
   int* dipiv, int* dinfo,
-  // scratch for the out-of-panel replay below, 2 * (n - panel_end) elements
   scalar_t* __restrict__ dcorr
 ) {
   using real_t = c10::scalar_value_type<scalar_t>::type;
+  constexpr auto one = static_cast<scalar_t>(1);
   const real_t ALPHA = (1 + std::sqrt(17)) / 8;
   const auto tid = threadIdx.x;
   const auto panel_start = curr_step;
@@ -931,10 +931,66 @@ ldl_diagonal_panel_fused_kernel(
 
   scalar_t D[2][2];
 
+  scalar_t* __restrict__ corr_col = dcorr;
+  scalar_t* __restrict__ corr_row = dcorr + n;
+  // Let Lprev = dLD[curr_step:, panel_start:curr_step],
+  //     Uprev = dLD[panel_start:curr_step, curr_step:],
+  //     Lcurr = dLD[curr_step:, curr_step],
+  // then Lcurr needs to accumulate -(Lprev @ Uprev)[:, 0] before
+  // being normalized by D^{-1} on the right.
+
+  // This method computes dLD[curr_step:, diag] -= (Lprev @ Uprev)[:, diag],
+  // and dLD[diag,  curr_step:] -= (Lprev @ Uprev)[diag, :].
+  // It is assumed that
+  // corr_col holds (Lprev @ Uprev)[:, diag], and
+  // corr_row holds (Lprev @ Uprev)[diag, :], which are then
+  // applied additively to the corresponding row/col of dLD
+  // as per += alpha * corr_col/corr_row.
+  const auto apply_rank1_updates = [&](const int diag, const scalar_t alpha, const bool recompute = true) {
+    // No-op for the very first column/row in the panel
+    if (curr_step == panel_start) return;
+
+    // Handle col
+    for (int i = curr_step + tid; i < n; i += BS) {
+      // recompute is passed by default or as an rvalue -- NVCC should optimize
+      if (recompute) {
+        scalar_t acc{};
+        for (int j = panel_start; j < curr_step; ++j) {
+          acc += dLD[LinOff(i, j, lda)] * dLD[LinOff(j, diag, lda)];
+        }
+        corr_col[i - curr_step] = acc;
+      }
+      dLD[LinOff(i, diag, lda)] += alpha * corr_col[i - curr_step];
+    }
+
+    // Handle row
+    for (int i = curr_step + tid; i < n; i += BS) {
+      // The diagonal is owned by the column sweep above
+      if (i == diag) continue;
+      // recompute is passed by default or as an rvalue -- NVCC should optimize
+      if (recompute) {
+        scalar_t acc{};
+        for (int j = panel_start; j < curr_step; ++j) {
+          acc += dLD[LinOff(j, i, lda)] * dLD[LinOff(diag, j, lda)];
+        }
+        corr_row[i - curr_step] = acc;
+      }
+      dLD[LinOff(diag, i, lda)] += alpha * corr_row[i - curr_step];
+    }
+  };
+
   // The processed block will factor nb or nb+1 rows/cols
-  while (curr_step < panel_start + nb - 1) {
+  while (curr_step < panel_start + nb) {
     int piv;
     int pivot_rank = 1;
+
+    // Accumulate rank-1 updates for the current row/col.
+    apply_rank1_updates(curr_step, /*alpha=*/-one);
+    __syncthreads();
+
+    if (curr_step == panel_start + nb - 1) {
+      break;
+    }
 
     // Bunch-Kaufman pivoting.
     // We follow p192 of
@@ -945,17 +1001,8 @@ ldl_diagonal_panel_fused_kernel(
       dLD, lda, n, curr_step, curr_step,
       /*exclude_idx=*/curr_step
     );
+    bool ilambda_outside_panel = (ilambda >= panel_end) && (curr_step > panel_start);
     const auto diag_abs = ldl::abs(dLD[LinOff(curr_step, curr_step, lda)]);
-
-    // The trailing block dLD[panel_end:, panel_end:] stays stale until the
-    // end-of-panel GEMM, but Bunch-Kaufman scans the whole column and can land
-    // in it. Bring the candidate row/col up to date in place, keeping the
-    // correction so it can be undone below. Doing it before the interchange
-    // means the swap carries the updated values (diagonal included) to where
-    // they belong, so the search and the swap need no special casing.
-    scalar_t* __restrict__ corr_col = dcorr;
-    scalar_t* __restrict__ corr_row = dcorr + (n - panel_end);
-    bool replay = false;
 
     // ilambda is -1 when the scan found no candidate at all, which happens once
     // NaNs reach the column: every comparison against a NaN is false, so the
@@ -965,29 +1012,8 @@ ldl_diagonal_panel_fused_kernel(
       // No permutation, 1x1 pivot
       piv = curr_step;
     } else {
-      replay = (ilambda >= panel_end) && (curr_step > panel_start);
-      if (replay) {
-        for (int i = panel_end + tid; i < n; i += BS) {
-          scalar_t acc{};
-          for (int t = panel_start; t < curr_step; ++t) {
-            acc += dLD[LinOff(i, t, lda)] * dLD[LinOff(t, ilambda, lda)];
-          }
-          corr_col[i - panel_end] = acc;
-          dLD[LinOff(i, ilambda, lda)] -= acc;
-        }
-        for (int j = panel_end + tid; j < n; j += BS) {
-          // the diagonal is owned by the column sweep above
-          if (j == ilambda) {
-            continue;
-          }
-          scalar_t acc{};
-          for (int t = panel_start; t < curr_step; ++t) {
-            acc += dLD[LinOff(ilambda, t, lda)] * dLD[LinOff(t, j, lda)];
-          }
-          corr_row[j - panel_end] = acc;
-          dLD[LinOff(ilambda, j, lda)] -= acc;
-        }
-      }
+      // New pivot candidate needs to accumulate rank-1 updates
+      apply_rank1_updates(ilambda, /*alpha=*/-one);
       __syncthreads();
       // Checking whether ilambda diagonal pivot is "stable"
       const auto [sigma, _] = ldl::find_pivot_row<scalar_t, BS>(
@@ -1040,21 +1066,11 @@ ldl_diagonal_panel_fused_kernel(
     }
     // }
 
-    // Undo the replay. Without an interchange this simply restores the stale
-    // values. With one, the swap has moved the updated row/col into the panel
-    // and a current one out into the deferred block, so this lands on the
-    // latter -- leaving it stale, which is what makes the end-of-panel GEMM
-    // apply to it exactly once.
-    if (replay) {
-      for (int i = panel_end + tid; i < n; i += BS) {
-        dLD[LinOff(i, ilambda, lda)] += corr_col[i - panel_end];
-      }
-      for (int j = panel_end + tid; j < n; j += BS) {
-        if (j != ilambda) {
-          dLD[LinOff(ilambda, j, lda)] += corr_row[j - panel_end];
-        }
-      }
-      __syncthreads();
+    // After the swap the ilamda col/row needs to undo the rank-1 update,
+    // as these will later be handled by GEMM,
+    // but only if ilambda is outside of the panel.
+    if (ilambda_outside_panel) {
+      apply_rank1_updates(ilambda, /*alpha=*/one, false);
     }
 
     // Update L21 {
@@ -1102,52 +1118,6 @@ ldl_diagonal_panel_fused_kernel(
       *dinfo = curr_step + 1;
     }
     __syncthreads();
-    // }
-
-    // Update the trailing part as per:
-    // L21 = dLD[curr_step + pivot_rank:, curr_step:curr_step + pivot_rank]
-    // U12 = dLD[curr_step:curr_step + pivot_rank, curr_step + pivot_rank:],
-    // B = dLD[curr_step + pivot_rank:, curr_step + pivot_rank:],
-    // B -= L21 @ U12 = L21 @ D @ op(L21),
-    // This kernel, however, only updates the parts of B which are within
-    // the panel, i.e. B[:, :nb] and B[:nb, nb:].
-    // The remaining part of B is handled by an external GEMM. {
-    auto update_trailing_B = [&](auto* __restrict__ B, int h, int w,
-                                 const auto* __restrict__ L21, const auto* __restrict__ U12) {
-      auto numel = h * w;
-      if (pivot_rank == 1) {
-        for (int idx = threadIdx.x; idx < numel; idx += BS) {
-          auto r = idx % h;
-          auto c = idx / h;
-          B[LinOff(r, c, lda)] -= L21[LinOff(r, 0, lda)] * U12[LinOff(0, c, lda)];
-        }
-      } else {
-        for (int idx = threadIdx.x; idx < numel; idx += BS) {
-          auto r = idx % h;
-          auto c = idx / h;
-          B[LinOff(r, c, lda)] -= (L21[LinOff(r, 0, lda)] * U12[LinOff(0, c, lda)]
-                                 + L21[LinOff(r, 1, lda)] * U12[LinOff(1, c, lda)]);
-        }
-      }
-    };
-    auto curr_nb = nb - (curr_step + pivot_rank - panel_start);
-    auto curr_dim = n - (curr_step + pivot_rank);
-    const auto* __restrict__ L21 = dLD + LinOff(curr_step + pivot_rank, curr_step, lda);
-    const auto* __restrict__ U12 = dLD + LinOff(curr_step, curr_step + pivot_rank, lda);
-    auto* __restrict__ B = dLD + LinOff(curr_step + pivot_rank, curr_step + pivot_rank, lda);
-
-    // Update B[:, :curr_nb]
-    if (curr_nb > 0 && curr_dim > 0) {
-      update_trailing_B(B, curr_dim, curr_nb, L21, U12);
-    }
-
-    // Update B[:curr_nb, curr_nb:]
-    curr_dim -= curr_nb;
-    B   += LinOff(0, curr_nb, lda);
-    U12 += LinOff(0, curr_nb, lda);
-    if (curr_nb > 0 && curr_dim > 0) {
-      update_trailing_B(B, curr_nb, curr_dim, L21, U12);
-    }
     // }
 
     // Finish iteration
