@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import dataclasses
 import re
 import unittest
 from unittest import mock
@@ -17,6 +18,7 @@ from torch._inductor.heuristics.template.triton import (
 )
 from torch._inductor.kernel.mm import blackwell_ws_persistent_tma_mm_template
 from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
+from torch._inductor.scheduler import Scheduler
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_num_sms, run_and_get_code
 from torch.testing import FileCheck
@@ -910,17 +912,23 @@ class TestBlackwellTMALoadFusion(TestCase):
         *extra_configs,
         autows=(1, False),
         dynamic=None,
+        fused_ms=0.0,
         **patches,
     ):
         """Compile fn with only the given configs as Triton choices. Under
         template autoWS, only the (DATA_PARTITION_FACTOR, TWO_CTAS) = autows
-        variants of them."""
+        variants of them. Fused epilogue benchmarks report fused_ms, so by
+        default every fusion the gates allow is kept."""
         key = ("triton::blackwell_ws_persistent_tma", "cuda", "mm")
         heuristic = get_template_heuristic(*key)
         # Template autoWS builds its configs from blackwell_persistent_mm_configs.
         orig = heuristic.mm_configs, heuristic.blackwell_persistent_mm_configs
         heuristic.mm_configs = heuristic.blackwell_persistent_mm_configs = [
             test_config,
+            # Epilogues are only benchmarked, and so reductions only fused,
+            # when autotuning has more than one choice. This twin hosts the
+            # same reductions.
+            dataclasses.replace(test_config, num_stages=test_config.num_stages - 1),
             *extra_configs,
         ]
         generate_autows_configs = type(heuristic)._generate_autows_configs
@@ -940,11 +948,15 @@ class TestBlackwellTMALoadFusion(TestCase):
                         "max_autotune_gemm_backends": "TRITON",
                         "triton.enable_persistent_tma_matmul": True,
                         "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+                        "benchmark_epilogue_fusion": True,
                         **patches,
                     }
                 ),
                 mock.patch.object(
                     type(heuristic), "_generate_autows_configs", autows_configs
+                ),
+                mock.patch.object(
+                    Scheduler, "benchmark_codegened_module", return_value=(fused_ms, "")
                 ),
             ):
                 return run_and_get_code(torch.compile(fn, dynamic=dynamic), *args)
@@ -980,7 +992,6 @@ class TestBlackwellTMALoadFusion(TestCase):
             out.untyped_storage().fill_(255)
             return out
 
-        patches = {"benchmark_epilogue_fusion": False, **patches}
         with mock.patch("torch._C._dynamo.guards._empty_strided_cuda", empty_strided):
             actual, code = self._run_with_mm_config(
                 fn, (a, b), test_config, *extra_configs, **patches
@@ -1062,6 +1073,8 @@ class TestBlackwellTMALoadFusion(TestCase):
         "case",
         (
             "disabled",
+            "unprofitable",
+            "no_benchmark",
             "max_values",
             "argmax",
             "subtile",
@@ -1073,7 +1086,8 @@ class TestBlackwellTMALoadFusion(TestCase):
         ),
     )
     def test_blackwell_mm_row_reduction_epilogue_not_fused(self, case: str):
-        """The reduction stays unfused when the flag is off, for arg reductions,
+        """The reduction stays unfused when the flag is off, when the fused
+        kernel benchmarks slower or isn't benchmarked, for arg reductions,
         configs that can't host it (EPILOGUE_SUBTILE > 1, data partitioning,
         2CTA), dynamic shapes, cpp_wrapper, and fp32 outputs."""
         fn = {
@@ -1091,8 +1105,7 @@ class TestBlackwellTMALoadFusion(TestCase):
             epilogue_subtile=2 if case == "subtile" else 1,
         )
         patches = {
-            # A perf rejection would hide a missing gate.
-            "benchmark_epilogue_fusion": False,
+            "benchmark_epilogue_fusion": case != "no_benchmark",
             "triton.template_reduction_epilogue": case != "disabled",
             "triton.enable_template_tma_store": case == "two_ctas",
             "cpp_wrapper": case == "cpp_wrapper",
@@ -1120,6 +1133,9 @@ class TestBlackwellTMALoadFusion(TestCase):
             test_config,
             autows=autows,
             dynamic=case == "dynamic" or None,
+            # Otherwise fused kernels benchmark as free, so a perf rejection
+            # can't hide a missing gate.
+            fused_ms=1e6 if case == "unprofitable" else 0.0,
             **patches,
         )
         self.assertEqual(actual, fn(a, b), atol=0, rtol=0)
