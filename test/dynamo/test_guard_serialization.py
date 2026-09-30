@@ -1580,6 +1580,15 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
             self.assertFalse(
                 is_portable_identity_guard("ID_MATCH", (), _custom_triple)
             )
+            with self.assertRaisesRegex(TypeError, "cannot pickle"):
+                GuardsStatePickler({}, {}, {}, {}, io.BytesIO()).dump(
+                    {"op": _custom_triple}
+                )
+        # A serving process that never imported the module defining the op.
+        with mock.patch.dict(OPDEFS):
+            del OPDEFS[_custom_triple._qualname]
+            with self.assertRaisesRegex(RuntimeError, "import the module"):
+                load_guards_state(buf.getvalue())
 
     def test_an_unguarded_grad_loads_as_none(self):
         # The .grad of a guarded leaf is a tensor the guard tree may not reach;
