@@ -3422,7 +3422,6 @@ class TestFP64CapabilityDeclarations(TestCase):
 
     def test_hpu_has_no_distributed_capabilities(self):
         capabilities = HPUTestBase._capabilities()
-        self.assertIn(Capability.lib.safetensors, capabilities)
         distributed_capabilities = {
             Capability.distributed.backend,
             Capability.distributed.dtensor,

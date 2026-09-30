@@ -2,7 +2,6 @@
 
 import copy
 import gc
-import importlib.util
 import inspect
 import logging
 import os
@@ -344,11 +343,6 @@ class Capability:
         bf16 = "dtype.bf16"
         fp64 = "dtype.fp64"
 
-    class lib:
-        """Third-party library capabilities."""
-
-        safetensors = "lib.safetensors"
-
     class attention:
         """Attention backend capabilities."""
 
@@ -362,16 +356,6 @@ class Capability:
         dtensor = "distributed.dtensor"
         fsdp = "distributed.fsdp"
 
-    class memory:
-        """Device memory capabilities."""
-
-        non_blocking_copy = "memory.non_blocking_copy"
-
-    class stream:
-        """Device stream capabilities."""
-
-        generic = "stream.generic"
-
 
 def _distributed_backend_available(device_type: str) -> bool:
     import torch.distributed as dist
@@ -383,13 +367,6 @@ def _distributed_backend_available(device_type: str) -> bool:
     except (AttributeError, ValueError):
         return False
     return dist.is_backend_available(backend)
-
-
-def _device_module_available(device_type: str) -> bool:
-    try:
-        return torch.get_device_module(device_type).is_available()
-    except (AttributeError, RuntimeError):
-        return False
 
 
 class DeviceTypeTestBase(TestCase):
@@ -473,10 +450,7 @@ class DeviceTypeTestBase(TestCase):
     # determines whether the current device supports it.
     @classmethod
     def _capabilities(cls) -> dict[str, Callable[[], bool]]:
-        return {
-            Capability.lib.safetensors: lambda: importlib.util.find_spec("safetensors")
-            is not None,
-        }
+        return {}
 
     # Flag to disable test suite early due to unrecoverable error such as CUDA error.
     _stop_test_suite = False
@@ -850,8 +824,6 @@ class CPUTestBase(DeviceTypeTestBase):
                     cls.device_type
                 ),
                 Capability.distributed.fsdp: lambda: False,
-                Capability.memory.non_blocking_copy: lambda: False,
-                Capability.stream.generic: lambda: False,
             }
         )
         return capabilities
@@ -893,12 +865,6 @@ class CUDATestBase(DeviceTypeTestBase):
                     cls.device_type
                 ),
                 Capability.distributed.fsdp: lambda: _distributed_backend_available(
-                    cls.device_type
-                ),
-                Capability.memory.non_blocking_copy: lambda: _device_module_available(
-                    cls.device_type
-                ),
-                Capability.stream.generic: lambda: _device_module_available(
                     cls.device_type
                 ),
             }
@@ -977,8 +943,6 @@ class MPSTestBase(DeviceTypeTestBase):
                 Capability.distributed.backend: lambda: False,
                 Capability.distributed.dtensor: lambda: False,
                 Capability.distributed.fsdp: lambda: False,
-                Capability.memory.non_blocking_copy: lambda: False,
-                Capability.stream.generic: lambda: False,
             }
         )
         return capabilities
@@ -1027,12 +991,6 @@ class XPUTestBase(DeviceTypeTestBase):
                     cls.device_type
                 ),
                 Capability.distributed.fsdp: lambda: _distributed_backend_available(
-                    cls.device_type
-                ),
-                Capability.memory.non_blocking_copy: lambda: _device_module_available(
-                    cls.device_type
-                ),
-                Capability.stream.generic: lambda: _device_module_available(
                     cls.device_type
                 ),
             }
