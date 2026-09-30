@@ -1929,7 +1929,10 @@ test_distributed_4gpu() {
   unset PYTORCH_MULTIGPU_SELECTION_COUNT_FILE
   # Only meaningful when the run itself succeeded; on failure rc is the real
   # signal and a 0 count just means collection never finished.
-  if [[ "$rc" -eq 0 && "$total_kept" -eq 0 ]]; then
+  # Rerun-disabled-tests mode (PYTORCH_TEST_RERUN_DISABLED_TESTS=1, the 08:29
+  # cron) narrows collection to disabled tests, so a shard can legitimately
+  # select nothing. A normal run that selects 0 is still a broken filter.
+  if [[ "$rc" -eq 0 && "$total_kept" -eq 0 && "${PYTORCH_TEST_RERUN_DISABLED_TESTS}" != "1" ]]; then
     echo "::error::distributed_4gpu shard selected 0 tests; min-gpus filter may have regressed"
     exit 1
   fi
