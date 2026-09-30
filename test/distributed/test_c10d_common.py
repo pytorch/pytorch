@@ -1966,6 +1966,10 @@ class AbstractCommTest:
 
         self.assertEqual(dist.get_process_group_ranks(group), [1])
 
+        # init_process_group can return on one rank while its peer is still
+        # connecting; tearing down before the peer is done makes its init fail.
+        dist.barrier()
+
     def _test_tensor_dtype_mismatch(self, backend):
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
