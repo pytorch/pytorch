@@ -102,6 +102,10 @@ struct TORCH_API SaveNcclMetaConfig {
         introspectOutputs(introspectOutputs) {}
 };
 
+// List-shaped values stay as opaque, preformatted strings because truncation
+// can insert "...". Do not parse or restructure them.
+using collective_meta_t = std::unordered_map<std::string, c10::IValue>;
+
 TORCH_API std::vector<FileLineFunc> prepareCallstack(
     const std::vector<jit::StackEntry>& cs);
 TORCH_API std::vector<std::string> callstackStr(
@@ -133,6 +137,11 @@ TORCH_API std::vector<std::string> inputTypes(const at::RecordFunction& fn);
 
 std::unordered_map<std::string, c10::IValue> TORCH_API
 saveExtraArgs(const at::RecordFunction& fn);
+TORCH_API collective_meta_t saveNcclMetaTyped(
+    const at::RecordFunction& fn,
+    const SaveNcclMetaConfig& config = SaveNcclMetaConfig());
+TORCH_API std::unordered_map<std::string, std::string> ncclMetaToStringMap(
+    const collective_meta_t& metadata);
 std::unordered_map<std::string, std::string> TORCH_API saveNcclMeta(
     const at::RecordFunction& fn,
     const SaveNcclMetaConfig& config = SaveNcclMetaConfig());
