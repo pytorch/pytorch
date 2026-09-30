@@ -146,6 +146,11 @@ def is_localization_supported(device_id: int | None = None) -> bool:
     not poison subsequent forks. Splitting and context creation always use CUDA
     to validate the actual resources.
 
+    The NVML check does not support predicting a later attachment to an MPS
+    server. Do not reuse a pre-initialization result after such an attachment;
+    query again instead. An already attached MPS client has initialized CUDA,
+    so subsequent queries use the driver path and its actual device topology.
+
     Args:
         device_id (int, optional): Device index. Default: current PyTorch device
             if PyTorch CUDA is initialized, otherwise ``0``.

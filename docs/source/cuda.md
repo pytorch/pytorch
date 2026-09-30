@@ -589,6 +589,12 @@ it does not poison subsequent forks.
 Actual splitting and context creation always use CUDA, independently of this
 capability check.
 
+The pre-initialization NVML result does not predict a later attachment to an
+MPS server; this dynamic flow is not supported by the NVML check. Query again
+after attachment instead of reusing the earlier result. An already attached
+MPS client has initialized CUDA, so the query uses CUDA's actual device topology
+rather than NVML. The support result itself is not cached.
+
 ### Fork/join execution
 
 `execute_in_green_contexts` runs a Python callback for each supplied stream,
