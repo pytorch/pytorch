@@ -6101,6 +6101,7 @@ exit(2)
             g.begin_capture_to_if_node(pred)
             child = torch.empty(LARGE_BUFFER // 4, device="cuda")
             child.fill_(2)
+            child.record_stream(torch.cuda.current_stream())
             state.add_(child[0])
             child_ptr = child.data_ptr()
             g.end_capture_to_conditional_node()
@@ -6112,6 +6113,7 @@ exit(2)
         self._replay_conditional_graph(g, pred, state, True, 6)
         self._replay_conditional_graph(g, pred, state, False, 4)
         self.assertEqual(child[0].item(), 2)
+        del child
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -6129,7 +6131,8 @@ exit(2)
     def test_cuda_graph_conditional_uses_parent_dependency_reuse_stream(self):
         torch.cuda.empty_cache()
         pred = torch.ones((), device="cuda", dtype=torch.bool)
-        state = torch.zeros((), device="cuda")
+        root_state = torch.zeros((), device="cuda")
+        child_state = torch.zeros((), device="cuda")
         g = torch.cuda.CUDAGraph()
         root_stream = torch.cuda.Stream()
         dependency_stream = torch.cuda.Stream()
@@ -6137,17 +6140,19 @@ exit(2)
         with torch.cuda.stream(root_stream):
             g.capture_begin()
             dependency_stream.wait_stream(root_stream)
-            root_ptr = self._allocate_graph_temporary(state, 1)
+            root_ptr = self._allocate_graph_temporary(root_state, 1)
             with torch.cuda.stream(dependency_stream):
                 g.begin_capture_to_if_node(pred)
-                child_ptr = self._allocate_graph_temporary(state, 2)
+                child_ptr = self._allocate_graph_temporary(child_state, 2)
                 g.end_capture_to_conditional_node()
             root_stream.wait_stream(dependency_stream)
             g.capture_end()
 
         self.assertNotEqual(root_ptr, child_ptr)
-        self._replay_conditional_graph(g, pred, state, True, 3)
-        self._replay_conditional_graph(g, pred, state, False, 1)
+        for pred_value, expected_child in ((True, 2), (False, 0)):
+            child_state.zero_()
+            self._replay_conditional_graph(g, pred, root_state, pred_value, 1)
+            self.assertEqual(child_state.item(), expected_child)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
@@ -6358,6 +6363,46 @@ exit(2)
         torch.cuda.synchronize()
         self.assertEqual(allocation_output, torch.full_like(allocation_output, 2))
         self.assertEqual(free_output, torch.full_like(free_output, 3))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipUnless(
+        TEST_CUDA_NATIVE_ALLOCATOR, "requires the native CUDA caching allocator"
+    )
+    @serialTest()
+    def test_graph_allocator_explicit_stream_preserves_deferred_free(self):
+        torch.cuda.empty_cache()
+        capture_stream = torch.cuda.Stream()
+        auxiliary_stream = torch.cuda.Stream()
+        allocation_stream = torch.cuda.Stream()
+        g = torch.cuda.CUDAGraph()
+
+        # Warm the unrelated stream's cache to avoid cudaMalloc during capture.
+        raw_ptr = torch.cuda.caching_allocator_alloc(256, stream=allocation_stream)
+        torch.cuda.caching_allocator_delete(raw_ptr)
+
+        with torch.cuda.stream(capture_stream):
+            g.capture_begin()
+            temporary = torch.ones(64, device="cuda")
+            temporary_ptr = temporary.data_ptr()
+            auxiliary_stream.wait_stream(capture_stream)
+            with torch.cuda.stream(auxiliary_stream):
+                output = temporary + 1
+            temporary.record_stream(auxiliary_stream)
+            del temporary
+
+            # This request must not drain frees from the ongoing capture.
+            raw_ptr = torch.cuda.caching_allocator_alloc(256, stream=allocation_stream)
+            self.addCleanup(torch.cuda.caching_allocator_delete, raw_ptr)
+            replacement = torch.full((64,), 3, device="cuda")
+            capture_stream.wait_stream(auxiliary_stream)
+            g.capture_end()
+
+        self.assertNotEqual(temporary_ptr, replacement.data_ptr())
+        g.replay()
+        torch.cuda.synchronize()
+        self.assertEqual(output, torch.full_like(output, 2))
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
