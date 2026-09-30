@@ -7602,6 +7602,43 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cuda
+    @skip_on_xpu
+    def test_cpu_value_view_with_storage_offset(self, device):
+        # The value is a slice of the projection output, so the C++ template has
+        # to apply its non-zero storage offset on top of the value strides.
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.H = 2
+                self.D = 16
+                self.S = 128
+                self.W = self.H * self.D
+                self.projection = nn.Parameter(
+                    torch.randn(self.W, 3 * self.W) / self.W**0.5
+                )
+
+            def forward(self, hidden_states):
+                B = hidden_states.size(0)
+                query, key, value = (hidden_states @ self.projection).split(
+                    self.W, dim=-1
+                )
+                query = query.view(B, self.S, self.H, self.D).permute(0, 2, 1, 3) * 1.5
+                key = key.view(B, self.S, self.H, self.D).permute(0, 2, 1, 3) * 1.5
+                value = value.view(B, self.S, self.H, self.D).permute(0, 2, 1, 3)
+                return flex_attention(query, key, value)
+
+        torch.manual_seed(0)
+        x = torch.randn(2, 128, 32, device=device)
+        model = Model().to(device).eval()
+
+        with torch.no_grad():
+            eager_out = model(x)
+            compiled_out = torch.compile(model)(x)
+
+        torch.testing.assert_close(compiled_out, eager_out, rtol=1e-4, atol=1e-4)
+
+    @supported_platform
+    @skip_on_cuda
     def test_cpu_error_message_return_lse(self, device):
         make_tensor = functools.partial(
             torch.randn,
