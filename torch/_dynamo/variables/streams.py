@@ -337,12 +337,11 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     def create(
         tx: "InstructionTranslatorBase",
         stream_to_enter: "StreamVariable | ConstantVariable",
-        **kwargs: dict[str, Any],
+        **kwargs: Any,
     ) -> "StreamContextVariable | NullContextVariable":
-        if (
-            isinstance(stream_to_enter, ConstantVariable)
-            and stream_to_enter.value is None
-        ):
+        if isinstance(stream_to_enter, ConstantVariable):
+            if stream_to_enter.value is not None:
+                raise AssertionError("Expected a stream or None")
             return NullContextVariable(**kwargs)
         return StreamContextVariable(
             stream_to_enter,
