@@ -15,9 +15,13 @@ from collections import defaultdict
 from collections.abc import Callable
 from types import ModuleType
 from typing import Any, cast, Generic, TYPE_CHECKING, TypedDict
-from typing_extensions import deprecated, NotRequired, ParamSpec
+from typing_extensions import deprecated, NotRequired, ParamSpec, TypeIs
 
 import torch
+
+
+if TYPE_CHECKING:
+    from torch.distributed.tensor import DTensor
 
 
 def _type(self, dtype=None, non_blocking=False, **kwargs):
@@ -875,6 +879,14 @@ def get_current_device_index() -> int:
     if torch.cuda.device_count() > 0:
         return torch.cuda.current_device()
     return -1
+
+
+def _is_dtensor(obj: object) -> TypeIs["DTensor"]:
+    # Checked without importing DTensor, which is expensive: nothing can be a
+    # DTensor before its module is imported.
+    dtensor_api = sys.modules.get("torch.distributed.tensor._api")
+    dtensor_cls = getattr(dtensor_api, "DTensor", None)
+    return dtensor_cls is not None and isinstance(obj, dtensor_cls)
 
 
 def _get_device_index(

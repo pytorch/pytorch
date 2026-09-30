@@ -1331,9 +1331,7 @@ def _free_unbacked_symbols_with_path(
             r.update(go(sub, path + (InnerTensorKey(attr),)))
 
         # match DTensor outer shapes
-        if torch.distributed.is_available() and isinstance(
-            a, torch.distributed.tensor.DTensor
-        ):
+        if torch._utils._is_dtensor(a):
             match_tensor(a)
     elif isinstance(a, torch.Tensor) and (
         is_batchedtensor(a) or is_gradtrackingtensor(a)
