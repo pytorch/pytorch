@@ -2149,7 +2149,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo" and BACKEND != "nccl" and BACKEND != "xccl",
-            "Only Gloo, Nccl and XCCL backend supports CUDA allReduce",
+            "Only Gloo, Nccl and XCCL backend supports allReduce",
         )
         @skip_if_no_gpu
         def test_broadcast_cuda(self):
@@ -2263,7 +2263,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             (BACKEND != "nccl" and BACKEND != "xccl"),
-            "Only Nccl or XCCL supports CUDA reduce",
+            "Only Nccl or XCCL supports reduce",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2540,7 +2540,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "Only Nccl or XCCL supports CUDA reduce",
+            "Only Nccl or XCCL supports reduce",
         )
         @skip_but_pass_in_sandcastle_if(
             BACKEND in DistTestCases.skip_collective["reduce"],
@@ -2640,7 +2640,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "Only NCCL or XCCL supports CUDA reduce_scatter_tensor",
+            "Only NCCL or XCCL supports reduce_scatter_tensor",
         )
         @skip_if_no_gpu
         def test_reduce_scatter_tensor_cuda(self):
@@ -2816,7 +2816,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo" and BACKEND != "nccl" and BACKEND != "xccl",
-            "Only Gloo ,NCCL and XCCL backends will have CUDA allReduce tested",
+            "Only Gloo, NCCL and XCCL backends will have allReduce tested",
         )
         @skip_if_no_gpu
         def test_all_reduce_sum_cuda(self):
@@ -2838,13 +2838,11 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo" and BACKEND != "nccl" and BACKEND != "xccl",
-            "Only Gloo and NCCL backends will have CUDA allReduce tested",
+            "Only Gloo, NCCL and XCCL backends will have allReduce tested",
         )
         @skip_if_no_gpu
         def test_all_reduce_sum_cuda_async(self):
             torch.accelerator.set_device_index(self.rank)
-
-            group, group_id, rank = self._init_global_test()
             group, group_id, rank = self._init_global_test()
             rank_to_GPU = init_multigpu_helper(dist.get_world_size(), BACKEND)
             self._test_all_reduce_helper(
@@ -2899,7 +2897,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "gloo" and BACKEND != "nccl" and BACKEND != "xccl",
-            "Only Gloo and NCCL backends will have CUDA allReduce tested",
+            "Only Gloo, NCCL and XCCL backends will have allReduce tested",
         )
         @skip_if_no_gpu
         def test_all_reduce_sum_cuda_complex(self):
@@ -3388,7 +3386,7 @@ class DistributedTest:
             self._test_scatter_helper(group, group_id, rank)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl", "Only Nccl supports CUDA gather"
+            BACKEND != "nccl" and BACKEND != "xccl", "Only Nccl and XCCL support gather"
         )
         @skip_if_no_gpu
         def test_scatter_cuda(self):
@@ -3408,7 +3406,7 @@ class DistributedTest:
             self._test_scatter_helper(group, group_id, rank, dtype=torch.cfloat)
 
         @skip_but_pass_in_sandcastle_if(
-            BACKEND != "nccl" and BACKEND != "xccl", "Only Nccl supports CUDA gather"
+            BACKEND != "nccl" and BACKEND != "xccl", "Only Nccl and XCCL support gather"
         )
         @skip_if_no_gpu
         def test_scatter_cuda_complex(self):
@@ -3513,7 +3511,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "Only NCCL and XCCL supports CUDA gather",
+            "Only NCCL and XCCL support gather",
         )
         @skip_if_no_gpu
         def test_gather_cuda(self):
@@ -3701,7 +3699,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "XCCL and NCCL support CUDA all_gather_into_tensor",
+            "Only NCCL and XCCL support all_gather_into_tensor",
         )
         @skip_if_no_gpu
         def test_all_gather_into_cat_tensor_cuda(self):
@@ -3723,7 +3721,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "XCCL and NCCL support CUDA all_gather_into_tensor",
+            "Only NCCL and XCCL support all_gather_into_tensor",
         )
         @skip_if_no_gpu
         def test_all_gather_into_stack_tensor_cuda(self):
@@ -3983,7 +3981,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "Only NCCL and XCCL supports CUDA all_to_all_single",
+            "Only NCCL and XCCL support all_to_all_single",
         )
         @skip_if_no_gpu
         def test_all_to_all_single_equal_split_cuda(self):
@@ -4008,7 +4006,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "Only NCCL and XCCL supports CUDA all_to_all_single",
+            "Only NCCL and XCCL support all_to_all_single",
         )
         @skip_if_no_gpu
         def test_all_to_all_single_equal_split_cuda_complex(self):
@@ -4027,7 +4025,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "Only NCCL and XCCL supports CUDA all_to_all_single",
+            "Only NCCL and XCCL support all_to_all_single",
         )
         @skip_if_no_gpu
         def test_all_to_all_single_unequal_split_cuda(self):
@@ -4052,7 +4050,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "Only NCCL and XCCL supports CUDA all_to_all_single",
+            "Only NCCL and XCCL support all_to_all_single",
         )
         @skip_if_no_gpu
         def test_all_to_all_single_unequal_split_cuda_complex(self):
@@ -4076,7 +4074,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "Only NCCL and XCCl supports CUDA all_to_all",
+            "Only NCCL and XCCL support all_to_all",
         )
         @skip_if_rocm_multiprocess
         def test_all_to_all_cuda(self):
@@ -4093,7 +4091,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "Only NCCL and XCCL supports CUDA all_to_all",
+            "Only NCCL and XCCL support all_to_all",
         )
         @skip_if_rocm_multiprocess
         def test_all_to_all_cuda_complex(self):
@@ -4113,7 +4111,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "Only Nccl supports CUDA all_to_all_single",
+            "Only NCCL and XCCL support all_to_all_single",
         )
         @skip_if_no_gpu
         @skip_if_small_worldsize
@@ -4138,7 +4136,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "Only Nccl supports CUDA all_to_all_single",
+            "Only NCCL and XCCL support all_to_all_single",
         )
         @skip_if_no_gpu
         @skip_if_small_worldsize
@@ -4163,7 +4161,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "Only Nccl and XCCL supports CUDA all_to_all_cuda",
+            "Only NCCL and XCCL support all_to_all",
         )
         @skip_if_small_worldsize
         @skip_if_rocm_multiprocess
@@ -4181,7 +4179,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "Only NCCL and XCCL supports CUDA all_to_all_single",
+            "Only NCCL and XCCL support all_to_all_single",
         )
         @skip_if_no_gpu
         def test_all_to_all_single_equal_split_full_group_cuda(self):
@@ -4204,7 +4202,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "Only Nccl supports CUDA all_to_all_single",
+            "Only NCCL and XCCL support all_to_all_single",
         )
         @skip_if_no_gpu
         def test_all_to_all_single_unequal_split_full_group_cuda(self):
@@ -4227,7 +4225,7 @@ class DistributedTest:
 
         @skip_but_pass_in_sandcastle_if(
             BACKEND != "nccl" and BACKEND != "xccl",
-            "Only NCCL and XCCL supports CUDA all_to_all",
+            "Only NCCL and XCCL support all_to_all",
         )
         @skip_if_rocm_multiprocess
         def test_all_to_all_full_group_cuda(self):
@@ -4964,6 +4962,7 @@ class DistributedTest:
             # Need to seed to ensure inputs are unique across rank. Otherwise,
             # allreduce won't have any effect.
             torch.manual_seed(self.rank)
+            torch.get_device_module().manual_seed(self.rank)
             torch.accelerator.set_device_index(self.rank)
             device_type = torch.accelerator.current_accelerator()
 
@@ -5532,7 +5531,7 @@ class DistributedTest:
             and BACKEND != "nccl"
             and BACKEND != "gloo"
             and BACKEND != "xccl",
-            "get_future is only supported on mpi, nccl and gloo",
+            "get_future is only supported on mpi, nccl, gloo and xccl",
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
         def test_accumulate_gradients_no_sync(self):
@@ -5546,7 +5545,7 @@ class DistributedTest:
             and BACKEND != "nccl"
             and BACKEND != "gloo"
             and BACKEND != "xccl",
-            "get_future is only supported on mpi, nccl and gloo",
+            "get_future is only supported on mpi, nccl, gloo and xccl",
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
         def test_accumulate_gradients_no_sync_grad_is_view(self):
@@ -5560,7 +5559,7 @@ class DistributedTest:
             and BACKEND != "nccl"
             and BACKEND != "gloo"
             and BACKEND != "xccl",
-            "get_future is only supported on mpi, nccl and gloo",
+            "get_future is only supported on mpi, nccl, gloo and xccl",
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
         def test_accumulate_gradients_no_sync_allreduce_hook(self):
@@ -5591,7 +5590,7 @@ class DistributedTest:
             and BACKEND != "nccl"
             and BACKEND != "gloo"
             and BACKEND != "xccl",
-            "get_future is only supported on mpi, nccl and gloo",
+            "get_future is only supported on mpi, nccl, gloo and xccl",
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
         def test_accumulate_gradients_no_sync_allreduce_with_then_hook(self):
@@ -5628,7 +5627,7 @@ class DistributedTest:
             and BACKEND != "nccl"
             and BACKEND != "gloo"
             and BACKEND != "xccl",
-            "get_future is only supported on mpi, nccl and gloo",
+            "get_future is only supported on mpi, nccl, gloo and xccl",
         )
         @nccl_skip_if_lt_x_gpu(BACKEND, 2)
         def test_get_future(self):
