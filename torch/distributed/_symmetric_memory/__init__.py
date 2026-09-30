@@ -1021,6 +1021,8 @@ def _rocm_supports_fused_all_gather_matmul_native(
         arch in _ROCM_ASYNC_MM_ARCHS
         and A_shard.dtype == torch.bfloat16
         and B.dtype == torch.bfloat16
+        and B.dim() == 2
+        and (B.is_contiguous() or B.t().is_contiguous())
         and local_M % _ROCM_ASYNC_MM_TILE_M == 0
         and A_shard.shape[-1] % _ROCM_ASYNC_MM_VECTOR == 0
         and B.shape[-1] % _ROCM_ASYNC_MM_VECTOR == 0
@@ -1132,16 +1134,15 @@ def _fused_all_gather_matmul_native_rocm(
     B: torch.Tensor,
     group_name: c10d.GroupName,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    # The CK kernel is 1.6x (gfx942) to 6x (gfx950) slower with column-major B
-    # than with row-major B, which outweighs copying B to row-major.
-    B = B if B.is_contiguous() else B.contiguous()
     symm_mem = rendezvous(A_shard, group_name)
     if symm_mem is None:
         symm_mem = get_symm_mem_workspace(
             group_name, A_shard.numel() * A_shard.element_size()
         )
-        # No barrier before overwriting this rank's workspace: ops that read
-        # peers' workspace end with a symm_mem.barrier() after their reads.
+        # No barrier before overwriting this rank's workspace: ops that access
+        # peers' workspace end with a symm_mem.barrier() after those accesses.
+        # The low-contention ops issue theirs on a side stream, so their results
+        # must be waited on before the group is used again.
         buf = symm_mem.get_buffer(symm_mem.rank, A_shard.shape, A_shard.dtype)
         _rocm_copy_in_pieces(buf, A_shard)
         A_shard = buf
