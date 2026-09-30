@@ -704,6 +704,24 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
     return model
 
 
+def _require_remote_http_url(url: str) -> None:
+    # urlopen accepts file:// and other local schemes. Hub downloads are remote fetches.
+    scheme = urlparse(url).scheme.lower()
+    if scheme not in ("http", "https"):
+        raise ValueError(
+            f"Unsupported URL scheme {scheme!r}; only http and https are allowed"
+        )
+
+
+def _checkpoint_file_name(name: str) -> str:
+    # A cache entry is one path component. Raw file_name was joined onto model_dir,
+    # so "../escaped.pth" and absolute paths were written outside model_dir.
+    filename = os.path.basename(name)
+    if filename in ("", ".", ".."):
+        raise ValueError(f"Invalid checkpoint file name: {name!r}")
+    return filename
+
+
 def download_url_to_file(
     url: str,
     dst: str,
@@ -713,7 +731,8 @@ def download_url_to_file(
     r"""Download object at the given URL to a local path.
 
     Args:
-        url (str): URL of the object to download
+        url (str): HTTP or HTTPS URL of the object to download. Other schemes,
+            including ``file``, are rejected.
         dst (str): Full path where object will be saved, e.g. ``/tmp/temporary_file``
         hash_prefix (str, optional): If not None, the SHA256 downloaded file should start with ``hash_prefix``.
             Default: None
@@ -734,6 +753,7 @@ def download_url_to_file(
     # being overridden by a broken download.
     # We deliberately do not use NamedTemporaryFile to avoid restrictive
     # file permissions being applied to the downloaded file.
+    _require_remote_http_url(url)
     dst = os.path.expanduser(dst)
     for _ in range(tempfile.TMP_MAX):
         tmp_dst = dst + "." + uuid.uuid4().hex + ".partial"
@@ -856,7 +876,9 @@ def load_state_dict_from_url(
             digits of the SHA256 hash of the contents of the file. The hash is used to
             ensure unique names and to verify the contents of the file.
             Default: False
-        file_name (str, optional): name for the downloaded file. Filename from ``url`` will be used if not set.
+        file_name (str, optional): name for the downloaded file. Filename from ``url``
+            will be used if not set. Only the final path component is kept. The resolved
+            path must stay inside ``model_dir``.
         weights_only(bool, optional): If True, only weights will be loaded and no complex pickled objects.
             Recommended for untrusted sources. See :func:`~torch.load` for more details.
 
@@ -880,11 +902,14 @@ def load_state_dict_from_url(
 
     os.makedirs(model_dir, exist_ok=True)
 
+    _require_remote_http_url(url)
     parts = urlparse(url)
-    filename = os.path.basename(parts.path)
-    if file_name is not None:
-        filename = file_name
-    cached_file = os.path.join(model_dir, filename)
+    filename = _checkpoint_file_name(parts.path if file_name is None else file_name)
+    model_dir_path = Path(model_dir).resolve(strict=False)
+    cached_path = (model_dir_path / filename).resolve(strict=False)
+    if not cached_path.is_relative_to(model_dir_path):
+        raise ValueError(f"Download path escapes model_dir: {filename!r}")
+    cached_file = os.fspath(cached_path)
     if not os.path.exists(cached_file):
         sys.stdout.write(f'Downloading: "{url}" to {cached_file}\n')
         hash_prefix = None
