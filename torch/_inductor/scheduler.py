@@ -83,6 +83,7 @@ from .utils import (
     cmp,
     decompose_index,
     device_need_guard,
+    fx_node_crosses_devices,
     get_current_backend,
     get_device_tflops,
     get_dtype_size,
@@ -287,6 +288,16 @@ class MixOrderReduction:
             if isinstance(subnode, SchedulerNode)
             and subnode.is_reduction()
             and isinstance(subnode.node, ComputedBuffer)
+        )
+
+    @staticmethod
+    def supports_noncontiguous_reductions(node: BaseSchedulerNode) -> bool:
+        return all(
+            subnode.node.get_reduction_type() in {"sum", "prod"}  # type: ignore[union-attr]
+            and subnode.node.get_dtype()  # type: ignore[union-attr]
+            in {torch.float16, torch.bfloat16, torch.float32}
+            for subnode in node.get_nodes()
+            if subnode.is_reduction()
         )
 
     @classmethod
@@ -527,18 +538,7 @@ class MixOrderReduction:
         if MixOrderReduction.is_split_reduction(contiguous_node):
             return False
 
-        # Other reduction types like max/min is not supported yet.
-        # There are no real use case as well.
-        out = all(
-            subnode.node.get_reduction_type()  # type: ignore[union-attr]
-            in {
-                "sum",
-                "prod",
-            }
-            for subnode in other_node.get_nodes()
-            if subnode.is_reduction()
-        )
-        return out
+        return cls.supports_noncontiguous_reductions(other_node)
 
     @classmethod
     def are_mix_order_reductions(
@@ -4530,9 +4530,10 @@ class FusedMixOrderReductions(FusedSchedulerNode):
 
         # Since node1 is from the current mix order reduction, if node1 is
         # contiguous, the fused node should also be contiguous.
-        if MixOrderReduction.is_contiguous_node(
-            node1
-        ) and not MixOrderReduction.is_contiguous_node(node2):
+        if MixOrderReduction.is_contiguous_node(node1):
+            if not MixOrderReduction.is_contiguous_node(node2):
+                return False
+        elif not MixOrderReduction.supports_noncontiguous_reductions(node2):
             return False
 
         def _get_ancestors(nodes: tuple[BaseSchedulerNode, ...]) -> OrderedSet[str]:
@@ -10935,10 +10936,12 @@ class Scheduler:
             relevant_reading_nodes = node1.snodes
         num_concurrent_reads = 0
         for reading_node in relevant_reading_nodes:
+            # A read of an earlier mutation of the same buffer (the output of an
+            # index_put_ into it, say) reads the same memory under another name.
             relevant_reads = [
                 read
                 for read in reading_node.read_writes.reads
-                if read.name == real_name
+                if self.mutation_real_name.get(read.name, read.name) == real_name
             ]
             if not relevant_reads:
                 continue
@@ -11713,8 +11716,14 @@ class Scheduler:
         if not node.is_gpu():
             return f"{node.get_device()} ops"
 
-        if isinstance(node.node, ir.DeviceCopy):
-            return "DeviceCopy ops"
+        # Decided on the FX node so that MultiOutput children, which share their
+        # parent's fx_node, are split together with it.
+        if isinstance(ir_node, ir.DeviceCopy) or (
+            isinstance(ir_node, ir.ExternKernel)
+            and (fx_node := getattr(ir_node, "fx_node", None)) is not None
+            and fx_node_crosses_devices(fx_node)
+        ):
+            return "cross-device ops"
 
         if isinstance(node.node, ir.Switch):
             return "Switch ops"
