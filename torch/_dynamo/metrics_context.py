@@ -19,12 +19,13 @@ import heapq
 import logging
 import time
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING, TypeAlias
+from typing import cast, TYPE_CHECKING, TypeAlias
 from typing_extensions import Self
 
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from types import TracebackType
 
 from torch.utils._traceback import CapturedTraceback
 
@@ -39,9 +40,9 @@ class TopN:
 
     def __init__(self, at_most: int = 25) -> None:
         self.at_most = at_most
-        self.heap: list[tuple[int, Any]] = []
+        self.heap: list[tuple[int, str]] = []
 
-    def add(self, key: Any, val: int) -> None:
+    def add(self, key: str, val: int) -> None:
         # Push if we haven't reached the max size, else push and pop the smallest
         fn = heapq.heappush if len(self.heap) < self.at_most else heapq.heappushpop
         fn(self.heap, (val, key))
@@ -49,12 +50,12 @@ class TopN:
     def __len__(self) -> int:
         return len(self.heap)
 
-    def __iter__(self) -> Iterator[tuple[Any, int]]:
+    def __iter__(self) -> Iterator[tuple[str, int]]:
         return ((key, val) for val, key in sorted(self.heap, reverse=True))
 
 
 OnExitType: TypeAlias = Callable[
-    [int, int, dict[str, Any], type[BaseException] | None, BaseException | None],
+    [int, int, dict[str, object], type[BaseException] | None, BaseException | None],
     None,
 ]
 
@@ -68,7 +69,7 @@ class MetricsContext:
         all metrics set during the lifetime of the contextmanager.
         """
         self._on_exit = on_exit
-        self._metrics: dict[str, Any] = {}
+        self._metrics: dict[str, object] = {}
         self._start_time_ns: int = 0
         self._level: int = 0
         self._edits: list[tuple[CapturedTraceback, set[str]]] = []
@@ -89,7 +90,7 @@ class MetricsContext:
         self,
         exc_type: type[BaseException] | None,
         exc_value: BaseException | None,
-        _traceback: Any,
+        _traceback: TracebackType | None,
     ) -> None:
         """
         At exit, call the provided on_exit function.
@@ -120,7 +121,7 @@ class MetricsContext:
             raise RuntimeError(f"Cannot increment {metric} outside of a MetricsContext")
         if metric not in self._metrics:
             self._metrics[metric] = 0
-        self._metrics[metric] += value
+        self._metrics[metric] = cast(int, self._metrics[metric]) + value
 
     def _render_edits(self, pred: set[str]) -> str:
         return "\n\n" + "\n\n".join(
@@ -129,7 +130,7 @@ class MetricsContext:
             if k & pred
         )
 
-    def set(self, metric: str, value: Any, overwrite: bool = False) -> None:
+    def set(self, metric: str, value: object, overwrite: bool = False) -> None:
         """
         Set a metric to a given value. Raises if the metric has been assigned previously
         in the current context.
@@ -145,7 +146,7 @@ class MetricsContext:
         self._edits.append((CapturedTraceback.extract(skip=1), {metric}))
         self._metrics[metric] = value
 
-    def set_key_value(self, metric: str, key: str, value: Any) -> None:
+    def set_key_value(self, metric: str, key: str, value: object) -> None:
         """
         Treats a given metric as a dictionary and set the k and value within it.
         Note that the metric must be a dictionary or not present.
@@ -157,9 +158,9 @@ class MetricsContext:
             raise RuntimeError(f"Cannot set {metric} outside of a MetricsContext")
         if metric not in self._metrics:
             self._metrics[metric] = {}
-        self._metrics[metric][key] = value
+        cast("dict[str, object]", self._metrics[metric])[key] = value
 
-    def update(self, values: dict[str, Any], overwrite: bool = False) -> None:
+    def update(self, values: dict[str, object], overwrite: bool = False) -> None:
         """
         Set multiple metrics directly. This method does NOT increment. Raises if any
         metric has been assigned previously in the current context and overwrite is
@@ -177,7 +178,7 @@ class MetricsContext:
         self._edits.append((CapturedTraceback.extract(skip=1), set(values.keys())))
         self._metrics.update(values)
 
-    def update_outer(self, values: dict[str, Any]) -> None:
+    def update_outer(self, values: dict[str, object]) -> None:
         """
         Update, but only when at the outermost context.
         """
@@ -186,7 +187,7 @@ class MetricsContext:
         if self._level == 1:
             self.update(values)
 
-    def add_to_set(self, metric: str, value: Any) -> None:
+    def add_to_set(self, metric: str, value: object) -> None:
         """
         Records a metric as a set() of values.
         """
@@ -194,9 +195,9 @@ class MetricsContext:
             raise RuntimeError(f"Cannot add {metric} outside of a MetricsContext")
         if metric not in self._metrics:
             self._metrics[metric] = set()
-        self._metrics[metric].add(value)
+        cast("set[object]", self._metrics[metric]).add(value)
 
-    def add_top_n(self, metric: str, key: Any, val: int) -> None:
+    def add_top_n(self, metric: str, key: str, val: int) -> None:
         """
         Records a metric as a TopN set of values.
         """
@@ -204,7 +205,7 @@ class MetricsContext:
             return
         if metric not in self._metrics:
             self._metrics[metric] = TopN()
-        self._metrics[metric].add(key, val)
+        cast(TopN, self._metrics[metric]).add(key, val)
 
 
 class RuntimeMetricsContext:
@@ -215,11 +216,11 @@ class RuntimeMetricsContext:
         context manager.
         """
         self._on_exit = on_exit
-        self._metrics: dict[str, Any] = {}
+        self._metrics: dict[str, object] = {}
         self._start_time_ns: int = 0
 
     def increment(
-        self, metric: str, value: int, extra: dict[str, Any] | None = None
+        self, metric: str, value: int, extra: dict[str, object] | None = None
     ) -> None:
         """
         Increment a metric by a given amount.
@@ -229,7 +230,7 @@ class RuntimeMetricsContext:
             self._start_time_ns = time.time_ns()
         if metric not in self._metrics:
             self._metrics[metric] = 0
-        self._metrics[metric] += value
+        self._metrics[metric] = cast(int, self._metrics[metric]) + value
 
         if extra:
             for k, v in extra.items():
