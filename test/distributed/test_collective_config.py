@@ -3,7 +3,11 @@
 import io
 from contextlib import contextmanager
 
-from test_c10d_pybackend import create_process_group, RecordingBackend
+from test_c10d_pybackend import (
+    ConfigRecordingBackend,
+    create_process_group,
+    RecordingBackend,
+)
 
 import torch
 import torch.distributed as dist
@@ -23,8 +27,9 @@ from torch.testing._internal.common_utils import (
 @instantiate_parametrized_tests
 class FunctionalCollectiveConfigTest(TestCase):
     @contextmanager
-    def _backend(self, device="cpu", name="nccl2"):
-        backend = RecordingBackend(0, 1, name)
+    def _backend(self, device="cpu", supports_config=True):
+        backend_type = ConfigRecordingBackend if supports_config else RecordingBackend
+        backend = backend_type(0, 1)
         group = create_process_group(backend)
         if device == "cuda":
             if not torch.cuda.is_available():
@@ -125,9 +130,9 @@ class FunctionalCollectiveConfigTest(TestCase):
             self.assertEqual(backend.wait_count, 4)
 
     def test_unsupported_backend(self):
-        with self._backend(name="python-backend") as (backend, group):
+        with self._backend(supports_config=False) as (backend, group):
             with self.assertRaisesRegex(
-                RuntimeError, "only supported by the nccl2 backend"
+                RuntimeError, "does not support per-collective configuration"
             ):
                 torch.ops._c10d_functional.all_reduce_config(
                     torch.ones(4), "sum", group.group_name, {"min_ctas": 1}

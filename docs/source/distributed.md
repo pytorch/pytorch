@@ -238,11 +238,16 @@ The argument is supported by `broadcast`, `all_reduce`, `all_reduce_coalesced`,
 `reduce`, `all_gather`, `all_gather_single`, `all_gather_coalesced`,
 `gather_single`, `reduce_scatter`, `reduce_scatter_single`, and
 `all_to_all_single`, including their aliases. For `all_to_all_single`, omit
-the split-size lists to use equal splits. Other backends, operations captured
-for coalescing, and NCCL2 time estimation reject non-`None` configurations.
+the split-size lists to use equal splits. Backends without a config-method
+override, operations captured for coalescing, and NCCL2 time estimation reject
+non-`None` configurations.
 External NCCL group scopes, including those opened by the legacy backend,
 are unsupported.
 Passing `None` preserves existing behavior and does not require nccl4py.
+The raw c10d schemas have an optional `config=None` argument. Backend config
+methods (for example, `allreduceConfig`) reject a non-`None` config by default
+and otherwise call the existing collective method. NCCL2 overrides the config
+methods for supported operations.
 
 `torch.compile` and `torch.export` support configured `all_reduce`, `all_gather`,
 `all_gather_single`, `reduce_scatter`, `reduce_scatter_single`, and
@@ -251,7 +256,7 @@ Configuration values become guarded graph constants; changing them recompiles.
 Exported programs retain the captured values, not the original Python object.
 Vendor integer and string options are supported; raw-pointer options require a
 runtime binding and cannot be traced. Use these Python APIs rather than raw
-`torch.ops.c10d` configuration overloads.
+`torch.ops.c10d` calls with a non-`None` config.
 
 Configured graphs use separate functional operators with ordered effects.
 Their runtime kernels establish completion on the calling stream before

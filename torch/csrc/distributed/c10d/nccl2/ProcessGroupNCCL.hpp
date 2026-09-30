@@ -142,6 +142,97 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   }
   c10::intrusive_ptr<::c10d::Backend::Options> getBackendOptions() override;
 
+  c10::intrusive_ptr<::c10d::Work> broadcastConfig(
+      std::vector<at::Tensor>& tensors,
+      const BroadcastOptions& opts = BroadcastOptions()) override {
+    return broadcast(tensors, opts);
+  }
+
+  c10::intrusive_ptr<::c10d::Work> allreduceConfig(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceOptions& opts = AllreduceOptions()) override {
+    return allreduce(tensors, opts);
+  }
+
+  c10::intrusive_ptr<::c10d::Work> allreduce_coalescedConfig(
+      std::vector<at::Tensor>& tensors,
+      const AllreduceCoalescedOptions& opts =
+          AllreduceCoalescedOptions()) override {
+    return allreduce_coalesced(tensors, opts);
+  }
+
+  c10::intrusive_ptr<::c10d::Work> reduceConfig(
+      std::vector<at::Tensor>& tensors,
+      const ReduceOptions& opts = ReduceOptions()) override {
+    return reduce(tensors, opts);
+  }
+
+  c10::intrusive_ptr<::c10d::Work> allgatherConfig(
+      std::vector<std::vector<at::Tensor>>& outputTensors,
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) override {
+    return allgather(outputTensors, inputTensors, opts);
+  }
+
+  c10::intrusive_ptr<::c10d::Work> all_gather_singleConfig(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const AllgatherOptions& opts = AllgatherOptions()) override {
+    return all_gather_single(outputBuffer, inputBuffer, opts);
+  }
+
+  c10::intrusive_ptr<::c10d::Work> allgather_coalescedConfig(
+      std::vector<std::vector<at::Tensor>>& outputTensorLists,
+      std::vector<at::Tensor>& inputTensors,
+      const AllgatherOptions& opts = AllgatherOptions()) override {
+    return allgather_coalesced(outputTensorLists, inputTensors, opts);
+  }
+
+  c10::intrusive_ptr<::c10d::Work> all_gather_single_coalescedConfig(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const AllgatherOptions& opts = AllgatherOptions()) override {
+    return all_gather_single_coalesced(outputs, inputs, opts);
+  }
+
+  c10::intrusive_ptr<::c10d::Work> gather_singleConfig(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const GatherOptions& opts = GatherOptions()) override {
+    return gather_single(outputBuffer, inputBuffer, opts);
+  }
+
+  c10::intrusive_ptr<::c10d::Work> reduce_scatterConfig(
+      std::vector<at::Tensor>& outputTensors,
+      std::vector<std::vector<at::Tensor>>& inputTensors,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
+    return reduce_scatter(outputTensors, inputTensors, opts);
+  }
+
+  c10::intrusive_ptr<::c10d::Work> reduce_scatter_singleConfig(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
+    return reduce_scatter_single(outputBuffer, inputBuffer, opts);
+  }
+
+  c10::intrusive_ptr<::c10d::Work> reduce_scatter_single_coalescedConfig(
+      std::vector<at::Tensor>& outputs,
+      std::vector<at::Tensor>& inputs,
+      const ReduceScatterOptions& opts = ReduceScatterOptions()) override {
+    return reduce_scatter_single_coalesced(outputs, inputs, opts);
+  }
+
+  c10::intrusive_ptr<::c10d::Work> all_to_all_singleConfig(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      std::vector<int64_t>& outputSplitSizes,
+      std::vector<int64_t>& inputSplitSizes,
+      const AllToAllOptions& opts = AllToAllOptions()) override {
+    return all_to_all_single(
+        outputBuffer, inputBuffer, outputSplitSizes, inputSplitSizes, opts);
+  }
+
   c10::intrusive_ptr<::c10d::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const ::c10d::BroadcastOptions& opts =

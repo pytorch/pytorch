@@ -3252,7 +3252,7 @@ class CollectiveConfigTest(TestCase):
             dist.all_reduce(tensor)
             dist.all_reduce(tensor, config=None)
             with self.assertRaisesRegex(
-                RuntimeError, "only supported by the nccl2 backend"
+                RuntimeError, "does not support per-collective configuration"
             ):
                 dist.all_reduce(tensor, config=object(), async_op=async_op)
             self.assertEqual(tensor, torch.ones(2))
@@ -3295,7 +3295,7 @@ class CollectiveConfigTest(TestCase):
                     opts = getattr(c10d, options)()
                     opts.config = object()
                     with self.assertRaisesRegex(
-                        RuntimeError, "only supported by the nccl2 backend"
+                        RuntimeError, "does not support per-collective configuration"
                     ):
                         getattr(backend, name)(*args, opts)
                     self.assertEqual(output, torch.zeros_like(tensor))
@@ -3314,7 +3314,7 @@ class CollectiveConfigTest(TestCase):
                 kwargs["config"] = object() if config_kind == "object" else None
             expected = (
                 self.assertRaisesRegex(
-                    RuntimeError, "only supported by the nccl2 backend"
+                    RuntimeError, "does not support per-collective configuration"
                 )
                 if config_kind == "object"
                 else nullcontext()
@@ -3379,7 +3379,8 @@ class CollectiveConfigTest(TestCase):
             self.assertEqual(compiled(tensor), module(tensor))
 
     @parametrize("frontend", ["make_fx", "fake", "meta", "functionalize", "remap"])
-    def test_raw_config_tracing(self, frontend):
+    @parametrize("overload_packet", [False, True])
+    def test_raw_config_tracing(self, frontend, overload_packet):
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.distributed._functional_collectives import (
             _LegacyToFunctionalCollectiveMode,
@@ -3391,14 +3392,23 @@ class CollectiveConfigTest(TestCase):
             reduce_op = dist.ReduceOp(dist.ReduceOp.SUM).boxed()
 
             def fn(tensor):
-                torch.ops.c10d.allreduce_.config(
-                    [tensor], group, reduce_op, None, False, config="test"
-                )
+                op = torch.ops.c10d.allreduce_
+                if not overload_packet:
+                    op = op.default
+                op([tensor], group, reduce_op, None, False, config="test")
                 return tensor
 
-            with self.assertRaisesRegex(
-                NotImplementedError, "Raw c10d configuration overloads"
-            ):
+            error = {
+                "make_fx": (NotImplementedError, "Raw c10d configuration calls"),
+                "remap": (NotImplementedError, "Raw c10d configuration calls"),
+                "fake": (RuntimeError, "Raw c10d configuration calls"),
+                "meta": (RuntimeError, "Raw c10d configuration calls"),
+                "functionalize": (
+                    RuntimeError,
+                    "does not support per-collective configuration",
+                ),
+            }[frontend]
+            with self.assertRaisesRegex(*error):
                 if frontend == "make_fx":
                     make_fx(fn)(torch.ones(2))
                 elif frontend == "fake":

@@ -1851,10 +1851,21 @@ _register_config_collective(
 )
 
 
-def _reject_collective_config(*args, **kwargs):
-    raise NotImplementedError(
-        "Raw c10d configuration overloads cannot be traced; use torch.distributed collective APIs"
-    )
+def _raw_collective_config(func, args, kwargs):
+    for index, argument in enumerate(func._schema.arguments):
+        if argument.name == "config":
+            return args[index] if index < len(args) else (kwargs or {}).get("config")
+    return None
+
+
+def _trace_raw_collective(mode, func, types, args, kwargs):
+    if _raw_collective_config(func, args, kwargs) is not None:
+        raise NotImplementedError(
+            "Raw c10d configuration calls cannot be traced; use torch.distributed collective APIs"
+        )
+    from torch.fx.experimental.proxy_tensor import proxy_call
+
+    return proxy_call(mode, func, mode.pre_dispatch, args, kwargs or {})
 
 
 lib_impl_c10d = torch.library.Library("c10d", "IMPL")
@@ -1875,14 +1886,10 @@ for _op in (
     "alltoall_",
     "alltoall_base_",
 ):
-    torch.library.register_fake(
-        f"c10d::{_op}.config", _reject_collective_config, lib=lib_impl_c10d
-    )
-    lib_impl_c10d.impl(f"{_op}.config", _reject_collective_config, "Functionalize")
     torch.library.register_torch_dispatch(
-        f"c10d::{_op}.config",
+        f"c10d::{_op}",
         ProxyTorchDispatchMode,
-        _reject_collective_config,
+        _trace_raw_collective,
         lib=lib_impl_c10d,
     )
 
@@ -2336,13 +2343,14 @@ def _remap_traceable_collective(
     else None. Shared by the make_fx compile_on_one_rank mode below and
     non-strict export's _NonStrictTorchFunctionHandler.
     """
+    raw_func = func.default if isinstance(func, torch._ops.OpOverloadPacket) else func
     if (
-        isinstance(func, torch._ops.OpOverload)
-        and func.namespace == "c10d"
-        and func._overloadname == "config"
+        isinstance(raw_func, torch._ops.OpOverload)
+        and raw_func.namespace == "c10d"
+        and _raw_collective_config(raw_func, args, kwargs) is not None
     ):
         raise NotImplementedError(
-            "Raw c10d configuration overloads cannot be traced; use torch.distributed collective APIs"
+            "Raw c10d configuration calls cannot be traced; use torch.distributed collective APIs"
         )
     if func not in traceable_collective_remaps:
         return None
