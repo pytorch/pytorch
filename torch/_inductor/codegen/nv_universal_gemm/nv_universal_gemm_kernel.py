@@ -1343,14 +1343,8 @@ class NVUniversalGemmKernel(Kernel):
         )
 
         arguments = self.ordered_arguments()
-        input_tensor_names = [
-            argument.name for argument in arguments if argument.kind == "input"
-        ]
-        output_buffers = [
-            cast(str, argument.buffer_name)
-            for argument in arguments
-            if argument.kind == "output"
-        ]
+        input_tensor_names = [f"in_ptr{i}" for i, _ in enumerate(self.input_nodes)]
+        output_buffers = self.ordered_output_buffers()
         input_params = [argument.name for argument in arguments]
         input_params.append("stream=None")
         params_str = ", ".join(input_params)
@@ -1360,10 +1354,7 @@ class NVUniversalGemmKernel(Kernel):
         else:
             input_tensors_expr = f"({', '.join(input_tensor_names)})"
 
-        workspace_arg = next(
-            (argument.name for argument in arguments if argument.kind == "workspace"),
-            "None",
-        )
+        workspace_arg = "workspace" if self.workspace_size > 0 else "None"
         has_epilogue = bool(self.epilogue.source) or self.local_reduce is not None
 
         # Build variant_kwargs dict expression for SCALED_GEMM

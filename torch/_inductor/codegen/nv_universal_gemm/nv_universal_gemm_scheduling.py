@@ -27,6 +27,7 @@ from ...codecache import code_hash, get_path
 from ...ir import (
     Buffer,
     ComputedBuffer,
+    FlexibleLayout,
     InputBuffer,
     Layout,
     MultiTemplateBuffer,
@@ -93,7 +94,7 @@ class _NVGemmBenchmarkTensorSpec:
 
 
 def _nvgemm_benchmark_tensor_specs(
-    generated: NVGemmGeneratedSource,
+    kernel: NVUniversalGemmKernel,
 ) -> tuple[_NVGemmBenchmarkTensorSpec | None, ...]:
     graph_input_examples = {}
     if V.graph.example_inputs is not None:
@@ -102,8 +103,8 @@ def _nvgemm_benchmark_tensor_specs(
         )
 
     tensor_specs = []
-    ranges_by_storage: dict[int | StorageWeakRef, list[tuple[int, int, int]]] = {}
-    for index, argument in enumerate(generated.kernel.ordered_arguments()):
+    ranges_by_storage: dict[object, list[tuple[int, int, int]]] = {}
+    for index, argument in enumerate(kernel.ordered_arguments()):
         if argument.kind == "workspace":
             tensor_specs.append(None)
             continue
@@ -121,33 +122,46 @@ def _nvgemm_benchmark_tensor_specs(
                 storage_node = storage_node.data
             elif isinstance(storage_node, ReinterpretView):
                 view_byte_offset += (
-                    V.graph.sizevars.optimization_hint(storage_node.layout.offset)
+                    cast(
+                        int,
+                        V.graph.sizevars.optimization_hint(storage_node.layout.offset),
+                    )
                     * storage_node.get_dtype().itemsize
                 )
                 storage_node = storage_node.data
-            elif isinstance(storage_node, Buffer) and isinstance(
-                storage_node.get_layout(), NonOwningLayout
-            ):
-                storage_node = storage_node.get_layout().view
+            elif isinstance(storage_node, Buffer):
+                layout = storage_node.get_layout()
+                if not isinstance(layout, NonOwningLayout):
+                    break
+                storage_node = layout.view
             else:
                 break
 
         view_byte_offset += (
-            V.graph.sizevars.optimization_hint(storage_node.get_layout().offset)
+            cast(
+                int,
+                V.graph.sizevars.optimization_hint(storage_node.get_layout().offset),
+            )
             * storage_node.get_dtype().itemsize
         )
 
-        storage_key: int | StorageWeakRef = id(storage_node)
+        storage_key: object = id(storage_node)
         storage_base_offset = 0
         if isinstance(storage_node, InputBuffer):
             name = storage_node.get_name()
             if name in V.graph.constants:
                 example = V.graph.constants[name]
-                storage_offset = example.storage_offset()
+                storage_offset = cast(
+                    int,
+                    V.graph.sizevars.optimization_hint(example.storage_offset()),
+                )
             elif name in V.graph.graph_inputs:
                 example = graph_input_examples.get(name)
-                storage_offset = V.graph.sizevars.optimization_hint(
-                    V.graph.graph_input_storage_offsets.get(name, 0)
+                storage_offset = cast(
+                    int,
+                    V.graph.sizevars.optimization_hint(
+                        V.graph.graph_input_storage_offsets.get(name, 0)
+                    ),
                 )
             else:
                 example = None
@@ -156,11 +170,36 @@ def _nvgemm_benchmark_tensor_specs(
                 storage_key = StorageWeakRef(example.untyped_storage())
                 storage_base_offset = storage_offset * example.element_size()
 
-        size = V.graph.sizevars.optimization_hints(node.get_size())
-        stride = V.graph.sizevars.optimization_hints(node.get_stride())
+        size = cast(
+            tuple[int, ...], V.graph.sizevars.optimization_hints(node.get_size())
+        )
+        stride = cast(
+            tuple[int, ...], V.graph.sizevars.optimization_hints(node.get_stride())
+        )
         dtype = node.get_dtype()
-        byte_offset = storage_base_offset + view_byte_offset
+        storage_dtype = storage_node.get_dtype()
         storage_length = compute_required_storage_length(size, stride, 0)
+        if argument.kind == "epilogue" and not kernel.epilogue.is_evt_fallback:
+            bounded_stride = list(FlexibleLayout.contiguous_strides(size))
+            for dim, length in enumerate(size):
+                if length > 1:
+                    bounded_stride[dim] += 1
+                    break
+            bounded_stride = tuple(bounded_stride)
+            bounded_storage_length = compute_required_storage_length(
+                size, bounded_stride, 0
+            )
+            if bounded_storage_length < storage_length:
+                stride = bounded_stride
+                storage_length = bounded_storage_length
+                storage_key = ("bounded_epilogue", index)
+                storage_base_offset = 0
+                view_byte_offset = 0
+                storage_dtype = dtype
+        device = node.get_device()
+        if device is None:
+            raise AssertionError("expected tensor argument to have a device")
+        byte_offset = storage_base_offset + view_byte_offset
         max_byte = byte_offset + storage_length * dtype.itemsize
         ranges_by_storage.setdefault(storage_key, []).append(
             (index, byte_offset, max_byte)
@@ -170,9 +209,9 @@ def _nvgemm_benchmark_tensor_specs(
                 size=size,
                 stride=stride,
                 offset=byte_offset,
-                device=node.get_device(),
+                device=device,
                 dtype=dtype,
-                storage_dtype=storage_node.get_dtype(),
+                storage_dtype=storage_dtype,
                 storage_of=index,
                 storage_size=0,
             )
@@ -185,8 +224,7 @@ def _nvgemm_benchmark_tensor_specs(
         current_end = -1
         for item in ranges:
             _, start, end = item
-            repeated_empty_range = bool(current) and (start, end) == current[-1][1:]
-            if current and start >= current_end and not repeated_empty_range:
+            if current and start > current_end:
                 storage_ranges.append(current)
                 current = []
             current.append(item)
@@ -228,7 +266,7 @@ def _render_nvgemm_benchmark_helpers(
     generated: NVGemmGeneratedSource,
 ) -> str:
     arguments = generated.kernel.ordered_arguments()
-    tensor_specs = _nvgemm_benchmark_tensor_specs(generated)
+    tensor_specs = _nvgemm_benchmark_tensor_specs(generated.kernel)
 
     args_code = IndentedBuffer()
     args_code.writeline("")
