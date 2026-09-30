@@ -798,8 +798,6 @@ struct AttentionKernel {
 
       if (kPreloadV) {
         prologueV(0);
-      } else {
-        MM1::Mma::drain_cp_asyncs();
       }
 
       typename MM0::Mma::Operator::IteratorC::TensorCoord
@@ -1061,7 +1059,7 @@ struct AttentionKernel {
           }
 
           // int first_key_block = 0;
-          MM1::Mma::drain_cp_asyncs();
+          // MM1::Mma::drain_cp_asyncs(); # TODO figure out if this is needed for correctness
           DISPATCH_BOOL(
               iter_key_start == first_key, kIsFirst, ([&] {
                 DISPATCH_BOOL(
@@ -1168,7 +1166,6 @@ struct AttentionKernel {
           thread_id(),
           warp_id(),
           lane_id());
-      MM1::Mma::drain_cp_asyncs();
       epilogue(rescale, dest_iter, accum_o);
     }
 
