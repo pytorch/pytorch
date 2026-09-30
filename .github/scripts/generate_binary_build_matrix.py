@@ -44,10 +44,18 @@ CUDA_ARCHES_CUDNN_VERSION = {
     "13.4": "9",
 }
 
-ROCM_ARCHES = ["7.14", "10.0", "preview"]
+ROCM_ARCHES = ["7.14", "10.0"]
 ROCM_PREVIEW_VERSION = (
     (REPO_ROOT / ".ci/docker/ci_commit_pins/rocm-preview.txt").read_text().strip()
 )
+# Preview is a stable channel, not a version; keep its external names together.
+ROCM_PREVIEW = {
+    "arch": "preview",
+    "channel": "rocm-preview",
+    "desired_cuda": "rocmpreview",
+    "version": ROCM_PREVIEW_VERSION,
+}
+ROCM_PREVIEW_ARCHES = [ROCM_PREVIEW["arch"]]
 
 XPU_ARCHES = ["xpu"]
 
@@ -81,7 +89,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     # dependency on latest patch version for (major, minor)
     "7.14": ("rocm[libraries,device-all]==7.14.*"),
     "10.0": ("rocm[libraries,device-all]==10.0.*"),
-    "preview": (f"rocm[libraries,device-all]=={ROCM_PREVIEW_VERSION}"),
+    ROCM_PREVIEW["arch"]: (f"rocm[libraries,device-all]=={ROCM_PREVIEW['version']}"),
     "xpu": (
         "intel-cmplr-lib-rt==2026.1.2 | "
         "intel-cmplr-lib-ur==2026.1.2 | "
@@ -134,19 +142,22 @@ def _rocm_channel(arch: str, separator: str = "") -> str:
     return f"rocm{separator}{arch}"
 
 
-# Preview uses a hyphenated display, upload, and index channel; desired_cuda
-# stays hyphen-free for wheel metadata and stable HUD job names.
 ROCM_NIGHTLY_SOURCE_MATRIX = {
     _rocm_channel(arch, "-"): dict(
         name=_rocm_channel(arch, "-"),
-        index_url=(
-            f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/"
-            f"{_rocm_channel(arch, '-' if arch == 'preview' else '')}"
-        ),
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/{_rocm_channel(arch)}",
         supported_platforms=["Linux"],
         accelerator="rocm",
     )
     for arch in ROCM_ARCHES
+}
+ROCM_PREVIEW_NIGHTLY_SOURCE_MATRIX = {
+    ROCM_PREVIEW["channel"]: dict(
+        name=ROCM_PREVIEW["channel"],
+        index_url=f"{PYTORCH_NIGHTLY_PIP_INDEX_URL}/{ROCM_PREVIEW['channel']}",
+        supported_platforms=["Linux"],
+        accelerator="rocm",
+    )
 }
 XPU_NIGHTLY_SOURCE_MATRIX = {
     "xpu": dict(
@@ -158,6 +169,7 @@ XPU_NIGHTLY_SOURCE_MATRIX = {
 }
 NIGHTLY_SOURCE_MATRIX.update(CUDA_NIGHTLY_SOURCE_MATRIX)
 NIGHTLY_SOURCE_MATRIX.update(ROCM_NIGHTLY_SOURCE_MATRIX)
+NIGHTLY_SOURCE_MATRIX.update(ROCM_PREVIEW_NIGHTLY_SOURCE_MATRIX)
 NIGHTLY_SOURCE_MATRIX.update(XPU_NIGHTLY_SOURCE_MATRIX)
 
 
@@ -287,7 +299,7 @@ def validate_runtime_release_table_consistency() -> None:
 def arch_type(arch_version: str) -> str:
     if arch_version in CUDA_ARCHES:
         return "cuda"
-    elif arch_version in ROCM_ARCHES:
+    elif arch_version in ROCM_ARCHES + ROCM_PREVIEW_ARCHES:
         return "rocm"
     elif arch_version in XPU_ARCHES:
         return "xpu"
@@ -310,12 +322,10 @@ WHEEL_CONTAINER_IMAGES = {
         for gpu_arch in CUDA_AARCH64_ARCHES
     },
     **{
-        gpu_arch: (
-            "manylinux2_28-builder:"
-            f"{_rocm_channel(gpu_arch, '-' if gpu_arch == 'preview' else '')}"
-        )
+        gpu_arch: f"manylinux2_28-builder:{_rocm_channel(gpu_arch)}"
         for gpu_arch in ROCM_ARCHES
     },
+    ROCM_PREVIEW["arch"]: f"manylinux2_28-builder:{ROCM_PREVIEW['channel']}",
     "xpu": "manylinux2_28-builder:xpu",
     "cpu": "manylinux2_28-builder:cpu",
     "cpu-aarch64": "manylinux2_28_aarch64-builder:cpu-aarch64",
@@ -337,6 +347,8 @@ FULL_PYTHON_VERSIONS = [
 
 
 def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
+    if gpu_arch_version == ROCM_PREVIEW["arch"]:
+        return ROCM_PREVIEW["desired_cuda"]
     return {
         "cpu": "cpu",
         "cpu-aarch64": "cpu",
@@ -412,7 +424,7 @@ def generate_wheels_matrix(
         # Define default compute archivectures
         arches = ["cpu"]
         if os == "linux":
-            arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
+            arches += CUDA_ARCHES + ROCM_ARCHES + ROCM_PREVIEW_ARCHES + XPU_ARCHES
         elif os == "windows":
             arches += CUDA_ARCHES + XPU_ARCHES
         elif os == "linux-aarch64":
@@ -510,7 +522,14 @@ def generate_wheels_matrix(
                         ].split(":")[1],
                         "package_type": package_type,
                         "upload_subfolder": (
-                            "rocm-preview" if gpu_arch_version == "preview" else ""
+                            ROCM_PREVIEW["channel"]
+                            if gpu_arch_version == ROCM_PREVIEW["arch"]
+                            else ""
+                        ),
+                        "index_subfolder": (
+                            ROCM_PREVIEW["channel"]
+                            if gpu_arch_version == ROCM_PREVIEW["arch"]
+                            else ""
                         ),
                         "build_name": f"{package_type}-py{python_version}-{build_name_arch}".replace(
                             ".", "_"

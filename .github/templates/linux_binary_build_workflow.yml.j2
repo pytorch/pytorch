@@ -489,6 +489,9 @@ jobs:
         {%- for config in rocm_configs %}
           - desired_python: "!{{ config['python_version'] }}"
             desired_cuda: "!{{ config['desired_cuda'] }}"
+          {%- if config.get('index_subfolder') %}
+            index_subfolder: "!{{ config['index_subfolder'] }}"
+          {%- endif %}
             gpu_arch_version: "!{{ config['gpu_arch_version'] | default('') }}"
             gpu_arch_type: "!{{ config['gpu_arch_type'] }}"
             docker_image: "!{{ config['container_image'] }}"
@@ -499,6 +502,7 @@ jobs:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: !{{ build_configs[0]['package_type'] }}
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      INDEX_SUBFOLDER: ${{ matrix.index_subfolder || '' }}
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}

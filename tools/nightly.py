@@ -1186,11 +1186,18 @@ def main() -> None:
                 if pip_source is None:
                     print(
                         f"{toolkit} {requested} is not available on platform {PLATFORM}. "
-                        f"Available version(s): {', '.join(sorted(available_sources, key=Version))}"
+                        f"Available version(s): {', '.join(sorted(available_sources))}"
                     )
                     sys.exit(1)
             else:
-                pip_source = available_sources[max(available_sources, key=Version)]
+                versioned_sources = {}
+                for version, source in available_sources.items():
+                    try:
+                        Version(version)
+                    except ValueError:
+                        continue
+                    versioned_sources[version] = source
+                pip_source = versioned_sources[max(versioned_sources, key=Version)]
 
     if pip_source is None:
         pip_source = PIP_SOURCES["cpu"]  # always available
