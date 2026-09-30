@@ -12084,27 +12084,11 @@ op_db: list[OpInfo] = [
                        # ValueError: Expected 2D tensor but got tensor with dimension: 1.
                        DecorateInfo(
                            unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_inplace',
-                           device_type='cpu', dtypes=(torch.complex64,)
+                           device_type=('cpu', 'cuda', 'xpu'), dtypes=(torch.complex64,)
                        ),
                        DecorateInfo(
                            unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_out',
-                           device_type='cpu', dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_inplace',
-                           device_type='cuda', dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_out',
-                           device_type='cuda', dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_inplace',
-                           device_type='xpu', dtypes=(torch.complex64,)
-                       ),
-                       DecorateInfo(
-                           unittest.expectedFailure, 'TestSparseCSRDevice', 'test_sparse_csr_unary_out',
-                           device_type='xpu', dtypes=(torch.complex64,)
+                           device_type=('cpu', 'cuda', 'xpu'), dtypes=(torch.complex64,)
                        ),
                        # AssertionError: Tensor-likes are not close!
                        DecorateInfo(
