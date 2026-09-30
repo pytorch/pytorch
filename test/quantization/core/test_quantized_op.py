@@ -8934,6 +8934,13 @@ class TestQuantizedConv(TestCase):
         torch.manual_seed(0)  # For reproducibility in 3D conv tests
         self._test_qconv_fp8_helper(3, pointwise_post_op)
 
+    @unittest.skipUnless(IS_ARM64, "AArch64 only")
+    def test_aarch64_quantized_engines(self):
+        engines = torch.backends.quantized.supported_engines
+        self.assertNotIn("x86", engines)
+        self.assertNotIn("fbgemm", engines)
+        self.assertNotIn(torch.backends.quantized.engine, ("x86", "fbgemm"))
+
     @unittest.skipIf(
         torch.backends.quantized.engine == "none",
         "No default quantized engine available",
