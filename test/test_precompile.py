@@ -5589,6 +5589,8 @@ class TestTritonRuntimeCacheTransport(TestCase):
             self.assertEqual(len(header["records"]), 3)
 
     def test_export_succeeds_after_a_failed_export(self):
+        import hashlib
+
         from torch.compiler._triton_runtime_cache import export_runtime_cache
 
         with tempfile.TemporaryDirectory() as tmp, _triton_cache_namespace(tmp):
@@ -5598,9 +5600,16 @@ class TestTritonRuntimeCacheTransport(TestCase):
                 self.assertRaisesRegex(OSError, "disk full"),
             ):
                 export_runtime_cache(context=self.CONTEXT)
-            pathlib.Path(tmp, ".runtime_cache_bundle.tmp").write_text("partial")
-            header, _ = _bundle_header(export_runtime_cache(context=self.CONTEXT))
+            marker = pathlib.Path(tmp, ".runtime_cache_bundle")
+            leftover = pathlib.Path(tmp, ".runtime_cache_bundle.tmp")
+            self.assertFalse(marker.exists())
+            self.assertFalse(leftover.exists())
+            leftover.write_text("partial")
+            bundle = export_runtime_cache(context=self.CONTEXT)
+            header, _ = _bundle_header(bundle)
             self.assertEqual(len(header["records"]), 3)
+            self.assertEqual(marker.read_text(), hashlib.sha256(bundle).hexdigest())
+            self.assertFalse(leftover.exists())
 
     def test_export_requires_a_private_file_cache(self):
         import triton

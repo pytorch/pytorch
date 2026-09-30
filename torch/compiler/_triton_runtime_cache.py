@@ -4,6 +4,11 @@ The bundle holds the entries Triton's ``FileCacheManager`` commits under
 ``TRITON_CACHE_DIR``: compiled kernel groups, native launcher modules, and
 autotuning results. Each member carries its checksum, and the header records
 the Triton build and Python ABI that produced them.
+
+The header does not record the GPU target. Triton's kernel and autotuning keys
+hash it, so on another target the entries are never read and those kernels
+compile on first use. Checking the target on import would start the GPU runtime
+before the application does.
 """
 
 from __future__ import annotations
