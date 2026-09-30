@@ -1148,14 +1148,6 @@ def make_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _is_version(name: str) -> bool:
-    try:
-        Version(name)
-    except ValueError:
-        return False
-    return True
-
-
 def parse_arguments() -> argparse.Namespace:
     parser = make_parser()
     args = parser.parse_args()
@@ -1199,7 +1191,7 @@ def main() -> None:
                     sys.exit(1)
             else:
                 # Named channels such as "preview" are opt-in only.
-                versions = [v for v in available_sources if _is_version(v)]
+                versions = [v for v in available_sources if v[:1].isdigit()]
                 pip_source = available_sources[max(versions, key=Version)]
 
     if pip_source is None:
