@@ -252,7 +252,8 @@ struct C10_API PyInterpreterVTable {
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack,
       c10::Device common_device) const = 0;
-  // try op's prim_meta_impl if it defines one
+  // Python callback for prims handling: runs the prims op's Python
+  // prim_meta_impl, if it defines one.
   virtual bool fake_try_prim_meta(
       const c10::OperatorHandle& op,
       torch::jit::Stack* stack) const = 0;
