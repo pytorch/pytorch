@@ -24,17 +24,6 @@ def synchronize() -> None:
     pass
 
 
-_CUDA_SYNC_SENTINEL = ["cuda"]
-
-
-def _is_cuda_sync_sentinel(devices: list[str] | None) -> bool:
-    return devices is None or devices == _CUDA_SYNC_SENTINEL
-
-
-def _is_cpu_only_devices(devices: list[str]) -> bool:
-    return len(devices) > 0 and all(spec == "cpu" for spec in devices)
-
-
 def _is_device_process_label(labels: str) -> bool:
     if "GPU" in labels:
         return True
@@ -61,29 +50,32 @@ def _device_profiler_activity() -> ProfilerActivity:
 
 
 def _synchronize_for_devices(devices: list[str] | None) -> None:
-    if devices is not None and len(devices) == 0:
-        raise ValueError("devices must not be empty")
-    if devices is not None and _is_cpu_only_devices(devices):
-        return
-    if _is_cuda_sync_sentinel(devices):
+    """Synchronize devices for a benchmark timing window.
+
+    ``None`` is the only default: synchronize the current accelerator when one
+    exists. An explicit list is parsed with ``torch.device``. CPU entries,
+    including ``cpu:0``, are skipped. Any other entry must match the current
+    accelerator type.
+    """
+    if devices is None:
         if not torch.accelerator.is_available():
             return
-        acc = torch.accelerator.current_accelerator()
-        if acc is None:
+        if torch.accelerator.current_accelerator() is None:
             return
         torch.accelerator.synchronize()
         return
+    if len(devices) == 0:
+        raise ValueError("devices must not be empty")
     parsed: list[tuple[str, torch.device]] = []
-    for spec in devices or []:
-        if spec == "cpu":
-            continue
+    for spec in devices:
         try:
             dev = torch.device(spec)
-        except (RuntimeError, ValueError) as exc:
+        except (RuntimeError, ValueError, TypeError) as exc:
             raise ValueError(f"Invalid device entry in devices: {spec!r}") from exc
         parsed.append((spec, dev))
-    if not parsed:
-        raise ValueError(f"No accelerator entries in devices {devices!r}")
+    targets = [(spec, dev) for spec, dev in parsed if dev.type != "cpu"]
+    if not targets:
+        return
     if not torch.accelerator.is_available():
         raise ValueError(
             f"Accelerator is not available but devices {devices!r} includes accelerator entries"
@@ -93,22 +85,12 @@ def _synchronize_for_devices(devices: list[str] | None) -> None:
         raise ValueError(
             f"No current accelerator but devices {devices!r} includes accelerator entries"
         )
-    targets: list[torch.device] = []
-    mismatched: list[str] = []
-    for spec, dev in parsed:
-        if dev.type != acc.type:
-            mismatched.append(spec)
-            continue
-        targets.append(dev)
+    mismatched = [spec for spec, dev in targets if dev.type != acc.type]
     if mismatched:
         raise ValueError(
             f"devices {mismatched!r} do not match current accelerator {acc.type!r}"
         )
-    if not targets:
-        raise ValueError(
-            f"No accelerator entries in devices {devices!r} for current accelerator {acc.type!r}"
-        )
-    for dev in targets:
+    for _, dev in targets:
         torch.accelerator.synchronize(dev)
 
 
@@ -132,14 +114,10 @@ def dump_chrome_trace(
 
     Outputs to trace_filename
 
-    ``devices`` defaults to ``["cuda"]`` (a historical sentinel meaning "sync
-    the current accelerator"). Any list containing only ``"cpu"`` skips
-    accelerator sync. ``[]`` is invalid. Explicit device strings must match the
-    current accelerator type or a ``ValueError`` is raised.
+    ``devices=None`` synchronizes the current accelerator. Explicit device
+    strings are parsed with ``torch.device`` and must match that accelerator.
+    CPU devices, including ``cpu:0``, skip accelerator sync. ``[]`` is invalid.
     """
-
-    if devices is None:
-        devices = ["cuda"]
 
     def _sync() -> None:
         _synchronize_for_devices(devices)
@@ -330,7 +308,7 @@ def benchmark_utilization(
         optimize_ctx,
         [_device_profiler_activity()],
         num_runs=num_runs,
-        devices=["cuda"],
+        devices=None,
     )
     utilization, mm_conv_utilization = compute_utilization(
         chrome_trace_file_name, total_length

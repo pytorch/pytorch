@@ -68,10 +68,14 @@ class TestFunctorchBenchmarkUtils(TestCase):
         self.assertEqual(len(calls), 8)
         self.assertTrue(all(c is None for c in calls))
 
-    def test_cuda_sentinel_falls_back_when_accelerator_type_differs(self):
+    def test_none_synchronizes_current_accelerator(self):
         calls = self._dump(acc_type="xpu")
         self.assertEqual(len(calls), 8)
         self.assertTrue(all(c is None for c in calls))
+
+    def test_explicit_cuda_does_not_act_as_sentinel_on_xpu(self):
+        with self.assertRaisesRegex(ValueError, "do not match current accelerator"):
+            self._dump(devices=["cuda"], acc_type="xpu")
 
     def test_does_not_rebind_module_synchronize(self):
         before = benchmark_utils.synchronize
@@ -114,14 +118,27 @@ class TestFunctorchBenchmarkUtils(TestCase):
             with self.assertRaisesRegex(ValueError, "Invalid device entry"):
                 benchmark_utils._synchronize_for_devices(["not-a-device"])
 
-    def test_sentinel_noop_without_accelerator(self):
+    def test_none_noop_without_accelerator(self):
         with patch.object(torch.accelerator, "is_available", return_value=False):
             benchmark_utils._synchronize_for_devices(None)
-            benchmark_utils._synchronize_for_devices(["cuda"])
+
+    def test_explicit_cuda_without_accelerator_raises(self):
+        with patch.object(torch.accelerator, "is_available", return_value=False):
+            with self.assertRaisesRegex(ValueError, "Accelerator is not available"):
+                benchmark_utils._synchronize_for_devices(["cuda"])
 
     def test_multiple_cpu_devices_does_not_sync(self):
         calls = self._dump(devices=["cpu", "cpu"])
         self.assertEqual(calls, [])
+
+    def test_cpu_with_index_does_not_sync(self):
+        self.assertEqual(self._dump(devices=["cpu:0"]), [])
+        self.assertEqual(self._dump(devices=["cpu", "cpu:0"]), [])
+
+    def test_mixed_cpu_index_and_accelerator(self):
+        calls = self._dump(devices=["cpu:0", "cuda:1"])
+        self.assertEqual(len(calls), 8)
+        self.assertTrue(all(c == torch.device("cuda:1") for c in calls))
 
     def test_mixed_cpu_and_accelerator_devices(self):
         calls = self._dump(devices=["cpu", "cuda:1"])
