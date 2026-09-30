@@ -137,6 +137,19 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         self._test(f)
 
+    def test_dont_reinplace_scatter_from_overlapping_view(self):
+        # https://github.com/pytorch/pytorch/issues/197829
+        def f(x):
+            x[1:] = x[:-1].clone()
+            return x
+
+        # On CPU the overlapping copy is wrong at any size. On a GPU it only
+        # shows with many blocks, and not on every run.
+        x = torch.randn(64, 8)
+        x2 = x.clone()
+        self.assertEqual(f(x), torch.compile(f)(x2))
+        self.assertEqual(x, x2)
+
     def test_view_index_put_should_reinplace_copy_to_base(self):
         def f(input_pos, val, cache):
             cache_view = aten.reshape.default(cache, [4, -1])

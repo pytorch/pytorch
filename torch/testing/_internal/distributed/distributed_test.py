@@ -7463,7 +7463,7 @@ class DistributedTest:
                 DDPUnevenTestInput(
                     name="large_conv_model",
                     model=large_model,
-                    inp=torch.ones(batch, batch, dim, dim, device=rank),
+                    inp=torch.ones(batch, batch, 64, 64, device=rank),
                     sync_interval=1,
                 ),
                 DDPUnevenTestInput(
