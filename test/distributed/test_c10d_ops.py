@@ -72,29 +72,28 @@ class TestC10dOps(TestCase):
 
         class ConfigBackend : public LegacyBackend {
          public:
-          c10::intrusive_ptr<c10d::Work> allreduceConfig(
-              std::vector<at::Tensor>& tensors,
-              const c10d::AllreduceOptions& opts) override {
-            return allreduce(tensors, opts);
-          }
+          bool supports_collective_config() const override { return true; }
         };
 
         void check_registration() {
             std::vector<at::Tensor> tensors;
             c10d::AllreduceOptions opts;
             LegacyBackend legacy;
-            legacy.allreduceConfig(tensors, opts);
+            legacy.check_collective_config(opts.config);
+            legacy.allreduce(tensors, opts);
             TORCH_CHECK(legacy.calls == 1);
             opts.config = c10::IValue(1);
             bool rejected = false;
             try {
-                legacy.allreduceConfig(tensors, opts);
+                legacy.check_collective_config(opts.config);
+            legacy.allreduce(tensors, opts);
             } catch (const c10::Error&) {
                 rejected = true;
             }
             TORCH_CHECK(rejected && legacy.calls == 1);
             ConfigBackend configured;
-            configured.allreduceConfig(tensors, opts);
+            configured.check_collective_config(opts.config);
+            configured.allreduce(tensors, opts);
             TORCH_CHECK(configured.calls == 1);
 
             torch::Library library(
