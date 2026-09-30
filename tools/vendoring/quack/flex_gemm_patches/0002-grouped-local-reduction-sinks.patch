@@ -1,23 +1,23 @@
 diff --git a/quack/epilogue/frontend.py b/quack/epilogue/frontend.py
-index 544566e..a9cf4be 100644
+index 46dc637..fb26fca 100644
 --- a/quack/epilogue/frontend.py
 +++ b/quack/epilogue/frontend.py
-@@ -333,0 +334,4 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
+@@ -328,0 +329,4 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
 +        if const_expr(kind == "value"):
 +            fragment = op.fn_prepare(self, fragment, False)
 +            assert fragment is not None
 +            return fragment.load()
-@@ -337 +341 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
+@@ -332 +336 @@ class _FragmentEpiModMixin(_EpiModMixinBase):
 -            "TensorSSA callbacks support c/row/col/tile/scalar/apply operands"
 +            "TensorSSA callbacks support c/row/col/tile/scalar/value/apply operands"
-@@ -471,4 +475,2 @@ class EpiMod:
+@@ -466,4 +470,2 @@ class EpiMod:
 -        if fragmentwise and (self.mode != "element" or prepass is not None):
 -            raise ValueError(
 -                "TensorSSA callbacks support element mode without an accumulator prepass"
 -            )
 +        if fragmentwise and self.mode != "element":
 +            raise ValueError("TensorSSA callbacks support element mode only")
-@@ -2016 +2018,8 @@ def gemm_epilogue(
+@@ -1986 +1988,8 @@ def gemm_epilogue(
 -def fragment_epilogue(outputs=(), ops=None, outs=None, extra_ops=()):
 +def fragment_epilogue(
 +    outputs=(),
@@ -27,7 +27,7 @@ index 544566e..a9cf4be 100644
 +    prepass=None,
 +    prepass_outs=(),
 +):
-@@ -2025,0 +2035,2 @@ def fragment_epilogue(outputs=(), ops=None, outs=None, extra_ops=()):
+@@ -1995,0 +2005,2 @@ def fragment_epilogue(outputs=(), ops=None, outs=None, extra_ops=()):
 +            prepass=prepass,
 +            prepass_outs=prepass_outs,
 diff --git a/quack/epilogue/mixin.py b/quack/epilogue/mixin.py
