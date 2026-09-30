@@ -1580,8 +1580,9 @@ class _NestedReductionBase:
         self.check_non_leaf_epilogue_fallback()
 
     # Cover non-power-of-two X and R extents.
+    @parametrize("polyhedral_fusion", [False, True])
     @parametrize("B,D,G", [(32, 1024, 16), (1, 16, 16), (3, 16, 16), (3, 72, 24)])
-    def test_standalone_sub_parent_epilogue(self, B, D, G):
+    def test_standalone_sub_parent_epilogue(self, B, D, G, polyhedral_fusion):
         def f(x):
             xg = x.view(B, D // G, G)
             amax = xg.float().abs().amax(dim=-1)
@@ -1593,11 +1594,13 @@ class _NestedReductionBase:
             return even, odd, scale
 
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
-        self.check_nested_matches_unnested(f, (x,))
-        self.check_fusion()
+        with inductor_config.patch(polyhedral_fusion=polyhedral_fusion):
+            self.check_nested_matches_unnested(f, (x,))
+            self.check_fusion()
 
+    @parametrize("polyhedral_fusion", [False, True])
     @parametrize("dynamic_axis", ["batch", "reduction"])
-    def test_dynamic_standalone_sub_parent_epilogue(self, dynamic_axis):
+    def test_dynamic_standalone_sub_parent_epilogue(self, dynamic_axis, polyhedral_fusion):
         B, D = 4, 512
 
         def f(x):
@@ -1619,10 +1622,11 @@ class _NestedReductionBase:
             for shape in shapes
         ]
         torch._dynamo.mark_dynamic(inputs[0], 0 if dynamic_axis == "batch" else 1)
-        compiled = torch.compile(f, fullgraph=True)
-        for x in inputs:
-            self.assertEqual(compiled(x), f(x), atol=1e-2, rtol=1e-2)
-        self.check_fusion()
+        with inductor_config.patch(polyhedral_fusion=polyhedral_fusion):
+            compiled = torch.compile(f, fullgraph=True)
+            for x in inputs:
+                self.assertEqual(compiled(x), f(x), atol=1e-2, rtol=1e-2)
+            self.check_fusion()
 
     @parametrize("dynamic_axis", [None, "batch", "feature"])
     def test_pointwise_producer_standalone_sub_parent_epilogue(self, dynamic_axis):
@@ -1816,14 +1820,16 @@ class _NestedReductionBase:
             "triton.coalesce_tiling_analysis": False,
         }
     )
-    def test_rmsnorm_factor4_three_output_epilogue(self):
+    @parametrize("polyhedral_fusion", [False, True])
+    def test_rmsnorm_factor4_three_output_epilogue(self, polyhedral_fusion):
         B, D, G = 8, 4096, 32
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
         weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
-        self.check_nested_matches_unnested(
-            _rmsnorm_factor4_three_output_epilogue, (x, weight, G)
-        )
-        self.check_fusion()
+        with inductor_config.patch(polyhedral_fusion=polyhedral_fusion):
+            self.check_nested_matches_unnested(
+                _rmsnorm_factor4_three_output_epilogue, (x, weight, G)
+            )
+            self.check_fusion()
 
     def test_dynamic_batch_mxfp6_four_to_three_pack(self):
         D = 1024
@@ -2306,7 +2312,8 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x, row))
         self.check_fusion()
 
-    def test_standalone_sub_parent_shared_scalar_source(self):
+    @parametrize("polyhedral_fusion", [False, True])
+    def test_standalone_sub_parent_shared_scalar_source(self, polyhedral_fusion):
         B, D = 4, 16
 
         def f(x, scalar):
@@ -2320,8 +2327,9 @@ class _NestedReductionBase:
 
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
         scalar = torch.tensor(2.0, device=GPU_TYPE, dtype=torch.bfloat16)
-        self.check_nested_matches_unnested(f, (x, scalar))
-        self.check_fusion()
+        with inductor_config.patch(polyhedral_fusion=polyhedral_fusion):
+            self.check_nested_matches_unnested(f, (x, scalar))
+            self.check_fusion()
 
     def test_standalone_sub_parent_rejects_ambiguous_source_load(self):
         B, D, G = 32, 1024, 16

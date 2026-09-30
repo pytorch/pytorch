@@ -135,15 +135,11 @@ def _capture_staged_plans(nodes, staged_plans, output_group_mappings):
             node, FusedNestedReductions
         ):
             continue
-        reductions = [
-            candidate for candidate in node.get_nodes() if candidate.is_reduction()
-        ]
-        if not reductions:
+        device = node.get_device()
+        if device is None:
             continue
-        _, (parent_numel, parent_rnumel) = reductions[0].group
-        plan = NestedReduction.sub_parent_epilogue_plan(
-            node.get_nodes(), parent_numel, parent_rnumel
-        )
+        _, (numel, rnumel) = node.group
+        plan = NestedReduction.sub_parent_epilogue_plan(node.get_nodes(), numel, rnumel)
         if plan is not None:
             staged_plans.append(plan)
             output_group_mappings.extend(
@@ -393,6 +389,32 @@ class PolyhedralMLAFusionTest(TestCase):
         )
         self.assertEqual(set(observation.logical_factors), {4})
         self.assertEqual(set(observation.parent_widths), {HEAD_DIM})
+
+    @parametrize("force_persistent", [False, True])
+    @parametrize("view_offset", [1, 64])
+    def test_existing_lane_fusion_with_output_view(
+        self, device, force_persistent, view_offset
+    ):
+        def fn(x):
+            y = x + x.sum(-1, keepdim=True)
+            return y[:, ::4] * 2, y[:, view_offset:]
+
+        torch.manual_seed(0)
+        inputs = (torch.randn(8, 128, device=device),)
+        eager = fn(inputs[0])
+        disabled = _observe(
+            fn, inputs, polyhedral_fusion=False, force_persistent=force_persistent
+        )
+        enabled = _observe(
+            fn, inputs, polyhedral_fusion=True, force_persistent=force_persistent
+        )
+        self.assert_outputs(disabled.outputs, eager)
+        self.assert_outputs(enabled.outputs, eager)
+        self.assertEqual(disabled.staged_fusion_count, 1)
+        self.assertEqual(enabled.staged_fusion_count, disabled.staged_fusion_count)
+        self.assertEqual(disabled.generated_kernel_count, 1)
+        self.assertEqual(enabled.generated_kernel_count, disabled.generated_kernel_count)
+        self.assertEqual(enabled.affine_mappings, disabled.affine_mappings)
 
     @parametrize(
         "fn,shape_name,batch_size,seq_len,reorder,memory_planning",

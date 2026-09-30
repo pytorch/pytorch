@@ -2429,21 +2429,13 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
         if self._value_resolver is not None:
             planned = self._value_resolver.is_planned(name)
             if planned:
-                if self._replay_accesses is None:
-                    value = self._value_resolver.resolve_load(
-                        name,
-                        index,
-                        replay_context=self._replay_context,
-                        replay_node=self._replay_node,
-                    )
-                else:
-                    value = self._value_resolver.resolve_load(
-                        name,
-                        index,
-                        replay_context=self._replay_context,
-                        replay_node=self._replay_node,
-                        replay_accesses=self._replay_accesses,
-                    )
+                value = self._value_resolver.resolve_load(
+                    name,
+                    index,
+                    replay_context=self._replay_context,
+                    replay_node=self._replay_node,
+                    replay_accesses=self._replay_accesses,
+                )
                 if value is not None:
                     return value
         remapped_index = self._family.remap_index(index)
@@ -2632,24 +2624,19 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             access_stride = relation.access_stride
             if access_stride is None:
                 continue
-            base_offset = cast("sympy.Expr", relation.base_offset)
-            extent = cast("sympy.Expr", relation.extent)
-            if parent_numel is None or parent_rnumel is None:
-                raise AssertionError("affine relation is missing parent extents")
             if access_stride not in (1, sub_parent_factor):
                 raise AssertionError(
                     f"unsupported sub-parent affine stride {access_stride}"
                 )
-            sizevars = V.graph.sizevars
-            if access_stride == 1:
-                source_extent = sympy_product(relation.source_accesses[0].size)
-                parent_extent = parent_numel * parent_rnumel
-                if not V.graph.sizevars.statically_known_equals(
-                    source_extent, parent_extent
-                ):
-                    raise AssertionError(
-                        "dense affine source does not cover the parent frame"
-                    )
+            if access_stride == sub_parent_factor:
+                continue
+            extent = cast("sympy.Expr", relation.extent)
+            if parent_numel is None or parent_rnumel is None:
+                raise AssertionError("affine relation is missing parent extents")
+            source_extent = sympy_product(relation.source_accesses[0].size)
+            parent_extent = parent_numel * parent_rnumel
+            if not V.graph.sizevars.statically_known_equals(source_extent, parent_extent):
+                raise AssertionError("dense affine source does not cover the parent frame")
             consumer_extent = sympy_product(relation.consumer_access.size)
             if not V.graph.sizevars.statically_known_multiple_of(
                 consumer_extent, parent_numel
@@ -2662,8 +2649,6 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             )
             if not V.graph.sizevars.statically_known_equals(child_feature, extent):
                 raise AssertionError("affine extent does not match the consumer frame")
-            if access_stride == sub_parent_factor:
-                continue
             replay_matches = [
                 (group_index, node)
                 for group_index, group in enumerate(output_groups)
@@ -2679,7 +2664,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
                     for read in node.read_writes.reads
                 )
             ]
-            if access_stride == 1 and len(replay_matches) > 1:
+            if len(replay_matches) > 1:
                 raise AssertionError(
                     "dense affine relation belongs to multiple output groups"
                 )
@@ -3511,22 +3496,28 @@ class SIMDScheduling(BaseScheduling):
         consumer_node = node2 if node1.is_reduction() else node1
         _, (parent_numel, parent_rnumel) = reduction_node.group
         nodes = [*reduction_node.get_nodes(), *consumer_node.get_nodes()]
-        fusion_result = scheduler.NestedReduction.sub_parent_epilogue_result(
-            nodes, parent_numel, parent_rnumel
-        )
-        if not fusion_result.is_candidate:
-            return _SubParentFusion.DEFER
-        if fusion_result.plan is None:
+        plan = self._sub_parent_epilogue_plan(nodes, parent_numel, parent_rnumel)
+        if plan is None:
+            # No sub-parent plan covers the combined set, so a sub-parent-shaped
+            # member would reach generic tiling and scheduling, neither of which
+            # models a fraction of the parent tile. Keep it out of the group.
+            # The nested append path owns its own sub-parent stage, so leave
+            # those pairs to FusedNestedReductions.can_fuse_with.
             if isinstance(node1, scheduler.FusedNestedReductions) or isinstance(
                 node2, scheduler.FusedNestedReductions
             ):
                 return _SubParentFusion.DEFER
-            return _SubParentFusion.REJECT
-
-        plan = fusion_result.plan
-        if not self._sub_parent_plan_is_admitted(nodes, parent_numel, plan):
-            return _SubParentFusion.REJECT
-        epilogue_node_set = OrderedSet(plan.sub_parent_stages[0].epilogue_nodes)
+            return (
+                _SubParentFusion.REJECT
+                if any(
+                    self._is_sub_parent_shaped(node, parent_numel, parent_rnumel)
+                    for node in nodes
+                )
+                else _SubParentFusion.DEFER
+            )
+        stage = plan.sub_parent_stages[0]
+        epilogue_nodes = stage.epilogue_nodes
+        epilogue_node_set = OrderedSet(epilogue_nodes)
         if self._is_standalone_staged_reduction(reduction_node):
             return _SubParentFusion.FUSE
         return (
@@ -3547,20 +3538,21 @@ class SIMDScheduling(BaseScheduling):
         belong here rather than in the scheduler, which has no view of them. See
         Note [Sub-parent reduction epilogues].
         """
-        if (
-            not self.supports_sub_parent_epilogue
-            or not torch._inductor.config.triton.nested_reduction
-        ):
+        if not self.supports_sub_parent_epilogue or not config.triton.nested_reduction:
             return None
-        result = scheduler.NestedReduction.sub_parent_epilogue_result(
-            nodes, parent_numel, parent_rnumel
-        )
-        plan = result.plan
-        if plan is None:
-            return None
-        if not self._sub_parent_plan_is_admitted(nodes, parent_numel, plan):
-            return None
-        return plan
+        strategies = (False, True) if config.polyhedral_fusion else (False,)
+        for allow_translation in strategies:
+            result = scheduler.NestedReduction.sub_parent_epilogue_result(
+                nodes,
+                parent_numel,
+                parent_rnumel,
+                allow_translation=allow_translation,
+            )
+            if result.plan is not None and self._sub_parent_plan_is_admitted(
+                nodes, parent_numel, result.plan
+            ):
+                return result.plan
+        return None
 
     def _sub_parent_plan_is_admitted(
         self,
@@ -3570,7 +3562,7 @@ class SIMDScheduling(BaseScheduling):
     ) -> bool:
         if not self._sub_parent_tiling_is_2d(nodes, parent_numel, plan.parent_rnumel):
             return False
-        has_dense_mappings = any(
+        has_dense_mappings = plan.allow_translation and any(
             relation.access_stride == 1
             for stage in plan.sub_parent_stages
             for relation in stage.access_relations
@@ -3671,16 +3663,9 @@ class SIMDScheduling(BaseScheduling):
             if not node.is_reduction():
                 continue
             _, (parent_numel, parent_rnumel) = node.group
-            result = scheduler.NestedReduction.sub_parent_epilogue_result(
-                nodes, parent_numel, parent_rnumel
-            )
-            plan = result.plan
-            if plan is not None and self._sub_parent_plan_is_admitted(
-                nodes, parent_numel, plan
-            ):
+            plan = self._sub_parent_epilogue_plan(nodes, parent_numel, parent_rnumel)
+            if plan is not None:
                 return plan
-            if result.is_candidate:
-                break
         return None
 
     def generate_node_schedule(
