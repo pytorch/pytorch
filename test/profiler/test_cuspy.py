@@ -31,7 +31,7 @@ from torch.testing._internal.common_cuda import (
     TEST_CUPTI as TEST_CUPTI_PYTHON,
     TEST_CUPTI_V13_3,
 )
-from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
+from torch.testing._internal.common_profiler import initialize_kineto_with_accelerator
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
@@ -47,7 +47,7 @@ def setUpModule():
     # via the documented cuptiFinalize hand-off -- Cuspy does not exist yet, so this is
     # safe; libkineto re-subscribes on its next profile, so kineto tests are
     # unaffected. See pylibcupti().finalize.
-    if initialize_kineto_with_cuda() and TEST_CUPTI_V13_3:
+    if initialize_kineto_with_accelerator() and TEST_CUPTI_V13_3:
         from torch.profiler._cuspy.cupti_python import pylibcupti
 
         try:

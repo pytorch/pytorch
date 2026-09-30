@@ -54,9 +54,11 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
-    skipIf,
 )
-from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
+from torch.testing._internal.common_profiler import (
+    get_profiler_activities,
+    initialize_kineto_with_accelerator,
+)
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
@@ -70,6 +72,7 @@ from torch.testing._internal.common_utils import (
     serialTest,
     skipIfRocm,
     skipIfTorchDynamo,
+    skipIfXpu,
     TemporaryFileName,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
@@ -83,17 +86,8 @@ if TYPE_CHECKING:
     from torch.autograd.profiler_util import FunctionEvent
 
 
-def get_profiler_activities(device_type):
-    activities = [ProfilerActivity.CPU]
-    if device_type not in ("cpu", "meta"):
-        device_activity = getattr(ProfilerActivity, device_type.upper(), None)
-        if device_activity and device_activity in supported_activities():
-            activities.append(device_activity)
-    return activities
-
-
 def setUpModule():
-    initialize_kineto_with_cuda()
+    initialize_kineto_with_accelerator()
 
 
 # if tqdm is not shutdown properly, it will leave the monitor thread alive.
@@ -2173,6 +2167,10 @@ with open(sys.argv[1], "w") as f:
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
+    @skipIfXpu(
+        msg="setUpModule initializes the XPU runtime, and forking after "
+        "Level Zero init deadlocks the child"
+    )
     def test_forked_process(self):
         def validate_forked_json(profiler):
             nonlocal cpu_op_found, parent_tid, child_pid
@@ -2914,11 +2912,6 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
 
         event_list.table()
 
-    @skipIf(
-        True,
-        "XPU Trace event ends too late! Refer https://github.com/intel/torch-xpu-ops/issues/2263",
-        device_type="xpu",
-    )
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_chrome_trace(self, device):
@@ -3135,11 +3128,19 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             self.assertGreater(
                 len(kernel_events), 0, "Error: No kernel events in trace"
             )
+            if device_type == "xpu":
+                # XPU Kineto emits "sycl queue" rather than "stream", and no
+                # grid/block launch geometry.
+                required_keys = ["device", "sycl queue", "correlation"]
+                require_launch_geometry = False
+            else:
+                required_keys = ["device", "stream", "correlation"]
+                require_launch_geometry = True
             has_kernel_launch_metadata = False
             for ke in kernel_events:
                 args = ke.get("args", {})
                 name = ke.get("name", "<unknown>")
-                for key in ["device", "stream", "correlation"]:
+                for key in required_keys:
                     self.assertIn(
                         key, args, lambda msg: f"{msg}\nkernel '{name}' missing '{key}'"
                     )
@@ -3151,10 +3152,11 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                     lambda msg: f"{msg}\nkernel '{name}' should provide grid and block together",
                 )
                 has_kernel_launch_metadata |= has_grid
-            self.assertTrue(
-                has_kernel_launch_metadata,
-                "Error: No kernel events in trace contained grid/block metadata",
-            )
+            if require_launch_geometry:
+                self.assertTrue(
+                    has_kernel_launch_metadata,
+                    "Error: No kernel events in trace contained grid/block metadata",
+                )
 
     @onlyAccelerator
     @skipIfRocm(msg="ROCm does not emit OVERHEAD activity records")
@@ -3189,7 +3191,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             )
 
 
-instantiate_device_type_tests(TestProfilerDevice, globals())
+instantiate_device_type_tests(TestProfilerDevice, globals(), allow_xpu=True)
 
 
 @instantiate_parametrized_tests

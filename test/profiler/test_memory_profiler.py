@@ -73,6 +73,17 @@ class TestMemoryProfiler(TestCase):
 
         self.assertIsInstance(prof._memory_profile(), _memory_profiler.MemoryProfile)
 
+    def test_tensor_key_normalizes_negative_storage_ptr(self) -> None:
+        # High-bit addresses (e.g. XPU) reach _make as a negative intptr_t.
+        key = _memory_profiler.TensorKey._make(
+            tensor_id=0,
+            storage_ptr=-1,
+            allocation_id=0,
+            device=torch.device("cpu"),
+        )
+        self.assertIsNotNone(key)
+        self.assertEqual(key.storage.ptr, (1 << 64) - 1)
+
 
 class ScaleLayer(torch.nn.Module):
     def __init__(self) -> None:
@@ -1561,9 +1572,14 @@ class TestMemoryProfilerTimeline(TestCase):
             )
 
 
-instantiate_device_type_tests(TestIdentifyGradients, globals(), only_for=("cpu",))
 instantiate_device_type_tests(
-    TestMemoryProfilerE2EDeviceType, globals(), only_for=("cpu",)
+    TestIdentifyGradients, globals(), only_for=("cpu", "xpu"), allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestMemoryProfilerE2EDeviceType,
+    globals(),
+    only_for=("cpu", "xpu"),
+    allow_xpu=True,
 )
 instantiate_device_type_tests(TestMemoryProfilerTimeline, globals(), allow_xpu=True)
 
