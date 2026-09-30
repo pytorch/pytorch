@@ -507,7 +507,6 @@ class ScheduleTest(MultiProcContinuousTest):
             schedule = ScheduleClass(
                 stage, num_microbatches, loss_fn=loss_fn, scale_grads=False
             )
-
         # Clear gradients and run eval
         zero_gradients(stage_modules)
         losses = []
@@ -1163,7 +1162,7 @@ class ScheduleTest(MultiProcContinuousTest):
                 out = schedule.step(x, target=target, losses=losses)
             else:
                 schedule.step()
-            assert_recv_buffers_drained(self, stages)
+        assert_recv_buffers_drained(self, stages)
 
         # Verify results (rank 0 has both first and last stages)
         if self.rank == 0:
