@@ -5017,7 +5017,6 @@ class TestFXCUDA(JitTestCase):
                 f"node={node}: no stack trace containing {required_substrings}; got {stacks}",
             )
 
-    # This only fails on navi31
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     @blas_library_context("cublaslt")
     def test_profiler_stack_trace_augmentation(self, device):
@@ -5152,7 +5151,7 @@ event=aten::add node=add stack_trace=return x + 1
 event={kernel_event} node=add stack_trace=return x + 1
 event=aten::sub node=sub stack_trace=return x - 1
 event={kernel_event} node=sub stack_trace=return x - 1""",
-            )
+        )
 
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_nested_graph_modules(self, device):
@@ -5196,15 +5195,15 @@ event={kernel_event} node=sub stack_trace=return x - 1""",
         actual_traces = _enrich_profiler_traces(prof)
         kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
         self.assertExpectedInline(
-        actual_traces,
-        f"""\
+            actual_traces,
+            f"""\
 event=aten::mul node=mul stack_trace=m = torch.mul(x, y)
 event={kernel_event} node=mul stack_trace=m = torch.mul(x, y)
 event=aten::sin node=sin stack_trace=s = m.sin()
 event={kernel_event} node=sin stack_trace=s = m.sin()
 event=aten::add node=add stack_trace=a = s + self.c
 event={kernel_event} node=add stack_trace=a = s + self.c""",
-            )
+        )
 
     @xfailIfNoAcceleratorTriton
     def test_graph_module_with_hop_serialization(self, device):
