@@ -308,6 +308,8 @@ class FSDPParamGroup:
         )
         # A larger floating-point dtype holds a smaller one exactly (e.g. fp32
         # and bf16). Compare sizes since torch.promote_types rejects float8.
+        # Gradients reduced outside DP keep autograd's upcast so that reduction
+        # runs in the wider dtype too.
         self._fsdp_params_with_wider_grad_dtype = [
             p
             for p in self.fsdp_params
@@ -315,6 +317,7 @@ class FSDPParamGroup:
             and (compute_dtype := p.param_dtype or p.orig_dtype).is_floating_point
             and grad_dtype.is_floating_point
             and grad_dtype.itemsize > compute_dtype.itemsize
+            and not p.may_reduce_grad_outside_dp
         ]
 
     def _init_reduce_scatter_param_order(self) -> None:
