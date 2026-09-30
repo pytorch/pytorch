@@ -7,7 +7,7 @@ from typing import Any
 
 import torch
 from torch._inductor.select_algorithm import realize_inputs, SymbolicGridFn
-from torch._inductor.utils import get_current_backend, sympy_product
+from torch._inductor.utils import get_current_backend, is_bf16x9_matmul, sympy_product
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
@@ -37,6 +37,23 @@ def persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
         1,
         1,
     )
+
+
+@SymbolicGridFn
+def blackwell_persistent_mm_grid(M: int, N: int, meta: dict[str, Any], *, cdiv, min):
+    """Like persistent_mm_grid, with cluster-aligned 2CTA tiles and launch grid.
+
+    The heuristic also rounds ``NUM_SMS`` down to even because the template uses
+    it as the persistent-loop stride.
+    """
+    num_pid_m = cdiv(M, meta["BLOCK_M"])
+    if meta.get("TWO_CTAS", False):
+        num_pid_m = (num_pid_m + 1) // 2 * 2
+    num_tiles = num_pid_m * cdiv(N, meta["BLOCK_N"])
+    grid_size = min(meta["NUM_SMS"], num_tiles)
+    if meta.get("TWO_CTAS", False):
+        grid_size = (grid_size // 2) * 2
+    return (grid_size, 1, 1)
 
 
 @SymbolicGridFn
@@ -136,7 +153,10 @@ def scale_mm_epilogue():
 
 
 def use_native_matmul(mat1, mat2):
-    if not config.triton.native_matmul:
+    if (
+        is_bf16x9_matmul(mat1.get_device().type, mat1.get_dtype())
+        or not config.triton.native_matmul
+    ):
         return False
 
     # If tma matmul is on, don't do native matmul
@@ -219,6 +239,22 @@ def _use_small_mm_pointwise(
         return False
     skt = statically_known_true or V.graph.sizevars.statically_known_true
     return skt(m >= 64) and skt(k < 5) and skt(n < 5)
+
+
+def _fits_int32_buffer_span(
+    rows: int, row_stride: int | None, cols: int, itemsize: int
+) -> bool:
+    # Descriptor fields are signed int32, but AMD buffer voffset is an unsigned
+    # 32-bit byte offset.
+    int32_max = (1 << 31) - 1
+    uint32_max = (1 << 32) - 1
+    return (
+        0 < rows <= int32_max
+        and 0 < cols <= int32_max
+        and row_stride is not None
+        and 0 <= row_stride <= int32_max
+        and ((rows - 1) * row_stride + cols) * itemsize <= uint32_max
+    )
 
 
 def _is_static_problem(layout: Layout) -> tuple[bool, bool]:

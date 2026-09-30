@@ -1,4 +1,3 @@
-#include <cuda_runtime.h>
 
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 
