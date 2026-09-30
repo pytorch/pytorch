@@ -3604,6 +3604,8 @@ class BaseView(IRNode):
 
 @ir_dataclass
 class ExpandView(BaseView):
+    """Broadcast `data` to `size`; input dims of size 1 always read index 0."""
+
     size: Sequence[Expr]
 
     @staticmethod
@@ -3688,6 +3690,10 @@ class ExpandView(BaseView):
         target = self.get_size()
         actual = self.data.get_size()
         skip = len(target) - len(actual)
+        # A symbolic size such as TruncToInt(s0/300) can be known to be 1 by
+        # the shape env without being the literal 1, so decide broadcast dims
+        # the same way create() does when zeroing strides.
+        broadcast = [V.graph.sizevars.is_size_one_or_false(s) for s in actual]
 
         def reindex(
             index: Sequence[Expr],
@@ -3696,7 +3702,7 @@ class ExpandView(BaseView):
             if len(index) != len(actual):
                 raise AssertionError("Expected len(index) == len(actual)")
             for i in range(len(actual)):
-                if actual[i] == 1:
+                if broadcast[i]:
                     # zero out broadcast dimension
                     index[i] = sympy.S.Zero
             return index
@@ -5087,7 +5093,11 @@ class FlexibleLayout(Layout):
 
 
 class NonOwningLayout(Layout):
-    """Is a view into the storage of another tensor"""
+    """Layout for a named buffer that aliases another tensor or view.
+
+    This layout does not add a view transformation. ``view`` is the logical
+    tensor being aliased and carries any view-specific layout metadata.
+    """
 
     def __init__(self, view: BaseView | TensorBox) -> None:
         layout = view.get_layout()
@@ -5188,6 +5198,14 @@ class NoneLayout(OutputSpec):
 
 
 class MutationLayoutSHOULDREMOVE(Layout):
+    """Layout for an operation that writes into an existing tensor or view.
+
+    A buffer with this layout does not own a new allocation or add a view
+    transformation. ``target`` is the logical mutation destination and carries
+    any view-specific layout metadata. ``get_buffer()`` unwraps it to the buffer
+    whose storage is mutated.
+    """
+
     def __init__(self, target: IRNode) -> None:
         super().__init__(
             target.get_device_or_error(),
@@ -7027,13 +7045,18 @@ class ConcatKernel(NopKernel):
                 input_unwrapped = inp.data.unwrap_view()
             else:
                 input_unwrapped = inp.data
-
             if (
                 isinstance(input_unwrapped, StorageBox)
                 and input_unwrapped.is_input_buffer()
                 and (dev := inp.get_device()) is not None
                 and is_gpu(dev.type)
-                and not is_dynamic(input_buffer)
+                and (
+                    not is_dynamic(input_buffer)
+                    or (
+                        dev.type != "mtia"
+                        and config.combo_kernel_foreach_dynamic_shapes
+                    )
+                )
             ):
                 op_names.append(input_buffer.get_operation_name())
 
