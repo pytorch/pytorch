@@ -20,11 +20,12 @@ import json
 import os
 import platform
 import re
+import secrets
 import shutil
+import stat
 import struct
 import sys
 import sysconfig
-import tempfile
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
@@ -82,6 +83,13 @@ def runtime_cache_root(*, require_explicit: bool = False) -> Path:
 def _compatibility(context: Any) -> dict[str, Any]:
     from torch._inductor.runtime.triton_compat import triton_key
 
+    try:
+        # The header holds context as JSON, so import compares it in that form.
+        context = json.loads(json.dumps(context, sort_keys=True))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "Triton runtime-cache context must be JSON-serializable"
+        ) from exc
     return {
         "triton_key": hashlib.sha256(triton_key().encode()).hexdigest(),
         "python": list(sys.version_info[:3]),
@@ -131,6 +139,14 @@ def export_runtime_cache(*, context: Any = None, exclude: Iterable[str] = ()) ->
     directory is marked as holding this bundle.
     """
     root = runtime_cache_root(require_explicit=True)
+    try:
+        # Triton creates the directory on first use, and a capture may launch
+        # no Triton kernel.
+        root.mkdir(parents=True, exist_ok=True)
+    except FileExistsError:
+        raise RuntimeError(
+            f"Triton cache directory {root} is not a directory"
+        ) from None
     excluded = {_cache_key(key) for key in exclude}
     suffix = sysconfig.get_config_var("EXT_SUFFIX")
     if not suffix:
@@ -376,8 +392,10 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
     """Verify a bundle and hydrate Triton's cache directory with it atomically.
 
     Call before any Triton kernel is imported or launched. An empty (or
-    missing) directory is filled in one rename. A nonempty one must already
-    hold this bundle, or this raises, so each bundle needs its own directory.
+    missing) directory is filled in one rename, which keeps the permission bits
+    of a pre-created directory but not its owner or ACLs. A nonempty one must
+    already hold this bundle, or this raises, so each bundle needs its own
+    directory.
     """
     root = runtime_cache_root()
     try:
@@ -418,8 +436,13 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
         validate_ready()
         return
     root.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(tempfile.mkdtemp(prefix=f"{root.name}.hydrate-", dir=root.parent))
+    # Unlike mkdtemp, mkdir honors the umask, as Triton's own makedirs does.
+    staging = root.parent / f"{root.name}.hydrate-{os.getpid()}-{secrets.token_hex(8)}"
+    staging.mkdir()
     try:
+        # The rename replaces a pre-created directory, so keep its permissions.
+        if root.is_dir():
+            staging.chmod(stat.S_IMODE(root.stat().st_mode))
         for (key, name), payload in payloads.items():
             (staging / key).mkdir(exist_ok=True)
             (staging / key / name).write_bytes(payload)
@@ -434,7 +457,11 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
             # Windows cannot rename over a directory, even an empty one.
             with contextlib.suppress(OSError):
                 root.rmdir()
-                os.replace(staging, root)
+                try:
+                    os.replace(staging, root)
+                except OSError:
+                    root.mkdir()
+                    raise
             if staging.exists():
                 if not root.is_dir() or not any(root.iterdir()):
                     raise
