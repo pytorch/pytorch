@@ -5420,6 +5420,7 @@ def _replace_bundle_header(bundle, edit):
     return _MAGIC + struct.pack("!Q", len(encoded)) + encoded + payload
 
 
+@skipIfTorchDynamo("exports a Triton cache directory, not a traced program")
 @unittest.skipUnless(has_triton_package(), "requires Triton")
 @instantiate_parametrized_tests
 class TestTritonRuntimeCacheTransport(TestCase):
@@ -5539,7 +5540,7 @@ class TestTritonRuntimeCacheTransport(TestCase):
                 (sorted(os.listdir(tmp)), sorted(consumer.iterdir())), before
             )
 
-    @parametrize("kind", ("native", "kernel", "autotune"))
+    @parametrize("kind", ("native", "kernel", "group", "autotune"))
     @parametrize("damage", ("missing", "corrupt"))
     def test_import_verifies_an_already_hydrated_cache(self, kind, damage):
         from torch.compiler._triton_runtime_cache import import_runtime_cache
@@ -5552,6 +5553,7 @@ class TestTritonRuntimeCacheTransport(TestCase):
                 name = {
                     "native": native,
                     "kernel": "kernel.cubin",
+                    "group": "__grp__kernel.json",
                     "autotune": "kernel.autotune.json",
                 }[kind]
                 member = consumer / key / name
@@ -5559,23 +5561,149 @@ class TestTritonRuntimeCacheTransport(TestCase):
                     member.unlink()
                 else:
                     member.write_bytes(b"corrupt")
-                with self.assertRaisesRegex(RuntimeError, "Incomplete or incompatible"):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Incomplete or incompatible|Unreadable"
+                ):
                     import_runtime_cache(bundle, context=self.CONTEXT)
 
-    @parametrize("damage", ("missing_binary", "unrecognized_autotune"))
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
+    def test_export_holds_every_entry_triton_commits(self):
+        import triton
+        import triton.language as tl
+
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            _triton_cache_namespace(tmp),
+            triton.knobs.autotuning.scope(),
+        ):
+            # Autotuners read this knob when they are created.
+            triton.knobs.autotuning.cache = True
+
+            @triton.autotune(
+                configs=[triton.Config({"BLOCK": 64}), triton.Config({"BLOCK": 128})],
+                key=["n"],
+            )
+            @triton.jit
+            def add(x, y, out, n, BLOCK: tl.constexpr):
+                offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+                mask = offsets < n
+                total = tl.load(x + offsets, mask=mask) + tl.load(
+                    y + offsets, mask=mask
+                )
+                tl.store(out + offsets, total, mask=mask)
+
+            x = torch.randn(1000, device="cuda")
+            out = torch.empty_like(x)
+            add[lambda meta: (triton.cdiv(x.numel(), meta["BLOCK"]),)](
+                x, x, out, x.numel()
+            )
+            torch.cuda.synchronize()
+            header, _ = _bundle_header(export_runtime_cache(context=self.CONTEXT))
+            kinds = [record["kind"] for record in header["records"]]
+            self.assertEqual(kinds.count("kernel"), 2)
+            self.assertEqual(kinds.count("autotune"), 1)
+            # Groups are rebuilt on import, so every other committed file ships.
+            self.assertEqual(
+                {(file["key"], file["name"]) for file in header["files"]},
+                {
+                    (path.parent.name, path.name)
+                    for path in pathlib.Path(tmp).glob("*/*")
+                    if not path.name.startswith("__grp__")
+                },
+            )
+
+    @parametrize(
+        "damage",
+        (
+            "missing_binary",
+            "symlinked_binary",
+            "unrecognized_autotune",
+            "unreadable_autotune",
+            "unreadable_group",
+            "foreign_group",
+            "group_outside_entry",
+            "group_without_binary",
+            "unrecognized_file",
+            "foreign_native",
+            "invalid_key",
+        ),
+    )
     def test_export_rejects_an_incomplete_cache(self, damage):
         from torch.compiler._triton_runtime_cache import export_runtime_cache
 
         with tempfile.TemporaryDirectory() as tmp, _triton_cache_namespace(tmp):
             key, _ = _write_triton_runtime_entries()
+            entry = pathlib.Path(tmp, key)
+            group = entry / "__grp__kernel.json"
+            children = json.loads(group.read_text())["child_paths"]
             if damage == "missing_binary":
-                pathlib.Path(tmp, key, "kernel.cubin").unlink()
+                (entry / "kernel.cubin").unlink()
                 error = "Incomplete Triton runtime-cache entry"
-            else:
-                pathlib.Path(tmp, key, "kernel.autotune.json").write_text("{}")
+            elif damage == "symlinked_binary":
+                (entry / "kernel.cubin").rename(entry / "elsewhere")
+                (entry / "kernel.cubin").symlink_to(entry / "elsewhere")
+                error = "Incomplete Triton runtime-cache entry"
+            elif damage == "unrecognized_autotune":
+                (entry / "kernel.autotune.json").write_text("{}")
                 error = "Unrecognized Triton autotuning cache entry"
+            elif damage == "unreadable_autotune":
+                (entry / "kernel.autotune.json").write_text('{"key"')
+                error = "Unreadable Triton runtime-cache entry"
+            elif damage == "unreadable_group":
+                group.write_text('{"child_paths"')
+                error = "Unreadable Triton runtime-cache entry"
+            elif damage == "foreign_group":
+                group.write_text("[]")
+                error = "Incomplete Triton runtime-cache group"
+            elif damage == "group_outside_entry":
+                children["kernel.cubin"] = str(pathlib.Path(tmp, "kernel.cubin"))
+                group.write_text(json.dumps({"child_paths": children}))
+                error = "points outside its entry"
+            elif damage == "group_without_binary":
+                del children["kernel.cubin"]
+                group.write_text(json.dumps({"child_paths": children}))
+                error = "no compiled binary"
+            elif damage == "unrecognized_file":
+                (entry / "kernel.new_format").write_bytes(b"")
+                error = "Unrecognized Triton runtime-cache files"
+            elif damage == "foreign_native":
+                pathlib.Path(tmp, "EF" * 26).mkdir()
+                pathlib.Path(tmp, "EF" * 26, "launcher.so").write_bytes(b"")
+                error = "Unrecognized Triton runtime-cache files"
+            else:
+                pathlib.Path(tmp, "not-a-key").mkdir()
+                error = "Invalid Triton runtime-cache key"
             with self.assertRaisesRegex(RuntimeError, error):
                 export_runtime_cache(context=self.CONTEXT)
+
+    def test_export_skips_what_triton_never_reads(self):
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp, _triton_cache_namespace(tmp):
+            key, _ = _write_triton_runtime_entries()
+            expected, _ = _bundle_header(export_runtime_cache(context=self.CONTEXT))
+            pathlib.Path(tmp, key, "lock").write_bytes(b"")
+            pathlib.Path(tmp, key, "tmp.pid_1_2").mkdir()
+            # The stage files of a compile ptxas rejected, with no group.
+            failed = pathlib.Path(tmp, "GH" * 26)
+            failed.mkdir()
+            (failed / "kernel.ttir").write_text("ir")
+            (failed / "kernel.ptx").write_text("ptx")
+            header, _ = _bundle_header(export_runtime_cache(context=self.CONTEXT))
+            self.assertEqual(header, expected)
+
+    def test_export_accepts_an_unnormalized_cache_dir(self):
+        import triton
+
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp, _triton_cache_namespace(tmp):
+            triton.knobs.cache.dir = os.path.join(tmp, "..", os.path.basename(tmp))
+            _write_triton_runtime_entries()
+            header, _ = _bundle_header(export_runtime_cache(context=self.CONTEXT))
+            self.assertEqual(len(header["records"]), 3)
 
     def test_export_succeeds_after_a_failed_export(self):
         from torch.compiler._triton_runtime_cache import export_runtime_cache
@@ -5602,6 +5730,20 @@ class TestTritonRuntimeCacheTransport(TestCase):
                 del os.environ["TRITON_CACHE_DIR"]
                 with self.assertRaisesRegex(RuntimeError, "explicit absolute"):
                     export_runtime_cache(context=self.CONTEXT)
+            with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": "relative"}):
+                with self.assertRaisesRegex(RuntimeError, "explicit absolute"):
+                    export_runtime_cache(context=self.CONTEXT)
+            with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": f"{tmp}-other"}):
+                with self.assertRaisesRegex(RuntimeError, "Triton to use"):
+                    export_runtime_cache(context=self.CONTEXT)
+            link = pathlib.Path(f"{tmp}-link")
+            link.symlink_to(tmp)
+            self.addCleanup(link.unlink)
+            with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": str(link)}):
+                triton.knobs.cache.dir = str(link)
+                with self.assertRaisesRegex(RuntimeError, "not a symlink"):
+                    export_runtime_cache(context=self.CONTEXT)
+            triton.knobs.cache.dir = tmp
             triton.knobs.cache.manager_class = type("Custom", (FileCacheManager,), {})
             with self.assertRaisesRegex(RuntimeError, "custom cache manager"):
                 export_runtime_cache(context=self.CONTEXT)
