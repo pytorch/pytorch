@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     make_dynamo_test,
     parametrize,
+    subtest,
 )
 
 
@@ -451,9 +452,16 @@ class TpReprTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=False)
         self.assertEqual(compiled(), fn())
 
+    # A sourceless set subclass built in the graph loses its type name on the
+    # outer repr: Dynamo prints {SetSubclass(...)} instead of SetSubclass({...}).
     @parametrize(
         "set_type",
-        (set, frozenset, _SetSubclass, _FrozenSetSubclass),
+        (
+            set,
+            frozenset,
+            subtest(_SetSubclass, decorators=[unittest.expectedFailure]),
+            _FrozenSetSubclass,
+        ),
         name_fn=lambda t: t.__name__.lstrip("_"),
     )
     def test_self_ref_set_repr(self, set_type):

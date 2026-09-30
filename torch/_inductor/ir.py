@@ -3604,6 +3604,8 @@ class BaseView(IRNode):
 
 @ir_dataclass
 class ExpandView(BaseView):
+    """Broadcast `data` to `size`; input dims of size 1 always read index 0."""
+
     size: Sequence[Expr]
 
     @staticmethod
@@ -3688,6 +3690,10 @@ class ExpandView(BaseView):
         target = self.get_size()
         actual = self.data.get_size()
         skip = len(target) - len(actual)
+        # A symbolic size such as TruncToInt(s0/300) can be known to be 1 by
+        # the shape env without being the literal 1, so decide broadcast dims
+        # the same way create() does when zeroing strides.
+        broadcast = [V.graph.sizevars.is_size_one_or_false(s) for s in actual]
 
         def reindex(
             index: Sequence[Expr],
@@ -3696,7 +3702,7 @@ class ExpandView(BaseView):
             if len(index) != len(actual):
                 raise AssertionError("Expected len(index) == len(actual)")
             for i in range(len(actual)):
-                if actual[i] == 1:
+                if broadcast[i]:
                     # zero out broadcast dimension
                     index[i] = sympy.S.Zero
             return index
