@@ -7,6 +7,7 @@ from unittest import mock
 import torch
 from torch._inductor import config
 from torch._inductor.autows_utils import has_two_ctas, meta_ws_enabled
+from torch._inductor.codegen import simd
 from torch._inductor.heuristics.registry import _HEURISTIC_CACHE, get_template_heuristic
 from torch._inductor.heuristics.template.triton import (
     _use_template_autows,
@@ -16,6 +17,7 @@ from torch._inductor.heuristics.template.triton import (
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAScaledBlackwellTMATemplateConfigHeuristic,
 )
+from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.kernel.mm import blackwell_ws_persistent_tma_mm_template
 from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
 from torch._inductor.scheduler import Scheduler
@@ -1170,6 +1172,51 @@ class TestBlackwellTMALoadFusion(TestCase):
         )
         self.assertFalse(
             any(k.startswith("triton_tem") and "clone" in k for k in kernels), kernels
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_row_reduction_epilogue_skips_misfit_tile(self):
+        """The fusion benchmark skips choices whose tile can't host the
+        reduction epilogue, even when they rank first, and fuses into one that
+        can. Reading a row reduction back doesn't fit subtiled outputs."""
+        orig_choice_timings = MultiTemplateBuffer.choice_timings
+        orig_tile_fits = simd.tile_fits_reduction_epilogue
+        rejected_tiles = []
+
+        def choice_timings(self, hint_override=None):
+            # Rank the subtiled choices first.
+            timings = orig_choice_timings(self, hint_override)
+            subtiled = [c for c in timings if (c.output_tile or (0, 0, 1))[2] > 1]
+            return dict.fromkeys([*subtiled, *timings], 1.0)
+
+        def tile_fits(tile, template, epilogue_nodes):
+            fits = orig_tile_fits(tile, template, epilogue_nodes)
+            if not fits:
+                rejected_tiles.append(tile)
+            return fits
+
+        with (
+            mock.patch.object(MultiTemplateBuffer, "choice_timings", choice_timings),
+            mock.patch.object(simd, "tile_fits_reduction_epilogue", tile_fits),
+        ):
+            kernels, code = self._run_reduction(
+                lambda a, b: (c := (a @ b).float()) - c.mean(-1, keepdim=True),
+                1024,
+                512,
+                128,
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8, epilogue_subtile=2),
+                tol=1e-5,
+                **{"triton.template_reduction_epilogue": True},
+            )
+        self._assert_row_fused(kernels, code)
+        self.assertTrue(rejected_tiles)
+        self.assertTrue(
+            all(tile is not None and tile[2] > 1 for tile in rejected_tiles),
+            rejected_tiles,
         )
 
 

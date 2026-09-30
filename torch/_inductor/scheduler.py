@@ -7436,7 +7436,22 @@ class Scheduler:
             if self._has_layout_conflict_for_template(multi_node):
                 return FusionResult.fuse(False)
 
-            from torch._inductor.codegen.simd import CantSplit
+            from torch._inductor.codegen.simd import (
+                CantSplit,
+                tile_fits_reduction_epilogue,
+            )
+
+            # A reduction epilogue needs an output tile that can hold it. Each
+            # choice records its tile when rendered, so reject misfits up front.
+            epilogue_nodes = [n for n in node_list_fused if not n.is_template()]
+            reduction_epilogue = epilogue_fusion and any(
+                n.is_reduction() for n in epilogue_nodes
+            )
+
+            def choice_fits_reduction_epilogue(choice: ir.ChoiceCaller) -> bool:
+                return not reduction_epilogue or tile_fits_reduction_epilogue(
+                    getattr(choice, "output_tile", None), multi_node, epilogue_nodes
+                )
 
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
             if not has_atomic_add:
@@ -7449,7 +7464,7 @@ class Scheduler:
                         if not isinstance(
                             choice,
                             torch._inductor.select_algorithm.TritonTemplateCaller,
-                        ):
+                        ) or not choice_fits_reduction_epilogue(choice):
                             continue
                         try:
                             with multi_node.swap_as_triton_caller(choice):
@@ -7463,13 +7478,6 @@ class Scheduler:
                                     )
                                 )
                         except CantSplit:
-                            continue
-                        except Exception as e:
-                            fusion_log.debug(
-                                "Exception in compiling %s: %s",
-                                "prologue" if not epilogue_fusion else "epilogue",
-                                e,
-                            )
                             continue
 
                     min_ms_fused = float("inf")
@@ -7538,7 +7546,7 @@ class Scheduler:
             def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
                 if not isinstance(
                     choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                ):
+                ) or not choice_fits_reduction_epilogue(choice):
                     return False
                 # For prologue fusion we check if the underlying template of the choice
                 # supports all allowed prologue inputs. If not, we skip this choice in
@@ -7633,6 +7641,9 @@ class Scheduler:
                 if not is_triton and not is_nvgemm:
                     continue
 
+                if not choice_fits_reduction_epilogue(choice):
+                    continue
+
                 # pyrefly: ignore [missing-attribute]
                 if is_nvgemm and not choice.supports_epilogue_fusion:
                     continue
@@ -7684,13 +7695,6 @@ class Scheduler:
                                 (choice, *self.compile_kernel(node_list_fused))
                             )
                 except CantSplit:
-                    continue
-                except Exception as e:
-                    fusion_log.debug(
-                        "Exception in compiling %s: %s",
-                        "prologue" if not epilogue_fusion else "epilogue",
-                        e,
-                    )
                     continue
                 template_choices += 1
 
