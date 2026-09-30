@@ -3,24 +3,10 @@
 import sympy
 
 import torch
-from torch.utils._ordered_set import OrderedSet
 
+from .codegen.common import BackendFeature
 from .ir import Pointwise, TensorBox
-from .virtualized import ops
-
-
-# Out-of-tree backends (e.g. PrivateUse1 devices) register after torch is
-# imported; they opt in through the register function below.
-_jagged_pointwise_devices: OrderedSet[str] = OrderedSet(["cuda"])
-
-
-def register_jagged_pointwise_lowering_device(device_type: str) -> None:
-    """Register a device that supports the fused jagged pointwise lowering."""
-    _jagged_pointwise_devices.add(device_type)
-
-
-def _supports_jagged_pointwise_lowering(device: torch.device) -> bool:
-    return device.type in _jagged_pointwise_devices
+from .virtualized import ops, V
 
 
 # pyre-ignore[2,3]
@@ -139,9 +125,10 @@ def register_jagged_ops():
         jagged_values_size = jagged_values.get_size()
 
         # only handle the common case of a single jagged dimension
+        # The fused kernel only needs ops every Inductor backend supports
+        # (indirect_indexing, masked), so there is no device/feature gate here.
         if (
             len(jagged_offsets) != 1
-            or not _supports_jagged_pointwise_lowering(device)
             or device != jagged_offsets[0].get_device()
             or len(jagged_values_size) != 2
             or len(jagged_offsets[0].get_size()) != 1
@@ -209,9 +196,11 @@ def register_jagged_ops():
         dense_size = dense.get_size()
 
         # only handle the common case of a single jagged dimension
+        # get_inverse_offsets emits ops.bucketize, so only backends declaring
+        # BackendFeature.BUCKETIZE take the fused path.
         if (
             len(jagged_offsets) != 1
-            or not _supports_jagged_pointwise_lowering(device)
+            or not V.graph.has_feature(dense, BackendFeature.BUCKETIZE)
             or device != jagged_offsets[0].get_device()
             or len(jagged_offsets[0].get_size()) != 1
             or len(dense_size) != 3

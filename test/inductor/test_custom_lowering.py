@@ -5,11 +5,13 @@ from unittest import skipIf
 
 import torch
 from torch._inductor import config
+from torch._inductor.codegen.common import BackendFeature, has_backend_feature
 from torch._inductor.ir import Pointwise
 from torch._inductor.lowering import make_fallback, make_pointwise, register_lowering
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch._inductor.virtualized import ops
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -274,6 +276,67 @@ class TestCustomLowering(InductorTestCase):
         self.assertTrue(
             torch.allclose(torch.compile(M())(torch.ones(3)), torch.ones(3) + 1)
         )
+
+
+class TestJaggedAtenLowerings(InductorTestCase):
+    """Fused vs. fallback behavior of the jagged <-> padded dense lowerings."""
+
+    def test_jagged_to_padded_dense_fused(self, device):
+        values = torch.randn(10, 5, device=device)
+        offsets = torch.tensor([0, 1, 3, 8, 10], device=device, dtype=torch.int64)
+        max_length = offsets.diff().max().item()
+        padding_value = 1.3
+
+        def fn(values, offsets, max_length):
+            return torch.ops.aten._jagged_to_padded_dense_forward(
+                values, [offsets], [max_length], padding_value
+            )
+
+        # The fused kernel only uses ops every backend supports, so no device
+        # should fall back to the ATen kernel.
+        expected = fn(values, offsets, max_length)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True), values, offsets, max_length
+        )
+        self.assertEqual(actual, expected)
+        self.assertNotIn(
+            "torch.ops.aten._jagged_to_padded_dense_forward", "".join(code)
+        )
+
+    def test_padded_dense_to_jagged_fused_or_fallback(self, device):
+        values = torch.randn(10, 5, device=device)
+        offsets = torch.tensor([0, 1, 3, 8, 10], device=device, dtype=torch.int64)
+        max_length = offsets.diff().max().item()
+        total_L = values.shape[0]
+        padded = torch.ops.aten._jagged_to_padded_dense_forward(
+            values, [offsets], [max_length], 1.3
+        )
+
+        def fn(padded, offsets, total_L):
+            return torch.ops.aten._padded_dense_to_jagged_forward(
+                padded, [offsets], total_L
+            )
+
+        # get_inverse_offsets emits ops.bucketize, so only backends declaring
+        # BackendFeature.BUCKETIZE take the fused path; the rest fall back.
+        expected = fn(padded, offsets, total_L)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True), padded, offsets, total_L
+        )
+        self.assertEqual(actual, expected)
+        if has_backend_feature(device, BackendFeature.BUCKETIZE):
+            self.assertNotIn(
+                "torch.ops.aten._padded_dense_to_jagged_forward", "".join(code)
+            )
+        else:
+            self.assertIn(
+                "torch.ops.aten._padded_dense_to_jagged_forward", "".join(code)
+            )
+
+
+instantiate_device_type_tests(
+    TestJaggedAtenLowerings, globals(), only_for=("cpu", "cuda")
+)
 
 
 if __name__ == "__main__":
