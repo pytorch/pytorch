@@ -61,8 +61,7 @@ def main(args: argparse.Namespace) -> None:
 
     with open(args.template_path) as input:
         with open(args.output_path, "w") as output:
-            for line in input:
-                output.write(apply_replacements(replacements, line))
+            output.writelines(apply_replacements(replacements, line) for line in input)
 
 
 if __name__ == "__main__":

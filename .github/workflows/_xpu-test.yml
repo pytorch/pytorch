@@ -1,3 +1,4 @@
+# Owner(s): ["module: xpu"]
 # TODO: this looks sort of similar to _linux-test, but there are like a dozen
 # places where you would have to insert an if statement. Probably it's better to
 # just use a different workflow altogether
@@ -243,7 +244,6 @@ jobs:
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e TESTS_TO_INCLUDE \
-            -e ZE_AFFINITY_MASK \
             -e HUGGING_FACE_HUB_TOKEN \
             -e DASHBOARD_TAG \
             --env-file="${RUNNER_TEMP}/github_env_${GITHUB_RUN_ID}" \

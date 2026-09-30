@@ -10,8 +10,8 @@ from torch.utils._exposed_in import exposed_in
 
 from .opaque_object import (
     _resolve_opaque_type_info,
-    is_opaque_reference_type,
-    is_opaque_type,
+    is_custom_class,
+    is_opaque_symbolic_type,
 )
 
 
@@ -39,7 +39,7 @@ def infer_schema(
       | assumed to be torch.*. Similarly, string type annotations "Optional, List, Sequence, Union"
       | without library specification are assumed to be typing.*.
     * | Only the args listed in ``mutates_args`` are being mutated. If ``mutates_args`` is "unknown",
-      | it assumes that all inputs to the operator are being mutates.
+      | it assumes that all inputs to the operator are being mutated.
 
     Callers (e.g. the custom ops API) are responsible for checking these assumptions.
 
@@ -161,7 +161,7 @@ def infer_schema(
 
         schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
-            if is_opaque_type(annotation_type):
+            if is_custom_class(annotation_type):
                 schema_type = _resolve_opaque_type_info(annotation_type).class_name  # type: ignore[union-attr]
             elif annotation_type == torch._C.ScriptObject:
                 error_fn(
@@ -335,13 +335,20 @@ def derived_types(
             (typing.Optional[seq_typ], f"{cpp_type}[]?")  # noqa: UP045
             for seq_typ in derived_seq_types(base_type)
         )
+    if optional_base_list and optional_list_base:
+        result.extend(
+            (typing.Optional[seq_typ], f"{cpp_type}?[]?")  # noqa: UP045
+            # pyrefly: ignore [not-a-type]
+            for seq_typ in derived_seq_types(typing.Optional[base_type])  # noqa: UP045
+        )
     return result
 
 
 def get_supported_param_types():
     data: list[tuple[type | typing._SpecialForm, str, bool, bool, bool]] = [
-        # (python type, schema type, type[] variant, type?[] variant, type[]? variant
-        (Tensor, "Tensor", True, True, False),
+        # (python type, schema type, type[] variant, type?[] variant, type[]? variant)
+        # type?[]? is derived when both type?[] and type[]? are enabled.
+        (Tensor, "Tensor", True, True, True),
         (int, "SymInt", True, False, True),
         (float, "float", True, False, True),
         (bool, "bool", True, False, True),
@@ -383,7 +390,7 @@ def parse_return(annotation, error_fn):
     origin = typing.get_origin(annotation)
     if origin is not tuple:
         if annotation not in SUPPORTED_RETURN_TYPES:
-            if is_opaque_reference_type(annotation):
+            if is_opaque_symbolic_type(annotation):
                 return _resolve_opaque_type_info(annotation).class_name  # type: ignore[union-attr]
             error_fn(
                 f"Return has unsupported type {annotation}. "
@@ -394,7 +401,7 @@ def parse_return(annotation, error_fn):
 
     args = typing.get_args(annotation)
     for arg in args:
-        if arg not in SUPPORTED_RETURN_TYPES and not is_opaque_reference_type(arg):
+        if arg not in SUPPORTED_RETURN_TYPES and not is_opaque_symbolic_type(arg):
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."

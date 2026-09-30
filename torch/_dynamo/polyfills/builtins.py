@@ -7,6 +7,7 @@ from __future__ import annotations
 import builtins
 import functools
 import operator
+import sys
 import typing
 from collections.abc import Callable
 from typing import TYPE_CHECKING, TypeVar
@@ -82,6 +83,14 @@ class _CallableIterator:
         # for each call to its __next__() method;
         r = self.fn()
 
+        # CPython calliter_iternext (Objects/iterobject.c) re-reads it_callable /
+        # it_sentinel after the call returns. If a reentrant next() exhausted
+        # this iterator during fn() (gh-101892), it_sentinel is now NULL, so the
+        # sentinel comparison is skipped and StopIteration is raised regardless
+        # of the returned value.
+        if self.exhausted:
+            raise StopIteration
+
         # If the value returned is equal to sentinel, StopIteration will be raised
         if r == self.sentinel:
             self.exhausted = True
@@ -104,6 +113,12 @@ class _SequenceIterator:
         if self.exhausted:
             raise StopIteration
 
+        # CPython iter_iternext (Objects/iterobject.c): the index counter is a
+        # Py_ssize_t, so once it reaches PY_SSIZE_T_MAX (sys.maxsize) it cannot
+        # advance and every subsequent next() raises OverflowError.
+        if self.index == sys.maxsize:
+            raise OverflowError("iter index too large")
+
         try:
             result = self.iterable.__getitem__(self.index)
             self.index += 1
@@ -111,6 +126,13 @@ class _SequenceIterator:
         except (IndexError, StopIteration):
             self.exhausted = True
             raise StopIteration from None
+
+    def __setstate__(self, state) -> None:
+        # CPython iter_setstate (Objects/iterobject.c): a negative index is
+        # clamped to 0, and the state is only applied while the iterator is
+        # live (it_seq != NULL), i.e. not yet exhausted.
+        if not self.exhausted:
+            self.index = max(state, 0)
 
 
 def sequence_iterator(iterable) -> Iterable[object]:

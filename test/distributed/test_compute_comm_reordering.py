@@ -36,7 +36,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
-device_type = str(get_devtype())
+device_type = get_devtype().type
 
 
 def get_snode_runtime_for_reorder_compute_test(snode):
@@ -135,6 +135,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
             compiled = torch.compile(func)
@@ -179,6 +180,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
             compiled = torch.compile(func)
@@ -233,6 +235,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
             compiled = torch.compile(func)
@@ -294,6 +297,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
             compiled = torch.compile(func)
@@ -354,6 +358,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             self.world_size,
             self.backend(device_type),
             fake_pg=not at_least_x_gpu(2),
+            rdvz_file=self.file_name,
         ):
             inputs = torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
             compiled = torch.compile(func)
@@ -412,6 +417,7 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
                 self.world_size,
                 self.backend(device_type),
                 fake_pg=not at_least_x_gpu(2),
+                rdvz_file=self.file_name,
             ):
                 inputs = (
                     torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
@@ -481,7 +487,11 @@ graph():
             return grad3, grad2, grad1
 
         with _dynamo_dist_per_rank_init(
-            self.rank, self.world_size, self.backend(device_type), fake_pg=True
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=True,
+            rdvz_file=self.file_name,
         ):
             fn(g1, g2, g3)
 

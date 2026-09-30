@@ -303,7 +303,10 @@ class TestTensorBuiltins(JitTestCase):
         keys = dir(tensor)
 
         # real and imag are only implemented for complex tensors.
-        self.assertRaises(RuntimeError, lambda: should_keep(tensor, "imag"))
+        # Eager returns TypeError, but dynamo wraps it into TorchRuntimeError.
+        self.assertRaises(
+            (TypeError, RuntimeError), lambda: should_keep(tensor, "imag")
+        )
         keys.remove("imag")
 
         properties = [p for p in keys if should_keep(tensor, p)]
@@ -323,9 +326,6 @@ class TestTensorBuiltins(JitTestCase):
             "grad_fn",
             # This is an undocumented property so it's not included
             "output_nr",
-            # This has a longer implementation, maybe not worth copying to
-            # TorchScript if named tensors don't work there anyways
-            "names",
             # We don't plan to support grad_dtype in TorchScript
             "grad_dtype",
         }

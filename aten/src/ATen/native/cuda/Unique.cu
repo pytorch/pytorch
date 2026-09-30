@@ -123,7 +123,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_dim_cuda_template(
         at::empty({0}, self.options().dtype(kLong));
     Tensor counts = at::empty({0}, self.options().dtype(kLong));
 
-    return std::make_tuple(output, inverse_indices, counts);
+    return std::make_tuple(
+        std::move(output), std::move(inverse_indices), std::move(counts));
   }
 
   TORCH_CHECK(num_zero_dims == 0,
@@ -192,7 +193,7 @@ _unique_cuda(const Tensor& self, const bool sorted, const bool return_inverse) {
     // The current CUDA implementation of unique always sort due to the
     // lack of hashtable implementation in thrust
     auto [output, inverse, _] = internal::unique_cuda_template<scalar_t>(self, false, return_inverse, false);
-    return std::make_tuple(output, inverse);
+    return std::make_tuple(std::move(output), std::move(inverse));
   }), AT_EXPAND(AT_ALL_TYPES), kBool, kBFloat16, kHalf, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
 }
 

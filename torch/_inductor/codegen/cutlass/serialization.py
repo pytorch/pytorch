@@ -38,9 +38,10 @@ class CUTLASSOperationSerializer:
         Returns:
             str: JSON string representation of the operation
         """
-        assert operation.__class__.__qualname__ == "GemmOperation", (
-            "Only GemmOperation objects are supported via the main API"
-        )
+        if operation.__class__.__qualname__ != "GemmOperation":
+            raise AssertionError(
+                "Only GemmOperation objects are supported via the main API"
+            )
         return json.dumps(cls._gemm_operation_to_json(operation))
 
     @classmethod

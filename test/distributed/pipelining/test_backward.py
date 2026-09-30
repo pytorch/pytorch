@@ -14,7 +14,11 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipXPUIf,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 d_hid = 512
@@ -22,6 +26,8 @@ batch_size = 256
 
 
 class StageBackwardTests(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward(self, device):
         # MLP as a stage module
@@ -96,6 +102,27 @@ class StageBackwardTests(TestCase):
         for _, p in mod.named_parameters():
             # Check that the weight gradients were not updated
             self.assertEqual(p.grad, None)
+
+    def test_stage_backward_input_ignores_non_tensor_inputs(self, device):
+        mod = MLPModule(d_hid).to(device)
+        x = torch.randn(batch_size, d_hid, device=device, requires_grad=True)
+        non_tensor_input = object()
+
+        ref_mod = copy.deepcopy(mod).to(device)
+        ref_x = x.detach().requires_grad_(True).to(device)
+
+        loss = mod(x).sum()
+        dinputs, _param_groups = stage_backward_input(
+            stage_outputs_or_loss=(loss,),
+            output_grads=None,
+            input_values=[non_tensor_input, x],
+            weights=mod.parameters(),
+        )
+
+        ref_mod(ref_x).sum().backward()
+        self.assertEqual(dinputs[0], None)
+        torch.testing.assert_close(x.grad, ref_x.grad)
+        torch.testing.assert_close(dinputs[1], ref_x.grad)
 
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward_weight(self, device):
@@ -303,10 +330,7 @@ class StageBackwardTests(TestCase):
             torch.testing.assert_close(p.grad, ref_p.grad)
 
 
-devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(
-    StageBackwardTests, globals(), only_for=devices, allow_xpu=True
-)
+instantiate_device_type_tests(StageBackwardTests, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
