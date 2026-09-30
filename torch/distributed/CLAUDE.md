@@ -38,6 +38,12 @@ and tests. Read the repository-level instructions as well.
   test files. Use backend-generic suites unless testing backend-specific behavior.
 - Use existing test harnesses, `TestCase.assertEqual`, and parametrization. Test
   supported CPU/device paths and unavailable-backend/insufficient-device paths.
+- Keep tests fast: multi-GPU execution is expensive. Prefer
+  `MultiThreadedTestCase` where thread-based ranks model the behavior under test,
+  or `MultiProcContinuousTest` to reuse worker processes across test methods,
+  rather than launching fresh processes for every test. Keep fresh-process
+  isolation for process startup, failure, teardown, or state that cannot be safely
+  reset; do not trade correctness or coverage for speed.
 - Restore process groups, environment variables, default devices, global flags,
   and other test state. Reused workers must not leak state between methods.
 - Build affected components, run lint and targeted tests, and report exact
