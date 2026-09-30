@@ -1864,6 +1864,11 @@ def get_selected_tests(options) -> list[str]:
     else:
         options.exclude.append("test_openreg")
 
+    # run_doctests ignores the test config, so CI runs doctests once (docs_test
+    # config) instead of in every job. Run them only when explicitly included.
+    if options.include == TESTS:
+        options.exclude.append("doctests")
+
     # Filter to only run onnx tests when --onnx option is specified
     onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]
     if options.onnx:

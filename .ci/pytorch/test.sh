@@ -2331,6 +2331,8 @@ test_vec256() {
 }
 
 test_docs_test() {
+  time python test/run_test.py --include doctests --verbose
+  assert_git_not_dirty
   .ci/pytorch/docs-test.sh
 }
 
