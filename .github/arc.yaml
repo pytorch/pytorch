@@ -141,3 +141,4 @@ lf_allowlist:
     - l-x86aavx2-11-41-l4      # g6.4xlarge
     - l-x86aavx2-11-41-a10g    # g5.4xlarge
     - l-x86aavx2-45-167-a10g-4 # g5.12xlarge
+    - l-arm64g4-16-62          # m8g.4xlarge, default aarch64 build runner
