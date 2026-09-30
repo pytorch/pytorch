@@ -274,8 +274,12 @@ opmath_t<T> threadgroup_prod(
   }
   if (size > simdgroup_size) {
     ::metal::threadgroup_barrier(::metal::mem_flags::mem_threadgroup);
-    if (idx < ((size + simdgroup_size - 1) / simdgroup_size)) {
-      auto rc1 = simd_prod(data[idx]);
+    // Keep the whole first simdgroup active: the long and complex simd_prod
+    // shuffle from other lanes, and an inactive lane reads as 0, which zeroes
+    // the product. Lanes past nsimd multiply by the identity instead.
+    const auto nsimd = ceil_div(size, simdgroup_size);
+    if (idx < simdgroup_size) {
+      auto rc1 = simd_prod(idx < nsimd ? data[idx] : cast_to<opmath_t<T>>(1));
       if (idx == 0) {
         data[0] = rc1;
       }
