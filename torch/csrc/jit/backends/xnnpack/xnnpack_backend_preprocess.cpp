@@ -72,8 +72,8 @@ c10::IValue preprocess(
         "method_compile_spec inputs do not match expected number of forward inputs");
 
     example_inputs.reserve(inp_list.size());
-    for (const auto i : c10::irange(inp_list.size())) {
-      example_inputs.emplace_back(inp_list[i]);
+    for (const auto& t : inp_list) {
+      example_inputs.emplace_back(t);
     }
   } else {
     TORCH_CHECK(
