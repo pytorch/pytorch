@@ -19,6 +19,7 @@ import types
 import typing
 import unittest
 import uuid
+import weakref
 from unittest import mock
 
 import torch
@@ -6085,9 +6086,177 @@ class TestPrecompileNoCompilation(TestCase):
         self.assertEqual(command.mock_calls, [])
 
 
+def _static_runtime_kernel(block):
+    """A CachingAutotuner whose only launcher statically launches XBLOCK=block."""
+    import triton
+
+    from torch._inductor.runtime.triton_heuristics import (
+        _ConstRepr,
+        CachingAutotuner,
+        StaticTritonCompileResult,
+    )
+
+    config = triton.Config({"XBLOCK": block})
+    result = StaticTritonCompileResult(
+        types.SimpleNamespace(cubin_raw=b"binary", name="runtime_kernel"),
+        config,
+        {"selected_block": block},
+        {"kernel_name": "runtime_kernel"},
+    )
+    kernel = CachingAutotuner.__new__(CachingAutotuner)
+    kernel.fn = types.SimpleNamespace(
+        fn=_no_compilation_single_graph,
+        __globals__={},
+        used_global_vals={},
+        repr=_ConstRepr("runtime_kernel"),
+        _hash_lock=threading.RLock(),
+    )
+    kernel.inductor_meta = {"kernel_name": "runtime_kernel"}
+    kernel.lock = threading.Lock()
+    kernel.compile_results = [result]
+    kernel.launchers = [types.SimpleNamespace(config=config, _compile_result=result)]
+    kernel._cached_launcher = kernel.launchers[0]
+    kernel.benchmark_failure_reasons = {}
+    kernel._plugins = []
+    kernel._reload_kernel = None
+    return kernel
+
+
+@contextlib.contextmanager
+def _producer_triton_cache(directory):
+    import triton
+
+    with (
+        triton.knobs.cache.scope(),
+        triton.knobs.autotuning.scope(),
+        mock.patch.dict(
+            os.environ,
+            {"TRITON_CACHE_AUTOTUNING": "1", "TRITON_CACHE_DIR": str(directory)},
+        ),
+    ):
+        triton.knobs.cache.dir = str(directory)
+        triton.knobs.cache.manager_class = None
+        triton.knobs.autotuning.cache = True
+        yield
+
+
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileRuntimeCache(TestCase):
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @parametrize("tuning", ("rblock", "coordesc", "combo"))
+    def test_static_export_preserves_late_winner(self, tuning):
+        from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
+        from torch.compiler._runtime_cache import _freeze_triton_kernel
+
+        original = _static_runtime_kernel(32)
+        kernel = _static_runtime_kernel(64)
+        kernel.compile_results = original.compile_results
+        launcher = kernel.launchers[0]
+        if tuning == "coordesc":
+            kernel.inductor_meta["coordinate_descent_tuning"] = True
+            kernel._should_coordesc_tune = True
+            launcher.config.found_by_coordesc = True
+        elif tuning == "combo":
+            kernel.inductor_meta["combo_tuning_groups"] = [{"group": 0}]
+            launcher.config.found_by_combo_autotune = True
+        unexecuted = _static_runtime_kernel(128)
+        unexecuted.launchers = []
+        unexecuted._cached_launcher = None
+        original_results = kernel.compile_results
+        original_launchers = kernel.launchers
+        original_fn = kernel.fn.fn
+        with mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"):
+            payload = _freeze_triton_kernel("source", [unexecuted, kernel])
+        saved = pickle.loads(payload)
+        self.assertEqual(saved.cache_key, "source")
+        self.assertEqual(saved.kernel.compile_results[0].config.kwargs, {"XBLOCK": 64})
+        self.assertEqual(
+            saved.kernel.compile_results[0].compile_meta, {"selected_block": 64}
+        )
+        self.assertEqual(saved.kernel.launchers, [])
+        self.assertIsNone(saved.kernel._cached_launcher)
+        self.assertIsNone(saved.kernel.fn.fn)
+        self.assertIs(kernel.compile_results, original_results)
+        self.assertIs(kernel.launchers, original_launchers)
+        self.assertIs(kernel._cached_launcher, launcher)
+        self.assertIs(kernel.fn.fn, original_fn)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_static_export_failure_leaves_live_kernel(self):
+        from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
+        from torch.compiler._runtime_cache import (
+            _freeze_triton_kernel,
+            _UnresolvedTritonExport,
+        )
+
+        kernel = _static_runtime_kernel(64)
+        kernel.compile_results[0].kernel.cubin_raw = None
+        evicted = _static_runtime_kernel(32)
+        evicted.compile_results[0].kernel.cubin_raw = None
+        original_results = kernel.compile_results
+        original_launchers = kernel.launchers
+        original_fn = kernel.fn.fn
+        with (
+            mock.patch.object(
+                StaticTritonCompileResult,
+                "reload_cubin_path",
+                side_effect=RuntimeError("missing selected binary"),
+            ),
+            self.assertRaises(_UnresolvedTritonExport) as failure,
+        ):
+            _freeze_triton_kernel("source", [kernel, evicted])
+        rejected = failure.exception.sources[0]["instances"]
+        self.assertEqual(
+            [(r["reason"], r["error"]) for r in rejected],
+            [("cubin_unavailable", "missing selected binary")] * 2,
+        )
+        self.assertIs(kernel.compile_results, original_results)
+        self.assertIs(kernel.launchers, original_launchers)
+        self.assertIs(kernel._cached_launcher, original_launchers[0])
+        self.assertIs(kernel.fn.fn, original_fn)
+        kernel.launchers = []
+        with self.assertRaisesRegex(RuntimeError, "no fully resolved static launcher"):
+            _freeze_triton_kernel("source", [kernel])
+
+    def test_static_records_follow_cache_reset(self):
+        import hashlib
+
+        from torch._inductor.async_compile import CompiledTritonKernels
+        from torch._inductor.utils import fresh_cache
+        from torch.compiler import _runtime_cache
+
+        payload = pickle.dumps({"source": b"stale binary metadata"})
+        artifact = _runtime_cache.InductorTritonCacheArtifact(
+            hashlib.sha256(payload).hexdigest(), payload
+        )
+        with mock.patch.object(_runtime_cache, "_frozen_triton_kernels", {}):
+            artifact.populate_cache()
+            self.assertIn("source", _runtime_cache._frozen_triton_kernels)
+            CompiledTritonKernels.cache_clear()
+            self.assertIn("source", _runtime_cache._frozen_triton_kernels)
+            with fresh_cache():
+                self.assertIsNone(_runtime_cache.load_triton_kernel("source"))
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_capture_releases_static_kernel_instances(self):
+        from torch.compiler import _runtime_cache
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            _producer_triton_cache(directory),
+        ):
+            with torch.compiler.precompile.capture_runtime():
+                owner = _runtime_cache._capture
+                self.assertIsNotNone(owner)
+                kernel = _static_runtime_kernel(64)
+                reference = weakref.ref(kernel)
+                _runtime_cache.record_triton_kernel("source", kernel)
+                del kernel
+                self.assertIsNotNone(reference())
+            self.assertEqual(owner.triton_kernels, {})
+            self.assertIsNone(reference())
+
     def test_finalize_seals_capture_and_prepare_skips_graph(self):
         from pathlib import Path
 
@@ -6116,6 +6285,13 @@ class TestPrecompileRuntimeCache(TestCase):
             with self.assertRaisesRegex(PrecompileError, "Could not finalize"):
                 pc.finalize_cache(artifact_path=source, cache_path=cache)
             self.assertEqual(cache.read_bytes(), frozen)
+            with pc.no_compilation():
+                loaded = pc.load(artifact_path=source, cache_path=cache)
+            with torch.no_grad():
+                self.assertEqual(
+                    loaded(torch.ones(4)),
+                    _no_compilation_single_graph(torch.ones(4)),
+                )
             with self.assertRaisesRegex(PrecompileError, "forbids cleanup compiler"):
                 check_compilation_allowed("cleanup compiler")
         self.assertEqual(os.environ.get(env), previous)
@@ -6162,15 +6338,12 @@ class TestPrecompileRuntimeCache(TestCase):
             with mock.patch.object(_runtime_cache._capture, "pid", os.getpid() + 1):
                 with self.assertRaisesRegex(PrecompileError, "Could not finalize"):
                     pc.finalize_cache(artifact_path=source, cache_path=cache)
+                with open(cache, "rb") as f:
+                    self.assertEqual(f.read(), original)
                 with pc.capture_runtime():
                     pc.finalize_cache(artifact_path=source, cache_path=cache)
                     self.assertTrue(is_compilation_forbidden())
             self.assertFalse(is_compilation_forbidden())
-        with open(cache, "rb") as f:
-            self.assertEqual(
-                torch.load(io.BytesIO(f.read()), weights_only=True),
-                torch.load(io.BytesIO(original), weights_only=True),
-            )
 
     def test_failed_finalize_write_keeps_cache_and_scope_retryable(self):
         from torch.compiler._no_compile import is_compilation_forbidden
@@ -6212,16 +6385,8 @@ class TestPrecompileRuntimeCache(TestCase):
         x = torch.ones(4)
         with pc.capture_runtime():
             source, cache = _capture_files(self, fn, [(x,)], backend=backend)
-            with open(cache, "rb") as f:
-                captured = torch.load(io.BytesIO(f.read()), weights_only=True)
             pc.finalize_cache(artifact_path=source, cache_path=cache)
-            with open(cache, "rb") as f:
-                finalized = torch.load(io.BytesIO(f.read()), weights_only=True)
-            # An eager capture carries no artifact, and finalizing must keep it so.
-            self.assertEqual(
-                finalized["artifact"] is None, captured["artifact"] is None
-            )
-            self.assertEqual(finalized["artifact"] is None, backend == "eager")
+            pc.prepare_runtime(artifact_path=source, cache_path=cache)
             runnable = pc.load(source, cache)
             with torch.no_grad():
                 self.assertEqual(runnable(x), fn(x))
@@ -6305,6 +6470,343 @@ class TestPrecompileRuntimeCache(TestCase):
         blob = _read_runtime_cache_envelope(source, cache, "prepare_runtime")
         self.assertEqual((blob["backend"], blob["tracer"]), ("eager", "dynamo"))
 
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_finalize_reports_all_unresolved_triton_sources(self):
+        from pathlib import Path
+
+        from torch._guards import CompileId
+        from torch._inductor.runtime.hints import HeuristicType
+        from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
+        from torch.compiler._no_compile import is_compilation_forbidden
+        from torch.compiler._runtime_cache import record_triton_kernel
+
+        unlaunched = _static_runtime_kernel(32)
+        unlaunched.launchers = []
+        unlaunched._cached_launcher = None
+        unlaunched.filename = "/tmp/runtime_kernel.py"
+        unlaunched.compile_id = CompileId(frame_id=24, frame_compile_id=5)
+        unlaunched.is_backward = True
+        unlaunched.heuristic_type = HeuristicType.REDUCTION
+        unlaunched.configs = [unlaunched.compile_results[0].config]
+        unlaunched.inductor_meta["private_config"] = "do not include config values"
+        ambiguous = _static_runtime_kernel(64)
+        ambiguous.launchers.append(_static_runtime_kernel(128).launchers[0])
+        dynamic = _static_runtime_kernel(64)
+        dynamic.launchers[0]._compile_result = object()
+        combo = _static_runtime_kernel(64)
+        combo.inductor_meta["combo_tuning_groups"] = [{"group": 0}]
+        coordesc = _static_runtime_kernel(64)
+        coordesc.inductor_meta["coordinate_descent_tuning"] = True
+        coordesc._should_coordesc_tune = True
+        eligible = _static_runtime_kernel(64)
+        unresolved = {
+            "unlaunched": unlaunched,
+            "ambiguous": ambiguous,
+            "dynamic": dynamic,
+            "combo": combo,
+            "coordesc": coordesc,
+        }
+        live_results = eligible.compile_results
+        live_launchers = eligible.launchers
+        live_fn = eligible.fn.fn
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            _producer_triton_cache(directory),
+        ):
+            source, cache = _capture_files(
+                self, _no_compilation_single_graph, [(torch.ones(4),)], backend="eager"
+            )
+            source, cache = Path(source), Path(cache)
+            before = (source.read_bytes(), cache.read_bytes())
+            with torch.compiler.precompile.capture_runtime():
+                for key, kernel in unresolved.items():
+                    record_triton_kernel(key, kernel)
+                record_triton_kernel("eligible_duplicate", unlaunched)
+                record_triton_kernel("eligible_duplicate", eligible)
+                with (
+                    mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"),
+                    mock.patch("torch._logging.trace_structured") as trace,
+                    self.assertRaisesRegex(
+                        PrecompileError, "Could not finalize"
+                    ) as failure,
+                ):
+                    torch.compiler.precompile.finalize_cache(
+                        artifact_path=source, cache_path=cache
+                    )
+                report = json.loads(str(failure.exception.__cause__).split("\n", 1)[1])
+                sources = {entry["source_key"]: entry for entry in report["sources"]}
+                self.assertEqual(set(sources), set(unresolved))
+                self.assertEqual(
+                    {
+                        key: entry["instances"][0]["reason"]
+                        for key, entry in sources.items()
+                    },
+                    {
+                        "unlaunched": "launcher_count_not_one",
+                        "ambiguous": "launcher_count_not_one",
+                        "dynamic": "non_static_compile_result",
+                        "combo": "combo_autotuning_incomplete",
+                        "coordesc": "coordinate_descent_tuning_incomplete",
+                    },
+                )
+                self.assertEqual(sources["unlaunched"]["instance_count"], 1)
+                info = sources["unlaunched"]["instances"][0]
+                self.assertEqual(info["kernel_name"], "runtime_kernel")
+                self.assertEqual(info["filename"], "/tmp/runtime_kernel.py")
+                self.assertEqual(info["compile_id"], "24/5")
+                self.assertEqual(info["direction"], "backward")
+                self.assertEqual(info["heuristic"], "REDUCTION")
+                self.assertEqual(info["config_count"], 1)
+                self.assertEqual(info["launcher_count"], 0)
+                self.assertEqual(info["compile_result_count"], 1)
+                self.assertEqual(
+                    info["compile_result_types"], ["StaticTritonCompileResult"]
+                )
+                self.assertEqual(
+                    sources["ambiguous"]["instances"][0]["launcher_count"], 2
+                )
+                self.assertEqual(
+                    sources["dynamic"]["instances"][0]["launcher_result_types"],
+                    ["object"],
+                )
+                self.assertNotIn("do not include config values", json.dumps(report))
+                trace.assert_called_once()
+                self.assertEqual(trace.call_args.args, ("artifact",))
+                self.assertEqual(
+                    trace.call_args.kwargs["metadata_fn"](),
+                    {"name": "precompile_triton_export_failures", "encoding": "json"},
+                )
+                self.assertEqual(trace.call_args.kwargs["payload_fn"](), report)
+                self.assertFalse(is_compilation_forbidden())
+                self.assertEqual((source.read_bytes(), cache.read_bytes()), before)
+                self.assertIs(eligible.compile_results, live_results)
+                self.assertIs(eligible.launchers, live_launchers)
+                self.assertIs(eligible._cached_launcher, live_launchers[0])
+                self.assertIs(eligible.fn.fn, live_fn)
+            self.assertFalse(is_compilation_forbidden())
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @parametrize("stage", ("cubin", "pickle"))
+    def test_finalize_failure_keeps_cache_and_reopens_scope(self, stage):
+        from pathlib import Path
+
+        from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
+        from torch._inductor.triton_bundler import StaticallyLaunchedAutotuner
+        from torch.compiler._no_compile import is_compilation_forbidden
+        from torch.compiler._runtime_cache import record_triton_kernel
+
+        kernel = _static_runtime_kernel(64)
+        if stage == "cubin":
+            kernel.compile_results[0].kernel.cubin_raw = None
+        live_results = kernel.compile_results
+        live_launchers = kernel.launchers
+        live_fn = kernel.fn.fn
+        target = {
+            "cubin": (
+                "torch._inductor.runtime.triton_heuristics."
+                "StaticTritonCompileResult.reload_cubin_path"
+            ),
+            "pickle": "torch.compiler._runtime_cache.pickle.dumps",
+        }[stage]
+        error = (
+            pickle.PicklingError("incomplete dependency")
+            if stage == "pickle"
+            else RuntimeError("incomplete dependency")
+        )
+        original_dumps = pickle.dumps
+
+        def reject_static_record(value, *args, **kwargs):
+            if isinstance(value, StaticallyLaunchedAutotuner):
+                raise error
+            return original_dumps(value, *args, **kwargs)
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            _producer_triton_cache(directory),
+        ):
+            source, cache = _capture_files(
+                self, _no_compilation_single_graph, [(torch.ones(4),)], backend="eager"
+            )
+            source, cache = Path(source), Path(cache)
+            before = (source.read_bytes(), cache.read_bytes())
+            with torch.compiler.precompile.capture_runtime():
+                record_triton_kernel("source", kernel)
+                with (
+                    mock.patch.object(StaticTritonCompileResult, "reload_cubin_path"),
+                    mock.patch(
+                        target,
+                        side_effect=reject_static_record
+                        if stage == "pickle"
+                        else error,
+                    ),
+                    self.assertRaisesRegex(
+                        PrecompileError, "Could not finalize"
+                    ) as failure,
+                ):
+                    torch.compiler.precompile.finalize_cache(
+                        artifact_path=source, cache_path=cache
+                    )
+                if stage == "cubin":
+                    [rejected] = failure.exception.__cause__.sources[0]["instances"]
+                    self.assertEqual(rejected["reason"], "cubin_unavailable")
+                else:
+                    self.assertIs(failure.exception.__cause__, error)
+                self.assertFalse(is_compilation_forbidden())
+                self.assertEqual((source.read_bytes(), cache.read_bytes()), before)
+                self.assertIs(kernel.compile_results, live_results)
+                self.assertIs(kernel.launchers, live_launchers)
+                self.assertIs(kernel._cached_launcher, live_launchers[0])
+                self.assertIs(kernel.fn.fn, live_fn)
+            self.assertFalse(is_compilation_forbidden())
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_static_export_freezes_a_copy_with_cubin_bytes(self):
+        from torch._inductor.runtime.triton_heuristics import StaticTritonCompileResult
+        from torch.compiler import _runtime_cache
+
+        kernel = _static_runtime_kernel(64)
+        live_binary = kernel.compile_results[0].kernel
+        # A launched static kernel has already dropped its cubin bytes.
+        live_binary.cubin_raw = None
+        launcher = kernel.launchers[0]
+        live_fn = kernel.fn.fn
+        original_dumps = pickle.dumps
+
+        def check_live_kernel(value, *args, **kwargs):
+            # A concurrent run() must keep seeing the live launchers.
+            self.assertIs(kernel._cached_launcher, launcher)
+            self.assertEqual(kernel.launchers, [launcher])
+            self.assertIs(kernel.fn.fn, live_fn)
+            return original_dumps(value, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as directory:
+            cubin = os.path.join(directory, "runtime_kernel.cubin")
+            with open(cubin, "wb") as f:
+                f.write(b"from disk")
+
+            def locate(result):
+                result.kernel.cubin_path = cubin
+
+            with (
+                mock.patch.object(
+                    StaticTritonCompileResult,
+                    "reload_cubin_path",
+                    autospec=True,
+                    side_effect=locate,
+                ),
+                mock.patch(
+                    "torch.compiler._runtime_cache.pickle.dumps",
+                    side_effect=check_live_kernel,
+                ),
+            ):
+                payload = _runtime_cache._freeze_triton_kernel("source", [kernel])
+        saved = pickle.loads(payload).kernel
+        self.assertEqual(saved.compile_results[0].kernel.cubin_raw, b"from disk")
+        self.assertIsNone(live_binary.cubin_raw)
+        self.assertFalse(hasattr(live_binary, "cubin_path"))
+        self.assertIs(kernel.compile_results[0].kernel, live_binary)
+
+    def test_frozen_kernel_is_unpickled_once_per_source(self):
+        import hashlib
+
+        from torch.compiler import _runtime_cache
+
+        first, second = object(), object()
+        with (
+            mock.patch.object(_runtime_cache, "_frozen_triton_kernels", {}),
+            mock.patch.object(_runtime_cache, "_loaded_triton_kernels", {}),
+            mock.patch.object(
+                _runtime_cache,
+                "_load_frozen_triton_kernel",
+                side_effect=[first, second],
+            ) as load,
+        ):
+            for binary in (b"old", b"new"):
+                payload = pickle.dumps({"source": binary})
+                _runtime_cache.InductorTritonCacheArtifact(
+                    hashlib.sha256(payload).hexdigest(), payload
+                ).populate_cache()
+                expected = first if binary == b"old" else second
+                self.assertIs(_runtime_cache.load_triton_kernel("source"), expected)
+                self.assertIs(_runtime_cache.load_triton_kernel("source"), expected)
+                load.assert_called_with("source", binary)
+            self.assertEqual(load.call_count, 2)
+            self.assertIsNone(_runtime_cache.load_triton_kernel("other"))
+
+    def test_frozen_triton_hit_records_compile_info(self):
+        from torch._guards import compile_context, CompileContext, CompileId
+        from torch._inductor.async_compile import AsyncCompile
+
+        kernel = mock.MagicMock()
+        compile_id = CompileId(frame_id=3, frame_compile_id=1)
+        with (
+            mock.patch(
+                "torch.compiler._runtime_cache.load_triton_kernel",
+                return_value=kernel,
+            ),
+            compile_context(CompileContext(compile_id)),
+        ):
+            self.assertIs(AsyncCompile().triton("frozen", "# source"), kernel)
+        kernel.set_compile_info.assert_called_once_with(compile_id, False)
+
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
+    @parametrize("coordesc", (False, True))
+    def test_frozen_gpu_kernel_serves_strict_load_from_empty_caches(self, coordesc):
+        import gc
+
+        from torch._inductor import config as inductor_config
+        from torch._inductor.async_compile import CompiledTritonKernels
+        from torch._inductor.utils import clear_caches
+        from torch.compiler import _runtime_cache
+
+        def fn(x):
+            return (x.sin() * 2).sum(dim=-1)
+
+        pc = torch.compiler.precompile
+        x = torch.randn(64, 1024, device="cuda")
+        with tempfile.TemporaryDirectory() as directory:
+            producer = {
+                "TORCHINDUCTOR_CACHE_DIR": os.path.join(directory, "producer"),
+                "TRITON_CACHE_DIR": os.path.join(directory, "producer_triton"),
+            }
+            consumer = {
+                "TORCHINDUCTOR_CACHE_DIR": os.path.join(directory, "consumer"),
+                "TRITON_CACHE_DIR": os.path.join(directory, "consumer_triton"),
+            }
+            clear_caches()
+            with (
+                mock.patch.dict(os.environ, producer),
+                inductor_config.patch(coordinate_descent_tuning=coordesc),
+                pc.capture_runtime(),
+            ):
+                compiled = torch.compile(fn, backend="inductor")
+                with torch.no_grad():
+                    expected = compiled(x)
+                source, cache = _capture_files(self, fn, [(x,)], backend="inductor")
+                [recorded] = _runtime_cache._capture.triton_kernels.values()
+                pc.finalize_cache(artifact_path=source, cache_path=cache)
+                # Collecting the frozen copies must not unload the live modules.
+                gc.collect()
+                with torch.no_grad():
+                    self.assertEqual(compiled(x), expected)
+            winner = recorded[0].launchers[0].config
+            clear_caches()
+            try:
+                with mock.patch.dict(os.environ, consumer), pc.no_compilation():
+                    pc.prepare_runtime(artifact_path=source, cache_path=cache)
+                    runnable = pc.load(source, cache)
+                    with torch.no_grad():
+                        self.assertEqual(runnable(x), expected)
+                    [served] = _runtime_cache._loaded_triton_kernels.values()
+                    self.assertEqual(len(served.launchers), 1)
+                    self.assertEqual(served.launchers[0].config.kwargs, winner.kwargs)
+                    if coordesc:
+                        self.assertTrue(served.launchers[0].config.found_by_coordesc)
+                    self.assertTrue(os.listdir(consumer["TRITON_CACHE_DIR"]))
+            finally:
+                CompiledTritonKernels.cache_clear()
+                clear_caches()
+
     @parametrize(
         "damage", ("none", "format", "version", "backend", "tracer", "code_hash")
     )
@@ -6358,6 +6860,16 @@ class TestPrecompileRuntimeCache(TestCase):
                             artifact_path=source, cache_path=cache
                         )
                     hydrate.assert_not_called()
+
+    def test_prepare_requires_finalized_cache(self):
+        artifact, cache = _capture_files(
+            self, lambda x: x.sin(), [(torch.ones(4),)], backend="eager"
+        )
+        with self.assertRaisesRegex(PrecompileError, "Could not prepare") as failure:
+            torch.compiler.precompile.prepare_runtime(
+                artifact_path=artifact, cache_path=cache
+            )
+        self.assertIn("precompile.finalize_cache", str(failure.exception.__cause__))
 
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     @parametrize("device", (0, None))
