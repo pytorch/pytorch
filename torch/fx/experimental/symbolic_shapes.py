@@ -22,6 +22,7 @@ import dis
 import functools
 import glob
 import hashlib
+import importlib.util
 import inspect
 import itertools
 import logging
@@ -370,11 +371,9 @@ def uninteresting_files() -> set[str]:
     import torch._logging
     import torch._subclasses.fake_tensor
     import torch._subclasses.meta_utils
-    import torch.export._trace
 
     mods = [
         sys.modules[__name__],
-        torch.export._trace,
         torch.fx.experimental.recording,
         torch.fx.experimental.sym_node,
         torch.fx.interpreter,
@@ -393,6 +392,11 @@ def uninteresting_files() -> set[str]:
     import torch._dynamo.guards
 
     files = {inspect.getfile(m) for m in mods}
+    # Only the filename is needed, and importing torch.export._trace is slow.
+    export_trace_spec = importlib.util.find_spec("torch.export._trace")
+    if export_trace_spec is None or export_trace_spec.origin is None:
+        raise AssertionError("torch.export._trace not found")
+    files.add(export_trace_spec.origin)
 
     # Add all Python files in torch._higher_order_ops directory
     higher_order_ops_dir = os.path.dirname(torch._higher_order_ops.__file__)

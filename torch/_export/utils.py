@@ -1401,7 +1401,12 @@ def _collect_all_valid_cia_ops_for_namespace(
 ) -> set["OperatorBase"]:
     # Step 1: Materialize all ops from C++ dispatcher
     _materialize_cpp_cia_ops()
+    return _collect_materialized_cia_ops_for_namespace(op_namespace)
 
+
+def _collect_materialized_cia_ops_for_namespace(
+    op_namespace: torch._ops._OpNamespace,
+) -> set["OperatorBase"]:
     # Step 2: Query all ops from python dispatcher
     cia_ops = set()
     for op in op_namespace:
@@ -1427,6 +1432,7 @@ def _collect_all_valid_cia_ops() -> set["OperatorBase"]:
 
     Note that the output of this function should never be modified
     """
+    _materialize_cpp_cia_ops()
     cia_ops = set()
     for op_namespace_name in torch.ops._dir:
         # The reason we split here is because aten ops are safe to cache.
@@ -1437,7 +1443,7 @@ def _collect_all_valid_cia_ops() -> set["OperatorBase"]:
                 )
             op_namespace = getattr(torch.ops, op_namespace_name)
             if isinstance(op_namespace, torch._ops._OpNamespace):
-                cia_ops |= _collect_all_valid_cia_ops_for_namespace(op_namespace)
+                cia_ops |= _collect_materialized_cia_ops_for_namespace(op_namespace)
         else:
             cia_ops |= _collect_all_valid_cia_ops_for_aten_namespace()
     return cia_ops
