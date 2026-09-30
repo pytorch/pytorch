@@ -554,12 +554,12 @@
 
 - name: _linalg_det(Tensor A) -> (Tensor result, Tensor LU, Tensor pivots)
   A: linalg_det_backward(grad, result, A, LU, pivots)
-  result: linalg_det_jvp(A_t, result, LU, pivots, A_p.is_contiguous() && !A_p.is_complex())
+  result: linalg_det_jvp(A_t, result, A_p, LU, pivots, A_p.is_contiguous() && !A_p.is_complex())
   output_differentiability: [True, False, False]
 
 - name: _linalg_slogdet(Tensor A) -> (Tensor sign, Tensor logabsdet, Tensor LU, Tensor pivots)
   A: slogdet_backward(grad_sign, grad_logabsdet, A, sign, LU, pivots)
-  sign, logabsdet: slogdet_jvp(LU, pivots, A_t, sign, A_p.is_contiguous() && !A_p.is_complex())
+  sign, logabsdet: slogdet_jvp(LU, pivots, A_t, A_p, sign, A_p.is_contiguous() && !A_p.is_complex())
   output_differentiability: [True, True, False, False]
 
 - name: block_diag(Tensor[] tensors) -> Tensor
@@ -635,19 +635,19 @@
   result: self_t.zero_()
 
 - name: erf(Tensor self) -> Tensor
-  self: 2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
+  self: M_2_SQRTPI * exp(-(self.pow(2))) * grad
   result: auto_element_wise
 
 - name: erfc(Tensor self) -> Tensor
-  self: -2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
+  self: -M_2_SQRTPI * exp(-(self.pow(2))) * grad
   result: auto_element_wise
 
 - name: special_erfcx(Tensor self) -> Tensor
-  self: (2.0 * self * result - 2.0 / sqrt(M_PI)) * grad
+  self: (2.0 * self * result - M_2_SQRTPI) * grad
   result: auto_element_wise
 
 - name: erfinv(Tensor self) -> Tensor
-  self: 0.5 * sqrt(M_PI) * exp(self.erfinv().pow(2)) * grad
+  self: (M_PI_4 * M_2_SQRTPI) * exp(self.erfinv().pow(2)) * grad
   result: auto_element_wise
 
 - name: exp(Tensor self) -> Tensor
@@ -975,7 +975,7 @@
   result: auto_element_wise
 
 - name: log10(Tensor self) -> Tensor
-  self: grad / (self.conj() * 2.3025850929940456)
+  self: grad / (self.conj() * M_LN10)
   result: auto_element_wise
 
 - name: log1p(Tensor self) -> Tensor
@@ -983,7 +983,7 @@
   result: auto_element_wise
 
 - name: log2(Tensor self) -> Tensor
-  self: grad / (self.conj() * 0.6931471805599453)
+  self: grad / (self.conj() * M_LN2)
   result: auto_element_wise
 
 - name: logaddexp(Tensor self, Tensor other) -> Tensor
@@ -1127,6 +1127,10 @@
   self: linalg_matrix_sqrth_differential(self, grad)
   result: linalg_matrix_sqrth_differential(self_p, self_t)
 
+- name: linalg_polar(Tensor A) -> (Tensor U, Tensor H)
+  A: linalg_polar_backward(grad_U, grad_H, A, U, H)
+  U, H: linalg_polar_jvp(A_t, A_p, U, H)
+
 - name: max.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor values, Tensor indices)
   self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), keepdim)
   values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)
@@ -1143,11 +1147,11 @@
   result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where(self_p > other_p, self_t, other_t))
 
 - name: fmax(Tensor self, Tensor other) -> Tensor
-  # Reuse the tie-split output when transforms and tensor subclasses allow safe in-place masking.
-  self: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self < other, 0)
-  other: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self > other, 0)
+  # Split finite ties and preserve the forward NaN-selection convention.
+  self: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), (self >= other).logical_or_(other.isnan()).logical_not_(), 0)
+  other: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), (self > other).logical_or_(other.isnan()), 0)
   # Do not blend tangents arithmetically: an inactive NaN or infinite tangent must not contaminate the result.
-  result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where(self_p > other_p, self_t, other_t))
+  result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where((self_p > other_p).logical_or_(other_p.isnan()), self_t, other_t))
 
 - name: mean(Tensor self, *, ScalarType? dtype=None) -> Tensor
   dispatch:
@@ -1209,11 +1213,11 @@
   result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where(self_p < other_p, self_t, other_t))
 
 - name: fmin(Tensor self, Tensor other) -> Tensor
-  # Reuse the tie-split output when transforms and tensor subclasses allow safe in-place masking.
-  self: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self > other, 0)
-  other: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), self < other, 0)
+  # Split finite ties and preserve the forward NaN-selection convention.
+  self: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), (self <= other).logical_or_(other.isnan()).logical_not_(), 0)
+  other: masked_fill_inplace_if_safe(at::where(self == other, grad / 2, grad), (self < other).logical_or_(other.isnan()), 0)
   # Do not blend tangents arithmetically: an inactive NaN or infinite tangent must not contaminate the result.
-  result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where(self_p < other_p, self_t, other_t))
+  result: at::where(self_p == other_p, (self_t + other_t) / 2, at::where((self_p < other_p).logical_or_(other_p.isnan()), self_t, other_t))
 
 - name: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
@@ -1478,11 +1482,11 @@
   result: auto_element_wise
 
 - name: special_ndtri(Tensor self) -> Tensor
-  self: grad * std::sqrt(2 * M_PI) * (result.square() / 2).exp()
+  self: grad * (M_PI_2 * M_SQRT2 * M_2_SQRTPI) * (result.square() * 0.5).exp()
   result: auto_element_wise
 
 - name: special_log_ndtr(Tensor self) -> Tensor
-  self: grad / std::sqrt(2 * M_PI) * (result + self.pow(2) / 2).neg().exp()
+  self: grad * (M_2_SQRTPI * M_SQRT2 * 0.25) * (result + self.pow(2) * 0.5).neg().exp()
   result: auto_element_wise
 
 # [Note: Sometimes view derivatives]
@@ -1609,7 +1613,7 @@
 
 - name: _linalg_solve_ex(Tensor A, Tensor B, *, bool left=True, bool check_errors=False) -> (Tensor result, Tensor LU, Tensor pivots, Tensor info)
   A, B: linalg_solve_backward(grad, result, A, LU, pivots, left, grad_input_mask[1])
-  result: "linalg_solve_jvp(A_t, B_t, result, LU, pivots, left)"
+  result: "linalg_solve_jvp(A_t, B_t, result, A_p, LU, pivots, left)"
   output_differentiability: [True, False, False, False]  # LU is an auxiliary tensor not exposed to the user
 
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
@@ -2942,9 +2946,9 @@
 
 - name: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, SymInt? max_seqlen_q, SymInt? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? seqlen_k=None, int? window_size=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)
   output_differentiability: [True, False, False, False, False, False]
-  query, key, value, bias: _efficient_attention_backward_symint(grad, query, key, value, bias, output, cu_seqlens_q, cu_seqlens_k, max_seqlen_batch_q, max_seqlen_batch_k, logsumexp, dropout_p, philox_seed, philox_offset, custom_mask_type, bias.requires_grad(), scale)
+  query, key, value, bias: _efficient_attention_backward_symint(grad, query, key, value, bias, output, cu_seqlens_q, cu_seqlens_k, max_seqlen_batch_q, max_seqlen_batch_k, logsumexp, dropout_p, philox_seed, philox_offset, custom_mask_type, bias.requires_grad(), scale, std::nullopt, window_size)
 
-- name: _cudnn_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
+- name: _cudnn_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? attn_bias, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, bool compute_log_sumexp, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None, Tensor? seqused_k=None, Tensor? block_table=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor philox_seed, Tensor philox_offset, Tensor debug_attn_mask)
   output_differentiability: [True, False, False, False, False, False, False, False, False]
   query, key, value: _cudnn_attention_backward_symint(grad, query, key, value, output, logsumexp, philox_seed, philox_offset, attn_bias, cum_seq_q, cum_seq_k, max_q, max_k, dropout_p, is_causal, scale)
 
@@ -3088,16 +3092,20 @@
   x: non_differentiable
 
 - name: special_bessel_j0(Tensor self) -> Tensor
-  self: non_differentiable
+  self: grad * -at::special_bessel_j1(self)
+  result: auto_element_wise
 
 - name: special_bessel_j1(Tensor self) -> Tensor
-  self: non_differentiable
+  self: bessel_j1_backward(grad, self, result)
+  result: auto_element_wise
 
 - name: special_bessel_y0(Tensor self) -> Tensor
-  self: non_differentiable
+  self: grad * -at::special_bessel_y1(self)
+  result: auto_element_wise
 
 - name: special_bessel_y1(Tensor self) -> Tensor
-  self: non_differentiable
+  self: bessel_y1_backward(grad, self, result)
+  result: auto_element_wise
 
 - name: special_chebyshev_polynomial_t(Tensor x, Tensor n) -> Tensor
   x: non_differentiable
@@ -3180,16 +3188,20 @@
   x: non_differentiable
 
 - name: special_modified_bessel_i0(Tensor self) -> Tensor
-  self: non_differentiable
+  self: grad * at::special_modified_bessel_i1(self)
+  result: auto_element_wise
 
 - name: special_modified_bessel_i1(Tensor self) -> Tensor
-  self: non_differentiable
+  self: i1_backward(grad, self, result)
+  result: auto_element_wise
 
 - name: special_modified_bessel_k0(Tensor self) -> Tensor
-  self: non_differentiable
+  self: grad * -at::special_modified_bessel_k1(self)
+  result: auto_element_wise
 
 - name: special_modified_bessel_k1(Tensor self) -> Tensor
-  self: non_differentiable
+  self: grad * -(at::special_modified_bessel_k0(self) + result * self.reciprocal())
+  result: auto_element_wise
 
 - name: special_scaled_modified_bessel_k0(Tensor x) -> Tensor
   x: non_differentiable

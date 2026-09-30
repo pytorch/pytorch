@@ -53,7 +53,7 @@ def _make_config_key_from_heuristic(cfg: HeuristicConfig) -> ConfigKey:
 
 
 def _make_config_key_from_kernel_design(design) -> ConfigKey | None:
-    """Build config key from cutlass.operators kernel metadata.design."""
+    """Build a raw config key from cutlass.operators kernel metadata.design."""
     if (
         hasattr(design, "tile_shape")
         and len(design.tile_shape) >= 2
@@ -65,6 +65,27 @@ def _make_config_key_from_kernel_design(design) -> ConfigKey | None:
             design.tile_shape[1],
             design.cluster_shape[0],
             design.cluster_shape[1],
+        )
+    return None
+
+
+def _make_config_key_from_kernel(kernel) -> ConfigKey | None:
+    """Build a per-CTA config key from a cutlass.operators kernel."""
+    design = kernel.metadata.design
+    key = _make_config_key_from_kernel_design(design)
+    if key is not None:
+        use_2cta_instrs = getattr(
+            getattr(kernel, "impl", None),
+            "use_2cta_instrs",
+            None,
+        )
+        if use_2cta_instrs is None:
+            use_2cta_instrs = bool(getattr(design, "use_2cta_mma", False))
+        return (
+            key[0] // (2 if use_2cta_instrs else 1),
+            key[1],
+            key[2],
+            key[3],
         )
     return None
 
@@ -154,15 +175,21 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             log.debug("No heuristic configs found, using first %d kernels", count)
             return kernels[:count]
 
-        # Match kernels to heuristic configs
-        matched: list[tuple] = []
+        # Match kernels to each distinct heuristic config at its best estimate.
+        config_runtimes: dict[ConfigKey, float] = {}
         for cfg in heuristic_configs:
             key = _make_config_key_from_heuristic(cfg)
+            config_runtimes[key] = min(
+                cfg.estimated_runtime, config_runtimes.get(key, float("inf"))
+            )
+
+        matched: list[tuple] = []
+        for key, runtime in config_runtimes.items():
             kernels_for_key = config_to_kernels.get(key)
             if not kernels_for_key:
                 continue
             for kernel in kernels_for_key:
-                matched.append((kernel, cfg.estimated_runtime))
+                matched.append((kernel, runtime))
 
         if not matched:
             log.debug(
@@ -176,7 +203,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
 
         # Supplement with hand-picked configs in the space nvMatmulHeuristics doesn't currently explore.
         if config.nvgemm_supplement_configs:
-            _SUPPLEMENT_CONFIGS: OrderedSet[ConfigKey] = OrderedSet(
+            _SUPPLEMENT_DESIGN_CONFIGS: OrderedSet[ConfigKey] = OrderedSet(
                 [
                     (64, 128, 1, 1),
                     (64, 128, 1, 2),
@@ -233,12 +260,17 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                     (256, 256, 4, 1),
                 ]
             )
-            selected_keys = OrderedSet(
+            selected_design_keys = OrderedSet(
                 [_make_config_key_from_kernel_design(k.metadata.design) for k in result]
             )
-            for key, key_kernels in config_to_kernels.items():
-                if key not in selected_keys and key in _SUPPLEMENT_CONFIGS:
-                    result.append(key_kernels[0])
+            for kernel in kernels:
+                design_key = _make_config_key_from_kernel_design(kernel.metadata.design)
+                if (
+                    design_key not in selected_design_keys
+                    and design_key in _SUPPLEMENT_DESIGN_CONFIGS
+                ):
+                    result.append(kernel)
+                    selected_design_keys.add(design_key)
 
         log.debug(
             "Heuristic filtered to %d kernels from %d total", len(result), len(kernels)
@@ -273,7 +305,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         config_to_kernels: dict[ConfigKey, list] = defaultdict(list)
 
         for kernel in kernels:
-            key = _make_config_key_from_kernel_design(kernel.metadata.design)
+            key = _make_config_key_from_kernel(kernel)
             if key is not None:
                 config_to_kernels[key].append(kernel)
 
