@@ -114,9 +114,7 @@ class StudentT(Distribution):
         # -inf (and backprop produce NaN gradients) for in-support points with
         # a finite density (#198578). logaddexp(0, 2*log|y| - log(df)) ==
         # log(1 + y^2/df) exactly, but stays finite.
-        log_y_sq_over_df_term = torch.logaddexp(
-            torch.zeros_like(y), 2 * torch.abs(y).log() - self.df.log()
-        )
+        log_y_sq_over_df_term = torch.logaddexp(torch.zeros_like(y), 2 * torch.abs(y).log() - self.df.log())
         return -0.5 * (self.df + 1.0) * log_y_sq_over_df_term - Z
 
     def entropy(self):

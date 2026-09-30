@@ -87,9 +87,7 @@ class Cauchy(Distribution):
         # in-support points with a perfectly finite density (#198578).
         # logaddexp(0, 2*log|z|) == log(1 + z^2) exactly, but stays finite.
         z = (value - self.loc) / self.scale
-        log_z_sq_term = torch.logaddexp(
-            torch.zeros_like(z), 2 * torch.abs(z).log()
-        )
+        log_z_sq_term = torch.logaddexp(torch.zeros_like(z), 2 * torch.abs(z).log())
         return -math.log(math.pi) - self.scale.log() - log_z_sq_term
 
     def cdf(self, value):

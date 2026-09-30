@@ -7482,15 +7482,12 @@ class TestCauchyStudentTNumericalStability(unittest.TestCase):
         for value in [1e18, 1e20, 1e30, 1e150]:
             log_prob = dist.log_prob(torch.tensor(value, dtype=self.dtype))
             self.assertTrue(torch.isfinite(log_prob))
-            # asymptotic: log_prob ~ -log(pi * scale) - 2 * log(|z|)
             expected = -math.log(math.pi) - 2 * math.log(value)
             self.assertLess(abs(log_prob.item() - expected), 1e-9)
 
     def test_cauchy_log_prob_grad_finite_for_large_values(self):
         scale = torch.tensor(1.0, dtype=self.dtype, requires_grad=True)
-        dist = torch.distributions.Cauchy(
-            torch.tensor(0.0, dtype=self.dtype), scale
-        )
+        dist = torch.distributions.Cauchy(torch.tensor(0.0, dtype=self.dtype), scale)
         dist.log_prob(torch.tensor(1e20, dtype=self.dtype)).backward()
         self.assertTrue(torch.isfinite(scale.grad))
 
