@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import contextlib
+import dataclasses
 from unittest import skipIf
 from unittest.mock import Mock, patch, PropertyMock
 
@@ -17,7 +18,6 @@ from torch._inductor.codegen.common import CSEVariable
 from torch._inductor.codegen.simd import (
     _GroupedReductionLayout,
     _PointwiseRemapHandler,
-    _SubParentFusion,
     _SubParentValueResolver,
     SIMDScheduling,
 )
@@ -44,11 +44,8 @@ from torch._inductor.scheduler import (
     SchedulerNode,
     SubParentAccessRelation,
     SubParentEpilogueCandidate,
-    SubParentEpilogueStage,
     SubParentEpilogueGrouping,
-    SubParentFusionResult,
     SubParentOutputGroup,
-    StagedReductionPlan,
 )
 from torch._inductor.sizevars import SizeVarAllocator
 from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
@@ -1148,210 +1145,6 @@ class TestScheduler(TestCase):
             expected,
         )
 
-    def test_translated_capability_gate_requires_cuda(self, device):
-        row, feature = sympy.symbols(
-            "capability_row capability_feature", integer=True, nonnegative=True
-        )
-        source = MemoryDep(
-            "buf0",
-            256 * row + feature,
-            (row, feature),
-            (4, 256),
-        )
-        consumer = MemoryDep(
-            "buf0",
-            256 * row + feature + 64,
-            (row, feature),
-            (4, 64),
-        )
-        relation = SubParentAccessRelation(
-            (source,),
-            consumer,
-            access_stride=1,
-            requires_live_source=False,
-            base_offset=64,
-            extent=64,
-        )
-        plan = StagedReductionPlan(
-            parent_nodes=(),
-            parent_numel=sympy.Integer(4),
-            parent_rnumel=sympy.Integer(256),
-            nested_stage=None,
-            sub_parent_stages=(
-                SubParentEpilogueStage(
-                    factor=4,
-                    access_relations=(relation,),
-                    output_groups=(
-                        SubParentOutputGroup(output_lanes=1, nodes=(Mock(),)),
-                    ),
-                ),
-            ),
-            allow_translation=True,
-        )
-        scheduling = object.__new__(SIMDScheduling)
-        scheduling.supports_sub_parent_epilogue = True
-        graph = Mock(sizevars=SizeVarAllocator())
-        node = Mock()
-        node.get_device.return_value = torch.device(device)
-
-        with (
-            V.set_graph_handler(graph),
-            patch.object(
-                SIMDScheduling, "_sub_parent_tiling_is_2d", return_value=True
-            ),
-            patch.object(
-                NestedReduction,
-                "sub_parent_epilogue_result",
-                side_effect=(
-                    SubParentFusionResult(False, None),
-                    SubParentFusionResult(True, plan),
-                ),
-            ),
-            inductor_config.patch(
-                {"polyhedral_fusion": True, "triton.nested_reduction": True}
-            ),
-        ):
-            admitted = scheduling._sub_parent_epilogue_plan((node,), 4, 256)
-            if torch.device(device).type == "cuda":
-                self.assertIs(admitted, plan)
-            else:
-                self.assertIsNone(admitted)
-
-    @parametrize(
-        "legacy_state", ["accepted", "not_admitted", "not_proved", "both_not_admitted"]
-    )
-    @parametrize("enabled", [False, True])
-    def test_sub_parent_selection_preserves_existing_plan(self, legacy_state, enabled):
-        legacy = Mock(allow_translation=False)
-        translated = Mock(allow_translation=True)
-        legacy_result = SubParentFusionResult(
-            True, None if legacy_state == "not_proved" else legacy
-        )
-        scheduling = object.__new__(SIMDScheduling)
-        scheduling.supports_sub_parent_epilogue = True
-        nodes = (Mock(),)
-        with (
-            inductor_config.patch(
-                {"polyhedral_fusion": enabled, "triton.nested_reduction": True}
-            ),
-            patch.object(
-                NestedReduction,
-                "sub_parent_epilogue_result",
-                side_effect=(legacy_result, SubParentFusionResult(True, translated)),
-            ) as planner,
-            patch.object(
-                SIMDScheduling,
-                "_sub_parent_plan_is_admitted",
-                side_effect=lambda nodes, numel, plan: (
-                    (plan is translated and legacy_state != "both_not_admitted")
-                    or legacy_state == "accepted"
-                ),
-            ),
-        ):
-            plan = scheduling._sub_parent_epilogue_plan(nodes, 8, 128)
-        expected = None
-        if legacy_state == "accepted":
-            expected = legacy
-        elif enabled and legacy_state != "both_not_admitted":
-            expected = translated
-        self.assertIs(plan, expected)
-        attempts = [False] if legacy_state == "accepted" or not enabled else [False, True]
-        self.assertEqual(
-            [call.kwargs["allow_translation"] for call in planner.call_args_list], attempts
-        )
-
-    @parametrize("legacy_accepted", [False, True])
-    @parametrize("enabled", [False, True])
-    def test_sub_parent_semantic_selection_preserves_existing_plan(
-        self, legacy_accepted, enabled
-    ):
-        legacy = Mock(allow_translation=False)
-        translated = Mock(allow_translation=True)
-        nodes = (Mock(),)
-        with (
-            inductor_config.patch(polyhedral_fusion=enabled),
-            patch.object(
-                NestedReduction,
-                "sub_parent_epilogue_result",
-                side_effect=(
-                    SubParentFusionResult(True, legacy if legacy_accepted else None),
-                    SubParentFusionResult(True, translated),
-                ),
-            ) as planner,
-        ):
-            plan = NestedReduction.sub_parent_epilogue_plan(nodes, 8, 128)
-        expected = legacy if legacy_accepted else translated if enabled else None
-        self.assertIs(plan, expected)
-        attempts = [False] if legacy_accepted or not enabled else [False, True]
-        self.assertEqual(
-            [call.kwargs["allow_translation"] for call in planner.call_args_list], attempts
-        )
-        for call in planner.call_args_list:
-            self.assertEqual(call.args, (nodes, 8, 128))
-
-    def test_sub_parent_plan_search_continues_after_failure(self):
-        scheduling = object.__new__(SIMDScheduling)
-        first, second = Mock(), Mock()
-        first.group = (None, (8, 128))
-        second.group = (None, (8, 256))
-        nodes = [first, second]
-        plan = Mock()
-        with patch.object(
-            SIMDScheduling, "_sub_parent_epilogue_plan", side_effect=(None, plan)
-        ) as planner:
-            self.assertIs(scheduling._find_sub_parent_epilogue_plan(nodes), plan)
-        self.assertEqual(
-            [call.args for call in planner.call_args_list],
-            [(nodes, 8, 128), (nodes, 8, 256)],
-        )
-
-    @parametrize("consumer_numel", [8, 32, 1024])
-    @inductor_config.patch("triton.nested_reduction", True)
-    def test_sub_parent_failed_plan_uses_original_shape_fallback(self, consumer_numel):
-        scheduling = object.__new__(SIMDScheduling)
-        scheduling.supports_sub_parent_epilogue = True
-        reduction, consumer = Mock(), Mock()
-        reduction.is_reduction.return_value = True
-        consumer.is_reduction.return_value = False
-        reduction.group = (None, (8, 128))
-        consumer.group = (None, (consumer_numel, 1))
-        reduction.get_nodes.return_value = [reduction]
-        consumer.get_nodes.return_value = [consumer]
-        with (
-            V.set_graph_handler(Mock(sizevars=SizeVarAllocator())),
-            patch.object(SIMDScheduling, "_sub_parent_epilogue_plan", return_value=None),
-        ):
-            decision = scheduling._sub_parent_epilogue_decision(reduction, consumer)
-        expected = _SubParentFusion.REJECT if consumer_numel == 32 else _SubParentFusion.DEFER
-        self.assertIs(decision, expected)
-
-    @parametrize("valid_plan", [False, True])
-    def test_standalone_staged_codegen_reconstructs_selected_plan(self, valid_plan):
-        scheduling = object.__new__(SIMDScheduling)
-        scheduling.scheduler = None
-        nodes = [Mock()]
-        node = Mock(spec=FusedStagedReduction)
-        node.get_nodes.return_value = nodes
-        plan = Mock() if valid_plan else None
-        with (
-            patch.object(
-                SIMDScheduling,
-                "_find_sub_parent_epilogue_plan",
-                return_value=plan,
-            ) as selector,
-            patch.object(
-                SIMDScheduling, "_codegen_reduction_with_sub_parent_epilogue"
-            ) as emitter,
-        ):
-            if valid_plan:
-                scheduling.codegen_staged_reduction(node)
-                emitter.assert_called_once_with(nodes, plan)
-            else:
-                with self.assertRaisesRegex(AssertionError, "plan was lost before codegen"):
-                    scheduling.codegen_staged_reduction(node)
-                emitter.assert_not_called()
-            selector.assert_called_once_with(nodes)
-
     def test_sub_parent_resolver_uses_planned_lane_set(self):
         d0 = sympy.Symbol("d0", integer=True, nonnegative=True)
         source = MemoryDep("buf0", d0, (d0,), (sympy.Integer(16),))
@@ -1461,6 +1254,76 @@ class TestScheduler(TestCase):
         resolver._materialize = Mock(return_value=None)
         with self.assertRaisesRegex(AssertionError, "lost required .*source 'buf0'"):
             resolver.materialize_sources((relation,))
+
+    @parametrize("live_source", [False, True])
+    def test_sub_parent_materializes_each_lane_source_once(self, live_source):
+        index = sympy.Symbol("lane_materialize_index", integer=True)
+        source = MemoryDep("buf0", index, (index,), (sympy.Integer(16),))
+        relations = tuple(
+            SubParentAccessRelation(
+                (source,),
+                MemoryDep("buf0", 2 * index + lane, (index,), (sympy.Integer(8),)),
+                access_stride=2,
+                requires_live_source=live_source,
+                base_offset=lane,
+                extent=8,
+            )
+            for lane in (0, 1)
+        )
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            resolver = self._make_sub_parent_value_resolver(relations)
+        value = Mock()
+        resolver._values = {"buf0": [value]}
+        resolver._materialize = Mock(return_value=Mock())
+        resolver._materialize_dense_source = Mock()
+        resolver.materialize_sources(iter((*relations, *relations)))
+        if live_source:
+            resolver._materialize.assert_called_once_with(value)
+        else:
+            resolver._materialize.assert_not_called()
+        resolver._materialize_dense_source.assert_not_called()
+
+    @parametrize(
+        "live_source,replayed,selected",
+        ((True, True, True), (False, True, True), (True, False, True), (True, True, False)),
+    )
+    def test_sub_parent_dense_materialization_uses_relation_values(
+        self, live_source, replayed, selected
+    ):
+        row, feature = sympy.symbols("dense_materialize_row dense_materialize_feature")
+        source = MemoryDep("buf0", 16 * row + feature, (row, feature), (2, 16))
+        consumer = MemoryDep("buf0", 16 * row + feature, (row, feature), (2, 8))
+        relation = SubParentAccessRelation(
+            (source,),
+            consumer,
+            access_stride=1,
+            requires_live_source=live_source,
+            base_offset=0,
+            extent=8,
+        )
+        node = Mock(
+            read_writes=ReadWrites(OrderedSet([consumer]), OrderedSet(), OrderedSet())
+        )
+        groups = (SubParentOutputGroup(1, (node,)),) if replayed else ()
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            resolver = self._make_sub_parent_value_resolver(
+                (relation,), parent_numel=2, parent_rnumel=16, output_groups=groups
+            )
+        requested = dataclasses.replace(relation)
+        self.assertIsNot(requested, relation)
+        value = Mock()
+        resolver._values = {"buf0": [value]}
+        resolver._materialize = Mock()
+        resolver._materialize_dense_source = Mock(return_value=Mock())
+        resolver.materialize_sources((requested,) if selected else ())
+        resolver._materialize.assert_not_called()
+        if selected and replayed and live_source:
+            descriptor = resolver._relation_descriptors[0]
+            resolver._materialize_dense_source.assert_called_once_with(
+                0, descriptor, value, 0
+            )
+        else:
+            resolver._materialize_dense_source.assert_not_called()
 
     def test_sub_parent_resolver_uses_masked_load_ownership(self):
         d0 = sympy.Symbol("d0", integer=True)

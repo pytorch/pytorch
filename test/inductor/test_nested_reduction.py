@@ -8,13 +8,16 @@ from unittest.mock import patch
 import torch
 import torch._inductor.config as inductor_config
 import torch.nn.functional as F
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch._higher_order_ops.inline_asm_elementwise import inline_asm_elementwise
 from torch._inductor import metrics
 from torch._inductor.choices import InductorChoices
+from torch._inductor.scheduler import FusedStagedReduction, NestedReduction
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -299,6 +302,43 @@ def _rmsnorm_mxfp8_scale_swizzle(x, weight, G):
         .to(torch.float8_e4m3fn)
     )
     return payload.view(B, D), _swizzle_scale(scale_u8)
+
+
+MLA_HEAD_DIM = 256
+MLA_ROPE_DIM = 64
+
+
+def _shifted_mla_indexer(x, ln_w, ln_b, cos, sin):
+    mean = x.mean(-1, keepdim=True)
+    var = ((x - mean) ** 2).mean(-1, keepdim=True)
+    normed = (x - mean) / torch.sqrt(var + 1e-5) * ln_w + ln_b
+    k_rot, k_pass = torch.split(
+        normed.unsqueeze(2),
+        [MLA_ROPE_DIM, x.shape[-1] - MLA_ROPE_DIM],
+        dim=-1,
+    )
+    return k_rot * cos + k_rot * sin, k_pass
+
+
+def _make_mla_inputs(
+    *, device, batch_size, seq_len, head_dim=MLA_HEAD_DIM, projection=False
+):
+    torch.manual_seed(0)
+    dtype = torch.bfloat16
+    input_dim = 7168 if projection else head_dim
+    rope_shape = (batch_size, seq_len, 1, MLA_ROPE_DIM)
+    inputs = [torch.randn(batch_size, seq_len, input_dim, device=device, dtype=dtype)]
+    if projection:
+        inputs.append(torch.randn(head_dim, input_dim, device=device, dtype=dtype))
+    inputs.extend(
+        (
+            torch.randn(head_dim, device=device, dtype=dtype),
+            torch.randn(head_dim, device=device, dtype=dtype),
+            torch.randn(rope_shape, device=device, dtype=dtype),
+            torch.randn(rope_shape, device=device, dtype=dtype),
+        )
+    )
+    return tuple(inputs)
 
 
 @instantiate_parametrized_tests
@@ -1343,8 +1383,7 @@ class _NestedReductionBase:
         self.assertEqual(metrics.codegen_nested_reduction, 1)
         self.assertGreater(metrics.generated_kernel_count, 1)
 
-    @parametrize("polyhedral_fusion", [False, True])
-    def test_producer_consumer_sub_parent_intermediate(self, polyhedral_fusion):
+    def test_producer_consumer_sub_parent_intermediate(self):
         B, D, G = 32, 1024, 16
 
         def f(x, weight):
@@ -1357,9 +1396,8 @@ class _NestedReductionBase:
 
         x = torch.randn(B, D, device=GPU_TYPE)
         weight = torch.randn(D, device=GPU_TYPE)
-        with inductor_config.patch(polyhedral_fusion=polyhedral_fusion):
-            self.check_nested_matches_unnested(f, (x, weight))
-            self.check_fusion()
+        self.check_nested_matches_unnested(f, (x, weight))
+        self.check_fusion()
 
     def test_producer_consumer_broadcasts_outer_reduction_output(self):
         B, D, G = 32, 1024, 16
@@ -1580,9 +1618,8 @@ class _NestedReductionBase:
         self.check_non_leaf_epilogue_fallback()
 
     # Cover non-power-of-two X and R extents.
-    @parametrize("polyhedral_fusion", [False, True])
     @parametrize("B,D,G", [(32, 1024, 16), (1, 16, 16), (3, 16, 16), (3, 72, 24)])
-    def test_standalone_sub_parent_epilogue(self, B, D, G, polyhedral_fusion):
+    def test_standalone_sub_parent_epilogue(self, B, D, G):
         def f(x):
             xg = x.view(B, D // G, G)
             amax = xg.float().abs().amax(dim=-1)
@@ -1594,13 +1631,11 @@ class _NestedReductionBase:
             return even, odd, scale
 
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
-        with inductor_config.patch(polyhedral_fusion=polyhedral_fusion):
-            self.check_nested_matches_unnested(f, (x,))
-            self.check_fusion()
+        self.check_nested_matches_unnested(f, (x,))
+        self.check_fusion()
 
-    @parametrize("polyhedral_fusion", [False, True])
     @parametrize("dynamic_axis", ["batch", "reduction"])
-    def test_dynamic_standalone_sub_parent_epilogue(self, dynamic_axis, polyhedral_fusion):
+    def test_dynamic_standalone_sub_parent_epilogue(self, dynamic_axis):
         B, D = 4, 512
 
         def f(x):
@@ -1622,11 +1657,10 @@ class _NestedReductionBase:
             for shape in shapes
         ]
         torch._dynamo.mark_dynamic(inputs[0], 0 if dynamic_axis == "batch" else 1)
-        with inductor_config.patch(polyhedral_fusion=polyhedral_fusion):
-            compiled = torch.compile(f, fullgraph=True)
-            for x in inputs:
-                self.assertEqual(compiled(x), f(x), atol=1e-2, rtol=1e-2)
-            self.check_fusion()
+        compiled = torch.compile(f, fullgraph=True)
+        for x in inputs:
+            self.assertEqual(compiled(x), f(x), atol=1e-2, rtol=1e-2)
+        self.check_fusion()
 
     @parametrize("dynamic_axis", [None, "batch", "feature"])
     def test_pointwise_producer_standalone_sub_parent_epilogue(self, dynamic_axis):
@@ -1820,16 +1854,14 @@ class _NestedReductionBase:
             "triton.coalesce_tiling_analysis": False,
         }
     )
-    @parametrize("polyhedral_fusion", [False, True])
-    def test_rmsnorm_factor4_three_output_epilogue(self, polyhedral_fusion):
+    def test_rmsnorm_factor4_three_output_epilogue(self):
         B, D, G = 8, 4096, 32
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
         weight = torch.randn(D, device=GPU_TYPE, dtype=torch.bfloat16)
-        with inductor_config.patch(polyhedral_fusion=polyhedral_fusion):
-            self.check_nested_matches_unnested(
-                _rmsnorm_factor4_three_output_epilogue, (x, weight, G)
-            )
-            self.check_fusion()
+        self.check_nested_matches_unnested(
+            _rmsnorm_factor4_three_output_epilogue, (x, weight, G)
+        )
+        self.check_fusion()
 
     def test_dynamic_batch_mxfp6_four_to_three_pack(self):
         D = 1024
@@ -2312,8 +2344,7 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x, row))
         self.check_fusion()
 
-    @parametrize("polyhedral_fusion", [False, True])
-    def test_standalone_sub_parent_shared_scalar_source(self, polyhedral_fusion):
+    def test_standalone_sub_parent_shared_scalar_source(self):
         B, D = 4, 16
 
         def f(x, scalar):
@@ -2327,9 +2358,8 @@ class _NestedReductionBase:
 
         x = torch.randn(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
         scalar = torch.tensor(2.0, device=GPU_TYPE, dtype=torch.bfloat16)
-        with inductor_config.patch(polyhedral_fusion=polyhedral_fusion):
-            self.check_nested_matches_unnested(f, (x, scalar))
-            self.check_fusion()
+        self.check_nested_matches_unnested(f, (x, scalar))
+        self.check_fusion()
 
     def test_standalone_sub_parent_rejects_ambiguous_source_load(self):
         B, D, G = 32, 1024, 16
@@ -2702,6 +2732,214 @@ class NestedReductionTest(_NestedReductionBase, TestBase):
 @inductor_config.patch("force_disable_caches", True)
 class NestedReductionNonPersistentTest(_NestedReductionBase, TestBase):
     force_persistent_outer_reduction = False
+
+
+class TranslatedSubParentEpilogueTest(TestCase):
+    def assert_outputs(self, actual, expected):
+        self.assertEqual(len(actual), len(expected))
+        for result, reference in zip(actual, expected):
+            self.assertEqual(result.shape, reference.shape)
+            self.assertEqual(result.dtype, reference.dtype)
+            self.assertTrue(torch.isfinite(result).all().item())
+        self.assertEqual(actual, expected, atol=6e-2, rtol=2e-2)
+
+    def assert_staged_plan(self, nodes, *, expected, translated):
+        staged = [node for node in nodes if type(node) is FusedStagedReduction]
+        self.assertEqual(len(staged), int(expected))
+        if expected and translated:
+            node = staged[0]
+            _, (numel, rnumel) = node.group
+            plan = NestedReduction.sub_parent_epilogue_plan(
+                node.get_nodes(), numel, rnumel
+            )
+            self.assertIsNotNone(plan)
+            self.assertEqual(plan.parent_rnumel, MLA_HEAD_DIM)
+            self.assertEqual(len(plan.sub_parent_stages), 1)
+            stage = plan.sub_parent_stages[0]
+            self.assertEqual(stage.factor, 4)
+            self.assertEqual(len(stage.output_groups), 1)
+            self.assertEqual(stage.output_groups[0].output_lanes, 1)
+            mappings = {
+                (relation.access_stride, relation.base_offset, relation.extent)
+                for relation in stage.access_relations
+                if relation.access_stride is not None
+            }
+            self.assertEqual(mappings, {(1, 0, 64), (1, 64, 192)})
+        return nodes
+
+    def compile_and_check(
+        self,
+        fn,
+        input_sets,
+        *,
+        expected=True,
+        translated=True,
+        force_persistent=None,
+        dynamic=False,
+        nested_reduction=True,
+        **config,
+    ):
+        torch._dynamo.reset()
+        metrics.reset()
+        captured = False
+
+        def capture(nodes):
+            nonlocal captured
+            captured = True
+            return self.assert_staged_plan(
+                nodes, expected=expected, translated=translated
+            )
+
+        compile_config = {
+            "polyhedral_fusion": True,
+            "triton.nested_reduction": nested_reduction,
+            "fx_graph_cache": False,
+            "_post_fusion_custom_pass": capture,
+            **config,
+        }
+        counter = CompileCounterWithBackend("inductor") if dynamic else None
+        with (
+            inductor_config.patch(compile_config),
+            fresh_inductor_cache(),
+            _choices_context(force_persistent),
+        ):
+            compiled = torch.compile(
+                fn,
+                backend=counter if dynamic else "inductor",
+                fullgraph=True,
+                dynamic=True if dynamic else None,
+            )
+            for inputs in input_sets:
+                eager = fn(*inputs)
+                self.assert_outputs(compiled(*inputs), eager)
+        self.assertTrue(captured)
+        if dynamic:
+            self.assertEqual(counter.frame_count, 1)
+        return metrics.generated_kernel_count
+
+    @parametrize("force_persistent", [False, True])
+    def test_existing_lane_fusion_with_output_view(self, device, force_persistent):
+        def fn(x):
+            y = x + x.sum(-1, keepdim=True)
+            return y[:, ::4] * 2, y[:, 1:]
+
+        torch.manual_seed(0)
+        inputs = (torch.randn(8, 128, device=device),)
+        kernels = self.compile_and_check(
+            fn, (inputs,), translated=False, force_persistent=force_persistent
+        )
+        self.assertEqual(kernels, 1)
+
+    @parametrize(
+        "shape_name,batch_size,seq_len,reorder,memory_planning",
+        (
+            ("smoke", 2, 8, False, False),
+            ("prefill", 4, 512, True, False),
+            ("decode", 64, 1, True, True),
+            ("projection", 2, 8, False, False),
+        ),
+    )
+    def test_translated_fusion(
+        self, device, shape_name, batch_size, seq_len, reorder, memory_planning
+    ):
+        inputs = _make_mla_inputs(
+            device=device,
+            batch_size=batch_size,
+            seq_len=seq_len,
+            projection=shape_name == "projection",
+        )
+        if shape_name == "projection":
+
+            def fn(hidden, weight, *args):
+                return _shifted_mla_indexer(F.linear(hidden, weight), *args)
+        else:
+            fn = _shifted_mla_indexer
+        if shape_name == "smoke":
+            disabled = self.compile_and_check(
+                fn,
+                (inputs,),
+                expected=False,
+                polyhedral_fusion=False,
+                force_persistent=True,
+            )
+        enabled = self.compile_and_check(
+            fn,
+            (inputs,),
+            force_persistent=True,
+            reorder_for_peak_memory=reorder,
+            memory_planning=memory_planning,
+            memory_pool="intermediates" if memory_planning else "none",
+        )
+        if shape_name == "smoke":
+            self.assertLess(enabled, disabled)
+
+    @parametrize(
+        "dynamic_feature_width,shapes",
+        (
+            (False, ((2, 8, 256), (4, 5, 256))),
+            (True, ((2, 8, 256), (2, 8, 192), (2, 8, 384))),
+        ),
+    )
+    def test_dynamic_shapes(self, device, dynamic_feature_width, shapes):
+        input_sets = tuple(
+            _make_mla_inputs(device=device, batch_size=batch, seq_len=seq, head_dim=width)
+            for batch, seq, width in shapes
+        )
+        for input_index, tensor in enumerate(input_sets[0]):
+            for dim in range(tensor.dim()):
+                feature = dynamic_feature_width and (
+                    (input_index == 0 and dim == 2)
+                    or (input_index in (1, 2) and dim == 0)
+                )
+                if feature:
+                    torch._dynamo.maybe_mark_dynamic(tensor, dim)
+                elif tensor.dim() >= 2 and dim < 2:
+                    torch._dynamo.mark_dynamic(tensor, dim)
+                else:
+                    torch._dynamo.mark_static(tensor, dim)
+        self.compile_and_check(
+            _shifted_mla_indexer,
+            input_sets,
+            dynamic=True,
+            expected=not dynamic_feature_width,
+        )
+
+    @parametrize(
+        "kind,head_dim,options",
+        (
+            ("non_power_of_two", 192, {}),
+            ("wider", 384, {}),
+            ("strided", MLA_HEAD_DIM, {}),
+            ("indirect", MLA_HEAD_DIM, {}),
+            ("equal_split", MLA_HEAD_DIM, {}),
+            ("nested_disabled", MLA_HEAD_DIM, {"nested_reduction": False}),
+            ("looped", MLA_HEAD_DIM, {"force_persistent": False}),
+        ),
+    )
+    def test_unsupported_candidate_falls_back(self, device, kind, head_dim, options):
+        def fn(x, ln_w, ln_b, cos, sin, indices=None):
+            if kind not in ("strided", "indirect", "equal_split"):
+                return _shifted_mla_indexer(x, ln_w, ln_b, cos, sin)
+            mean = x.mean(-1, keepdim=True)
+            var = ((x - mean) ** 2).mean(-1, keepdim=True)
+            normed = (x - mean) / torch.sqrt(var + 1e-5) * ln_w + ln_b
+            if kind == "equal_split":
+                return torch.split(normed.unsqueeze(2), [128, 128], dim=-1)
+            if kind == "strided":
+                selected = normed[..., ::2]
+            else:
+                selected = normed.index_select(-1, indices)
+            selected = selected.unsqueeze(2)
+            leading = selected[..., :32]
+            return leading * cos[..., :32] + leading * sin[..., :32], selected[..., 32:]
+
+        inputs = _make_mla_inputs(device=device, batch_size=2, seq_len=8, head_dim=head_dim)
+        if kind == "indirect":
+            inputs = (*inputs, torch.randperm(head_dim, device=device)[:96])
+        self.compile_and_check(fn, (inputs,), expected=False, **options)
+
+
+instantiate_device_type_tests(TranslatedSubParentEpilogueTest, globals(), only_for="cuda")
 
 
 TRITON_KERNEL_RE = re.compile(

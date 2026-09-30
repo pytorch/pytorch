@@ -2664,7 +2664,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
                     for read in node.read_writes.reads
                 )
             ]
-            if len(replay_matches) > 1:
+            if len(OrderedSet(group_index for group_index, _ in replay_matches)) > 1:
                 raise AssertionError(
                     "dense affine relation belongs to multiple output groups"
                 )
@@ -2742,7 +2742,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             )
         self._values: dict[str, OrderedSet[CSEVariable]] = {}
         self._materialized: dict[CSEVariable, MaterializedSubParentValue] = {}
-        self._dense_materialized: dict[tuple[int, int, int], CSEVariable] = {}
+        self._dense_materialized: dict[tuple[CSEVariable, int, int], CSEVariable] = {}
         self._lane_projections: dict[CSEVariable, _LaneProjection] = {}
         # Pointwise results at parent resolution, recorded as they are
         # emitted, so a lane replay of the same op can fold onto them.
@@ -2986,7 +2986,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
     ) -> CSEVariable | None:
         if not self._kernel.cse.contains_value(cast("TritonCSEVariable", source)):
             return None
-        key = (id(source), descriptor_index, output_lane)
+        key = (source, descriptor_index, output_lane)
         if key in self._dense_materialized:
             return self._dense_materialized[key]
         relation = descriptor.relation
@@ -3040,11 +3040,24 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         split while their parent-resolution value is still available.
         """
         required_relations = tuple(relations)
-        required_relation_ids = OrderedSet([id(relation) for relation in required_relations])
+        for name in OrderedSet(
+            relation.consumer_access.name
+            for relation in required_relations
+            if relation.access_stride != 1
+        ):
+            if not self._contracts[name].source_is_internal:
+                continue
+            materialized = any(
+                self._materialize(value) is not None
+                for value in self._values.get(name, ())
+            )
+            if not materialized:
+                raise AssertionError(f"lost required sub-parent source {name!r}")
+
         for descriptor_index, descriptor in enumerate(self._relation_descriptors):
             relation = descriptor.relation
             if (
-                id(relation) not in required_relation_ids
+                relation not in required_relations
                 or not relation.requires_live_source
                 or descriptor.output_group is None
                 or relation.access_stride != 1
@@ -3066,26 +3079,6 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
                     f"lost required dense sub-parent source "
                     f"{relation.consumer_access.name!r}"
                 )
-
-        for relation in required_relations:
-            if relation.access_stride == 1:
-                continue
-            if (
-                relation.access_stride is not None
-                and relation.access_stride != self._sub_parent_factor
-            ):
-                raise AssertionError(
-                    f"unsupported sub-parent affine stride {relation.access_stride}"
-                )
-            name = relation.consumer_access.name
-            if not self._contracts[name].source_is_internal:
-                continue
-            materialized = any(
-                self._materialize(value) is not None
-                for value in self._values.get(name, ())
-            )
-            if not materialized:
-                raise AssertionError(f"lost required sub-parent source {name!r}")
 
     def is_planned(self, name: str) -> bool:
         """Whether the final relation plan covers this source name."""
@@ -3540,28 +3533,13 @@ class SIMDScheduling(BaseScheduling):
         """
         if not self.supports_sub_parent_epilogue or not config.triton.nested_reduction:
             return None
-        strategies = (False, True) if config.polyhedral_fusion else (False,)
-        for allow_translation in strategies:
-            result = scheduler.NestedReduction.sub_parent_epilogue_result(
-                nodes,
-                parent_numel,
-                parent_rnumel,
-                allow_translation=allow_translation,
-            )
-            if result.plan is not None and self._sub_parent_plan_is_admitted(
-                nodes, parent_numel, result.plan
-            ):
-                return result.plan
-        return None
-
-    def _sub_parent_plan_is_admitted(
-        self,
-        nodes: Sequence[BaseSchedulerNode],
-        parent_numel: sympy.Expr,
-        plan: scheduler.StagedReductionPlan,
-    ) -> bool:
-        if not self._sub_parent_tiling_is_2d(nodes, parent_numel, plan.parent_rnumel):
-            return False
+        plan = scheduler.NestedReduction.sub_parent_epilogue_plan(
+            nodes, parent_numel, parent_rnumel
+        )
+        if plan is None:
+            return None
+        if not self._sub_parent_tiling_is_2d(nodes, parent_numel, parent_rnumel):
+            return None
         has_dense_mappings = plan.allow_translation and any(
             relation.access_stride == 1
             for stage in plan.sub_parent_stages
@@ -3571,11 +3549,10 @@ class SIMDScheduling(BaseScheduling):
             node.get_device() is None or node.get_device().type != "cuda"
             for node in nodes
         ):
-            return False
-        return not (
-            has_dense_mappings
-            and not self._dense_projection_is_persistent(plan)
-        )
+            return None
+        if has_dense_mappings and not self._dense_projection_is_persistent(plan):
+            return None
+        return plan
 
     @staticmethod
     def _dense_group_extent_subs(
@@ -4739,6 +4716,8 @@ class SIMDScheduling(BaseScheduling):
             "tiling_scores": tiling_score,
             "override_cooperative_reduction": False,
         }
+        if has_dense_mappings:
+            kernel_kwargs["override_persistent_reduction"] = True
         kernels = cast(
             "list[TritonKernel]",
             self.create_kernel_choices(kernel_features, [tiling], kernel_kwargs),
