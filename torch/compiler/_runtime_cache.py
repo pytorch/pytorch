@@ -44,6 +44,10 @@ def _precompile_error(message: str) -> Exception:
 _frozen_triton_kernels: dict[str, bytes] = {}
 _loaded_triton_kernels: dict[str, CachingAutotuner] = {}
 _frozen_triton_kernels_lock = threading.Lock()
+# Keyed like CppCodeCache: by source and full build command, which includes the
+# producer's absolute include and library paths.
+_frozen_cpp_kernels: dict[str, bytes] = {}
+_frozen_cpp_kernels_lock = threading.Lock()
 
 
 @CacheArtifactFactory.register
@@ -65,6 +69,71 @@ class InductorTritonCacheArtifact(CacheArtifact):
             _frozen_triton_kernels.update(records)
             for key in records:
                 _loaded_triton_kernels.pop(key, None)
+
+
+@CacheArtifactFactory.register
+class InductorCppCacheArtifact(CacheArtifact):
+    @staticmethod
+    def type() -> str:
+        return "inductor_cpp"
+
+    def populate_cache(self) -> None:
+        if hashlib.sha256(self.content).hexdigest() != self.key:
+            raise RuntimeError("Corrupt Inductor C++ runtime artifact")
+        records = pickle.loads(self.content)
+        if not isinstance(records, dict) or not all(
+            isinstance(key, str) and isinstance(value, bytes)
+            for key, value in records.items()
+        ):
+            raise RuntimeError("Invalid Inductor C++ runtime artifact")
+        with _frozen_cpp_kernels_lock:
+            _frozen_cpp_kernels.update(records)
+
+
+def clear_cpp_kernels() -> None:
+    with _frozen_cpp_kernels_lock:
+        _frozen_cpp_kernels.clear()
+
+
+def record_cpp_kernel(key: str, binary_path: str, load: Callable[[], object]) -> None:
+    with _capture_lock:
+        owner = _capture
+        if owner is None or owner.pid != os.getpid() or owner.sealed:
+            return
+        owner.cpp_kernels[key] = (binary_path, load)
+
+
+def has_frozen_cpp_kernel(key: str) -> bool:
+    with _frozen_cpp_kernels_lock:
+        return key in _frozen_cpp_kernels
+
+
+def restore_cpp_kernel(key: str, binary_path: str) -> None:
+    """Materialize a frozen C++ kernel binary at this host's cache path."""
+    with _frozen_cpp_kernels_lock:
+        payload = _frozen_cpp_kernels.get(key)
+    if payload is None or os.path.exists(binary_path):
+        return
+    os.makedirs(os.path.dirname(binary_path), exist_ok=True)
+    temporary = f"{binary_path}.{os.getpid()}.{threading.get_ident()}.tmp"
+    try:
+        with open(temporary, "wb") as output:
+            output.write(payload)
+        os.replace(temporary, binary_path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _freeze_cpp_kernels(kernels: dict[str, str]) -> bytes:
+    missing = sorted(key for key, path in kernels.items() if not os.path.exists(path))
+    if missing:
+        raise RuntimeError(f"Cannot export C++ kernels with no binary: {missing}")
+    binaries: dict[str, bytes] = {}
+    for key, binary_path in kernels.items():
+        with open(binary_path, "rb") as binary:
+            binaries[key] = binary.read()
+    return pickle.dumps(binaries)
 
 
 def record_triton_kernel(key: str, kernel: CachingAutotuner) -> None:
@@ -257,6 +326,7 @@ class _RuntimeCapture:
         self.policy = contextlib.ExitStack()
         self.finalize_lock = threading.Lock()
         self.triton_kernels: dict[str, list[CachingAutotuner]] = {}
+        self.cpp_kernels: dict[str, tuple[str, Callable[[], object]]] = {}
 
     def seal(self) -> None:
         if self.sealed:
@@ -309,6 +379,7 @@ def capture_runtime() -> Iterator[None]:
         finally:
             with _capture_lock:
                 owner.triton_kernels.clear()
+                owner.cpp_kernels.clear()
                 if _capture is owner:
                     _capture = None
 
@@ -316,10 +387,11 @@ def capture_runtime() -> Iterator[None]:
 def finalize_runtime_cache(
     artifact: bytes | None, write: Callable[[bytes | None], None]
 ) -> None:
-    """Freeze the scope's static Triton kernels into the cache artifact, pass it
-    to ``write``, then keep the scope sealed.
+    """Freeze the scope's static Triton kernels and C++ kernel binaries into the
+    cache artifact, pass it to ``write``, then keep the scope sealed.
 
-    Pending async compiles are waited on first, then the scope is sealed so any
+    Pending async compiles are waited on and every recorded C++ kernel is built
+    first, then the scope is sealed so any
     later compile raises before kernels are frozen, and it is unsealed again if
     freezing, serialization or ``write`` raises so the caller can retry. The
     caller must stop compiling before calling this: a kernel submitted on
@@ -344,18 +416,31 @@ def finalize_runtime_cache(
         )
         if artifacts is None:
             raise RuntimeError("Cannot finalize an unreadable precompile cache")
-        if InductorTritonCacheArtifact.type() in artifacts:
+        if any(
+            kind in artifacts
+            for kind in (
+                InductorTritonCacheArtifact.type(),
+                InductorCppCacheArtifact.type(),
+            )
+        ):
             raise RuntimeError(
                 "The precompile cache already contains frozen runtime dependencies"
             )
         # Drain before sealing: compile result callbacks re-check
         # check_compilation_allowed, so draining under the seal rejects them.
         AsyncCompile.drain_pending()
+        with _capture_lock:
+            cpp_loads = [load for _, load in owner.cpp_kernels.values()]
+        # Finishes pending C++ builds and builds loads that were never forced, so
+        # no binary is missing or partially written when it is frozen.
+        for load in cpp_loads:
+            load()
         if torch.cuda.is_initialized():
             torch.cuda.synchronize()
         with _capture_lock:
             owner.seal()
             kernels = dict(owner.triton_kernels)
+            cpp_kernels = {key: path for key, (path, _) in owner.cpp_kernels.items()}
         try:
             static_kernels: dict[str, bytes] = {}
             rejected_sources: list[dict[str, object]] = []
@@ -378,9 +463,15 @@ def finalize_runtime_cache(
                 )
                 raise error
             static_payload = pickle.dumps(static_kernels)
+            cpp_payload = _freeze_cpp_kernels(cpp_kernels)
             artifacts[InductorTritonCacheArtifact.type()] = [
                 InductorTritonCacheArtifact(
                     hashlib.sha256(static_payload).hexdigest(), static_payload
+                )
+            ]
+            artifacts[InductorCppCacheArtifact.type()] = [
+                InductorCppCacheArtifact(
+                    hashlib.sha256(cpp_payload).hexdigest(), cpp_payload
                 )
             ]
             serializer = AppendingByteSerializer(serialize_fn=_serialize_single_cache)

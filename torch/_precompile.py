@@ -3348,6 +3348,10 @@ def prepare_runtime(
     generates the same Triton source is served the frozen kernel and its
     selected config, until ``torch._inductor.utils.fresh_cache()`` or
     ``clear_caches()`` resets Inductor's caches.
+    Frozen C++ kernels likewise, but a C++ kernel is keyed by its full build
+    command, which includes absolute include and library paths: the serving host
+    must install PyTorch and its toolchain at the producer's paths, or the kernel
+    misses and, under :func:`no_compilation`, raises.
 
     Raises :class:`~torch.compiler.PrecompileError` for a make_fx capture, a
     mismatched or unreadable pair, or a cache :func:`finalize_cache` did not
