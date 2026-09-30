@@ -1028,18 +1028,38 @@ def launch_mxfp8_grouped_gemm_gfx950(
             # Warm both bounded traversal modes; runtime selects using the grid.
             for persistent in (False, True):
                 compile_param = dataclasses.replace(param, persistent=persistent)
-                flyc.compile(
+                _compile_gfx950(
                     cached_launch(*compile_param.key()), *compile_args_factory()
                 )
             return out
         run_cached_flydsl(
             cached_launch(*launch_param.key()),
             constexpr_param=launch_param,
-            compiler=flyc.compile,
+            compiler=_compile_gfx950,
             dispatch_args=dispatch_args,
             compile_args_factory=compile_args_factory,
         )
     return out
+
+
+def _compile_gfx950(jit_func, *args):
+    """`flyc.compile`, refusing any target but gfx950.
+
+    Every scaled MFMA and ``ds_read_tr`` here is gfx950-only, and gfx942 has no
+    MX support at all. FlyDSL resolves its target from the environment and, if
+    it cannot, silently assumes gfx942 -- which would surface as an LLVM
+    instruction-selection abort, or a kernel for the wrong chip. Checked at
+    compile time, where the resolved target is what will actually be built.
+    """
+    from flydsl.compiler.backends import get_backend
+
+    arch = get_backend().target.arch.split(":", 1)[0]
+    if arch != "gfx950":
+        raise RuntimeError(
+            f"MXFP8 grouped GEMM requires gfx950, but FlyDSL is targeting {arch!r}; "
+            "set FLYDSL_GPU_ARCH if autodetection picked the wrong arch"
+        )
+    return flyc.compile(jit_func, *args)
 
 
 def _row_windows(M, K, N, offs, block_r=BLOCK_R):

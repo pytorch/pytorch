@@ -596,6 +596,34 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(compiler.call_count, 2)
         compiled.assert_called_once()
 
+    def test_compiled_cache_compiles_for_device_arch(self):
+        """A cold compile targets the dispatch device's arch, not a guess."""
+        seen_arch = []
+
+        def compiler(jit_func, *args):
+            seen_arch.append(os.environ.get("FLYDSL_GPU_ARCH"))
+            return mock.Mock()
+
+        def invoke(key):
+            dispatch = SimpleNamespace(device=SimpleNamespace(type="cuda", index=0))
+            run_cached_flydsl(
+                SimpleNamespace(),
+                object(),
+                constexpr_param=_CacheParam(key),
+                compiler=compiler,
+                dispatch_args=(dispatch,),
+            )
+
+        props = SimpleNamespace(gcnArchName="gfx950:sramecc+:xnack-")
+        with mock.patch("torch.cuda.get_device_properties", return_value=props):
+            with mock.patch.dict(os.environ, {"FLYDSL_GPU_ARCH": ""}):
+                invoke("detected")
+                # Scoped to the compile: the process environment is untouched.
+                self.assertEqual(os.environ["FLYDSL_GPU_ARCH"], "")
+            with mock.patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx942"}):
+                invoke("explicit")
+        self.assertEqual(seen_arch, ["gfx950", "gfx942"])
+
     def test_compiled_cache_serializes_same_param(self):
         jit_func = SimpleNamespace()
         compile_started = threading.Event()
@@ -1361,6 +1389,31 @@ class TestFlyDSLTemplate(TestCase):
         self.assertEqual(module.pick_tile(m, e, n, num_cus=256), (256, 128))
         with mock.patch.object(module, "_current_device_cu_count", return_value=128):
             self.assertEqual(module.pick_tile(m, e, n), (256, 256))
+
+    def test_flydsl_mxfp8_grouped_mm_refuses_non_gfx950_target(self):
+        """gfx942 has no MX support; compiling for it must fail loudly."""
+        import importlib
+
+        if not flydsl_utils.runtime_available():
+            self.skipTest("FlyDSL runtime unavailable")
+
+        module = importlib.import_module(
+            "torch._inductor.kernel.vendored_templates.flydsl.kernels."
+            "mxfp8_grouped_gemm_gfx950"
+        )
+        with (
+            mock.patch.object(module.flyc, "compile") as compile_,
+            mock.patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx942"}),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "requires gfx950.*gfx942"):
+                module._compile_gfx950(object())
+            compile_.assert_not_called()
+        with (
+            mock.patch.object(module.flyc, "compile") as compile_,
+            mock.patch.dict(os.environ, {"FLYDSL_GPU_ARCH": "gfx950"}),
+        ):
+            module._compile_gfx950("jit", 1)
+            compile_.assert_called_once_with("jit", 1)
 
 
 def _mxfp_case(mxfp_format, shape, device, a_is_transposed=False, b_is_transposed=True):

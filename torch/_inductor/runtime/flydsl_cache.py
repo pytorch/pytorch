@@ -36,6 +36,28 @@ def temporary_env(updates: dict[str, str | None]):
                 os.environ[key] = old_value
 
 
+def _device_gpu_arch(device: Any) -> str | None:
+    """The arch to compile for, taken from the device the kernel will run on.
+
+    Left to itself, FlyDSL finds the arch by running ``rocm_agent_enumerator``
+    and silently falls back to gfx942 if that fails. It does fail in Inductor's
+    subprocess workers when their inherited ``PYTHONPATH`` does not match the
+    enumerator's interpreter. gfx942 then gets code it cannot run: the gfx950
+    kernels either fail instruction selection or, for MX formats, target a
+    chip with no MX support. The device already reports its arch, so no
+    subprocess is needed. An explicit ``FLYDSL_GPU_ARCH`` still wins; returning
+    None leaves the environment as it is.
+    """
+    if os.environ.get("FLYDSL_GPU_ARCH"):
+        return None
+    if getattr(device, "type", None) != "cuda":
+        return None
+    import torch
+
+    arch = getattr(torch.cuda.get_device_properties(device), "gcnArchName", None)
+    return str(arch).split(":", 1)[0] if arch else None
+
+
 def run_cached_flydsl(
     jit_func: Any,
     *compile_args: Any,
@@ -84,7 +106,8 @@ def run_cached_flydsl(
                 if compile_args_factory is not None
                 else compile_args
             )
-            compiled = compiler(jit_func, *args)
+            with temporary_env({"FLYDSL_GPU_ARCH": _device_gpu_arch(device)}):
+                compiled = compiler(jit_func, *args)
             compiled_cache[cache_key] = compiled
         else:
             dispatch_after_wait = True
