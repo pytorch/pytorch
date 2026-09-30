@@ -49,7 +49,7 @@ from ..utils import (
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, TritonScratchWorkspace
-from .cpp_utils import cexpr, DEVICE_TO_ATEN
+from .cpp_utils import cexpr, device_to_aten
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .multi_kernel import MultiKernelCall
 from .triton_utils import should_unwrap_unspec_arg
@@ -1317,7 +1317,7 @@ class CppWrapperGpu(CppWrapperCpu):
         )
 
     def _codegen_cached_device_type(self) -> str:
-        device_str = DEVICE_TO_ATEN[self.device][5:].lower()
+        device_str = device_to_aten(self.device)[5:].lower()
         self.used_cached_devices.add(device_str)
         return f"cached_torch_device_type_{device_str}"
 
