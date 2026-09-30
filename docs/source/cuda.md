@@ -629,8 +629,9 @@ point, not every device's current stream.
 ### Localized memory pools
 
 With CUDA driver and cuda.bindings 13.4+, `LocalizedMemPool` allocates physical
-memory on a specified locality domain. Using the MemPool does not localize kernel execution; use a green-context stream separately
-when compute localization is also desired.
+memory on a specified locality domain.
+Using the MemPool does not localize kernel execution;
+use a green-context stream separately when compute localization is also desired.
 
 ```python
 pool = torch.cuda.LocalizedMemPool(locality_domain_id=0, device="cuda:0")
