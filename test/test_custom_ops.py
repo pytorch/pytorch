@@ -6425,7 +6425,9 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             },
         )
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "pinned CPU memory requires CUDA or XPU")
+    @unittest.skipIf(
+        not TEST_CUDA and not TEST_XPU, "pinned CPU memory requires CUDA or XPU"
+    )
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
     )
@@ -6444,7 +6446,9 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         x = torch.arange(12, dtype=torch.float32, pin_memory=True).view(3, 4)
         torch.library.opcheck(op, (x,), test_utils="test_schema")
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "pinned CPU memory requires CUDA or XPU")
+    @unittest.skipIf(
+        not TEST_CUDA and not TEST_XPU, "pinned CPU memory requires CUDA or XPU"
+    )
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
     )
@@ -6507,7 +6511,9 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         self.assertEqual(cloned.elem, x.elem)
         self.assertNotEqual(cloned.elem.data_ptr(), x.elem.data_ptr())
 
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "pinned CPU memory requires CUDA or XPU")
+    @unittest.skipIf(
+        not TEST_CUDA and not TEST_XPU, "pinned CPU memory requires CUDA or XPU"
+    )
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
     )
