@@ -6476,9 +6476,10 @@ class TestPrecompileRuntimeCache(TestCase):
                     source, cache = _capture_files(self, fn, [(x,)], backend="inductor")
                     self.assertTrue(_runtime_cache._capture.cpp_kernels)
                     pc.finalize_cache(artifact_path=source, cache_path=cache)
+                # Inductor never precompiles headers on Windows.
                 self.assertEqual(
                     os.path.isdir(os.path.join(directory, "p", "precompiled_headers")),
-                    precompile_headers,
+                    precompile_headers and not IS_WINDOWS,
                 )
                 clear_caches()
                 with (
