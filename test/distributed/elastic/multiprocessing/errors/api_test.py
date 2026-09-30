@@ -7,6 +7,7 @@ import os
 import shutil
 import signal
 import tempfile
+import unittest
 from unittest import mock
 
 from torch.distributed.elastic.multiprocessing.errors import (
@@ -15,11 +16,6 @@ from torch.distributed.elastic.multiprocessing.errors import (
     record,
 )
 from torch.distributed.elastic.multiprocessing.errors.error_handler import ErrorHandler
-from torch.testing._internal.common_utils import (
-    HardwareClassification,
-    run_tests,
-    TestCase,
-)
 
 
 class SentinelError(Exception):
@@ -107,9 +103,7 @@ def read_resource_file(resource_file: str) -> str:
         return "".join(fp.readlines())
 
 
-class ApiTest(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
+class ApiTest(unittest.TestCase):
     def setUp(self):
         super().setUp()
         self.test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
@@ -467,7 +461,3 @@ class ApiTest(TestCase):
                 wrapped()
 
         error_handler.record_exception.assert_not_called()
-
-
-if __name__ == "__main__":
-    run_tests()

@@ -195,6 +195,7 @@ from torch._vendor.quack.gemm_config import (
     GemmConfig,
     SplitKMode,
     blockscaled_default_config,
+    canonicalize_config_constraints,
     cta_tile_shape_m,
     default_config,
 )
@@ -204,6 +205,10 @@ from torch._vendor.quack.gemm_sm90 import GemmSm90
 from torch._vendor.quack.gemm_sm100 import GemmSm100
 from torch._vendor.quack.gemm_sm120 import GemmSm120
 from torch._vendor.quack.rounding import RoundingMode
+
+canonicalize_config_constraints = torch._dynamo.assume_constant_result(
+    canonicalize_config_constraints
+)
 
 _SM_BASE = {8: GemmSm80, 9: GemmSm90, 10: GemmSm100, 11: GemmSm100, 12: GemmSm120}
 
@@ -694,13 +699,22 @@ class EpiMod:
         self._minted[key] = cls
         return cls
 
-    def gemm_tuned(self, A, B, D, C=None, *, epi_args: dict, b_kn: bool = False):
-        """Autotuned gemm(): config-space sweep via quack.gemm_runtime.autotune (lazy
-        import — this module sits below gemm_config in the import graph).
-        Returns TunedModGemm(plan, config, sinks); see tuned_mod_gemm."""
+    def gemm_tuned(
+        self, A, B, D, C=None, *, epi_args: dict, b_kn: bool = False, config_constraints=None
+    ):
+        """Autotune GEMM over the optionally constrained native config space."""
         from torch._vendor.quack.gemm_runtime.autotune import tuned_mod_gemm
 
-        return tuned_mod_gemm(self, A, B, D, C, epi_args=epi_args, b_kn=b_kn)
+        return tuned_mod_gemm(
+            self,
+            A,
+            B,
+            D,
+            C,
+            epi_args=epi_args,
+            b_kn=b_kn,
+            config_constraints=config_constraints,
+        )
 
     def gemm(
         self,
@@ -1449,7 +1463,8 @@ class EpiMod:
         out=None,  # {name: buffer} incl. "D"; missing entries are allocated
         out_dtype=None,
         store_d=True,
-        config=None,  # exact GemmConfig pin; None selects the mod's default
+        config_constraints=None,  # partial GemmConfig fields, mapping or canonical tuple
+        config=None,  # exact GemmConfig pin; None selects/defaults from constraints
         tuned=True,
         dynamic_scheduler=False,
         cu_seqlens_m=None,
@@ -1468,7 +1483,6 @@ class EpiMod:
         #                           the resolved config's tile_M/tile_K)
         add_to_output=False,  # D += result via the TMA reduce-add store atom (see
         #                       EpiMod.gemm); requires out={"D": buf} and C=None
-        compile_dispatch: bool = True,
         **operands,  # epilogue operand tensors/scalars by fn-parameter name
     ):
         """Eager torch-facing call: resolve config (autotune via
@@ -1478,7 +1492,9 @@ class EpiMod:
         ``host_finalize`` (partials are internal scratch) unless the caller
         passed the partial buffer as an operand.
 
-        The tuned path covers the non-SR surface (see quack.gemm_runtime.autotune,
+        ``config_constraints`` limits native candidates for both tuning and
+        deterministic selection; an exact ``config=`` must satisfy them. The
+        tuned path covers the non-SR surface (see quack.gemm_runtime.autotune,
         incl. varlen/gather/blockscaled/concat, A-operand transforms and
         dynamic_scheduler=True); other calls resolve with the explicit
         ``config=`` or the per-arch default.
@@ -1489,18 +1505,24 @@ class EpiMod:
         transform_a rides the same op: the handle crosses by semantic digest
         (bind it to a module global for cross-process graphs), runtime
         operand tensors ride the op's input list, and the bundle is rebuilt
-        inside the op body. Generated runtime callers set ``compile_dispatch=False``
-        because they are already below torch.compile."""
+        inside the op body."""
         import torch
 
+        constraints = canonicalize_config_constraints(config_constraints)
         if config is not None and type(config) is not GemmConfig:
             raise TypeError("config must be an exact GemmConfig or None")
+        if config is not None and any(
+            getattr(config, name) != value for name, value in constraints
+        ):
+            raise ValueError(
+                f"config {config} does not satisfy config_constraints={dict(constraints)!r}"
+            )
 
         owned_fmt = None
         transform_key = None
         if transform_a is not None:
             if not hasattr(transform_a, "semantic_digest"):
-                if compile_dispatch and torch.compiler.is_compiling():
+                if torch.compiler.is_compiling():
                     raise NotImplementedError(
                         "transform_a under torch.compile needs a digest-carrying handle "
                         "(@a_transform / dropout_a / w4_transform)"
@@ -1539,7 +1561,7 @@ class EpiMod:
             if not store_d or out is None or out.get("D") is None:
                 raise ValueError('add_to_output requires the accumulator as out={"D": buf}')
 
-        if compile_dispatch and torch.compiler.is_compiling():
+        if torch.compiler.is_compiling():
             if dynamic_scheduler or epi_key_overrides is not None:
                 raise NotImplementedError(
                     "dynamic_scheduler/epi_key_overrides under torch.compile: not supported yet"
@@ -1554,6 +1576,7 @@ class EpiMod:
                 out=out,
                 out_dtype=out_dtype,
                 store_d=store_d,
+                config_constraints=constraints,
                 config=config,
                 tuned=tuned,
                 cu_seqlens_m=cu_seqlens_m,
@@ -1595,10 +1618,11 @@ class EpiMod:
                 else tuple(sorted((kk, tensor_key(v)) for kk, v in out.items())),
                 out_dtype,
                 store_d,
-                # GemmConfig is a frozen dataclass; key by value so callers
-                # may rebuild an equal config per call (identity keys can
-                # alias a freed config's address and replay its plan).
-                config,
+                # Pinned configs key by identity: they are module-level
+                # constants in practice; a recreated equal config just
+                # re-records (correct, one extra cold pass).
+                None if config is None else id(config),
+                constraints,
                 tuned,
                 dynamic_scheduler,
                 tensor_key(cu_seqlens_m),
@@ -1650,10 +1674,10 @@ class EpiMod:
                     result[name] = self._finalize_sink(name, buf, cu_seqlens_m, plan)
                 return result
 
-        from torch._vendor.quack.gemm_runtime.autotune import mod_b_kn
-
         varlen_m = cu_seqlens_m is not None
-        b_kn = mod_b_kn(A.device, concat_layout)
+        # concat reads B (k, n) through per-call views, so it vetoes the b_kn
+        # trace-time relabel (the interleave lives in mod.gemm).
+        b_kn = get_device_capacity(A.device)[0] >= 9 and not concat_layout
         B_d = B if (b_kn or owned_fmt is not None) else B.mT
         n_override = transform_a.padded_n(B) if transform_a is not None else None
         provided_out = frozenset(k for k, v in (out or {}).items() if v is not None)
@@ -1682,7 +1706,7 @@ class EpiMod:
                 # worst-case shapes per metadata (it's on the warm path).
                 l = lead[0] if len(lead) == 2 else None
                 num_seqs = None if cu_seqlens_m is None else cu_seqlens_m.shape[0] - 1
-                shape_key = (lead[-1], n, l, str(A.device), num_seqs)
+                shape_key = (lead[-1], n, l, str(A.device), num_seqs, constraints)
                 cache = self.__dict__.setdefault("_sink_shape_cache", {})
                 shapes = cache.get(shape_key)
                 if shapes is None:
@@ -1693,6 +1717,7 @@ class EpiMod:
                         l=l,
                         device=A.device,
                         num_seqs=num_seqs,
+                        config_constraints=constraints,
                     )
                     cache[shape_key] = shapes
                 for name, shape in shapes.items():
@@ -1719,6 +1744,7 @@ class EpiMod:
                 transform_a=transform_a,
                 transform_sf=transform_sf,
                 transform_operands=transform_operands,
+                config_constraints=constraints,
             )
             sink_bufs = {name: res.sinks[name] for name in owned_sinks}
             cfg_used, plan_used = res.config, res.plan
@@ -1748,7 +1774,7 @@ class EpiMod:
             )
             if config is not None:
                 cfg = config
-            elif any(
+            elif constraints or any(
                 hasattr(op, "supports_config")
                 for op in (
                     *self.ops.values(),
@@ -1757,7 +1783,7 @@ class EpiMod:
                     *self.extra_ops,
                 )
             ):
-                from torch._vendor.quack.gemm_runtime.autotune import _legal_mod_configs, mod_selection_args
+                from torch._vendor.quack.gemm_runtime.autotune import _select_mod_config, mod_selection_args
 
                 selection_args = mod_selection_args(
                     operands,
@@ -1777,9 +1803,13 @@ class EpiMod:
                     if SFA is not None
                     else self._default_config(A, B, transform_a)
                 )
-                cfg = _legal_mod_configs(
-                    self, A.device, selection_args, preferred_config=preferred_config
-                )[0]
+                cfg = _select_mod_config(
+                    self,
+                    A.device,
+                    constraints,
+                    selection_args,
+                    preferred_config=preferred_config,
+                )
             elif SFA is not None:
                 cfg = blockscaled_default_config(
                     A.shape[-2], n, device_capacity=get_device_capacity(A.device)[0]

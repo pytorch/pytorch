@@ -6,21 +6,27 @@ Test selective lowering control via node metadata annotations.
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import HardwareClassification, parametrize
-from torch.testing._internal.inductor_utils import patch_custom_fallback_pass
-from torch.utils._triton import has_triton
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    patch_custom_fallback_pass,
+)
 
 
+@instantiate_parametrized_tests
 class SelectiveLoweringTest(InductorTestCase):
     """
     Tests for user-controllable selective lowering using node.meta annotations.
     """
 
-    hw_classification = HardwareClassification.ACCELERATOR
+    device = GPU_TYPE
 
     @parametrize("fallback", (True, False))
-    def test_basic_selective_lowering(self, device, fallback: bool):
+    def test_basic_selective_lowering(self, fallback: bool):
         """
         Test that nodes marked for fallback use fallback handlers instead of lowerings.
         """
@@ -30,8 +36,8 @@ class SelectiveLoweringTest(InductorTestCase):
             b = a * 2  # This will use normal lowering
             return b
 
-        x = torch.randn(10, device=device)
-        y = torch.randn(10, device=device)
+        x = torch.randn(10, device=self.device)
+        y = torch.randn(10, device=self.device)
 
         # Mark all add operations for fallback
         def should_fallback_add(node: torch.fx.Node) -> bool:
@@ -52,13 +58,8 @@ class SelectiveLoweringTest(InductorTestCase):
         self.assertEqual("aten.add" in code, fallback)
 
 
-instantiate_device_type_tests(
-    SelectiveLoweringTest, globals(), except_for="cpu", allow_xpu=True
-)
-
-
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if has_triton():
+    if HAS_GPU:
         run_tests(needs="filelock")
