@@ -114,6 +114,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
+    TraceableWrapperSubclass,
 )
 from torch.utils.weak import TensorWeakRef
 
@@ -151,6 +152,7 @@ from ..source import (
     is_from_optimizer_source,
     is_from_unspecialized_nn_module_source,
     ListGetItemSource,
+    ListReverseIteratorBackingListSource,
     LocalSource,
     NNModuleSource,
     NonSerializableSetGetItemSource,
@@ -191,6 +193,9 @@ from ..utils import (
     is_utils_checkpoint,
     is_wrapper_or_member_descriptor,
     istype,
+    list_reverseiterator,
+    list_reverseiterator_backing_list,
+    list_reverseiterator_len,
     namedtuple_fields,
     odict_values,
     proxy_args_kwargs,
@@ -252,8 +257,10 @@ from .iter import CountIteratorVariable, ItertoolsVariable
 from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
+    ByteArrayVariable,
     DequeVariable,
     ListIteratorVariable,
+    ListReverseIteratorVariable,
     ListVariable,
     RangeVariable,
     SizeVariable,
@@ -969,8 +976,10 @@ class VariableBuilder:
                 (tuple, list, odict_values, collections.deque, torch.Size),
                 cls.wrap_listlike,
             ),
+            (bytearray, cls.wrap_bytearray),
             (itertools.count, cls.wrap_itertools_count),
             (tuple_iterator, cls.wrap_tuple_iterator),
+            (list_reverseiterator, cls.wrap_list_reverseiterator),
             (range_iterator, cls.wrap_range_iterator),
             ((slice, range), cls.wrap_slice_range),
             (tuple(common_constant_types), cls.wrap_literal),
@@ -1371,6 +1380,8 @@ class VariableBuilder:
             (enum.Enum, torch.DispatchKey, torch._C._functorch.TransformType),
         ) or is_pybind11_enum_member(value):
             self.install_guards(GuardBuilder.ID_MATCH)
+            # _call_impl registers this object with SideEffects after _wrap returns,
+            # so sourced enum members support attribute mutation.
             return UserDefinedObjectVariable(value, source=self.source)
         elif DebuggingVariable.is_reorderable_logging_function(value):
             # Put this above builtin_callable so that print() can be handled
@@ -2439,8 +2450,14 @@ class VariableBuilder:
             return result
         return self.tx.output.side_effects.track_object_existing(value, result)
 
+    def wrap_bytearray(self, value: bytearray) -> VariableTracker:
+        self.install_guards(GuardBuilder.TYPE_MATCH, GuardBuilder.EQUALS_MATCH)
+        result = ByteArrayVariable(value, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
+
     def wrap_listlike(
-        self, value: Union[tuple[Any, ...], list[Any], odict_values, NamedTuple]
+        self,
+        value: Union[tuple[Any, ...], list[Any], odict_values, NamedTuple],
     ) -> VariableTracker:
         if config.specialize_int and type(value) is torch.Size:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
@@ -2585,6 +2602,26 @@ class VariableBuilder:
             for i in range(tuple_iterator_len(value))
         ]
         result = TupleIteratorVariable(output, source=self.source)
+        return self.tx.output.side_effects.track_mutable(value, result)
+
+    def wrap_list_reverseiterator(self, value: Any) -> VariableTracker:
+        self.install_guards(GuardBuilder.LIST_REVERSEITERATOR_LEN)
+        length = list_reverseiterator_len(value)
+        backing_list = list_reverseiterator_backing_list(value)
+        backing_source = ListReverseIteratorBackingListSource(self.get_source())
+        backing_vt = VariableBuilder(self.tx, backing_source)(backing_list)
+        source_seq = (
+            backing_vt._base_vt
+            if isinstance(backing_vt, UserDefinedListVariable)
+            else backing_vt
+        )
+        if source_seq is None:
+            raise AssertionError("_base_vt must not be None")
+        result = ListReverseIteratorVariable(
+            source_seq=source_seq,
+            it_index=length - 1,
+            source=self.source,
+        )
         return self.tx.output.side_effects.track_mutable(value, result)
 
     def wrap_range_iterator(self, value: range_iterator) -> VariableTracker:
@@ -5134,6 +5171,39 @@ def wrap_to_fake_tensor_and_record(
         )
 
 
+def _coor_check_tensor_device(
+    e: torch.Tensor | TraceableWrapperSubclass, source: Source
+) -> None:
+    """Refuse a tensor on a non-current accelerator under compile-on-one-rank.
+
+    Its index is the tracing rank's, so no guard on it can be rank-portable and the
+    artifact could not be shared. The make_fx backends already refuse such a graph
+    (_coor_check_current_accelerator), but Dynamo builds the tensor guards before any
+    backend runs, so a backend that never traces -- "eager" -- would otherwise reach
+    the guard with a device only the tracing rank has. Refusing here is what lets
+    TENSOR_MATCH decide relative-vs-exact from the device type alone, identically on
+    every rank, instead of recording the decision and replaying it.
+    """
+    from torch.fx.experimental.proxy_tensor import _coor_enabled
+
+    if not _coor_enabled():
+        return
+    device = e.device
+    if device.type in ("cpu", "meta"):
+        return
+    acc = torch.accelerator.current_accelerator()
+    cur = None
+    if acc is not None and device.type == acc.type:
+        cur = torch.device(acc.type, torch.accelerator.current_device_index())
+        if device.index is None or device.index == cur.index:
+            return
+    raise RuntimeError(
+        f"device_as_parameter: {source.name} is on {device}, which is not the "
+        f"current accelerator ({cur or acc}); the traced graph cannot be made "
+        f"device-agnostic for compile-on-one-rank."
+    )
+
+
 def _wrap_to_fake_tensor_and_record_impl(
     e: Any,
     tx: "InstructionTranslatorBase",
@@ -5150,6 +5220,7 @@ def _wrap_to_fake_tensor_and_record_impl(
     ):
         if source is None:
             raise AssertionError("source must not be None for tensor wrapping")
+        _coor_check_tensor_device(e, source)
         static_shapes, _reason = tensor_always_has_static_shape(
             e,
             is_tensor,
@@ -5557,6 +5628,9 @@ class SourcelessBuilder:
         )
         handlers[tuple] = lambda tx, value: TupleVariable(
             [create(tx, x) for x in value]
+        )
+        handlers[bytearray] = lambda tx, value: ByteArrayVariable(
+            bytearray(value), mutation_type=ValueMutationNew()
         )
         handlers[torch.Size] = lambda tx, value: SizeVariable(
             [create(tx, x) for x in value]
