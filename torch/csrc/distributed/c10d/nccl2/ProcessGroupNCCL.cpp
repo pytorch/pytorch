@@ -631,7 +631,8 @@ void ProcessGroupNCCL::abortProcess(const std::string& reason) {
   TC_LOG(ERROR, this) << "Aborting process on rank " << rank_ << " due to "
                       << reason;
   runAbortHooks();
-  const auto waitMs = getCvarInt({"TORCHCOMM_HEALTH_CHECK_WAIT_MS"}, 15000);
+  const auto waitMs =
+      getCvarInt(::c10d::TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 15 * 1000);
   TC_LOG(ERROR, this)
       << "Waiting " << waitMs
       << "ms for health check and flight recorder dump before aborting";
