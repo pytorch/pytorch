@@ -18,7 +18,6 @@
 #include <mutex>
 #include <shared_mutex>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
 using c10::CachingAllocator::Stat;
@@ -470,8 +469,23 @@ struct CachingHostAllocatorImpl {
     if (!allocated_during_capture) {
       // Event recording must be done outside the mutex to avoid potential
       // deadlocks (e.g., when Python GIL is involved)
-      for (auto stream : streams) {
-        record_stream(events, stream);
+      //
+      // free() is reached from ~StorageImpl, so a throw here would cross a
+      // noexcept destructor and terminate. Leaving event_count_ elevated
+      // retires the block permanently, as the capture path below also does.
+      try {
+        for (auto stream : streams) {
+          record_stream(events, stream);
+        }
+      } catch ([[maybe_unused]] const std::exception& e) {
+        TORCH_WARN_ONCE(
+            "Failed to record an event while freeing a pinned host block; "
+            "the block will not be reused: ",
+            e.what());
+      } catch (...) {
+        TORCH_WARN_ONCE(
+            "Failed to record an event while freeing a pinned host block; "
+            "the block will not be reused");
       }
     }
 
@@ -1329,25 +1343,25 @@ struct TORCH_API HostAllocator : public at::Allocator {
   virtual void reset_peak_stats() = 0;
 
   virtual void begin_allocate_to_pool(
-      c10::MempoolId_t pool_id,
-      std::function<bool(c10::Stream)> filter) {
+      c10::MempoolId_t /*pool_id*/,
+      std::function<bool(c10::Stream)> /*filter*/) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for begin_allocate_to_pool");
   }
 
-  virtual void end_allocate_to_pool(c10::MempoolId_t pool_id) {
+  virtual void end_allocate_to_pool(c10::MempoolId_t /*pool_id*/) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for end_allocate_to_pool");
   }
 
-  virtual void release_pool(c10::MempoolId_t pool_id) {
+  virtual void release_pool(c10::MempoolId_t /*pool_id*/) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for release_pool");
   }
 
   virtual void record_history(
-      bool enabled,
-      c10::CachingDeviceAllocator::CreateContextFn context_recorder,
-      size_t max_entries,
-      c10::CachingDeviceAllocator::RecordContext when,
-      bool clearHistory) {}
+      bool /*enabled*/,
+      c10::CachingDeviceAllocator::CreateContextFn /*context_recorder*/,
+      size_t /*max_entries*/,
+      c10::CachingDeviceAllocator::RecordContext /*when*/,
+      bool /*clearHistory*/) {}
 
   virtual bool is_history_enabled() const {
     return false;
@@ -1492,4 +1506,3 @@ struct HostAllocatorRegistry {
   }
 
 } // namespace at
-C10_DIAGNOSTIC_POP()

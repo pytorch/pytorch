@@ -954,20 +954,11 @@ class Module:
 
         # _apply is traced by dynamo at the bytecode level, and torch._subclasses
         # is in dynamo's MOD_SKIPLIST, revisit later for c++
-        from torch._subclasses.fake_tensor import FakeTensor
-
-        def contains_fake_tensor(tensor) -> bool:
-            if isinstance(tensor, FakeTensor):  # noqa: ISINSTANCE_FAKE_TENSOR
-                return True
-            if is_traceable_wrapper_subclass(tensor):
-                attrs, _ = tensor.__tensor_flatten__()
-                return any(
-                    contains_fake_tensor(getattr(tensor, attr)) for attr in attrs
-                )
-            return False
+        from torch._subclasses.fake_tensor import is_fake
 
         def has_fake_tensor(tensor, tensor_applied) -> bool:
-            return contains_fake_tensor(tensor) or contains_fake_tensor(tensor_applied)
+            # is_fake also sees through functional and functorch wrappers.
+            return is_fake(tensor) or is_fake(tensor_applied)
 
         def compute_should_use_set_data(tensor, tensor_applied, has_fake) -> bool:
             if (
@@ -1059,14 +1050,21 @@ class Module:
                 g_should_use_set_data = compute_should_use_set_data(
                     param_grad, grad_applied, g_has_fake_tensor
                 )
-                g_should_use_swap_tensors = (
-                    p_should_use_swap_tensors and not g_has_fake_tensor
+                # Decide for the gradient itself: a wrapper-subclass gradient
+                # on a plain parameter still needs swap_tensors.
+                g_should_use_swap_tensors = not g_has_fake_tensor and (
+                    should_use_swap_tensors
+                    or is_traceable_wrapper_subclass(grad_applied)
                 )
                 if g_should_use_swap_tensors:
                     grad_applied.requires_grad_(param_grad.requires_grad)
                     try:
+                        # The module's reference would keep param_grad's use
+                        # count at 2 and block the swap.
+                        out_param.grad = None
                         torch.utils.swap_tensors(param_grad, grad_applied)
                     except Exception as e:
+                        out_param.grad = param_grad
                         raise RuntimeError(
                             f"_apply(): Couldn't swap {self._get_name()}.{key}.grad"
                         ) from e
@@ -1838,7 +1836,7 @@ class Module:
     # torchrec tests the code consistency with the following code
     # fmt: off
     def _call_impl(self, *args, **kwargs):
-        forward_call = (self._slow_forward if torch._C._get_tracing_state() else self.forward)
+        forward_call = (self._slow_forward if torch._C._is_tracing() else self.forward)
         # If we don't have any hooks, we want to skip the rest of the logic in
         # this function, and just call forward.
         if not (self._backward_hooks or self._backward_pre_hooks or self._forward_hooks or self._forward_pre_hooks

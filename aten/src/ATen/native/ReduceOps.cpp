@@ -330,7 +330,7 @@ static ScalarType get_result_or_self_value_dtype(
 
 TORCH_META_FUNC2(norm, ScalarOpt_dim)
 (const Tensor& self, const OptionalScalarRef p, IntArrayRef dim, bool keepdim) {
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       at::isFloatingType(self.scalar_type()) || at::isComplexType(self.scalar_type()),
       "norm(): input dtype should be either floating point or complex. "
       "Got ", self.scalar_type(), " instead.");
@@ -1110,8 +1110,8 @@ static void pre_check_gradient(const Tensor& self, std::optional<int64_t> spacin
 }
 
 static std::vector<Tensor> gradient_helper(const Tensor& self, TensorList coordinates, IntArrayRef dim, int64_t edge_order) {
-  for (const auto i : c10::irange(coordinates.size())) {
-    TORCH_CHECK(self.device() == coordinates[i].device(), "torch.gradient expected each tensor to be on the same device, but got devices ", self.device(), " and ", coordinates[i].device(), "!");
+  for (const auto& coordinate : coordinates) {
+    TORCH_CHECK(self.device() == coordinate.device(), "torch.gradient expected each tensor to be on the same device, but got devices ", self.device(), " and ", coordinate.device(), "!");
   }
 
   std::vector<Tensor> result;
