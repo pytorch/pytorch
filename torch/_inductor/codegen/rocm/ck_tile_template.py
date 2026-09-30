@@ -22,9 +22,20 @@ class CKTileTemplate(ROCmTemplate):
         torch.float8_e5m2: "BF8",  # gfx95
     }
 
+    _CK_DTYPE_ALIASES = {
+        "F8": "ck_tile::fp8_t",
+        "BF8": "ck_tile::bf8_t",
+        "F16": "ck_tile::half_t",
+        "F32": "float",
+        "BF16": "ck_tile::bfloat16_t",
+    }
+
+    # Bytes per element, used for the alignment and LDS budget math in the gemm
+    # templates. Keys are _TORCH_DTYPE_TO_CK values. This table does not decide
+    # which instances exist; see GEMM_DTYPES in ck_tile_universal_gemm_template.
     ck_dtype_to_size = {
-        "FP16": 2,
-        "BF16": 2,
+        _TORCH_DTYPE_TO_CK[torch.float16]: 2,
+        _TORCH_DTYPE_TO_CK[torch.bfloat16]: 2,
     }
 
     def header(self) -> IndentedBuffer:
@@ -40,15 +51,9 @@ class CKTileTemplate(ROCmTemplate):
 
     def globals(self) -> IndentedBuffer:
         res = super().globals()
-        res.splice(
-            """
-                using F8  = ck_tile::fp8_t;
-                using BF8 = ck_tile::bf8_t;
-                using F16 = ck_tile::half_t;
-                using F32 = float;
-                using BF16 = ck_tile::bfloat16_t;
-            """
-        )
+        res.newline()
+        for name, ctype in self._CK_DTYPE_ALIASES.items():
+            res.writeline(f"using {name} = {ctype};")
         return res
 
     def torch_type_to_ck(self, node: IRNode, ptr: str) -> str:

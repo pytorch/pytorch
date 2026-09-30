@@ -64,6 +64,9 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
       With the default ``make_fx`` tracer, capture is non-strict. Control flow is
       specialized to the example inputs, and shapes are static -- each size is baked in.
+      A nested example input is refused on both capture paths, and an unbacked capture
+      (below) also refuses to run inside another trace, whose fake mode would outrank the
+      one that path builds.
       The exception is a tensor dim explicitly marked unbacked (inductor backend only)
       with ``torch._dynamo.decorators.mark_unbacked`` on the inputs before the call; such
       a dim is captured as an unbacked symint, so one artifact serves any runtime size of

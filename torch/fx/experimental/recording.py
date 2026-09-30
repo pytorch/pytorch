@@ -270,10 +270,23 @@ def record_shapeenv_event(
 
         @functools.wraps(fn)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            # Recording is off in a normal compile, and this wraps ShapeEnv
+            # methods called hundreds of thousands of times, so answer that case
+            # before importing, building the retlog closure or touching NEST.
+            shape_env = args[0]
+            skip_recording = (
+                not shape_env.should_record_events  # type: ignore[attr-defined]
+                or shape_env.is_recording  # type: ignore[attr-defined]
+            )
+            if skip_recording and not trace_shape_events_log.isEnabledFor(
+                logging.DEBUG
+            ):
+                return fn(*args, **kwargs)
+
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-            if not isinstance(args[0], ShapeEnv):
-                raise AssertionError(f"Expected ShapeEnv, got {type(args[0])}")
+            if not isinstance(shape_env, ShapeEnv):
+                raise AssertionError(f"Expected ShapeEnv, got {type(shape_env)}")
 
             global NEST
 
@@ -286,10 +299,8 @@ def record_shapeenv_event(
                 trace_shape_events_log.debug("%s-> %s", " " * (NEST - 1), r)
                 return r
 
-            shape_env = args[0]
-
             try:
-                if not shape_env.should_record_events or shape_env.is_recording:  # type: ignore[has-type]
+                if skip_recording:
                     # If ShapeEnv is already recording an event, call the wrapped
                     # function directly.
                     #
@@ -335,7 +346,7 @@ def record_shapeenv_event(
                         raise
 
             except Exception:
-                if not shape_env.should_record_events or shape_env.is_recording:
+                if skip_recording:
                     # If ShapeEnv is disabled or already recording an event, re-raise the exception without logging.
                     raise
                 log.error(
