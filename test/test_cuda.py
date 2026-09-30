@@ -4510,6 +4510,48 @@ assert x.item() == 2
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
 
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(not TEST_WITH_ROCM, "Only ROCm keeps a BLAS handle per stream")
+    def test_blas_handle_new_thread_under_capture(self):
+        # A thread that first touches BLAS inside the capture must get the spare
+        # capture handle rather than create a handle, which allocates on the
+        # capturing device. A fresh process, so no released handle satisfies
+        # the request.
+        script = """
+import threading
+import torch
+
+torch.cuda.current_blas_handle()
+x = torch.ones(1, device="cuda")
+stream = torch.cuda.Stream()
+graph = torch.cuda.CUDAGraph()
+state = {}
+
+def worker():
+    try:
+        with torch.cuda.stream(stream):
+            torch.cuda.current_blas_handle()
+    except BaseException as error:
+        state["error"] = error
+
+with torch.cuda.graph(graph, stream=stream):
+    thread = threading.Thread(target=worker)
+    thread.start()
+    thread.join()
+    if "error" in state:
+        raise state["error"]
+    x.add_(1)
+graph.replay()
+torch.cuda.synchronize()
+assert x.item() == 2
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
     @unittest.skipIf(not TEST_WITH_ROCM, "Only ROCm binds public handles to a buffer")
     def test_blas_handle_workspace_outside_private_pools(self):
         # A new stream's public handle is created, and its permanent buffer
@@ -9956,6 +9998,19 @@ class TestMemPool(TestCase):
         torch._C._cuda_clearCublasWorkspaces()
         torch.cuda.empty_cache()
         segments = torch.cuda.memory._snapshot()["segments"]
+        # On ROCm the workspace of each public hipBLAS handle lives in a
+        # per-device pool for the life of the process, so ignore pools that
+        # already exist; only the default pool must be empty here.
+        persistent_pools = {s["segment_pool_id"] for s in segments} - {(0, 0)}
+
+        def snapshot_segments():
+            return [
+                s
+                for s in torch.cuda.memory._snapshot()["segments"]
+                if s["segment_pool_id"] not in persistent_pools
+            ]
+
+        segments = snapshot_segments()
         self.assertEqual(len(segments), 0, "Expected empty pool in the beginning")
 
         nelem = 1024 * 1024
@@ -9974,8 +10029,7 @@ class TestMemPool(TestCase):
         def side_thread_fn(segments):
             trigger_alloc.wait()
             out = torch.empty(nelem, dtype=torch.int8, device="cuda")
-            s = torch.cuda.memory._snapshot()["segments"]
-            segments.append(s)
+            segments.append(snapshot_segments())
             done_allocation.set()
 
         segments = []

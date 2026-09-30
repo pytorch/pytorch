@@ -234,7 +234,10 @@ using CuBlasCapturePoolType = DeviceThreadHandlePool<cublasHandle_t, createCaptu
 // releaseCaptureCublasWorkspaces when the capture ends.
 struct CaptureWorkspace {
   at::DataPtr workspace;
+  size_t size;
   cublasPointerMode_t pointer_mode;
+  // Kernels captured with an earlier, smaller workspace still use it at replay.
+  std::vector<at::DataPtr> retired;
 };
 
 struct CaptureWorkspaces {
@@ -745,22 +748,34 @@ static cublasHandle_t getCaptureCublasHandle(
     }
     auto it = workspaces.map.find(key);
     if (it != workspaces.map.end()) {
-      workspace_ptr = it->second.workspace.get();
       pointer_mode = it->second.pointer_mode;
+      if (it->second.size >= workspace_size) {
+        workspace_ptr = it->second.workspace.get();
+      }
+    } else if (auto eager_handle =
+                   getCuBlasPoolWindow<CuBlasPublicPoolType>().find(
+                       device, stream_key)) {
+      // Carry over a pointer mode the caller set on this stream's eager handle.
+      TORCH_CUDABLAS_CHECK(cublasGetPointerMode(eager_handle, &pointer_mode));
     }
   }
   if (workspace_ptr == nullptr) {
-    // Carry over a pointer mode the caller set on this stream's eager handle.
-    if (auto eager_handle = getCuBlasPoolWindow<CuBlasPublicPoolType>().find(
-            device, stream_key)) {
-      TORCH_CUDABLAS_CHECK(cublasGetPointerMode(eager_handle, &pointer_mode));
-    }
     // Allocated while capturing, so it comes from the capture's private pool.
     auto workspace = allocateCUDABlasWorkspace(workspace_size);
-    workspace_ptr = workspace.get();
     std::lock_guard<std::mutex> lock(workspaces.mutex);
-    workspaces.map.emplace(
-        key, CaptureWorkspace{std::move(workspace), pointer_mode});
+    auto it = workspaces.map.find(key);
+    if (it == workspaces.map.end()) {
+      it = workspaces.map
+               .emplace(key, CaptureWorkspace{std::move(workspace), workspace_size, pointer_mode, {}})
+               .first;
+    } else if (it->second.size < workspace_size) {
+      // The workspace size grew mid-capture; keep the old buffer alive.
+      it->second.retired.push_back(std::move(it->second.workspace));
+      it->second.workspace = std::move(workspace);
+      it->second.size = workspace_size;
+    }
+    workspace_ptr = it->second.workspace.get();
+    workspace_size = it->second.size;
   }
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
   TORCH_CUDABLAS_CHECK(
@@ -778,9 +793,6 @@ cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
 #ifdef USE_ROCM
   c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
-  // Callers request the public handle to keep handle creation out of stream
-  // capture, so create this thread's internal handle too.
-  (void)getCuBlasPoolWindow<CuBlasPoolType>().reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   cudaStream_t raw_stream = stream;
   cublasHandle_t handle = nullptr;
@@ -790,6 +802,11 @@ cublasHandle_t getCurrentCUDABlasHandle(bool setup) {
     // captured on this stream.
     handle = getCaptureCublasHandle(device, raw_stream, *capture_id);
   } else {
+    // Callers request the public handle to keep handle creation out of stream
+    // capture, so create this thread's internal handle too. Under capture the
+    // spare capture handle serves a new thread; creating an internal handle
+    // there would allocate and free its arena on a capturing device.
+    (void)getCuBlasPoolWindow<CuBlasPoolType>().reserve(device);
     // A rocBLAS workspace must not be used by two streams at once, and
     // rocblas_set_stream does not wait for the old stream, so each stream gets
     // its own public handle.
@@ -930,7 +947,11 @@ void releaseCaptureCublasWorkspaces(c10::CaptureId_t capture_id) {
     std::lock_guard<std::mutex> lock(workspaces.mutex);
     for (auto it = workspaces.map.begin(); it != workspaces.map.end();) {
       if (std::get<0>(it->first) == capture_id) {
-        released[std::get<1>(it->first)].push_back(std::move(it->second.workspace));
+        auto& handle_workspaces = released[std::get<1>(it->first)];
+        for (auto& retired : it->second.retired) {
+          handle_workspaces.push_back(std::move(retired));
+        }
+        handle_workspaces.push_back(std::move(it->second.workspace));
         it = workspaces.map.erase(it);
       } else {
         ++it;
