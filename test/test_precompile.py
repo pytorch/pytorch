@@ -5420,6 +5420,62 @@ def _replace_bundle_header(bundle, edit):
     return _MAGIC + struct.pack("!Q", len(encoded)) + encoded + payload
 
 
+_TRITON_TRANSPORT_KERNEL = """
+import triton
+import triton.language as tl
+
+
+@triton.autotune(
+    configs=[triton.Config({"BLOCK": 64}), triton.Config({"BLOCK": 128})],
+    key=["n"],
+)
+@triton.jit
+def scale(x_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    offsets = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offsets < n
+    tl.store(out_ptr + offsets, tl.load(x_ptr + offsets, mask=mask) * 3, mask=mask)
+"""
+
+
+_TRITON_TRANSPORT_DRIVER = """
+import os
+import pathlib
+import sys
+
+phase, directory, module = sys.argv[1:4]
+cache = pathlib.Path(directory, phase)
+bundle = pathlib.Path(directory, "bundle")
+os.environ["TRITON_CACHE_DIR"] = str(cache)
+os.environ["TRITON_CACHE_AUTOTUNING"] = "1"
+
+import torch
+from torch.compiler._triton_runtime_cache import (
+    export_runtime_cache,
+    import_runtime_cache,
+)
+
+if phase == "consume":
+    import_runtime_cache(bundle.read_bytes())
+    before = sorted(cache.rglob("*"))
+
+import triton
+
+sys.path.insert(0, directory)
+scale = __import__(module).scale
+x = torch.arange(1000, device="cuda", dtype=torch.float32)
+out = torch.empty_like(x)
+scale[lambda meta: (triton.cdiv(x.numel(), meta["BLOCK"]),)](x, out, x.numel())
+torch.testing.assert_close(out, x * 3)
+if phase == "produce":
+    bundle.write_bytes(export_runtime_cache())
+else:
+    # A compile or an autotuning benchmark would have written to the cache.
+    after = sorted(cache.rglob("*"))
+    assert after == before, sorted(set(after) - set(before))
+print("transport phase ok:", phase)
+"""
+
+
 @skipIfTorchDynamo("exports a Triton cache directory, not a traced program")
 @unittest.skipUnless(has_triton_package(), "requires Triton")
 @instantiate_parametrized_tests
@@ -5455,10 +5511,13 @@ class TestTritonRuntimeCacheTransport(TestCase):
             bundle, key, native = self._bundle(spelled)
             with _triton_cache_namespace(spelled):
                 import_runtime_cache(bundle, context=self.CONTEXT)
+            inode = consumer.stat().st_ino if consumer_exists else None
             with _triton_cache_namespace(consumer):
                 import_runtime_cache(bundle, context=self.CONTEXT)
                 import_runtime_cache(bundle, context=self.CONTEXT)
                 self.assertEqual(stat.S_IMODE(consumer.stat().st_mode), mode)
+                if consumer_exists:
+                    self.assertEqual(consumer.stat().st_ino, inode)
                 for name in (native, "kernel.cubin", "kernel.autotune.json"):
                     self.assertEqual(
                         (consumer / key / name).read_bytes(),
@@ -5649,24 +5708,25 @@ class TestTritonRuntimeCacheTransport(TestCase):
                     )
                     other = export_runtime_cache(context=self.CONTEXT)
             consumer = pathlib.Path(tmp, "consumer")
-            replace = os.replace
+            rename = os.rename
 
             def race(source, destination):
-                patched.side_effect = replace
+                patched.side_effect = rename
                 import_runtime_cache(other, context=self.CONTEXT)
-                return replace(source, destination)
+                return rename(source, destination)
 
             with (
                 _triton_cache_namespace(consumer),
-                mock.patch("os.replace", side_effect=race) as patched,
+                mock.patch("os.rename", side_effect=race) as patched,
             ):
                 if winner == "same":
                     import_runtime_cache(bundle, context=self.CONTEXT)
                 else:
                     with self.assertRaisesRegex(RuntimeError, "its own empty"):
                         import_runtime_cache(bundle, context=self.CONTEXT)
-            self.assertEqual(patched.call_count, 2)
-            self.assertEqual([p for p in os.listdir(tmp) if ".hydrate-" in p], [])
+            # One rename per key: ours, then the winner's one or two.
+            self.assertEqual(patched.call_count, 2 if winner == "same" else 3)
+            self.assertEqual([p for p in os.listdir(consumer) if ".hydrate-" in p], [])
 
     @parametrize("consumer_exists", (False, True))
     def test_import_reports_a_failed_rename(self, consumer_exists):
@@ -5677,16 +5737,76 @@ class TestTritonRuntimeCacheTransport(TestCase):
             consumer = pathlib.Path(tmp, "consumer")
             if consumer_exists:
                 consumer.mkdir()
-            before = sorted(os.listdir(tmp))
             with (
                 _triton_cache_namespace(consumer),
-                mock.patch("os.replace", side_effect=PermissionError("read-only")),
+                mock.patch("os.rename", side_effect=PermissionError("read-only")),
                 self.assertRaisesRegex(PermissionError, "read-only"),
             ):
                 import_runtime_cache(bundle, context=self.CONTEXT)
-            self.assertEqual(sorted(os.listdir(tmp)), before)
-            if consumer_exists:
-                self.assertEqual(list(consumer.iterdir()), [])
+            self.assertEqual(list(consumer.iterdir()), [])
+
+    @parametrize("leftover", ("none", "foreign"))
+    def test_import_completes_an_interrupted_import(self, leftover):
+        import shutil
+
+        from torch.compiler._triton_runtime_cache import import_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, key, native = self._bundle(pathlib.Path(tmp, "producer"))
+            consumer = pathlib.Path(tmp, "consumer")
+            with _triton_cache_namespace(consumer):
+                import_runtime_cache(bundle, context=self.CONTEXT)
+                # An import killed after its first rename, before the marker.
+                marker = consumer / ".runtime_cache_bundle"
+                marker.unlink()
+                shutil.rmtree(consumer / key)
+                pathlib.Path(consumer, ".runtime_cache_bundle.hydrate-1-0").mkdir()
+                if leftover == "foreign":
+                    pathlib.Path(consumer, "cd" * 32).mkdir()
+                    with self.assertRaisesRegex(RuntimeError, "its own empty"):
+                        import_runtime_cache(bundle, context=self.CONTEXT)
+                    return
+                import_runtime_cache(bundle, context=self.CONTEXT)
+                self.assertTrue(marker.is_file())
+                self.assertTrue((consumer / key / native).is_file())
+                # A hydrated cache still imports after Triton adds entries to it.
+                pathlib.Path(consumer, "cd" * 32).mkdir()
+                import_runtime_cache(bundle, context=self.CONTEXT)
+
+    def test_import_into_a_file(self):
+        from torch.compiler._triton_runtime_cache import import_runtime_cache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            bundle, _, _ = self._bundle(pathlib.Path(tmp, "producer"))
+            consumer = pathlib.Path(tmp, "consumer")
+            consumer.write_text("not a directory")
+            with (
+                _triton_cache_namespace(consumer),
+                self.assertRaisesRegex(RuntimeError, "not a directory"),
+            ):
+                import_runtime_cache(bundle, context=self.CONTEXT)
+
+    @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
+    def test_imported_cache_launches_without_compiling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            module = f"triton_transport_{uuid.uuid4().hex}"
+            pathlib.Path(directory, module + ".py").write_text(_TRITON_TRANSPORT_KERNEL)
+            for phase in ("produce", "consume"):
+                out = subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        _TRITON_TRANSPORT_DRIVER,
+                        phase,
+                        directory,
+                        module,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
+                )
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn(f"transport phase ok: {phase}", out.stdout)
 
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires CUDA and Triton")
     def test_export_holds_every_entry_triton_commits(self):
@@ -5899,6 +6019,11 @@ class TestTritonRuntimeCacheTransport(TestCase):
                 self.assertRaisesRegex(RuntimeError, "not a directory"),
             ):
                 export_runtime_cache(context=self.CONTEXT)
+            with (
+                _triton_cache_namespace(occupied / "triton"),
+                self.assertRaisesRegex(RuntimeError, "Cannot create"),
+            ):
+                export_runtime_cache(context=self.CONTEXT)
 
     def test_export_records_context_as_json(self):
         from torch.compiler._triton_runtime_cache import export_runtime_cache
@@ -5907,8 +6032,9 @@ class TestTritonRuntimeCacheTransport(TestCase):
             _write_triton_runtime_entries()
             header, _ = _bundle_header(export_runtime_cache(context={"cuda": (12, 4)}))
             self.assertEqual(header["compatibility"]["context"], {"cuda": [12, 4]})
-            with self.assertRaisesRegex(RuntimeError, "JSON-serializable"):
-                export_runtime_cache(context=object())
+            for context in (object(), {"x": float("nan")}):
+                with self.assertRaisesRegex(RuntimeError, "JSON-serializable"):
+                    export_runtime_cache(context=context)
 
 
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
