@@ -387,9 +387,9 @@ struct AllocParams {
 // Internal implementation that manages actual memory blocks.
 // high level MemPool interface wraps PrivatePool via MempoolId.
 struct PrivatePool {
-  PrivatePool(MempoolId_t id, std::shared_ptr<XPUAllocator> allocator = nullptr)
+  PrivatePool(MempoolId_t id, XPUAllocator* allocator = nullptr)
       : id(std::move(id)),
-        allocator_(std::move(allocator)),
+        allocator_(allocator),
         large_blocks(/*small=*/false, this),
         small_blocks(/*small=*/true, this) {}
   PrivatePool(const PrivatePool&) = delete;
@@ -406,13 +406,13 @@ struct PrivatePool {
   // allocation_count drop to zero, we can delete this PrivatePool from
   // graph_pools.
   int allocation_count{0};
-  std::shared_ptr<XPUAllocator> allocator_;
+  XPUAllocator* allocator_;
   BlockPool large_blocks;
   BlockPool small_blocks;
 
  public:
   XPUAllocator* allocator() {
-    return allocator_.get();
+    return allocator_;
   }
 };
 
@@ -1448,19 +1448,18 @@ class DeviceCachingAllocator {
 
   void create_or_incref_pool(
       MempoolId_t mempool_id,
-      std::shared_ptr<XPUAllocator> allocator = nullptr) {
+      XPUAllocator* allocator = nullptr) {
     auto it = graph_pools.find(mempool_id);
     if (it == graph_pools.end()) {
       // mempool_id does not reference an existing pool.
       // Make a new pool for XPU graph capture or memory pool usage.
       graph_pools.emplace(
-          mempool_id,
-          std::make_unique<PrivatePool>(mempool_id, std::move(allocator)));
+          mempool_id, std::make_unique<PrivatePool>(mempool_id, allocator));
     } else {
       // mempool_id references an existing pool, which the current XPU graph
       // capture will share.
       TORCH_INTERNAL_ASSERT(it->second->use_count > 0);
-      TORCH_INTERNAL_ASSERT(!allocator);
+      TORCH_INTERNAL_ASSERT(allocator == nullptr);
       it->second->use_count++;
     }
   }
@@ -1875,9 +1874,9 @@ class DeviceCachingAllocator {
 
   void createOrIncrefPool(
       MempoolId_t mempool_id,
-      std::shared_ptr<XPUAllocator> allocator = nullptr) {
+      XPUAllocator* allocator = nullptr) {
     std::scoped_lock<std::recursive_mutex> lock(mutex);
-    create_or_incref_pool(mempool_id, std::move(allocator));
+    create_or_incref_pool(mempool_id, allocator);
   }
 
   void setNoSplit(MempoolId_t mempool_id) {
@@ -2361,10 +2360,10 @@ class NativeCachingAllocator : public XPUAllocator {
   void createOrIncrefPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      std::shared_ptr<XPUAllocator> allocator) {
+      XPUAllocator* allocator) {
     assertValidDevice(device);
     device_allocators[device]->createOrIncrefPool(
-        mempool_id, std::move(allocator));
+        std::move(mempool_id), allocator);
   }
 
   void beginAllocateToPool(
@@ -2373,7 +2372,7 @@ class NativeCachingAllocator : public XPUAllocator {
       std::function<bool(sycl::queue*)> filter) {
     assertValidDevice(device);
     device_allocators[device]->beginAllocateToPool(
-        mempool_id, std::move(filter));
+        std::move(mempool_id), std::move(filter));
   }
 
   void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
@@ -2393,7 +2392,7 @@ class NativeCachingAllocator : public XPUAllocator {
 
   void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
     assertValidDevice(device);
-    device_allocators[device]->releasePool(mempool_id);
+    device_allocators[device]->releasePool(std::move(mempool_id));
   }
 
   void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
@@ -2411,7 +2410,7 @@ class NativeCachingAllocator : public XPUAllocator {
 
   int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
     assertValidDevice(device);
-    return device_allocators[device]->getPoolUseCount(mempool_id);
+    return device_allocators[device]->getPoolUseCount(std::move(mempool_id));
   }
 };
 
@@ -2479,7 +2478,7 @@ std::shared_ptr<void> getIpcDevPtr(std::string handle) {
 void createOrIncrefPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
-    std::shared_ptr<XPUAllocator> allocator_ptr) {
+    XPUAllocator* allocator_ptr) {
   return native_allocator.createOrIncrefPool(device, mempool_id, allocator_ptr);
 }
 

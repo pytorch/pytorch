@@ -34,8 +34,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       pytorch-linux-jammy-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}
-      # Bracket syntax: the artifact key has a dot, which expression property access would split.
-      pytorch-linux-noble-rocm-n-py3-11: ${{ steps.process-artifacts.outputs['pytorch-linux-noble-rocm-n-py3.11'] }}
+      pytorch-linux-noble-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}
       pytorch-linux-jammy-rocm-n-py3-benchmarks: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}
     steps:
       - name: Download artifacts
@@ -62,7 +61,7 @@ jobs:
         runner: [linux.rocm.mi210.docker-cache]
         docker-image: [
           "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}",
-          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3-11 }}"
+          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}"
           #"${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}"
         ]
     runs-on: "${{ matrix.runner }}"

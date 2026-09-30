@@ -7,7 +7,6 @@ from torch._inductor.codegen.block_analysis import BlockPatternMatcher
 from torch._inductor.utils import sympy_dot
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
-    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -23,8 +22,6 @@ x, y = sympy.symbols("x y")
 
 @instantiate_parametrized_tests
 class BlockAnalysisTest(TestCase):
-    hw_classification = HardwareClassification.GENERIC
-
     @classmethod
     def setUpClass(cls):
         super().setUpClass()

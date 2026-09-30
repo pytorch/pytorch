@@ -25,9 +25,8 @@ Tensor tile(const Tensor& self, const IntArrayRef repeats) {
   const int64_t size_diff = self.dim() - static_cast<int64_t>(repeats.size());
   if (size_diff > 0) {
     std::vector<int64_t> new_repeats(size_diff, 1);
-    new_repeats.reserve(new_repeats.size() + repeats.size());
-    for (const auto& repeat : repeats) {
-      new_repeats.emplace_back(repeat);
+    for (const auto i : c10::irange(repeats.size())) {
+      new_repeats.emplace_back(repeats[i]);
     }
     return self.repeat(IntArrayRef(new_repeats));
   }
