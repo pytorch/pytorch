@@ -1282,25 +1282,43 @@ static void apply_syevd_batched_rocsolver(const Tensor& values, const Tensor& ve
 
   rocblas_handle handle = static_cast<rocblas_handle>(at::cuda::getCurrentCUDASolverDnHandle());
 
-  // rocsolver will manage the workspace size automatically
-   if(!rocblas_is_managing_device_memory(handle))
-        TORCH_ROCBLAS_CHECK(rocblas_set_workspace(handle, nullptr, 0));
+  auto run_syevd = [&] {
+    return _rocsolver_syevd_strided_batched<scalar_t>(
+        handle,
+        evect,
+        uplo,
+        n,
+        vectors_data,
+        lda,
+        vectors_stride,
+        values_data,
+        values_stride,
+        static_cast<scalar_t*>(work_data.get()),
+        work_stride,
+        infos_data,
+        batch_size);
+  };
 
-  TORCH_ROCBLAS_CHECK(_rocsolver_syevd_strided_batched<scalar_t>(
-    handle,
-    evect,
-    uplo,
-    n,
-    vectors_data,
-    lda,
-    vectors_stride,
-    values_data,
-    values_stride,
-    static_cast<scalar_t*>(work_data.get()),
-    work_stride,
-    infos_data,
-    batch_size
-  ));
+  TORCH_ROCBLAS_CHECK(rocblas_start_device_memory_size_query(handle));
+  auto query_status = run_syevd();
+  size_t workspace_size = 0;
+  TORCH_ROCBLAS_CHECK(
+      rocblas_stop_device_memory_size_query(handle, &workspace_size));
+  TORCH_CHECK(
+      query_status == rocblas_status_success ||
+          query_status == rocblas_status_size_increased ||
+          query_status == rocblas_status_size_unchanged,
+      "rocblas error: ",
+      rocblas_status_to_string(query_status),
+      " when querying workspace for rocsolver syevd");
+
+  auto workspace = allocator.allocate(workspace_size);
+  TORCH_ROCBLAS_CHECK(
+      rocblas_set_workspace(handle, workspace.get(), workspace_size));
+  auto status = run_syevd();
+  auto reset_status = rocblas_set_workspace(handle, nullptr, 0);
+  TORCH_ROCBLAS_CHECK(status);
+  TORCH_ROCBLAS_CHECK(reset_status);
 }
 #endif // USE_ROCM && ROCSOLVER_SYEVD_BATCHED_ENABLED
 
