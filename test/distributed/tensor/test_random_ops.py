@@ -146,6 +146,84 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
     @with_comms
     @skip_unless_torch_gpu
+    @parametrize("op", [torch.rand_like, torch.randn_like])
+    @parametrize("placement", [Shard(0), Replicate()])
+    @parametrize("init_tracker", [False, True])
+    @parametrize("input_device", ["cpu", "meta"])
+    def test_random_op_device_override(self, op, placement, init_tracker, input_device):
+        mesh = self.build_device_mesh()
+        meta_dt = DTensor.from_local(
+            torch.empty(8, 4, device="meta"), mesh, [placement]
+        )
+        dt = torch.empty_like(meta_dt, device=input_device).fill_(1)
+        device_dt = torch.empty_like(meta_dt, device=self.device_type)
+        device_module = torch.get_device_module(self.device_type)
+        outputs = []
+        states = []
+
+        for arg in (dt, device_dt):
+            torch.manual_seed(1234)
+            cpu_state = torch.get_rng_state()
+            tracker = OffsetBasedRNGTracker(mesh) if init_tracker else None
+            with patch.object(random, "_rng_tracker", tracker):
+                outputs.append(
+                    [op(arg, device=self.device_type).to_local() for _ in range(2)]
+                )
+            states.append(device_module.get_rng_state())
+            self.assertEqual(torch.get_rng_state(), cpu_state)
+
+        @maybe_run_for_local_tensor
+        def check_outputs(first, second, expected_first, expected_second):
+            self.assertEqual(first, expected_first)
+            self.assertEqual(second, expected_second)
+            self.assertNotEqual(first, second)
+
+        check_outputs(*outputs[0], *outputs[1])
+        self.assertEqual(states[0], states[1])
+        if not dt.is_meta:
+            self.assertEqual(dt.to_local(), torch.ones_like(dt.to_local()))
+
+    @with_comms
+    @skip_unless_torch_gpu
+    @parametrize("op", [torch.rand_like, torch.randn_like])
+    @parametrize(
+        "input_device,output_device",
+        [
+            ("accelerator", "cpu"),
+            ("meta", "cpu"),
+            ("cpu", "meta"),
+            ("accelerator", "meta"),
+        ],
+    )
+    def test_random_op_device_override_other_targets(
+        self, op, input_device, output_device
+    ):
+        mesh = self.build_device_mesh()
+        meta_dt = DTensor.from_local(torch.empty(8, 4, device="meta"), mesh, [Shard(0)])
+        if input_device == "accelerator":
+            input_device = self.device_type
+        dt = torch.empty_like(meta_dt, device=input_device).fill_(1)
+        tracker = OffsetBasedRNGTracker(mesh)
+        device_module = torch.get_device_module(self.device_type)
+        cpu_state = torch.get_rng_state()
+        device_state = device_module.get_rng_state()
+
+        with patch.object(random, "_rng_tracker", tracker):
+            if output_device == "cpu":
+                with self.assertRaisesRegex(
+                    RuntimeError, f"DTensor random op .*cpu.*{self.device_type}"
+                ):
+                    op(dt, device=output_device)
+            else:
+                self.assertTrue(op(dt, device=output_device).is_meta)
+
+        self.assertEqual(torch.get_rng_state(), cpu_state)
+        self.assertEqual(device_module.get_rng_state(), device_state)
+        if not dt.is_meta:
+            self.assertEqual(dt.to_local(), torch.ones_like(dt.to_local()))
+
+    @with_comms
+    @skip_unless_torch_gpu
     def test_fsdp_cpu_init_device_mismatch(self):
         mesh = self.build_device_mesh()
         with torch.device("meta"):

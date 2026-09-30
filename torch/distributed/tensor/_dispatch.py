@@ -377,16 +377,20 @@ class OpDispatcher:
                     cast(dtensor.DTensor, args[0]),
                     cast(torch.Tensor, local_tensor_args[0]),
                 )
+                random_device = (
+                    cast(torch.device | None, op_info.local_kwargs.get("device"))
+                    or first_local_arg.device
+                )
                 if (
-                    not first_local_arg.is_meta
-                    and first_local_arg.device.type != mesh.device_type
+                    random_device.type != "meta"
+                    and random_device.type != mesh.device_type
                 ):
                     # The mesh RNG tracker cannot advance a different device's RNG.
                     raise RuntimeError(
-                        f"DTensor random op {op_call} requires the local tensor device "
-                        f"({first_local_arg.device}) to match the device mesh "
-                        f"({mesh.device_type}). Use a device mesh matching the local "
-                        "tensor device."
+                        f"DTensor random op {op_call} requires the output device "
+                        f"({random_device}) to match the device mesh "
+                        f"({mesh.device_type}). Use a device mesh matching the "
+                        "output device."
                     )
 
                 if not random._rng_tracker and is_rng_supported_mesh(mesh):
@@ -417,7 +421,7 @@ class OpDispatcher:
 
                 if (
                     random._rng_tracker
-                    and not first_local_arg.is_meta
+                    and random_device.type != "meta"
                     and random._rng_tracker.distribute_region_enabled
                 ):
                     accelerator = torch.accelerator.current_accelerator()
