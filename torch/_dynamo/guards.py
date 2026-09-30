@@ -108,6 +108,7 @@ from torch._guards import (
     Source,
     StorageOverlap,
 )
+from torch._library.custom_ops import CustomOpDef, OPDEFS
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import get_opaque_obj_info, is_opaque_constant_type
 from torch._logging import structured
@@ -4712,6 +4713,10 @@ class GuardsStatePickler(FunctionPicklerBase):
     def _unpickle_op(cls, namespace: str, opname: str, overloadname: str) -> Any:
         return getattr(getattr(getattr(torch.ops, namespace), opname), overloadname)
 
+    @classmethod
+    def _unpickle_custom_op_def(cls, qualname: str) -> Any:
+        return OPDEFS[qualname]
+
     @staticmethod
     def _unpickle_sdp_backend(name: str) -> torch.nn.attention.SDPBackend:
         # Reconstruct from the Python-facing enum namespace
@@ -5143,6 +5148,10 @@ class GuardsStatePickler(FunctionPicklerBase):
                 obj._overloadname,
             )
 
+        elif _is_registered_custom_op_def(obj):
+            # Its Library holds a _DispatchModule, which cannot be pickled.
+            return type(self)._unpickle_custom_op_def, (obj._qualname,)
+
         elif (
             obj.__class__.__module__ == "builtins"
             and obj.__class__.__name__ == "PyCapsule"
@@ -5348,6 +5357,10 @@ def _is_nested_named_tuple_type(obj: object) -> bool:
     )
 
 
+def _is_registered_custom_op_def(value: object) -> bool:
+    return isinstance(value, CustomOpDef) and OPDEFS.get(value._qualname) is value
+
+
 def _resolves_by_reference(value: object) -> bool:
     """Whether unpickling ``value`` in another process yields that process's
     canonical object, so an identity guard rebuilt at load checks the right id.
@@ -5369,7 +5382,7 @@ def _resolves_by_reference(value: object) -> bool:
         return False
     if isinstance(value, (type, types.FunctionType, types.BuiltinFunctionType)):
         return FunctionPicklerBase._fqn_resolves(value)  # type: ignore[arg-type]
-    return False
+    return _is_registered_custom_op_def(value)
 
 
 def is_portable_identity_guard(
