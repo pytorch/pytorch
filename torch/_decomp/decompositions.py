@@ -5050,9 +5050,7 @@ def _grid_sampler_2d(
     private_backend = torch._C._get_privateuse1_backend_name()
     use_32bit_indices = (
         a.device.type in ("cuda", "xpu") or a.device.type == private_backend
-    ) and guard_or_false(
-        sym_and(iH <= int32_max, iW <= int32_max)
-    )
+    ) and guard_or_false(sym_and(iH <= int32_max, iW <= int32_max))
     index_dtype = torch.int32 if use_32bit_indices else torch.int64
 
     if _expand_grid:
