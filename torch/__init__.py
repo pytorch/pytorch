@@ -2064,6 +2064,12 @@ def set_float32_matmul_precision(precision: str) -> None:
         is set then the float32 datatype is used for internal computations, equivalent
         to setting `torch.backends.cuda.matmul.allow_tf32 = False`.
 
+    .. note::
+
+        The implementation of "high" and "medium" precision in AMD Instinct MI300 series
+        devices uses 10 mantissa bits but always rounds down instead of rounding to nearest,
+        reducing accuracy slightly and introducing a downward bias. See :ref:`tf32_on_mi300`.
+
     Args:
         precision(str): can be set to "highest" (default), "high", or "medium" (see above).
 
