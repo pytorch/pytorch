@@ -105,7 +105,7 @@ size_t assertFind(
     if (extra_msg) {
       extra_msg(ss);
     }
-    TORCH_CHECK(false, std::move(ss).str());
+    throw std::runtime_error(std::move(ss).str());
   }
   return pos;
 }
@@ -143,7 +143,7 @@ size_t assertFindRegex(
     if (extra_msg) {
       extra_msg(ss);
     }
-    TORCH_CHECK(false, std::move(ss).str());
+    throw std::runtime_error(std::move(ss).str());
   }
   return pos;
 }
@@ -180,7 +180,7 @@ void assertNotFind(
     ss << " but found it\n";
     found_range.highlight(ss);
     ss << "From " << check << '\n';
-    TORCH_CHECK(false, std::move(ss).str());
+    throw std::runtime_error(std::move(ss).str());
   }
 }
 
@@ -193,8 +193,7 @@ struct FileCheckImpl {
     has_run = true;
 
     if (groups.empty() || groups[0].empty()) {
-      TORCH_CHECK(
-          false,
+      throw std::runtime_error(
           "No checks have been added to this instance of"
           "Filecheck! Check for bad input.");
     }
@@ -328,7 +327,7 @@ struct FileCheckImpl {
         SourceRange(source, start, start + 1).highlight(ss);
         ss << "Check for bad input.";
         has_run = true;
-        TORCH_CHECK(false, std::move(ss).str());
+        throw std::runtime_error(std::move(ss).str());
       }
       start = findNextStart(source, start);
     }
@@ -363,7 +362,7 @@ struct FileCheckImpl {
       c10::printQuotedString(ss, check.search_str_);
       ss << "highlighted but it is not." << '\n';
       error_range.highlight(ss);
-      TORCH_CHECK(false, std::move(ss).str());
+      throw std::runtime_error(std::move(ss).str());
     };
 
     size_t search_start_offset = start_offset;

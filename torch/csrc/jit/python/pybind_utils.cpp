@@ -476,14 +476,12 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         auto pyCu = get_python_cu();
         classType = pyCu->get_class(c10::QualifiedName(qualified_name));
         if (!classType) {
-          TORCH_CHECK(
-              false,
-              c10::str(
-                  "Assigning the object ",
-                  py::str(obj),
-                  " to an interface fails because the value is not "
-                  "a TorchScript compatible type, did you forget to",
-                  "turn it into a user defined TorchScript class?"));
+          throw std::runtime_error(c10::str(
+              "Assigning the object ",
+              py::str(obj),
+              " to an interface fails because the value is not "
+              "a TorchScript compatible type, did you forget to",
+              "turn it into a user defined TorchScript class?"));
         }
         res = toIValue(obj, classType);
       }
@@ -864,11 +862,6 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
       for (const auto& err : errors) {
         ss << err.what() << "\n\n";
       }
-      // rpc/python_functions.cpp catches std::runtime_error around
-      // getOpWithStack by name, to retry against the non-c10 overload set.
-      // c10::Error does not derive from it, so a check macro here silently
-      // disables RPC's overload fallback.
-      // @allow-raw-throw: rpc's overload fallback catches this base by name
       throw std::runtime_error(std::move(ss).str());
     }
 
@@ -888,7 +881,7 @@ bool checkSchemaAllowFakeScriptObject(
   try {
     match = matchSchemaAllowFakeScriptObject(schema, args, kwargs);
   } catch (schema_match_error& error) {
-    TORCH_CHECK(false, error.what());
+    throw std::runtime_error(error.what());
   }
   return match;
 }

@@ -139,7 +139,6 @@ class TestRegistry(TestCase):
         self.assertEqual(node.dispatch_key, "CPU")
         self.assertEqual(node.cond_fn, cond_fn)
         self.assertEqual(node.impl_fn, impl_fn)
-        self.assertIsNone(node.try_initialize_runtime)
         self.assertFalse(node.unconditional_override)
         self.assertTrue(node.active)
 
@@ -595,25 +594,6 @@ class TestRegistryRuntime(TestCase):
         self.assertTrue(torch.equal(out, torch.tensor([8.0, 15.0])))
         self.assertFalse(sentinel_called[0])
 
-    def test_runtime_initialization_falls_through(self):
-        impl = MagicMock(side_effect=AssertionError("implementation was called"))
-        self.registry.register_op_override(
-            "test_dsl",
-            "aten",
-            "mul.Tensor",
-            "CPU",
-            lambda a, b: True,
-            impl,
-            try_initialize_runtime=lambda: False,
-        )
-        self._install("mul.Tensor", "CPU")
-
-        self.assertEqual(
-            torch.ops.aten.mul.Tensor(torch.tensor([2.0]), torch.tensor([4.0])).item(),
-            8.0,
-        )
-        impl.assert_not_called()
-
     def test_compile_session_flag_falls_through_without_recursion(self):
         """The eager router must not redispatch to its own aten override when
         compile-session state is set but Dynamo is not actively tracing it.
@@ -1013,26 +993,18 @@ class TestRegistryRuntime(TestCase):
         self.assertTrue(torch.equal(mul(a, b), torch.tensor([8.0, 15.0])))
 
     def test_fake_tensor_shape_inference(self):
-        """FakeTensor shape-infers through `_native::<id>` via the registered
-        fake kernel, without running the implementation or runtime initialization.
+        """FakeTensorMode must shape-infer through `_native::<id>` via the
+        registered fake kernel (which redispatches to the aten meta).
         """
 
         def cond(*a, **k):
             return True
 
-        impl = MagicMock(side_effect=AssertionError("implementation ran"))
-        try_initialize_runtime = MagicMock(
-            side_effect=AssertionError("runtime initialization ran")
-        )
+        def impl(a, b):
+            return torch.full_like(a, 1.0)
 
         self.registry.register_op_override(
-            "test_dsl",
-            "aten",
-            "mul.Tensor",
-            "CPU",
-            cond,
-            impl,
-            try_initialize_runtime=try_initialize_runtime,
+            "test_dsl", "aten", "mul.Tensor", "CPU", cond, impl
         )
         self._install("mul.Tensor", "CPU")
 
@@ -1077,21 +1049,6 @@ class TestRegistryRuntime(TestCase):
             )
         )
         self.assertEqual(call_count[0], 2)
-
-    def test_unconditional_override_rejects_runtime_initialization(self):
-        with self.assertRaisesRegex(
-            ValueError, "try_initialize_runtime cannot be provided"
-        ):
-            self.registry.register_op_override(
-                "test_dsl",
-                "aten",
-                "mul.Tensor",
-                "CPU",
-                None,
-                lambda a, b: a,
-                try_initialize_runtime=lambda: True,
-                unconditional_override=True,
-            )
 
     # torch.equal, not assertEqual, below: assertEqual computes its tolerances with
     # tensor*float, which this UNCONDITIONAL override on mul.Tensor also catches, so

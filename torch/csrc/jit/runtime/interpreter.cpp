@@ -926,10 +926,6 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       // save the original exception's message when creating a new JITException
       throw JITException(ss.str(), python_class_name, e.what());
     } else if (not_implemented_error) {
-      // Rethrows with the *original* exception's backtrace and caller, which
-      // is the whole point: TORCH_CHECK_NOT_IMPLEMENTED would stamp this
-      // interpreter frame over the location the user needs to see.
-      // @allow-raw-throw: carries the original backtrace and caller
       throw c10::NotImplementedError(
           ss.str(),
           not_implemented_error->backtrace(),
@@ -938,7 +934,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       if (get_cpp_stacktraces_enabled()) {
         ss << e.what() << '\n';
       }
-      TORCH_CHECK(false, std::move(ss).str());
+      throw std::runtime_error(std::move(ss).str());
     }
   }
 

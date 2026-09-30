@@ -221,6 +221,7 @@ class TestPrefixCopy(TestCase):
     @parametrize("nonzero_shards", [False, True])
     @parametrize("world_size", [1, 4])
     @parametrize("mixed_layout", [False, True])
+    @parametrize("mixed_dtype", [False, True])
     @dtypes(torch.bfloat16)
     def test_reduce_scatter_preparation(
         self,
@@ -230,6 +231,7 @@ class TestPrefixCopy(TestCase):
         nonzero_shards,
         world_size,
         mixed_layout,
+        mixed_dtype,
     ):
         shapes = [
             (world_size * 3 - 1, 5),
@@ -239,6 +241,8 @@ class TestPrefixCopy(TestCase):
         grads = [make_tensor(shape, device=device, dtype=dtype) for shape in shapes]
         if mixed_layout:
             grads[2] = grads[2].transpose(0, 1).contiguous().transpose(0, 1)
+        if mixed_dtype:
+            grads[1] = grads[1].float()
         shard_dims = list(range(len(grads))) if nonzero_shards else [0] * len(grads)
         shards = []
         for dim, grad in zip(shard_dims, grads):
@@ -262,12 +266,14 @@ class TestPrefixCopy(TestCase):
         with _OpCounter() as counter:
             copy_in(output)
         self.assertEqual(output, expected, atol=0, rtol=0)
+        uses_native_copy = native_copy and not mixed_dtype
         self.assertEqual(
             counter.counts[torch.ops.fsdp._reduce_scatter_copy_in_.default],
-            int(native_copy),
+            int(uses_native_copy),
         )
         self.assertEqual(
-            counter.counts[torch.ops.fsdp.chunk_cat.default], int(not native_copy)
+            counter.counts[torch.ops.fsdp.chunk_cat_mixed_dtype.default],
+            int(not uses_native_copy),
         )
 
     @parametrize("native_copy", [False, True])
@@ -477,7 +483,9 @@ class TestPrefixCopy(TestCase):
         expected = torch.cat([local] * world_size, dim=shard_dim)
         param = self._make_extension_param(world_size, shard_dim, local.size(), ())
         param.sharded_param.requires_grad = False
-        param.param_dtype, param.orig_dtype = None, local.dtype
+        param.param_dtype = param.reduce_dtype = None
+        param.orig_dtype = local.dtype
+        param._has_sharded_grad_dtype_override = False
         param._orig_size = expected.size()
         param._contiguous_orig_stride = expected.stride()
         param.is_spmd_types = False

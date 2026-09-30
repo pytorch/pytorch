@@ -587,8 +587,8 @@ TEST(SchemaParserTest, TensorListAnnotatedAliasSets) {
 TEST(SchemaParserTest, AnnotatedAliasWithoutBeforeSet) {
   EXPECT_THAT(
       []() { parseSchema("at::foo(Tensor(!) self) -> Tensor"); },
-      ::testing::Throws<c10::Error>(::testing::Property(
-          &c10::Error::what,
+      ::testing::Throws<std::runtime_error>(::testing::Property(
+          &std::runtime_error::what,
           ::testing::HasSubstr("expected ident but found '!' here"))));
 }
 

@@ -67,13 +67,14 @@ struct C10_EXPORT ConcretePyObjectHolder final : PyObjectHolder {
 
       return extractorFn(py_obj_).cast<std::vector<at::Tensor>>();
     } catch (py::error_already_set& e) {
-      auto err = c10::str("Cannot extract tensors from value: ", e.what());
+      auto err = std::runtime_error(
+          c10::str("Cannot extract tensors from value: ", e.what()));
       {
         pybind11::gil_scoped_acquire ag;
         e.restore();
         PyErr_Clear();
       }
-      TORCH_CHECK(false, err);
+      throw std::runtime_error(err);
     }
   }
 

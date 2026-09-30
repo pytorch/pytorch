@@ -69,7 +69,8 @@ struct NVSHMEMAllocation {
   NVSHMEMAllocation& operator=(NVSHMEMAllocation&&) = delete;
 
   ~NVSHMEMAllocation() {
-    if (should_skip_cuda_cleanup(device_idx)) {
+    // Avoid calling CUDA functions after driver shutting down
+    if (is_finalizing()) {
       return;
     }
     c10::cuda::CUDAGuard guard(device_idx);

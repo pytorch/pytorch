@@ -37,11 +37,8 @@ from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
-    DTensorContinuousTestBase,
     DTensorOpTestBase,
     DTensorTestBase,
-    LocalDTensorContinuousTestBase,
-    NUM_DEVICES,
     op_strategy_context,
     with_comms,
 )
@@ -600,9 +597,7 @@ def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
         return len(output_strategy_str_list) == len(set(output_strategy_str_list))
 
 
-class DistTensorReplicateStrategyRegistrationTest(DTensorContinuousTestBase):
-    world_size = NUM_DEVICES
-
+class DistTensorReplicateStrategyRegistrationTest(DTensorTestBase):
     @with_comms
     @patch("torch.distributed.tensor._sharding_prop._select_min_cost_strategy")
     def test_replicate_strategy_placement(self, mock_select_strategy):
@@ -740,7 +735,6 @@ class TestStrategyOperation(DTensorTestBase):
 DistTensorReplicateStrategyRegistrationTestWithLocalTensor = (
     create_local_tensor_test_class(
         DistTensorReplicateStrategyRegistrationTest,
-        base_class=LocalDTensorContinuousTestBase,
     )
 )
 

@@ -799,25 +799,8 @@ class GraphLowering(torch.fx.Interpreter):
         if config.force_layout_optimization:
             return True
 
-        # aten.convolution_backward prepends grad_output to aten.convolution's
-        # (input, weight) and takes groups at index 9 instead of last, so the
-        # heuristics below have to index the two schemas differently.
-        def is_conv_bwd(n: Node) -> bool:
-            return n.target is torch.ops.aten.convolution_backward.default
-
-        def get_conv_input_weight_vals(n: Node) -> tuple[Any, Any]:
-            if is_conv_bwd(n):
-                return n.args[1].meta["val"], n.args[2].meta["val"]  # type: ignore[union-attr, operator]
-            return n.args[0].meta["val"], n.args[1].meta["val"]  # type: ignore[union-attr, operator]
-
         conv_nodes = [
-            n
-            for n in gm.graph.nodes
-            if n.target
-            in (
-                torch.ops.aten.convolution.default,
-                torch.ops.aten.convolution_backward.default,
-            )
+            n for n in gm.graph.nodes if n.target is torch.ops.aten.convolution.default
         ]
 
         for n in gm.graph.nodes:
@@ -834,9 +817,9 @@ class GraphLowering(torch.fx.Interpreter):
             torch.backends.mkldnn.enabled  # pyrefly: ignore [unbound-name]
             and torch.backends.mkldnn.is_available()  # pyrefly: ignore [unbound-name]
             and all(
-                val.device.type in SUPPORTED_MKLDNN_DEVICES
+                n.args[idx].meta["val"].device.type in SUPPORTED_MKLDNN_DEVICES
                 for n in conv_nodes
-                for val in get_conv_input_weight_vals(n)
+                for idx in [0, 1]
             )
         ):
             return True
@@ -849,9 +832,9 @@ class GraphLowering(torch.fx.Interpreter):
             return False
 
         if any(
-            has_free_symbols(val)
+            has_free_symbols(n.args[idx].meta["val"])
             for n in conv_nodes
-            for val in get_conv_input_weight_vals(n)
+            for idx in [0, 1]
         ):
             log.debug(
                 "See perf regression with dynamic shape. Follow up in https://github.com/pytorch/pytorch/issues/102670"
@@ -859,19 +842,22 @@ class GraphLowering(torch.fx.Interpreter):
             return False
 
         def is_grouped(n: Any) -> bool:
-            meta_val = get_conv_input_weight_vals(n)[1]
+            meta_val = n.args[1].meta["val"]  # type: ignore[union-attr, operator]
             if not isinstance(meta_val, torch.Tensor):
                 raise AssertionError(f"Expected torch.Tensor, got {type(meta_val)}")
-            groups = n.args[9] if is_conv_bwd(n) else n.args[-1]
-            return groups > 1 and meta_val.size(1) > 1
+            return n.args[-1] > 1 and meta_val.size(1) > 1  # type: ignore[union-attr, operator]
 
         def is_in_out_channel(n: torch.fx.Node) -> bool:
-            meta_val = get_conv_input_weight_vals(n)[1]
-            return meta_val.size(0) * 2 <= meta_val.size(1) and meta_val.size(2) > 1
+            return (
+                n.args[1].meta["val"].size(0) * 2 <= n.args[1].meta["val"].size(1)  # type: ignore[union-attr, operator]
+                and n.args[1].meta["val"].size(2) > 1  # type: ignore[union-attr, operator]
+            )
 
         def is_small_channel(n: torch.fx.Node) -> bool:
-            meta_val = get_conv_input_weight_vals(n)[1]
-            return meta_val.size(0) <= 64 and meta_val.size(1) <= 64
+            return (
+                n.args[1].meta["val"].size(0) <= 64  # type: ignore[union-attr, operator]
+                and n.args[1].meta["val"].size(1) <= 64  # type: ignore[union-attr, operator]
+            )
 
         # only grouped convolutions benchmarked as slower in conv samples for inference only
         if is_inference:

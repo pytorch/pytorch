@@ -960,11 +960,9 @@ struct TORCH_API Node {
     AT_ASSERT(name.is_attr());
     auto it = findAttr(name, true);
     auto* child = dynamic_cast<T*>(it->get());
-    TORCH_CHECK(
-        child != nullptr,
-        "required keyword attribute '",
-        name.toUnqualString(),
-        "' has the wrong type");
+    if (child == nullptr) {
+      throw IRAttributeError(name, true);
+    }
     return child->value();
   }
   using AVPtr = AttributeValue::Ptr;
@@ -977,11 +975,9 @@ struct TORCH_API Node {
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
     });
-    TORCH_CHECK(
-        !required || it != values_.end(),
-        "required keyword attribute '",
-        name.toUnqualString(),
-        "' is undefined");
+    if (required && it == values_.end()) {
+      throw IRAttributeError(name, false);
+    }
     AT_ASSERT(!required || it != values_.end());
     return it;
   }
@@ -991,11 +987,9 @@ struct TORCH_API Node {
     auto it = std::find_if(values_.begin(), values_.end(), [&](const AVPtr& v) {
       return v->name == name;
     });
-    TORCH_CHECK(
-        !required || it != values_.end(),
-        "required keyword attribute '",
-        name.toUnqualString(),
-        "' is undefined");
+    if (required && it == values_.end()) {
+      throw IRAttributeError(name, false);
+    }
     AT_ASSERT(!required || it != values_.end());
     return it;
   }
