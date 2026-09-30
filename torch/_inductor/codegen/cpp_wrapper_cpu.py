@@ -2340,9 +2340,18 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.codegen_tensor_item(node.inputs[0].get_dtype(), data, f"{node.sym}_raw")
 
         if len(node.keypath) == 0:
-            is_symint = symbol_is_type(node.sym, SymT.UNBACKED_INT)
-            cpp_type = "int64_t" if is_symint else "auto"
-            self.writeline(f"{cpp_type} {node.sym} = {node.sym}_raw;")
+            if symbol_is_type(node.sym, SymT.UNBACKED_INT):
+                if node.inputs[0].get_dtype() == torch.uint64:
+                    self.writeline(
+                        f"if ({node.sym}_raw > std::numeric_limits<int64_t>::max()) "
+                        '{ throw std::runtime_error("value cannot be converted to '
+                        'type int64_t without overflow"); }'
+                    )
+                self.writeline(
+                    f"int64_t {node.sym} = static_cast<int64_t>({node.sym}_raw);"
+                )
+            else:
+                self.writeline(f"auto {node.sym} = {node.sym}_raw;")
         elif len(node.keypath) == 1 and isinstance(node.keypath[0], ConvertIntKey):
             self.writeline(f"int64_t {node.sym} = {node.sym}_raw ? 1 : 0;")
         elif len(node.keypath) == 1 and isinstance(node.keypath[0], DivideByKey):

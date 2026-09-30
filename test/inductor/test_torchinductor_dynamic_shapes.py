@@ -1605,6 +1605,56 @@ class TestSymbolicFull(TestCase):
     def test_full_symbolic_fill_respects_dtype_cpp_wrapper(self, device, fill_value):
         self._check_symbolic_fill_respects_dtype(device, fill_value)
 
+    def _check_symbolic_fill_cast_precedes_consumer(
+        self, device, dtype, fill_value, operation
+    ):
+        def f(x):
+            y = torch.full((1,), x.item(), dtype=dtype, device=device)
+            if operation == "mul":
+                y = y * 2
+            else:
+                y = y.square()
+            if dtype.is_floating_point:
+                return y
+            return torch.div(y, 2, rounding_mode="floor")
+
+        x = torch.tensor(fill_value, device=device)
+        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize(
+        "dtype,fill_value,operation",
+        (
+            (torch.float32, 2**24 + 1, "square"),
+            (torch.int32, 50_000, "square"),
+            (torch.int64, 2**62 + 1, "mul"),
+        ),
+    )
+    def test_full_symbolic_fill_cast_precedes_consumer(
+        self, device, dtype, fill_value, operation
+    ):
+        self._check_symbolic_fill_cast_precedes_consumer(
+            device, dtype, fill_value, operation
+        )
+
+    @onlyOn(["cpu", "cuda", "xpu"])
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize(
+        "dtype,fill_value,operation",
+        (
+            (torch.float32, 2**24 + 1, "square"),
+            (torch.int32, 50_000, "square"),
+            (torch.int64, 2**62 + 1, "mul"),
+        ),
+    )
+    def test_full_symbolic_fill_cast_precedes_consumer_cpp_wrapper(
+        self, device, dtype, fill_value, operation
+    ):
+        self._check_symbolic_fill_cast_precedes_consumer(
+            device, dtype, fill_value, operation
+        )
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @parametrize(
         "dtype,fill_value,valid_value,input_dtype",
@@ -1698,6 +1748,13 @@ class TestSymbolicFull(TestCase):
         self.assertEqual(compiled_f(x), f(x))
 
         x = torch.tensor(300, dtype=torch.uint64, device=device)
+        with self.assertRaisesRegex(RuntimeError, self._overflow_error):
+            f(x)
+        with self.assertRaisesRegex(RuntimeError, self._overflow_error):
+            compiled_f(x)
+
+        uint64_max = torch.iinfo(torch.uint64).max
+        x = torch.tensor(uint64_max, dtype=torch.uint64, device=device)
         with self.assertRaisesRegex(RuntimeError, self._overflow_error):
             f(x)
         with self.assertRaisesRegex(RuntimeError, self._overflow_error):
