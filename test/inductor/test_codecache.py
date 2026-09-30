@@ -51,6 +51,7 @@ from torch._inductor.codecache import (
     PyCodeCache,
     TensorMetadata,
     TensorMetadataAndValues,
+    triton_key,
 )
 from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
 from torch._inductor.codegen.cuda.compile_utils import cuda_compile_command
@@ -125,6 +126,12 @@ STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
 
 @instantiate_parametrized_tests
 class TestCacheKeyStrategy(TestCase):
+    def setUp(self):
+        super().setUp()
+        # These tests expect triton_key to be recomputed under their patches;
+        # an earlier compile may have cached (or be prefetching) the real value.
+        triton_key.clear()
+
     @parametrize("backend_precision", ("bfx9", "tf32"))
     def test_precompile_cache_key_handles_bfx9(self, backend_precision):
         from torch._inductor.select_algorithm import create_precompile_key
