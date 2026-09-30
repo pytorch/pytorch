@@ -974,6 +974,27 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
     bypass_device_restrictions = False
 
     @classmethod
+    def _capabilities(cls):
+        capabilities = super()._capabilities()
+        device_type = torch._C._get_privateuse1_backend_name()
+        capabilities.update(
+            {
+                Capability.distributed: {
+                    Capability.distributed.backend: lambda: _distributed_backend_available(
+                        device_type
+                    ),
+                    Capability.distributed.dtensor: lambda: _distributed_backend_available(
+                        device_type
+                    ),
+                    Capability.distributed.fsdp: lambda: _distributed_backend_available(
+                        device_type
+                    ),
+                },
+            }
+        )
+        return capabilities
+
+    @classmethod
     def get_primary_device(cls):
         return cls.primary_device
 
