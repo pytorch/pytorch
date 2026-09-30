@@ -242,6 +242,63 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_gb=32.0,
     ),
     # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/245796/
+    # intel-arc-pro-b65-graphics/specifications.html
+    "INTEL B65": DeviceInfo(
+        tops={
+            torch.float64: 6.14,
+            torch.float32: 12.28,
+            "torch.tf32": 98.5,
+            torch.bfloat16: 98.5,
+            torch.float16: 98.5,
+            torch.float8_e8m0fnu: 98.5,
+            torch.float8_e4m3fnuz: 98.5,
+            torch.float8_e5m2: 98.5,
+            torch.float8_e5m2fnuz: 98.5,
+            torch.int8: 197,
+        },
+        dram_bw_gbs=608.0,
+        dram_gb=32.0,
+    ),
+    # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/243916/
+    # intel-arc-pro-b60-graphics/specifications.html
+    "INTEL B60": DeviceInfo(
+        tops={
+            torch.float64: 6.14,
+            torch.float32: 12.28,
+            "torch.tf32": 98.5,
+            torch.bfloat16: 98.5,
+            torch.float16: 98.5,
+            torch.float8_e8m0fnu: 98.5,
+            torch.float8_e4m3fnuz: 98.5,
+            torch.float8_e5m2: 98.5,
+            torch.float8_e5m2fnuz: 98.5,
+            torch.int8: 197,
+        },
+        dram_bw_gbs=456.0,
+        dram_gb=24.0,
+    ),
+    # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/242615/
+    # intel-arc-pro-b50-graphics/specifications.html
+    "INTEL B50": DeviceInfo(
+        tops={
+            torch.float64: 5.33,
+            torch.float32: 10.65,
+            "torch.tf32": 85.0,
+            torch.bfloat16: 85.0,
+            torch.float16: 85.0,
+            torch.float8_e8m0fnu: 85.0,
+            torch.float8_e4m3fnuz: 85.0,
+            torch.float8_e5m2: 85.0,
+            torch.float8_e5m2fnuz: 85.0,
+            torch.int8: 170,
+        },
+        dram_bw_gbs=224.0,
+        dram_gb=16.0,
+    ),
+    # Source:
     # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/232876/\
     # intel-data-center-gpu-max-1100/specifications.html
     "Intel(R) Data Center GPU Max 1100": DeviceInfo(
@@ -290,12 +347,14 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_gb=64,
     ),
 }
-}
 _device_mapping["AMD INSTINCT MI350X"] = _device_mapping["AMD MI350X"]
 _device_mapping["AMD INSTINCT MI300X"] = _device_mapping["AMD MI300X"]
 _device_mapping["AMD INSTINCT MI210X"] = _device_mapping["AMD MI210X"]
 _device_mapping["Intel(R) Arc(TM) B580 Graphics"] = _device_mapping["INTEL B580"]
 _device_mapping["Intel(R) Arc(TM) Pro B70 Graphics"] = _device_mapping["INTEL B70"]
+_device_mapping["Intel(R) Arc(TM) Pro B65 Graphics"] = _device_mapping["INTEL B65"]
+_device_mapping["Intel(R) Arc(TM) Pro B60 Graphics"] = _device_mapping["INTEL B60"]
+_device_mapping["Intel(R) Arc(TM) Pro B50 Graphics"] = _device_mapping["INTEL B50"]
 
 # Enforce the upper-case-key invariant so entries cannot silently miss
 # `lookup_device_info` (which upper-cases the query before lookup).

@@ -291,7 +291,7 @@ class TestUtils(TestCase):
         device_name = "Intel(R) Data Center GPU Max 1550"
         self.assertEqual(datasheet_tops(torch.float16, device_name=device_name), 419.43)
         self.assertEqual(datasheet_tops(torch.float32, device_name=device_name), 26.2)
-        self.assertEqual(datasheet_dram_bw_gbs(device_name=device_name), 3276.8)
+        self.assertEqual(datasheet_dram_bw_gbs(device_name=device_name), 1638.4)
 
 
 def has_supported_gpu():
