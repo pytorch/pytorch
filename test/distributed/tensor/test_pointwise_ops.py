@@ -1421,12 +1421,12 @@ class TestPointwiseRuleValidation(TestCase):
                     self.assertEqual(
                         stats.true_positives,
                         expected,
-                        f"{name}: expected {expected} true_positives, got {stats.true_positives}",
+                        lambda msg: f"{msg}\n{name}: expected {expected} true_positives, got {stats.true_positives}",
                     )
                     self.assertEqual(
                         len(stats.false_positives),
                         0,
-                        f"{name}: found incorrect rules: {stats.false_positives}",
+                        lambda msg: f"{msg}\n{name}: found incorrect rules: {stats.false_positives}",
                     )
 
                 self._with_even_sizes(run)

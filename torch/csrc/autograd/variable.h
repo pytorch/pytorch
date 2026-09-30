@@ -163,7 +163,13 @@ TORCH_API void set_gradient_edge(const Variable& /*self*/, Edge edge);
 /// For View Variables:
 /// Called after in-place modifications. Modifies the grad_fn of the base
 /// Variable.
-TORCH_API void rebase_history(const Variable& /*self*/, Edge gradient_edge);
+///
+/// Returns the node that was actually attached as the new history: the
+/// CopySlices node for views, otherwise the passed-in function. Callers use
+/// it to fire node creation hooks on the composed node.
+TORCH_API c10::intrusive_ptr<Node> rebase_history(
+    const Variable& /*self*/,
+    Edge gradient_edge);
 
 /// Gets the raw gradient function pointer, whatever it currently is.
 TORCH_API Node* grad_fn_unsafe(const Variable& /*self*/);
@@ -486,7 +492,7 @@ struct TORCH_API ViewInfo {
   /// The "base" and "tensor" are respectively the input and output of the
   /// differentiable view function that happened. They are required to properly
   /// set the optional view_fn_ when it is not provided. The "view_func", if
-  /// provided, should be a function that allows to re-do the view between
+  /// provided, should be a function that allows re-doing the view between
   /// "base" and "tensor".
   ViewInfo chain(
       const Variable& base,
@@ -523,7 +529,7 @@ struct TORCH_API ViewInfo {
 ///
 /// Differentiable Views
 /// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-/// This class allows to track both forward and backward AD differentiable
+/// This class allows tracking both forward and backward AD differentiable
 /// views. These views can have different base as non-differentiable view for
 /// forward and backward mode AD are not the same.
 ///

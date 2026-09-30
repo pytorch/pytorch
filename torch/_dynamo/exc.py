@@ -20,6 +20,32 @@ Observed Exceptions:
     - Special handling for StopIteration, LookupError, etc.
     - Exception state management during compilation
 
+    When an exception is raised inside a ``torch.compile`` region,
+    TorchDynamo does **not** immediately propagate it to the caller.
+    Instead, Dynamo symbolically traces the exception so that
+    ``try``/``except`` blocks inside the compiled function can be
+    captured in the FX graph and reasoned about statically.
+
+    Common Python exception types are wrapped in ``ObservedException``
+    subclasses (e.g. ``StopIteration`` → ``ObservedUserStopIteration``,
+    ``KeyError`` → ``ObservedKeyError``).  The full mapping is defined in
+    ``observed_exception_map``.  For exception types not present in that
+    map, :func:`get_dynamo_observed_exception` creates a new
+    ``ObservedException`` subclass dynamically at tracing time.
+
+    If an observed exception is **not caught** inside the compiled region
+    it propagates out and is re-raised as the original exception type in
+    eager mode, preserving the original traceback for the user.
+
+    .. note::
+        This behaviour means that exception-based control flow (e.g.
+        ``StopIteration`` from a custom iterator, ``KeyError`` from a
+        dict access) is generally supported inside ``torch.compile``
+        regions.  However, raising or catching exceptions that depend on
+        *data-dependent* conditions may still cause a graph break because
+        Dynamo cannot statically determine which branch will be taken at
+        compile time.
+
 Error Formatting:
     - Stack trace filtering and formatting
     - Error message augmentation
@@ -31,6 +57,7 @@ import logging
 import re
 import sys
 import textwrap
+import types
 import typing
 from enum import auto, Enum
 from functools import lru_cache
@@ -46,7 +73,7 @@ from .utils import counters
 
 
 if TYPE_CHECKING:
-    import types
+    from collections.abc import Mapping, Sequence
 
     from torch._dynamo.variables import VariableTracker
     from torch._guards import CompileId
@@ -68,6 +95,49 @@ log = logging.getLogger(__name__)
 graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
+_EXCEPTION_STATE_ATTRS_TO_DROP = frozenset(
+    (
+        "_torch_dynamo_tracer_output",
+        "first_useful_frame",
+        "frame_exec_strategy",
+    )
+)
+
+
+class _SerializedException(RuntimeError):
+    _dynamo_original_exception_type: str
+
+    def __init__(self, exc: BaseException) -> None:
+        super().__init__(str(exc))
+        self._dynamo_original_exception_type = (
+            f"{type(exc).__module__}.{type(exc).__qualname__}"
+        )
+
+
+def _safe_inner_exception(exc: BaseException) -> _SerializedException:
+    return _SerializedException(exc)
+
+
+def _safe_exception_state(state: Mapping[str, object]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for name, value in state.items():
+        if name in _EXCEPTION_STATE_ATTRS_TO_DROP or isinstance(value, types.FrameType):
+            result[name] = None
+        elif name == "inner_exception" and isinstance(value, BaseException):
+            result[name] = _safe_inner_exception(value)
+        else:
+            result[name] = value
+    return result
+
+
+def _reconstruct_torch_dynamo_exception(
+    exc_type: type[TorchDynamoException], args: tuple[object, ...]
+) -> TorchDynamoException:
+    exc = exc_type.__new__(exc_type)
+    BaseException.__init__(exc, *args)
+    return exc
+
+
 class TorchDynamoException(RuntimeError):
     """Base exception class for all TorchDynamo-specific exceptions.
 
@@ -78,12 +148,32 @@ class TorchDynamoException(RuntimeError):
             instead of the default behavior. This allows exceptions to signal specific
             execution strategies (e.g., SKIP, RUN_ONLY) without requiring separate
             exception types for control flow.
+        apply_to_code: Whether frame_exec_strategy should be cached on the code
+            object and applied to future invocations. If frame_exec_strategy is
+            unset, False requests a non-cached SKIP/DEFAULT strategy while True
+            uses normal exception handling. If it is set, the supplied strategy
+            is either cached or limited to the current invocation accordingly.
     """
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: object, **kwargs: object) -> None:
         super().__init__(*args, **kwargs)
         self._torch_dynamo_tracer_output: DynamoTracerOutput | None = None
         self.frame_exec_strategy: FrameExecStrategy | None = None
+        self.apply_to_code = True
+
+    def __reduce__(self) -> tuple[object, ...]:
+        return (
+            _reconstruct_torch_dynamo_exception,
+            (type(self), self.args),
+            self.__getstate__(),
+        )
+
+    def __getstate__(self) -> dict[str, object]:
+        return _safe_exception_state(self.__dict__)
+
+    def __setstate__(self, state: Mapping[str, object] | None, /) -> None:
+        if state is not None:
+            self.__dict__.update(state)
 
 
 class InternalTorchDynamoError(TorchDynamoException):
@@ -94,10 +184,19 @@ class ResumePrologueTracingError(TorchDynamoException):
     pass
 
 
+class CompileOnOneRankUnsupported(TorchDynamoException):
+    """Something a rank-portable graph cannot express under compile_on_one_rank.
+
+    Deliberately not a graph break. Breaking out drops the frame back to eager,
+    which silently forfeits the rank-portability the feature was turned on for, so
+    these propagate whether or not graph breaks are allowed.
+    """
+
+
 class RestartAnalysis(TorchDynamoException):
     restart_reason: str | None
 
-    def __init__(self, *args: Any, restart_reason: str | None = None) -> None:
+    def __init__(self, *args: object, restart_reason: str | None = None) -> None:
         self.restart_reason = restart_reason
         super().__init__(*args)
 
@@ -153,10 +252,15 @@ class TorchRuntimeError(TorchDynamoException):
 
 
 class InvalidBackend(TorchDynamoException):
-    def __init__(self, name: str) -> None:
-        super().__init__(
-            f"Invalid backend: {name!r}, see `torch._dynamo.list_backends()` for available backends."
+    def __init__(self, name: str, suggestions: list[str] | None = None) -> None:
+        msg = f"Invalid backend: {name!r}"
+        msg += (
+            f", did you mean: {', '.join(map(repr, suggestions))}?"
+            if suggestions
+            else "."
         )
+        msg += " See `torch._dynamo.list_backends()` for available backends."
+        super().__init__(msg)
 
 
 class ResetRequired(TorchDynamoException):
@@ -173,7 +277,10 @@ class ResetRequired(TorchDynamoException):
 
 class ShortenTraceback(TorchDynamoException):
     def __init__(
-        self, *args: Any, first_useful_frame: types.FrameType | None, **kwargs: Any
+        self,
+        *args: object,
+        first_useful_frame: types.FrameType | None,
+        **kwargs: object,
     ) -> None:
         super().__init__(*args, **kwargs)
         self.first_useful_frame = first_useful_frame
@@ -192,11 +299,11 @@ class ShortenTraceback(TorchDynamoException):
 class BackendCompilerFailed(ShortenTraceback):
     def __init__(
         self,
-        backend_fn: Any,
+        backend_fn: object,
         inner_exception: Exception,
         first_useful_frame: types.FrameType | None,
     ) -> None:
-        self.backend_name = getattr(backend_fn, "__name__", "?")
+        self.backend_name: str = getattr(backend_fn, "__name__", "?")
         self.inner_exception = inner_exception
         msg = f"backend={self.backend_name!r} raised:\n{type(inner_exception).__name__}: {inner_exception}"
         super().__init__(msg, first_useful_frame=first_useful_frame)
@@ -217,6 +324,8 @@ class Unsupported(TorchDynamoException):
         *,
         case_name: str | None = None,
         real_stack: StackSummary | None = None,
+        preserve_skip_frame_after_inline: bool = False,
+        apply_to_code: bool = True,
     ) -> None:
         super().__init__(msg)
         if not real_stack:
@@ -224,6 +333,8 @@ class Unsupported(TorchDynamoException):
         self.real_stack = real_stack
         self.msg = msg
         self.skip_frame = skip_frame
+        self.preserve_skip_frame_after_inline = preserve_skip_frame_after_inline
+        self.apply_to_code = apply_to_code
         self.category: str | None = None
         self.add_to_stats()
         self.gb_type: str | None = gb_type
@@ -294,6 +405,7 @@ class UserError(TorchDynamoException):
         super().__init__(msg)
         self.real_stack = torch._guards.TracingContext.extract_stack()
         self.skip_frame = False
+        self.preserve_skip_frame_after_inline = False
         self.logged = False
         self.error_type = error_type
         self.msg = msg
@@ -340,7 +452,7 @@ class PackageError(TorchDynamoException):
 class ObservedException(TorchDynamoException):
     # An exception observed during the tracing. This exception is used by Dynamo to handle exceptions.
     def __init__(
-        self, *args: Any, real_stack: StackSummary | None = None, **kwargs: Any
+        self, *args: object, real_stack: StackSummary | None = None, **kwargs: object
     ) -> None:
         super().__init__(*args, **kwargs)
         self.real_stack: StackSummary = (
@@ -352,12 +464,14 @@ class ObservedException(TorchDynamoException):
 
 class ObservedUserStopIteration(ObservedException):
     # An UserStopIteration exception observed during the Dynamo tracing (e.g Dynamo tracing __next__)
-    value: Any | None
+    # Preserve CPython's value attribute for external inspection; Dynamo tracks the
+    # symbolic payload separately through ExceptionVariable.args.
+    value: object | None
 
     # Reference `StopIteration_init` in CPython
     # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
     def __init__(
-        self, *args: Any, real_stack: StackSummary | None = None, **kwargs: Any
+        self, *args: object, real_stack: StackSummary | None = None, **kwargs: object
     ) -> None:
         super().__init__("unhandled `raise StopIteration`", real_stack=real_stack)
         if len(args) > 0:
@@ -404,6 +518,10 @@ class ObservedTypeError(ObservedException):
     pass
 
 
+class FakeTensorObservedException(ObservedException):
+    pass
+
+
 observed_exception_map = {
     StopIteration: ObservedUserStopIteration,
     LookupError: ObservedLookupError,
@@ -415,6 +533,28 @@ observed_exception_map = {
     NotImplementedError: ObservedNotImplementedError,
     TypeError: ObservedTypeError,
 }
+
+
+class UnhandledDescriptorError(NotImplementedError):
+    """Raised by object_generic_getattr when a descriptor type is not
+    recognized by _resolve_descriptor_get.  Subclasses NotImplementedError
+    so callers that catch NotImplementedError (e.g., generic_getattr's
+    graph-break fallback) still work, but callers that want to
+    distinguish unhandled descriptors from other NotImplementedErrors can
+    catch this specifically.
+    """
+
+
+class TritonUnavailableError(RuntimeError):
+    """
+    Raised by DeviceInterface.raise_if_triton_unavailable to signal that a
+    device cannot run Triton (e.g. no Triton backend was built for it).
+
+    Subclasses RuntimeError so existing callers that catch RuntimeError keep
+    working, while callers that only want to react to Triton unavailability -
+    such as has_triton() - can catch this specific type instead of swallowing
+    every RuntimeError, which would hide unrelated bugs.
+    """
 
 
 def get_dynamo_observed_exception(exc_type: type[Exception]) -> type[ObservedException]:
@@ -431,15 +571,20 @@ def raise_observed_exception(
     exc_type: type[Exception],
     tx: InstructionTranslatorBase,
     *,
-    args: list[VariableTracker] | list[str] | None = None,
+    args: Sequence[object] | None = None,
     kwargs: dict[str, VariableTracker] | None = None,
 ) -> NoReturn:
-    from .symbolic_convert import ExceptionVals
+    from .variables.base import VariableTracker
     from .variables.builder import SourcelessBuilder
 
     if args:
+        # Callers commonly forward a real exception's .args, whose members are
+        # not all strings (TypeError("msg", 42)). Anything that is not already
+        # a VariableTracker has to be wrapped, or it reaches the VT machinery raw.
         args_ = [
-            SourcelessBuilder.create(tx, arg) if isinstance(arg, str) else arg
+            arg
+            if isinstance(arg, VariableTracker)
+            else SourcelessBuilder.create(tx, arg)
             for arg in args
         ]
     else:
@@ -450,15 +595,12 @@ def raise_observed_exception(
     exception_vt = SourcelessBuilder.create(tx, exc_type).call_function(
         tx, args_, kwargs or {}
     )
-    if not isinstance(exception_vt, ExceptionVals):
-        raise AssertionError(f"expected ExceptionVals, got {type(exception_vt)}")
-    tx._attach_traceback_to_exception(exception_vt)
-    tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
-    raised_exc = get_dynamo_observed_exception(exc_type)
-    # Store the original exception arguments for better error messages
-    if args:
-        raise raised_exc(*args_)
-    raise raised_exc
+    tx.do_raise(exception_vt, None)
+
+
+def raise_attribute_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
+    """Raise an AttributeError as an observed exception during tracing."""
+    raise_observed_exception(AttributeError, tx, args=[msg])
 
 
 def raise_type_error(tx: InstructionTranslatorBase, msg: str) -> NoReturn:
@@ -517,6 +659,7 @@ def unimplemented_with_warning(
     context: str,
     explanation: str,
     hints: list[str],
+    log_warning: bool = True,
 ) -> NoReturn:
     # This function calls unimplemented internally and eventually graph breaks
     # or falls to eager. unimplemented itself does not print any user warnings,
@@ -524,7 +667,8 @@ def unimplemented_with_warning(
     # encountered in the torch.compile stack which is worth showing as warning
     # to the user. For example, if AOT Autograd backend fails with a fake tensor
     # exception, its ok to fallback to eager but not silently. Here, we can use
-    # this function to log the message and the stack trace.
+    # this function to log the message and the stack trace. Callers can disable
+    # the user warning while keeping structured/debug graph-break logging.
     graph_break_msg = format_error_msg_verbose(e, code)
     torch._logging.trace_structured(
         "artifact",
@@ -543,7 +687,7 @@ def unimplemented_with_warning(
         explanation=explanation,
         hints=hints,
         from_exc=e,
-        log_warning=True,
+        log_warning=log_warning,
     )
 
 
@@ -636,6 +780,8 @@ def unimplemented(
     from_exc: Any = _NOTHING,
     log_warning: bool = False,
     skip_frame: bool = False,
+    preserve_skip_frame_after_inline: bool = False,
+    apply_to_code: bool = True,
 ) -> NoReturn:
     """
     Called within dynamo to cause a graph break.
@@ -645,32 +791,38 @@ def unimplemented(
         context: Developer context for the graph break. It can contain tracing context/dynamic strings.
         explanation: User-facing context-dependent explanation for the graph break. Can be dynamic.
         hints: List of user-facing hints for the graph break.
+        preserve_skip_frame_after_inline: Keep skip_frame=True if this graph break
+                 is raised from an inlined function and bubbles to the parent frame.
+        apply_to_code: Cache the resulting frame execution strategy on the code object.
     """
 
     msg = format_graph_break_message(gb_type, context, explanation, hints)
 
     if log_warning:
         log.warning(msg)
+    options: dict[str, Any] = {
+        "preserve_skip_frame_after_inline": preserve_skip_frame_after_inline,
+        "apply_to_code": apply_to_code,
+    }
     if from_exc is not _NOTHING:
         past_real_stack = None
         if hasattr(from_exc, "real_stack"):
             past_real_stack = from_exc.real_stack
+        options["real_stack"] = past_real_stack
         if isinstance(from_exc, Unsupported):
             msg = f"{from_exc.msg}\n\n*** While handling this graph break, another graph break occurred: ***\n\n{msg}"
             # noqa: GB_REGISTRY
-            raise Unsupported(msg, gb_type, skip_frame, real_stack=past_real_stack)
+            raise Unsupported(msg, gb_type, skip_frame, **options)
         # noqa: GB_REGISTRY
-        raise Unsupported(
-            msg, gb_type, skip_frame, real_stack=past_real_stack
-        ) from from_exc
+        raise Unsupported(msg, gb_type, skip_frame, **options) from from_exc
     # noqa: GB_REGISTRY
-    raise Unsupported(msg, gb_type, skip_frame)
+    raise Unsupported(msg, gb_type, skip_frame, **options)
 
 
 # KeyError has special handling for its args
 # see https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L2534 for details
 class KeyErrorMsg:
-    def __init__(self, value: Any) -> None:
+    def __init__(self, value: object) -> None:
         self.value = value
 
     def __str__(self) -> str:
@@ -708,9 +860,15 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
  torch._dynamo.replay('{exc.record_filename}').\n"
         )
 
-    if not config.verbose and hasattr(exc, "real_stack"):
+    show_verbose_hint = real_stack is not None or isinstance(exc, ShortenTraceback)
+    if not config.verbose and show_verbose_hint:
+        stack_trace = (
+            "the full Dynamo stack trace"
+            if isinstance(exc, ShortenTraceback)
+            else "the internal stack trace"
+        )
         msg += (
-            "\nSet TORCHDYNAMO_VERBOSE=1 for the internal stack trace "
+            f"\nSet TORCHDYNAMO_VERBOSE=1 for {stack_trace} "
             "(please do this especially if you're reporting a bug to PyTorch). "
             'For even more developer context, set TORCH_LOGS="+dynamo"\n'
         )

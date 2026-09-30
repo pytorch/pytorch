@@ -1,7 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import contextlib
-import functools
 import logging
 import warnings
 from collections.abc import Callable
@@ -21,8 +20,8 @@ from torch._higher_order_ops.utils import (
     _maybe_run_with_interpreter,
     check_input_alias_and_mutation_return_outputs,
     create_bw_fn,
+    create_fn_remove_none,
     fill_none_with_masks,
-    filter_with_masks,
     materialize_as_graph,
     reenter_make_fx,
     save_values_for_backward,
@@ -332,7 +331,7 @@ class CondAutogradOp(torch.autograd.Function):
             false_fn,
             operands,
         )
-        # We snapshot the dispatch keys in forward for materializing the
+        # We snapshot the dispatch keys in forward for materializing
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
@@ -347,31 +346,17 @@ class CondAutogradOp(torch.autograd.Function):
         args = operands + flat_grads
         # TODO: we need to materialize the bw graphs because dynamo is unable to
         # trace through the joint function when torch.compile torch.autograd.grad.
-
-        grads_tensor_masks = []
-
-        def create_fn_remove_none(fn):
-            @functools.wraps(fn)
-            def wrapped(*args):
-                nonlocal grads_tensor_masks
-
-                true_outputs = fn(*args)
-                grads_tensor_masks = [
-                    bool(isinstance(out, torch.Tensor)) for out in true_outputs
-                ]
-                return filter_with_masks(true_outputs, grads_tensor_masks)
-
-            return wrapped
-
+        true_wrapped, grads_tensor_masks = create_fn_remove_none(ctx._true_bw_fn)
         true_bw_gm = materialize_as_graph(
-            create_fn_remove_none(ctx._true_bw_fn),
+            true_wrapped,
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
             force_enable_grad=True,
         )
+        false_wrapped, _ = create_fn_remove_none(ctx._false_bw_fn)
         false_bw_gm = materialize_as_graph(
-            create_fn_remove_none(ctx._false_bw_fn),
+            false_wrapped,
             args,
             ctx._fw_include_key_set,
             ctx._fw_exclude_key_set,
@@ -448,6 +433,22 @@ def check_tensor_meta_match(
         )
 
 
+def _merge_ints_to_symint(
+    values: list[int], mode: FakeTensorMode
+) -> int | torch.SymInt:
+    """Merge N concrete ints into a single unbacked SymInt bounded [min, max].
+
+    Returns the value unchanged when all values are equal.
+    """
+    if all(v == values[0] for v in values):
+        return values[0]
+    if mode.shape_env is None:
+        raise AssertionError("mode.shape_env is None")
+    merged = mode.shape_env.create_unbacked_symint()
+    mode.shape_env.constrain_symbol_range(merged.node.expr, min(values), max(values))
+    return merged
+
+
 def _merge_output(
     a: torch.Tensor | int | None,
     b: torch.Tensor | int | None,
@@ -478,13 +479,7 @@ def _merge_output(
         )
 
     if type(a) is int and type(b) is int:
-        if a == b:
-            return a
-        if mode.shape_env is None:
-            raise AssertionError("mode.shape_env is None")
-        merged_out = mode.shape_env.create_unbacked_symint()
-        mode.shape_env.constrain_symbol_range(merged_out.node.expr, *min_max(a, b))
-        return merged_out
+        return _merge_ints_to_symint([a, b], mode)
 
     if not (type(a) is FakeTensor and type(b) is FakeTensor):
         raise AssertionError(
@@ -695,6 +690,11 @@ def _merge_output(
             nxt_merged_stride_expr = merged_strides[i] * merged_size[i]
             a_stride_expr[_maybe_expr(a_val * a_ex_size[i])] = nxt_merged_stride_expr
             b_stride_expr[_maybe_expr(b_val * b_ex_size[i])] = nxt_merged_stride_expr
+            # fake tensors accumulate contiguous strides as stride * max(size, 1)
+            a_max_key = _maybe_expr(a_val * torch.sym_max(a_ex_size[i], 1))
+            b_max_key = _maybe_expr(b_val * torch.sym_max(b_ex_size[i], 1))
+            a_stride_expr.setdefault(a_max_key, nxt_merged_stride_expr)
+            b_stride_expr.setdefault(b_max_key, nxt_merged_stride_expr)
         return merged_strides
 
     merged_stride: list[int | torch.SymInt] = _bound_stride(

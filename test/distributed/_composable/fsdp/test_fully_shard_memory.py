@@ -24,7 +24,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TEST_CUDA,
     TEST_HPU,
-    TEST_XPU,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
@@ -290,7 +289,7 @@ class TestFullyShardMemory(FSDPTest):
             self.assertLessEqual(
                 mem_after_steps - mem_after_warmup,
                 2,
-                f"Memory grew by {mem_after_steps - mem_after_warmup} MB over "
+                lambda msg: f"{msg}\nMemory grew by {mem_after_steps - mem_after_warmup} MB over "
                 f"{num_steps} steps with gc disabled, indicating a reference "
                 f"cycle leak in FSDP's autograd graph",
             )
@@ -329,18 +328,17 @@ class TestFullyShardMemory(FSDPTest):
 
     def _get_peak_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()
-
-        if TEST_CUDA or TEST_XPU:
+        # HPU uses different memory stat keys.
+        if not TEST_HPU:
             return round(mem_stats["active_bytes.all.peak"] / 1e6)
-        if TEST_HPU:
-            return round(mem_stats["MaxInUse"] / 1e6)
+        return round(mem_stats["MaxInUse"] / 1e6)
 
     def _get_curr_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()
-        if TEST_CUDA or TEST_XPU:
+        # HPU uses different memory stat keys.
+        if not TEST_HPU:
             return round(mem_stats["active_bytes.all.current"] / 1e6)
-        if TEST_HPU:
-            return round(mem_stats["InUse"] / 1e6)
+        return round(mem_stats["InUse"] / 1e6)
 
     def _register_optim_in_backward(
         self, model: torch.nn.Module, **optim_kwargs
@@ -371,8 +369,9 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
     def world_size(self) -> int:
         return min(4, torch.get_device_module(device_type).device_count())
 
+    # This test is CUDA-specific because it relies on torch.cuda._sleep.
     @skip_if_lt_x_gpu(4)
-    @unittest.skipIf(TEST_HPU or TEST_XPU, "HSDP sync correctness test is CUDA-only")
+    @unittest.skipIf(not TEST_CUDA, "HSDP sync correctness test is CUDA-only")
     def test_ar_buffer_lifetime_mixed_dtype(self):
         """Regression guard for PR #140044 (`[FSDP2] Fix CUDA sync for bf16
         HSDP AR, fp32 params`).
@@ -485,14 +484,14 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
                 # magnitude; any collapse shows up as a large mismatch here.
                 self.assertFalse(
                     math.isnan(slow_sum),
-                    f"NaN in slow-AR grad for {name}",
+                    lambda msg: f"{msg}\nNaN in slow-AR grad for {name}",
                 )
                 self.assertAlmostEqual(
                     slow_sum,
                     ref_sum,
                     delta=max(abs(ref_sum) * 1e-3, 1e-3),
                     msg=(
-                        f"HSDP AR buffer lifetime regression ({mp_dtype}): "
+                        lambda msg: f"{msg}\nHSDP AR buffer lifetime regression ({mp_dtype}): "
                         f"grad sum for {name} differs under slow AR. "
                         f"reference={ref_sum:.4f}, slow={slow_sum:.4f}. "
                         f"All layers collapsing to the same value indicates "
@@ -500,6 +499,53 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
                         f"(see PR #140044, PR #180900)."
                     ),
                 )
+
+
+class TestFullyShardAllReduceHookSyncCorrectness(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(2, torch.get_device_module(device_type).device_count())
+
+    # This test is CUDA-specific because it relies on torch.cuda._sleep.
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not TEST_CUDA, "all-reduce hook sync test is CUDA-only")
+    def test_all_reduce_hook_buffer_lifetime_mixed_dtype(self):
+        # Without native HSDP, the all-reduce hook and the cast to orig_dtype
+        # read the RS output on the hook stream. If nothing holds it past the
+        # cast, the next RS (for the first linear) can reuse its block before
+        # the slow hook finishes, and the last linear's grad reads that data.
+        torch.manual_seed(0)
+        dim = 512
+        model = nn.Sequential(
+            nn.Linear(dim, dim, bias=False),
+            nn.ReLU(),
+            nn.Linear(dim, dim, bias=False),
+        ).to(device_type)
+        # bf16 reduce with fp32 params, so the cast drops the last RS output ref
+        mp = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+        )
+        linears = [layer for layer in model if isinstance(layer, nn.Linear)]
+        for linear in linears:
+            fully_shard(linear, mp_policy=mp)
+        fully_shard(model, mp_policy=mp)
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn(4, dim, device=device_type)
+
+        model(inp).sum().backward()
+        ref_grads = [param.grad.to_local().clone() for param in model.parameters()]
+        model.zero_grad()
+
+        sleep_cycles = int(200 * get_cycles_per_ms())
+
+        def slow_hook(output: torch.Tensor) -> None:
+            torch.get_device_module(device_type)._sleep(sleep_cycles)
+
+        for linear in linears:
+            linear.set_all_reduce_hook(slow_hook)
+        model(inp).sum().backward()
+        for param, ref_grad in zip(model.parameters(), ref_grads):
+            self.assertEqual(param.grad.to_local(), ref_grad)
 
 
 if __name__ == "__main__":

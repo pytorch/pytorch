@@ -187,7 +187,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ complex / polar ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 static void complex_check_floating(const Tensor& a, const Tensor& b) {
-  TORCH_CHECK(
+  TORCH_CHECK_NOT_IMPLEMENTED(
       (a.scalar_type() == kFloat || a.scalar_type() == kDouble ||
        a.scalar_type() == kHalf) &&
           (b.scalar_type() == kFloat || b.scalar_type() == kDouble ||
@@ -939,6 +939,21 @@ Tensor ones(
 
 Tensor& ones_out(IntArrayRef size, Tensor& result) {
   return native::full_out(size, /*fill_value=*/1., result);
+}
+
+// SymInt-aware Meta kernel for ones
+Tensor ones_meta_symint(
+    SymIntArrayRef size,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory) {
+  TensorOptions options =
+      TensorOptions().dtype(dtype).layout(layout).device(device).pinned_memory(
+          pin_memory);
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      options.layout() != kSparse, "ones is not implemented for sparse layout");
+  return at::empty_symint(size, infer_full_options(/*fill_value=*/1., options));
 }
 
 Tensor ones_like(
@@ -1718,7 +1733,8 @@ Tensor zeros_symint(
     std::optional<Device> device,
     std::optional<bool> pin_memory) {
   for (const auto& dim_size : size) {
-    TORCH_CHECK(dim_size >= 0, "zeros: Dimension size must be non-negative.");
+    TORCH_SYM_CHECK(
+        dim_size.sym_ge(0), "zeros: Dimension size must be non-negative.");
   }
   Layout layout_ = layout.value_or(Layout::Strided);
   if (at::sparse_csr::is_sparse_compressed(layout_)) {
