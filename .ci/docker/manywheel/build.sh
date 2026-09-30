@@ -80,8 +80,10 @@ case ${image} in
         PYTORCH_ROCM_ARCH="gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx1150;gfx1151;gfx1250"
         TARGET=rocm_final
         GPU_IMAGE=amd64/almalinux:8
-        if [[ "${GPU_ARCH_VERSION}" == "7.14" ]]; then
-            THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
+        if [[ "${GPU_ARCH_VERSION}" == "10.1" ]]; then
+            # Release candidate; drop this branch once 10.1 is on the stable index.
+            GPU_ARCH_VERSION="10.1.0rc3"
+            THEROCK_INDEX_URL="https://rc.repo.amd.com/rocm/whl-next/"
         else
             THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
         fi
