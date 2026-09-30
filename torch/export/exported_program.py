@@ -857,6 +857,10 @@ def _common_getitem_elimination_pass(
             if not isinstance(module, torch.fx.GraphModule):
                 continue
 
+            # Signatures name root-graph nodes, and names repeat across
+            # subgraphs, so only root dedups may rewrite them.
+            is_root_graph = module is gm
+
             node_id: dict[torch.fx.Node, str] = {}
             getitems: dict[str, torch.fx.Node] = {}
             for node in list(module.graph.nodes):
@@ -865,11 +869,12 @@ def _common_getitem_elimination_pass(
                     new_id = f"{node_id[source]}.{idx}"
                     if new_id in getitems:
                         node.replace_all_uses_with(getitems[new_id])
-                        for entry in module_call_graph:
-                            if entry.signature is not None:
-                                entry.signature.replace_all_uses_with(
-                                    node, getitems[new_id]
-                                )
+                        if is_root_graph:
+                            for entry in module_call_graph:
+                                if entry.signature is not None:
+                                    entry.signature.replace_all_uses_with(
+                                        node, getitems[new_id]
+                                    )
                         module.graph.erase_node(node)
                     else:
                         getitems[new_id] = node
