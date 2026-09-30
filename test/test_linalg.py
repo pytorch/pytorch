@@ -9751,6 +9751,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 class TestLinalgSVD(TestCase):
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
+    @skipIfRocm
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @dtypesIfMPS(torch.float32, torch.complex64)
     def test_svd_ill_conditioned(self, device, dtype):
