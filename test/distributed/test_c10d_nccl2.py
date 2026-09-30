@@ -273,6 +273,31 @@ class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
         self.assertEqual(t, torch.full((4,), expected, device=self.device))
 
 
+class ProcessGroupNCCL2CommPtrTest(_ProcessGroupNCCL2OptionsTest):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_comm_ptr(self) -> None:
+        # The legacy backend returns the communicator of the current device.
+        torch.cuda.set_device(self.device)
+        self._check_all_reduce()
+        backend = dist.get_backend_impl(device=self.device)
+        self.assertNotEqual(backend.comm_ptr, 0)
+        # _comm_ptr() is kept for backwards compatibility.
+        self.assertEqual(backend._comm_ptr(), backend.comm_ptr)
+
+
+class ProcessGroupNCCLLazyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
+
+
+class ProcessGroupNCCLLegacyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-legacy"
+
+
 class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file) -> None:
