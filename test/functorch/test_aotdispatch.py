@@ -1408,6 +1408,30 @@ def forward(self, primals_1):
     return (mul, mul)""",
         )
 
+    def test_input_mutation_is_output_after_mutated_inputs(self):
+        # b's mutation is applied after the graph and a's stays in it; the
+        # graph returns the updated b before a, and b must not get a's value.
+        def f(a, b):
+            b.mul_(2)
+            a.add_(1)
+            return a
+
+        def f_metadata(a, b):
+            b.t_()
+            a.add_(1)
+            return a
+
+        for fn, make_inputs in [
+            # b requires grad: training graph
+            (f, lambda: [torch.zeros(3), torch.ones(3, requires_grad=True).add(1)]),
+            # inference graph
+            (f_metadata, lambda: [torch.zeros(3), torch.ones(2, 3)]),
+        ]:
+            compiled_fn = aot_function(fn, nop, keep_inference_input_mutations=True)
+            ref_inp, test_inp = make_inputs(), make_inputs()
+            self.assertEqual(fn(*ref_inp), compiled_fn(*test_inp))
+            self.assertEqual(ref_inp, test_inp)
+
     def test_input_mutation_multiple(self):
         def f(a, b, c):
             a.mul_(2)
