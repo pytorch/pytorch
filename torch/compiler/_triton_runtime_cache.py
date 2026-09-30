@@ -347,7 +347,7 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
 
     Call before any Triton kernel is imported or launched. An empty (or
     missing) directory is filled in one rename. A nonempty one must already
-    hold exactly this bundle, or this raises.
+    hold this bundle, or this raises, so each bundle needs its own directory.
     """
     root = runtime_cache_root()
     try:
@@ -360,8 +360,9 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
         marker = root / _READY
         if not marker.is_file() or marker.is_symlink() or marker.read_text() != digest:
             raise RuntimeError(
-                "Triton cache directory is nonempty and does not hold this "
-                f"runtime cache: {root}"
+                f"Triton cache directory {root} is nonempty and does not hold this "
+                "runtime cache; import each runtime cache into its own empty "
+                "TRITON_CACHE_DIR"
             )
         for (key, name), payload in payloads.items():
             path = root / key / name

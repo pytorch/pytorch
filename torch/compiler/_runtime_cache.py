@@ -73,6 +73,21 @@ def _triton_runtime_cache() -> ModuleType | None:
     return _triton_runtime_cache
 
 
+def _gpu_runtime_started() -> bool:
+    import torch
+
+    # Triton JIT kernels launch only on a GPU, and torch starts each device
+    # runtime lazily on first use.
+    return torch.cuda.is_initialized() or torch.xpu.is_initialized()
+
+
+_TRITON_SETTINGS_REQUIRED = (
+    "precompile.capture_runtime requires an explicit TRITON_CACHE_DIR dedicated "
+    "to this capture, and Triton's autotuning cache (TRITON_CACHE_AUTOTUNING=1), "
+    "before application imports"
+)
+
+
 def _runtime_context() -> dict[str, str | None]:
     import torch
     from torch._inductor.codecache import torch_key
@@ -469,9 +484,11 @@ def _active_capture() -> _RuntimeCapture | None:
 def capture_runtime() -> Iterator[None]:
     """Own one producer lifetime, including strict validation and cleanup.
 
-    When Triton is installed, set an attempt-private TRITON_CACHE_DIR and enable
-    Triton's autotuning cache (for example TRITON_CACHE_AUTOTUNING=1) before
-    application imports.
+    When Triton is installed, set a TRITON_CACHE_DIR dedicated to this capture and
+    enable Triton's autotuning cache (for example TRITON_CACHE_AUTOTUNING=1) before
+    application imports. Without TRITON_CACHE_DIR, a capture that never starts a
+    GPU runtime ships no Triton runtime cache; finalize_cache raises if it does
+    start one.
     Finalizing the cache seals this scope against further compiler work until the
     outer application cleanup has returned.
     """
@@ -484,20 +501,17 @@ def capture_runtime() -> Iterator[None]:
     if (cache := _triton_runtime_cache()) is not None:
         from triton import knobs
 
+        root = None
         try:
             root = cache.runtime_cache_root(require_explicit=True)
         except Exception as exc:
-            raise _precompile_error(
-                "precompile.capture_runtime requires an explicit, attempt-private "
-                "TRITON_CACHE_DIR before application imports"
-            ) from exc
-        if not knobs.autotuning.cache:
-            raise _precompile_error(
-                "precompile.capture_runtime requires Triton's autotuning cache "
-                "(TRITON_CACHE_AUTOTUNING=1) before application imports"
-            )
-        root.mkdir(parents=True, exist_ok=True)
-        cache_root = str(root)
+            if "TRITON_CACHE_DIR" in os.environ or _gpu_runtime_started():
+                raise _precompile_error(_TRITON_SETTINGS_REQUIRED) from exc
+        if root is not None:
+            if not knobs.autotuning.cache:
+                raise _precompile_error(_TRITON_SETTINGS_REQUIRED)
+            root.mkdir(parents=True, exist_ok=True)
+            cache_root = str(root)
     owner = _RuntimeCapture(cache_root)
     with _capture_lock:
         if _active_capture() is not None:
@@ -548,6 +562,12 @@ def finalize_runtime_cache(
             raise RuntimeError(
                 "The precompile runtime cache has already been finalized"
             )
+        if cache is not None and owner.cache_root is None:
+            if _gpu_runtime_started():
+                raise RuntimeError(
+                    f"The capture started a GPU runtime, so {_TRITON_SETTINGS_REQUIRED}"
+                )
+            cache = None
         if cache is not None and str(cache.runtime_cache_root()) != owner.cache_root:
             raise RuntimeError("The runtime-cache namespace changed during capture")
         artifacts = (

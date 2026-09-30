@@ -7766,6 +7766,84 @@ class TestPrecompileRuntimeCache(TestCase):
                     self.fail("capture_runtime started without Triton's settings")
 
     @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    @parametrize("gpu", ("never", "before", "during"))
+    def test_capture_runtime_without_triton_cache_dir_waits_for_a_gpu(self, gpu):
+        from pathlib import Path
+
+        from torch.compiler import _runtime_cache
+
+        pc = torch.compiler.precompile
+        started = mock.Mock(return_value=gpu == "before")
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            _fake_triton_runtime_cache(Path(directory)) as fake,
+            mock.patch.dict(os.environ),
+            mock.patch.object(_runtime_cache, "_gpu_runtime_started", started),
+        ):
+            fake.explicit = False
+            del os.environ["TRITON_CACHE_DIR"]
+            if gpu == "before":
+                with self.assertRaisesRegex(PrecompileError, "TRITON_CACHE_DIR"):
+                    with pc.capture_runtime():
+                        self.fail("capture_runtime started without TRITON_CACHE_DIR")
+                return
+            with pc.capture_runtime():
+                source, cache = _capture_files(
+                    self, _no_compilation_single_graph, [(torch.ones(4),)], "eager"
+                )
+                started.return_value = gpu == "during"
+                if gpu == "never":
+                    pc.finalize_cache(artifact_path=source, cache_path=cache)
+                else:
+                    with self.assertRaisesRegex(
+                        PrecompileError, "Could not finalize"
+                    ) as failure:
+                        pc.finalize_cache(artifact_path=source, cache_path=cache)
+                    self.assertIn(
+                        "started a GPU runtime", str(failure.exception.__cause__)
+                    )
+            self.assertEqual(fake.exclusions, [])
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
+    def test_one_triton_runtime_cache_per_directory(self):
+        import hashlib
+
+        from triton.runtime.cache import get_cache_manager
+
+        from torch.compiler import _runtime_cache
+        from torch.compiler._triton_runtime_cache import export_runtime_cache
+
+        artifacts = []
+        with tempfile.TemporaryDirectory() as directory:
+            for name in ("first", "second"):
+                with _triton_cache_namespace(pathlib.Path(directory, name)):
+                    _write_triton_runtime_entries()
+                    if name == "second":
+                        native = "extra" + sysconfig.get_config_var("EXT_SUFFIX")
+                        get_cache_manager("cd" * 32).put(b"second", native)
+                    payload = export_runtime_cache(
+                        context=_runtime_cache._runtime_context()
+                    )
+                artifacts.append(
+                    _runtime_cache.TritonRuntimeCacheArtifact(
+                        hashlib.sha256(payload).hexdigest(), payload
+                    )
+                )
+            consumer = pathlib.Path(directory, "consumer")
+            with (
+                _triton_cache_namespace(consumer),
+                mock.patch.object(_runtime_cache, "_imported_triton_runtime", set()),
+            ):
+                artifacts[0].import_into_triton(strict=True)
+                hydrated = sorted(consumer.rglob("*"))
+                with self.assertRaisesRegex(RuntimeError, "its own empty"):
+                    artifacts[1].import_into_triton(strict=True)
+                with self.assertLogs(_runtime_cache.log, "WARNING") as logs:
+                    artifacts[1].import_into_triton(strict=False)
+                self.assertIn("its own empty", logs.output[0])
+                self.assertEqual(sorted(consumer.rglob("*")), hydrated)
+
+    @unittest.skipUnless(HAS_TRITON, "requires Triton")
     def test_finalize_rejects_changed_triton_cache_dir(self):
         from pathlib import Path
 
