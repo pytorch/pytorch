@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
 import copy
+import inspect
 import unittest
 from re import escape
 from typing import Any, List, Optional
@@ -409,6 +410,101 @@ class TestUnflatten(TestCase):
         ep.graph.eliminate_dead_code()
         unflattened = unflatten(ep)
         self.compare_outputs(ep.module(), unflattened, (torch.randn(2), torch.randn(5)))
+
+    def test_unflatten_reexport_dynamic_shapes(self):
+        class AdapterBase(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.adapter = torch.nn.Linear(2, 2)
+                self.act = torch.nn.ReLU()
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.act(self.adapter(x))
+
+        class Main(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.base = AdapterBase()
+
+            def forward(self, x: torch.Tensor):
+                return self.base(x)
+
+        model = Main().eval()
+        x = torch.rand(2, 2)
+        ep = export(
+            model,
+            (x,),
+            dynamic_shapes=({0: torch.export.Dim("batch", min=1, max=1024)},),
+        )
+        unflattened = unflatten(ep)
+
+        self.assertEqual(str(inspect.signature(unflattened.forward)), "(x)")
+        static_reexport = export(unflattened, (x,))
+        torch.testing.assert_close(static_reexport.module()(x), model(x))
+
+        for dynamic_shapes in (
+            ({0: torch.export.Dim("batch_tuple", min=1, max=1024)},),
+            {"x": {0: torch.export.Dim("batch_dict", min=1, max=1024)}},
+        ):
+            reexported = export(
+                unflattened,
+                (x,),
+                dynamic_shapes=dynamic_shapes,
+            )
+            torch.testing.assert_close(reexported.module()(x), model(x))
+
+    def test_unflatten_forward_binds_to_replicas(self):
+        class Leaf(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.leaf = Leaf()
+
+            def forward(self, x):
+                return self.leaf(x)
+
+        x = torch.rand(2, 2)
+        unflattened = unflatten(export(Mod(), (x,)))
+        # DataParallel replicas are shallow copies with their own __dict__;
+        # forward must dispatch through the replica, not the source module.
+        replica = unflattened._replicate_for_data_parallel()
+        replica.leaf = torch.nn.Identity()
+
+        torch.testing.assert_close(unflattened(x), x + 1)
+        torch.testing.assert_close(replica(x), x)
+
+    def test_unflatten_flat_args_adapter_reexport(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x, y):
+                return x + y
+
+        class KeepTwoFlatArgsAdapter(FlatArgsAdapter):
+            def adapt(
+                self,
+                target_spec: TreeSpec,
+                input_spec: TreeSpec,
+                input_args: List[Any],
+                metadata: dict[str, Any],
+                obj: Optional[Any] = None,
+            ) -> List[Any]:
+                while len(input_args) > 2:
+                    input_args.pop(-1)
+                return input_args
+
+        inps = (torch.rand(2, 2), torch.rand(2, 2))
+        ep = export(Mod(), inps)
+        unflattened = unflatten(ep, KeepTwoFlatArgsAdapter())
+        # The adapter accepts a different input tree, so binding stays variadic.
+        self.assertEqual(
+            str(inspect.signature(unflattened.forward)), "(*args, **kwargs)"
+        )
+
+        new_inps = (*inps, torch.rand(2, 3))
+        reexported = export(unflattened, new_inps)
+        torch.testing.assert_close(reexported.module()(*new_inps), Mod()(*inps))
 
     def test_unflatten_wrong_input(self):
         class Mod(torch.nn.Module):

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import abc
 import copy
+import inspect
 import logging
 import operator
 import re
@@ -329,6 +330,31 @@ class FlatArgsAdapter(abc.ABC):
         return []
 
 
+class _UnflattenedForward:
+    """
+    Non-data descriptor decorating UnflattenedModule.forward. The runtime call
+    stays variadic, but inspect.signature reports the exported top-level input
+    names so re-export binds example inputs like the original module. Binding
+    happens at attribute access, so shallow copies such as DataParallel replicas
+    call their own state rather than the instance the signature was configured on.
+    """
+
+    def __init__(self, fn):
+        self.fn = fn
+
+    def __get__(self, module, owner=None):
+        if module is None:
+            return self.fn
+
+        def forward(*args, **kwargs):
+            return self.fn(module, *args, **kwargs)
+
+        signature = module.__dict__.get("_forward_signature")
+        if signature is not None:
+            forward.__signature__ = signature  # type: ignore[attr-defined]
+        return forward
+
+
 class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
     def __init__(
         self,
@@ -598,6 +624,7 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
         _reorder_submodules(self, fqn_order)
         self.graph.lint()
         self.finalize()
+        self._configure_forward_signature()
 
     def _print_graph(self):
         for fqn, mod in self.named_modules():
@@ -696,7 +723,32 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
 
         return flat_args
 
-    def forward(self, *args, **kwargs):
+    def _configure_forward_signature(self):
+        self._forward_signature = None
+        signature = self.module_call_graph[0].signature
+        # A flat args adapter accepts input trees that differ from the export,
+        # so the exported input names must not constrain signature binding.
+        if (
+            self.flat_args_adapter is not None
+            or signature is None
+            or signature.forward_arg_names is None
+        ):
+            return
+        try:
+            self._forward_signature = inspect.Signature(
+                [
+                    inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                    for name in signature.forward_arg_names
+                ]
+            )
+        except ValueError:
+            log.debug(
+                "Unable to install an introspection signature for UnflattenedModule.forward",
+                exc_info=True,
+            )
+
+    @_UnflattenedForward
+    def forward(self, *args, **kwargs):  # pyrefly: ignore [bad-override]
         flat_args = self.process_forward_inputs(*args, **kwargs)
         signature = self.module_call_graph[0].signature
 
