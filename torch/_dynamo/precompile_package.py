@@ -1352,27 +1352,28 @@ _INVARIANT_DROPPABLE_GUARD_TYPES = _IDENTITY_GUARD_TYPES | frozenset({"BUILTIN_M
 
 def _saved_hooks_fingerprint() -> str:
     """
-    Name the installed saved-tensors hooks the way the guard compares them.
+    Name the installed saved-tensors hooks the way the saved guard compares them.
 
-    The guard stores ``tuple(map(id, hooks))`` when both hooks are fx
-    GraphModules and ``None`` otherwise, so plain-Python hooks, and no hooks at
-    all, are one value to it and must be one value here, or the report shows a
-    'varies' line for a guard that passes either way. Inlineable hooks are
-    named by their rendered graph rather than by address, since an id cannot
-    go in a committed, diffable file. KNOWN TRADEOFF: two distinct GraphModules
-    with identical code read as one hook set here while the guard tells them
-    apart, so the report may call that guard invariant when it is not.
+    A serialized AUTOGRAD_SAVED_TENSORS_HOOKS guard compares
+    ``guards._saved_tensors_hooks_fingerprint``: None for hooks it cannot inline,
+    so plain-Python hooks and no hooks at all are one value, and otherwise a
+    content hash of each hook's graph and fx.wrap ``user_cache_hash``es, with
+    None for a graph the guard never accepts. Reusing it keeps two hook sets one
+    line here exactly when the loaded guard treats them alike; an id could not
+    go in a committed, diffable file anyway.
     """
     try:
-        from torch._functorch._aot_autograd.utils import (
-            saved_tensors_hooks_are_inlineable,
-            top_saved_tensors_hooks,
-        )
+        from torch._dynamo.guards import _saved_tensors_hooks_fingerprint
+        from torch._functorch._aot_autograd.utils import top_saved_tensors_hooks
 
-        hooks = top_saved_tensors_hooks()
-        if not saved_tensors_hooks_are_inlineable(hooks):
+        fingerprint = _saved_tensors_hooks_fingerprint(top_saved_tensors_hooks())
+        if fingerprint is None:
             return "hooks=None"
-        return "hooks=(" + ", ".join(_hash_text(hook.code) for hook in hooks) + ")"
+        return (
+            "hooks=("
+            + ", ".join("unverifiable" if p is None else p[:12] for p in fingerprint)
+            + ")"
+        )
     except Exception:
         # Distinct from the "" that means "the rendered code already names the
         # check": a failed read must not merge two variants.
