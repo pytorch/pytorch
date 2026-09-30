@@ -1577,9 +1577,7 @@ class TestGuardsStatePickler(torch._inductor.test_case.TestCase):
         self.assertTrue(is_portable_identity_guard("ID_MATCH", (), _custom_triple))
         # Redefining the op under the same name replaces it in the registry.
         with mock.patch.dict(OPDEFS, {_custom_triple._qualname: _custom_halve}):
-            self.assertFalse(
-                is_portable_identity_guard("ID_MATCH", (), _custom_triple)
-            )
+            self.assertFalse(is_portable_identity_guard("ID_MATCH", (), _custom_triple))
             with self.assertRaisesRegex(TypeError, "cannot pickle"):
                 GuardsStatePickler({}, {}, {}, {}, io.BytesIO()).dump(
                     {"op": _custom_triple}
