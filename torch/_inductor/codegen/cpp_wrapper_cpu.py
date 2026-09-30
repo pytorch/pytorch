@@ -341,6 +341,17 @@ def _profiling_ivalue_lines(
     return lines, inputs_vec_var
 
 
+def _fallback_debug_args(raw_args: Sequence[Any]) -> list[str]:
+    """Buffer names among a fallback's arguments, for the debug printer.
+    Views are skipped, as they are on the C shim path."""
+    names: list[str] = []
+    for arg in raw_args:
+        for item in arg if isinstance(arg, (list, tuple)) else (arg,):
+            if isinstance(item, ir.Buffer):
+                names.append(item.get_name())
+    return names
+
+
 class CppWrapperCpu(PythonWrapperCodegen):
     """
     Generates cpp wrapper for running on CPU and calls cpp kernels
@@ -4323,7 +4334,7 @@ if (!custom_op_wrapper) {
         )
 
         extern_kernel_node_index = len(V.extern_kernel_nodes) - 1
-        self.writeline(
+        call = (
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_proxy_executor_call_function(proxy_executor, "
             f"{extern_kernel_node_index}, "
             f"{len(int_call_args)}, "
@@ -4331,6 +4342,31 @@ if (!custom_op_wrapper) {
             f"{len(tensor_call_args)}, "
             f"{tensor_call_str}));"
         )
+
+        # Same debug printer and profiling block as generate_c_shim_extern_kernel_call,
+        # keyed on the op name since there is no shim. Written as plain lines (the
+        # dual-wrapper buffers only take strings), and only the call goes inside the
+        # block so the output handles declared above outlive it.
+        kernel_name = str(op_overload)
+        profiling_args = self.make_profiling_args(raw_args)
+        node = next((o for o in raw_outputs if isinstance(o, ExternKernel)), None)
+
+        debug_printer_manager = V.graph.wrapper_code.debug_printer
+        debug_printer_manager.set_printer_args(
+            _fallback_debug_args(raw_args), kernel_name, None, None, "extern"
+        )
+        with debug_printer_manager:
+            if not kernel_profile_enabled():
+                self.writeline(call)
+                return
+            self.writeline("{")
+            if config.cpp.enable_kernel_context_guard:
+                self.write_kernel_context_guard(
+                    kernel_name, node if node is not None else []
+                )
+            self.write_record_function_handle(kernel_name, profiling_args)
+            self.writeline(call)
+            self.writeline("}")
 
     def codegen_runtime_lookup_tensor_call_args(
         self, tensor_call_args: Sequence[str]
