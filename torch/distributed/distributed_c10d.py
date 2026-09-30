@@ -198,7 +198,6 @@ _XCCL_AVAILABLE = True
 # doctests that share a venv with install_torchcomms.
 _TORCHCOMM_AVAILABLE = importlib.util.find_spec("torchcomms") is not None
 _torchcomms_loaded: dict[str, Callable[..., object]] | None = None
-_torchcomms_natives_bound = False
 if TYPE_CHECKING:
     # Real types for checkers only. These imports are not executed, so they
     # do not dlopen torchcomms.
@@ -218,40 +217,51 @@ else:
 
 
 def _import_torchcomms() -> dict[str, Callable[..., object]]:
-    """Load torchcomms natives. Only call when torchcomms is actually used."""
-    global _torchcomms_loaded, _torchcomms_natives_bound
+    """Load torchcomms natives. Only call when torchcomms is actually used.
+
+    A name that is already set is left alone. Tests patch ``new_comm`` and
+    ``_BackendWrapper``; assigning unconditionally replaces those patches.
+    """
+    global _torchcomms_loaded
     global _BackendWrapper, new_comm, _TorchCommsFlightRecorderHook
-    if _torchcomms_loaded is not None:
-        return _torchcomms_loaded
-    try:
+    if _torchcomms_loaded is None:
+        try:
+            # pyrefly: ignore [missing-import]
+            from torchcomms._comms import (
+                _BackendWrapper as BackendWrapper,
+                _is_backend_registered as is_backend_registered,
+            )
+        except ImportError:
+            # pyrefly: ignore [missing-import]
+            from torchcomms._backend_wrapper import _BackendWrapper as BackendWrapper
+
+            def is_backend_registered(backend: str) -> bool:
+                return False
+
         # pyrefly: ignore [missing-import]
-        from torchcomms._comms import (
-            _BackendWrapper as BackendWrapper,
-            _is_backend_registered as is_backend_registered,
-        )
-    except ImportError:
+        from torchcomms import is_backend_built, new_comm as imported_new_comm
+
+        # Aliased: the unqualified name is the c10d hook imported above, which is
+        # attached to a ProcessGroup rather than to a TorchComms comm.
         # pyrefly: ignore [missing-import]
-        from torchcomms._backend_wrapper import _BackendWrapper as BackendWrapper
+        from torchcomms.hooks import FlightRecorderHook as TorchCommsFlightRecorderHook
 
-        def is_backend_registered(backend: str) -> bool:
-            return False
-
-    # pyrefly: ignore [missing-import]
-    from torchcomms import is_backend_built, new_comm as imported_new_comm
-
-    # Aliased: the unqualified name is the c10d hook imported above, which is
-    # attached to a ProcessGroup rather than to a TorchComms comm.
-    # pyrefly: ignore [missing-import]
-    from torchcomms.hooks import FlightRecorderHook as TorchCommsFlightRecorderHook
-
-    _BackendWrapper = BackendWrapper
-    new_comm = imported_new_comm
-    _TorchCommsFlightRecorderHook = TorchCommsFlightRecorderHook
-    _torchcomms_natives_bound = True
-    _torchcomms_loaded = {
-        "is_backend_built": is_backend_built,
-        "is_backend_registered": is_backend_registered,
-    }
+        _torchcomms_loaded = {
+            "is_backend_built": is_backend_built,
+            "is_backend_registered": is_backend_registered,
+            "BackendWrapper": BackendWrapper,
+            "new_comm": imported_new_comm,
+            "FlightRecorderHook": TorchCommsFlightRecorderHook,
+        }
+    # Fill only unset slots, including after a cached import. mock.patch
+    # restores a name to None, and a later call must bind the real object
+    # without clobbering a patch that is currently installed.
+    if _BackendWrapper is None:
+        _BackendWrapper = _torchcomms_loaded["BackendWrapper"]
+    if new_comm is None:
+        new_comm = _torchcomms_loaded["new_comm"]
+    if _TorchCommsFlightRecorderHook is None:
+        _TorchCommsFlightRecorderHook = _torchcomms_loaded["FlightRecorderHook"]
     return _torchcomms_loaded
 
 
@@ -388,8 +398,12 @@ def _create_torchcomms_backend(
     """Create a c10d BackendWrapper for one TorchComms backend instance."""
     if not _TORCHCOMM_AVAILABLE:
         raise RuntimeError("TorchComms is not available")
-    # Tests patch ``new_comm`` before this runs. Import only when it is unset.
-    if not _torchcomms_natives_bound and new_comm is None:
+    # Tests patch ``new_comm`` before this runs. Import fills only unset names.
+    if (
+        new_comm is None
+        or _BackendWrapper is None
+        or _TorchCommsFlightRecorderHook is None
+    ):
         _import_torchcomms()
 
     torch_device = _resolve_torchcomms_device(device, device_id)
