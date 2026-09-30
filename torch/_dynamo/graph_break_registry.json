@@ -3262,6 +3262,14 @@
   "GB7716": [
     {
       "Gb_type": "specialization of globals() dictionary",
+      "Context": "namespace size or order",
+      "Explanation": "Dynamo cannot safely specialize the size or order of globals while tracing may still install internal globals.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "specialization of globals() dictionary",
       "Context": "operation",
       "Explanation": "Dynamo cannot safely specialize the size or order of globals while tracing may still install internal globals.",
       "Hints": [
@@ -3270,6 +3278,14 @@
     }
   ],
   "GB9280": [
+    {
+      "Gb_type": "mutation of globals() dictionary",
+      "Context": "write to globals()",
+      "Explanation": "Dynamo cannot safely trace writes through globals() because global reads and replayed writes use separate state.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "mutation of globals() dictionary",
       "Context": "operation",

@@ -2021,16 +2021,16 @@ class OutputGraph(OutputGraphCommon):
         return stack_values, meta
 
     def _has_live_globals_namespace(self, tx: "InstructionTranslatorBase") -> bool:
-        from .variables.user_defined import GlobalsNamespaceVariable
+        from .variables.dicts import GlobalDictVariable
 
         current_tx: InstructionTranslatorBase | None = tx
         found = False
-        live_values = []
+        live_values: list[Any] = []
 
         def check(value: VariableTracker) -> None:
             nonlocal found
             # Realizing unrelated lazy values here would introduce extra guards.
-            if type.__instancecheck__(GlobalsNamespaceVariable, value):
+            if type.__instancecheck__(GlobalDictVariable, value):
                 found = True
 
         while current_tx is not None:

@@ -23,7 +23,7 @@ import sys
 import types
 import weakref
 from collections.abc import Callable, Iterator
-from typing import Any, cast, TYPE_CHECKING, Union
+from typing import Any, cast, NoReturn, TYPE_CHECKING, Union
 
 from torch.utils._pytree import MappingKey
 
@@ -870,15 +870,92 @@ class ConstDictVariable(VariableTracker):
         return super().tp_getattro_impl(tx, name)
 
 
+class GlobalDictVariable(ConstDictVariable):
+    def _check_pending_writes(self, tx: "InstructionTranslatorBase") -> None:
+        current_tx = tx
+        while current_tx is not None:
+            if current_tx.symbolic_globals or any(
+                inst.opname in ("STORE_GLOBAL", "DELETE_GLOBAL")
+                for inst in current_tx.instructions
+            ):
+                unimplemented(
+                    gb_type="globals() in function with global writes",
+                    context=tx.f_code.co_name,
+                    explanation="Dynamo cannot safely read globals() after or before a STORE_GLOBAL in the same function.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                    skip_frame=True,
+                )
+            current_tx = current_tx.parent
+
+    def getitem_const(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker:
+        self._check_pending_writes(tx)
+        return super().getitem_const(tx, arg)
+
+    def getitem_const_raise_exception_if_absent(
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
+    ) -> VariableTracker:
+        self._check_pending_writes(tx)
+        return super().getitem_const_raise_exception_if_absent(tx, arg)
+
+    def is_python_constant(self) -> bool:
+        return False
+
+    def reject_specialization(
+        self, tx: "InstructionTranslatorBase", *args, **kwargs
+    ) -> NoReturn:
+        unimplemented(
+            gb_type="specialization of globals() dictionary",
+            context="namespace size or order",
+            explanation="Dynamo cannot safely specialize the size or order of globals while tracing may still install internal globals.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+            skip_frame=True,
+        )
+
+    mp_length_impl = reject_specialization
+    sq_length_impl = reject_specialization
+    tp_iter_impl = reject_specialization
+    tp_repr_impl = reject_specialization
+    tp_str_impl = reject_specialization
+    unpack_var_sequence = reject_specialization
+
+    def mp_ass_subscript_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        key: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        unimplemented(
+            gb_type="mutation of globals() dictionary",
+            context="write to globals()",
+            explanation="Dynamo cannot safely trace writes through globals() because global reads and replayed writes use separate state.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+            skip_frame=True,
+        )
+
+    def reject_mutation(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.mp_ass_subscript_impl(tx, ConstantVariable.create(None), None)
+
+    tp_methods = dict.fromkeys(
+        ("clear", "pop", "popitem", "update", "setdefault"), Method(reject_mutation)
+    )
+
+
 def globals_dict_variable(
     tx: "InstructionTranslatorBase", f_globals: dict[str, Any]
 ) -> VariableTracker:
     from ..symbolic_convert import _registered_module_for_globals
-    from .user_defined import GlobalsNamespaceVariable
+    from .builder import VariableBuilder
 
     if f_globals in tx.output.side_effects:
         tracked = tx.output.side_effects[f_globals]
-        if not isinstance(tracked, GlobalsNamespaceVariable):
+        if not isinstance(tracked, GlobalDictVariable):
             unimplemented(
                 gb_type="globals() namespace already tracked as dict",
                 context=tx.f_code.co_name,
@@ -899,9 +976,9 @@ def globals_dict_variable(
         source = GlobalSource(globals_name)
 
     install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-    return tx.output.side_effects.track_mutable(
-        f_globals, GlobalsNamespaceVariable(f_globals, source=source)
-    )
+    tracked = VariableBuilder(tx, source)(f_globals)
+    tracked.__class__ = GlobalDictVariable
+    return tracked
 
 
 class OrderedDictVariable(ConstDictVariable):

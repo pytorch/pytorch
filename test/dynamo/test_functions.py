@@ -2339,6 +2339,48 @@ partial_fn = functools.partial(fn, scale=2)
             {name for name in globals() if name.startswith("___unnamed_scope_")},
         )
 
+    def test_globals_read_is_traced(self):
+        def fn(x):
+            namespace = globals()
+            return x + namespace["_variable"] + namespace.get("_variable")
+
+        counter = torch._dynamo.testing.CompileCounter()
+        x = torch.ones(2)
+        self.assertEqual(torch.compile(fn, backend=counter, fullgraph=True)(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize(
+        "operation",
+        (
+            "namespace['_variable'] = 2",
+            "del namespace['_variable']",
+            "namespace.update(_variable=2)",
+            "namespace.clear()",
+            "namespace.pop('_variable')",
+            "namespace.popitem()",
+            "namespace.setdefault('_variable', 2)",
+            "namespace |= {'_variable': 2}",
+            "dict.update(namespace, _variable=2)",
+            "dict.__setitem__(namespace, '_variable', 2)",
+        ),
+    )
+    def test_globals_mutations_are_not_traced(self, operation):
+        module_name = f"_dynamo_globals_mutation_{id(self)}"
+        module = types.ModuleType(module_name)
+        sys.modules[module_name] = module
+        exec(
+            "_variable = 1\ndef fn(x):\n namespace = globals()\n "
+            + operation
+            + "\n return x + 1",
+            module.__dict__,
+        )
+        try:
+            with self.assertRaises(Unsupported):
+                torch.compile(module.fn, backend="eager", fullgraph=True)(torch.ones(2))
+            self.assertEqual(module._variable, 1)
+        finally:
+            del sys.modules[module_name]
+
     def test_globals_length_and_iteration_graph_break(self):
         def length_fn(x):
             return x + len(globals())

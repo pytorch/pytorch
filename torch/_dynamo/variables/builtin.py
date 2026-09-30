@@ -160,11 +160,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import (
-    GlobalsNamespaceVariable,
-    UserDefinedObjectVariable,
-    UserDefinedVariable,
-)
+from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 
 if TYPE_CHECKING:
@@ -3479,9 +3475,6 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if args and isinstance(args[0], GlobalsNamespaceVariable):
-            return args[0]._reject_mapping_operation(tx, name)
-
         if name == "__new__":
             if args:
                 # dict.__new__ (tp_new) ignores extra args — only the first
