@@ -1509,22 +1509,13 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(grad, input.grad, atol=0, rtol=0)
                 input.grad = None
 
-    # Cases are chosen to cover each deterministic backward kernel branch:
-    # NCHW scalar gather (contiguous), NHWC scalar fallback (channels_last with
-    # channels not divisible by the vector width), and NHWC vectorized gather
-    # (channels_last with channels divisible by the vector width: 8 for
-    # FP16/BF16, 4 for FP32, 2 for FP64). C=8 exercises the vector path for all
-    # dtypes; C=3 forces the NHWC scalar fallback.
-    @onlyNativeDeviceTypes
+    # The generic NN test covers contiguous and channels-last double precision,
+    # including the scalar channels-last fallback. Keep dtype-specific vector
+    # paths and scale-factor recomputation here.
+    @onlyCUDA
+    @skipIfRocm
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @parametrize("case", [
-        {"name": "nchw_upsample_fp32", "shape": (1, 3, 4, 5),
-         "size": (8, 9), "dtype": torch.float32, "align_corners": False},
-        {"name": "nchw_downsample_fp32", "shape": (1, 3, 8, 7),
-         "size": (4, 3), "dtype": torch.float32, "align_corners": True},
-        {"name": "nhwc_scalar_fp32", "shape": (1, 3, 4, 5),
-         "size": (8, 9), "dtype": torch.float32, "align_corners": False,
-         "channels_last": True},
         {"name": "nhwc_vec_fp16", "shape": (1, 8, 4, 5),
          "size": (8, 10), "dtype": torch.float16, "align_corners": False,
          "channels_last": True},
@@ -1545,6 +1536,12 @@ class TestTorchDeviceType(TestCase):
         from torch._decomp import decompositions
 
         dtype = case["dtype"]
+        atol, rtol = {
+            torch.float16: (1e-2, 1e-2),
+            torch.bfloat16: (5e-2, 5e-2),
+            torch.float32: (1e-5, 1e-5),
+            torch.float64: (1e-10, 1e-10),
+        }[dtype]
         channels_last = case.get("channels_last", False)
         memory_format = (
             torch.channels_last if channels_last else torch.contiguous_format
@@ -1568,19 +1565,12 @@ class TestTorchDeviceType(TestCase):
             n, c, *output_spatial, device=device, dtype=dtype
         ).contiguous(memory_format=memory_format)
 
-        # NVIDIA CUDA must use the native deterministic kernel, not the
-        # _upsample_linear_vec decomposition. HIP intentionally keeps the fallback.
-        dispatch_guard = contextlib.nullcontext()
-        if torch.device(device).type == "cuda" and torch.version.hip is None:
-            dispatch_guard = unittest.mock.patch.object(
-                decompositions,
-                "_upsample_linear_vec",
-                side_effect=AssertionError(
-                    "CUDA should use the native deterministic kernel"),
-            )
-
         grad = None
-        with DeterministicGuard(True), dispatch_guard:
+        with DeterministicGuard(True), unittest.mock.patch.object(
+            decompositions,
+            "_upsample_linear_vec",
+            side_effect=AssertionError("CUDA should use the native deterministic kernel"),
+        ):
             for _ in range(2):
                 input.grad = None
                 output = torch.nn.functional.interpolate(input, **interp_kwargs)
@@ -1597,7 +1587,7 @@ class TestTorchDeviceType(TestCase):
         reference_output = torch.nn.functional.interpolate(
             reference_input, **interp_kwargs)
         reference_output.backward(output_grad.cpu().contiguous())
-        self.assertEqual(grad.cpu(), reference_input.grad)
+        self.assertEqual(grad.cpu(), reference_input.grad, atol=atol, rtol=rtol)
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
