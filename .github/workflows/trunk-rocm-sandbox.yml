@@ -6,11 +6,6 @@ on:
   #  branches:
   #    - main
   #    - release/*
-  # TEMPORARY: remove before merge. trunk-rocm-sandbox has no dedicated ciflow
-  # label, so use the registered ciflow/trunk push tag for PR validation.
-  push:
-    tags:
-      - ciflow/trunk/*
   workflow_dispatch:
   schedule:
     - cron: 0 0,3,6,9,12,15,18,21 * * * # run every 3 hours for regression coverage
@@ -47,11 +42,7 @@ jobs:
       check_experiments: amd-sandbox
 
   linux-noble-rocm-py3_11-build:
-    # TEMPORARY: remove before merge. Disable issue 167849 matches the real
-    # job name and empties the test matrix. This name is used only on the
-    # ciflow/trunk tag push so this PR can run shards. Schedule and main keep
-    # the real name, so they stay disabled.
-    name: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/ciflow/trunk/')) && 'pr-validation-mi350' || 'linux-noble-rocm-py3.11-mi350' }}
+    name: linux-noble-rocm-py3.11-mi350
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
