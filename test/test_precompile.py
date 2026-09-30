@@ -5454,9 +5454,18 @@ from torch.compiler._triton_runtime_cache import (
     import_runtime_cache,
 )
 
+
+def snapshot():
+    # Triton commits with os.replace, so a rewrite changes the inode.
+    return {
+        path: (path.stat().st_ino, path.stat().st_mtime_ns)
+        for path in cache.rglob("*")
+    }
+
+
 if phase == "consume":
     import_runtime_cache(bundle.read_bytes())
-    before = sorted(cache.rglob("*"))
+    before = snapshot()
 
 import triton
 
@@ -5470,8 +5479,8 @@ if phase == "produce":
     bundle.write_bytes(export_runtime_cache())
 else:
     # A compile or an autotuning benchmark would have written to the cache.
-    after = sorted(cache.rglob("*"))
-    assert after == before, sorted(set(after) - set(before))
+    after = snapshot()
+    assert after == before, sorted(p for p in after if after[p] != before.get(p))
 print("transport phase ok:", phase)
 """
 
