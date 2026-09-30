@@ -117,6 +117,7 @@ from .eval_frame import (
 from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
+    CompileOnOneRankUnsupported,
     FailOnRecompileLimitHit,
     format_error_msg,
     InternalTorchDynamoError,
@@ -1715,6 +1716,13 @@ def _compile(
         ValidationException,
     )
 
+    if isinstance(innermost_backend(compiler_fn), torch._TorchCompileInductorWrapper):
+        # Overlap the one-time source hashing for Inductor's cache keys with
+        # Dynamo and AOTAutograd tracing.
+        from torch._inductor.codecache import prefetch_cache_keys
+
+        prefetch_cache_keys()
+
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
     dynamo_time_before_restart: float = 0.0
@@ -2234,6 +2242,7 @@ def _compile(
                     ShortenTraceback,
                     PackageError,
                     ResumePrologueTracingError,
+                    CompileOnOneRankUnsupported,
                     unittest.SkipTest,
                 ),
             ):
@@ -2428,7 +2437,9 @@ class ConvertFrame:
             # need to make these exceptions not get wrapped
 
             # We intentionally don't want to suppress error here.
-            if isinstance(e, UncapturedHigherOrderOpError):
+            if isinstance(
+                e, (UncapturedHigherOrderOpError, CompileOnOneRankUnsupported)
+            ):
                 raise
 
             soft_fail = isinstance(e, (Unsupported, UserError))
@@ -2489,14 +2500,15 @@ class ConvertFrame:
             else:
                 log.warning(error_msg, exc_info=True)
 
-            # Check if the exception has a specific frame execution strategy
-            if (
-                isinstance(e, exc.TorchDynamoException)
-                and e.frame_exec_strategy is not None
+            # Check if the exception overrides the default frame execution behavior.
+            if isinstance(e, exc.TorchDynamoException) and (
+                e.frame_exec_strategy is not None or not e.apply_to_code
             ):
                 return ConvertFrameReturn(
-                    frame_exec_strategy=e.frame_exec_strategy,
-                    skip_reason="compilation failed with a custom frame execution strategy",
+                    frame_exec_strategy=e.frame_exec_strategy
+                    or FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT),
+                    apply_to_code=e.apply_to_code,
+                    skip_reason="compilation failed with exception-directed frame execution",
                 )
 
         return ConvertFrameReturn(
