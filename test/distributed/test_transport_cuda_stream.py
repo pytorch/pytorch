@@ -26,7 +26,6 @@ def _worker(rank, pipe, capture=False):
     # Prewarm kernels and memory copies before queuing host callbacks.
     source.copy_(producer)
     consumer.copy_(destination)
-    torch.cuda._sleep(1_000_000)
     torch.cuda.synchronize()
     source.zero_()
     local_source = transport.register_memory(source)
@@ -50,7 +49,6 @@ def _worker(rank, pipe, capture=False):
         stream.synchronize()
         write_graph, read_graph = torch.cuda.CUDAGraph(), torch.cuda.CUDAGraph()
         with torch.cuda.graph(write_graph):
-            torch.cuda._sleep(1_000_000)
             source.copy_(producer, non_blocking=True)
             transport.write_stream(local_source.to_view(), remote_destination)
         with torch.cuda.graph(read_graph):
@@ -89,7 +87,6 @@ def _worker(rank, pipe, capture=False):
                 raise AssertionError("unexpected capture result or peer message")
     else:
         with torch.cuda.stream(stream):
-            torch.cuda._sleep(1_000_000)
             source.copy_(producer, non_blocking=True)
             transport.write_stream(local_source.to_view(), remote_destination)
         stream.synchronize()
@@ -143,13 +140,19 @@ def _callback_worker(fail, capture=False):
             ):
                 raise AssertionError("ordinary asynchronous read changed")
     entered, release = threading.Event(), threading.Event()
+    active = 0
 
     async def transfer(*args, **kwargs):
+        nonlocal active
+        active += 1
+        if active > 1:
+            raise AssertionError("transfer started before prior stream work")
         entered.set()
         if fail:
             raise RuntimeError("injected callback failure")
         if not await asyncio.to_thread(release.wait, 5):
             raise TimeoutError("enqueue blocked the submitting thread")
+        active -= 1
 
     with (
         patch.object(transport, "_transfer_async", side_effect=transfer),
@@ -161,6 +164,8 @@ def _callback_worker(fail, capture=False):
                 transport.write_stream(memory.to_view(), remote)
             graph.replay()
         else:
+            # The second transfer must wait for the first on the stream.
+            transport.write_stream(memory.to_view(), remote)
             transport.write_stream(memory.to_view(), remote)
         done = torch.cuda.Event()
         done.record()
