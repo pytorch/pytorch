@@ -1148,6 +1148,19 @@ def make_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _is_version(name: str) -> bool:
+    try:
+        Version(name)
+    except ValueError:
+        return False
+    return True
+
+
+def _source_sort_key(name: str) -> tuple[int, Any]:
+    # Numbered versions first in version order, then named channels such as "preview".
+    return (0, Version(name)) if _is_version(name) else (1, name)
+
+
 def parse_arguments() -> argparse.Namespace:
     parser = make_parser()
     args = parser.parse_args()
@@ -1186,18 +1199,18 @@ def main() -> None:
                 if pip_source is None:
                     print(
                         f"{toolkit} {requested} is not available on platform {PLATFORM}. "
-                        f"Available version(s): {', '.join(sorted(available_sources))}"
+                        f"Available version(s): {', '.join(sorted(available_sources, key=_source_sort_key))}"
                     )
                     sys.exit(1)
             else:
-                versioned_sources = {}
-                for version, source in available_sources.items():
-                    try:
-                        Version(version)
-                    except ValueError:
-                        continue
-                    versioned_sources[version] = source
-                pip_source = versioned_sources[max(versioned_sources, key=Version)]
+                versions = [v for v in available_sources if _is_version(v)]
+                if not versions:
+                    print(
+                        f"No numbered {toolkit} version available on platform {PLATFORM}; "
+                        f"pass one of: {', '.join(sorted(available_sources))}"
+                    )
+                    sys.exit(1)
+                pip_source = available_sources[max(versions, key=Version)]
 
     if pip_source is None:
         pip_source = PIP_SOURCES["cpu"]  # always available

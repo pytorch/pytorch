@@ -13,7 +13,10 @@ install_ubuntu() {
 
     install_rocm
 
+    # Standalone CMake projects such as rocm-origami call find_package(hip)
+    # directly instead of using PyTorch's ROCM_PATH-aware LoadHIP.cmake.
     {
+        printf 'export CMAKE_PREFIX_PATH=%q:${CMAKE_PREFIX_PATH:-}\n' "${ROCM_HOME}"
         printf 'export LD_LIBRARY_PATH=%q:${LD_LIBRARY_PATH:-}\n' "${ROCM_HOME}/lib"
         if [[ -n "${USE_MSLK:-}" ]]; then
             printf 'export USE_MSLK=%q\n' "${USE_MSLK}"
