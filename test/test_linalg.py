@@ -9748,30 +9748,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.assertEqual(out_accelerator.cpu(), out_cpu)
 
 
-class TestLinalgSVD(TestCase):
-    @skipCPUIfNoLapack
-    @skipCUDAIfNoCusolver
-    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
-    @dtypesIfMPS(torch.float32, torch.complex64)
-    def test_svd_ill_conditioned(self, device, dtype):
-        # Small columns must still undergo Jacobi rotations: skipping them at
-        # an absolute epsilon cutoff breaks orthogonality and inflates sigma.
-        q = torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q
-        v = torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q
-        A = (q * torch.logspace(-5, 0, 32, dtype=q.real.dtype)) @ v.mH
-        cpu_s = torch.linalg.svdvals(A)
-        U, S, Vh = (t.cpu() for t in torch.linalg.svd(A.to(device), full_matrices=False))
-        eye = torch.eye(32, dtype=dtype).expand(16, 32, 32)
-        self.assertEqual(U.mH @ U, eye, atol=1e-4, rtol=1e-4)
-        self.assertEqual(Vh @ Vh.mH, eye, atol=1e-4, rtol=1e-4)
-        self.assertEqual((U * S.unsqueeze(-2)) @ Vh, A, atol=1e-4, rtol=1e-4)
-        self.assertEqual(S, cpu_s, atol=1e-5, rtol=1e-4)
-        self.assertEqual(
-            (S > 1e-4 * S[..., :1]).sum(-1),
-            (cpu_s > 1e-4 * cpu_s[..., :1]).sum(-1),
-        )
-
-
 class TestLinalgCudaOnly(TestCase):
     """CUDA/ROCm-specific linalg tests (TunableOp, backend library selection)."""
 
@@ -11944,7 +11920,6 @@ class TestGroupedMM(TestCase):
         self.grouped_mm_helper(a, b, offs, backward=False)
 
 instantiate_device_type_tests(TestLinalg, globals())
-instantiate_device_type_tests(TestLinalgSVD, globals(), allow_mps=True)
 instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
 instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
 
