@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import pickle
+import shutil
 import stat
 import struct
 import subprocess
@@ -5696,8 +5697,10 @@ class TestTritonRuntimeCacheTransport(TestCase):
                 ):
                     import_runtime_cache(bundle, context=self.CONTEXT)
 
-    @parametrize("winner", ("same", "different"))
+    @parametrize("winner", ("same", "different", "subset"))
     def test_import_that_loses_the_rename_checks_the_winner(self, winner):
+        import hashlib
+
         from triton.runtime.cache import get_cache_manager
 
         from torch.compiler._triton_runtime_cache import (
@@ -5708,7 +5711,7 @@ class TestTritonRuntimeCacheTransport(TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             bundle, _, _ = self._bundle(pathlib.Path(tmp, "producer"))
             other = bundle
-            if winner == "different":
+            if winner != "same":
                 with _triton_cache_namespace(pathlib.Path(tmp, "other")):
                     _write_triton_runtime_entries()
                     get_cache_manager("cd" * 32).put(
@@ -5716,6 +5719,9 @@ class TestTritonRuntimeCacheTransport(TestCase):
                         "other" + sysconfig.get_config_var("EXT_SUFFIX"),
                     )
                     other = export_runtime_cache(context=self.CONTEXT)
+            if winner == "subset":
+                # This import places the extra entry and finds the winner's marker.
+                bundle, other = other, bundle
             consumer = pathlib.Path(tmp, "consumer")
             rename = os.rename
 
@@ -5733,8 +5739,12 @@ class TestTritonRuntimeCacheTransport(TestCase):
                 else:
                     with self.assertRaisesRegex(RuntimeError, "its own empty"):
                         import_runtime_cache(bundle, context=self.CONTEXT)
-            # One rename per key: ours, then the winner's one or two.
+            # One rename per key, ours and the winner's.
             self.assertEqual(patched.call_count, 2 if winner == "same" else 3)
+            self.assertEqual(
+                (consumer / ".runtime_cache_bundle").read_text(),
+                hashlib.sha256(other).hexdigest(),
+            )
             self.assertEqual([p for p in os.listdir(consumer) if ".hydrate-" in p], [])
 
     @parametrize("consumer_exists", (False, True))
@@ -5756,8 +5766,6 @@ class TestTritonRuntimeCacheTransport(TestCase):
 
     @parametrize("leftover", ("none", "foreign"))
     def test_import_completes_an_interrupted_import(self, leftover):
-        import shutil
-
         from torch.compiler._triton_runtime_cache import import_runtime_cache
 
         with tempfile.TemporaryDirectory() as tmp:

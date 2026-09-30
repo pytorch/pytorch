@@ -476,6 +476,14 @@ def import_runtime_cache(bundle: bytes, *, context: Any = None) -> None:
         reject_foreign_entries()
         validate_members()
         (staging / _READY).write_text(digest)
-        os.replace(staging / _READY, marker)
+        try:
+            # Unlike a rename, a link fails if another import marked it first.
+            os.link(staging / _READY, marker)
+        except FileExistsError:
+            if marker.read_text() != digest:
+                raise foreign() from None
+        except OSError:
+            # Some filesystems have no hard links.
+            os.replace(staging / _READY, marker)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
