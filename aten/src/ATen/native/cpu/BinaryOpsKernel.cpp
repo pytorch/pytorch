@@ -251,6 +251,59 @@ void div_trunc_kernel(TensorIteratorBase& iter) {
   }
 }
 
+// Keep this out of line. Inlining it into the vectorized loop costs 2-3x even on
+// inputs that never reach it.
+template <typename scalar_t>
+C10_NOINLINE Vectorized<scalar_t> fmod_scalar_vec(
+    Vectorized<scalar_t> a,
+    Vectorized<scalar_t> b) {
+  using vec_t = Vectorized<scalar_t>;
+  __at_align__ scalar_t as[vec_t::size()];
+  __at_align__ scalar_t bs[vec_t::size()];
+  a.store(as);
+  b.store(bs);
+  for (int64_t i = 0; i < vec_t::size(); ++i) {
+    as[i] = std::fmod(as[i], bs[i]);
+  }
+  return vec_t::loadu(as);
+}
+
+// Sleef_fmod reduces by multiplying the dividend by the reciprocal of the
+// divisor, so that product overflows to infinity and the result comes back NaN
+// once abs(a / b) passes the largest finite value. Sleef documents the range as
+// undefined. std::fmod is correct there, so redo the vector when a NaN shows up.
+//
+// div_floor_floating_vec below works around the same limitation, but it only
+// needs the quotient and can drop the remainder. Here the remainder is the
+// result.
+//
+// Checking the output for NaN is cheaper than predicting overflow from the
+// inputs, and it does not depend on knowing where Sleef stops being accurate.
+// Lanes that are legitimately NaN, from a NaN input or a zero divisor, take the
+// slow path too and still come back NaN.
+//
+// Only float and double need this. Vectorized<Half> and Vectorized<BFloat16>
+// implement fmod with std::fmod per element, so they are already exact. The
+// bfloat16 remainder kernel below converts to float first, so it does need it.
+template <typename scalar_t>
+inline Vectorized<scalar_t> fmod_floating_vec(
+    const Vectorized<scalar_t>& a,
+    const Vectorized<scalar_t>& b) {
+  using vec_t = Vectorized<scalar_t>;
+  const auto r = a.fmod(b);
+  if constexpr (
+      std::is_same_v<scalar_t, float> || std::is_same_v<scalar_t, double>) {
+    // zero_mask sets a bit per zero lane, so mapping the NaN lanes to zero
+    // turns "is any lane NaN" into a nonzero test that does not depend on the
+    // mask width.
+    if (C10_UNLIKELY(
+            vec_t::blendv(vec_t(1), vec_t(0), r.isnan()).zero_mask() != 0)) {
+      return fmod_scalar_vec(a, b);
+    }
+  }
+  return r;
+}
+
 template <typename scalar_t>
 inline Vectorized<scalar_t> div_floor_floating_vec(
     const Vectorized<scalar_t>& a,
@@ -379,8 +432,8 @@ void remainder_kernel(TensorIteratorBase& iter) {
         [=](Vectorized<BFloat16> a, Vectorized<BFloat16> b) {
           auto [a0, a1] = convert_bfloat16_float(a);
           auto [b0, b1] = convert_bfloat16_float(b);
-          auto mod0 = a0.fmod(b0);
-          auto mod1 = a1.fmod(b1);
+          auto mod0 = fmod_floating_vec(a0, b0);
+          auto mod1 = fmod_floating_vec(a1, b1);
           const auto zero = Vectorized<float>(0);
           auto mask0 = (mod0 != zero) & ((b0 < zero) ^ (mod0 < zero));
           auto mask1 = (mod1 != zero) & ((b1 < zero) ^ (mod1 < zero));
@@ -401,7 +454,7 @@ void remainder_kernel(TensorIteratorBase& iter) {
                     return mod;
                   },
               [=](Vectorized<scalar_t> a, Vectorized<scalar_t> b) {
-                auto mod = a.fmod(b);
+                auto mod = fmod_floating_vec(a, b);
                 const auto zero = Vectorized<scalar_t>(0);
                 auto mask = (mod != zero) & ((b < zero) ^ (mod < zero));
                 return Vectorized<scalar_t>::blendv(mod, mod + b, mask);
@@ -1053,7 +1106,7 @@ void fmod_kernel(TensorIteratorBase& iter) {
                 return std::fmod(x, d);
               },
               [](Vectorized<scalar_t> x, Vectorized<scalar_t> d) {
-                return x.fmod(d);
+                return fmod_floating_vec(x, d);
               });
         });
   }
