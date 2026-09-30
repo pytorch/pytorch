@@ -1553,6 +1553,27 @@ class _SubParentFusion(enum.Enum):
     FUSE = enum.auto()
 
 
+@dataclasses.dataclass(frozen=True)
+class _SubParentRelationDescriptor:
+    """Immutable replay metadata for one planned source-to-consumer relation."""
+
+    relation: scheduler.SubParentAccessRelation
+    output_group: int | None
+    output_lanes: int
+    replay_node: Any | None
+    parent_shape: tuple[sympy.Expr, sympy.Expr]
+    child_shape: tuple[sympy.Expr, sympy.Expr]
+
+
+@dataclasses.dataclass(frozen=True)
+class _SubParentReplayContext:
+    """The output group and lane currently being replayed."""
+
+    output_group: int
+    output_lanes: int
+    output_lane: int
+
+
 def _select_lane(
     parts: tuple[CSEVariable, ...],
     lane: sympy.Expr,
@@ -2105,6 +2126,89 @@ class _GroupedReductionLayout:
         family.set_value_masks(kernel, parts)
         return parts
 
+    def project_parent_value(
+        self,
+        kernel: TritonKernel,
+        family: _DerivedIterationFamily,
+        value: CSEVariable,
+        *,
+        access_stride: int,
+        base_offset: sympy.Expr,
+        extent: sympy.Expr,
+        parent_shape: tuple[sympy.Expr, sympy.Expr],
+        child_shape: tuple[sympy.Expr, sympy.Expr],
+        output_lanes: int,
+        output_lane: int,
+        factor: int,
+    ) -> CSEVariable:
+        """Project one proved contiguous child interval from a parent tile."""
+        if value.dtype is None:
+            raise AssertionError("affine source must have a known dtype")
+        if not self.local_reduction_in_r:
+            raise AssertionError("affine projection requires an R parent axis")
+        if not V.graph.sizevars.statically_known_equals(
+            parent_shape[0], child_shape[0]
+        ):
+            raise AssertionError("affine projection changed the parent row extent")
+        if access_stride != 1:
+            raise AssertionError("contiguous projection requires affine stride one")
+        if output_lanes <= 0 or not 0 <= output_lane < output_lanes:
+            raise AssertionError("invalid affine output-lane metadata")
+        if value.shape is None or len(value.shape) != 2:
+            raise AssertionError("affine source must be a two-dimensional tile")
+        if str(value.shape[self.parent_axis]) != self.parent_block:
+            raise AssertionError(
+                f"affine source is not parent resolution: {value.shape}"
+            )
+
+        sizevars = V.graph.sizevars
+        parent_width = sizevars.guard_int(parent_shape[1])
+        if parent_width <= 0 or parent_width % factor != 0:
+            raise AssertionError("affine parent extent is not divisible by factor")
+        child_width = parent_width // factor
+        consumer_width = sizevars.guard_int(extent)
+        if not sizevars.statically_known_equals(extent, child_shape[1]):
+            raise AssertionError("affine extent does not match the consumer frame")
+        if (
+            child_width <= 0
+            or consumer_width <= 0
+            or consumer_width != child_width * output_lanes
+        ):
+            raise AssertionError(
+                "affine child extent is incompatible with output lanes"
+            )
+        base_offset = sizevars.guard_int(base_offset)
+        offset = base_offset + output_lane * child_width
+        if (
+            base_offset < 0
+            or base_offset + consumer_width > parent_width
+            or offset < 0
+            or offset + child_width > parent_width
+        ):
+            raise AssertionError("affine child interval is outside its parent frame")
+        if offset % child_width != 0:
+            raise AssertionError("affine child interval is not lane aligned")
+
+        # Keep the replayed value's block shape in the derived family's
+        # vocabulary.  The concrete relation width and the derived Triton
+        # block width are equivalent, but shape propagation compares symbolic
+        # dimensions textually (for example, ``64`` vs ``R0_BLOCK//4``).
+        child_block = family.sub_parent_tree().block_size_str()
+        part_shape = (*value.shape[:-1], child_block)
+        parts = tuple(
+            kernel.cse.newvar(bounds=value.bounds, dtype=value.dtype, shape=part_shape)
+            for _ in range(factor)
+        )
+        reshape_shape = (*value.shape[:-1], factor, child_block)
+        kernel.emit_contiguous_split_via_reshape(
+            value, reshape_shape, tuple(map(str, parts))
+        )
+        family.set_value_masks(kernel, parts)
+        part_index = base_offset // child_width + output_lane
+        if part_index >= len(parts):
+            raise AssertionError("affine projection selected an unavailable part")
+        return parts[part_index]
+
     def sub_parent_split_shapes(
         self,
         family: _DerivedIterationFamily,
@@ -2307,19 +2411,39 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
         family: _DerivedIterationFamily,
         load_transform: _ParentFullLoadTransform | None = None,
         value_resolver: _SubParentValueResolver | None = None,
+        replay_context: _SubParentReplayContext | None = None,
+        replay_node: Any | None = None,
+        replay_accesses: tuple[tuple[MemoryDep, sympy.Expr], ...] | None = None,
     ):
         super().__init__(inner)
         self._kernel = kernel
         self._family = family
         self._load_transform = load_transform
         self._value_resolver = value_resolver
+        self._replay_context = replay_context
+        self._replay_node = replay_node
+        self._replay_accesses = replay_accesses
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
         planned = False
         if self._value_resolver is not None:
             planned = self._value_resolver.is_planned(name)
             if planned:
-                value = self._value_resolver.resolve_load(name, index)
+                if self._replay_accesses is None:
+                    value = self._value_resolver.resolve_load(
+                        name,
+                        index,
+                        replay_context=self._replay_context,
+                        replay_node=self._replay_node,
+                    )
+                else:
+                    value = self._value_resolver.resolve_load(
+                        name,
+                        index,
+                        replay_context=self._replay_context,
+                        replay_node=self._replay_node,
+                        replay_accesses=self._replay_accesses,
+                    )
                 if value is not None:
                     return value
         remapped_index = self._family.remap_index(index)
@@ -2427,6 +2551,31 @@ class _PointwiseRemapHandler(WrapperHandler):  # type: ignore[type-arg]
 class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
     """Use exhaustive access proofs as a per-name sub-parent replay contract."""
 
+    @staticmethod
+    def _accesses_match_in_child_frame(
+        left: MemoryDep,
+        right: MemoryDep,
+        parent_numel: sympy.Expr,
+        child_extent: sympy.Expr,
+    ) -> bool:
+        """Compare accesses after collapsing them into the proved X/R frame."""
+        if left.name != right.name or left.mode != right.mode:
+            return False
+        frame = (
+            sympy_index_symbol("_sub_parent_replay_x"),
+            sympy_index_symbol("_sub_parent_replay_r"),
+        )
+        sizes = (parent_numel, child_extent)
+        left_frame = left.normalize_with_ranges(frame, sizes)
+        right_frame = right.normalize_with_ranges(frame, sizes)
+        return (
+            left_frame is not None
+            and right_frame is not None
+            and V.graph.sizevars.statically_known_equals(
+                left_frame.index, right_frame.index
+            )
+        )
+
     def __init__(
         self,
         inner,
@@ -2436,53 +2585,179 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         *,
         access_relations: tuple[scheduler.SubParentAccessRelation, ...],
         sub_parent_factor: int,
+        output_groups: tuple[scheduler.SubParentOutputGroup, ...] = (),
+        parent_numel: sympy.Expr | None = None,
+        parent_rnumel: sympy.Expr | None = None,
     ):
         super().__init__(inner)
         self._kernel = kernel
         self._layout = layout
         self._sub_parent_family = sub_parent_family
         self._sub_parent_factor = sub_parent_factor
-        # Fusion checks each access. Replay only needs their consistent per-name
-        # consequences: capture role and any permitted parent lanes.
+        has_dense_mappings = any(
+            relation.access_stride == 1
+            for relation in access_relations
+        )
+        if has_dense_mappings and (parent_numel is None or parent_rnumel is None):
+            raise AssertionError(
+                "dense affine replay requires parent extents"
+            )
+        if has_dense_mappings and layout.group_tree.is_loop:
+            raise AssertionError(
+                "dense affine projection requires the complete logical parent tile"
+            )
+        # Fusion checks each access. Replay resolves every affine access from
+        # its proof record and retains per-name source ownership contracts.
         relations_by_name: dict[str, list[scheduler.SubParentAccessRelation]] = (
             collections.defaultdict(list)
         )
         consumer_lanes: dict[MemoryDep, int] = {}
         for relation in access_relations:
-            if relation.parent_lane is not None:
+            if relation.access_stride == sub_parent_factor:
                 consumer = relation.consumer_access.normalize()
-                prior_lane = consumer_lanes.setdefault(consumer, relation.parent_lane)
-                if prior_lane != relation.parent_lane:
+                lane = V.graph.sizevars.guard_int(
+                    cast("sympy.Expr", relation.base_offset)
+                )
+                prior_lane = consumer_lanes.setdefault(consumer, lane)
+                if prior_lane != lane:
                     raise AssertionError(
                         f"consumer access has multiple lanes: {consumer}"
                     )
             relations_by_name[relation.consumer_access.name].append(relation)
+        self._relation_descriptors: list[_SubParentRelationDescriptor] = []
+        self._dense_descriptor_indices: dict[str, list[int]] = (
+            collections.defaultdict(list)
+        )
+        for relation in access_relations:
+            access_stride = relation.access_stride
+            if access_stride is None:
+                continue
+            base_offset = cast("sympy.Expr", relation.base_offset)
+            extent = cast("sympy.Expr", relation.extent)
+            if parent_numel is None or parent_rnumel is None:
+                raise AssertionError("affine relation is missing parent extents")
+            if access_stride not in (1, sub_parent_factor):
+                raise AssertionError(
+                    f"unsupported sub-parent affine stride {access_stride}"
+                )
+            sizevars = V.graph.sizevars
+            if access_stride == 1:
+                source_extent = sympy_product(relation.source_accesses[0].size)
+                parent_extent = parent_numel * parent_rnumel
+                if not V.graph.sizevars.statically_known_equals(
+                    source_extent, parent_extent
+                ):
+                    raise AssertionError(
+                        "dense affine source does not cover the parent frame"
+                    )
+            consumer_extent = sympy_product(relation.consumer_access.size)
+            if not V.graph.sizevars.statically_known_multiple_of(
+                consumer_extent, parent_numel
+            ):
+                raise AssertionError(
+                    "affine consumer does not have a row-major child frame"
+                )
+            child_feature = V.graph.sizevars.simplify(
+                FloorDiv(consumer_extent, parent_numel)
+            )
+            if not V.graph.sizevars.statically_known_equals(child_feature, extent):
+                raise AssertionError("affine extent does not match the consumer frame")
+            if access_stride == sub_parent_factor:
+                continue
+            replay_matches = [
+                (group_index, node)
+                for group_index, group in enumerate(output_groups)
+                for node in group.nodes
+                if any(
+                    isinstance(read, MemoryDep)
+                    and self._accesses_match_in_child_frame(
+                        relation.consumer_access,
+                        read,
+                        parent_numel,
+                        extent,
+                    )
+                    for read in node.read_writes.reads
+                )
+            ]
+            if access_stride == 1 and len(replay_matches) > 1:
+                raise AssertionError(
+                    "dense affine relation belongs to multiple output groups"
+                )
+            if not replay_matches:
+                replay_matches = [(None, None)]
+            for group_index, replay_node in replay_matches:
+                output_lanes = (
+                    output_groups[group_index].output_lanes
+                    if group_index is not None
+                    else 1
+                )
+                descriptor = _SubParentRelationDescriptor(
+                    relation=relation,
+                    output_group=group_index,
+                    output_lanes=output_lanes,
+                    replay_node=replay_node,
+                    parent_shape=(parent_numel, parent_rnumel),
+                    child_shape=(parent_numel, extent),
+                )
+                descriptor_index = len(self._relation_descriptors)
+                self._relation_descriptors.append(descriptor)
+                self._dense_descriptor_indices[relation.consumer_access.name].append(
+                    descriptor_index
+                )
         self._contracts: dict[str, _SubParentSourceContract] = {}
         for name, relations in relations_by_name.items():
+            mapping_kinds = OrderedSet(
+                [
+                    "direct"
+                    if relation.access_stride is None
+                    else (
+                        "dense"
+                        if relation.access_stride == 1
+                        else "interleaved"
+                    )
+                    for relation in relations
+                ]
+            )
+            if len(mapping_kinds) != 1:
+                raise AssertionError(f"mixed affine relation kinds for {name}")
+            mapping_kind = next(iter(mapping_kinds))
             source_sets = OrderedSet(
                 [frozenset(relation.source_accesses) for relation in relations]
             )
             source_roles = OrderedSet(
                 [relation.requires_live_source for relation in relations]
             )
-            parent_lanes = OrderedSet([relation.parent_lane for relation in relations])
+            parent_lanes = OrderedSet(
+                [
+                    None
+                    if relation.access_stride is None or relation.access_stride == 1
+                    else V.graph.sizevars.guard_int(
+                        cast("sympy.Expr", relation.base_offset)
+                    )
+                    for relation in relations
+                ]
+            )
             if len(source_sets) != 1:
                 raise AssertionError(f"mixed source accesses for {name}")
-            if len(source_roles) != 1:
-                raise AssertionError(f"mixed source roles for {name}")
-            if None in parent_lanes and len(parent_lanes) != 1:
-                raise AssertionError(f"mixed direct and lane relations for {name}")
+            if mapping_kind != "dense":
+                if len(source_roles) != 1:
+                    raise AssertionError(f"mixed source roles for {name}")
+                if None in parent_lanes and len(parent_lanes) != 1:
+                    raise AssertionError(f"mixed direct and lane relations for {name}")
             allowed_lanes = (
                 None
-                if None in parent_lanes
+                if mapping_kind != "interleaved"
                 else cast("frozenset[int]", frozenset(parent_lanes))
             )
             self._contracts[name] = _SubParentSourceContract(
-                source_is_internal=next(iter(source_roles)),
+                source_is_internal=any(
+                    relation.requires_live_source for relation in relations
+                ),
                 parent_lanes=allowed_lanes,
             )
         self._values: dict[str, OrderedSet[CSEVariable]] = {}
         self._materialized: dict[CSEVariable, MaterializedSubParentValue] = {}
+        self._dense_materialized: dict[tuple[int, int, int], CSEVariable] = {}
         self._lane_projections: dict[CSEVariable, _LaneProjection] = {}
         # Pointwise results at parent resolution, recorded as they are
         # emitted, so a lane replay of the same op can fold onto them.
@@ -2658,12 +2933,102 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             self._materialized[value] = materialized
         return materialized
 
+    def _select_dense_descriptor(
+        self,
+        name: str,
+        index: sympy.Expr,
+        replay_context: _SubParentReplayContext | None,
+        replay_node: Any | None,
+        replay_accesses: tuple[tuple[MemoryDep, sympy.Expr], ...] | None,
+    ) -> tuple[int, _SubParentRelationDescriptor] | None:
+        candidates = [
+            (descriptor_index, self._relation_descriptors[descriptor_index])
+            for descriptor_index in self._dense_descriptor_indices.get(name, ())
+        ]
+        if replay_context is not None:
+            candidates = [
+                (descriptor_index, descriptor)
+                for descriptor_index, descriptor in candidates
+                if descriptor.output_group == replay_context.output_group
+                and descriptor.output_lanes == replay_context.output_lanes
+                and replay_context.output_lane < descriptor.output_lanes
+            ]
+        if replay_node is not None:
+            candidates = [
+                (descriptor_index, descriptor)
+                for descriptor_index, descriptor in candidates
+                if descriptor.replay_node is replay_node
+            ]
+        if replay_accesses is None:
+            candidates = [
+                (descriptor_index, descriptor)
+                for descriptor_index, descriptor in candidates
+                if V.graph.sizevars.statically_known_equals(
+                    descriptor.relation.consumer_access.index, index
+                )
+            ]
+        else:
+            candidates = [
+                (descriptor_index, descriptor)
+                for descriptor_index, descriptor in candidates
+                if any(
+                    self._accesses_match_in_child_frame(
+                        descriptor.relation.consumer_access,
+                        read,
+                        descriptor.parent_shape[0],
+                        descriptor.child_shape[1],
+                    )
+                    and V.graph.sizevars.statically_known_equals(
+                        replay_index, index
+                    )
+                    for read, replay_index in replay_accesses
+                )
+            ]
+        if len(candidates) == 1:
+            return candidates[0]
+        if not candidates:
+            return None
+        raise AssertionError(
+            f"ambiguous dense sub-parent relation for {name!r} at {index}"
+        )
+
+    def _materialize_dense_source(
+        self,
+        descriptor_index: int,
+        descriptor: _SubParentRelationDescriptor,
+        source: CSEVariable,
+        output_lane: int,
+    ) -> CSEVariable | None:
+        if not self._kernel.cse.contains_value(cast("TritonCSEVariable", source)):
+            return None
+        key = (id(source), descriptor_index, output_lane)
+        if key in self._dense_materialized:
+            return self._dense_materialized[key]
+        relation = descriptor.relation
+        if relation.access_stride != 1:
+            raise AssertionError("dense descriptor lost its stride-one mapping")
+        value = self._layout.project_parent_value(
+            self._kernel,
+            self._sub_parent_family,
+            source,
+            access_stride=relation.access_stride,
+            base_offset=cast("sympy.Expr", relation.base_offset),
+            extent=cast("sympy.Expr", relation.extent),
+            parent_shape=descriptor.parent_shape,
+            child_shape=descriptor.child_shape,
+            output_lanes=descriptor.output_lanes,
+            output_lane=output_lane,
+            factor=self._sub_parent_factor,
+        )
+        self._dense_materialized[key] = value
+        return value
+
     def is_group_width_shape(self, shape: Sequence[int | str] | None) -> bool:
         """Whether ``shape`` is a non-direct value at grouped resolution."""
         parent_dim = self._layout.parent_dim(shape)
         return (
             parent_dim == self._layout.num_groups_str
-            and parent_dim != self._layout.child_block(self._sub_parent_factor)
+            and parent_dim != self._sub_parent_family.sub_parent_tree().block_size_str()
         )
 
     def materialize_group_width(self, value: CSEVariable) -> CSEVariable:
@@ -2684,12 +3049,50 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
     def materialize_sources(
         self, relations: Iterable[scheduler.SubParentAccessRelation]
     ) -> None:
-        """Preserve required lane sources before the parent body is flushed.
+        """Preserve required sources before the parent body is flushed.
 
-        External sources are plain loads: their lanes split lazily when a
-        consumer needs them, or reload if the value has expired by then.
+        External sources can reload normally. Internal sources are projected or
+        split while their parent-resolution value is still available.
         """
-        for name in OrderedSet(relation.consumer_access.name for relation in relations):
+        required_relations = tuple(relations)
+        required_relation_ids = OrderedSet([id(relation) for relation in required_relations])
+        for descriptor_index, descriptor in enumerate(self._relation_descriptors):
+            relation = descriptor.relation
+            if (
+                id(relation) not in required_relation_ids
+                or not relation.requires_live_source
+                or descriptor.output_group is None
+                or relation.access_stride != 1
+            ):
+                continue
+            materialized = any(
+                self._materialize_dense_source(
+                    descriptor_index,
+                    descriptor,
+                    source,
+                    output_lane,
+                )
+                is not None
+                for source in self._values.get(relation.consumer_access.name, ())
+                for output_lane in range(descriptor.output_lanes)
+            )
+            if not materialized:
+                raise AssertionError(
+                    f"lost required dense sub-parent source "
+                    f"{relation.consumer_access.name!r}"
+                )
+
+        for relation in required_relations:
+            if relation.access_stride == 1:
+                continue
+            if (
+                relation.access_stride is not None
+                and relation.access_stride != self._sub_parent_factor
+            ):
+                raise AssertionError(
+                    f"unsupported sub-parent affine stride {relation.access_stride}"
+                )
+            name = relation.consumer_access.name
             if not self._contracts[name].source_is_internal:
                 continue
             materialized = any(
@@ -2784,8 +3187,39 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             raise AssertionError(f"unplanned lane {lane} for {name!r}")
         return lane_value
 
-    def resolve_load(self, name: str, index: sympy.Expr) -> CSEVariable | None:
+    def resolve_load(
+        self,
+        name: str,
+        index: sympy.Expr,
+        *,
+        replay_context: _SubParentReplayContext | None = None,
+        replay_node: Any | None = None,
+        replay_accesses: tuple[tuple[MemoryDep, sympy.Expr], ...] | None = None,
+    ) -> CSEVariable | None:
         """Try each live source, requiring in-kernel values to resolve."""
+        if name in self._dense_descriptor_indices:
+            selected = self._select_dense_descriptor(
+                name, index, replay_context, replay_node, replay_accesses
+            )
+            if selected is None:
+                if self._contracts[name].source_is_internal:
+                    raise AssertionError(
+                        f"no dense sub-parent relation for {name!r} at {index}"
+                    )
+                return None
+            descriptor_index, descriptor = selected
+            output_lane = (
+                replay_context.output_lane if replay_context is not None else 0
+            )
+            for source in self.resolve_sources(name):
+                value = self._materialize_dense_source(
+                    descriptor_index, descriptor, source, output_lane
+                )
+                if value is not None:
+                    return value
+            if self._contracts[name].source_is_internal:
+                raise AssertionError(f"sub-parent stage lost required source {name!r}")
+            return None
         for source in self.resolve_sources(name):
             if (
                 self._contracts[name].parent_lanes is None
@@ -2809,6 +3243,14 @@ class SIMDScheduling(BaseScheduling):
 
     kernel_type: type[Any] = SIMDKernel  # override in subclass
     supports_sub_parent_epilogue = False
+
+    @staticmethod
+    def _is_standalone_staged_reduction(
+        node: scheduler.BaseSchedulerNode,
+    ) -> bool:
+        return isinstance(node, scheduler.FusedStagedReduction) and not isinstance(
+            node, scheduler.FusedNestedReductions
+        )
 
     def group_fn(self, sizes):
         return tuple(V.graph.sizevars.simplify(sympy_product(s)) for s in sizes)
@@ -2896,8 +3338,7 @@ class SIMDScheduling(BaseScheduling):
                     return False
 
             if reduction_can_fuse and any(
-                isinstance(node, scheduler.FusedStagedReduction)
-                and not isinstance(node, scheduler.FusedNestedReductions)
+                self._is_standalone_staged_reduction(node)
                 for node in (node1, node2)
             ):
                 nodes = [*node1.get_nodes(), *node2.get_nodes()]
@@ -3001,12 +3442,12 @@ class SIMDScheduling(BaseScheduling):
                 if not ordinary_fusion:
                     why("nodes numel incompatibility")
 
-            if ordinary_fusion and type(node2) is not scheduler.FusedStagedReduction:
+            if ordinary_fusion and not self._is_standalone_staged_reduction(node2):
                 return True
 
             if (
                 node2.get_operation_names() & node1.ancestors
-                or type(node2) is scheduler.FusedStagedReduction
+                or self._is_standalone_staged_reduction(node2)
             ):
                 sub_parent_fusion = self._sub_parent_epilogue_decision(node1, node2)
                 if sub_parent_fusion is _SubParentFusion.REJECT:
@@ -3014,7 +3455,7 @@ class SIMDScheduling(BaseScheduling):
                     return False
                 if sub_parent_fusion is _SubParentFusion.FUSE:
                     return True
-            if type(node2) is scheduler.FusedStagedReduction:
+            if self._is_standalone_staged_reduction(node2):
                 why("staged reduction plan would be lost")
                 return False
             return ordinary_fusion
@@ -3070,29 +3511,23 @@ class SIMDScheduling(BaseScheduling):
         consumer_node = node2 if node1.is_reduction() else node1
         _, (parent_numel, parent_rnumel) = reduction_node.group
         nodes = [*reduction_node.get_nodes(), *consumer_node.get_nodes()]
-        plan = self._sub_parent_epilogue_plan(nodes, parent_numel, parent_rnumel)
-        if plan is None:
-            # No sub-parent plan covers the combined set, so a sub-parent-shaped
-            # member would reach generic tiling and scheduling, neither of which
-            # models a fraction of the parent tile. Keep it out of the group.
-            # The nested append path owns its own sub-parent stage, so leave
-            # those pairs to FusedNestedReductions.can_fuse_with.
+        fusion_result = scheduler.NestedReduction.sub_parent_epilogue_result(
+            nodes, parent_numel, parent_rnumel
+        )
+        if not fusion_result.is_candidate:
+            return _SubParentFusion.DEFER
+        if fusion_result.plan is None:
             if isinstance(node1, scheduler.FusedNestedReductions) or isinstance(
                 node2, scheduler.FusedNestedReductions
             ):
                 return _SubParentFusion.DEFER
-            return (
-                _SubParentFusion.REJECT
-                if any(
-                    self._is_sub_parent_shaped(node, parent_numel, parent_rnumel)
-                    for node in nodes
-                )
-                else _SubParentFusion.DEFER
-            )
-        stage = plan.sub_parent_stages[0]
-        epilogue_nodes = stage.epilogue_nodes
-        epilogue_node_set = OrderedSet(epilogue_nodes)
-        if type(reduction_node) is scheduler.FusedStagedReduction:
+            return _SubParentFusion.REJECT
+
+        plan = fusion_result.plan
+        if not self._sub_parent_plan_is_admitted(nodes, parent_numel, plan):
+            return _SubParentFusion.REJECT
+        epilogue_node_set = OrderedSet(plan.sub_parent_stages[0].epilogue_nodes)
+        if self._is_standalone_staged_reduction(reduction_node):
             return _SubParentFusion.FUSE
         return (
             _SubParentFusion.FUSE
@@ -3117,14 +3552,92 @@ class SIMDScheduling(BaseScheduling):
             or not torch._inductor.config.triton.nested_reduction
         ):
             return None
-        plan = scheduler.NestedReduction.sub_parent_epilogue_plan(
+        result = scheduler.NestedReduction.sub_parent_epilogue_result(
             nodes, parent_numel, parent_rnumel
         )
+        plan = result.plan
         if plan is None:
             return None
-        if not self._sub_parent_tiling_is_2d(nodes, parent_numel, parent_rnumel):
+        if not self._sub_parent_plan_is_admitted(nodes, parent_numel, plan):
             return None
         return plan
+
+    def _sub_parent_plan_is_admitted(
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+        parent_numel: sympy.Expr,
+        plan: scheduler.StagedReductionPlan,
+    ) -> bool:
+        if not self._sub_parent_tiling_is_2d(nodes, parent_numel, plan.parent_rnumel):
+            return False
+        has_dense_mappings = any(
+            relation.access_stride == 1
+            for stage in plan.sub_parent_stages
+            for relation in stage.access_relations
+        )
+        if has_dense_mappings and any(
+            node.get_device() is None or node.get_device().type != "cuda"
+            for node in nodes
+        ):
+            return False
+        return not (
+            has_dense_mappings
+            and not self._dense_projection_is_persistent(plan)
+        )
+
+    @staticmethod
+    def _dense_group_extent_subs(
+        plan: scheduler.StagedReductionPlan,
+    ) -> dict[sympy.Expr, sympy.Expr]:
+        # The final SchedulerNode groups may still spell the specialized
+        # parent width with the backed symbolic dimension.
+        group_extent_subs: dict[sympy.Expr, sympy.Expr] = {}
+        for parent_node in plan.parent_nodes:
+            if not parent_node.is_reduction():
+                continue
+            _, (node_numel, node_rnumel) = parent_node.group
+            if (
+                V.graph.sizevars.statically_known_equals(
+                    node_numel, plan.parent_numel
+                )
+                and V.graph.sizevars.statically_known_equals(
+                    node_rnumel, plan.parent_rnumel
+                )
+                and node_rnumel != plan.parent_rnumel
+            ):
+                group_extent_subs[node_rnumel] = plan.parent_rnumel
+                break
+        return group_extent_subs
+
+    def _dense_projection_is_persistent(
+        self, plan: scheduler.StagedReductionPlan
+    ) -> bool:
+        """Whether a dense affine projection owns a complete parent tile."""
+        if not plan.parent_nodes:
+            return True
+        group_extent_subs = self._dense_group_extent_subs(plan)
+        parent_schedule = self.generate_node_schedule(
+            plan.parent_nodes,
+            plan.parent_numel,
+            plan.parent_rnumel,
+            required_post_reduction_index=plan.required_post_reduction_index,
+            group_extent_subs=group_extent_subs or None,
+        )
+        features = SIMDKernelFeatures(
+            parent_schedule,
+            plan.parent_numel,
+            plan.parent_rnumel,
+        )
+        _, tiling_scores = self.get_tiling_and_scores(
+            parent_schedule,
+            plan.parent_numel,
+            plan.parent_rnumel,
+            features.coalesce_analysis,
+        )
+        return V.choices.should_use_persistent_reduction(
+            features.with_tiling_scores(tiling_scores),
+            cooperative_reduction=False,
+        )
 
     def _sub_parent_tiling_is_2d(
         self,
@@ -3158,13 +3671,21 @@ class SIMDScheduling(BaseScheduling):
             if not node.is_reduction():
                 continue
             _, (parent_numel, parent_rnumel) = node.group
-            plan = self._sub_parent_epilogue_plan(nodes, parent_numel, parent_rnumel)
-            if plan is not None:
+            result = scheduler.NestedReduction.sub_parent_epilogue_result(
+                nodes, parent_numel, parent_rnumel
+            )
+            plan = result.plan
+            if plan is not None and self._sub_parent_plan_is_admitted(
+                nodes, parent_numel, plan
+            ):
                 return plan
+            if result.is_candidate:
+                break
         return None
 
     def generate_node_schedule(
-        self, nodes, numel, rnumel, *, required_post_reduction_index=None
+        self, nodes, numel, rnumel, *, required_post_reduction_index=None,
+        group_extent_subs=None,
     ):
         """Build a schedule, optionally requiring a main-body suffix after a reduction."""
         if required_post_reduction_index is not None and not (
@@ -3181,14 +3702,21 @@ class SIMDScheduling(BaseScheduling):
         current_loop_has_reduction = False
         completed_reduction_loop = False
 
-        def fits_in_main_body(n):
+        def node_group(n):
             _, (node_numel, node_rnumel) = n.group
+            if group_extent_subs:
+                node_numel = sympy_subs(node_numel, group_extent_subs)
+                node_rnumel = sympy_subs(node_rnumel, group_extent_subs)
+            return node_numel, node_rnumel
+
+        def fits_in_main_body(n):
+            node_numel, node_rnumel = node_group(n)
             return (node_numel == numel and node_rnumel == rnumel) or (
                 node_numel == numel * rnumel and node_rnumel == 1
             )
 
         def fits_outside_reduction(n):
-            _, (node_numel, node_rnumel) = n.group
+            node_numel, node_rnumel = node_group(n)
             return node_numel == numel and node_rnumel == 1 and rnumel != 1
 
         def expect_improved_memory_usage(n):
@@ -3760,6 +4288,9 @@ class SIMDScheduling(BaseScheduling):
                         sub_parent_family,
                         access_relations=sub_parent_stage.access_relations,
                         sub_parent_factor=sub_parent_stage.factor,
+                        output_groups=sub_parent_stage.output_groups,
+                        parent_numel=outer_numel,
+                        parent_rnumel=outer_rnumel,
                     )
                 with V.set_ops_handler(value_resolver or V.get_ops_handler()):
                     self._codegen_node_schedule_body(combined_schedule, kernel)
@@ -3813,7 +4344,7 @@ class SIMDScheduling(BaseScheduling):
                     value_resolver.materialize_sources(
                         relation
                         for relation in sub_parent_stage.access_relations
-                        if relation.parent_lane is not None
+                        if relation.access_stride is not None
                     )
                     self._codegen_sub_parent_output_groups(
                         kernel,
@@ -4053,6 +4584,7 @@ class SIMDScheduling(BaseScheduling):
         *,
         load_transform: _ParentFullLoadTransform | None = None,
         value_resolver: _SubParentValueResolver | None = None,
+        replay_context: _SubParentReplayContext | None = None,
     ) -> None:
         """Emit pointwise nodes under an explicit nested iteration family.
 
@@ -4075,6 +4607,20 @@ class SIMDScheduling(BaseScheduling):
                     family=family,
                     load_transform=load_transform,
                     value_resolver=value_resolver,
+                    replay_context=replay_context,
+                    replay_node=sn,
+                    replay_accesses=tuple(
+                        (
+                            read,
+                            sympy_subs(
+                                read.index,
+                                dict(zip(read.var_names, iter_vars)),
+                            ),
+                        )
+                        for read in sn.read_writes.reads
+                        if isinstance(read, MemoryDep)
+                        and len(read.var_names) == len(iter_vars)
+                    ),
                 )
                 self._prepare_loop_body(sn._body)
                 with V.set_ops_handler(handler), kernel.set_current_node(sn):
@@ -4090,8 +4636,13 @@ class SIMDScheduling(BaseScheduling):
     ) -> None:
         """Replay every sub-parent output group with indexed forwarding active."""
         with V.set_ops_handler(value_resolver):
-            for output_group in stage.output_groups:
+            for output_group_index, output_group in enumerate(stage.output_groups):
                 for output_lane in range(output_group.output_lanes):
+                    replay_context = _SubParentReplayContext(
+                        output_group=output_group_index,
+                        output_lanes=output_group.output_lanes,
+                        output_lane=output_lane,
+                    )
                     source = layout.sub_parent_iteration_values(
                         family,
                         stage.factor,
@@ -4104,6 +4655,7 @@ class SIMDScheduling(BaseScheduling):
                         family,
                         source,
                         value_resolver=value_resolver,
+                        replay_context=replay_context,
                     )
 
     def _codegen_nodes(
@@ -4131,28 +4683,45 @@ class SIMDScheduling(BaseScheduling):
         nodes: Sequence[BaseSchedulerNode],
         plan: scheduler.StagedReductionPlan,
     ) -> None:
-        """Emit a reduction followed by its lane-resolution epilogue.
+        """Emit a parent reduction followed by its sub-parent epilogue.
 
-        Parent loads still live after reduction codegen are split in registers;
-        expired loads are reissued in the derived iteration space.
+        Live parent values can be projected or split into the child domain.
+        External sources that expire from CSE reload in the derived domain.
         """
         if plan.nested_stage is not None or len(plan.sub_parent_stages) != 1:
             raise AssertionError("expected one standalone sub-parent stage")
         stage = plan.sub_parent_stages[0]
+        has_dense_mappings = any(
+            relation.access_stride == 1
+            for relation in stage.access_relations
+        )
         numel = plan.parent_numel
         rnumel = plan.parent_rnumel
+        sub_parent_factor = stage.factor
         sub_parent_epilogue_nodes = stage.epilogue_nodes
         parent_nodes = list(plan.parent_nodes)
-        required_lane_relations = tuple(
+        group_extent_subs = (
+            self._dense_group_extent_subs(plan)
+            if has_dense_mappings
+            else {}
+        )
+        required_replay_relations = tuple(
             relation
             for relation in stage.access_relations
-            if relation.requires_live_source and relation.parent_lane is not None
+            if relation.access_stride is not None
+        )
+        required_live_lane_relations = tuple(
+            relation
+            for relation in required_replay_relations
+            if relation.requires_live_source
+            and relation.access_stride == sub_parent_factor
         )
         parent_schedule = self.generate_node_schedule(
             parent_nodes,
             numel,
             rnumel,
             required_post_reduction_index=plan.required_post_reduction_index,
+            group_extent_subs=group_extent_subs or None,
         )
         schedule_log.debug(
             "Schedule:\n %s\nSub-parent epilogue:\n %s",
@@ -4190,10 +4759,13 @@ class SIMDScheduling(BaseScheduling):
             self.create_kernel_choices(kernel_features, [tiling], kernel_kwargs),
         )
         metrics.codegen_nested_reduction += 1
-        sub_parent_factor = stage.factor
         parent_rnumel = plan.parent_rnumel
         for kernel in kernels:
-            kernel.min_rblock = sub_parent_factor
+            kernel.min_rblock = (
+                sub_parent_factor
+                if not has_dense_mappings
+                else V.graph.sizevars.guard_int(parent_rnumel)
+            )
             if len(kernel.range_trees) != 2:
                 raise AssertionError("sub-parent codegen requires a 2D kernel")
             layout = _GroupedReductionLayout.from_kernel(
@@ -4210,13 +4782,19 @@ class SIMDScheduling(BaseScheduling):
                     sub_parent_family,
                     access_relations=stage.access_relations,
                     sub_parent_factor=sub_parent_factor,
+                    output_groups=stage.output_groups,
+                    parent_numel=plan.parent_numel,
+                    parent_rnumel=plan.parent_rnumel,
                 )
                 with V.set_ops_handler(value_resolver):
                     self._codegen_node_schedule_body(parent_schedule, kernel)
-                if not required_lane_relations:
+                if required_replay_relations:
+                    value_resolver.materialize_sources(required_replay_relations)
+                if has_dense_mappings or not required_live_lane_relations:
+                    # Dense projections need the completed parent tile. Lane
+                    # replay with a live source must run before body flush,
+                    # while the source value is still present in CSE.
                     kernel.codegen_body()
-                else:
-                    value_resolver.materialize_sources(required_lane_relations)
                 self._codegen_sub_parent_output_groups(
                     kernel,
                     stage,

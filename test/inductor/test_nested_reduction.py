@@ -1343,7 +1343,8 @@ class _NestedReductionBase:
         self.assertEqual(metrics.codegen_nested_reduction, 1)
         self.assertGreater(metrics.generated_kernel_count, 1)
 
-    def test_producer_consumer_sub_parent_intermediate(self):
+    @parametrize("polyhedral_fusion", [False, True])
+    def test_producer_consumer_sub_parent_intermediate(self, polyhedral_fusion):
         B, D, G = 32, 1024, 16
 
         def f(x, weight):
@@ -1356,8 +1357,9 @@ class _NestedReductionBase:
 
         x = torch.randn(B, D, device=GPU_TYPE)
         weight = torch.randn(D, device=GPU_TYPE)
-        self.check_nested_matches_unnested(f, (x, weight))
-        self.check_fusion()
+        with inductor_config.patch(polyhedral_fusion=polyhedral_fusion):
+            self.check_nested_matches_unnested(f, (x, weight))
+            self.check_fusion()
 
     def test_producer_consumer_broadcasts_outer_reduction_output(self):
         B, D, G = 32, 1024, 16
