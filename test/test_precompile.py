@@ -6824,7 +6824,7 @@ class TestPrecompileRuntimeCache(TestCase):
                 + "# payload\n" * 200000
                 + "this is not valid Python ("
             )
-            source.write_text(code)
+            source.write_bytes(code.encode())
             blob = {
                 "format": _CACHE_FORMAT,
                 "version": _CACHE_VERSION,
