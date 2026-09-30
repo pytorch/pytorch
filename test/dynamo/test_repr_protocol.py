@@ -58,6 +58,9 @@ class _CustomReprDict(dict):
         return "custom str"
 
 
+_global_dict = {"a": 1}
+
+
 @instantiate_parametrized_tests
 class TpReprTests(TestCase):
     hw_classification = HardwareClassification.GENERIC
@@ -339,7 +342,7 @@ class TpReprTests(TestCase):
         self.assertEqual(compiled(x), fn(x))
 
     @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
-    def test_mappingproxy_after_dict_mutation_graph_breaks(self, stringify):
+    def test_mappingproxy_after_dict_mutation(self, stringify):
         d = {"a": 1}
         proxy = types.MappingProxyType(d)
 
@@ -347,11 +350,11 @@ class TpReprTests(TestCase):
             d["b"] = 2
             return x + 1, stringify(proxy)
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "mapping proxy affected by dictionary mutation",
-        ):
-            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(4))
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        got = compiled(x)
+        del d["b"]
+        self.assertEqual(got, fn(x))
 
     @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
     def test_mappingproxy_cyclic_repr_and_str(self, stringify):
@@ -381,6 +384,7 @@ class TpReprTests(TestCase):
         "make_mapping",
         (
             lambda: collections.OrderedDict(a=1),
+            lambda: collections.defaultdict(int, a=1),
             lambda: _CustomReprDict(a=1),
             lambda: types.MappingProxyType({"a": 1}),
         ),
@@ -394,16 +398,6 @@ class TpReprTests(TestCase):
 
         x = torch.randn(4)
         self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
-
-    @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
-    def test_mappingproxy_of_defaultdict(self, stringify):
-        proxy = types.MappingProxyType(collections.defaultdict(int, a=1))
-
-        def fn(x):
-            return x + 1, stringify(proxy)
-
-        x = torch.randn(4)
-        self.assertEqual(torch.compile(fn, backend="eager")(x), fn(x))
 
     def test_mappingproxy_repr_recompiles_for_new_mapping_type(self):
         proxy = types.MappingProxyType({"a": 1})
@@ -420,6 +414,21 @@ class TpReprTests(TestCase):
 
         proxy = types.MappingProxyType(collections.OrderedDict(a=1))
         self.assertEqual(compiled(x), fn(x))
+
+    def test_mappingproxy_of_global_dict_passed_as_input(self):
+        def fn(x, proxy):
+            return x + 1, _global_dict["a"], repr(proxy)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+        x = torch.randn(4)
+        proxy = types.MappingProxyType(_global_dict)
+        self.assertEqual(compiled(x, proxy), fn(x, proxy))
+        self.assertEqual(compiled(x, proxy), fn(x, proxy))
+        self.assertEqual(cnt.frame_count, 1)
+
+        other = types.MappingProxyType({"a": 5})
+        self.assertEqual(compiled(x, other), fn(x, other))
 
     @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
     def test_dict_keys_mapping_repr(self, stringify):
