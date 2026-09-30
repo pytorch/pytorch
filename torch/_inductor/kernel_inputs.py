@@ -12,50 +12,18 @@ from torch._inductor.virtualized import V
 from .ir import FixedLayout, FlexibleLayout, Layout
 
 
-# Not functools.lru_cache: Python 3.12+ stores raised exceptions, so a transient
-# RuntimeError from get_device_properties would stay cached for the process.
-_architecture_name_cache: dict[torch.device, str | None] = {}
-
-
-def clear_architecture_name_cache() -> None:
-    _architecture_name_cache.clear()
-
-
 def architecture_name_from_device(device: torch.device) -> str | None:
-    """Return the lookup-table architecture key for ``device``.
+    """Lookup-table architecture id for ``device``.
 
-    CUDA/HIP read ``gcnArchName`` from ``DeviceInterface.get_device_properties``,
-    which is the canonical architecture id for those backends.
-
-    Other registered backends fall back to ``name`` when ``gcnArchName`` is absent.
-    Third-party lookup tables must key rows using this exact string (spacing and
-    capitalization included). ``name`` is often a driver-exposed product label
-    (e.g. ``Ascend910B``, ``NVIDIA H100 80GB HBM3``) rather than a pure arch id;
-    backends that rely on lookup tables should keep ``name`` stable across runs.
-
-    A dedicated ``DeviceInterface.get_device_architecture`` could replace this
-    fallback later; for now ``gcnArchName or name`` is the contract.
-
-    Returns ``None`` when the device is unregistered or properties are not
-    implemented. ``RuntimeError`` is not cached.
+    None means template lookup stays off for this device, including
+    device-agnostic table rows. Backends opt in by overriding
+    ``DeviceInterface.get_lookup_architecture``.
     """
     try:
-        return _architecture_name_cache[device]
-    except KeyError:
-        pass
-    try:
         device_interface = get_interface_for_device(device)
-        device_properties = device_interface.get_device_properties(device)
     except NotImplementedError:
-        _architecture_name_cache[device] = None
         return None
-    arch = getattr(device_properties, "gcnArchName", None)
-    if arch:
-        _architecture_name_cache[device] = arch
-        return arch
-    name = getattr(device_properties, "name", None) or None
-    _architecture_name_cache[device] = name
-    return name
+    return device_interface.get_lookup_architecture(device)
 
 
 if TYPE_CHECKING:
@@ -147,7 +115,7 @@ class KernelInputs(ABC):
         return self._input_nodes[0].get_device()
 
     def device_name(self) -> str | None:
-        """Architecture name from the device's properties, if present."""
+        """Lookup-table architecture id, if the backend provides one."""
         if self._device_name is None:
             self._device_name = architecture_name_from_device(self.device())
         return self._device_name
