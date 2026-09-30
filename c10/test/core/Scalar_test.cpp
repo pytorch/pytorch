@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <c10/core/Scalar.h>
+#include <c10/util/Exception.h>
 
 using namespace c10;
 
@@ -28,16 +29,16 @@ TEST(ScalarTest, UnsignedConstructor) {
   ASSERT_EQ(sx.toUInt16(), x);
   ASSERT_EQ(sx.toInt(), x);
   ASSERT_EQ(sy.toUInt32(), y);
-  EXPECT_THROW(sy.toInt(), std::runtime_error); // overflows
+  EXPECT_THROW(sy.toInt(), c10::Error); // overflows
   ASSERT_EQ(sy.toLong(), y);
   ASSERT_EQ(sz0.toUInt64(), z0);
   ASSERT_EQ(sz0.toInt(), z0);
   ASSERT_EQ(sz1.toUInt64(), z1);
-  EXPECT_THROW(sz1.toInt(), std::runtime_error); // overflows
+  EXPECT_THROW(sz1.toInt(), c10::Error); // overflows
   ASSERT_EQ(sz1.toLong(), z1);
   ASSERT_EQ(sz2.toUInt64(), z2);
-  EXPECT_THROW(sz2.toInt(), std::runtime_error); // overflows
-  EXPECT_THROW(sz2.toLong(), std::runtime_error); // overflows
+  EXPECT_THROW(sz2.toInt(), c10::Error); // overflows
+  EXPECT_THROW(sz2.toLong(), c10::Error); // overflows
 }
 
 TEST(ScalarTest, Equality) {

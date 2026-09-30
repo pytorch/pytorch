@@ -3,11 +3,18 @@
 # TODO: move set tests from test_functions.py/test_misc.py to this file
 
 
+import collections
+import enum
 import sys
 
 import torch
+import torch._dynamo.exc
 import torch._dynamo.test_case
-from torch.testing._internal.common_utils import make_dynamo_test
+import torch._dynamo.testing
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+)
 
 
 lst = []
@@ -23,6 +30,15 @@ class NeverEqualForListRemove:
         return False
 
 
+class IndexForListPop:
+    def __index__(self):
+        return 1
+
+
+class IntEnumForListPop(enum.IntEnum):
+    SECOND = 1
+
+
 class CmpKeyForListSort:
     def __init__(self, v):
         self.v = v
@@ -32,6 +48,8 @@ class CmpKeyForListSort:
 
 
 class TupleTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Tuple methods
     # + count
     # + index
@@ -288,6 +306,27 @@ class ListTests(TupleTests):
         self.assertRaises(TypeError, p.pop, 2, 3)
 
     @make_dynamo_test
+    def test_pop_index_conversion(self):
+        p = self.thetype("abcd")
+        self.assertEqual(p.pop(-2), "c")
+        self.assertEqual(p.pop(IndexForListPop()), "b")
+        self.assertEqual(p, ["a", "d"])
+
+        # An IntEnum and a bool are int subclasses, so both convert by value.
+        p = self.thetype("abcd")
+        self.assertEqual(p.pop(IntEnumForListPop.SECOND), "b")
+        self.assertEqual(p.pop(True), "c")
+        self.assertRaises(IndexError, p.pop, -3)
+        self.assertRaises(TypeError, p.pop, 1.0)
+        self.assertRaisesRegex(
+            OverflowError, "too large to convert to C ssize_t", p.pop, 2**80
+        )
+
+        # The conversion precedes the empty-list check.
+        self.assertRaises(TypeError, self.thetype().pop, 1.0)
+        self.assertRaises(IndexError, self.thetype().pop, 0)
+
+    @make_dynamo_test
     def test_remove(self):
         p = self.thetype("abad")
         self.assertIsNone(p.remove("a"))
@@ -533,6 +572,133 @@ class ListTests(TupleTests):
         # Valid iterable assignments are unaffected.
         p[1:3] = ["x", "y"]
         self.assertEqual(p, ["a", "x", "y", "d", "e", "f"])
+
+
+class IndexNotFoundTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    # list/tuple/deque share BaseListVariable.list_index, but CPython's
+    # ValueError text does not: on <=3.13 list and deque repr the missing
+    # value while tuple ignores it; 3.14 dropped the repr everywhere
+    # (gh-121288). Each sequence is built twice: from constants (the inline
+    # fast path) and from opaque objects (the polyfills.index path).
+    def _check(self, fn):
+        x = torch.ones(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_list(self):
+        def fn(x):
+            try:
+                [1, 2, 3].index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_tuple(self):
+        def fn(x):
+            try:
+                (1, 2, 3).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_deque(self):
+        def fn(x):
+            try:
+                collections.deque([1, 2, 3]).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_list_nonconst(self):
+        def fn(x):
+            try:
+                [NeverEqualForListRemove()].index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_tuple_nonconst(self):
+        def fn(x):
+            try:
+                (NeverEqualForListRemove(),).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+    def test_deque_nonconst(self):
+        def fn(x):
+            try:
+                collections.deque([NeverEqualForListRemove()]).index("z")
+            except ValueError as e:
+                return str(e)
+
+        self._check(fn)
+
+
+class SymIntIndexTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    # pop() specializes a shape-derived index under a guard, since which element
+    # leaves the list is structural. ref: https://github.com/pytorch/pytorch/issues/196285
+    def _check(self, fn, sizes):
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnts, fullgraph=True, dynamic=True)
+        for n in sizes:
+            x = torch.ones(n)
+            self.assertEqual(compiled(x), fn(x))
+        return cnts
+
+    def test_pop_sym_index(self):
+        def fn(x):
+            values = [x * 2, x * 3, x * 4]
+            first = values.pop(x.shape[0] - 2)
+            return first + values.pop(-x.shape[0] + 1)
+
+        self._check(fn, [3])
+
+    def test_pop_sym_index_recompiles(self):
+        def fn(x):
+            values = [x + 1, x + 2, x + 3]
+            return values.pop(x.shape[0] - 3) * 10 + values[0]
+
+        cnts = self._check(fn, [3, 4])
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_pop_sym_index_out_of_range(self):
+        # Caught inside the compiled region: fullgraph rejects an escaping one.
+        def fn(x):
+            try:
+                return [1, 2, 3].pop(x.shape[0] + 5)
+            except IndexError as e:
+                return str(e)
+
+        self._check(fn, [3])
+
+    def test_deque_sym_maxlen(self):
+        # maxlen goes through the same PyLong_AsSsize_t conversion as pop's index.
+        def fn(x):
+            q = collections.deque([1, 2, 3], maxlen=x.shape[0] - 1)
+            return x + len(q)
+
+        cnts = self._check(fn, [3, 4])
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_pop_unbacked_index_raises(self):
+        # No guard can make an unbacked choice sound, so pop refuses rather than
+        # specializing on the first sample.
+        def fn(x):
+            return [1, 2, 3].pop(x.sum().item() % 3)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            compiled(torch.ones(3, dtype=torch.int64))
 
 
 if __name__ == "__main__":
