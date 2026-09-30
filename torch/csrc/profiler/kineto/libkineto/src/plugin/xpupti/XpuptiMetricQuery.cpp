@@ -14,6 +14,7 @@
 #include <cstring>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 
 #include <fmt/format.h>
@@ -23,10 +24,11 @@ namespace libkineto {
 
 namespace {
 
+static_assert(kXpuDeviceUuidSize == PTI_MAX_DEVICE_UUID_SIZE);
 constexpr std::string_view kMetricsHint =
     "Querying XPU metrics may require ZET_ENABLE_METRICS=1 in the environment";
 
-const char* metricTypeToString(pti_metric_type type) {
+inline std::string metricTypeToString(pti_metric_type type) {
   switch (type) {
     case PTI_METRIC_TYPE_DURATION:
       return "duration";
@@ -51,7 +53,7 @@ const char* metricTypeToString(pti_metric_type type) {
   }
 }
 
-const char* metricValueTypeToString(pti_metric_value_type type) {
+inline std::string metricValueTypeToString(pti_metric_value_type type) {
   switch (type) {
     case PTI_METRIC_VALUE_TYPE_UINT32:
       return "uint32";
@@ -77,14 +79,13 @@ const char* metricValueTypeToString(pti_metric_value_type type) {
 } // namespace
 
 std::vector<XpuMetricGroupInfo> xpuptiAvailableMetrics(
-    const std::array<uint8_t, 16>& deviceUuid) {
+    const XpuDeviceUuid& deviceUuid) {
   uint32_t deviceCount = 0;
   XPUPTI_CALL(ptiMetricsGetDevices(nullptr, &deviceCount), kMetricsHint);
   auto devices = std::make_unique<pti_device_properties_t[]>(deviceCount);
   XPUPTI_CALL(ptiMetricsGetDevices(devices.get(), &deviceCount), kMetricsHint);
 
   // PTI device order is not guaranteed to match torch.xpu device indices.
-  static_assert(PTI_MAX_DEVICE_UUID_SIZE == 16);
   const pti_device_properties_t* device = nullptr;
   for (uint32_t i = 0; i < deviceCount; ++i) {
     if (std::memcmp(devices[i]._uuid, deviceUuid.data(), deviceUuid.size()) ==
