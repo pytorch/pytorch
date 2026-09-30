@@ -170,9 +170,9 @@ Only then assign each survivor to exactly one section (see "One finding, one sec
 
 ### Step 5: Fact-Check
 
-Fact-check the **consolidated** list — one sub-agent per surviving finding, never one per raw candidate.
+Fact-check the **consolidated** list, never the raw candidates. Scale the number of agents to the task: group findings that touch the same code or subsystem into one agent, and give a finding its own agent only when verifying it needs deep investigation. A small PR usually needs 1-2 agents; rarely spawn more than 5.
 
-Spawn the agents in parallel. Each independently verifies the claim by re-reading the relevant code and surrounding context (give each agent the paths of any `REVIEW.md` covering the finding's file), and returns **valid**, **invalid**, or **needs rewording**. Drop invalid issues, reword the rest. If unsure, leave the issue with a comment for the author that this is low confidence.
+Spawn the agents in parallel. Each independently verifies its findings by re-reading the relevant code and surrounding context (give each agent the paths of any `REVIEW.md` covering its findings' files), and returns **valid**, **invalid**, or **needs rewording** for each. Drop invalid issues, reword the rest. If unsure, leave the issue with a comment for the author that this is low confidence.
 
 ## Time Budget
 
