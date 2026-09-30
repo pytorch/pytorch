@@ -273,11 +273,9 @@ class DtypePropagationOpsHandler:
 
     @staticmethod
     def value_expr(expr: sympy.Expr, dtype: torch.dtype) -> torch.dtype:
-        # Unlike `index_expr`, `value_expr` always honors the requested
-        # dtype because the result feeds tensor-value computation. The
-        # sympy expression is emitted literally, so there is no
-        # bf16/fp16 -> fp32 compute-type promotion here.
-        return dtype
+        # Preserve the requested integer width and apply floating-point
+        # compute promotion, as for other tensor-value operations.
+        return upcast_compute_type(dtype)
 
     @staticmethod
     def to_dtype(
@@ -485,6 +483,8 @@ class DtypePropagationOpsHandler:
         is_pure=True,
         pack=1,
         input_dtypes=None,
+        output_dtypes=None,
+        output_index=0,
     ):
         return dtype
 
