@@ -27,8 +27,13 @@ class TestFlashAttentionRegistry(TestCase):
         self._saved_active = attention.current_flash_attention_impl()
         _registry._FLASH_ATTENTION_IMPLS.clear()
         _registry._FLASH_ATTENTION_ACTIVE = None
+        # _cudnn caches the provider it captured; a test that enabled the real
+        # provider would otherwise make later ones skip the import they test.
+        self._saved_cudnn = (_cudnn._PROVIDER_REGISTER_FN, _cudnn._ACTIVE_HANDLE)
+        _cudnn._PROVIDER_REGISTER_FN = _cudnn._ACTIVE_HANDLE = None
 
     def tearDown(self):
+        _cudnn._PROVIDER_REGISTER_FN, _cudnn._ACTIVE_HANDLE = self._saved_cudnn
         _registry._FLASH_ATTENTION_IMPLS.clear()
         _registry._FLASH_ATTENTION_IMPLS.update(self._saved_impls)
         _registry._FLASH_ATTENTION_ACTIVE = self._saved_active

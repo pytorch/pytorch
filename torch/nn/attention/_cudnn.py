@@ -19,6 +19,7 @@ Note that this replaces the implementation of the *cuDNN* SDPA ops
 ops. It is orthogonal to :func:`torch.backends.cuda.enable_cudnn_sdp`, which
 controls whether the cuDNN backend is eligible for selection at all.
 """
+
 # mypy: allow-untyped-defs
 
 from __future__ import annotations
@@ -30,7 +31,6 @@ import os
 
 from . import _registry
 from ._registry import FlashAttentionHandle as _ProviderHandle
-
 
 __all__ = [
     "register_cudnn_attention",
@@ -152,7 +152,7 @@ def register_cudnn_attention(module_path: str = _CUDNN_MODULE_PATH):
 
 
 def _enable_from_env() -> None:
-    """Honor ``TORCH_CUDNN_SDPA_USE_PYTHON`` at ``torch.nn.attention`` import.
+    """Honor ``TORCH_CUDNN_SDPA_USE_PYTHON``; the last step of ``import torch``.
 
     Lets an existing script run on the cuDNN Python implementation without a
     source change, which is what makes A/B comparison and soak testing
@@ -177,6 +177,4 @@ def _enable_from_env() -> None:
         )
 
 
-_registry.register_flash_attention_impl(
-    "CUDNN", register_fn=register_cudnn_attention
-)
+_registry.register_flash_attention_impl("CUDNN", register_fn=register_cudnn_attention)
