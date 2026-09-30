@@ -39,15 +39,6 @@ static const Tensor apply_update(const FunctionalStorageImpl::Update& update, co
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
   if (update.view_metas.empty()) { return t; }
 
-  // The view inverses below assume every element of a view is its own memory location.
-  // A broadcasting expand() breaks that assumption.
-  for (const auto& meta : update.view_metas) {
-    TORCH_CHECK(
-        !meta->is_expand,
-        "Functionalization encountered a mutation through a view with internal overlap (e.g. a broadcasting "
-        "expand()). This is not supported yet.");
-  }
-
   std::vector<at::Tensor> tmp_values({base});
   tmp_values.reserve(update.view_metas.size());
   for (size_t i = 0; i < update.view_metas.size() - 1; ++i) {
@@ -57,6 +48,25 @@ static const Tensor apply_update(const FunctionalStorageImpl::Update& update, co
     // If need to, we could probably apply this optimization and only bother computing tmp_values
     // for those necessary view ops.
     tmp_values.push_back(std::move(next_view));
+  }
+  // The view inverses below assume every element of a view is its own memory location.
+  // A broadcasting expand() breaks that assumption: any dim that isn't known to keep its input
+  // size (new leading dims count as size 1) repeats elements.
+  for (size_t i = 0; i < update.view_metas.size(); ++i) {
+    if (!update.view_metas[i]->is_expand) {
+      continue;
+    }
+    const auto& out = i + 1 < tmp_values.size() ? tmp_values[i + 1] : update.new_val;
+    auto in_sizes = tmp_values[i].sym_sizes();
+    auto out_sizes = out.sym_sizes();
+    size_t new_dims = out_sizes.size() - in_sizes.size();
+    for (size_t d = 0; d < out_sizes.size(); ++d) {
+      c10::SymInt in_size = d < new_dims ? c10::SymInt(1) : in_sizes[d - new_dims];
+      TORCH_CHECK(
+          TORCH_STATICALLY_KNOWN_TRUE(out_sizes[d].sym_eq(in_size)),
+          "Functionalization encountered a mutation through a view with internal overlap (e.g. a broadcasting "
+          "expand()). This is not supported yet.");
+    }
   }
   for(int64_t i = static_cast<int64_t>(update.view_metas.size()) - 1; i >= 0; --i) {
     // Each view inverse is implemented in ViewInverses.cpp.

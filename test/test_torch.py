@@ -6715,6 +6715,37 @@ class TestTorchDeviceType(TestCase):
             # inputs are not expandable, output size is not the same as mean
             torch.normal(tensor2345, tensor120, out=output345)
 
+    @onlyAccelerator
+    def test_tensor_set_errors_cross_device(self, device):
+        f_cpu = torch.randn((2, 3), dtype=torch.float32)
+        f_dev = torch.randn((2, 3), dtype=torch.float32, device=device)
+
+        # cpu -> device
+        self.assertRaises(RuntimeError, lambda: f_cpu.set_(f_dev.storage()))
+        self.assertRaises(RuntimeError,
+                          lambda: f_cpu.set_(f_dev.storage(), 0, f_dev.size(), f_dev.stride()))
+        self.assertRaises(RuntimeError, lambda: f_cpu.set_(f_dev))
+
+        # device -> cpu
+        self.assertRaises(RuntimeError, lambda: f_dev.set_(f_cpu.storage()))
+        self.assertRaises(RuntimeError,
+                          lambda: f_dev.set_(f_cpu.storage(), 0, f_cpu.size(), f_cpu.stride()))
+        self.assertRaises(RuntimeError, lambda: f_dev.set_(f_cpu))
+
+    def test_pickle_generator(self, device):
+        generator = torch.Generator(device=device).manual_seed(12345)
+        if self.device_type != "cpu":
+            generator.set_offset(100)
+        torch.randn((100, 100), generator=generator, device=device)  # progress the RNG state
+
+        reserialized: torch.Generator = pickle.loads(pickle.dumps(generator))
+
+        self.assertEqual(generator.device, reserialized.device)
+        self.assertEqual(generator.initial_seed(), reserialized.initial_seed())
+        if self.device_type != "cpu":
+            self.assertEqual(generator.get_offset(), reserialized.get_offset())
+        torch.testing.assert_close(generator.get_state(), reserialized.get_state())
+
 
 class TestTorchCUDA(TestCase):
     hw_classification = HardwareClassification.CUDA
@@ -6776,6 +6807,23 @@ class TestTorchCUDA(TestCase):
             torch.cuda.synchronize()
         names = tuple(event.key for event in prof.key_averages())
         self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
+
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    @parametrize("src_dtype,dst_dtype", [(torch.int32, torch.int64),
+                                         (torch.bool, torch.int64),
+                                         (torch.bool, torch.float64)])
+    def test_converting_copy_emits_vectorized_kernel(self, device, src_dtype, dst_dtype):
+        if src_dtype == torch.bool:
+            src = torch.randint(0, 256, (1024, 1024), dtype=torch.uint8, device=device).view(torch.bool)
+        else:
+            src = make_tensor((1024, 1024), dtype=src_dtype, device=device)
+        torch.cuda.synchronize()
+        with torch.profiler.profile() as prof:
+            dst = src.to(dst_dtype)
+            torch.cuda.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        self.assertTrue(any("vectorized_elementwise_kernel" in name for name in names), names)
+        self.assertEqual(dst.cpu(), src.cpu().to(dst_dtype))
 
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm
@@ -6894,6 +6942,74 @@ class TestTorchCUDA(TestCase):
 
         _test_serialization(tempfile.NamedTemporaryFile)
         _test_serialization(BytesIOContext)
+
+    # Test that internal versions of functions related to TypedStorage do not
+    # produce a deprecation warning
+    def test_typed_storage_internal_no_warning(self):
+        s1 = torch.cuda.FloatStorage(10)
+        s1_untyped = s1.untyped()
+        t1 = torch.randn(10, device='cuda')
+
+        funcs = [
+            lambda: torch.cuda.FloatStorage(_internal=True),
+            lambda: torch.TypedStorage(
+                dtype=torch.float,
+                device='cuda',
+                _internal=True),
+            lambda: torch.TypedStorage(
+                wrap_storage=s1_untyped,
+                dtype=s1.dtype,
+                _internal=True),
+            lambda: torch.cuda.FloatStorage._dtype,
+            lambda: s1._resize_(20),
+            lambda: s1._size(),
+            lambda: s1._untyped_storage,
+            lambda: s1._is_shared(),
+            lambda: s1._share_memory_(),
+            lambda: s1._pickle_storage_type(),
+            lambda: s1._setitem(slice(0, s1._size()), 1),
+            lambda: s1._element_size(),
+            lambda: s1._deepcopy({}),
+            lambda: s1._data_ptr(),
+            lambda: s1._nbytes(),
+            lambda: t1._typed_storage(),
+        ]
+
+        # Check that each of the TypedStorage internal function calls do not
+        # produce a deprecation warning
+        for f in funcs:
+            with warnings.catch_warnings():
+                warnings.filterwarnings('error', "TypedStorage is deprecated")
+                f()
+
+    # Test that public functions related to TypedStorage produce a deprecation
+    # warning
+    @skipIfTorchInductor("FIXME")
+    def test_typed_storage_deprecation_warning(self):
+        s1 = torch.cuda.FloatStorage(10)
+        funcs = [
+            lambda: torch.cuda.FloatStorage(),
+            lambda: torch.cuda.FloatStorage.dtype,
+            lambda: s1.fill_(0),
+            lambda: s1.is_cuda,
+            lambda: s1.untyped(),
+            lambda: len(s1),
+            lambda: s1[0],
+        ]
+
+        # Check that each of the TypedStorage function calls produce a warning
+        # if warnings are reset between each
+        for f in funcs:
+            with AlwaysWarnTypedStorageRemoval(True):
+                with warnings.catch_warnings(record=True) as w:
+                    warnings.resetwarnings()
+                    f()
+                    self.assertEqual(len(w), 1, msg=str([str(a) for a in w]))
+                    warning = w[0].message
+                    self.assertTrue(warning, DeprecationWarning)
+                    self.assertTrue(re.search(
+                        '^TypedStorage is deprecated',
+                        str(warning)))
 
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
@@ -7560,22 +7676,6 @@ class TestTorch(TestCase):
                           lambda: f_cpu.set_(d_cpu.storage(), 0, d_cpu.size(), d_cpu.stride()))
         self.assertRaises(RuntimeError, lambda: f_cpu.set_(d_cpu))
 
-        # change device
-        if torch.cuda.is_available():
-            f_cuda = torch.randn((2, 3), dtype=torch.float32, device='cuda')
-
-            # cpu -> cuda
-            self.assertRaises(RuntimeError, lambda: f_cpu.set_(f_cuda.storage()))
-            self.assertRaises(RuntimeError,
-                              lambda: f_cpu.set_(f_cuda.storage(), 0, f_cuda.size(), f_cuda.stride()))
-            self.assertRaises(RuntimeError, lambda: f_cpu.set_(f_cuda))
-
-            # cuda -> cpu
-            self.assertRaises(RuntimeError, lambda: f_cuda.set_(f_cpu.storage()))
-            self.assertRaises(RuntimeError,
-                              lambda: f_cuda.set_(f_cpu.storage(), 0, f_cpu.size(), f_cpu.stride()))
-            self.assertRaises(RuntimeError, lambda: f_cuda.set_(f_cpu))
-
     # FIXME: move this test test_testing.py (along with allclose testing)
     # NOTE: test_equal will be deprecated in favor of torch.testing.assert_close
     #   once torch.testing is out of beta
@@ -7864,26 +7964,6 @@ class TestTorch(TestCase):
 
     def test_invalid_generator_raises(self):
         self.assertRaises(RuntimeError, lambda: torch.Generator('opengl'))
-
-    def test_pickle_generator(self) -> None:
-        devices = ['cpu']
-        if torch.cuda.is_available():
-            devices += ['cuda']
-
-        for device in devices:
-            with self.subTest(device=device):
-                generator = torch.Generator(device=device).manual_seed(12345)
-                if device != "cpu":
-                    generator.set_offset(100)
-                torch.randn((100, 100), generator=generator, device=device)  # progress the RNG state
-
-                reserialized: torch.Generator = pickle.loads(pickle.dumps(generator))
-
-                self.assertEqual(generator.device, reserialized.device)
-                self.assertEqual(generator.initial_seed(), reserialized.initial_seed())
-                if device != "cpu":
-                    self.assertEqual(generator.get_offset(), reserialized.get_offset())
-                torch.testing.assert_close(generator.get_state(), reserialized.get_state())
 
     def _sobol_reference_samples(self, scramble: bool) -> torch.Tensor:
         if not scramble:
@@ -8436,36 +8516,6 @@ class TestTorch(TestCase):
             lambda: t0._typed_storage(),
         ]
 
-        if torch.cuda.is_available():
-            s1 = torch.cuda.FloatStorage(10)
-            s1_untyped = s1.untyped()
-            t1 = torch.randn(10, device='cuda')
-
-            funcs += [
-                lambda: torch.cuda.FloatStorage(_internal=True),
-                lambda: torch.TypedStorage(
-                    dtype=torch.float,
-                    device='cuda',
-                    _internal=True),
-                lambda: torch.TypedStorage(
-                    wrap_storage=s1_untyped,
-                    dtype=s1.dtype,
-                    _internal=True),
-                lambda: torch.cuda.FloatStorage._dtype,
-                lambda: s1._resize_(20),
-                lambda: s1._size(),
-                lambda: s1._untyped_storage,
-                lambda: s1._is_shared(),
-                lambda: s1._share_memory_(),
-                lambda: s1._pickle_storage_type(),
-                lambda: s1._setitem(slice(0, s1._size()), 1),
-                lambda: s1._element_size(),
-                lambda: s1._deepcopy({}),
-                lambda: s1._data_ptr(),
-                lambda: s1._nbytes(),
-                lambda: t1._typed_storage(),
-            ]
-
         # Check that each of the TypedStorage internal function calls do not
         # produce a deprecation warning
         for f in funcs:
@@ -8487,18 +8537,6 @@ class TestTorch(TestCase):
             lambda: len(s0),
             lambda: s0[0],
         ]
-
-        if torch.cuda.is_available():
-            s1 = torch.cuda.FloatStorage(10)
-            funcs += [
-                lambda: torch.cuda.FloatStorage(),
-                lambda: torch.cuda.FloatStorage.dtype,
-                lambda: s1.fill_(0),
-                lambda: s1.is_cuda,
-                lambda: s1.untyped(),
-                lambda: len(s1),
-                lambda: s1[0],
-            ]
 
         # Check that each of the TypedStorage function calls produce a warning
         # if warnings are reset between each
