@@ -3701,6 +3701,63 @@ def binary_cross_entropy_with_logits(
     )
 
 
+def _linear_cross_entropy_chunked_applies(
+    input: Tensor,
+    linear_weight: Tensor,
+    target: Tensor,
+    linear_bias: Tensor | None,
+    reduction: str,
+    label_smoothing: float,
+    options: "LinearCrossEntropyOptions | None",
+    *,
+    warn: bool = True,
+) -> bool:
+    """Whether :func:`linear_cross_entropy` routes to the chunked custom ops.
+
+    Warns when ``options`` was supplied but cannot be honoured, so a caller
+    whose options are being ignored hears about it. Kept as one function
+    because the answer is needed in more than one place: the dispatch below,
+    that warning, and the OpInfo sample filter for the native overrides, which
+    has to predict which samples ever reach the ops -- that caller passes
+    ``warn=False``, since it is asking rather than dispatching.
+    """
+    if options is None:
+        return False
+    # K-dim loss falls back: the chunked op softmaxes over the full
+    # linear_weight.shape[0], not per-position over num_classes.
+    out_features = linear_weight.shape[1:-1]
+    # The chunked op has no gradient slot for the target, so a probability
+    # target requiring grad falls back to the reference path.
+    logits_shape = (*input.shape[:-1], linear_weight.shape[0], *out_features)
+    chunkable_prob_target = (
+        target.shape == logits_shape
+        and target.dtype == input.dtype
+        and not (target.requires_grad and torch.is_grad_enabled())
+    )
+    applies = (
+        reduction in {"mean", "sum", "none"}
+        and label_smoothing == 0.0
+        and (target.dtype == torch.int64 or chunkable_prob_target)
+        and not out_features
+        and not torch.jit.is_tracing()
+    )
+    if not applies and warn:
+        warnings.warn(
+            "linear_cross_entropy: ``options`` ignored; chunked path needs "
+            "reduction in {'mean','sum','none'}, label_smoothing == 0, target.dtype"
+            " == int64 (or a probability target with dtype matching input and"
+            " requires_grad == False), out_features == (). Got "
+            f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
+            f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
+            f", tracing={torch.jit.is_tracing()}"
+            f", target.requires_grad={target.requires_grad}"
+            f", linear_bias.shape="
+            f"{tuple(linear_bias.shape) if linear_bias is not None else None}.",
+            stacklevel=3,
+        )
+    return applies
+
+
 def linear_cross_entropy(
     input: Tensor,
     linear_weight: Tensor,
@@ -3717,11 +3774,19 @@ def linear_cross_entropy(
 
     The statement::
 
-      loss = linear_cross_entropy(input, linear_weight, target, **kwargs)
+      loss = linear_cross_entropy(
+          input, linear_weight, target, linear_bias=linear_bias, **kwargs
+      )
 
     is equivalent to the following reference implementation of linear_cross_entropy::
 
-      logits = linear(input, linear_weight)
+      C, *out_features, in_features = linear_weight.shape
+      logits = linear(
+          input,
+          linear_weight.reshape(-1, in_features),
+          None if linear_bias is None else linear_bias.reshape(-1),
+      )
+      logits = logits.reshape(*input.shape[:-1], C, *out_features)
       loss = cross_entropy(logits, target, **kwargs)
 
     provided that :attr:`ignore_index` is not explicitly set to `None`
@@ -3807,7 +3872,9 @@ def linear_cross_entropy(
         The reference path (``options=None``) supports all of the above.
 
     Shape:
-        - Input: :math:`(in_features)` or :math:`(N, in\_features)`.
+        - Input: :math:`(in_features)` or :math:`(N, in\_features)`. There is
+          no :math:`(B, T, in\_features)` form: flatten sequence inputs to
+          :math:`(N, in\_features)` with target :math:`(N)`.
         - Linear weight: :math:`(C, in\_features)` or :math:`(C, d_1,
           ..., d_K, in\_features)` with :math:`K \geq 1` in the case of
           K-dimensional loss.  Note: multi-dimensional weights (K > 0)
@@ -3890,44 +3957,11 @@ def linear_cross_entropy(
             "ignore_index cannot be specified when target contains probabilities"
         )
     ignore_index = ignore_index if ignore_index is not None else -100
-
-    # The chunked op has no gradient slot for the target, so a probability
-    # target requiring grad falls back to the reference path.
-    chunkable_prob_target = (
-        target_contains_probabilities
-        and target.dtype == input.dtype
-        and not (target.requires_grad and torch.is_grad_enabled())
-    )
-    # K-dim loss falls back: the chunked op softmaxes over the full
-    # linear_weight.shape[0], not per-position over num_classes.
-    if options is not None and (
-        out_features
-        or reduction not in {"mean", "sum", "none"}
-        or label_smoothing != 0.0
-        or (target.dtype != torch.int64 and not chunkable_prob_target)
-        or torch.jit.is_tracing()
-    ):
-        warnings.warn(
-            "linear_cross_entropy: ``options`` ignored; chunked path needs "
-            "reduction in {'mean','sum','none'}, label_smoothing == 0, target.dtype"
-            " == int64 (or a probability target with dtype matching input and"
-            " requires_grad == False), out_features == (). Got "
-            f"reduction={reduction!r}, label_smoothing={label_smoothing}, "
-            f"target.dtype={target.dtype}, out_features={tuple(out_features)}"
-            f", tracing={torch.jit.is_tracing()}"
-            f", target.requires_grad={target.requires_grad}"
-            f", linear_bias.shape="
-            f"{tuple(linear_bias.shape) if linear_bias is not None else None}.",
-            stacklevel=2,
-        )
-
-    if (
-        options is not None
-        and reduction in {"mean", "sum", "none"}
-        and label_smoothing == 0.0
-        and (target.dtype == torch.int64 or chunkable_prob_target)
-        and not out_features
-        and not torch.jit.is_tracing()
+    # ``options is not None`` is redundant with the predicate, which returns
+    # False for None -- it is here so the type checker narrows ``options`` for
+    # the ``_adjust`` call below.
+    if options is not None and _linear_cross_entropy_chunked_applies(
+        input, linear_weight, target, linear_bias, reduction, label_smoothing, options
     ):
         if input.dim() == 2:
             num_batches = input.shape[0]

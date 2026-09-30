@@ -25,7 +25,6 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     requires_nccl_version,
     skip_if_lt_x_gpu,
-    skip_if_rocm_ver_atleast_multiprocess,
 )
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
@@ -272,6 +271,31 @@ class _ProcessGroupNCCL2OptionsTest(MultiProcContinuousTest):
         dist.all_reduce(t)
         expected = float(sum(range(self.world_size)))
         self.assertEqual(t, torch.full((4,), expected, device=self.device))
+
+
+class ProcessGroupNCCL2CommPtrTest(_ProcessGroupNCCL2OptionsTest):
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_comm_ptr(self) -> None:
+        # The legacy backend returns the communicator of the current device.
+        torch.cuda.set_device(self.device)
+        self._check_all_reduce()
+        backend = dist.get_backend_impl(device=self.device)
+        self.assertNotEqual(backend.comm_ptr, 0)
+        # _comm_ptr() is kept for backwards compatibility.
+        self.assertEqual(backend._comm_ptr(), backend.comm_ptr)
+
+
+class ProcessGroupNCCLLazyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-lazy"
+
+
+class ProcessGroupNCCLLegacyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-legacy"
 
 
 class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
@@ -582,10 +606,13 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
         self._check_all_reduce(pg)
 
         if self.rank == 0:
+            dist.set_timeout(timedelta(milliseconds=1), group=pg)
             # Nobody else joins, so this can never complete and the watchdog
             # trips. Without the tear-down the process must survive and the
             # timeout must become readable through get_error().
-            dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
+            dist.all_reduce(
+                torch.ones(1024, device=self.device), group=pg, async_op=True
+            )
             deadline = time.time() + 60
             while time.time() < deadline and backend.get_error() == ErrorType.SUCCESS:
                 time.sleep(0.5)
@@ -609,7 +636,10 @@ class ProcessGroupNCCL2WatchdogNoTearDownTest(_ProcessGroupNCCL2SubgroupTest):
         self._check_all_reduce(pg)
 
         if self.rank == 0:
-            dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
+            dist.set_timeout(timedelta(milliseconds=1), group=pg)
+            dist.all_reduce(
+                torch.ones(1024, device=self.device), group=pg, async_op=True
+            )
             deadline = time.time() + 60
             while time.time() < deadline and backend.get_error() == ErrorType.SUCCESS:
                 time.sleep(0.5)
@@ -635,6 +665,7 @@ class ProcessGroupNCCL2BlockingWaitTest(_ProcessGroupNCCL2SubgroupTest):
         self._check_all_reduce(pg)
 
         if self.rank == 0:
+            dist.set_timeout(timedelta(milliseconds=1), group=pg)
             work = dist.all_reduce(
                 torch.ones(1024, device=self.device), group=pg, async_op=True
             )
@@ -766,7 +797,10 @@ class ProcessGroupNCCL2DumpTimeoutBoundTest(_ProcessGroupNCCL2SubgroupTest):
             self._check_all_reduce(pg)
             path = env["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
             if self.rank == 0:
-                dist.all_reduce(torch.ones(1024, device=self.device), group=pg)
+                dist.set_timeout(timedelta(milliseconds=1), group=pg)
+                dist.all_reduce(
+                    torch.ones(1024, device=self.device), group=pg, async_op=True
+                )
                 dump = None
                 deadline = time.time() + 60
                 while dump is None and time.time() < deadline:
@@ -809,7 +843,6 @@ class ProcessGroupNCCL2ExpandableSegmentsTest(MultiProcContinuousTest):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_ver_atleast_multiprocess([7, 14])
     def test_large_in_place_all_gather(self) -> None:
         numel = 16 * 1024 * 1024
         output = torch.empty(
@@ -1244,6 +1277,21 @@ class ProcessGroupNCCL2UninitializedCudaTest(TestCase):
     a torch.cuda call. Runs in a subprocess because the harness calls
     torch.cuda.set_device in setUp, which hides uninitialized-allocator bugs.
     """
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @unittest.skipIf(torch.cuda.device_count() < 2, "requires at least 2 GPUs")
+    def test_watchdog_uses_group_device(self) -> None:
+        self._run_child(
+            """
+import time
+# Let the watchdog initialize and poll the work queue.
+time.sleep(2)
+assert torch._C._cuda_hasPrimaryContext(1)
+assert not torch._C._cuda_hasPrimaryContext(0), "watchdog created a CUDA context on GPU 0"
+""",
+            device_id='torch.device("cuda:1")',
+        )
 
     def _run_child(
         self,
