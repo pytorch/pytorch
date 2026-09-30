@@ -77,6 +77,7 @@ class _ComputationType(str, Enum):
     FULL_BACKWARD = "B"
     OVERLAP_F_B = "OVERLAP_F_B"
     REDUCE_GRAD = "REDUCE_GRAD"
+    WAIT_REDUCE_GRAD = "WAIT_REDUCE_GRAD"
 
     @staticmethod
     def from_str(action: str) -> "_ComputationType":
@@ -98,6 +99,7 @@ RECV_B = _ComputationType.RECV_B
 FULL_BACKWARD = _ComputationType.FULL_BACKWARD
 OVERLAP_F_B = _ComputationType.OVERLAP_F_B
 REDUCE_GRAD = _ComputationType.REDUCE_GRAD
+WAIT_REDUCE_GRAD = _ComputationType.WAIT_REDUCE_GRAD
 
 # Keep the alias private; public schedule signatures spell out the accepted
 # forms so generated API documentation remains self-contained.
@@ -118,7 +120,7 @@ B = FULL_BACKWARD
 
 # Helper to parse an action string like 1F0 into a tuple of (stage_index, computation_type, microbatch_index)
 _action_regex = re.compile(
-    r"(\d+)(F|I|B|W|UNSHARD|RESHARD|REDUCE_GRAD|SEND_F|RECV_F|SEND_B|RECV_B)(\d*)"
+    r"(\d+)(WAIT_REDUCE_GRAD|REDUCE_GRAD|UNSHARD|RESHARD|SEND_F|RECV_F|SEND_B|RECV_B|F|I|B|W)(\d*)"
 )
 
 
@@ -1582,14 +1584,20 @@ def _requires_reduce_grad(action_type: _ComputationType) -> bool:
 
 
 def _add_reduce_grad(
-    actions: list[_Action | None], n_microbatches: int
+    actions: list[_Action | None],
+    n_microbatches: int,
+    defer_reduce_grad_wait: bool = False,
 ) -> list[_Action | None]:
     """
     REDUCE_GRAD refers to joint across minibatches grad reduction.
     reduce_grad frees memory and we want to schedule it just after the last "backward"-like stage.
+    Each reduction has a matching wait. By default, the wait follows the
+    reduction. When deferred, it runs before the next reduction or at schedule
+    end. This keeps at most one reduction pending per rank.
     """
     actions_with_reduce_grad: list[_Action | None] = []
     cnt: dict[int, int] = defaultdict(int)
+    pending_stage_idx: int | None = None
 
     def _leaf_action(a, to_schedule):
         if _requires_reduce_grad(a.computation_type):
@@ -1610,7 +1618,21 @@ def _add_reduce_grad(
             _leaf_action(a, schedule_reduce_grad_stage_idxs)
 
         for stage_idx in schedule_reduce_grad_stage_idxs:
+            if defer_reduce_grad_wait and pending_stage_idx is not None:
+                actions_with_reduce_grad.append(
+                    _Action(pending_stage_idx, WAIT_REDUCE_GRAD, None)
+                )
             actions_with_reduce_grad.append(_Action(stage_idx, REDUCE_GRAD, None))
+            if defer_reduce_grad_wait:
+                pending_stage_idx = stage_idx
+            else:
+                actions_with_reduce_grad.append(
+                    _Action(stage_idx, WAIT_REDUCE_GRAD, None)
+                )
+    if pending_stage_idx is not None:
+        actions_with_reduce_grad.append(
+            _Action(pending_stage_idx, WAIT_REDUCE_GRAD, None)
+        )
     return actions_with_reduce_grad
 
 
@@ -2678,6 +2700,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     ``max_active_stages`` controls FSDP parameter residency, while
     ``unshard_lookahead`` independently controls all-gather issue distance; see
     :func:`_resolve_unshard_lookahead` for its policies.
+
+    Compute-comms schedules must pair each ``REDUCE_GRAD`` with a matching
+    ``WAIT_REDUCE_GRAD`` and keep at most one reduction pending per rank.
     """
 
     def __init__(self, *args, **kwargs):
@@ -2686,6 +2711,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         self._unshard_lookahead: _UnshardLookahead = kwargs.pop(
             "unshard_lookahead", "full"
         )
+        self._defer_reduce_grad_wait: bool = kwargs.pop("defer_reduce_grad_wait", False)
         super().__init__(*args, **kwargs)
         # Action to custom function mapping
         self._comp_type_to_function_map: dict[_ComputationType, Callable] = {}
@@ -2729,10 +2755,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             UNSHARD,
             RESHARD,
             REDUCE_GRAD,
+            WAIT_REDUCE_GRAD,
         ):
             raise ValueError(
-                f"Invalid computation type {computation_type}. Only FORWARD, FULL_BACKWARD, \
-                BACKWARD_INPUT, BACKWARD_WEIGHT, OVERLAP_F_B, UNSHARD, RESHARD and REDUCE_GRAD are supported."
+                f"Invalid computation type {computation_type}. Only FORWARD, "
+                "FULL_BACKWARD, BACKWARD_INPUT, BACKWARD_WEIGHT, OVERLAP_F_B, "
+                "UNSHARD, RESHARD, REDUCE_GRAD, and WAIT_REDUCE_GRAD are supported."
             )
 
         # Check if computation_type is already registered
@@ -2779,7 +2807,41 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         )
                     self.pipeline_order_with_comms[rank].append(action)
             # TODO what level of validation should we offer for compute+comms schedule?
+            for rank, action_list in self.pipeline_order_with_comms.items():
+                pending_stage_idx: int | None = None
+                for action in action_list:
+                    for sub_action in action.sub_actions or (action,):
+                        stage_idx = sub_action.stage_index
+                        if sub_action.computation_type == REDUCE_GRAD:
+                            if pending_stage_idx is not None:
+                                raise ValueError(
+                                    f"Rank {rank} cannot start REDUCE_GRAD for stage "
+                                    f"{stage_idx} while stage {pending_stage_idx} has "
+                                    "a pending reduction"
+                                )
+                            pending_stage_idx = stage_idx
+                        elif sub_action.computation_type == WAIT_REDUCE_GRAD:
+                            if pending_stage_idx is None:
+                                raise ValueError(
+                                    f"Rank {rank} has WAIT_REDUCE_GRAD for stage "
+                                    f"{stage_idx} without a pending reduction"
+                                )
+                            if pending_stage_idx != stage_idx:
+                                raise ValueError(
+                                    f"Rank {rank} has WAIT_REDUCE_GRAD for stage "
+                                    f"{stage_idx}, but stage {pending_stage_idx} "
+                                    "has the pending reduction"
+                                )
+                            pending_stage_idx = None
+                if pending_stage_idx is not None:
+                    raise ValueError(
+                        f"Stage {pending_stage_idx} at rank {rank} has "
+                        "REDUCE_GRAD without WAIT_REDUCE_GRAD"
+                    )
         elif format == "compute_only":
+            if self._defer_reduce_grad_wait:
+                self._validate_deferred_gradient_reduction()
+
             # Validate that the schedule does not have comms already added to it
             for rank, action_list in actions.items():
                 for i, action in enumerate(action_list):
@@ -2801,6 +2863,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 self.pipeline_order_with_comms[rank] = _add_reduce_grad(  # type: ignore[assignment]
                     self.pipeline_order_with_comms[rank],  # type: ignore[arg-type]
                     self._n_microbatches,
+                    defer_reduce_grad_wait=self._defer_reduce_grad_wait,
                 )
 
             self.pipeline_order_with_comms = _add_send_recv(
@@ -2885,6 +2948,22 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             if stage_idx not in self.unsharded_stages:
                 raise AssertionError(f"Attempted to compute on sharded {stage_idx=}")
 
+    def _validate_deferred_gradient_reduction(self) -> None:
+        comm_ctx_to_stage: dict[int, int] = {}
+        for stage in self._stages:
+            if not isinstance(stage.submod, FSDPModule):
+                continue
+            comm_ctx_id = id(stage.submod._get_fsdp_state()._comm_ctx)
+            previous_stage = comm_ctx_to_stage.get(comm_ctx_id)
+            if previous_stage is not None:
+                raise ValueError(
+                    "defer_reduce_grad_wait does not support FSDP stages that "
+                    "share a communication context. Do not call "
+                    f"share_comm_ctx() for stages {previous_stage} and "
+                    f"{stage.stage_index}"
+                )
+            comm_ctx_to_stage[comm_ctx_id] = stage.stage_index
+
     def _step_microbatches(
         self,
         arg_mbs: list | None = None,
@@ -2932,6 +3011,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     UNSHARD,
                     RESHARD,
                     REDUCE_GRAD,
+                    WAIT_REDUCE_GRAD,
                 )
             ):
                 raise AssertionError(f"{action=} missing mb_index")
@@ -3097,15 +3177,28 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     last_backward=last_backward,
                 )
             elif comp_type == REDUCE_GRAD:
+                if not self._has_backward:
+                    return
                 if not self._finalize_gradients and stage_uses_fsdp:
                     self._deferred_stages.add(stage_idx)
                     return
-                grad_scale_factor = self._n_microbatches if self.scale_grads else 1
-                stage.perform_reduce_grad(grad_scale_factor)
+                if stage_uses_fsdp:
+                    stage.start_gradient_reduction()
+                else:
+                    grad_scale_factor = self._n_microbatches if self.scale_grads else 1
+                    stage.perform_reduce_grad(grad_scale_factor)
                 if stage_uses_fsdp:
                     self.unsharded_stages.discard(stage_idx)
                     self._deferred_stages.discard(stage_idx)
                     self._finalized_stages.add(stage_idx)
+            elif comp_type == WAIT_REDUCE_GRAD:
+                if not self._has_backward:
+                    return
+                if not self._finalize_gradients and stage_uses_fsdp:
+                    return
+                if stage_uses_fsdp:
+                    grad_scale_factor = self._n_microbatches if self.scale_grads else 1
+                    stage.wait_for_gradient_reduction(grad_scale_factor)
             else:
                 raise ValueError(f"{action=} is unknown or unsupported")
 
@@ -3187,6 +3280,10 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             unshards may be issued. ``"full"`` matches ``max_active_stages``;
             ``"auto"`` uses ``min(rank + 2, max_active_stages)``; a tuple
             supplies one positive integer per pipeline rank.
+        defer_reduce_grad_wait: If ``True``, delay each FSDP
+            ``WAIT_REDUCE_GRAD`` until before the next reduction or schedule
+            end. Otherwise, each wait follows its ``REDUCE_GRAD``. At most one
+            reduction may be pending per pipeline rank.
     """
 
     def __init__(
@@ -3200,6 +3297,8 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
+        *,
+        defer_reduce_grad_wait: bool = False,
     ):
         super().__init__(
             stages=stages,
@@ -3211,6 +3310,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             unshard_lookahead=unshard_lookahead,
+            defer_reduce_grad_wait=defer_reduce_grad_wait,
         )
 
         # 1. Create the pipeline_order (all ranks do this calculation)
@@ -3435,6 +3535,10 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             unshards may be issued. ``"full"`` matches ``max_active_stages``;
             ``"auto"`` uses ``min(rank + 2, max_active_stages)``; a tuple
             supplies one positive integer per pipeline rank.
+        defer_reduce_grad_wait: If ``True``, delay each FSDP
+            ``WAIT_REDUCE_GRAD`` until before the next reduction or schedule
+            end. Otherwise, each wait follows its ``REDUCE_GRAD``. At most one
+            reduction may be pending per pipeline rank.
     """
 
     def __init__(
@@ -3450,6 +3554,8 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
+        *,
+        defer_reduce_grad_wait: bool = False,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -3464,6 +3570,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             unshard_lookahead=unshard_lookahead,
+            defer_reduce_grad_wait=defer_reduce_grad_wait,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3557,6 +3664,10 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             unshards may be issued. ``"full"`` matches ``max_active_stages``;
             ``"auto"`` uses ``min(rank + 2, max_active_stages)``; a tuple
             supplies one positive integer per pipeline rank.
+        defer_reduce_grad_wait: If ``True``, delay each FSDP
+            ``WAIT_REDUCE_GRAD`` until before the next reduction or schedule
+            end. Otherwise, each wait follows its ``REDUCE_GRAD``. At most one
+            reduction may be pending per pipeline rank.
     """
 
     def __init__(
@@ -3572,6 +3683,8 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
+        *,
+        defer_reduce_grad_wait: bool = False,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3588,6 +3701,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             unshard_lookahead=unshard_lookahead,
+            defer_reduce_grad_wait=defer_reduce_grad_wait,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -3767,6 +3881,10 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             unshards may be issued. ``"full"`` matches ``max_active_stages``;
             ``"auto"`` uses ``min(rank + 2, max_active_stages)``; a tuple
             supplies one positive integer per pipeline rank.
+        defer_reduce_grad_wait: If ``True``, delay each FSDP
+            ``WAIT_REDUCE_GRAD`` until before the next reduction or schedule
+            end. Otherwise, each wait follows its ``REDUCE_GRAD``. At most one
+            reduction may be pending per pipeline rank.
     """
 
     def __init__(
@@ -3782,6 +3900,8 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
+        *,
+        defer_reduce_grad_wait: bool = False,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3798,6 +3918,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             unshard_lookahead=unshard_lookahead,
+            defer_reduce_grad_wait=defer_reduce_grad_wait,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -3966,6 +4087,10 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             unshards may be issued. ``"full"`` matches ``max_active_stages``;
             ``"auto"`` uses ``min(rank + 2, max_active_stages)``; a tuple
             supplies one positive integer per pipeline rank.
+        defer_reduce_grad_wait: If ``True``, delay each FSDP
+            ``WAIT_REDUCE_GRAD`` until before the next reduction or schedule
+            end. Otherwise, each wait follows its ``REDUCE_GRAD``. At most one
+            reduction may be pending per pipeline rank.
     """
 
     def __init__(
@@ -3981,6 +4106,8 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         defer_pp_recv: bool = False,
         max_active_stages: int = 3,
         unshard_lookahead: Literal["full", "auto"] | tuple[int, ...] = "full",
+        *,
+        defer_reduce_grad_wait: bool = False,
     ):
         # TODO: we don't support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3997,6 +4124,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             defer_pp_recv=defer_pp_recv,
             max_active_stages=max_active_stages,
             unshard_lookahead=unshard_lookahead,
+            defer_reduce_grad_wait=defer_reduce_grad_wait,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"

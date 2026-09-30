@@ -73,6 +73,16 @@ def comparable(value):
     return value
 
 
+class _ExplicitInitExc(BaseException):
+    def __init__(self, value):
+        BaseException.__init__(self, value)
+
+
+class _SuperInitExc(BaseException):
+    def __init__(self, value):
+        super().__init__(value)
+
+
 class ExceptionTests(torch._dynamo.test_case.TestCase):
     def test_exception(self):
         def fn(x):
@@ -128,6 +138,58 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires LOAD_FAST_CHECK")
+    def test_exception_target_cleanup(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            try:
+                return exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_exception_target_cleanup_double_delete(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            try:
+                del exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+            return x
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires LOAD_FAST_CHECK")
+    def test_exception_target_cleanup_graph_break(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            x = x * 2
+            torch._dynamo.graph_break()
+            try:
+                return exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+
+        x = torch.ones(1)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_exception4(self):
         def fn(x):
@@ -477,6 +539,18 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         inp = torch.ones(3)
         out = f(inp)
         self.assertTrue(torch.equal(out, inp + 1))
+
+    def test_observed_exception_with_non_string_args(self):
+        def fn(x):
+            try:
+                type("A", (), {"__doc__": "x\udcdcy"})
+            except UnicodeEncodeError:
+                return x + 1
+            return x
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
     @make_dynamo_test
     def test_isinstance_CustomException(self):
@@ -1466,16 +1540,10 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), fn(x))
 
     def test_user_exception_base_init_returned_object(self):
-        class Explicit(BaseException):
-            def __init__(self, value):
-                BaseException.__init__(self, value)
-
-        class ViaSuper(BaseException):
-            def __init__(self, value):
-                super().__init__(value)
-
+        # Module-level classes: the returned objects are reconstructed by
+        # importing their class from its defining module.
         def fn(x):
-            return x + 1, Explicit(value=x), ViaSuper(value=x)
+            return x + 1, _ExplicitInitExc(value=x), _SuperInitExc(value=x)
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         for x in (torch.ones(2), torch.ones(3) + 1):
@@ -1989,12 +2057,10 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(comparable(opt_fn(x)[0]), comparable(fn(x)[0]))
 
-    # A write is routed to the wrapped ExceptionVariable, but side_effects sends
-    # only a bare ExceptionVariable through reconstruct(), so a
-    # UserDefinedExceptionObjectVariable is rebuilt via __new__ and the write is
-    # dropped at the boundary.
-    @unittest.expectedFailure
-    @parametrize("attr", WRITABLE_BASE_EXCEPTION_ATTRS)
+    @parametrize(
+        "attr",
+        [a for a in WRITABLE_BASE_EXCEPTION_ATTRS if a != "__suppress_context__"],
+    )
     def test_exception_attr_write_survives_escape(self, attr):
         def fn(x):
             e = CustomException("x")
