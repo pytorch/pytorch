@@ -2596,11 +2596,6 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       num_layers,
       bidirectional);
 
-  TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
-  TORCH_CHECK(
-      _batch_sizes.device().is_cpu(),
-      "batch_sizes tensor should be on CPU, but got ",
-      _batch_sizes.device());
   IntArrayRef batch_sizes{
       _batch_sizes.data_ptr<int64_t>(),
       static_cast<size_t>(_batch_sizes.size(0))};
