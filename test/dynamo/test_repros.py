@@ -74,7 +74,6 @@ from torch.testing._internal.common_device_type import (
     e4m3_type,
     instantiate_device_type_tests,
     onlyAccelerator,
-    skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
@@ -8815,6 +8814,21 @@ SavedForBackwardsAOTOutput(idx=5)""",
         )
         self.assertEqual(result.dtype, torch.float32)
 
+    def test_call_with_kwarg(self):
+        # Python <= 3.12 compiles a call with a literal keyword argument to
+        # KW_NAMES (pushes the arg names tuple into co_consts) followed by
+        # CALL, rather than 3.13+'s CALL_KW (which pushes the names tuple
+        # onto the stack).
+        def helper(a, b=1):
+            return a + b
+
+        def fn(x):
+            return helper(x, b=2)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_empty_out_shape_mismatch_dynamic(self):
         def f(size, out):
             return torch.empty(size, out=out, dtype=torch.float32)
@@ -9226,7 +9240,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(opt_f)
 
     @onlyAccelerator
-    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/5321")
     def test_layer_norm_mixed_dtype_aot_eager_decomp_partition_errors(self, device):
         # https://github.com/pytorch/pytorch/issues/151478
         if not torch.get_device_module(device).is_bf16_supported():
