@@ -549,7 +549,7 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
 
     def __init__(self, kernel: CompiledKernel) -> None:
         # pyrefly: ignore [missing-attribute]
-        self.cubin_raw = kernel.asm.get("zebin", None)
+        self.cubin_raw = kernel.asm.get("zebin") or kernel.asm.get("spv")
         super().__init__(kernel)
 
     def load_kernel(self, device: int) -> None:

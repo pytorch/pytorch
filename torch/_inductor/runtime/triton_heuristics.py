@@ -3079,9 +3079,15 @@ class StaticTritonCompileResult(CompileResult[_T]):
             )
 
             if not os.path.exists(cubin_location):
-                raise CannotStaticallyLaunchKernel(
-                    f"Cubin path not found: {cubin_location}"
-                )
+                if triton_meta.get("device_type") == "xpu" and (
+                    kernel.asm.get("zebin") is not None
+                    or kernel.asm.get("spv") is not None
+                ):
+                    kernel._cubin_path = None
+                else:
+                    raise CannotStaticallyLaunchKernel(
+                        f"Cubin path not found: {cubin_location}"
+                    )
 
             else:
                 kernel._cubin_path = cubin_location
