@@ -13106,6 +13106,15 @@ class BaseScheduling:  # noqa: docstring_linter
         """
         raise NotImplementedError
 
+    def benchmark_mix_order_reduction(
+        self, node: FusedMixOrderReductions
+    ) -> tuple[float, str] | None:
+        """
+        Benchmark the kernel codegen_mix_order_reduction would emit for node,
+        or return None if the backend can't.
+        """
+        return None
+
     def get_fusion_pair_priority(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> int:
