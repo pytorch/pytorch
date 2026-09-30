@@ -154,9 +154,13 @@ def with_temp_dir(
         try:
             func(self, *args, **kwargs)
         finally:
-            if dist.is_initialized() and dist.get_rank() == 0:
-                shutil.rmtree(self.temp_dir, ignore_errors=True)
-            else:
+            # Every rank reads the directory rank 0 created, so rank 0 must not
+            # remove it until the others are done. This has to run on the failure
+            # path too, or a rank whose body raised leaves its peers blocked here
+            # until the process group times out.
+            if dist.is_initialized():
+                dist.barrier()
+            if not dist.is_initialized() or dist.get_rank() == 0:
                 shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     return wrapper

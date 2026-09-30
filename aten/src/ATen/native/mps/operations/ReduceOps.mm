@@ -1494,9 +1494,10 @@ static void reduction_dispatch_mps(TensorIterator& iter, const ReductionDispatch
       return;
     }
     // The inner kernels index in 32 bits.
-    if (num_reduced == 1 && reduced_dim == input_orig.dim() - 1 && canUse32BitIndexMath(input_orig)) {
-      const auto row_len = safe_downcast<uint32_t, int64_t>(input_orig.size(-1));
-      const auto num_rows = safe_downcast<uint32_t, int64_t>(input_orig.numel() / row_len);
+    const auto innermost = num_reduced == 0 || (num_reduced == 1 && reduced_dim == nd - 1);
+    if (innermost && canUse32BitIndexMath(input_orig)) {
+      const auto row_len = reduction_size;
+      const auto num_rows = safe_downcast<uint32_t, int64_t>(output.numel());
       // Tensors too small to fill the GPU gain nothing from packing rows
       // into simdgroups; keep them on the inner kernel below (the pre-chunk
       // routing, whose enqueue floor measures ~10% lower there).
