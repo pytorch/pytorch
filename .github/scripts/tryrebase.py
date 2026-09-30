@@ -5,10 +5,15 @@ import os
 import re
 import subprocess
 import sys
+import time
 from collections.abc import Generator
 from typing import Any
 
-from github_utils import gh_post_pr_comment as gh_post_comment
+from github_utils import (
+    gh_fetch_json_dict,
+    gh_fetch_url,
+    gh_post_pr_comment as gh_post_comment,
+)
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from trymerge import GitHubPR
 
@@ -25,6 +30,7 @@ def parse_args() -> Any:
     parser = ArgumentParser("Rebase PR into branch")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--branch", type=str)
+    parser.add_argument("--comment-id", type=int)
     parser.add_argument("pr_num", type=int)
     return parser.parse_args()
 
@@ -51,8 +57,37 @@ def post_already_uptodate(
     )
 
 
+def approve_pending_ci(
+    pr: GitHubPR, sha: str, timeout: float = 60, interval: float = 10
+) -> None:
+    """Approve CI runs held for maintainer approval, e.g. those of outside contributors.
+
+    Runs are created gradually after a push, so keep polling until the timeout.
+    """
+    runs_url = f"https://api.github.com/repos/{pr.org}/{pr.project}/actions/runs"
+    params = {"head_sha": sha, "status": "action_required", "per_page": 100}
+    approved: set[int] = set()
+    deadline = time.monotonic() + timeout
+    while True:
+        for run in gh_fetch_json_dict(runs_url, params)["workflow_runs"]:
+            if run["id"] in approved:
+                continue
+            print(f"Approving {run['html_url']}")
+            gh_fetch_url(
+                f"{runs_url}/{run['id']}/approve", method="POST", reader=lambda x: x
+            )
+            approved.add(run["id"])
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(interval)
+
+
 def rebase_onto(
-    pr: GitHubPR, repo: GitRepo, onto_branch: str, dry_run: bool = False
+    pr: GitHubPR,
+    repo: GitRepo,
+    onto_branch: str,
+    dry_run: bool = False,
+    approve_ci_sha: str | None = None,
 ) -> bool:
     branch = f"pull/{pr.pr_num}/head"
     head_repo = pr.info["headRepository"]
@@ -66,6 +101,7 @@ def rebase_onto(
     refspec = f"{branch}:{pr.head_ref()}"
 
     repo.fetch(branch, branch)
+    head_sha = repo.rev_parse(branch)
     # Rebase only the PR's own commits. The 2-arg `git rebase <onto_branch>
     # <branch>` form replays all of onto_branch..branch, which grafts in trunk
     # commits when the PR has merged its base in and onto_branch (e.g.
@@ -95,6 +131,12 @@ def rebase_onto(
             + "git pull --rebase`)",
             dry_run=dry_run,
         )
+        # The push re-holds outside contributors' CI; approve it so merge -r doesn't fail.
+        if not dry_run and approve_ci_sha is not None and head_sha == approve_ci_sha:
+            try:
+                approve_pending_ci(pr, repo.rev_parse(branch))
+            except Exception as e:
+                print(f"Failed to approve CI: {e}")
         return True
 
 
@@ -247,7 +289,20 @@ def main() -> None:
             with git_config_guard(repo):
                 rc = rebase_ghstack_onto(pr, repo, onto_branch, dry_run=args.dry_run)
         else:
-            rc = rebase_onto(pr, repo, onto_branch, dry_run=args.dry_run)
+            # Only approve CI for the commit the merge command was issued on,
+            # not for commits pushed since.
+            approve_ci_sha = (
+                pr.get_commit_sha_at_comment(args.comment_id)
+                if args.comment_id is not None
+                else None
+            )
+            rc = rebase_onto(
+                pr,
+                repo,
+                onto_branch,
+                dry_run=args.dry_run,
+                approve_ci_sha=approve_ci_sha,
+            )
         sys.exit(0 if rc else 1)
 
     except Exception as e:

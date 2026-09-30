@@ -51,7 +51,7 @@ jobs:
           set -x
           if [ -n "${REBASE}" ]; then
             # attempt to rebase, if it fails then comment on the PR that it failed
-            if ! python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}"; then
+            if ! python3 .github/scripts/tryrebase.py "${PR_NUM}" --branch "${REBASE}" ${COMMENT_ID:+--comment-id "${COMMENT_ID}"}; then
               python3 .github/scripts/comment_on_pr.py "${PR_NUM}" "merge"
               exit 0
             fi
