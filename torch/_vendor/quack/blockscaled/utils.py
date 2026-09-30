@@ -25,6 +25,7 @@ from torch._vendor.quack.blockscaled.quantize import (  # noqa: F401  (pure-torc
     FP4_E2M1FN_VALUES,
     QUANTIZERS,
     _COMPILE_KW,
+    _lazy_compile,
     _fp4_unpacked_to_value,
     dequant_operand,
     pack_scale_2d_to_blocked_contig,
@@ -256,7 +257,7 @@ BLOCKSCALED_FORMATS = {
 # of an eager pad/permute/contiguous chain; see the dynamic=False and
 # recompile_limit notes in quantize.py (per-wrapper limit where torch supports
 # it, global-config fallback on torch < 2.13)
-_pack_scale_compiled = torch.compile(pack_scale_2d_to_blocked_contig, **_COMPILE_KW)
+_pack_scale_compiled = _lazy_compile(pack_scale_2d_to_blocked_contig, **_COMPILE_KW)
 
 
 def blockscaled_quantize(
