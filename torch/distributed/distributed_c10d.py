@@ -1953,19 +1953,6 @@ def _check_tensor_list(param: object, param_name: str) -> None:
         )
 
 
-def _check_collective_config(
-    group: ProcessGroup | C10DBackend | None, tensor: torch.Tensor
-) -> None:
-    group = group or _get_default_group()
-    backend = (
-        group if isinstance(group, C10DBackend) else group._get_backend(tensor.device)
-    )
-    if backend.name() != "nccl2":
-        raise RuntimeError(
-            "Per-collective configuration is only supported by the nccl2 backend"
-        )
-
-
 def _group_or_default_group(group: ProcessGroup | None = None) -> ProcessGroup:
     if group is None or group is GroupMember.WORLD:
         group = _get_default_group()
