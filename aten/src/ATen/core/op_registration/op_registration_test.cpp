@@ -16,7 +16,6 @@
 #include <ATen/core/Tensor.h>
 #include <functional>
 
-#include <ATen/core/LegacyTypeDispatch.h>
 
 #include <algorithm>
 

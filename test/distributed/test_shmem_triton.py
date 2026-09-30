@@ -451,6 +451,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         SIGNAL_VAL = 1  # Signal completion value
         NVSHMEM_CMP_EQ = 0  # compare equal for signal wait until
 
+        # Barrier so rank 1's pad zeroing cannot erase rank 0's incoming signal.
+        dist.barrier()
+
         if rank == 0:
             # Rank 0 puts into Rank 1
             my_putmem_signal_block_kernel[(1, 1, 1)](
@@ -509,6 +512,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         SIGNAL_VAL = 16  # val + NVSHMEM_SIGNAL_ADD
         NVSHMEM_CMP_EQ = 0
 
+        # Barrier so rank 1's pad zeroing cannot erase rank 0's incoming signal.
+        dist.barrier()
+
         if rank == 0:
             # Rank 0 puts into Rank 1
             my_putmem_signal_block_kernel[(1, 1, 1)](
@@ -556,6 +562,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         expected_flag = torch.tensor(
             [FLAG_FINAL_VALUE], dtype=torch.int32, device=self.device
         )
+
+        # Barrier so the local flag init cannot erase the peer's incoming write.
+        dist.barrier()
 
         if rank == 0:
             # Rank 0 (the waiter)
@@ -610,6 +619,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
         # Use the signal pad for synchronization, as in previous tests
         flag_dtype = torch.int64
         flag = out_hdl.get_signal_pad(rank, (1,), dtype=flag_dtype).fill_(0)
+
+        # Barrier so rank 1's pad zeroing cannot erase rank 0's incoming signal.
+        dist.barrier()
 
         if rank == 0:
             # Producer (rank 0): Puts data into rank 1's `out` buffer and then sets the flag
@@ -680,6 +692,9 @@ class SHMEMTritonTest(MultiProcContinuousTest):
             [flag_val], dtype=torch.int32, device=self.device
         )
         NVSHMEM_CMP_EQ = 0  # compare equal
+
+        # Barrier so the local flag init cannot erase the peer's incoming write.
+        dist.barrier()
 
         if rank == 0:
             my_put_with_fence_kernel[(1,)](

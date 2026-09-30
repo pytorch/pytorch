@@ -677,13 +677,9 @@ REGISTER_UNARY_OP(bitwise_not, uchar, uchar);
 REGISTER_UNARY_OP(bitwise_not, bool, bool);
 
 struct logical_not_functor {
-  template <typename T, enable_if_t<!is_complex_v<T>, bool> = true>
+  template <typename T>
   inline bool operator()(const T x) {
-    return x == T(0);
-  }
-  template <typename T, enable_if_t<is_complex_v<T>, bool> = true>
-  inline bool operator()(const T x) {
-    return x.x == 0 && x.y == 0;
+    return !c10::metal::cast_to<bool>(x);
   }
 };
 
@@ -835,3 +831,112 @@ REGISTER_UNARY_ALPHA_OP(nan_to_num, half, NanToNumParams_float, half);
 REGISTER_UNARY_ALPHA_OP(nan_to_num, bfloat, NanToNumParams_float, bfloat);
 REGISTER_UNARY_ALPHA_OP(nan_to_num, float2, NanToNumParams_float, float2);
 REGISTER_UNARY_ALPHA_OP(nan_to_num, half2, NanToNumParams_float, half2);
+
+// Metal's frexp() computes in float32 and Apple GPUs flush float32 subnormals
+// to zero; bfloat16 shares float32's exponent range, so its subnormals are lost
+// the same way. Decompose the bit pattern instead -- integer ops are not
+// subject to flush-to-zero. U is T's unsigned twin.
+template <typename T, typename U>
+inline T frexp_bits(const T x, thread int& exponent) {
+  constexpr int MANT = numeric_limits<T>::digits - 1;
+  constexpr int EXP = int(sizeof(T)) * 8 - MANT - 1;
+  constexpr U mant_mask = (U(1) << MANT) - 1;
+  constexpr U exp_all = (U(1) << EXP) - 1;
+  constexpr int bias = (1 << (EXP - 1)) - 1;
+
+  const U bits = as_type<U>(x);
+  const U sign = bits & (U(1) << (MANT + EXP));
+  const U exp_field = (bits >> MANT) & exp_all;
+  U frac = bits & mant_mask;
+
+  // inf, nan and +-0 are returned unchanged with a zero exponent
+  if (exp_field == exp_all || (exp_field == 0 && frac == 0)) {
+    exponent = 0;
+    return x;
+  }
+
+  if (exp_field == 0) {
+    // Subnormal: value = frac * 2^(1 - bias - MANT). With lead the index of
+    // frac's highest set bit, frac = 2^lead * 1.g, so the value is
+    // 1.g * 2^(lead + 1 - bias - MANT) and the [0.5, 1) form is
+    // (1.g / 2) * 2^(lead + 2 - bias - MANT). Shifting the leading one up to
+    // the implicit-bit position leaves g in the significand field. frac is
+    // nonzero here: the exp_field == 0 && frac == 0 case returned above, and
+    // MANT + EXP is the index of U's top bit, so clz gives lead directly.
+    const int lead = MANT + EXP - int(clz(frac));
+    frac = (frac << (MANT - lead)) & mant_mask;
+    exponent = lead + 2 - bias - MANT;
+  } else {
+    // Normal: value = 1.f * 2^(exp_field - bias), i.e.
+    // (1.f / 2) * 2^(exp_field - bias + 1).
+    exponent = int(exp_field) - bias + 1;
+  }
+  // An exponent field of bias-1 is 2^-1, scaling the significand into [0.5, 1).
+  return as_type<T>(U(sign | (U(bias - 1) << MANT) | frac));
+}
+
+// Overload set so the kernels can stay dtype-generic, mirroring exp_ above.
+inline float frexp_(const float x, thread int& e) {
+  return frexp_bits<float, uint>(x, e);
+}
+inline half frexp_(const half x, thread int& e) {
+  return frexp_bits<half, ushort>(x, e);
+}
+inline bfloat frexp_(const bfloat x, thread int& e) {
+  return frexp_bits<bfloat, ushort>(x, e);
+}
+
+// frexp writes a mantissa and an exponent, so it cannot use the shared
+// single-output unary functor path.
+template <typename T>
+kernel void frexp_dense(
+    device T* mantissa [[buffer(0)]],
+    device int* exponent [[buffer(1)]],
+    constant T* input [[buffer(2)]],
+    uint index [[thread_position_in_grid]]) {
+  int exp = 0;
+  mantissa[index] = frexp_(input[index], exp);
+  exponent[index] = exp;
+}
+
+// Byte strides come straight from the TensorIterator, indexed with the shared
+// long-offset primitives, so nothing is downcast and arbitrarily large offsets
+// are addressed the same way every other strided MPS kernel does.
+template <typename T>
+kernel void frexp_strided(
+    device void* mantissa [[buffer(0)]],
+    device void* exponent [[buffer(1)]],
+    constant void* input [[buffer(2)]],
+    constant long* sizes [[buffer(3)]],
+    constant long* mantissa_strides [[buffer(4)]],
+    constant long* exponent_strides [[buffer(5)]],
+    constant long* input_strides [[buffer(6)]],
+    constant uint& ndim [[buffer(7)]],
+    uint index [[thread_position_in_grid]]) {
+  long pos[max_ndim];
+  pos_from_thread_index(long(index), pos, sizes, ndim);
+  int exp = 0;
+  const auto m = frexp_(
+      val_at_offs<T>(input, offset_from_coord(pos, input_strides, ndim)), exp);
+  ref_at_offs<T>(mantissa, offset_from_coord(pos, mantissa_strides, ndim)) = m;
+  ref_at_offs<int>(exponent, offset_from_coord(pos, exponent_strides, ndim)) =
+      exp;
+}
+
+#define REGISTER_FREXP_OP(T)                                                \
+  template [[host_name("frexp_dense_" #T)]] kernel void frexp_dense<T>(     \
+      device T*, device int*, constant T*, uint);                           \
+  template [[host_name("frexp_strided_" #T)]] kernel void frexp_strided<T>( \
+      device void*,                                                         \
+      device void*,                                                         \
+      constant void*,                                                       \
+      constant long*,                                                       \
+      constant long*,                                                       \
+      constant long*,                                                       \
+      constant long*,                                                       \
+      constant uint&,                                                       \
+      uint)
+
+REGISTER_FREXP_OP(float);
+REGISTER_FREXP_OP(half);
+REGISTER_FREXP_OP(bfloat);
