@@ -7424,6 +7424,8 @@ class Scheduler:
             if self._has_layout_conflict_for_template(multi_node):
                 return FusionResult.fuse(False)
 
+            from torch._inductor.codegen.simd import CantSplit
+
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
             if not has_atomic_add:
                 for hint_override in config.multi_kernel_hints:
@@ -7437,16 +7439,19 @@ class Scheduler:
                             torch._inductor.select_algorithm.TritonTemplateCaller,
                         ):
                             continue
-                        with multi_node.swap_as_triton_caller(choice):
-                            future_choices.append(
-                                (
-                                    choice,
-                                    *self.compile_kernel(
-                                        node_list_fused,
-                                        hint_override=choice.hint_override,
-                                    ),
+                        try:
+                            with multi_node.swap_as_triton_caller(choice):
+                                future_choices.append(
+                                    (
+                                        choice,
+                                        *self.compile_kernel(
+                                            node_list_fused,
+                                            hint_override=choice.hint_override,
+                                        ),
+                                    )
                                 )
-                            )
+                        except CantSplit:
+                            continue
 
                     min_ms_fused = float("inf")
                     ms_fused_choice: TritonTemplateCallerBase | None = None
@@ -7510,8 +7515,6 @@ class Scheduler:
                 # Use 0 for unfused time, won't be used as benchmark_template_fusion
                 # is guaranteed to be False here
                 choice_timings_iter = [(c, 0) for c in multi_node.choices]
-
-            from torch._inductor.codegen.simd import CantSplit
 
             def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
                 if not isinstance(
@@ -7637,8 +7640,7 @@ class Scheduler:
                 if benchmark_template_fusion and unfused_time >= ms1 + ms2:
                     break
 
-                template_choices += 1
-                if template_choices > config.max_template_fusion_benchmarked_choices:
+                if template_choices >= config.max_template_fusion_benchmarked_choices:
                     break
 
                 try:
@@ -7664,6 +7666,7 @@ class Scheduler:
                             )
                 except CantSplit:
                     continue
+                template_choices += 1
 
             if len(future_choices) == 0:
                 return FusionResult.fuse(False)
