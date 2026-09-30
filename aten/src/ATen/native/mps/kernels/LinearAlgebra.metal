@@ -3113,6 +3113,8 @@ constant constexpr auto kMaxThreadsPerThreadgroup = 1024;
 constant constexpr auto kMaxSIMDGroups =
     kMaxThreadsPerThreadgroup / c10::metal::simdgroup_size;
 
+// Combines a block of reflectors into one factor, one column per threadgroup,
+// so the host can apply the whole block with two matmuls.
 template <typename T>
 kernel void householder_block(
     device const T* A,
@@ -3349,6 +3351,8 @@ kernel void unpack_pivots(
   }
 }
 
+// Unblocked QR of a panel held entirely in registers, RowsPerThread rows per
+// lane, so every reduction stays within one SIMD group.
 template <uint RowsPerThread>
 [[max_total_threads_per_threadgroup(kMaxThreadsPerThreadgroup)]]
 kernel void geqrf_panel(
@@ -3448,6 +3452,7 @@ kernel void geqrf_panel(
   }
 }
 
+// geqrf_kernel_mps picks the smallest of these that holds the whole panel.
 #define REGISTER_GEQRF_PANEL(Rows)                                            \
   template [[host_name("geqrf_panel_" #Rows)]] kernel void geqrf_panel<Rows>( \
       device float*, device float*, constant GeqrfParams<>&, uint, uint);
@@ -3455,6 +3460,9 @@ REGISTER_GEQRF_PANEL(8);
 REGISTER_GEQRF_PANEL(16);
 REGISTER_GEQRF_PANEL(32);
 
+// Unblocked Householder QR with one threadgroup per matrix. Reflectors are
+// normalized in parallel, and each trailing column gets as many simdgroups as
+// the threadgroup can spare.
 template <typename T>
 kernel void geqrf(
     device T* R [[buffer(0)]],
