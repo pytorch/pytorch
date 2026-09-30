@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 import functools
+import os
 import sys
 import warnings
 from collections.abc import Sequence
+from ctypes import byref, c_int
 from typing import Any
 from typing_extensions import deprecated
 
 import torch
 from torch.cuda._utils import (
+    _check_cuda,
     _check_cuda_bindings,
     _cuda_bindings_driver as _drv,
     _cuda_bindings_runtime as _rt,
     _ensure_cuda_bindings_version,
+    _get_cuda_library,
     _HAS_CUDA_BINDINGS,
 )
 
@@ -20,6 +24,8 @@ from torch.cuda._utils import (
 __all__ = [
     "GreenContext",
     "SMPartition",
+    "get_num_locality_domains",
+    "is_localization_supported",
 ]
 
 _STREAMS_PER_GREEN_CONTEXT_POOL = 32
@@ -40,8 +46,10 @@ _CONTEXT_STACK_DEPRECATION = (
 # the driver version cannot change during the lifetime of a process
 @functools.cache
 def _get_driver_version() -> int:
-    # pyrefly: ignore [missing-attribute]
-    return _check_cuda_bindings(_drv.cuDriverGetVersion())
+    # Loading cuda.bindings' driver dispatch alongside NVML can break CUDA after fork.
+    version = c_int()
+    _check_cuda(_get_cuda_library().cuDriverGetVersion(byref(version)))
+    return version.value
 
 
 def _ensure_cuda_version(version: int, message: str) -> None:
@@ -66,6 +74,183 @@ def _ensure_workqueue_supported() -> None:
     _ensure_cuda_version(
         13010, "Workqueue configuration requires CUDA driver and cuda.bindings 13.1+"
     )
+
+
+def _ensure_locality_supported() -> None:
+    message = "Locality domains require CUDA driver and cuda.bindings 13.4+"
+    _ensure_cuda_version(13040, message)
+
+
+def _is_locality_software_supported() -> bool:
+    if (
+        torch.version.cuda is None
+        or torch.version.hip is not None
+        or sys.platform == "win32"
+        or not _HAS_CUDA_BINDINGS
+    ):
+        return False
+    if _get_driver_version() < 13040:
+        return False
+    try:
+        _ensure_cuda_bindings_version(13040, "Locality domains require bindings 13.4+")
+    except RuntimeError:
+        return False
+    return True
+
+
+def _get_locality_domain_count(device: int) -> int:
+    count = c_int()
+    # pyrefly: ignore [missing-attribute]
+    attribute = _drv.CUdevice_attribute.CU_DEVICE_ATTRIBUTE_LOCALITY_DOMAIN_COUNT
+    _check_cuda(
+        _get_cuda_library().cuDeviceGetAttribute(byref(count), attribute.value, device)
+    )
+    return count.value
+
+
+def get_num_locality_domains(device_id: int | None = None) -> int:
+    r"""Return the device's locality-domain count reported by CUDA.
+
+    Returns ``1`` when the required software is unavailable. With CUDA driver
+    and bindings 13.4+, initializes the CUDA driver and queries the count.
+    This query does not create a context when ``device_id`` is specified;
+    invalid devices and failed driver queries raise an error.
+    Initializing the driver can prevent CUDA use in subsequently forked children.
+
+    Args:
+        device_id (int, optional): Device index. When ``None``, uses the current
+            PyTorch device, initializing PyTorch CUDA state if necessary.
+    """
+    if not _is_locality_software_supported():
+        return 1
+    if device_id is None:
+        device_id = torch.cuda.current_device()
+    driver = _get_cuda_library()
+    _check_cuda(driver.cuInit(0))
+    device = c_int()
+    _check_cuda(driver.cuDeviceGet(byref(device), device_id))
+    return _get_locality_domain_count(device.value)
+
+
+def is_localization_supported(device_id: int | None = None) -> bool:
+    r"""Return whether the software supports localization on a multi-domain GPU.
+
+    Returns ``False`` when the required software is unavailable or the device
+    has at most one locality domain. Before driver initialization, attempts a
+    best-effort NVML capability check based on architecture and system
+    configuration, raising if NVML cannot determine support. Once the driver
+    is initialized, queries CUDA directly; invalid devices and failed queries
+    raise. This function does not initialize the driver or a context and does
+    not poison subsequent forks. Splitting and context creation always use CUDA
+    to validate the actual resources.
+
+    Args:
+        device_id (int, optional): Device index. Default: current PyTorch device
+            if PyTorch CUDA is initialized, otherwise ``0``.
+    """
+    if not _is_locality_software_supported():
+        return False
+    if device_id is None:
+        device_id = torch.cuda.current_device() if torch.cuda.is_initialized() else 0
+    device = c_int()
+    # Use ctypes: loading cuda.bindings' driver dispatch alongside NVML can
+    # make CUDA initialization segfault in forked children.
+    result = _get_cuda_library().cuDeviceGet(byref(device), device_id)
+    # pyrefly: ignore [missing-attribute]
+    if result == _drv.CUresult.CUDA_ERROR_NOT_INITIALIZED.value:
+        supported = _is_localization_supported_nvml(device_id)
+        if supported is None:
+            raise RuntimeError(
+                "Cannot determine locality-domain support through NVML without "
+                "initializing CUDA. Initialize CUDA explicitly before querying again."
+            )
+        return supported
+    _check_cuda(result)
+    return _get_locality_domain_count(device.value) > 1
+
+
+def _is_localization_supported_nvml(device_id: int) -> bool | None:
+    from ctypes import byref, c_int, c_uint, c_void_p, CDLL, create_string_buffer
+
+    # NVML describes physical GPUs; MPS can expose a different CUDA topology.
+    if any(name.startswith("CUDA_MPS_") for name in os.environ) or any(
+        os.path.exists(path) for path in ("/tmp/nvidia-mps", "/run/nvidia-mps")
+    ):
+        return None
+    try:
+        if not 0 <= device_id < torch.cuda._device_count_nvml():
+            return None
+        visible = torch.cuda._parse_visible_devices()
+        nvml = CDLL("libnvidia-ml.so.1")
+        if nvml.nvmlInit_v2() != 0:
+            return None
+        try:
+            version = create_string_buffer(80)
+            if nvml.nvmlSystemGetDriverVersion(version, len(version)) != 0:
+                return None
+            branch = version.value.split(b".", 1)[0]
+            if not branch.isdigit():
+                return None
+            if int(branch) < 580:
+                return False
+            if isinstance(visible[0], str):
+                indices = [torch.cuda._get_nvml_device_index(device_id)]
+            else:
+                # CUDA's numeric order can differ from NVML's. Without UUIDs,
+                # require agreement across all physical GPUs, including hidden ones.
+                count = c_uint()
+                if nvml.nvmlDeviceGetCount_v2(byref(count)) != 0:
+                    return None
+                indices = range(count.value)
+            support = []
+            for index in indices:
+                handle = c_void_p()
+                if nvml.nvmlDeviceGetHandleByIndex_v2(index, byref(handle)) != 0:
+                    return None
+                major, minor = c_int(), c_int()
+                if (
+                    nvml.nvmlDeviceGetCudaComputeCapability(
+                        handle, byref(major), byref(minor)
+                    )
+                    != 0
+                ):
+                    return None
+                if major.value < 10 or major.value == 12:
+                    support.append(False)
+                    continue
+                if major.value != 10:
+                    return None
+                virtualization = c_uint()
+                if (
+                    nvml.nvmlDeviceGetVirtualizationMode(handle, byref(virtualization))
+                    != 0
+                ):
+                    return None
+                if virtualization.value == 2:  # NVML_GPU_VIRTUALIZATION_MODE_VGPU
+                    support.append(False)
+                    continue
+                if virtualization.value != 0:
+                    return None
+                current, pending = c_uint(), c_uint()
+                if (
+                    nvml.nvmlDeviceGetMigMode(handle, byref(current), byref(pending))
+                    != 0
+                ):
+                    return None
+                if current.value != 0:
+                    return None
+                numa_node = c_uint()
+                # A NUMA-exposed GPU needs a driver query, as do NVML failures.
+                if nvml.nvmlDeviceGetNumaNodeId(handle, byref(numa_node)) != 3:
+                    return None  # NVML_ERROR_NOT_SUPPORTED is the expected result.
+                support.append(True)
+            if len(set(support)) == 1:
+                return support[0]
+            return None
+        finally:
+            nvml.nvmlShutdown()
+    except (AttributeError, OSError, RuntimeError):
+        return None
 
 
 def _parse_workqueue_scope(workqueue_scope: str | None) -> int | None:
@@ -136,6 +321,22 @@ class SMPartition:
         r"""The co-scheduled SM alignment reported by CUDA for this resource."""
         return self._resource.sm.smCoscheduledAlignment
 
+    @property
+    def locality_domain_id(self) -> int | None:
+        r"""The locality domain reported by CUDA, or ``None`` if unspecified.
+
+        Requires CUDA driver and bindings 13.4+. This reads the resource's
+        metadata rather than inferring a domain from the requested split.
+        """
+        _ensure_locality_supported()
+        flag = (
+            # pyrefly: ignore [missing-attribute]
+            _drv.CUdevSmResourceGroup_flags.CU_DEV_SM_RESOURCE_GROUP_LOCALITY_DOMAIN_ID
+        )
+        if self._resource.sm.flags & flag:
+            return self._resource.sm.localityDomainId
+        return None
+
     def split(
         self,
         *,
@@ -143,6 +344,7 @@ class SMPartition:
         coscheduled_sm_count: int | Sequence[int] = 0,
         preferred_coscheduled_sm_count: int | Sequence[int] = 0,
         backfill: bool | Sequence[bool] = False,
+        locality_domain_ids: int | None | Sequence[int | None] = None,
     ) -> tuple[tuple[SMPartition, ...], SMPartition | None]:
         r"""Split this resource into disjoint groups and an optional remainder.
 
@@ -162,8 +364,12 @@ class SMPartition:
                 Preferred larger grouping size, when CUDA can combine groups.
                 Zero selects the CUDA default. Default: ``0``.
             backfill (bool or sequence of bool, optional): Allow CUDA to fill
-                groups with SMs outside complete co-scheduled groupings.
+                groups with SMs outside the co-scheduling or locality constraints.
                 Default: ``False``.
+            locality_domain_ids (int, None, or sequence of int or None, optional):
+                Select SMs from these locality domains during splitting. ``None``
+                leaves locality unconstrained. Requires CUDA driver and bindings
+                13.4+ when any domain is specified. Default: ``None``.
 
         Each option can be a scalar or a sequence. All sequences must have the
         same nonzero length; scalars are broadcast to that length. If every
@@ -200,6 +406,7 @@ class SMPartition:
             "coscheduled_sm_count": coscheduled_sm_count,
             "preferred_coscheduled_sm_count": preferred_coscheduled_sm_count,
             "backfill": backfill,
+            "locality_domain_ids": locality_domain_ids,
         }
         sequences = {
             name: tuple(value)
@@ -220,6 +427,23 @@ class SMPartition:
         co_counts = values["coscheduled_sm_count"]
         preferred = values["preferred_coscheduled_sm_count"]
         backfills = values["backfill"]
+        domains = values["locality_domain_ids"]
+        num_domains = None
+        for domain in domains:
+            if domain is None:
+                continue
+            if not isinstance(domain, int) or isinstance(domain, bool) or domain < 0:
+                raise ValueError(
+                    "locality_domain_ids entries must be nonnegative integers or None"
+                )
+            if num_domains is None:
+                _ensure_locality_supported()
+                num_domains = _get_locality_domain_count(self.device_id)
+            if domain >= num_domains:
+                raise ValueError(
+                    f"locality_domain_ids contains {domain}, but valid IDs for "
+                    f"device {self.device_id} are 0 through {num_domains - 1}"
+                )
         for name, values in (
             ("num_sms", counts),
             ("coscheduled_sm_count", co_counts),
@@ -249,6 +473,12 @@ class SMPartition:
                     # pyrefly: ignore [missing-attribute]
                     _drv.CUdevSmResourceGroup_flags.CU_DEV_SM_RESOURCE_GROUP_BACKFILL
                 )
+            if domains[index] is not None:
+                param.flags |= (
+                    # pyrefly: ignore [missing-attribute]
+                    _drv.CUdevSmResourceGroup_flags.CU_DEV_SM_RESOURCE_GROUP_LOCALITY_DOMAIN_ID
+                )
+                param.localityDomainId = domains[index]
             params.append(param)
         resources, remainder = _check_cuda_bindings(
             # pyrefly: ignore [missing-attribute]
@@ -464,6 +694,7 @@ class GreenContext:
         coscheduled_sm_count: int | Sequence[int] = 0,
         preferred_coscheduled_sm_count: int | Sequence[int] = 0,
         backfill: bool | Sequence[bool] = False,
+        locality_domain_ids: int | None | Sequence[int | None] = None,
         workqueue_scope: str | None = None,
         workqueue_concurrency_limit: int | None = None,
         device_id: int | None = None,
@@ -487,6 +718,7 @@ class GreenContext:
             coscheduled_sm_count=coscheduled_sm_count,
             preferred_coscheduled_sm_count=preferred_coscheduled_sm_count,
             backfill=backfill,
+            locality_domain_ids=locality_domain_ids,
         )
         return tuple(
             GreenContext(
@@ -527,6 +759,14 @@ class GreenContext:
         if self._sm_count is None:
             self._sm_count = self.sm_partition.sm_count
         return self._sm_count
+
+    @property
+    def locality_domain_id(self) -> int | None:
+        r"""The locality domain reported by CUDA for this context, if specified.
+
+        Requires CUDA driver and bindings 13.4+.
+        """
+        return self.sm_partition.locality_domain_id
 
     @staticmethod
     def create(
