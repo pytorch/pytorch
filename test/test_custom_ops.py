@@ -40,6 +40,7 @@ from torch._utils_internal import get_file_path_2  # @manual
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing._internal import custom_op_db
+from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     OpDTypes,
@@ -55,15 +56,14 @@ from torch.testing._internal.common_utils import (
     run_tests,
     scoped_load_inline,
     skipIfCrossRef,
-    skipIfMPS,
     skipIfTorchDynamo,
     skipIfXpu,
     subtest,
     TemporaryFileName,
-    TEST_ACCELERATOR,
     TEST_WITH_ASAN,
     TEST_WITH_SLOW,
     TEST_WITH_TORCHDYNAMO,
+    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.custom_op_db import numpy_nonzero
@@ -2074,9 +2074,7 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
             op(x)
 
     @skipIfXpu(msg="Deprecated torch.custom_ops API")
-    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
-    # ValueError on MPS.
-    @skipIfMPS
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_impl_separate(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -2101,7 +2099,7 @@ TORCH_LIBRARY(_test_pyobject_dispatch_cpp_fallback_torch_function, m) {
         self.assertEqual(result, foo_accelerator(x_accelerator))
 
     @skipIfXpu(msg="Deprecated torch.custom_ops API")
-    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_impl_multiple(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
@@ -2704,7 +2702,7 @@ Dynamic shape operator
         self._test_impl_device("foo3", ["cpu", "cuda"], "cpu")
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_impl_device_accelerator(self):
         self._test_impl_device("foo4", "default", device_type)
         self._test_impl_device("foo5", [device_type], device_type)
@@ -5086,7 +5084,7 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertTrue(called)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_library_register_autocast(self):
         for device in [torch.accelerator.current_accelerator().type, "cpu"]:
             for mode in ["function", "qualname", "opoverload"]:
@@ -5112,7 +5110,7 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_library_register_autocast_low_level(self):
         for device in [torch.accelerator.current_accelerator().type, "cpu"]:
             for mode in ["qualname", "opoverload"]:
@@ -5142,7 +5140,7 @@ with warnings.catch_warnings(record=True) as w:
                     self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_library_register_autocast_list_input(self):
         for device in [torch.accelerator.current_accelerator().type, "cpu"]:
             for mode in ["function", "qualname", "opoverload"]:
@@ -5170,7 +5168,7 @@ with warnings.catch_warnings(record=True) as w:
                 self.assertEqual(y.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_library_register_autocast_multiple_times(self):
         for device in [torch.accelerator.current_accelerator().type, "cpu"]:
 
@@ -5193,7 +5191,7 @@ with warnings.catch_warnings(record=True) as w:
             self.assertEqual(y2.dtype, torch.float16)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator.")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_library_register_autocast_multiple_times_different_devices(self):
         @torch.library.custom_op("mylib::my_sin", mutates_args=())
         def my_sin(x: Tensor) -> Tensor:
@@ -5464,7 +5462,7 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertEqual(y, x.cos())
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_split_device(self):
         cpu_call_count = 0
         acc_call_count = 0
@@ -5500,7 +5498,7 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertEqual(acc_call_count, 1)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(not TEST_ACCELERATOR, "requires accelerator")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_multi_types(self):
         @torch.library.custom_op(
             "_torch_testing::f", mutates_args=(), device_types=("cpu", device_type)
@@ -6427,7 +6425,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             },
         )
 
-    @unittest.skipIf(not TEST_ACCELERATOR, "pinned CPU memory requires an accelerator")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "pinned CPU memory requires CUDA or XPU")
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
     )
@@ -6446,7 +6444,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         x = torch.arange(12, dtype=torch.float32, pin_memory=True).view(3, 4)
         torch.library.opcheck(op, (x,), test_utils="test_schema")
 
-    @unittest.skipIf(not TEST_ACCELERATOR, "pinned CPU memory requires an accelerator")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "pinned CPU memory requires CUDA or XPU")
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
     )
@@ -6509,7 +6507,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         self.assertEqual(cloned.elem, x.elem)
         self.assertNotEqual(cloned.elem.data_ptr(), x.elem.data_ptr())
 
-    @unittest.skipIf(not TEST_ACCELERATOR, "pinned CPU memory requires an accelerator")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "pinned CPU memory requires CUDA or XPU")
     @unittest.skipIf(
         PYTORCH_CUDA_MEMCHECK, "is_pinned uses failure to detect pointer property"
     )
@@ -6540,14 +6538,12 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         self.assertEqual(len(seen_inputs), 2)
         self.assertEqual(seen_inputs[-1][1], x.data_ptr())
 
-    # NotImplementedError on MPS.
-    @skipIfMPS
     def test_opcheck_customopdef(self):
         sample_inputs = [
             (torch.randn(3),),
             (torch.randn(3, requires_grad=True),),
         ]
-        if torch.accelerator.is_available():
+        if TEST_CUDA or TEST_XPU:
             sample_inputs.extend(
                 [
                     (torch.randn(3, device=device_type),),
