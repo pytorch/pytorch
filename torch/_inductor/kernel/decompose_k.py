@@ -73,6 +73,7 @@ def _decompose_k_choice_name(
         name = f"{name}_config_{bmm_config_index}"
     return name
 
+
 def get_blackwell_decompose_k_config_indices(m: int, n: int) -> tuple[int, ...]:
     """Return a bounded shape-appropriate set of partial-BMM configurations."""
     if m <= 128 and n <= 128:
