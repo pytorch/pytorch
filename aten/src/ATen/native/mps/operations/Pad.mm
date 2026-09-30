@@ -1,6 +1,7 @@
 //  Copyright © 2022 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/Padding.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/Pad.h>
 #include <c10/metal/common.h>
@@ -37,314 +38,113 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/ReplicationPad_metallib.h>
 #endif
 
-// Pad operations (1D/2D/3D forward and backward)
-static Tensor& pad_out_template(Tensor& output,
-                                const Tensor& input_,
-                                IntArrayRef padding,
-                                const std::optional<Tensor>& grad_output_opt,
-                                MPSGraphPaddingMode mode,
-                                const std::string& op_name) {
-  using CachedGraph = MPSUnaryGradCachedGraph;
-  const int padding_size = (int)padding.size();
-  int padding_dim = padding_size / 2; // either 1D, 2D, or 3D
-
-  TORCH_CHECK(
-      padding_size == 2 || padding_size == 4 || padding_size == 6, "invalid padding argument of size ", padding_size);
-
-  const Tensor& grad_output_ = *(at::borrow_from_optional_tensor(grad_output_opt));
-  const bool is_backward_pass = grad_output_.defined();
-
-  int64_t nbatch = 1;
-  int64_t ndims = input_.ndimension();
-
-  TORCH_CHECK(ndims >= (int64_t)padding_dim,
-              "Length of pad should be no more than twice the number of "
-              "dimensions of the input. Pad length is ",
-              padding_size,
-              "while the input has ",
-              ndims,
-              "dimensions.");
-
-  // number of input dims with ConstantPad could be less than 2
-  int dim_w = padding_dim;
-  int dim_h = padding_dim - 1;
-  int dim_d = padding_dim - 2;
-  int dim_slices = 0;
-
-  if (!is_backward_pass && ndims > padding_dim) {
-    // allow empty batch size but not other dimensions
-    const bool batch_mode = ndims == 2 + padding_dim;
-    const auto non_batch_sizes = input_.sizes().slice(batch_mode ? 1 : 0);
-    TORCH_CHECK((batch_mode || ndims == 1 + padding_dim) &&
-                    std::ranges::all_of(non_batch_sizes, [](int64_t size) { return size != 0; }),
-                "Expected ",
-                1 + padding_dim,
-                "D or ",
-                2 + padding_dim,
-                "D (batch mode) tensor with possibly 0 batch size and other non-zero dimensions for input, but got: ",
-                input_.sizes());
-  }
-
-  if (ndims == padding_dim) {
-    dim_w--;
-    dim_h--;
-    dim_d--;
-  } else if (ndims > padding_dim + 1) {
-    const int dim_diff = (int)ndims - padding_dim - 1;
-    // this virtually inflates the padding with zeros if ndims > padding_dim + 2
-    padding_dim += dim_diff - 1;
-    dim_w += dim_diff;
-    dim_h += dim_diff;
-    dim_d += dim_diff;
-    dim_slices++;
-    nbatch = input_.size(0);
-  }
-
-  int64_t pad_l = padding[0];
-  int64_t pad_r = padding[1];
-  int64_t pad_t = padding_size > 2 ? padding[2] : 0;
-  int64_t pad_b = padding_size > 2 ? padding[3] : 0;
-  int64_t pad_front = padding_size > 4 ? padding[4] : 0;
-  int64_t pad_back = padding_size > 4 ? padding[5] : 0;
-
-  int64_t nplane = input_.size(dim_slices);
-  int64_t input_w = input_.size(dim_w);
-  int64_t output_w = input_w + pad_l + pad_r;
-  int64_t input_h = padding_dim > 1 ? input_.size(dim_h) : 0;
-  int64_t output_h = padding_dim > 1 ? input_h + pad_t + pad_b : 0;
-  int64_t input_d = padding_dim > 2 ? input_.size(dim_d) : 0;
-  int64_t output_d = padding_dim > 2 ? input_d + pad_front + pad_back : 0;
-
-  Tensor grad_output, input = input_;
-
-  if (!is_backward_pass) {
-    TORCH_CHECK(output_w >= 1 || output_h >= padding_dim - 1,
-                "input (H: ",
-                input_h,
-                ", W: ",
-                input_w,
-                ") is too small. Calculated "
-                "output H: ",
-                output_h,
-                " W: ",
-                output_w);
-
-    std::vector<int64_t> outputSizes;
-    // these checks are only relevant for reflection padding (code taken from ReflectionPad.cpp)
-    if (mode == MPSGraphPaddingModeReflect) {
-      TORCH_CHECK(pad_l < input_w && pad_r < input_w,
-                  "Argument #4: Padding size should be less than the corresponding "
-                  "input dimension, but got: padding (",
-                  pad_l,
-                  ", ",
-                  pad_r,
-                  ") at dimension ",
-                  dim_w,
-                  " of input ",
-                  input_.sizes());
-
-      if (padding_dim > 1) {
-        TORCH_CHECK(pad_t < input_h && pad_b < input_h,
-                    "Argument #6: Padding size should be less than the corresponding "
-                    "input dimension, but got: padding (",
-                    pad_t,
-                    ", ",
-                    pad_b,
-                    ") at dimension ",
-                    dim_h,
-                    " of input ",
-                    input_.sizes());
-      }
-      if (padding_dim > 2) {
-        TORCH_CHECK(pad_front < input_d && pad_back < input_d,
-                    "Argument #8: Padding size should be less than the corresponding "
-                    "input dimension, but got: padding (",
-                    pad_front,
-                    ", ",
-                    pad_back,
-                    ") at dimension ",
-                    dim_d,
-                    " of input ",
-                    input_.sizes());
-      }
-    }
-    outputSizes.insert(outputSizes.begin(), output_w);
-    if (padding_dim >= 2)
-      outputSizes.insert(outputSizes.begin(), output_h);
-    if (padding_dim >= 3)
-      outputSizes.insert(outputSizes.begin(), output_d);
-    if (ndims >= 1 + padding_dim)
-      outputSizes.insert(outputSizes.begin(), nplane);
-    if (ndims >= 2 + padding_dim)
-      outputSizes.insert(outputSizes.begin(), nbatch);
-
-    output.resize_(outputSizes);
-
-    if (output.numel() == 0) {
-      return output;
-    }
-    input = input_.contiguous();
-  } else {
-    TORCH_CHECK(output_w == grad_output_.size(dim_w),
-                "gradOutput width unexpected. Expected: ",
-                output_w,
-                ", Got: ",
-                grad_output_.size(dim_w));
-    if (padding_dim > 1) {
-      TORCH_CHECK(output_h == grad_output_.size(dim_h),
-                  "gradOutput height unexpected. Expected: ",
-                  output_h,
-                  ", Got: ",
-                  grad_output_.size(dim_h));
-    }
-    output.resize_as_(input);
-    if (output.numel() == 0 || grad_output_.numel() == 0)
-      return output;
-    grad_output = grad_output_.contiguous();
-  }
-
-  // MPSGraph pads a rank > 4 operand incorrectly once the output inner extent is large
-  // (https://github.com/pytorch/pytorch/issues/194922). Only the trailing padding_size / 2 dims
-  // are padded, so fold the leading dims into one batch dim.
-  const bool needs_flatten = ndims > 4;
-  if (needs_flatten) {
-    const int64_t batch_end = ndims - padding_size / 2 - 1;
-    input = input.flatten(0, batch_end);
-    if (is_backward_pass) {
-      grad_output = grad_output.flatten(0, batch_end);
-    }
-    ndims = input.dim();
-  }
-
-  const uint32_t dims_mask = (1U << ndims) - 1;
-  uint32_t startMask = dims_mask, endMask = dims_mask;
-  std::vector<NSNumber*> leftPadVec(ndims, @(0));
-  std::vector<NSNumber*> rightPadVec(ndims, @(0));
-  std::vector<NSNumber*> startsVec(ndims, @(0));
-  std::vector<NSNumber*> endsVec(ndims, @(0));
-  std::vector<NSNumber*> stridesVec(ndims, @(1));
-
-  for (int64_t pdim = 0; pdim < padding_size / 2; pdim++) {
-    const int64_t leftIdx = pdim * 2;
-    const int64_t rightIdx = pdim * 2 + 1;
-    const int64_t padIdx = ndims - pdim - 1;
-
-    leftPadVec[padIdx] = @(padding[leftIdx]);
-    rightPadVec[padIdx] = @(padding[rightIdx]);
-    // workaround for negative padding issue in backward pass
-    if (is_backward_pass) {
-      if (padding[leftIdx] < 0) {
-        leftPadVec[padIdx] = @(0);
-        startsVec[padIdx] = @(-padding[leftIdx]);
-        startMask &= ~(1U << padIdx);
-      }
-      if (padding[rightIdx] < 0) {
-        rightPadVec[padIdx] = @(0);
-        endsVec[padIdx] = @(input.size(padIdx) + padding[rightIdx]);
-        endMask &= ~(1U << padIdx);
-      }
-    }
-  }
-  MPSShape* leftPadding = [NSArray arrayWithObjects:leftPadVec.data() count:ndims];
-  MPSShape* rightPadding = [NSArray arrayWithObjects:rightPadVec.data() count:ndims];
-
-  MPSDataType dataType = getMPSScalarType(input.scalar_type());
-  // workaround for Bool type assert with Constant padding
-  if (input.scalar_type() == kBool) {
-    dataType = MPSDataTypeInt8;
-  }
-
-  @autoreleasepool {
-    std::string key =
-        op_name + getTensorsStringKey({input, grad_output, output}) + ":[" + getArrayRefString(padding) + "]";
-
-    auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, dataType, getMPSShape(input));
-      const bool needsSlice = startMask != dims_mask || endMask != dims_mask;
-
-      if (!is_backward_pass) {
-        MPSGraphTensor* padTensor = [mpsGraph padTensor:newCachedGraph->inputTensor_
-                                        withPaddingMode:mode
-                                            leftPadding:leftPadding
-                                           rightPadding:rightPadding
-                                          constantValue:0.0
-                                                   name:nil];
-        // workaround for the right padding bug in Monterey
-        if (needsSlice) {
-          newCachedGraph->gradInputTensor_ =
-              [mpsGraph sliceTensor:padTensor
-                             starts:[NSArray arrayWithObjects:startsVec.data() count:ndims]
-                               ends:[NSArray arrayWithObjects:endsVec.data() count:ndims]
-                            strides:[NSArray arrayWithObjects:stridesVec.data() count:ndims]
-                          startMask:startMask
-                            endMask:endMask
-                        squeezeMask:0
-                               name:nil];
-        } else {
-          newCachedGraph->gradInputTensor_ = padTensor;
-        }
-      } else {
-        newCachedGraph->gradOutputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, dataType, getMPSShape(grad_output));
-        MPSGraphTensor* padGradTensor =
-            [mpsGraph padGradientWithIncomingGradientTensor:newCachedGraph->gradOutputTensor_
-                                               sourceTensor:newCachedGraph->inputTensor_
-                                                paddingMode:mode
-                                                leftPadding:leftPadding
-                                               rightPadding:rightPadding
-                                                       name:nil];
-        // workaround for negative padding issue with padGradientWithIncomingGradientTensor()
-        if (needsSlice) {
-          for (auto i : c10::irange(ndims)) {
-            auto start = [startsVec[i] intValue];
-            auto input_size = input.size(i);
-            // TODO: It should be possible to make this case work. Currently
-            // MPSGraph can crash if start >= input_size, so we raise an error
-            // to prevent the crash.
-            TORCH_INTERNAL_ASSERT(start == 0 || start < input_size);
-          }
-          newCachedGraph->gradInputTensor_ =
-              [mpsGraph sliceGradientTensor:padGradTensor
-                           fwdInShapeTensor:[mpsGraph shapeOfTensor:newCachedGraph->inputTensor_ name:nil]
-                                     starts:[NSArray arrayWithObjects:startsVec.data() count:ndims]
-                                       ends:[NSArray arrayWithObjects:endsVec.data() count:ndims]
-                                    strides:[NSArray arrayWithObjects:stridesVec.data() count:ndims]
-                                  startMask:startMask
-                                    endMask:endMask
-                                squeezeMask:0
-                                       name:nil];
-        } else {
-          newCachedGraph->gradInputTensor_ = padGradTensor;
-        }
-      }
-      if (needs_flatten) {
-        newCachedGraph->gradInputTensor_ = [mpsGraph reshapeTensor:newCachedGraph->gradInputTensor_
-                                                         withShape:getMPSShape(output)
-                                                              name:nil];
-      }
-    });
-
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input, nullptr, true, dataType);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, output, nullptr, true, dataType);
-    Placeholder gradOutputPlaceholder = !is_backward_pass
-        ? Placeholder()
-        : Placeholder(cachedGraph->gradOutputTensor_, grad_output, nullptr, true, dataType);
-
-    NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
-    feeds[inputPlaceholder.getMPSGraphTensor()] = inputPlaceholder.getMPSGraphTensorData();
-    if (is_backward_pass) {
-      feeds[gradOutputPlaceholder.getMPSGraphTensor()] = gradOutputPlaceholder.getMPSGraphTensorData();
-    }
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-  return output;
-}
-
 static MTLSize pad_threadgroup(id<MTLComputePipelineState> pso, NSUInteger gx, NSUInteger gy, NSUInteger gz) {
   const auto maxTPG = [pso maxTotalThreadsPerThreadgroup];
   const auto tg_x = std::min<NSUInteger>(maxTPG, gx);
   const auto tg_y = std::min<NSUInteger>(maxTPG / tg_x, gy);
   const auto tg_z = std::min<NSUInteger>(maxTPG / (tg_x * tg_y), gz);
   return MTLSizeMake(tg_x, tg_y, tg_z);
+}
+
+// Pad operations (1D/2D/3D forward and backward)
+static Tensor& pad_out_template(Tensor& output,
+                                const Tensor& input,
+                                IntArrayRef padding,
+                                const std::optional<Tensor>& grad_output_opt,
+                                bool is_reflection,
+                                const std::string& op_name) {
+  TORCH_CHECK(padding.size() == 2 || padding.size() == 4 || padding.size() == 6,
+              "invalid padding argument of size ",
+              padding.size());
+  const auto padding_dim = static_cast<int64_t>(padding.size() / 2);
+  const Tensor& grad_output = *at::borrow_from_optional_tensor(grad_output_opt);
+  const bool backward = grad_output.defined();
+  if (!backward) {
+    output.resize_(at::native::padding::pad_shape_check(input, padding, padding_dim, is_reflection));
+  } else {
+    at::native::padding::check_valid_input(input, padding, padding_dim);
+    at::native::padding::pad_backward_shape_check(grad_output, input, padding, padding_dim);
+    output.resize_as_(input);
+  }
+  if (output.numel() == 0) {
+    return output;
+  }
+  if (backward && grad_output.numel() == 0) {
+    return output.zero_();
+  }
+
+  const auto& source = backward ? grad_output : input;
+  // Plain TORCH_CHECK to match the RuntimeError CPU and CUDA raise from data_ptr<T>() for this mismatch.
+  TORCH_CHECK(source.scalar_type() == output.scalar_type(),
+              "expected scalar type ",
+              source.scalar_type(),
+              " but found ",
+              output.scalar_type());
+  const auto& input_tensor = backward ? output : input;
+  const auto& output_tensor = backward ? grad_output : output;
+  const auto channel_dim = input.dim() - padding_dim - 1;
+  // The _i32 kernels form pad_left + 2 * (size - 1), so leave int32 headroom beyond the offsets themselves.
+  constexpr int64_t max32 = int64_t{1} << 29;
+  const bool use32 = canUse32BitIndexMath(input_tensor, max32) && canUse32BitIndexMath(output_tensor, max32) &&
+      std::all_of(padding.begin(), padding.end(), [](int64_t pad) { return std::abs(pad) < max32; });
+  const auto width = output.size(-1);
+  const auto height = padding_dim >= 2 ? output.size(-2) : 1;
+  const auto grid_x = c10::metal::ceil_div(width, static_cast<int64_t>(c10::metal::ILP_PER_THREAD));
+  const auto grid = MTLSizeMake(c10::checked_convert<uint32_t>(grid_x, "uint32_t"),
+                                c10::checked_convert<uint32_t>(height, "uint32_t"),
+                                c10::checked_convert<uint32_t>(output.numel() / (width * height), "uint32_t"));
+  using namespace std::string_view_literals;
+  const auto kernel_name = fmt::format("{}_pad{}d_{}_{}{}",
+                                       is_reflection ? "reflection"sv : "replication"sv,
+                                       padding_dim,
+                                       backward ? "backward"sv : "forward"sv,
+                                       scalarToMetalTypeString(source),
+                                       use32 ? "_i32"sv : "_i64"sv);
+  auto pso = lib.getPipelineStateForFunc(kernel_name);
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(pso, op_name, {source, output}, stream);
+      auto encoder = stream->commandEncoder();
+      [encoder setComputePipelineState:pso];
+      mtlDispatchByIndexWidth<int32_t, int64_t>(use32, [&](auto idx_tag) {
+        using idx_t = typename decltype(idx_tag)::type;
+        // Innermost padded dims first, then the channel stride and the batch stride (0 when unbatched).
+        auto sizes = [&](const Tensor& tensor) {
+          c10::metal::array<idx_t, 3> values = {1, 1, 1};
+          for (const auto dim : c10::irange(padding_dim)) {
+            values[dim] = static_cast<idx_t>(tensor.size(-1 - dim));
+          }
+          return values;
+        };
+        auto strides = [&](const Tensor& tensor) {
+          c10::metal::array<idx_t, 5> values{};
+          for (const auto dim : c10::irange(padding_dim)) {
+            values[dim] = static_cast<idx_t>(tensor.stride(-1 - dim));
+          }
+          values[3] = static_cast<idx_t>(tensor.stride(channel_dim));
+          values[4] = static_cast<idx_t>(channel_dim == 1 ? tensor.stride(0) : 0);
+          return values;
+        };
+        c10::metal::array<idx_t, 3> left_pad{};
+        for (const auto dim : c10::irange(padding_dim)) {
+          left_pad[dim] = static_cast<idx_t>(padding[2 * dim]);
+        }
+        const PadParams<idx_t> params{
+            .input_sizes = sizes(input_tensor),
+            .output_sizes = sizes(output_tensor),
+            .left_pad = left_pad,
+            .input_strides = strides(input_tensor),
+            .output_strides = strides(output_tensor),
+            .channels = static_cast<idx_t>(input.size(channel_dim)),
+        };
+        mtl_setArgs(encoder, source, output, params);
+      });
+      [encoder dispatchThreads:grid threadsPerThreadgroup:pad_threadgroup(pso, grid.width, grid.height, grid.depth)];
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+  return output;
 }
 
 static void replication_pad1d_kernel_mps(const Tensor& input_, IntArrayRef padding, const Tensor& output) {
@@ -573,23 +373,13 @@ static void constant_pad_strided_kernel_mps(const Tensor& input,
 // 1D Reflection and Replication Padding
 TORCH_IMPL_FUNC(reflection_pad1d_out_mps)
 (const Tensor& input, IntArrayRef padding, const Tensor& output) {
-  mps::pad_out_template(const_cast<Tensor&>(output),
-                        input,
-                        padding,
-                        std::nullopt,
-                        MPSGraphPaddingModeReflect,
-                        "reflection_pad1d_out_mps");
+  mps::pad_out_template(const_cast<Tensor&>(output), input, padding, std::nullopt, true, "reflection_pad1d_out_mps");
 }
 
 TORCH_IMPL_FUNC(reflection_pad1d_backward_out_mps)
 (const Tensor& grad_output, const Tensor& input, IntArrayRef padding, const Tensor& grad_input) {
-  grad_input.resize_as_(input).zero_();
-  mps::pad_out_template(const_cast<Tensor&>(grad_input),
-                        input,
-                        padding,
-                        grad_output,
-                        MPSGraphPaddingModeReflect,
-                        "reflection_pad1d_backward_out_mps");
+  mps::pad_out_template(
+      const_cast<Tensor&>(grad_input), input, padding, grad_output, true, "reflection_pad1d_backward_out_mps");
 }
 
 TORCH_IMPL_FUNC(replication_pad1d_out_mps)
@@ -604,93 +394,70 @@ TORCH_IMPL_FUNC(replication_pad1d_backward_out_mps)
 
 // 2D Reflection and Replication Padding
 Tensor& reflection_pad2d_out_mps(const Tensor& input, IntArrayRef padding, Tensor& output) {
-  return mps::pad_out_template(output, input, padding, std::nullopt, MPSGraphPaddingModeReflect, __func__);
+  return mps::pad_out_template(output, input, padding, std::nullopt, true, __func__);
 }
 
 Tensor reflection_pad2d_mps(const Tensor& input, IntArrayRef padding) {
   Tensor output = at::empty({0}, input.options());
-  return mps::pad_out_template(output, input, padding, std::nullopt, MPSGraphPaddingModeReflect, __func__);
+  return mps::pad_out_template(output, input, padding, std::nullopt, true, __func__);
 }
 
 Tensor& reflection_pad2d_backward_out_mps(const Tensor& grad_output,
                                           const Tensor& input,
                                           IntArrayRef padding,
                                           Tensor& grad_input) {
-  grad_input.resize_as_(input).zero_();
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeReflect, __func__);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, true, __func__);
 }
 
 Tensor reflection_pad2d_backward_mps(const Tensor& grad_output, const Tensor& input, IntArrayRef padding) {
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeReflect, __func__);
+  auto grad_input = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, true, __func__);
 }
 
 TORCH_IMPL_FUNC(replication_pad2d_out_mps)
 (const Tensor& input, IntArrayRef padding, const Tensor& output) {
-  mps::pad_out_template(const_cast<Tensor&>(output),
-                        input,
-                        padding,
-                        std::nullopt,
-                        MPSGraphPaddingModeClampToEdge,
-                        "replication_pad2d_out_mps");
+  mps::pad_out_template(const_cast<Tensor&>(output), input, padding, std::nullopt, false, "replication_pad2d_out_mps");
 }
 
 Tensor& replication_pad2d_backward_out_mps(const Tensor& grad_output,
                                            const Tensor& input,
                                            IntArrayRef padding,
                                            Tensor& grad_input) {
-  grad_input.resize_as_(input).zero_();
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, __func__);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, false, __func__);
 }
 
 Tensor replication_pad2d_backward_mps(const Tensor& grad_output, const Tensor& input, IntArrayRef padding) {
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, __func__);
+  auto grad_input = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, false, __func__);
 }
 
 // 3D Reflection and Replication Padding
 TORCH_IMPL_FUNC(reflection_pad3d_out_mps)
 (const Tensor& input, IntArrayRef padding, const Tensor& output) {
-  mps::pad_out_template(const_cast<Tensor&>(output),
-                        input,
-                        padding,
-                        std::nullopt,
-                        MPSGraphPaddingModeReflect,
-                        "reflection_pad3d_out_mps");
+  mps::pad_out_template(const_cast<Tensor&>(output), input, padding, std::nullopt, true, "reflection_pad3d_out_mps");
 }
 
 TORCH_IMPL_FUNC(reflection_pad3d_backward_out_mps)
 (const Tensor& grad_output, const Tensor& input, IntArrayRef padding, const Tensor& grad_input) {
-  grad_input.resize_as_(input).zero_();
-  mps::pad_out_template(const_cast<Tensor&>(grad_input),
-                        input,
-                        padding,
-                        grad_output,
-                        MPSGraphPaddingModeReflect,
-                        "reflection_pad3d_backward_out_mps");
+  mps::pad_out_template(
+      const_cast<Tensor&>(grad_input), input, padding, grad_output, true, "reflection_pad3d_backward_out_mps");
 }
 
 TORCH_IMPL_FUNC(replication_pad3d_out_mps)
 (const Tensor& input, IntArrayRef padding, const Tensor& output) {
-  mps::pad_out_template(const_cast<Tensor&>(output),
-                        input,
-                        padding,
-                        std::nullopt,
-                        MPSGraphPaddingModeClampToEdge,
-                        "replication_pad3d_out_mps");
+  mps::pad_out_template(const_cast<Tensor&>(output), input, padding, std::nullopt, false, "replication_pad3d_out_mps");
 }
 
 Tensor& replication_pad3d_backward_out_mps(const Tensor& grad_output,
                                            const Tensor& input,
                                            IntArrayRef padding,
                                            Tensor& grad_input) {
-  grad_input.resize_as_(input).zero_();
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, __func__);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, false, __func__);
 }
 
 Tensor replication_pad3d_backward_mps(const Tensor& grad_output, const Tensor& input, IntArrayRef padding) {
-  auto grad_input = at::zeros_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-  return mps::pad_out_template(grad_input, input, padding, grad_output, MPSGraphPaddingModeClampToEdge, __func__);
+  auto grad_input = at::empty_like(input, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  return mps::pad_out_template(grad_input, input, padding, grad_output, false, __func__);
 }
 
 // backward pass is explicitly handled in autograd by negating the "pad" argument
