@@ -335,6 +335,7 @@ Save after instantiation and before resetting or destroying the graph.
      CUDAPluggableAllocator
      change_current_allocator
      MemPool
+     LocalizedMemPool
 ```
 
 ```{eval-rst}
@@ -587,6 +588,26 @@ propagate. The predicate does not initialize the driver or a context, so calling
 it does not poison subsequent forks.
 Actual splitting and context creation always use CUDA, independently of this
 capability check.
+
+### Localized memory pools
+
+With CUDA driver and cuda.bindings 13.4+, `LocalizedMemPool` allocates physical
+memory on a specified locality domain. Construction initializes CUDA so
+validation uses the actual CUDA-visible topology. The native CUDA caching
+allocator suballocates and caches those allocations as it does for a regular `MemPool`.
+This does not localize kernel execution; use a green-context stream separately
+when compute localization is also desired.
+
+```python
+pool = torch.cuda.LocalizedMemPool(locality_domain_id=0, device="cuda:0")
+with torch.cuda.use_mem_pool(pool, device="cuda:0"):
+    x = torch.empty(1024, device="cuda:0")
+```
+
+Use the pool only on its owning device; access from other devices is not
+supported. Keep the pool alive until its tensors have been released and their
+CUDA work has completed. As with `use_mem_pool`, only allocations on the current
+thread are redirected.
 
 ```{eval-rst}
 .. currentmodule:: torch.cuda.green_contexts
