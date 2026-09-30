@@ -423,6 +423,11 @@ class StreamVariable(StreamContextVariable):
         super().__init__(None, **kwargs)
 
     def python_type(self) -> type:
+        # A current stream's example value is a plain torch.Stream; any other value
+        # keeps its own, possibly more derived, type (e.g. a user subclass).
+        value_type = type(self.value)
+        if issubclass(value_type, self._cpython_type):
+            return value_type
         return self._cpython_type
 
     def _stream_device_get(
@@ -584,6 +589,9 @@ class StreamVariable(StreamContextVariable):
         from ..utils import cmp_name_to_op_mapping
         from .constant import ConstantVariable
 
+        if op not in ("__eq__", "__ne__"):
+            # THPStream_richcompare only implements == and !=.
+            return ConstantVariable.create(NotImplemented)
         if not isinstance(other, StreamVariable):
             # Stream's tp_richcompare (THPStream_richcompare) compares
             # stream_id/device and never returns NotImplemented.
@@ -601,24 +609,22 @@ class StreamVariable(StreamContextVariable):
                 install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
             if other.source:
                 install_guard(other.source.make_guard(GuardBuilder.EQUALS_MATCH))
-        op_fn = cmp_name_to_op_mapping[op]
-        if self_is_current or other_is_current:
-            self_type = self.python_type() if self_is_current else type(self.value)
-            other_type = other.python_type() if other_is_current else type(other.value)
-            equal = self_type is other_type and (
-                self.value.stream_id,
-                self.value.device_index,
-                self.value.device_type,
-            ) == (
-                other.value.stream_id,
-                other.value.device_index,
-                other.value.device_type,
+
+        def eager_value(var: StreamVariable, is_current: bool) -> torch.Stream:
+            # A current stream is traced as a plain torch.Stream; give it the type
+            # its API returns so the comparison dispatches as it does in eager.
+            value, cls = var.value, var.python_type()
+            if not is_current or type(value) is cls:
+                return value
+            return cls(
+                stream_id=value.stream_id,
+                device_index=value.device_index,
+                device_type=value.device_type,
             )
-            return ConstantVariable.create(equal if op == "__eq__" else not equal)
-        return VariableTracker.build(
-            tx,
-            op_fn(self.value, other.value),  # pyrefly: ignore[bad-argument-type]
-        )
+
+        lhs = eager_value(self, self_is_current)
+        rhs = eager_value(other, other_is_current)
+        return VariableTracker.build(tx, cmp_name_to_op_mapping[op](lhs, rhs))
 
     def as_proxy(self) -> Proxy:
         return self.proxy

@@ -1620,6 +1620,64 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         self.assertEqual(cnt.frame_count, 2)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_cpu_stream_equality_under_coor(self):
+        def f(x, stream):
+            return x + (1 if stream == torch.accelerator.current_stream() else 2)
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.zeros(1, device="cuda")
+        stream = torch.Stream(device="cpu")
+        self.assertEqual(compiled(x, stream), f(x, stream))
+        self.assertEqual(compiled(x, stream), f(x, stream))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    @parametrize("stream_kind", ("generic", "cuda", "subclass"))
+    @parametrize("query", ("generic", "cuda"))
+    @parametrize("comparison", ("eq", "ne"))
+    def test_mixed_type_current_stream_comparison_under_coor(
+        self, stream_kind, query, comparison
+    ):
+        class SubStream(torch.Stream):
+            pass
+
+        cls = {"generic": torch.Stream, "cuda": torch.cuda.Stream}.get(
+            stream_kind, SubStream
+        )
+        mod = torch.accelerator if query == "generic" else torch.cuda
+
+        def f(x, stream):
+            current = mod.current_stream()
+            matches = stream == current if comparison == "eq" else stream != current
+            return x + (1 if matches else 2)
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.zeros(1, device="cuda")
+        # Non-current first, so a guard that misses the flip reuses the wrong graph.
+        for base in (torch.Stream(), torch.accelerator.current_stream()):
+            stream = cls(
+                stream_id=base.stream_id,
+                device_index=base.device_index,
+                device_type=base.device_type,
+            )
+            self.assertEqual(compiled(x, stream), f(x, stream))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @compiler_config.patch(compile_on_one_rank=True)
+    def test_current_stream_ordering_raises_under_coor(self):
+        def f(x, stream):
+            try:
+                return x + (1 if stream < torch.accelerator.current_stream() else 2)
+            except TypeError:
+                return x + 3
+
+        compiled = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.zeros(1, device="cuda")
+        stream = torch.Stream()
+        self.assertEqual(compiled(x, stream), f(x, stream))
+
     @requires_multigpu
     @compiler_config.patch(compile_on_one_rank=True)
     @parametrize("stream_kind", ("generic", "cuda"))
