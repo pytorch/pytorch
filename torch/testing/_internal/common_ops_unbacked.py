@@ -67,7 +67,6 @@ ops_dde_xfail = {
     xfail("inner"),
     xfail("kron"),
     xfail("linalg.cond"),
-    xfail("linalg.cross"),
     xfail("linalg.householder_product"),
     xfail("linalg.ldl_solve"),
     xfail("linalg.lstsq"),
