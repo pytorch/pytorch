@@ -20,8 +20,8 @@ from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_mutation,
 )
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
+from torch._inductor.extern_kernels import extern_kernels  # noqa: F401
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
-from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
 from torch._inductor.utils import convert_to_symint
 from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton

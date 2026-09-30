@@ -80,6 +80,7 @@ from .codegen.triton_utils import (
 )
 from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
+from .extern_kernels import extern_kernels, KernelNamespace  # noqa: F401
 from .fx_utils import count_flops_fx
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .ops_handler import StoreMode
@@ -123,13 +124,6 @@ if TYPE_CHECKING:
 
     from .codegen.common import CSE
 
-
-class KernelNamespace:
-    pass
-
-
-# these objects are imported from the generated wrapper code
-extern_kernels = KernelNamespace()
 
 WORKSPACE_ARG_PLACEHOLDER = "ws_placeholder"
 
