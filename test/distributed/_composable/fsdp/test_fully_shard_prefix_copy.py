@@ -232,7 +232,9 @@ class TestPrefixCopy(TestCase):
         with _OpCounter() as counter:
             copy_in(output)
         self.assertEqual(output, expected, atol=0, rtol=0)
-        self.assertEqual(counter.counts[torch.ops.fsdp.chunk_cat.default], 1)
+        self.assertEqual(
+            counter.counts[torch.ops.fsdp.chunk_cat_mixed_dtype.default], 1
+        )
 
     @parametrize(
         "layout",
@@ -421,7 +423,9 @@ class TestPrefixCopy(TestCase):
         expected = torch.cat([local] * world_size, dim=shard_dim)
         param = self._make_extension_param(world_size, shard_dim, local.size(), ())
         param.sharded_param.requires_grad = False
-        param.param_dtype, param.orig_dtype = None, local.dtype
+        param.param_dtype = param.reduce_dtype = None
+        param.orig_dtype = local.dtype
+        param._has_sharded_grad_dtype_override = False
         param._orig_size = expected.size()
         param._contiguous_orig_stride = expected.stride()
         param.is_spmd_types = False

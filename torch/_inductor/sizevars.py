@@ -217,10 +217,8 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
-    # Avoid full-expression sympy.simplify here.  This helper only needs to
-    # expose lane-uniform FloorDiv/ModularIndexing terms for later stride
-    # analysis, and sympy's general simplifier can be superlinear on the large
-    # dynamic-shape index expressions produced by real models.
+    if not index.has(sympy.Rel):
+        index = sympy.simplify(index)
     if index != original_index:
         return simplify_index_in_vec_range(index, var, vec_length)
 

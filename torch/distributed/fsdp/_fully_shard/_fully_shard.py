@@ -130,6 +130,14 @@ def fully_shard(
     on ``module`` frees them (if needed). Similar backward hooks all-gather
     parameters and later free parameters and reduce-scatter gradients.
 
+    Parameter dtypes and ``grad_dtype`` may change (e.g. ``module.bfloat16()``)
+    until lazy initialization at the first forward or
+    :meth:`FSDPModule.unshard`; later changes are unsupported. An explicit
+    ``grad_dtype`` survives dtype conversions and is inherited by a parameter
+    that ``load_state_dict(assign=True)`` registers without one. Device moves
+    preserve sharded gradient dtypes and leave pending gradients on their
+    original device.
+
     Since grouping multiple tensors together for one collective is critical for
     communication efficiency, this implementation makes this grouping first
     class. Calling :meth:`fully_shard` on ``module`` constructs one group that
@@ -419,6 +427,18 @@ class FSDPModule:
         both reduce-scatter and all-reduce together. This is the equivalence of
         `no_sync` in FSDP1.
 
+        Unsynchronized gradients accumulate on unsharded parameters according
+        to ``MixedPrecisionPolicy.reduce_dtype``. Sharded gradients and HSDP
+        buffers awaiting all-reduce remain separate. CPU offload moves only
+        fully reduced sharded gradients to CPU.
+
+        ``zero_grad()`` clears only the currently registered parameters' gradients,
+        leaving other parameter copies and pending all-reduce buffers intact.
+
+        Before gradient clipping or an optimizer step, enable the required
+        reductions and call ``set_is_last_backward(True)`` for the final backward.
+        Reshard before updating parameters.
+
         Args:
             requires_gradient_sync (bool): Whether to reduce gradients for the
                 module's parameters.
@@ -495,6 +515,9 @@ class FSDPModule:
         be used during gradient accumulation to trade off higher memory for
         reduced communication since the unsharded parameters do not need to be
         re-all-gathered before the next forward.
+
+        Call :meth:`reshard` on each FSDP module on every rank before updating
+        its sharded parameters.
 
         Args:
             reshard_after_backward (bool): Whether to reshard parameters after
@@ -687,6 +710,10 @@ class FSDPModule:
         multi-modal models, mixture of experts), causing mismatched
         reduce-scatter collectives. Similar to DDP's
         ``find_unused_parameters``.
+
+        Parameters requiring gradients with explicit ``grad_dtype=None``
+        require a non-``None`` ``reduce_dtype`` so zero gradients have the
+        same dtype on every rank; otherwise, backward raises an error.
 
         Args:
             reduce_scatter_unused_params (bool): Whether to include zero
@@ -883,19 +910,36 @@ class FSDPModule:
             raise AssertionError(f"No FSDP state found on {self}")
         return state
 
-    def _apply(self, *args: Any, **kwargs: Any) -> Any:
+    def _apply(
+        self, fn: Callable[[torch.Tensor], torch.Tensor], recurse: bool = True
+    ) -> Any:
         # Reshard to ensure that sharded parameters are registered
         self.reshard()
-        ret = super()._apply(*args, **kwargs)  # type: ignore[misc]
         state = self._get_fsdp_state()
-        if not state._fsdp_param_groups:
-            return ret
-        # TODO: Remove this padding logic once DTensor pads the local tensor:
-        # https://github.com/pytorch/pytorch/issues/113045
+        fsdp_params = [
+            param for group in state._fsdp_param_groups for param in group.fsdp_params
+        ]
+        saved_grads = {}
+        for fsdp_param in fsdp_params:
+            param = fsdp_param.sharded_param
+            # Module._apply swaps in parameters without grad_dtype.
+            fsdp_param._capture_grad_dtype_policy(param)
+            grad = param.grad
+            if grad is not None and fsdp_param._has_sharded_grad_dtype_override:
+                # Explicit grad_dtype, not the parameter dtype, owns this
+                # gradient's dtype. Module._apply would convert it with the
+                # parameter and attach it before FSDP restores grad_dtype.
+                saved_grads[fsdp_param] = grad
+                param.grad = None
+        ret = super()._apply(fn, recurse=recurse)  # type: ignore[misc]
         with torch.no_grad():
-            for fsdp_param_group in state._fsdp_param_groups:
-                for fsdp_param in fsdp_param_group.fsdp_params:
-                    fsdp_param.reset_sharded_param()
+            for fsdp_param in fsdp_params:
+                fsdp_param.reset_sharded_param()
+                if (grad := saved_grads.get(fsdp_param)) is not None:
+                    param = fsdp_param.sharded_param
+                    param.grad = grad.to(device=param.device).requires_grad_(
+                        grad.requires_grad
+                    )
         return ret
 
 

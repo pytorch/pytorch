@@ -500,6 +500,61 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
                     ),
                 )
 
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not TEST_CUDA, "HSDP sync correctness test is CUDA-only")
+    def test_partial_repack_after_slow_all_reduce(self):
+        # No input requires grad, so both post-backwards run in the final
+        # callback. layer's finalize_backward releases its fp32 all-reduce
+        # buffer (its bf16 sharded grads are casts), then aux repacks its
+        # pending partial because aux.second first gets a gradient. The repack
+        # must not reuse that buffer while the slowed all-reduce still uses it.
+        class TwoLinear(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.first = nn.Linear(32, 32, bias=False)
+                self.second = nn.Linear(32, 32, bias=False)
+
+            def forward(self, inp, use_second=True):
+                output = self.first(inp)
+                return output + self.second(inp) if use_second else output
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = TwoLinear()
+                self.aux = TwoLinear()
+
+            def forward(self, inp, use_layer):
+                output = self.aux(inp, use_second=use_layer)
+                return output + self.layer(inp) if use_layer else output
+
+        model = Model().to(device_type, torch.bfloat16)
+        mesh = init_device_mesh(
+            device_type.type,
+            (2, self.world_size // 2),
+            mesh_dim_names=("replicate", "shard"),
+        )
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+        )
+        for module in (model.layer, model.aux, model):
+            fully_shard(module, mesh=mesh, mp_policy=mp_policy)
+        orig_all_reduce = dist.all_reduce
+
+        def slow_all_reduce(*args, **kwargs):
+            torch.cuda._sleep(int(200 * get_cycles_per_ms()))
+            return orig_all_reduce(*args, **kwargs)
+
+        with mock.patch.object(dist, "all_reduce", slow_all_reduce):
+            for use_layer, value in ((False, 2.0), (True, 3.0)):
+                model.set_requires_all_reduce(use_layer)
+                inp = torch.full((1, 32), value, device=device_type).bfloat16()
+                model(inp, use_layer).sum().backward()
+        for module, expected in ((model.layer, (3, 3)), (model.aux, (5, 3))):
+            for param, value in zip(module.parameters(), expected):
+                actual = param.grad.full_tensor()
+                self.assertEqual(actual, torch.full_like(actual, value))
+
 
 if __name__ == "__main__":
     run_tests()

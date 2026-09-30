@@ -131,14 +131,10 @@ void validateBlock(
       validateBlock(sub_block, operator_export_type);
     }
     // Macro'ed so we get a marginally better line number on failed export
-    // `name` is spliced into a std::string concatenation, not passed as its own
-    // argument: call sites rely on the leading std::string to anchor chains
-    // that start with a string literal plus a const char*.
 #define FAIL_EXPORT(name)                          \
-  TORCH_CHECK(                                     \
-      false,                                       \
+  throw std::runtime_error(                        \
       std::string("ONNX export failed: ") + name + \
-          "\n\nGraph we tried to export:\n" + b->owningGraph()->toString());
+      "\n\nGraph we tried to export:\n" + b->owningGraph()->toString());
     // Special error messages for certain types of operators
     if (node->kind() == prim::PythonOp) {
       if (operator_export_type !=
@@ -216,10 +212,11 @@ void CreateExternalFile(
   std::string fullFilePath = folder + "/" + tensorName;
   std::unique_ptr<FILE, decltype(&CloseFile)> fp(
       fopen(fullFilePath.c_str(), "wb"), &CloseFile);
-  TORCH_CHECK(
-      fp != nullptr,
-      "ONNX export failed. Could not open file or directory: ",
-      fullFilePath);
+  if (fp == nullptr) {
+    throw std::runtime_error(
+        std::string("ONNX export failed. Could not open file or directory: ") +
+        fullFilePath);
+  }
   std::string s = get_little_endian_data(tensor);
   fwrite(s.c_str(), tensor.element_size(), tensor.numel(), fp.get());
 } // fclose() called here through CloseFile(), if FILE* is not a null pointer.
@@ -498,7 +495,7 @@ static onnx::AttributeProto_AttributeType ATenAttributeKindToOnnxAttributeType(
       std::ostringstream err_msg;
       err_msg << "attribute \"" << name.toDisplayString()
               << "\" has unexpected kind: " << toString(at_kind);
-      TORCH_CHECK(false, std::move(err_msg).str());
+      throw std::runtime_error(std::move(err_msg).str());
   }
 }
 
@@ -1165,7 +1162,7 @@ void GraphEncoder::AddAttribute(
       std::ostringstream err_msg;
       err_msg << "attribute \"" << name.toDisplayString()
               << "\" has unexpected kind: " << toString(node->kindOf(name));
-      TORCH_CHECK(false, std::move(err_msg).str());
+      throw std::runtime_error(std::move(err_msg).str());
   }
 }
 
@@ -1447,9 +1444,9 @@ std::string serialize_model_proto_to_string(
 
 void check_onnx_proto(const std::string& proto_string) {
   onnx::ModelProto model;
-  TORCH_CHECK(
-      ParseProtoFromBytes(&model, proto_string.c_str(), proto_string.size()),
-      "Invalid ONNX proto string.");
+  if (!ParseProtoFromBytes(&model, proto_string.c_str(), proto_string.size())) {
+    throw std::runtime_error("Invalid ONNX proto string.");
+  }
   // 1. baseline check
   // These two checks prevent broken graph being generated
   // And errors out exporting if that happens.

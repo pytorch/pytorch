@@ -45,7 +45,9 @@ class unwrapping_shared_ptr {
     impl->clear_cb = &clear_registered_instances;
   }
   T* get() const {
-    TORCH_CHECK(impl->elem, "has been invalidated");
+    if (!impl->elem) {
+      throw std::logic_error("has been invalidated");
+    }
     return impl->elem;
   }
   // we need to disable the overloaded & for PyBind11 < 2.3 due.
@@ -53,7 +55,9 @@ class unwrapping_shared_ptr {
 #if (PYBIND11_VERSION_MAJOR > 2) || \
     ((PYBIND11_VERSION_MAJOR == 2) && (PYBIND11_VERSION_MINOR >= 3))
   T** operator&() {
-    TORCH_CHECK(impl->elem, "has been invalidated");
+    if (!impl->elem) {
+      throw std::logic_error("has been invalidated");
+    }
     return &(impl->elem);
   }
 #endif
@@ -91,7 +95,7 @@ namespace pybind11::detail {
         value = v_h.template holder<holder_type>().get();                                 \
         return true;                                                                      \
       } else {                                                                            \
-        throw py::cast_error(                                                             \
+        throw cast_error(                                                                 \
             "Unable to cast from non-held to held instance (#Class& to Holder<#Class>)"); \
       }                                                                                   \
     }                                                                                     \

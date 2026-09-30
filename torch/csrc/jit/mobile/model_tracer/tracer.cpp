@@ -148,7 +148,7 @@ int main(int argc, char* argv[]) {
         << "\nPlease consider opening an issue at https://github.com/pytorch/pytorch/issues "
         << "with the detailed error message." << '\n';
 
-    throw;
+    throw ex;
   }
 
   if (tracer_result.traced_operators.size() <=

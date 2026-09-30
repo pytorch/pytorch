@@ -72,8 +72,7 @@ static auto register_opaque_obj_class =
         .def(
             "__obj_flatten__",
             [](const c10::intrusive_ptr<OpaqueObject>& self) {
-              TORCH_CHECK(
-                  false,
+              throw std::runtime_error(
                   "Unable to implement __obj_flatten__ for opaque objects.");
             });
 
