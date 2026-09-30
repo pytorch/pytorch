@@ -2857,7 +2857,10 @@ class TestPrecompile(TestCase):
         # export list would otherwise generate no cases and pass vacuously.
         exported = {
             "capture",
+            "capture_runtime",
+            "finalize_cache",
             "load",
+            "prepare_runtime",
             "Capture",
             "DynamoTracer",
             "MakeFxTracer",
@@ -6085,6 +6088,277 @@ class TestPrecompileNoCompilation(TestCase):
 @skipIfTorchDynamo("precompile captures cannot run under dynamo wrapping")
 @instantiate_parametrized_tests
 class TestPrecompileRuntimeCache(TestCase):
+    def test_finalize_seals_capture_and_prepare_skips_graph(self):
+        from pathlib import Path
+
+        from torch.compiler._no_compile import (
+            check_compilation_allowed,
+            is_compilation_forbidden,
+        )
+
+        pc = torch.compiler.precompile
+        env = "TORCH_PRECOMPILE_NO_COMPILATION"
+        previous = os.environ.get(env)
+        with pc.capture_runtime():
+            with self.assertRaisesRegex(PrecompileError, "already active"):
+                with pc.capture_runtime():
+                    self.fail("Nested runtime capture was accepted")
+            source, cache = _capture_files(
+                self,
+                _no_compilation_single_graph,
+                [(torch.ones(4),)],
+                backend="eager",
+            )
+            cache = Path(cache)
+            pc.finalize_cache(artifact_path=source, cache_path=cache)
+            frozen = cache.read_bytes()
+            self.assertTrue(is_compilation_forbidden())
+            with self.assertRaisesRegex(PrecompileError, "Could not finalize"):
+                pc.finalize_cache(artifact_path=source, cache_path=cache)
+            self.assertEqual(cache.read_bytes(), frozen)
+            with self.assertRaisesRegex(PrecompileError, "forbids cleanup compiler"):
+                check_compilation_allowed("cleanup compiler")
+        self.assertEqual(os.environ.get(env), previous)
+        self.assertFalse(is_compilation_forbidden())
+        with (
+            mock.patch(
+                "torch._precompile._make_inlined_forward",
+                side_effect=AssertionError("graph installed"),
+            ),
+            mock.patch(
+                "torch.cuda.init", side_effect=AssertionError("CUDA initialized")
+            ),
+        ):
+            pc.prepare_runtime(artifact_path=source, cache_path=cache)
+            pc.prepare_runtime(artifact_path=source, cache_path=cache)
+
+    def test_capture_runtime_rejects_start_under_no_compilation(self):
+        pc = torch.compiler.precompile
+        with (
+            pc.no_compilation(),
+            self.assertRaisesRegex(PrecompileError, "compilation is forbidden"),
+        ):
+            with pc.capture_runtime():
+                self.fail("capture_runtime started under no_compilation")
+
+    def test_finalize_requires_this_process_capture_scope(self):
+        from torch.compiler import _runtime_cache
+        from torch.compiler._no_compile import is_compilation_forbidden
+
+        pc = torch.compiler.precompile
+        source, cache = _capture_files(
+            self, _no_compilation_single_graph, [(torch.ones(4),)], backend="eager"
+        )
+        with open(cache, "rb") as f:
+            original = f.read()
+        with self.assertRaisesRegex(
+            PrecompileError, "^precompile\\.finalize_cache: Could not finalize"
+        ) as failure:
+            pc.finalize_cache(artifact_path=source, cache_path=cache)
+        self.assertIn("capture_runtime scope", str(failure.exception))
+
+        with pc.capture_runtime():
+            # A forked child inherits the parent's scope object.
+            with mock.patch.object(_runtime_cache._capture, "pid", os.getpid() + 1):
+                with self.assertRaisesRegex(PrecompileError, "Could not finalize"):
+                    pc.finalize_cache(artifact_path=source, cache_path=cache)
+                with pc.capture_runtime():
+                    pc.finalize_cache(artifact_path=source, cache_path=cache)
+                    self.assertTrue(is_compilation_forbidden())
+            self.assertFalse(is_compilation_forbidden())
+        with open(cache, "rb") as f:
+            self.assertEqual(
+                torch.load(io.BytesIO(f.read()), weights_only=True),
+                torch.load(io.BytesIO(original), weights_only=True),
+            )
+
+    def test_failed_finalize_write_keeps_cache_and_scope_retryable(self):
+        from torch.compiler._no_compile import is_compilation_forbidden
+
+        pc = torch.compiler.precompile
+        source, cache = _capture_files(
+            self, _no_compilation_single_graph, [(torch.ones(4),)], backend="eager"
+        )
+        os.chmod(cache, 0o640)
+        # Windows keeps only the read-only bit, so compare with what chmod left.
+        mode = stat.S_IMODE(os.stat(cache).st_mode)
+        with open(cache, "rb") as f:
+            original = f.read()
+        with pc.capture_runtime():
+            with (
+                mock.patch("os.replace", side_effect=OSError("disk full")),
+                self.assertRaisesRegex(PrecompileError, "Could not finalize"),
+            ):
+                pc.finalize_cache(artifact_path=source, cache_path=cache)
+            self.assertFalse(is_compilation_forbidden())
+            with open(cache, "rb") as f:
+                self.assertEqual(f.read(), original)
+            self.assertEqual(
+                sorted(os.listdir(os.path.dirname(cache))),
+                ["artifact.cache", "artifact.py"],
+            )
+            pc.finalize_cache(artifact_path=source, cache_path=cache)
+            self.assertTrue(is_compilation_forbidden())
+        self.assertEqual(stat.S_IMODE(os.stat(cache).st_mode), mode)
+
+    @parametrize("backend", ("eager", "inductor"))
+    def test_strict_load_serves_finalized_pair(self, backend):
+        pc = torch.compiler.precompile
+        fn = (
+            _no_compilation_single_graph
+            if backend == "eager"
+            else _no_compilation_inductor_graph
+        )
+        x = torch.ones(4)
+        with pc.capture_runtime():
+            source, cache = _capture_files(self, fn, [(x,)], backend=backend)
+            with open(cache, "rb") as f:
+                captured = torch.load(io.BytesIO(f.read()), weights_only=True)
+            pc.finalize_cache(artifact_path=source, cache_path=cache)
+            with open(cache, "rb") as f:
+                finalized = torch.load(io.BytesIO(f.read()), weights_only=True)
+            # An eager capture carries no artifact, and finalizing must keep it so.
+            self.assertEqual(
+                finalized["artifact"] is None, captured["artifact"] is None
+            )
+            self.assertEqual(finalized["artifact"] is None, backend == "eager")
+            runnable = pc.load(source, cache)
+            with torch.no_grad():
+                self.assertEqual(runnable(x), fn(x))
+
+    def test_finalize_rejects_inductor_capture_without_artifact(self):
+        pc = torch.compiler.precompile
+        source, cache = _capture_files(
+            self, _no_compilation_inductor_graph, [(torch.ones(4),)], backend="inductor"
+        )
+        _rewrite_envelope(cache, artifact=None)
+        with (
+            pc.capture_runtime(),
+            self.assertRaisesRegex(PrecompileError, "saved none") as failure,
+        ):
+            pc.finalize_cache(artifact_path=source, cache_path=cache)
+        self.assertIn(
+            f"(artifact_path={source!r}, cache_path={cache!r})", str(failure.exception)
+        )
+
+    @parametrize("operation", ("finalize_cache", "prepare_runtime"))
+    def test_runtime_cache_rejects_make_fx_capture(self, operation):
+        from pathlib import Path
+
+        pc = torch.compiler.precompile
+        source, cache = _capture_files(
+            self,
+            _no_compilation_single_graph,
+            [(torch.ones(4),)],
+            backend="eager",
+            tracer=MakeFxTracer(),
+        )
+        with (
+            pc.capture_runtime(),
+            self.assertRaisesRegex(
+                PrecompileError, "supports only Dynamo captures"
+            ) as failure,
+        ):
+            getattr(pc, operation)(artifact_path=Path(source), cache_path=Path(cache))
+        self.assertTrue(
+            str(failure.exception).startswith(
+                f"precompile.{operation} (artifact_path={source!r}, "
+                f"cache_path={cache!r})"
+            )
+        )
+
+    @parametrize("operation", ("finalize_cache", "prepare_runtime"))
+    @parametrize(
+        "damage", ("no_artifact", "no_cache", "corrupt", "format", "code_hash")
+    )
+    def test_runtime_cache_errors_name_operation_and_pair(self, operation, damage):
+        pc = torch.compiler.precompile
+        source, cache = _capture_files(
+            self, _no_compilation_single_graph, [(torch.ones(4),)], backend="eager"
+        )
+        if damage == "no_artifact":
+            os.remove(source)
+        elif damage == "no_cache":
+            os.remove(cache)
+        elif damage == "corrupt":
+            with open(cache, "r+b") as f:
+                f.truncate(20)
+        else:
+            _rewrite_envelope(cache, **{damage: "incompatible"})
+        with (
+            pc.capture_runtime(),
+            self.assertRaisesRegex(
+                PrecompileError, f"^precompile\\.{operation} "
+            ) as failure,
+        ):
+            getattr(pc, operation)(artifact_path=source, cache_path=cache)
+        self.assertIn(
+            f"(artifact_path={source!r}, cache_path={cache!r})", str(failure.exception)
+        )
+
+    def test_envelope_reader_parses_emitted_dynamo_header(self):
+        from torch._precompile import _read_runtime_cache_envelope
+
+        source, cache = _capture_files(
+            self, _no_compilation_single_graph, [(torch.ones(4),)], backend="eager"
+        )
+        blob = _read_runtime_cache_envelope(source, cache, "prepare_runtime")
+        self.assertEqual((blob["backend"], blob["tracer"]), ("eager", "dynamo"))
+
+    @parametrize(
+        "damage", ("none", "format", "version", "backend", "tracer", "code_hash")
+    )
+    def test_prepare_streams_and_verifies_before_hydration(self, damage):
+        import hashlib
+        from pathlib import Path
+
+        from torch._precompile import _CACHE_FORMAT, _CACHE_VERSION
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "artifact.py"
+            cache = Path(directory) / "artifact.cache"
+            code = (
+                'BACKEND = "eager"\nTRACER = "dynamo"\n'
+                + "# payload\n" * 200000
+                + "this is not valid Python ("
+            )
+            source.write_bytes(code.encode())
+            blob = {
+                "format": _CACHE_FORMAT,
+                "version": _CACHE_VERSION,
+                "backend": "eager",
+                "tracer": "dynamo",
+                "code_hash": hashlib.sha256(code.encode()).hexdigest(),
+                "artifact": b"runtime payload",
+            }
+            if damage != "none":
+                blob[damage] = "incompatible"
+            torch.save(blob, cache)
+            with (
+                mock.patch(
+                    "torch.compiler._runtime_cache.prepare_runtime_cache"
+                ) as hydrate,
+                mock.patch(
+                    "torch._precompile._parse_artifact_metadata",
+                    side_effect=AssertionError("parsed full program"),
+                ),
+                mock.patch(
+                    "torch._precompile._make_inlined_forward",
+                    side_effect=AssertionError("executed source"),
+                ),
+            ):
+                if damage == "none":
+                    torch.compiler.precompile.prepare_runtime(
+                        artifact_path=source, cache_path=cache
+                    )
+                    hydrate.assert_called_once_with(b"runtime payload")
+                else:
+                    with self.assertRaises(PrecompileError):
+                        torch.compiler.precompile.prepare_runtime(
+                            artifact_path=source, cache_path=cache
+                        )
+                    hydrate.assert_not_called()
+
     @unittest.skipUnless(TEST_CUDA and HAS_TRITON, "requires Triton")
     @parametrize("device", (0, None))
     @parametrize("explicit_cache", (False, True))
