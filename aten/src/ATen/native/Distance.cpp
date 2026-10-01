@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/OpMathType.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/native/Distance.h>
 #include <c10/util/accumulate.h>
@@ -77,14 +78,16 @@ Tensor _euclidean_dist(const Tensor& x1, const Tensor& x2) {
    * We divide it in two steps to simplify dealing with subgradients in the
    * backward step */
   // float16/bfloat16 squares and the padded product cancel in too few bits:
-  // identical rows then have a nonzero diagonal. Evaluate that product in
-  // float32 and cast back. float32 and float64 keep the original dtype.
+  // identical rows then have a nonzero diagonal. Evaluate that product in the
+  // op math type (float32 for reduced types) and cast back. float32 and
+  // float64 keep the original dtype.
   const auto out_dtype = at::result_type(x1, x2);
+  const auto compute_dtype = at::toOpMathType(out_dtype);
   Tensor a = x1;
   Tensor b = x2;
-  if (at::isReducedFloatingType(out_dtype)) {
-    a = x1.to(at::kFloat);
-    b = x2.to(at::kFloat);
+  if (compute_dtype != out_dtype) {
+    a = x1.to(compute_dtype);
+    b = x2.to(compute_dtype);
   }
   Tensor x1_norm = a.pow(2).sum(-1, true);
   Tensor x1_pad = at::ones_like(x1_norm, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
