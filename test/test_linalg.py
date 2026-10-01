@@ -5969,7 +5969,7 @@ class TestLinalg(TestCase):
 
         # low batch regime shapes
         bsl = (4, 8)
-        nsl = (259, 1027, 2033)
+        nsl = (259, 513, 1027)
 
         # high batch regime shapes
         bsh = (150, 550)
