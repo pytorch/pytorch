@@ -34,7 +34,7 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
 
 // Returns true only if the strides are contiguous for the sizes, false if they
 // are not or it is data dependent. Does not check numel.
-inline static bool _compute_contiguous_or_false(
+inline static bool _is_contiguous_or_false(
     ArrayRef<c10::SymInt> sizes,
     ArrayRef<c10::SymInt> strides) {
   // When calculating the expected stride, we can choose to multiply
@@ -82,7 +82,7 @@ inline static c10::SymBool _compute_contiguous_sym(
   // We try to minimize creating large symbolic expressions when not needed to
   // avoid symbolic evaluation perf issues.
   if (TORCH_GUARD_OR_FALSE(sym_eq(numel, 0)) ||
-      _compute_contiguous_or_false(sizes, strides)) {
+      _is_contiguous_or_false(sizes, strides)) {
     return c10::SymBool(true);
   }
 
@@ -134,7 +134,7 @@ bool _compute_channels_last_contiguous_2d(
 
 // When this function return True, result always true. When it return False,
 // result could be False or data dependent.
-inline static bool _compute_channels_last_contiguous_2d_or_false(
+inline static bool _is_channels_last_contiguous_2d_or_false(
     ArrayRef<c10::SymInt> sizes,
     ArrayRef<c10::SymInt> strides) {
   if (sizes.size() != 4) {
@@ -168,7 +168,7 @@ inline static c10::SymBool _compute_channels_last_contiguous_2d_sym(
     case 4: {
       // We try to minimize creating large symbolic expressions when not needed
       // to avoid symbolic evaluation perf issues.
-      if (_compute_channels_last_contiguous_2d_or_false(sizes, strides)) {
+      if (_is_channels_last_contiguous_2d_or_false(sizes, strides)) {
         return c10::SymBool(true);
       }
 
