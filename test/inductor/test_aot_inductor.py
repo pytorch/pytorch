@@ -8221,11 +8221,12 @@ class AOTInductorTestsTemplate:
         def mask(*bits):
             return torch.tensor(bits, dtype=torch.float, device=self.device)
 
+        model = Model()
+        example_inputs = (mask(1, 1, 0, 0), mask(1, 1, 1, 0))
         with config.patch(torch._inductor.lite_mode_options):
-            so_path = AOTIRunnerUtil.legacy_compile(
-                Model(), (mask(1, 1, 0, 0), mask(1, 1, 1, 0))
-            )
+            so_path = AOTIRunnerUtil.legacy_compile(model, example_inputs)
         compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
+        self.assertEqual(compiled(*example_inputs), model(*example_inputs))
         # Same sizes as the example, so only the relational assert can catch it.
         with self.assertRaisesRegex(RuntimeError, r"Expected u\d+ <= u\d+"):
             compiled(mask(1, 1, 1, 0), mask(1, 0, 0, 0))

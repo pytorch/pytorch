@@ -2541,6 +2541,12 @@ def selective_decompose(
     trace_joint_graph: bool,
 ) -> fx.GraphModule:
     """Retrace a joint graph module and selectively apply decomposition."""
+    from torch._guards import detect_fake_mode
+
+    # rebind_unbacked (in _SelectiveDecomposeInterpreter.run_node) requires that
+    # the retrace not hit fake tensor memos from the original trace.
+    if (fake_mode := detect_fake_mode(args)) is not None:
+        fake_mode.epoch += 1
 
     if trace_joint_graph:
         # the arg name, primals and tangents, are important.
