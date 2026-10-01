@@ -138,7 +138,7 @@ static PyObject* unpack_saved_variables(
           i < self->saved_variable_is_intermediate.size() &&
           self->saved_variable_is_intermediate[i] &&
           isDifferentiableType(unpacked_var.scalar_type())) {
-        auto error_node = c10::make_intrusive<Error>(
+        auto error_node = c10::make_intrusive<torch::autograd::Error>(
             "A custom autograd Function saved an intermediate tensor for backward and "
             "does not support double backward through that tensor. Either return the "
             "intermediate as an output of the Function, or mark the Function "

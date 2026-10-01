@@ -9318,32 +9318,34 @@ for shape in [(1,), ()]:
 
         x_e = torch.tensor(2.0, requires_grad=True)
         y_e = OnceDiff.apply(x_e)
-        g1_e = torch.autograd.grad(y_e, x_e, create_graph=True)[0]
+        go = torch.ones_like(y_e, requires_grad=True)
+        g1_e = torch.autograd.grad(y_e, x_e, grad_outputs=go, create_graph=True)[0]
         with self.assertRaisesRegex(
-            RuntimeError, "Trying to backward through the function which was already backwared"
+            RuntimeError,
+            "trying to differentiate twice a function that was marked with @once_differentiable",
         ):
-            torch.autograd.grad(g1_e, x_e)
+            g1_e.backward()
 
         # Case F: None and non-differentiable tensors handled without issue
         class SaveNonDiff(Function):
             @staticmethod
             def forward(ctx, x, mask):
                 ctx.save_for_backward(x, mask, None)
-                return x * mask.float()
+                return x * x * mask.float()
 
             @staticmethod
             def backward(ctx, grad_output):
                 x, mask, none_val = ctx.saved_tensors
-                assert none_val is None
-                return grad_output * mask.float(), None
+                self.assertIsNone(none_val)
+                return 2 * x * grad_output * mask.float(), None
 
         x_f = torch.tensor(2.0, requires_grad=True)
         mask = torch.tensor(1, dtype=torch.int64)
         y_f = SaveNonDiff.apply(x_f, mask)
         g1_f = torch.autograd.grad(y_f, x_f, create_graph=True)[0]
-        self.assertEqual(g1_f, 1.0)
+        self.assertEqual(g1_f, 4.0)
         g2_f = torch.autograd.grad(g1_f, x_f)[0]
-        self.assertEqual(g2_f, 0.0)
+        self.assertEqual(g2_f, 2.0)
 
         # Case G: setup_context pathway
         class SaveIntermediateSetupContext(Function):
@@ -9368,7 +9370,6 @@ for shape in [(1,), ()]:
         self.assertEqual(g1_g, expected_grad1)
         with self.assertRaisesRegex(RuntimeError, err_msg):
             torch.autograd.grad(g1_g, x_g)
-
 
     @unittest.skipIf(
         TEST_WITH_ASAN or IS_LINUX, "https://github.com/pytorch/pytorch/issues/180489"
