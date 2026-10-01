@@ -3763,7 +3763,14 @@ def _coalescing_manager(
     if device:
         group._start_coalescing(device)
     cm = _CoalescingManager()
-    yield cm
+    try:
+        yield cm
+    except BaseException:
+        _world.pg_coalesce_state.pop(group)
+        if device:
+            group._end_coalescing(device)
+        raise
+
     work = None
     op_list = _world.pg_coalesce_state.pop(group)
     if op_list:
@@ -3875,8 +3882,10 @@ def _time_estimator(
         )
     backend._start_time_estimate()
     cm = _TimeEstimator()
-    yield cm
-    cm.estimated_time = backend._end_time_estimate()
+    try:
+        yield cm
+    finally:
+        cm.estimated_time = backend._end_time_estimate()
 
 
 def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
