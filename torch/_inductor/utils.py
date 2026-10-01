@@ -5113,6 +5113,22 @@ def is_cudagraph_unsafe_fx_node(fx_node: torch.fx.Node) -> bool:
     return False
 
 
+def fx_node_crosses_devices(fx_node: torch.fx.Node) -> bool:
+    """
+    Check if an FX node reads or produces tensors on more than one device.
+
+    A CUDA graph cannot record such an op: whatever it touches on the other
+    device lives outside the graph's memory pool. Meta tensors have no storage
+    and are ignored.
+    """
+    devices: OrderedSet[torch.device] = OrderedSet()
+    for node in (*fx_node.all_input_nodes, fx_node):
+        for val in pytree.tree_leaves(node.meta.get("val")):
+            if isinstance(val, torch.Tensor) and val.device.type != "meta":
+                devices.add(val.device)
+    return len(devices) > 1
+
+
 def is_cudagraph_unsafe_op(node: Operation) -> bool:
     """
     Returns True if the node is an op that is not cudagraphable.
