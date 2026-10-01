@@ -5214,6 +5214,39 @@ for dtype in (torch.int32, torch.int64):
         with self.assertRaisesRegex(NotImplementedError, msg):
             torch.compile(fn, fullgraph=True)(a, b)
 
+    @parametrize(
+        "dtype", (torch.int8, torch.uint8, torch.int32, torch.int64, torch.float32)
+    )
+    def test_bmm_cpu_decompose_preserves_integer_output_dtype(self, dtype):
+        # The CPU mul+sum bmm decomposition must keep aten.bmm's output dtype
+        # for integer inputs instead of leaking L.sum_'s int64 promotion, and
+        # the final narrow must truncate like eager's wraparound accumulation
+        # rather than saturate.
+        if self.device != "cpu":
+            raise unittest.SkipTest("CPU-specific decomposition branch")
+
+        def fn(a, b):
+            return torch.bmm(a, b)
+
+        # M == 1: the 100 + 100 sum overflows int8, so eager (narrow-dtype
+        # wraparound accumulation) and inductor (int64 then to_dtype) only
+        # agree when the final cast truncates.
+        a = torch.full((1, 1, 2), 100, device=self.device, dtype=dtype)
+        b = torch.ones(1, 2, 2, device=self.device, dtype=dtype)
+        expected = fn(a, b)
+        actual, code = run_and_get_code(
+            torch.compile(fn, fullgraph=True, dynamic=False), a, b
+        )
+        self.assertEqual(actual.dtype, expected.dtype)
+        self.assertEqual(actual, expected)
+        # The decomposition must actually fire: no extern bmm in the output.
+        self.assertNotIn("extern_kernels.bmm", "\n".join(code))
+
+        # N == 1: the other half of the branch condition.
+        a2 = torch.ones(1, 2, 2, device=self.device, dtype=dtype)
+        b2 = torch.full((1, 2, 1), 100, device=self.device, dtype=dtype)
+        self.common(fn, (a2, b2))
+
     @skipIfPy312  # segfaults
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_mixed_mm(self):
@@ -8525,6 +8558,16 @@ for dtype in (torch.int32, torch.int64):
         y = torch.randn(20, 1024 * 1024)
         self.common(f, (x, y), atol=1e-3, rtol=1e-3)
 
+    def test_inplace_flip_after_index_put(self):
+        # After index_put_ has mutated x, the flip reads x under the name of
+        # the index_put_ output, which the copy back into x must not fuse with.
+        def f(x):
+            x.index_put_((torch.arange(x.size(0), device=x.device),), x * 2.0)
+            x.add_(x.flip(0))
+            return x
+
+        self.common(f, (torch.randn(20, 1024),))
+
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
             src_node_feat = node_feat[edge_index[0]]
@@ -11019,6 +11062,36 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(same(actual2, correct2))
         self.assertTrue(same(arg1, arg2))
         self.assertTrue(same(arg3, arg4))
+
+    def test_input_mutation_copy_of_input_mutated_later(self):
+        # A copy of an input that is mutated later in the graph must stay a real
+        # copy. remove_noop_ops replaced it by the input itself, so the copy into
+        # b read the *updated* a, directly or through a chain of views. This needs
+        # a's write-back copy_ to come first: a sorts first under
+        # canonicalize_output_graph_node_order and is also the first tensor used,
+        # so it is the first graph input either way.
+        def copy_slice(a, b):
+            b[0:, :] = a[0:, :]
+            a.add_(1)
+            return a
+
+        def copy_view_chain(a, b):
+            y = a.clone()
+            a.add_(1)
+            b.copy_(y.view(-1).view(3, 4))
+
+        for fn in (copy_slice, copy_view_chain):
+            for dynamic in (False, True):
+                torch._dynamo.reset()
+                a1 = torch.arange(12, dtype=torch.float32, device=self.device)
+                a1 = a1.view(3, 4)
+                b1 = torch.zeros(3, 4, device=self.device)
+                a2, b2 = a1.clone(), b1.clone()
+                correct = fn(a1, b1)
+                actual = torch.compile(fn, dynamic=dynamic)(a2, b2)
+                self.assertEqual(actual, correct)
+                self.assertEqual(a1, a2)
+                self.assertEqual(b1, b2)
 
     def test_input_mutation2(self):
         def fn(a):
@@ -14827,6 +14900,18 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, [torch.randn(1, 8, 396 * 300)])
 
+    def test_broadcast_symbolic_size_one_dynamic_shapes(self):
+        # y has symbolic size trunc(s0 / 300) which the shape env knows is 1.
+        # Broadcasting it against padded (size 1 + trunc(s0 / 300)) must zero
+        # its index like a literal size 1 dim would.
+        @torch.compile(dynamic=True)
+        def fn(x):
+            y = F.interpolate(x, scale_factor=1 / 300, mode="linear")
+            padded = F.pad(y, (1, 0))
+            return padded - y, padded > y
+
+        self.common(fn, [torch.arange(2 * 396, dtype=torch.float32).view(1, 2, 396)])
+
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     def test_pattern_matcher_unbacked(self):
         @torch.compile(fullgraph=True)
@@ -17779,6 +17864,28 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             same(ref_grad_list, act_grad_list, tol=1e-3),
             lambda msg: f"{msg}\nRef:\n{ref_grad_list}\nAct:\n{act_grad_list}",
         )
+
+    def test_weight_norm_1d_and_reduced_dtypes(self):
+        # https://github.com/pytorch/pytorch/issues/198676
+        def fn(v, g):
+            return torch._weight_norm(v, g, 0)
+
+        opt_fn = torch.compile(fn)
+        dtypes = [torch.float32, torch.float16, torch.bfloat16]
+        if is_mps_backend(self.device):
+            # MPS eager keeps the norm and the arithmetic in g.dtype
+            dtypes = [torch.float32]
+        for v_shape, g_shape in (((8,), (8,)), ((8, 5), (8, 1))):
+            for dtype in dtypes:
+                kw = {"device": self.device, "dtype": dtype}
+                v = torch.randn(v_shape, requires_grad=True, **kw)
+                g = torch.randn(g_shape, requires_grad=True, **kw)
+                grad_out = torch.randn(v_shape, **kw)
+                ref = fn(v, g)
+                ref_grad = torch.autograd.grad(ref, (v, g), grad_out)
+                act = opt_fn(v, g)
+                act_grad = torch.autograd.grad(act, (v, g), grad_out)
+                self.assertEqual((ref, ref_grad), (act, act_grad))
 
     def test_chunk_recompiles(self):
         def f(x):
