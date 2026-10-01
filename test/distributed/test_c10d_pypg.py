@@ -304,6 +304,22 @@ class TestPyProcessGroup(TestCase):
         pg._set_group_desc("desc")
         self.assertEqual(pg.group_desc, "py:desc")
 
+    def test_new_group_python_pg_with_bound_device(self):
+        # A custom backend that returns a Python ProcessGroup must not be
+        # eagerly connected when the default group has a bound device, since
+        # the returned group has no per-device backends.
+        dist.Backend.register_backend(
+            "bound_dummy",
+            lambda store, rank, size, timeout: dist.ProcessGroup(rank, size),
+        )
+        dist.init_process_group("gloo", store=dist.HashStore(), rank=0, world_size=1)
+        try:
+            _get_default_group().bound_device_id = torch.device("cpu", 0)
+            pg = dist.new_group(ranks=[0], backend="bound_dummy")
+            self.assertEqual(pg.size(), 1)
+        finally:
+            dist.destroy_process_group()
+
     def test_store_constructor(self):
         store = dist.HashStore()
         store.set("test_key", "test_value")
