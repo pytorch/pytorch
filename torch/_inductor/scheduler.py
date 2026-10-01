@@ -3738,15 +3738,18 @@ def _prune_redundant_deps(
         is_self_dep = name_to_fused_node[op_name] == node
         return is_redundant or is_self_dep
 
-    recorded_deps = OrderedSet[WeakDep]()
+    recorded_deps: OrderedSet[Dep] = OrderedSet()
     node_leaves = OrderedSet(node.get_nodes())
     for dep in node.unmet_dependencies:
         if isinstance(dep, WeakDep) and should_prune(dep):
             mutating_buf = name_to_buf.get(dep.mutating_buf)
-            mutating_node = None if mutating_buf is None else mutating_buf.defining_op
-            if mutating_node in node_leaves:
-                mutating_node._pruned_weak_deps.add(dep)
-                recorded_deps.add(dep)
+            if mutating_buf is None or mutating_buf.defining_op is None:
+                continue
+            mutating_node = mutating_buf.defining_op
+            if mutating_node not in node_leaves:
+                continue
+            mutating_node._pruned_weak_deps.add(dep)
+            recorded_deps.add(dep)
 
     if recorded_deps:
         node.set_read_writes(node.read_writes.remove_reads(recorded_deps))
