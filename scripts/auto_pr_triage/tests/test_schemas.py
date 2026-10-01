@@ -10,27 +10,23 @@ from schemas import (
     ActionPlan,
     AdditionalOwnerConcern,
     AddLabels,
-    BOT_CLOSED_COMMENT_TEMPLATE,
     BypassIntakeMatch,
-    CLOSE_ACTIONS,
-    ClosePullRequest,
     IntakeFacts,
     json_schema,
     LLMInput,
     LLMResult,
     MAX_ADDITIONAL_OWNERS,
     MAX_CODEPATH_OWNERS,
+    MISSING_ACTIONABLE_ISSUE_ACTIONS,
     OwnerMetadata,
     OwnershipResult,
     passes_intake,
     PathGroup,
     PlannerInput,
-    PostComment,
     PullRequestIdentity,
     RequestReviewers,
     RESULT_SCHEMA,
     ReviewerSnapshot,
-    RoundRobinCursor,
 )
 from tests.stage_fixtures import (
     additional_owner_concern,
@@ -188,14 +184,11 @@ class PullRequestIdentityTest(unittest.TestCase):
 
 class LLMInputTest(unittest.TestCase):
     def test_codepath_artifact_covers_every_changed_path(self) -> None:
-        prepared = llm_input(
-            team_rosters={"internal": ["@owner"]},
-            codepath_owners=["@owner", "@pytorch/team", "internal"],
-        )
+        prepared = llm_input(codepath_owners=["@owner", "@pytorch/team"])
 
         codepath = prepared.trusted_context.codepath_owners
 
-        owners = ("@owner", "@pytorch/team", "internal")
+        owners = ("@owner", "@pytorch/team")
         self.assertEqual(codepath.owners, owners)
         self.assertEqual(codepath.matched_path_groups, (PathGroup(owners, (0,)),))
         self.assertEqual(codepath.files_without_owners, ())
@@ -230,17 +223,6 @@ class LLMInputTest(unittest.TestCase):
         serialized["trusted_context"]["codepath_owners"]["owners"].insert(0, "@extra")
 
         with self.assertRaisesRegex(RuntimeError, "do not match path groups"):
-            LLMInput.from_dict(serialized)
-
-    def test_internal_codepath_owner_requires_metadata(self) -> None:
-        serialized = llm_input().to_dict()
-        codepath = serialized["trusted_context"]["codepath_owners"]
-        codepath["owners"] = ["missing"]
-        codepath["matched_path_groups"][0]["owners"] = ["missing"]
-
-        with self.assertRaisesRegex(
-            RuntimeError, "absent from extra ownership metadata"
-        ):
             LLMInput.from_dict(serialized)
 
     def test_llm_input_round_trip_preserves_analysis_artifacts(self) -> None:
@@ -395,14 +377,11 @@ class OwnershipResultTest(unittest.TestCase):
             codepath_owners={
                 "@pytorch/Zeta": ["torch/b.py", "torch/a.py"],
                 "@alice": ["torch/a.py"],
-                "internal": ["torch/a.py"],
             },
             additional_owner_concerns=concerns("zeta", "alpha"),
         )
 
-        self.assertEqual(
-            tuple(result.codepath_owners), ("@alice", "@pytorch/Zeta", "internal")
-        )
+        self.assertEqual(tuple(result.codepath_owners), ("@alice", "@pytorch/Zeta"))
         self.assertEqual(
             result.codepath_owners["@pytorch/Zeta"], ("torch/a.py", "torch/b.py")
         )
@@ -476,6 +455,7 @@ class OwnershipResultTest(unittest.TestCase):
         low = replace(additional_owner_concern("owner"), confidence="low")
         cases = [
             (owners("not.valid"), (), "invalid codepath owner"),
+            (owners("autograd"), (), "invalid codepath owner"),
             (owners("@bob", "@Alice"), (), "codepath owners are not canonical"),
             (owners("@Alice", "@alice"), (), "codepath owners are not canonical"),
             ({"@alice": ()}, (), "codepath owner has no files"),
@@ -483,7 +463,6 @@ class OwnershipResultTest(unittest.TestCase):
             ({}, concerns("@owner"), "invalid additional owner"),
             ({}, concerns("zeta", "alpha"), "additional owners are not canonical"),
             ({}, concerns("alpha", "alpha"), "additional owners are not canonical"),
-            (owners("owner"), concerns("owner"), "repeats a codepath owner"),
             ({}, (low,), "low-confidence owner"),
         ]
         for codepath, additional, message in cases:
@@ -554,10 +533,9 @@ class ActionPlanTest(unittest.TestCase):
             ({"labels": ("owner: compiler",)}, "label outside its decision"),
             ({"labels": ("bot-closed",)}, "label outside its decision"),
             ({"supporter_reviewers": ("stranger",)}, "unverified supporter"),
-            ({"codepath_owners": ("@other/team",)}, "foreign codepath owner team"),
-            ({"codepath_teams": ("compiler",)}, "team outside codepath owners"),
             ({"roster_reviewers": ("zed", "alice")}, "not canonical logins"),
-            ({"decision": "close"}, "closes an admitted PR"),
+            ({"decision": "missing_actionable_issue"}, "marks an admitted PR"),
+            ({"decision": "close"}, "unknown decision"),
             ({"run_attempt": 0}, "invalid run attempt"),
             (
                 {
@@ -565,10 +543,9 @@ class ActionPlanTest(unittest.TestCase):
                     "run_attempt": 2,
                     "codepath_owners": (),
                     "additional_owners": (),
-                    "decision": "close",
-                    "labels": ("bot-closed",),
+                    "decision": "missing_actionable_issue",
                 },
-                "closes on a rerun",
+                "marks a PR on a rerun",
             ),
             (
                 {"facts": intake_facts(is_already_handled=True)},
@@ -593,10 +570,9 @@ class ActionPlanTest(unittest.TestCase):
                 {
                     "codepath_owners": (),
                     "bypass_intake_matches": ("autograd",),
-                    "decision": "close",
-                    "labels": ("bot-closed",),
+                    "decision": "missing_actionable_issue",
                 },
-                "closes an admitted PR",
+                "marks an admitted PR",
             ),
             ({}, "routes a PR that was not admitted"),
             (
@@ -608,7 +584,7 @@ class ActionPlanTest(unittest.TestCase):
                 "routes a PR that was not admitted",
             ),
             (
-                {"decision": "routed_untriaged", "labels": ("owner: autograd",)},
+                {"decision": "routed_untriaged", "labels": ()},
                 "routes a PR that was not admitted",
             ),
         )
@@ -625,8 +601,7 @@ class ActionPlanTest(unittest.TestCase):
             {
                 "codepath_owners": (),
                 "additional_owners": (),
-                "decision": "close",
-                "labels": ("bot-closed",),
+                "decision": "missing_actionable_issue",
             },
             {"bypass_intake_matches": ("autograd",), "roster_reviewers": ("alice",)},
         )
@@ -638,8 +613,8 @@ class ActionPlanTest(unittest.TestCase):
     def test_actions_must_follow_the_fixed_order_and_shapes(self) -> None:
         fails_intake = intake_facts(has_actionable_linked_issue=False)
         labels = AddLabels(("triaged", "bot-triaged"))
-        owners = RequestReviewers(("alice",), (), "owner_roster")
-        supporter = RequestReviewers(("alice",), (), "supporter")
+        owners = RequestReviewers(("alice",), "owner_roster")
+        supporter = RequestReviewers(("alice",), "supporter")
         with_alice = intake_facts(supporters=("alice",))
         many = tuple(sorted(f"user{index:02d}" for index in range(16)))
         cases = (
@@ -648,15 +623,10 @@ class ActionPlanTest(unittest.TestCase):
                     "facts": fails_intake,
                     "codepath_owners": (),
                     "additional_owners": (),
-                    "decision": "close",
-                    "actions": CLOSE_ACTIONS[:2],
+                    "decision": "missing_actionable_issue",
+                    "actions": (labels,),
                 },
-                "not the fixed sequence",
-            ),
-            ({"actions": (ClosePullRequest(), labels)}, "without a close"),
-            (
-                {"actions": (PostComment(BOT_CLOSED_COMMENT_TEMPLATE),)},
-                "without a close",
+                "not the fixed set",
             ),
             ({"actions": (labels, owners)}, "request reviewers, then add labels"),
             ({"actions": (labels, labels)}, "request reviewers, then add labels"),
@@ -664,26 +634,15 @@ class ActionPlanTest(unittest.TestCase):
             ({"facts": with_alice, "actions": (owners, supporter)}, "unordered"),
             ({"facts": with_alice, "actions": (supporter, owners)}, "reviewer twice"),
             (
-                {"actions": (RequestReviewers(("bob",), (), "actionable_labeler"),)},
+                {"actions": (RequestReviewers(("bob",), "actionable_labeler"),)},
                 "unverified actionable_labeler",
             ),
             (
-                {"actions": (RequestReviewers(("bob",), (), "codepath_owner"),)},
-                "unverified codepath_owner",
-            ),
-            (
-                {
-                    "facts": with_alice,
-                    "actions": (RequestReviewers(("alice",), ("team",), "supporter"),),
-                },
-                "team outside codepath owners",
-            ),
-            (
-                {"actions": (RequestReviewers((), (), "owner_roster"),)},
+                {"actions": (RequestReviewers((), "owner_roster"),)},
                 "not canonical logins",
             ),
             (
-                {"actions": (RequestReviewers(many, (), "owner_roster"),)},
+                {"actions": (RequestReviewers(many, "owner_roster"),)},
                 "review request limit",
             ),
         )
@@ -696,21 +655,33 @@ class ActionPlanTest(unittest.TestCase):
 
     def test_action_kind_is_fixed_per_record(self) -> None:
         for build in (
-            lambda: ClosePullRequest(kind="comment"),
             lambda: AddLabels(("triaged",), kind="close"),
-            lambda: RequestReviewers(("alice",), (), "owner_roster", kind="add_labels"),
-            lambda: PostComment(BOT_CLOSED_COMMENT_TEMPLATE, kind="close"),
+            lambda: RequestReviewers(("alice",), "owner_roster", kind="add_labels"),
         ):
             with self.assertRaisesRegex(RuntimeError, "wrong kind"):
                 build()
 
+    def test_plans_cannot_close_or_comment(self) -> None:
+        plan = self.plan(
+            facts=intake_facts(has_actionable_linked_issue=False),
+            codepath_owners=(),
+            additional_owners=(),
+            decision="missing_actionable_issue",
+        )
+        for action in ({"kind": "close"}, {"kind": "comment", "template": "x"}):
+            with (
+                self.subTest(kind=action["kind"]),
+                self.assertRaisesRegex(RuntimeError, "does not match"),
+            ):
+                ActionPlan.from_dict({**plan.to_dict(), "actions": [action]})
+
     def test_request_reason_must_be_known(self) -> None:
-        for reason in ("handoff", "owners", "friends"):
+        for reason in ("handoff", "codepath_owner", "friends"):
             with (
                 self.subTest(reason=reason),
                 self.assertRaisesRegex(RuntimeError, "reason"),
             ):
-                RequestReviewers(("alice",), (), reason)
+                RequestReviewers(("alice",), reason)
 
     def test_json_round_trip_decodes_each_action_by_kind(self) -> None:
         routed = self.plan(
@@ -718,15 +689,16 @@ class ActionPlanTest(unittest.TestCase):
             supporter_reviewers=("alice",),
             roster_reviewers=("bob",),
         )
-        closed = self.plan(
+        marked = self.plan(
             facts=intake_facts(has_actionable_linked_issue=False),
             codepath_owners=(),
             additional_owners=(),
-            decision="close",
+            decision="missing_actionable_issue",
         )
+        self.assertEqual(marked.actions, MISSING_ACTIONABLE_ISSUE_ACTIONS)
         for plan, kinds in (
             (routed, [RequestReviewers, RequestReviewers, AddLabels]),
-            (closed, [ClosePullRequest, AddLabels, PostComment]),
+            (marked, [AddLabels]),
         ):
             with self.subTest(decision=plan.decision):
                 restored = ActionPlan.from_json(plan.to_json())
@@ -771,28 +743,23 @@ class OwnerMetadataTest(unittest.TestCase):
 
 
 class ReviewerSnapshotTest(unittest.TestCase):
-    def test_json_round_trip_keeps_rosters_and_cursors(self) -> None:
+    def test_json_round_trip_keeps_rosters(self) -> None:
         snapshot = ReviewerSnapshot(
-            existing_labels=("triaged", "owner: autograd"),
-            missing_labels=("owner: nn",),
-            native_codeowner_requests=None,
+            existing_labels=("triaged",),
+            missing_labels=("bot-closed",),
             requested_reviewers=("@alice",),
             submitted_reviewers=(),
             rosters={"autograd": ("@first", "@second")},
-            round_robin={"autograd": RoundRobinCursor(7, "@first")},
-            errors={"native_codeowner_requests": "RuntimeError: unavailable"},
+            errors={"rosters": "RuntimeError: unavailable"},
         )
 
         self.assertEqual(ReviewerSnapshot.from_json(snapshot.to_json()), snapshot)
 
     def test_rejects_malformed_snapshots(self) -> None:
-        empty = ReviewerSnapshot((), (), None, None, None, None, None, {})
+        empty = ReviewerSnapshot((), (), None, None, None, {})
         cases = (
             ({**empty.to_dict(), "extra": 1}, "extra"),
-            (
-                {**empty.to_dict(), "round_robin": {"autograd": {}}},
-                "prior_pull_request",
-            ),
+            ({**empty.to_dict(), "round_robin": {}}, "round_robin"),
         )
         for value, message in cases:
             with (
@@ -804,15 +771,10 @@ class ReviewerSnapshotTest(unittest.TestCase):
 
 class PlannerInputTest(unittest.TestCase):
     def test_rejects_inconsistent_stage_results(self) -> None:
-        empty = ReviewerSnapshot((), (), None, None, None, None, None, {})
+        empty = ReviewerSnapshot((), (), None, None, None, {})
         active = intake_result()
         cases = (
             (make_ownership_result(llm_run_status="skipped"), 1, "intake decision"),
-            (
-                make_ownership_result(codepath_owners=["@other/team"]),
-                1,
-                "foreign codepath owner team",
-            ),
             (make_ownership_result(), 0, "invalid run attempt"),
         )
         for ownership, run_attempt, message in cases:
@@ -823,7 +785,7 @@ class PlannerInputTest(unittest.TestCase):
                 PlannerInput(active, ownership, empty, run_attempt)
 
     def test_json_round_trip(self) -> None:
-        empty = ReviewerSnapshot((), (), None, None, None, None, None, {})
+        empty = ReviewerSnapshot((), (), None, None, None, {})
         value = PlannerInput(intake_result(), make_ownership_result(), empty, 2)
 
         self.assertEqual(PlannerInput.from_json(value.to_json()), value)

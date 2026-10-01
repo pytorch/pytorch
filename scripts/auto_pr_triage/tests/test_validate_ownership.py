@@ -981,21 +981,6 @@ class ValidationTest(unittest.TestCase):
             ),
         )
 
-    def test_validation_rejects_an_additional_codepath_owner(self) -> None:
-        prepared = llm_input(
-            team_rosters={"owner": ["@owner"]},
-            codepath_owners=["owner"],
-        )
-
-        errors = validate(
-            prepared=prepared, result=llm_result(additional_owners=["owner"])
-        )
-
-        self.assertEqual(
-            errors,
-            ["additional owners repeat codepath owners: ['owner']"],
-        )
-
 
 if __name__ == "__main__":
     unittest.main()

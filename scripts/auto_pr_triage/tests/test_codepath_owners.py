@@ -16,7 +16,6 @@ from codepath_owners import (
     resolve_paths,
     resolve_rule,
 )
-from identifiers import owner_label
 from trusted_config import (
     CODEPATH_OWNERS_PATH,
     load_codepath_owners,
@@ -200,7 +199,7 @@ class PolicyLoadingTest(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         root = Path(directory.name)
         path = root / CODEPATH_OWNERS_PATH
-        path.parent.mkdir(parents=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
         return load_codepath_owners(
             repository_root=root, repo="pytorch/pytorch", ref=COMMIT_SHA
@@ -214,32 +213,19 @@ class PolicyLoadingTest(unittest.TestCase):
             snapshot["source"],
             {
                 "repository": "pytorch/pytorch",
-                "path": ".github/auto-pr-triage/codepath_owners.txt",
+                "path": "CODEOWNERS",
                 "ref": COMMIT_SHA,
                 "blob_sha": hashlib.sha1(header + content).hexdigest(),
             },
         )
         self.assertEqual(snapshot["rules"][0]["owners"], ["@root-owner"])
 
-    def test_codepath_policy_matches_native_codeowners(self) -> None:
+    def test_checked_in_codeowners_loads(self) -> None:
         repository_root = Path(__file__).resolve().parents[3]
-        native = (repository_root / "CODEOWNERS").read_bytes()
-        policy_path = repository_root / ".github/auto-pr-triage/codepath_owners.txt"
-        policy = policy_path.read_bytes()
-
-        self.assertEqual(policy, native)
         snapshot = load_codepath_owners(
             repository_root=repository_root, repo="pytorch/ciforge", ref=COMMIT_SHA
         )
-        rules = snapshot["rules"]
-        self.assertTrue(rules)
-        self.assertTrue(
-            all(
-                rule["owners"]
-                and all(owner.startswith("@") for owner in rule["owners"])
-                for rule in rules
-            )
-        )
+        self.assertTrue(snapshot["rules"])
 
     def test_normalizes_and_deduplicates_github_handle_casing(self) -> None:
         snapshot = self.load(
@@ -276,21 +262,18 @@ class PolicyLoadingTest(unittest.TestCase):
         self.assertNotIn("rules", artifact)
         self.assertNotIn("parse_diagnostics", artifact)
 
-    def test_accepts_team_owner_ids(self) -> None:
-        snapshot = self.load(b"/torch/ compiler\n")
-        artifact = resolve_for_llm(paths=["torch/a.py"], snapshot=snapshot)
-
-        self.assertEqual(artifact["owners"], ["compiler"])
+    def test_skips_team_owner_ids(self) -> None:
+        snapshot = self.load(b"* @root-owner\n/torch/ compiler\n")
         self.assertEqual(
-            artifact["matched_path_groups"],
-            [{"owners": ["compiler"], "paths": ["torch/a.py"]}],
+            [rule["owners"] for rule in snapshot["rules"]], [["@root-owner"]]
         )
+        self.assertEqual(snapshot["parse_diagnostics"][0]["line"], 2)
 
     def test_rejects_oversize_invalid_utf8_and_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             path = root / CODEPATH_OWNERS_PATH
-            path.parent.mkdir(parents=True)
+            path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"x" * (MAX_CODEPATH_OWNERS_BYTES + 1))
             with self.assertRaisesRegex(RuntimeError, "size is invalid"):
                 load_codepath_owners(
@@ -310,15 +293,12 @@ class PolicyLoadingTest(unittest.TestCase):
                     repository_root=root, repo="pytorch/pytorch", ref=COMMIT_SHA
                 )
 
-    def test_rejects_foreign_teams_but_preserves_target_org_teams(self) -> None:
+    def test_preserves_teams(self) -> None:
         snapshot = self.load(b"* @person @pytorch/compiler\n")
         self.assertEqual(
             snapshot["rules"][0]["owners"],
             ["@person", "@pytorch/compiler"],
         )
-
-        with self.assertRaisesRegex(RuntimeError, "outside the target"):
-            self.load(b"* @other/compiler\n")
 
     def test_email_is_not_a_valid_owner_handle(self) -> None:
         with self.assertRaisesRegex(ValueError, "codepath owner"):
@@ -332,17 +312,15 @@ class PolicyLoadingTest(unittest.TestCase):
             ):
                 parse_rules(contents=f"* {owner}\n", strict=True)
 
-    def test_policy_loader_rejects_invalid_rules(self) -> None:
-        with self.assertRaisesRegex(ValueError, "codepath owner"):
-            self.load(b"* invalid.owner\n")
-
-
-class OwnerLabelTest(unittest.TestCase):
-    def test_owner_labels_are_derived_and_bounded(self) -> None:
-        self.assertEqual(owner_label("compiler"), "owner: compiler")
-        for owner_id in ("Compiler", "a" * 44):
-            with self.subTest(owner_id=owner_id), self.assertRaises(ValueError):
-                owner_label(owner_id)
+    def test_loader_skips_invalid_lines_like_github(self) -> None:
+        snapshot = self.load(
+            b"* @root-owner\n/docs/ person@example.com\n/a/ @a-owner\n"
+        )
+        self.assertEqual(
+            [rule["owners"] for rule in snapshot["rules"]],
+            [["@root-owner"], ["@a-owner"]],
+        )
+        self.assertEqual([d["line"] for d in snapshot["parse_diagnostics"]], [2])
 
 
 class CommandLineTest(unittest.TestCase):

@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from codepath_owners import parse_rules
-from identifiers import owner_label, TEAM_OWNER_ID_RE, USER_HANDLE_RE
+from identifiers import TEAM_OWNER_ID_RE, USER_HANDLE_RE
 
 
-CODEPATH_OWNERS_PATH = ".github/auto-pr-triage/codepath_owners.txt"
+CODEPATH_OWNERS_PATH = "CODEOWNERS"
 EXTRA_OWNERSHIP_METADATA_PATH = ".github/auto-pr-triage/extra_ownership_metadata.json"
 TEAM_MEMBERS_PATH = ".github/auto-pr-triage/team_members.json"
 MAX_CODEPATH_OWNERS_BYTES = 3_000_000
@@ -78,7 +78,12 @@ def _decode_document(*, text: str, path: str) -> dict[str, Any]:
 def load_codepath_owners(
     *, repository_root: Path, repo: str, ref: str
 ) -> dict[str, Any]:
-    """Load and strictly parse the codepath-owner rules."""
+    """Load the repository's CODEOWNERS rules, skipping lines the parser rejects.
+
+    GitHub skips invalid CODEOWNERS lines and applies the rest, so this does too
+    (for example an email owner, which GitHub accepts but cannot be mapped to a
+    login); the skipped lines are returned as parse_diagnostics.
+    """
 
     text, source = _load_document(
         repository_root=repository_root,
@@ -89,19 +94,8 @@ def load_codepath_owners(
     )
     diagnostics: list[dict[str, Any]] = []
     rules = parse_rules(
-        contents=text, blob_sha=source["blob_sha"], diagnostics=diagnostics, strict=True
+        contents=text, blob_sha=source["blob_sha"], diagnostics=diagnostics
     )
-    target_org = repo.split("/", 1)[0].casefold()
-    for rule in rules:
-        for owner in rule["owners"]:
-            if (
-                owner.startswith("@")
-                and "/" in owner
-                and owner[1:].split("/", 1)[0].casefold() != target_org
-            ):
-                raise RuntimeError(
-                    "codepath-owner policy names a team outside the target organization"
-                )
     return {"source": source, "rules": rules, "parse_diagnostics": diagnostics}
 
 
@@ -157,12 +151,8 @@ def load_team_members(*, repository_root: Path, repo: str, ref: str) -> dict[str
         raise RuntimeError("team member rosters are invalid")
     canonical_members: dict[str, str] = {}
     for owner_id, roster in rosters.items():
-        try:
-            owner_label(owner_id)
-        except ValueError as exc:
-            raise RuntimeError(
-                "team_members.json has an invalid team owner ID"
-            ) from exc
+        if not TEAM_OWNER_ID_RE.fullmatch(owner_id):
+            raise RuntimeError("team_members.json has an invalid team owner ID")
         if not isinstance(roster, list) or not roster:
             raise RuntimeError("team reviewer roster is invalid")
         seen_roster: set[str] = set()

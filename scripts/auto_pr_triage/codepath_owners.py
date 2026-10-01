@@ -138,11 +138,7 @@ def parse_rule(*, raw: str, line_number: int) -> dict[str, Any]:
         raise ValueError(
             f"invalid codepath owner {invalid_owner!r} on line {line_number}"
         )
-    owners = list(
-        dict.fromkeys(
-            owner.casefold() if owner.startswith("@") else owner for owner in raw_owners
-        )
-    )
+    owners = list(dict.fromkeys(owner.casefold() for owner in raw_owners))
     return {
         "line": line_number,
         "pattern": pattern,

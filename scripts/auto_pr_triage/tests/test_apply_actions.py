@@ -10,16 +10,9 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from apply_actions import (
-    apply_action_plan,
-    ApplyOutcome,
-    BOT_CLOSED_COMMENT,
-    GitHubClient,
-    main,
-)
+from apply_actions import apply_action_plan, ApplyOutcome, GitHubClient, main
 from schemas import ActionPlan
 from tests.plan_fixtures import (
-    close_args,
     configured,
     FakeGitHub,
     mutations,
@@ -27,7 +20,8 @@ from tests.plan_fixtures import (
     plan_pr,
     REPOSITORY,
     run_args,
-    run_close,
+    run_unadmitted,
+    unadmitted_args,
 )
 from tests.stage_fixtures import make_action_plan
 
@@ -46,16 +40,16 @@ class GitHubClientTest(unittest.TestCase):
     def test_client_sends_mutation_payload_through_stdin(self) -> None:
         github = GitHubClient()
         completed = subprocess.CompletedProcess(
-            args=[], returncode=0, stdout='{"state":"closed"}', stderr=""
+            args=[], returncode=0, stdout='[{"name":"triaged"}]', stderr=""
         )
         with mock.patch("apply_actions.subprocess.run", return_value=completed) as run:
             self.assertEqual(
                 github.json(
-                    "repos/pytorch/ciforge/pulls/123",
-                    method="PATCH",
-                    payload={"state": "closed"},
+                    "repos/pytorch/ciforge/issues/123/labels",
+                    method="POST",
+                    payload={"labels": ["triaged"]},
                 ),
-                {"state": "closed"},
+                [{"name": "triaged"}],
             )
         run.assert_called_once()
         self.assertEqual(
@@ -63,65 +57,57 @@ class GitHubClientTest(unittest.TestCase):
             [
                 "gh",
                 "api",
-                "repos/pytorch/ciforge/pulls/123",
+                "repos/pytorch/ciforge/issues/123/labels",
                 "--method",
-                "PATCH",
+                "POST",
                 "--input",
                 "-",
             ],
         )
-        self.assertEqual(run.call_args.kwargs["input"], '{"state":"closed"}')
+        self.assertEqual(run.call_args.kwargs["input"], '{"labels":["triaged"]}')
 
 
-class CloseDecisionTest(unittest.TestCase):
-    def test_clean_unprotected_policy_close_pr_closes(self) -> None:
+class MissingActionableIssueTest(unittest.TestCase):
+    def test_unadmitted_pr_gets_the_missing_issue_labels(self) -> None:
         github = FakeGitHub(labels=["open source"])
 
-        result = run_close(github)
+        result = run_unadmitted(github)
 
-        self.assertEqual(result, ApplyOutcome("closed"))
+        self.assertEqual(result, ApplyOutcome("missing_actionable_issue"))
         self.assertEqual(
             mutations(github),
             [
                 (
-                    "PATCH",
-                    "repos/pytorch/ciforge/pulls/123",
-                    {"state": "closed"},
-                ),
-                (
                     "POST",
                     "repos/pytorch/ciforge/issues/123/labels",
-                    {"labels": ["bot-closed"]},
-                ),
-                (
-                    "POST",
-                    "repos/pytorch/ciforge/issues/123/comments",
-                    {"body": BOT_CLOSED_COMMENT},
+                    {"labels": ["triaged", "bot-triaged", "missing actionable issue"]},
                 ),
             ],
         )
+        self.assertEqual(github.pr["state"], "open")
         self.assertEqual(github.live_reads, [])
 
     def test_missing_actionable_issue_on_retry_is_a_noop(self) -> None:
         github = FakeGitHub(labels=["open source"])
 
-        self.assertEqual(run_close(github, run_attempt=2), ApplyOutcome("kept_open"))
+        self.assertEqual(
+            run_unadmitted(github, run_attempt=2), ApplyOutcome("kept_open")
+        )
         self.assertEqual(mutations(github), [])
 
     def test_apply_rejects_plan_from_an_earlier_attempt(self) -> None:
         github = FakeGitHub(labels=["open source"])
-        args = close_args()
+        args = unadmitted_args()
         args.action_plan_json = plan_pr(args=args, github=github).to_json()
         args.run_attempt = 2
 
         with self.assertRaisesRegex(ValueError, "from attempt 1; rerun all jobs"):
             apply_action_plan(args=args, github=github)
         self.assertEqual(mutations(github), [])
-        self.assertEqual(github.pr["state"], "open")
 
-    def test_close_does_not_refetch_triage_facts_or_pr_state(self) -> None:
+    def test_labels_do_not_refetch_triage_facts_or_pr_state(self) -> None:
         github = FakeGitHub(
-            labels=["triaged", "bot-triaged", "bot-closed"],
+            labels=["triaged", "bot-triaged"],
             actionable_issue=True,
             author_has_triage_permission=True,
             requested_users=["soulitzer"],
@@ -131,19 +117,23 @@ class CloseDecisionTest(unittest.TestCase):
         github.pr["head"]["sha"] = "c" * 40
         github.pr["base"]["ref"] = "release"
 
-        self.assertEqual(run_close(github), ApplyOutcome("closed"))
+        self.assertEqual(
+            run_unadmitted(github), ApplyOutcome("missing_actionable_issue")
+        )
         self.assertEqual(github.live_reads, [])
         self.assertEqual(github.pr_fetches, 0)
         self.assertEqual(github.actionable_checks, 0)
         self.assertEqual(github.permission_checks, 0)
 
-    def test_missing_bot_closed_label_prevents_writes(self) -> None:
-        github = FakeGitHub(labels=["open source"], unavailable_labels=["bot-closed"])
+    def test_missing_label_prevents_writes(self) -> None:
+        github = FakeGitHub(
+            labels=["open source"], unavailable_labels=["missing actionable issue"]
+        )
         with self.assertRaisesRegex(RuntimeError, "required repository label"):
-            run_close(github)
+            run_unadmitted(github)
         self.assertEqual(mutations(github), [])
 
-    def test_close_timeout_reports_ambiguous_state(self) -> None:
+    def test_label_timeout_reports_ambiguous_state(self) -> None:
         class TimeoutGitHub(FakeGitHub):
             def json(
                 self,
@@ -152,58 +142,13 @@ class CloseDecisionTest(unittest.TestCase):
                 method: str = "GET",
                 payload: dict[str, Any] | None = None,
             ) -> Any:
-                if endpoint.endswith("/pulls/123") and method == "PATCH":
+                if endpoint.endswith("/issues/123/labels") and method == "POST":
                     raise subprocess.TimeoutExpired("gh api", 60)
                 return super().json(endpoint, method=method, payload=payload)
 
         github = TimeoutGitHub(labels=["open source"])
-        with self.assertRaisesRegex(RuntimeError, "close request failed"):
-            run_close(github)
-        self.assertFalse(any(call[0] == "POST" for call in github.calls))
-
-    def test_unconfirmed_close_response_reports_ambiguous_state(self) -> None:
-        class UnconfirmedGitHub(FakeGitHub):
-            def json(
-                self,
-                endpoint: str,
-                *,
-                method: str = "GET",
-                payload: dict[str, Any] | None = None,
-            ) -> Any:
-                response = super().json(endpoint, method=method, payload=payload)
-                if endpoint.endswith("/pulls/123") and method == "PATCH":
-                    response["state"] = "open"
-                return response
-
-        github = UnconfirmedGitHub(labels=["open source"])
-        with self.assertRaisesRegex(RuntimeError, "not confirmed"):
-            run_close(github)
-        self.assertFalse(any(call[0] == "POST" for call in github.calls))
-
-    def test_annotation_failures_are_reported_after_confirmed_close(self) -> None:
-        class AnnotationFailureGitHub(FakeGitHub):
-            def json(
-                self,
-                endpoint: str,
-                *,
-                method: str = "GET",
-                payload: dict[str, Any] | None = None,
-            ) -> Any:
-                if method == "POST" and (
-                    endpoint.endswith("/labels") or endpoint.endswith("/comments")
-                ):
-                    self.calls.append((method, endpoint, payload))
-                    raise RuntimeError("annotation failure")
-                return super().json(endpoint, method=method, payload=payload)
-
-        github = AnnotationFailureGitHub(labels=["open source"])
-        with self.assertRaises(RuntimeError) as context:
-            run_close(github)
-        detail = str(context.exception)
-        self.assertIn("closed, but annotations were incomplete", detail)
-        self.assertIn("label request failed", detail)
-        self.assertIn("comment failed", detail)
-        self.assertEqual(github.pr["state"], "closed")
+        with self.assertRaisesRegex(RuntimeError, "label request failed"):
+            run_unadmitted(github)
 
 
 class PlanExecutionBoundTest(unittest.TestCase):
@@ -224,19 +169,16 @@ class PlanExecutionBoundTest(unittest.TestCase):
             apply_action_plan(args=args, github=github)
         self.assertEqual(github.calls, [])
 
-    def test_apply_accepts_roster_member_and_direct_codepath_owner(self) -> None:
+    def test_apply_accepts_roster_member(self) -> None:
         github = FakeGitHub()
-        plan = self.plan(
-            codepath_reviewers=("codepath-owner",), roster_reviewers=("soulitzer",)
-        )
+        plan = self.plan(roster_reviewers=("soulitzer",))
         args = run_args(action_plan_json=plan.to_json())
 
         with configured():
             outcome = apply_action_plan(args=args, github=github)
 
-        self.assertEqual(outcome, ApplyOutcome("triaged", 2, 1))
-        self.assertEqual(mutations(github)[0][2], {"reviewers": ["codepath-owner"]})
-        self.assertEqual(mutations(github)[1][2], {"reviewers": ["soulitzer"]})
+        self.assertEqual(outcome, ApplyOutcome("triaged", 1))
+        self.assertEqual(mutations(github)[0][2], {"reviewers": ["soulitzer"]})
 
     def test_apply_rejects_a_codepath_owner_requested_from_a_roster(self) -> None:
         plan = self.plan(roster_reviewers=("codepath-owner",))
@@ -260,7 +202,7 @@ class PlanExecutionBoundTest(unittest.TestCase):
         with configured():
             outcome = apply_action_plan(args=args, github=github)
 
-        self.assertEqual(outcome, ApplyOutcome("triaged", 1, 1))
+        self.assertEqual(outcome, ApplyOutcome("triaged", 1))
         requested = "repos/pytorch/ciforge/pulls/123/requested_reviewers"
         self.assertEqual(
             mutations(github),
@@ -270,7 +212,7 @@ class PlanExecutionBoundTest(unittest.TestCase):
                 (
                     "POST",
                     "repos/pytorch/ciforge/issues/123/labels",
-                    {"labels": ["triaged", "bot-triaged", "owner: autograd"]},
+                    {"labels": ["triaged", "bot-triaged"]},
                 ),
             ],
         )
@@ -323,15 +265,18 @@ class PlanExecutionBoundTest(unittest.TestCase):
 class ApplyMainTest(unittest.TestCase):
     def test_main_reports_each_apply_status(self) -> None:
         cases = (
-            (ApplyOutcome("triaged", 2, 1, 3), "3 teams; applied 1 owner labels"),
+            (ApplyOutcome("triaged", 2), "requested 2 owner reviewers"),
             (
-                ApplyOutcome("incomplete", 2, 1, 3),
+                ApplyOutcome("incomplete", 2),
                 "Applied incomplete Auto PR Triage",
             ),
-            (ApplyOutcome("closed"), "Closed pytorch/ciforge#123"),
+            (
+                ApplyOutcome("missing_actionable_issue"),
+                "Labeled pytorch/ciforge#123 as missing an actionable issue",
+            ),
             (ApplyOutcome("kept_open"), "did not qualify for an apply action"),
             (
-                ApplyOutcome("routed_untriaged", 2, 1, 3),
+                ApplyOutcome("routed_untriaged", 2),
                 "Applied partial Auto PR Triage",
             ),
         )

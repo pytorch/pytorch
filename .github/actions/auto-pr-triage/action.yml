@@ -18,7 +18,7 @@ inputs:
     description: Stable directory for analysis and diagnostic artifacts
     required: true
   run-attempt:
-    description: Workflow run attempt; only the first attempt may close
+    description: Workflow run attempt; only the first attempt may mark a PR as missing an actionable issue
     required: true
 outputs:
   action-plan-json:

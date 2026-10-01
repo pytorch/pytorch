@@ -45,11 +45,11 @@ class GateFactTest(unittest.TestCase):
             "triaged",
             "bot-triaged",
             "bot-triage-error",
-            "bot-closed",
         ):
             with self.subTest(label=label):
                 self.assertTrue(is_already_handled([{"name": label}]))
         for label in (
+            "bot-closed",
             "bot-shadow-close",
             "bot-shadow-triaged",
             "bot-codeowners-shadow-match",
