@@ -468,9 +468,6 @@ cmake_dependent_option(USE_ITT "Use Intel(R) VTune Profiler ITT functionality"
 cmake_dependent_option(
   USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, AArch64, ppc64le and riscv64."
   "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER OR CPU_RISCV" OFF)
-cmake_dependent_option(
-  USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
-  "USE_MKLDNN AND CPU_AARCH64" OFF)
 option(USE_STATIC_MKL "Prefer to link with MKL statically (Unix only)" OFF)
 cmake_dependent_option(
   USE_MPI "Use MPI for Caffe2. Only available if USE_DISTRIBUTED is on." ON

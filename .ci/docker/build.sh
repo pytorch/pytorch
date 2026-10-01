@@ -322,7 +322,6 @@ case "$tag" in
   pytorch-linux-jammy-aarch64-py3.11-gcc13)
     ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=13
-    ACL=yes
     OPENBLAS=yes
     ;;
   pytorch-linux-jammy-aarch64-cuda13.0-cudnn9-py3.11-gcc13)
@@ -352,7 +351,6 @@ case "$tag" in
   pytorch-linux-jammy-aarch64-py3.11-gcc13-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=13
-    ACL=yes
     OPENBLAS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
@@ -483,7 +481,6 @@ build_image() {
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "XPU_DRIVER_TYPE=${XPU_DRIVER_TYPE}" \
        --build-arg "OMIX_VERSION=${OMIX_VERSION}" \
-       --build-arg "ACL=${ACL:-}" \
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
