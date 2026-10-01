@@ -92,6 +92,35 @@ def make_inputs_non_leaves(inps):
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
+class TestConditionalEffects(TestCase):
+    def test_conditional_effect_registration(self):
+        with torch.library._scoped_library("_conditional_effect", "FRAGMENT") as lib:
+            lib.define("call(Tensor x, bool ordered=False) -> Tensor")
+            op = torch.ops._conditional_effect.call.default
+            handle = _register_effectful_op(
+                op,
+                _EffectType.ORDERED,
+                predicate=lambda args, kwargs: kwargs.get(
+                    "ordered", args[1] if len(args) > 1 else False
+                ),
+            )
+            try:
+                x = torch.ones(1)
+                self.assertEqual(_get_effect(op), _EffectType.ORDERED)
+                self.assertIsNone(_get_effect(op, (x,), {}))
+                self.assertIsNone(_get_effect(op, (x, False), {}))
+                self.assertEqual(_get_effect(op, (x, True), {}), _EffectType.ORDERED)
+                self.assertEqual(
+                    _get_effect(op, (x,), {"ordered": True}), _EffectType.ORDERED
+                )
+            finally:
+                handle.destroy()
+            self.assertIsNone(_get_effect(op, (x, True), {}))
+
+    hw_classification = HardwareClassification.GENERIC
+
+
+@unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestWithEffects(TestCase):
     hw_classification = HardwareClassification.GENERIC
 

@@ -135,12 +135,6 @@ all_reduce(...)
 """
 
 
-def _call_collective(name, *args, config=None):
-    if config is None:
-        return getattr(torch.ops._c10d_functional, name)(*args)
-    return getattr(torch.ops._c10d_functional, name + "_config")(*args, config)
-
-
 def wait_tensor(tensor):
     """
     Wait on a tensor returned by the collectives ops.
@@ -204,8 +198,7 @@ def all_reduce(
     """
     group = _resolve_group(group, tag)
     reduce_op = reduceOp.lower() if isinstance(reduceOp, str) else reduceOp
-    tensor = _call_collective(
-        "all_reduce",
+    tensor = torch.ops._c10d_functional.all_reduce(
         self,
         reduce_op,
         _group_or_group_name(group),
@@ -244,8 +237,7 @@ def all_gather_single(
     # non-negative gather_dim.
     if gather_dim < 0:
         gather_dim += self.dim()
-    tensor = _call_collective(
-        "all_gather_into_tensor",
+    tensor = torch.ops._c10d_functional.all_gather_into_tensor(
         self,
         group_size,
         _group_or_group_name(group),
@@ -320,8 +312,7 @@ def reduce_scatter_single(
     if scatter_dim != 0:
         self = _chunk_or_narrow_cat(self, group_size, narrow_dim=scatter_dim, cat_dim=0)
 
-    tensor = _call_collective(
-        "reduce_scatter_tensor",
+    tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
         self,
         reduceOp.lower(),
         group_size,
@@ -641,8 +632,7 @@ def all_to_all_single(
             )
         output_split_sizes = [self.shape[0] // group_size] * group_size
         input_split_sizes = output_split_sizes
-    tensor = _call_collective(
-        "all_to_all_single",
+    tensor = torch.ops._c10d_functional.all_to_all_single(
         self,
         output_split_sizes,
         input_split_sizes,
@@ -773,8 +763,7 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
             f"all_reduce backward only supports `sum`, `premul_sum`, `avg`, `max`, `min` reductions, got '{reduce_op}'"
         )
     grad_reduce_op = "sum" if _is_min_max(reduce_op) else reduce_op
-    output = _call_collective(
-        "all_reduce",
+    output = torch.ops._c10d_functional.all_reduce(
         grad_output.contiguous(),
         grad_reduce_op,
         group_name,
@@ -793,8 +782,7 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
         # then cast back to the grad dtype.
         mask = _min_max_extremum_mask(fwd_input, fwd_output)
         tie_count = wait_tensor(
-            _call_collective(
-                "all_reduce",
+            torch.ops._c10d_functional.all_reduce(
                 mask.to(torch.float32),
                 "sum",
                 group_name,
@@ -803,7 +791,7 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
         )
         scaled = (output / tie_count).to(output.dtype)
         output = torch.ops.aten.where.ScalarOther(mask, scaled, 0)
-    return output, None, None
+    return (output,) + (None,) * (ctx.num_inputs - 1)
 
 
 def all_reduce_setup_context(ctx, inputs, output):
@@ -814,7 +802,9 @@ def all_reduce_setup_context(ctx, inputs, output):
         inputs: Tuple of (input, reduce_op, group_name)
         output: Output from forward pass
     """
-    input, reduce_op, group_name = inputs
+    input, reduce_op, group_name, *config_args = inputs
+    ctx.config = config_args[0] if config_args else None
+    ctx.num_inputs = len(inputs)
     ctx.group_name = group_name
     ctx.reduce_op = reduce_op.lower() if isinstance(reduce_op, str) else reduce_op
     if _is_min_max(ctx.reduce_op):
@@ -847,15 +837,14 @@ def all_gather_into_tensor_backward(ctx, grad_output: torch.Tensor):
     group_size = ctx.group_size
 
     # Backward is reduce_scatter with sum
-    output = _call_collective(
-        "reduce_scatter_tensor",
+    output = torch.ops._c10d_functional.reduce_scatter_tensor(
         grad_output.contiguous(),
         "sum",
         group_size,
         group_name,
         config=getattr(ctx, "config", None),
     )
-    return wait_tensor(output), None, None
+    return (wait_tensor(output),) + (None,) * (ctx.num_inputs - 1)
 
 
 def all_gather_into_tensor_setup_context(ctx, inputs, output):
@@ -867,7 +856,9 @@ def all_gather_into_tensor_setup_context(ctx, inputs, output):
         inputs: Tuple of (input, group_size, group_name)
         output: Output from forward pass
     """
-    input, group_size, group_name = inputs
+    input, group_size, group_name, *config_args = inputs
+    ctx.config = config_args[0] if config_args else None
+    ctx.num_inputs = len(inputs)
     ctx.group_name = group_name
     ctx.group_size = group_size
 
@@ -905,14 +896,13 @@ def reduce_scatter_tensor_backward(ctx, grad_output: torch.Tensor):
         )
 
     # Backward is all_gather
-    output = _call_collective(
-        "all_gather_into_tensor",
+    output = torch.ops._c10d_functional.all_gather_into_tensor(
         grad_output.contiguous(),
         group_size,
         group_name,
         config=getattr(ctx, "config", None),
     )
-    return wait_tensor(output), None, None, None
+    return (wait_tensor(output),) + (None,) * (ctx.num_inputs - 1)
 
 
 def reduce_scatter_tensor_setup_context(ctx, inputs, output):
@@ -924,7 +914,9 @@ def reduce_scatter_tensor_setup_context(ctx, inputs, output):
         inputs: Tuple of (input, reduce_op, group_size, group_name)
         output: Output from forward pass
     """
-    input, reduce_op, group_size, group_name = inputs
+    input, reduce_op, group_size, group_name, *config_args = inputs
+    ctx.config = config_args[0] if config_args else None
+    ctx.num_inputs = len(inputs)
     ctx.group_name = group_name
     ctx.group_size = group_size
     ctx.reduce_op = reduce_op.lower()
@@ -956,15 +948,14 @@ def all_to_all_single_backward(ctx, grad_output: torch.Tensor):
     input_split_sizes = ctx.input_split_sizes
 
     # Backward is all_to_all with reversed split sizes
-    output = _call_collective(
-        "all_to_all_single",
+    output = torch.ops._c10d_functional.all_to_all_single(
         grad_output.contiguous(),
         input_split_sizes,  # Reversed
         output_split_sizes,  # Reversed
         group_name,
         config=getattr(ctx, "config", None),
     )
-    return wait_tensor(output), None, None, None
+    return (wait_tensor(output),) + (None,) * (ctx.num_inputs - 1)
 
 
 def all_to_all_single_setup_context(ctx, inputs, output):
@@ -976,7 +967,9 @@ def all_to_all_single_setup_context(ctx, inputs, output):
         inputs: Tuple of (input, output_split_sizes, input_split_sizes, group_name)
         output: Output from forward pass
     """
-    input, output_split_sizes, input_split_sizes, group_name = inputs
+    input, output_split_sizes, input_split_sizes, group_name, *config_args = inputs
+    ctx.config = config_args[0] if config_args else None
+    ctx.num_inputs = len(inputs)
     ctx.group_name = group_name
     ctx.output_split_sizes = output_split_sizes
     ctx.input_split_sizes = input_split_sizes
@@ -1728,7 +1721,7 @@ def _all_gather_into_tensor_out_native_meta(input, group_size, group_name, *, ou
     return _make_all_gather_out_tensor(input, group_size)
 
 
-def _all_gather_into_tensor_native_meta(input, group_size, group_name):
+def _all_gather_into_tensor_native_meta(input, group_size, group_name, config=None):
     return _make_all_gather_out_tensor(input, group_size)
 
 
@@ -1739,7 +1732,9 @@ def _all_gather_into_tensor_coalesced_native_meta(inputs, group_size, group_name
     ]
 
 
-def _reduce_scatter_tensor_native_meta(inp, reduce_op, group_size, group_name):
+def _reduce_scatter_tensor_native_meta(
+    inp, reduce_op, group_size, group_name, config=None
+):
     shape = list(inp.size())
     shape[0] //= group_size
     return inp.new_empty(shape)
@@ -1809,46 +1804,29 @@ lib_impl_autograd.impl(
 lib_impl_autograd.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
 
 
-def _register_config_collective(name, fake, backward, setup):
-    op = getattr(torch.ops._c10d_functional, name + "_config").default
-
-    def config_fake(*args):
-        return fake(*args[:-1])
-
-    def config_setup(ctx, inputs, output):
-        setup(ctx, inputs[:-1], output)
-        ctx.config = inputs[-1]
-
-    def config_backward(ctx, grad):
-        return (*backward(ctx, grad), None)
-
-    torch.library.register_fake(op, config_fake)
-    torch.library.register_autograd(op, config_backward, setup_context=config_setup)
-    torch.library._register_effectful_op(op, torch.library.EffectType.ORDERED)
-    torch.fx.node.has_side_effect(op)
+# Configured collectives must survive DCE and retain enqueue order. Leave
+# ordinary collectives on their existing optimization path.
+from torch._higher_order_ops.effects import _register_effectful_op
 
 
-_register_config_collective(
-    "all_reduce", _all_reduce_meta, all_reduce_backward, all_reduce_setup_context
-)
-_register_config_collective(
+def _has_functional_config(args, kwargs):
+    return kwargs.get("config") is not None or bool(args and isinstance(args[-1], dict))
+
+
+_config_effect_handles = []
+for _name in (
+    "all_reduce",
     "all_gather_into_tensor",
-    _all_gather_into_tensor_native_meta,
-    all_gather_into_tensor_backward,
-    all_gather_into_tensor_setup_context,
-)
-_register_config_collective(
     "reduce_scatter_tensor",
-    _reduce_scatter_tensor_native_meta,
-    reduce_scatter_tensor_backward,
-    reduce_scatter_tensor_setup_context,
-)
-_register_config_collective(
     "all_to_all_single",
-    _all_to_all_single_meta,
-    all_to_all_single_backward,
-    all_to_all_single_setup_context,
-)
+):
+    _op = getattr(torch.ops._c10d_functional, _name).default
+    _config_effect_handles.append(
+        _register_effectful_op(
+            _op, torch.library.EffectType.ORDERED, predicate=_has_functional_config
+        )
+    )
+    torch.fx.node.has_side_effect(_op)
 
 
 def _raw_collective_config(func, args, kwargs):

@@ -258,7 +258,8 @@ Vendor integer and string options are supported; raw-pointer options require a
 runtime binding and cannot be traced. Use these Python APIs rather than raw
 `torch.ops.c10d` calls with a non-`None` config.
 
-Configured graphs use separate functional operators with ordered effects.
+Functional operators accept an optional `config=None` argument. Configured calls
+have ordered effects, and compiler transformations preserve their configuration.
 Their runtime kernels establish completion on the calling stream before
 returning, so they do not currently support communication/computation overlap.
 The existing no-config operators and eager asynchronous behavior are unchanged.

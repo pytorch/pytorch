@@ -26,6 +26,29 @@ from torch.testing._internal.common_utils import (
 
 @instantiate_parametrized_tests
 class FunctionalCollectiveConfigTest(TestCase):
+    def test_optional_config_schemas(self):
+        for name in (
+            "all_reduce",
+            "all_gather_into_tensor",
+            "reduce_scatter_tensor",
+            "all_to_all_single",
+        ):
+            op = getattr(torch.ops._c10d_functional, name).default
+            argument = op._schema.arguments[-1]
+            self.assertEqual(argument.name, "config")
+            self.assertTrue(argument.has_default_value())
+            self.assertIsNone(argument.default_value)
+            self.assertFalse(hasattr(torch.ops._c10d_functional, name + "_config"))
+            from torch._inductor.utils import has_collective_config
+
+            graph = torch.fx.Graph()
+            args = (None,) * (len(op._schema.arguments) - 1)
+            for config in (None, {}, {"min_ctas": 2}):
+                positional = graph.call_function(op, (*args, config))
+                keyword = graph.call_function(op, args, {"config": config})
+                self.assertEqual(has_collective_config(positional), config is not None)
+                self.assertEqual(has_collective_config(keyword), config is not None)
+
     @contextmanager
     def _backend(self, device="cpu", supports_config=True):
         backend_type = ConfigRecordingBackend if supports_config else RecordingBackend
@@ -68,7 +91,7 @@ class FunctionalCollectiveConfigTest(TestCase):
             "vendor_0_option_id": 8,
             "vendor_0_str_value": "value",
         }
-        op = getattr(torch.ops._c10d_functional, name + "_config")
+        op = getattr(torch.ops._c10d_functional, name)
         args = {
             "all_reduce": ("sum",),
             "all_gather_into_tensor": (1,),
@@ -105,7 +128,7 @@ class FunctionalCollectiveConfigTest(TestCase):
     def test_order_and_unused_collective(self, reverse, device):
         with self._backend(device) as (backend, group):
             group_name = group.group_name
-            op = torch.ops._c10d_functional.all_reduce_config
+            op = torch.ops._c10d_functional.all_reduce
 
             def fn(x):
                 first = op(x, "sum", group_name, {"user_profiler_tag": 1})
@@ -134,7 +157,7 @@ class FunctionalCollectiveConfigTest(TestCase):
             with self.assertRaisesRegex(
                 RuntimeError, "does not support per-collective configuration"
             ):
-                torch.ops._c10d_functional.all_reduce_config(
+                torch.ops._c10d_functional.all_reduce(
                     torch.ones(4), "sum", group.group_name, {"min_ctas": 1}
                 )
             self.assertEqual(backend.calls, [])
@@ -184,7 +207,7 @@ class FunctionalCollectiveConfigTest(TestCase):
             config = {"min_ctas": 2}
             group_name = group.group_name
 
-            op = getattr(torch.ops._c10d_functional, name + "_config")
+            op = getattr(torch.ops._c10d_functional, name)
             args = {
                 "all_reduce": ("sum",),
                 "all_gather_into_tensor": (1,),
