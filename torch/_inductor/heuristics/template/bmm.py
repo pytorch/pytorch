@@ -97,9 +97,15 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             "B_BROADCAST_BATCH": int(mat2.get_stride()[0]) == 0,
             "FLATTEN_OUTPUT": flatten_output,
             "tma_store": tma_store,
+            # The grid needs the logical problem, not the flattened output size.
+            "call_sizes": (batch, m, n),
         }
         use_meta_ws = meta_ws_enabled()
         for candidate in self.bmm_configs:
+            # A flattened output has no batch boundary, so an M tail tile would
+            # overwrite the leading rows of the next batch.
+            if flatten_output and m % candidate.block_m != 0:
+                continue
             two_ctas = use_meta_ws and candidate.two_ctas
             if two_ctas and not is_blackwell_bmm_2cta_compatible(
                 output_batch_rows=m,
