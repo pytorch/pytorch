@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable
 from unittest.mock import patch
 
 import torch._dynamo
@@ -26,6 +27,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
@@ -2046,8 +2048,30 @@ instantiate_device_type_tests(
 class TestManualOverlapSchedulingUnit(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
-    def test_move_overlap_nodes_repairs_multistage_collective_chain(self):
+    @staticmethod
+    def _wait_for(graph: fx.Graph, start: fx.Node) -> fx.Node:
+        return next(
+            node
+            for node in graph.find_nodes(
+                op="call_function",
+                target=torch.ops._c10d_functional.wait_tensor.default,
+            )
+            if node.args[0] is start
+        )
+
+    @staticmethod
+    def _count_stable_sorts(fn: Callable[[], None]) -> int:
         from torch._dynamo import graph_deduplication
+
+        with patch.object(
+            graph_deduplication,
+            "_stable_topological_sort",
+            wraps=graph_deduplication._stable_topological_sort,
+        ) as stable_sort:
+            fn()
+        return stable_sort.call_count
+
+    def test_move_overlap_nodes_repairs_multistage_collective_chain(self):
         from torch._inductor.fx_passes.overlap_manual_scheduling import (
             _move_overlap_nodes,
         )
@@ -2078,12 +2102,8 @@ class TestManualOverlapSchedulingUnit(TestCase):
             op="call_function",
             target=torch.ops._c10d_functional.all_reduce.default,
         )[0]
-        waits = traced.graph.find_nodes(
-            op="call_function",
-            target=torch.ops._c10d_functional.wait_tensor.default,
-        )
-        wait0 = next(node for node in waits if node.args[0] is rs0)
-        ar_wait0 = next(node for node in waits if node.args[0] is ar0)
+        wait0 = self._wait_for(traced.graph, rs0)
+        ar_wait0 = self._wait_for(traced.graph, ar0)
         consumer = traced.graph.find_nodes(
             op="call_function", target=torch.ops.aten.add.Tensor
         )[0]
@@ -2091,17 +2111,16 @@ class TestManualOverlapSchedulingUnit(TestCase):
         initial_positions = {node: i for i, node in enumerate(traced.graph.nodes)}
         self.assertLess(initial_positions[consumer], initial_positions[rs1])
 
-        with patch.object(
-            graph_deduplication,
-            "_stable_topological_sort",
-            wraps=graph_deduplication._stable_topological_sort,
-        ) as stable_sort:
-            _move_overlap_nodes(
-                traced.graph,
-                {wait0: OrderedSet([rs1])},
-                {rs1: "bucketed_reduce_scatter"},
-            )
-        self.assertEqual(stable_sort.call_count, 1)
+        self.assertEqual(
+            self._count_stable_sorts(
+                lambda: _move_overlap_nodes(
+                    traced.graph,
+                    {wait0: OrderedSet([rs1])},
+                    {rs1: "bucketed_reduce_scatter"},
+                )
+            ),
+            1,
+        )
         traced.graph.lint()
 
         positions = {node: i for i, node in enumerate(traced.graph.nodes)}
@@ -2111,7 +2130,6 @@ class TestManualOverlapSchedulingUnit(TestCase):
         self.assertLess(positions[ar_wait0], positions[consumer])
 
     def test_move_overlap_nodes_preserves_ordinary_moves(self):
-        from torch._dynamo import graph_deduplication
         from torch._inductor.fx_passes.overlap_manual_scheduling import (
             _move_overlap_nodes,
         )
@@ -2127,11 +2145,13 @@ class TestManualOverlapSchedulingUnit(TestCase):
         def all_gather_func(input0, input1):
             all_gather = torch.ops._c10d_functional.all_gather_into_tensor
             wait = torch.ops._c10d_functional.wait_tensor
-            wait0 = wait(all_gather(input0, 2, "shard_pg"))
-            wait0_user = -wait0
+            ag0 = all_gather(input0, 2, "shard_pg")
             input1 = -input1
+            input1_user = input1 + input0
+            wait0 = wait(ag0)
+            wait0_user = -wait0
             wait1 = wait(all_gather(input1, 2, "shard_pg"))
-            return wait0_user, wait1
+            return input1_user, wait0_user, wait1
 
         with FakeTensorMode():
             inputs = [torch.ones(8, 4) for _ in range(2)]
@@ -2142,61 +2162,90 @@ class TestManualOverlapSchedulingUnit(TestCase):
             op="call_function",
             target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
         )
-        rs_wait0 = next(
-            node
-            for node in rs_graph.find_nodes(
-                op="call_function",
-                target=torch.ops._c10d_functional.wait_tensor.default,
-            )
-            if node.args[0] is rs0
-        )
+        rs_wait0 = self._wait_for(rs_graph, rs0)
         rs_wait0_user = next(iter(rs_wait0.users))
-        with patch.object(
-            graph_deduplication,
-            "_stable_topological_sort",
-            wraps=graph_deduplication._stable_topological_sort,
-        ) as stable_sort:
-            _move_overlap_nodes(
+        stable_sort_count = self._count_stable_sorts(
+            lambda: _move_overlap_nodes(
                 rs_graph,
                 {rs_wait0: OrderedSet([rs1])},
                 {rs1: "bucketed_reduce_scatter"},
             )
+        )
         rs_graph.lint()
         rs_positions = {node: i for i, node in enumerate(rs_graph.nodes)}
         self.assertLess(rs_positions[rs1], rs_positions[rs_wait0])
         self.assertLess(rs_positions[rs_wait0], rs_positions[rs_wait0_user])
-        self.assertEqual(stable_sort.call_count, 0)
+        self.assertEqual(stable_sort_count, 0)
 
         ag0, ag1 = ag_graph.find_nodes(
             op="call_function",
             target=torch.ops._c10d_functional.all_gather_into_tensor.default,
         )
-        ag_wait0 = next(
-            node
-            for node in ag_graph.find_nodes(
-                op="call_function",
-                target=torch.ops._c10d_functional.wait_tensor.default,
-            )
-            if node.args[0] is ag0
-        )
+        ag_wait0 = self._wait_for(ag_graph, ag0)
         ag1_input = ag1.args[0]
         if not isinstance(ag1_input, fx.Node):
             raise AssertionError(f"expected Node input, got {type(ag1_input)}")
-        with patch.object(
-            graph_deduplication,
-            "_stable_topological_sort",
-            wraps=graph_deduplication._stable_topological_sort,
-        ) as stable_sort:
-            _move_overlap_nodes(
+        ag1_input_user = next(user for user in ag1_input.users if user is not ag1)
+        initial_positions = {node: i for i, node in enumerate(ag_graph.nodes)}
+        self.assertLess(initial_positions[ag1_input_user], initial_positions[ag_wait0])
+        self.assertLess(initial_positions[ag_wait0], initial_positions[ag1])
+        stable_sort_count = self._count_stable_sorts(
+            lambda: _move_overlap_nodes(
                 ag_graph,
                 {ag_wait0: OrderedSet([ag1])},
                 {ag1: "bucketed_all_gather"},
             )
-        self.assertEqual(stable_sort.call_count, 0)
+        )
+        self.assertEqual(stable_sort_count, 0)
         ag_graph.lint()
         ag_positions = {node: i for i, node in enumerate(ag_graph.nodes)}
         self.assertLess(ag_positions[ag1_input], ag_positions[ag1])
+        self.assertLess(ag_positions[ag1_input_user], ag_positions[ag1])
         self.assertLess(ag_positions[ag1], ag_positions[ag_wait0])
+
+    def test_bucket_wait_user_repair_skips_sort_when_ordered(self):
+        from torch._inductor.fx_passes.overlap_manual_scheduling import (
+            ManualOverlapPreservingBucketer,
+        )
+        from torch._inductor.fx_passes.overlap_scheduling import CollectiveInfo
+
+        def func(a, b):
+            all_reduce = torch.ops._c10d_functional.all_reduce
+            wait = torch.ops._c10d_functional.wait_tensor
+            first = wait(all_reduce(a, "sum", "pg"))
+            second = wait(all_reduce(b, "sum", "pg"))
+            return first + second
+
+        with FakeTensorMode():
+            traced = make_fx(func)(torch.ones(4), torch.ones(4))
+
+        collective_info = {}
+        for wait in traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.wait_tensor.default,
+        ):
+            start = wait.args[0]
+            if isinstance(start, fx.Node):
+                collective_info[start] = CollectiveInfo(start, wait, 0, 0, 0)
+
+        bucketer = ManualOverlapPreservingBucketer(
+            traced.graph, collective_info, OrderedSet(traced.graph.nodes)
+        )
+        stable_sort_count = self._count_stable_sorts(
+            lambda: bucketer.manual_bucket_collectives(list(traced.graph.nodes))
+        )
+
+        self.assertEqual(stable_sort_count, 0)
+        self.assertEqual(
+            len(
+                traced.graph.find_nodes(
+                    op="call_function",
+                    target=torch.ops._c10d_functional.all_reduce.default,
+                )
+            ),
+            1,
+        )
+        traced.graph.lint()
 
     def _run_reordered_hsdp_manual_bucketing(self, dependent: bool) -> fx.Graph:
         from torch._inductor.fx_passes.overlap_manual_scheduling import (
@@ -2231,13 +2280,6 @@ class TestManualOverlapSchedulingUnit(TestCase):
                 node.op == "call_function" and node.target == torch.ops.aten.neg.default
             ):
                 node.meta["manual_scope"] = "other"
-        final_all_reduce = list(
-            traced.graph.find_nodes(
-                op="call_function",
-                target=torch.ops._c10d_functional.all_reduce.default,
-            )
-        )[-1]
-        final_all_reduce.meta["custom"] = {"expected_final": True}
 
         def module_stack(node):
             scope = node.meta.get("manual_scope")
@@ -2274,21 +2316,21 @@ class TestManualOverlapSchedulingUnit(TestCase):
             2,
         )
 
-        output = next(node for node in graph.nodes if node.op == "output")
-        final_waits = [
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        rs0, rs1 = graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+        rs_wait0 = next(
             node
             for node in graph.find_nodes(
                 op="call_function",
                 target=torch.ops._c10d_functional.wait_tensor.default,
             )
-            if node.meta.get("custom", {}).get("expected_final")
-        ]
-        from torch._inductor.fx_passes.utils import BitsetAncestors
-
-        self.assertEqual(len(final_waits), 1)
-        self.assertTrue(
-            BitsetAncestors(list(graph.nodes)).is_ancestor(final_waits[0], output)
+            if node.args[0] is rs0
         )
+        self.assertTrue(BitsetAncestors(list(graph.nodes)).is_ancestor(rs_wait0, rs1))
 
     def test_manual_bucketing_still_fuses_independent_hsdp_chains(self):
         graph = self._run_reordered_hsdp_manual_bucketing(dependent=False)
@@ -2358,7 +2400,6 @@ class TestManualOverlapSchedulingUnit(TestCase):
         from torch._inductor.fx_passes.overlap_manual_scheduling import (
             _BucketPlanReachability,
         )
-        from torch._inductor.fx_passes.utils import BitsetAncestors
 
         graph = fx.Graph()
         root = graph.placeholder("root")
@@ -2388,23 +2429,22 @@ class TestManualOverlapSchedulingUnit(TestCase):
             start_c1,
             target,
         ]
-        reachability = _BucketPlanReachability(
-            BitsetAncestors(graph_nodes), graph_nodes, endpoints
-        )
+        reachability = _BucketPlanReachability(graph_nodes, endpoints)
         reachability.merge_starts([start_a0, start_a1])
         reachability.merge_starts([start_b0, start_b1])
 
         target_idx = reachability.endpoint_to_idx[target]
-        ancestors = reachability._get_ancestor_bits(target_idx)
+        ancestors = reachability.ancestor_bits(target_idx)
         self.assertTrue(ancestors & (1 << reachability.endpoint_to_idx[predecessor_a]))
         self.assertTrue(ancestors & (1 << reachability.endpoint_to_idx[predecessor_b]))
         self.assertFalse(ancestors & (1 << reachability.endpoint_to_idx[predecessor_c]))
 
         reachability.merge_starts([start_c0, start_c1])
-        ancestors = reachability._get_ancestor_bits(target_idx)
+        ancestors = reachability.ancestor_bits(target_idx)
         self.assertTrue(ancestors & (1 << reachability.endpoint_to_idx[predecessor_c]))
 
-    def test_manual_bucket_plan_accounts_for_earlier_group_rewrite(self):
+    @parametrize("same_scope", [False, True])
+    def test_manual_bucket_plan_accounts_for_earlier_group_rewrite(self, same_scope):
         from torch._inductor.fx_passes.overlap_manual_scheduling import (
             ManualOverlapPreservingBucketer,
         )
@@ -2449,20 +2489,25 @@ class TestManualOverlapSchedulingUnit(TestCase):
                 target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
             )
         )
-        bucketer.manual_bucket_collectives(
+        groups = [
             [
                 node
                 for collective in all_reduces
                 for node in (collective, collective_info[collective].wait_node)
-            ]
-        )
-        bucketer.manual_bucket_collectives(
+            ],
             [
                 node
                 for collective in reduce_scatters
                 for node in (collective, collective_info[collective].wait_node)
-            ]
-        )
+            ],
+        ]
+        if same_scope:
+            bucketer.manual_bucket_collectives(
+                [node for group in groups for node in group]
+            )
+        else:
+            for group in groups:
+                bucketer.manual_bucket_collectives(group)
         traced.graph.lint()
 
         # The all-reduces are initially independent and fuse first. Their fused
@@ -2701,6 +2746,9 @@ class TestManualOverlapSchedulingUnit(TestCase):
             },
         )
         self.assertEqual(list(graph.nodes), repaired_order)
+
+
+instantiate_parametrized_tests(TestManualOverlapSchedulingUnit)
 
 
 @requires_accelerator_dist_backend()
