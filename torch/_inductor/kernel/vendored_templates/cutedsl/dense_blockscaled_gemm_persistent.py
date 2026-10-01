@@ -847,6 +847,11 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         """
         GPU device kernel performing the Persistent batched GEMM computation.
         """
+        # Alpha is always supplied by the wrapper (one when output scaling is
+        # absent). Load it once so every epilogue subtile reuses the same FP32
+        # register instead of rebuilding the tensor load in the inner loop.
+        alpha_value = alpha_tensor[0].to(cutlass.Float32)
+
         warp_idx = cute.arch.warp_idx()
         warp_idx = cute.arch.make_warp_uniform(warp_idx)
 
@@ -1654,17 +1659,27 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
                     # Convert to C type
                     #
                     acc_vec = tiled_copy_r2s.retile(tTR_rAcc).load()
-                    # Fused global scale: multiply by runtime alpha[0] (a traced
-                    # kernel-arg scalar) when provided. Closure capture cannot
-                    # read a runtime tensor here, so alpha must be a kernel arg.
-                    # Apply in fp32 (acc_dtype) BEFORE the downcast to c_dtype so
-                    # low-range outputs (fp8/fp16) don't overflow/saturate on the
-                    # cast before alpha (typically < 1) restores range, and before
-                    # epilogue_op so the epilogue sees the true scaled value.
-                    # const_expr makes this a compile-time branch (skipped when
-                    # alpha_tensor is None) rather than device control flow.
-                    if cutlass.const_expr(alpha_tensor is not None):
-                        acc_vec = acc_vec * alpha_tensor[0].to(self.acc_dtype)
+                    # Fused global scale. Closure capture cannot read a runtime
+                    # tensor here, so alpha is a kernel argument.
+                    # Preserve ``scaled_mm(...).to(c_dtype) * alpha`` semantics:
+                    # first round the accumulator and zero-dimensional FP32
+                    # alpha to the requested output dtype. BF16/FP16 products
+                    # are rounded back to the same dtype before the epilogue, so
+                    # avoid promoting both operands to FP32 only to downcast the
+                    # product again. Keep the accumulator-typed path for FP8,
+                    # where doing arithmetic directly in the output dtype may
+                    # change overflow and saturation behavior.
+                    if cutlass.const_expr(
+                        self.c_dtype == cutlass.BFloat16
+                        or self.c_dtype == cutlass.Float16
+                    ):
+                        acc_vec = acc_vec.to(self.c_dtype)
+                        scaled_alpha = alpha_value.to(self.c_dtype)
+                        acc_vec = scaled_alpha * acc_vec
+                    else:
+                        acc_vec = acc_vec.to(self.c_dtype).to(self.acc_dtype)
+                        scaled_alpha = alpha_value.to(self.c_dtype).to(self.acc_dtype)
+                        acc_vec = scaled_alpha * acc_vec
                     has_epilogue_tensors = cutlass.const_expr(
                         len(epilogue_inputs.values) > 0
                     )
