@@ -274,6 +274,25 @@ def _is_gpu_triton_backend(
     )
 
 
+def _is_loop_carried_compile_error(e: Exception) -> bool:
+    """Whether ``e`` is the Triton loop-carried-variable compile failure.
+
+    Benchmarking a fusion candidate that hits it tells us nothing, so callers allow
+    the fusion instead -- the workaround for
+    https://github.com/triton-lang/triton/issues/2151. A compile that ran in an
+    async-compile pool worker comes back wrapped in a SubprocException, so match on
+    both sides of that boundary or the workaround silently stops applying whenever
+    the pool is in use.
+    """
+    from triton.compiler.errors import CompilationError
+
+    from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+    return isinstance(e, (CompilationError, SubprocException)) and (
+        "Loop-carried variable" in str(e)
+    )
+
+
 class MixOrderReduction:
     """
     This class contains utility functions to decide if we should fuse reductions
@@ -7284,7 +7303,10 @@ class Scheduler:
         )
 
     def compile_kernel(
-        self, nodes: Sequence[BaseSchedulerNode], hint_override: int | None = None
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+        hint_override: int | None = None,
+        skip_if_perf_cached: bool = False,
     ) -> tuple[LambdaFuture | None, ModuleType]:
         src_code = self.generate_kernel_code_from_nodes(
             nodes, benchmark_kernel=True, hint_override=hint_override
@@ -7293,6 +7315,11 @@ class Scheduler:
 
         if not hasattr(mod, "triton_"):
             return (None, mod)
+
+        if skip_if_perf_cached and mod.__file__ is not None:
+            perf_path = os.path.splitext(mod.__file__)[0] + ".kernel_perf"
+            if os.path.exists(perf_path):
+                return (None, mod)
 
         async_compile = torch._inductor.async_compile.AsyncCompile()
         if not async_compile.use_process_pool():
@@ -7375,8 +7402,6 @@ class Scheduler:
         # epilogues, so keep the existing non-template behavior here.
         if has_atomic_add and not is_multi_template:
             return FusionResult.fuse(True)
-
-        from triton.compiler.errors import CompilationError
 
         why = WhyNoFuse(node1, node2)
 
@@ -7888,10 +7913,10 @@ class Scheduler:
                 except NoTritonConfigsError:
                     return False
 
-                except CompilationError as e:
-                    if "Loop-carried variable" in str(e):
-                        return True
-                    raise
+                except Exception as e:
+                    if not _is_loop_carried_compile_error(e):
+                        raise
+                    return True
 
             return FusionResult.from_callable(
                 callable_fn=benchmark_when_ready, future=future_and_mod_l1_fused[0]
@@ -12763,12 +12788,19 @@ class Scheduler:
 
         if not config.benchmark_combo_kernel:
             return True
-
-        from triton.compiler.errors import CompilationError
+        if device is None:
+            raise AssertionError("expected device to be set")
 
         ms1, path1_list = 0.0, []
         node_benchmark_results = {}
-        for i, snode in enumerate(subkernel_nodes):
+        # Submit cache misses to the compile pool before benchmarking any subkernel.
+        # Triton's frontend holds the GIL, so compiles only overlap across processes.
+        compiled = [
+            self.compile_kernel(snode.get_nodes(), skip_if_perf_cached=True)
+            for snode in subkernel_nodes
+        ]
+
+        for i, (snode, (future, mod)) in enumerate(zip(subkernel_nodes, compiled)):
             node_list = snode.get_nodes()
             # We can not accurately benchmark kernel using atomic_add
             # due to how we generate random integer inputs.
@@ -12777,8 +12809,20 @@ class Scheduler:
                     "ComboKernel: benchmarking may not accurate due to atomic_add"
                 )
 
+            if future is not None:
+                try:
+                    future.result()
+                except Exception:
+                    # The benchmark below recompiles in-process and scores a failure as
+                    # inf; deciding here would make the verdict depend on the pool.
+                    fusion_log.debug(
+                        "ComboKernel benchmark: %d-th subkernel failed in the pool",
+                        i,
+                        exc_info=True,
+                    )
+
             try:
-                ms, path = self.benchmark_fused_nodes(node_list)
+                ms, path = self.benchmark_codegened_module(mod, device)
                 node_benchmark_results[snode] = (ms, path)
                 if math.isinf(ms):
                     fusion_log.debug(
@@ -12786,15 +12830,13 @@ class Scheduler:
                         i,
                     )
                     return False
-            except CompilationError as e:
-                # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
-                if "Loop-carried variable" in str(e):
-                    fusion_log.debug(
-                        "ComboKernel benchmark: return True because of loop-carried variable"
-                    )
-                    return True  # allow fusion
-                else:
+            except Exception as e:
+                if not _is_loop_carried_compile_error(e):
                     raise
+                fusion_log.debug(
+                    "ComboKernel benchmark: return True because of loop-carried variable"
+                )
+                return True  # allow fusion
             ms1 += ms
             path1_list.append(path)
 
@@ -12802,15 +12844,13 @@ class Scheduler:
             ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(
                 subkernel_nodes, node_benchmark_results
             )
-        except CompilationError as e:
-            # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
-            if "Loop-carried variable" in str(e):
-                fusion_log.debug(
-                    "ComboKernel benchmark: return True because of loop-carried variable"
-                )
-                return True  # allow fusion
-            else:
+        except Exception as e:
+            if not _is_loop_carried_compile_error(e):
                 raise
+            fusion_log.debug(
+                "ComboKernel benchmark: return True because of loop-carried variable"
+            )
+            return True  # allow fusion
 
         # small kernels are very likely to have speedup but hard to benchmark. So we skip benchmarking.
         small_kernel = ms2 - ms2_clone < 0.3 or ms1 < 0.3
@@ -12825,7 +12865,7 @@ class Scheduler:
                     "cannot fuse (benchmark): fusing causes %sx slowdown",
                     red_text(f"{ms1 / ms2:.3f}"),
                 )
-        # ms1 returned by benchmark_fused_nodes discounted clone time
+        # ms1 returned by benchmark_codegened_module discounted clone time
         return ms2 - ms2_clone < ms1 or small_kernel
 
     def get_buffer_layout(self, buf_name: str) -> ir.Layout:
