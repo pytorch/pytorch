@@ -229,40 +229,19 @@ config = NCCLCollConfig(max_ctas=4, alg_selection="ring")
 dist.all_reduce(tensor, config=config)
 ```
 
-Unset fields inherit NCCL's defaults or the communicator configuration.
-Use the same configuration on every participating rank. NCCL validates it
-locally; mismatched configurations can hang. Configurations within one NCCL
-group must also agree on `cga_cluster_size`.
+Unset fields inherit NCCL or communicator defaults. Use the same configuration
+on every participating rank; mismatches can hang. Configurations within an NCCL
+group must agree on `cga_cluster_size`. Passing `None` preserves existing behavior
+and does not require nccl4py.
 
-The argument is supported by `broadcast`, `all_reduce`, `all_reduce_coalesced`,
-`reduce`, `all_gather`, `all_gather_single`, `all_gather_coalesced`,
-`gather_single`, `reduce_scatter`, `reduce_scatter_single`, and
-`all_to_all_single`, including their aliases. For `all_to_all_single`, omit
-the split-size lists to use equal splits. Backends without collective-config
-support, operations captured for coalescing, and NCCL2 time estimation reject
-non-`None` configurations.
-External NCCL group scopes, including those opened by the legacy backend,
-are unsupported.
-Passing `None` preserves existing behavior and does not require nccl4py.
-The raw c10d schemas have an optional `config=None` argument. Backends opt in with
-`supports_collective_config` and handle `opts.config` in their existing collective
-methods. An opted-in backend must reject configurations on unsupported operations;
-backends that do not opt in reject every non-`None` config.
+Unsupported backends or operations, uneven splits, coalescing capture, and NCCL2
+time estimation reject configurations. External NCCL group scopes are unsupported.
 
-`torch.compile` and `torch.export` support configured `all_reduce`, `all_gather`,
-`all_gather_single`, `reduce_scatter`, `reduce_scatter_single`, and
-`all_to_all_single`, including their aliases, with `async_op=False`.
-Configuration values become guarded graph constants; changing them recompiles.
-Exported programs retain the captured values, not the original Python object.
-Vendor integer and string options are supported; raw-pointer options require a
-runtime binding and cannot be traced. Use these Python APIs rather than raw
-`torch.ops.c10d` calls with a non-`None` config.
-
-Functional operators accept an optional `config=None` argument. Configured calls
-have ordered effects, and compiler transformations preserve their configuration.
-Their runtime kernels establish completion on the calling stream before
-returning, so they do not currently support communication/computation overlap.
-The existing no-config operators and eager asynchronous behavior are unchanged.
+Supported synchronous calls can use `torch.compile` and `torch.export` through
+the Python collective APIs. Configuration values are captured as graph constants;
+changing them recompiles. Raw-pointer options cannot be traced. Configured
+compiled calls complete on the calling stream, without communication/computation
+overlap.
 
 (distributed-basics)=
 
