@@ -2940,7 +2940,8 @@ Tensor huber_loss_double_backward(
   auto d = (input - target).abs();
   auto grad_input = grad * (d < delta);
   if (reduction == at::Reduction::Mean) {
-    grad_input /= input.sym_numel();
+    // Forward AD may supply an immutable efficient zero tangent.
+    grad_input = grad_input / input.sym_numel();
   }
   return grad_input;
 }
