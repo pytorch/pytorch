@@ -98,6 +98,8 @@ class TextGenerationBenchmark(Benchmark):
                     f"{TextGenerationBenchmark.OUTPUT_LENGTH} generated-token slots exceeds "
                     f"{model_name}'s context length {context_length}"
                 )
+            # Match the static cache generate() allocates for this request, so prefill
+            # attends over the same KV length as generate's first forward.
             cache_capacity = total_length - 1
             model = TextGenerationPrefillModel(
                 model,
@@ -176,6 +178,14 @@ class TextGenerationPrefillModel(torch.nn.Module):
                         layer.lazy_initialization(
                             conv_states=conv_states, recurrent_states=recurrent_states
                         )
+            if not all(
+                layer.is_conv_states_initialized
+                for layer, is_linear in zip(self.cache.layers, self.cache.is_linear)
+                if is_linear
+            ):
+                raise RuntimeError(
+                    f"cannot preallocate linear attention cache for {config.model_type}"
+                )
         else:
             self.cache.reset()
 
