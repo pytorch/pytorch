@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     make_dynamo_test,
     munge_exc,
     parametrize,
+    subtest,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
@@ -243,6 +244,111 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(type(ref), type(res))
         self.assertEqual(ref["x"], res["x"])
         self.assertEqual(ref["y"], res["y"])
+
+    @parametrize(
+        "variant",
+        [
+            subtest("plain", name="plain"),
+            subtest("bound", name="bound"),
+            subtest("setitem", name="setitem"),
+            subtest("repeated", name="repeated"),
+            subtest("init", name="init"),
+            subtest("new", name="new"),
+            subtest("super", name="super"),
+            subtest("defaultdict", name="defaultdict"),
+        ],
+    )
+    def test_dict_subclass_fromkeys(self, variant):
+        class PrefixDict(dict):
+            def __setitem__(self, key, value):
+                dict.__setitem__(self, f"key_{key}", value)
+
+        class RecordingDict(dict):
+            def __init__(self):
+                self.calls = []
+
+            def __setitem__(self, key, value):
+                self.calls.append(key)
+                dict.__setitem__(self, key, value)
+
+        class InitDict(dict):
+            def __init__(self):
+                dict.__init__(self, initial=1)
+
+        class NewDict(dict):
+            def __new__(cls):
+                result = dict.__new__(cls)
+                result.created = True
+                return result
+
+        class SuperDict(dict):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.inited = True
+
+            def __setitem__(self, key, value):
+                super().__setitem__(key.upper(), value)
+
+        class MyDefaultDict(defaultdict):
+            pass
+
+        cases = {
+            "plain": (SimpleDict, ("a", "b"), False),
+            "bound": (SimpleDict, ("a", "b"), True),
+            "setitem": (PrefixDict, ("a", "b"), False),
+            "repeated": (RecordingDict, ("a", "a", "b"), False),
+            "init": (InitDict, ("a", "b"), False),
+            "new": (NewDict, ("a",), False),
+            "super": (SuperDict, "ab", False),
+            "defaultdict": (MyDefaultDict, "ab", False),
+        }
+        dict_cls, keys, bound = cases[variant]
+
+        def fn(x):
+            target = dict_cls() if bound else dict_cls
+            return target.fromkeys(keys, x + 1)
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual), dict_cls)
+        self.assertEqual(actual, expected)
+        self.assertEqual(vars(actual), vars(expected))
+        if isinstance(expected, defaultdict):
+            self.assertIs(actual.default_factory, expected.default_factory)
+
+    def test_dict_subclass_fromkeys_setitem_raises(self):
+        class ErrorDict(dict):
+            def __setitem__(self, key, value):
+                raise ValueError("rejected")
+
+        def fn(x):
+            try:
+                ErrorDict.fromkeys(("a",), x + 1)
+            except ValueError:
+                return x + 2
+            return x + 3
+
+        x = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_dict_subclass_fromkeys_input(self):
+        class OtherDict(dict):
+            pass
+
+        def fn(cls, d, x):
+            y = x + 1
+            return cls.fromkeys("a", y), d.fromkeys("b", y), type(d).fromkeys("c", y)
+
+        x = torch.randn(2)
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnts, fullgraph=True)
+        for cls in (SimpleDict, OtherDict):
+            expected = fn(cls, cls(), x)
+            actual = compiled(cls, cls(), x)
+            self.assertEqual([type(d) for d in actual], [cls] * 3)
+            self.assertEqual(actual, expected)
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_dict_subclass_methods_fallback_mutation(self):
         def fn(sd, x):
