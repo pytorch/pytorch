@@ -605,7 +605,7 @@ class TritonTemplateKernel(TritonKernel):
         epilogue_fn=identity,
         subgraphs: list[ir.ComputedBuffer] | None = None,
         workspace_arg: WorkspaceArg | None = None,
-        uses_load_input_for_all_named_inputs=False,
+        prologue_loads_all_named_inputs=False,
         hint_override: int | None = None,
         triton_meta: TritonMeta | None = None,
         always_freeze_layout: bool = False,
@@ -745,7 +745,7 @@ class TritonTemplateKernel(TritonKernel):
         # Update each time an input is marked frozen, used to replay the freezing of inputs on a cache hit.
         self.frozen_layouts_cnt = 0
 
-        self.uses_load_input_for_all_named_inputs = uses_load_input_for_all_named_inputs
+        self.prologue_loads_all_named_inputs = prologue_loads_all_named_inputs
 
         # When always_freeze_layout is True, get_stride_and_maybe_freeze_layout will
         # always freeze the layout immediately, bypassing layout constraints.
@@ -766,22 +766,6 @@ class TritonTemplateKernel(TritonKernel):
 
     def _gen_tmp_var(self) -> str:
         return f"_tmp_var{next(self.tmp_var_ctr)}"
-
-    def get_load_input_names(self) -> OrderedSet[str]:
-        """Return named-input buffers used to route producers to load_input()."""
-        return OrderedSet(
-            input_node.get_name()
-            for input_node in self.input_nodes[
-                self.prefix_args : len(self.input_nodes) - self.suffix_args
-            ]
-        )
-
-    def get_store_output_input_names(self) -> OrderedSet[str]:
-        """Return prefix-input buffers used to route producers to store_output()."""
-        return OrderedSet(
-            self.input_nodes[index].get_name()
-            for index in self.prefix_inputs_fusion_indices
-        )
 
     def _is_input_fused(self, input_name: str) -> bool:
         return (
@@ -1126,7 +1110,9 @@ class TritonTemplateKernel(TritonKernel):
         # The args may be duplicated, so renaming must be after args are de-duplicated.
         for name in argnames:
             input_node = self.named_input_nodes[name]
-            if self.uses_load_input_for_all_named_inputs:
+            # When the template uses load_input() for every named input, mark all
+            # named inputs eligible for load-input fusion during def_kernel().
+            if self.prologue_loads_all_named_inputs:
                 self.load_input_fusion_allowed_inputs.add(input_node.get_name())
             if self._is_input_arg_omitted(input_node.get_name()):
                 continue
@@ -1394,9 +1380,8 @@ class TritonTemplateKernel(TritonKernel):
         """
 
         input_node = self.named_input_nodes[input_name]
-        # when uses_load_input_for_all_named_inputs is True load_input_fusion_allowed_inputs
-        # is populate in def kernel
-        if not self.uses_load_input_for_all_named_inputs:
+        # Otherwise, discover eligibility as each load_input() call is rendered.
+        if not self.prologue_loads_all_named_inputs:
             self.load_input_fusion_allowed_inputs.add(input_node.get_name())
 
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
@@ -2319,8 +2304,6 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             def get_name(self) -> str:
                 return template_buffer.get_name()
 
-        # External named inputs are exposed through get_load_input_names(). The
-        # remaining arguments are dummy values used only by standalone Triton codegen.
         super().__init__(
             kernel_name="",
             input_nodes=(),
@@ -2332,6 +2315,10 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             meta={},
             call_sizes=[],
             hint_override=None,
+        )
+        # External templates currently support producer fusion only in prologues.
+        self.load_input_fusion_allowed_inputs.update(
+            template_buffer.load_input_fusion_allowed_inputs
         )
         # Extra inputs needed by fused ops beyond the template's own I/O
         self._extra_inputs: dict[str, str] = {}
@@ -2355,15 +2342,6 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         # Reference to the scheduler, set by _compute_fusion_metadata;
         # used in call_kernel() to codegen unfused epilogue nodes
         self._scheduling_ref: Any = None
-
-    def get_load_input_names(self) -> OrderedSet[str]:
-        return OrderedSet(
-            input_node.get_name()
-            for input_node in self._template_buffer._named_inputs.values()
-        )
-
-    def get_store_output_input_names(self) -> OrderedSet[str]:
-        return OrderedSet()
 
     def _finalize_partial_render(
         self, partial_code: str | PartialRender
@@ -2762,13 +2740,6 @@ class GenerateAndLoadResult(NamedTuple):
     kernel_args_sizevars_keys: tuple[sympy.Expr, ...]
     kernel_options: dict[str, Any]
 
-    @property
-    def producer_fusion_allowed_inputs(self) -> OrderedSet[str]:
-        return (
-            self.load_input_fusion_allowed_inputs
-            | self.store_output_fusion_allowed_inputs
-        )
-
 
 class GeneratedCodeCacheEntry(NamedTuple):
     code: str
@@ -2960,7 +2931,7 @@ class TritonTemplate(KernelTemplate):
         source: str,
         debug=False,
         cache_codegen_enabled_for_template=False,
-        uses_load_input_for_all_named_inputs=False,
+        prologue_loads_all_named_inputs=False,
         always_freeze_layout: bool = False,
     ) -> None:
         super().__init__(name, hash=hashlib.sha256(source.encode("utf-8")).hexdigest())
@@ -2978,7 +2949,7 @@ class TritonTemplate(KernelTemplate):
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
         clear_on_fresh_cache(self._generated_code_cache)
-        self.uses_load_input_for_all_named_inputs = uses_load_input_for_all_named_inputs
+        self.prologue_loads_all_named_inputs = prologue_loads_all_named_inputs
         # When always_freeze_layout is True, the kernel will always freeze layouts
         # immediately instead of using layout constraints. This is used by
         # FlexAttention templates which require frozen layouts.
@@ -3112,7 +3083,7 @@ class TritonTemplate(KernelTemplate):
             "prefix_inputs_fusion_indices": prefix_inputs_fusion_indices,
             "epilogue_fn": epilogue_fn,
             "subgraphs": subgraphs,
-            "uses_load_input_for_all_named_inputs": self.uses_load_input_for_all_named_inputs,
+            "prologue_loads_all_named_inputs": self.prologue_loads_all_named_inputs,
             "always_freeze_layout": self.always_freeze_layout,
             "index_dtype_override": index_dtype,
         }
@@ -3410,6 +3381,12 @@ class TritonTemplate(KernelTemplate):
                 triton_meta=triton_meta,
                 **options,
             )
+            kernel.load_input_fusion_allowed_inputs.update(
+                result.load_input_fusion_allowed_inputs
+            )
+            kernel.store_output_fusion_allowed_inputs.update(
+                result.store_output_fusion_allowed_inputs
+            )
             render = functools.partial(
                 kernel.render,
                 self.template,
@@ -3676,13 +3653,6 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         self.hint_override = hint_override
 
         self.n_regs = None
-
-    @property
-    def producer_fusion_allowed_inputs(self) -> OrderedSet[str]:
-        return (
-            self.load_input_fusion_allowed_inputs
-            | self.store_output_fusion_allowed_inputs
-        )
 
     def benchmark(self, *args, out):
         if self.bmreq is None:

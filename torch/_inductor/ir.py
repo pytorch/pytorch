@@ -6168,12 +6168,6 @@ class TemplateBuffer(OperationBuffer):
     def get_store_output_fusion_allowed_inputs(self) -> OrderedSet[str]:
         return self.store_output_fusion_allowed_inputs
 
-    def get_producer_fusion_allowed_inputs(self) -> OrderedSet[str]:
-        return (
-            self.load_input_fusion_allowed_inputs
-            | self.store_output_fusion_allowed_inputs
-        )
-
     def has_aliasing_or_mutation_for_prologue_fusion(
         self, scheduler_node: _HasAliasingOrMutation
     ) -> bool:

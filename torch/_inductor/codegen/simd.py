@@ -4490,8 +4490,6 @@ class SIMDScheduling(BaseScheduling):
         """
         buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()
-        store_output_input_names = kernel.get_store_output_input_names()
-        load_input_names = kernel.get_load_input_names()
         prologue_group = []
         for prologue in prologue_nodes:
             names = prologue.get_buffer_names()
@@ -4503,12 +4501,12 @@ class SIMDScheduling(BaseScheduling):
                 if len(names) != 1:
                     raise AssertionError(f"expected len(names) == 1, got {len(names)}")
                 input_name = next(iter(names))
-                if input_name in store_output_input_names:
+                if input_name in kernel.store_output_fusion_allowed_inputs:
                     kernel.store_output_input_producer_groups[input_name] = (
                         prologue_group
                     )
                     kernel.store_output_fused_inputs.add(input_name)
-                if input_name in load_input_names:
+                if input_name in kernel.load_input_fusion_allowed_inputs:
                     buf_name_to_prologue_group[input_name] = prologue_group
                     kernel.load_input_fused_inputs.add(input_name)
                 prologue_group = []
