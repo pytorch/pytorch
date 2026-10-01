@@ -799,6 +799,27 @@ function test_private_pool_segment_events_without_blocks() {
   assert(envelope.timesteps.at(-1) > envelope.timesteps[0], 'reservation has a visible lifetime');
 }
 
+function test_released_pool_initial_reservation() {
+  console.log('test_released_pool_initial_reservation');
+  for (const action of ['segment_free', 'segment_unmap']) {
+    for (const active of [false, true]) {
+      const traces = [];
+      if (active) {
+        traces.push({ action: 'free_completed', addr: 0x1000, size: 1024,
+          frames: [], stream: 3, pool_id: [1, 1] });
+      }
+      traces.push({ action, addr: 0x1000, size: 8192, frames: [], stream: 3, pool_id: [1, 1] });
+      const snapshot = makeSnapshot({ traces });
+
+      const result = process_alloc_data(snapshot, 0, false, 15000, true);
+      const envelope = result.allocations_over_time.find(d => d.elem === 'pool:1,1,s3');
+      assertEqual(result.max_size, 8192, 'released pool retains its historical reservation');
+      assertEqual(envelope.timesteps[0], 0, 'reservation existed before the trace');
+      assertEqual(envelope.size[0], 8192, 'initial reservation includes inactive bytes');
+    }
+  }
+}
+
 function test_ghost_blocks() {
   console.log('test_ghost_blocks');
   // Snapshot produced by (agent_space/test_ring_buffer_overflow.py):
@@ -1764,6 +1785,7 @@ test_segment_snapshot_no_trace();
 test_default_pool_ghost_block();
 test_idle_private_pool_reservation();
 test_private_pool_segment_events_without_blocks();
+test_released_pool_initial_reservation();
 test_ghost_blocks();
 test_ghost_blocks_not_created_for_traced_addrs();
 test_ghost_blocks_default_pool_collected();

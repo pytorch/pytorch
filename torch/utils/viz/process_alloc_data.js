@@ -878,9 +878,10 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     for (const se of pool_segment_events) {
       net_from_trace[se.pool_key] = (net_from_trace[se.pool_key] || 0) + se.delta;
     }
-    for (const pk in snapshot_reserved) {
+    const pool_keys = new Set([...Object.keys(snapshot_reserved), ...Object.keys(net_from_trace)]);
+    for (const pk of pool_keys) {
       const pool = get_or_create_pool(pk);
-      pool.reserved = snapshot_reserved[pk] - (net_from_trace[pk] || 0);
+      pool.reserved = (snapshot_reserved[pk] || 0) - (net_from_trace[pk] || 0);
       // Grow envelope to initial reserved (no animation — pre-existing)
       if (pool.reserved > pool.max) {
         if (pool.envelope_data === null) create_pool_envelope(pool, pk);
