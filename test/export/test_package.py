@@ -107,6 +107,8 @@ class TestPackage(TestCase):
 
 
 class TestAOTIPackageStreamAffinity(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_aoti_load_package_forwards_stream_affinity_options(self):
         compiled_model = object()
         with mock.patch(
