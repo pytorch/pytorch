@@ -9,9 +9,9 @@ Key classes include:
 - FrameSummaryVariable: Tracks frame summary objects
 """
 
-import sys
 import traceback
 import types
+import weakref
 from typing import Any, TYPE_CHECKING, Union
 
 from torch._dynamo.variables.base import MutationType
@@ -65,18 +65,24 @@ class FrameSummaryVariable(VariableTracker):
 class FrameVariable(VariableTracker):
     """A frame object of a frame traced by `tx`, as reached via `tb_frame`."""
 
-    _nonvar_fields = {"tx", *VariableTracker._nonvar_fields}
+    _nonvar_fields = {"tx_ref", "f_code", *VariableTracker._nonvar_fields}
 
     def __init__(self, tx: "InstructionTranslatorBase", **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        self.tx = tx
+        # Weak: tx caches this VT, and a strong ref would keep every traced
+        # value of the frame alive until the next gc cycle.
+        self.tx_ref = weakref.ref(tx)
+        self.f_code = tx.f_code
 
     def python_type(self) -> type[types.FrameType]:
         return types.FrameType
 
     def _get_f_lineno(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        inst = self.tx.lasti_instruction()
-        if sys.version_info < (3, 11) or inst.positions is None:
+        # tx is the frame doing the read; the traced frame may be a finished
+        # callee further down the traceback.
+        frame_tx = self.tx_ref()
+        inst = frame_tx.lasti_instruction() if frame_tx is not None else None
+        if inst is None or inst.positions is None:
             unimplemented(
                 gb_type="frame.f_lineno not supported",
                 context=f"{self} accessing 'f_lineno'",
@@ -88,6 +94,8 @@ class FrameVariable(VariableTracker):
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
+        # Without this, an unmodeled attribute such as f_trace becomes a
+        # GetAttrVariable that silently compares unequal to its eager value.
         if self.lookup_tp_getset_member(name) is None:
             unimplemented(
                 gb_type="Unsupported frame attribute",
@@ -100,7 +108,7 @@ class FrameVariable(VariableTracker):
     # ref: CPython Objects/frameobject.c frame_getsetlist
     tp_getset = {
         "f_lineno": GetSet(_get_f_lineno, unmodeled_setter),
-        "f_code": GetSet(getset_build(lambda s: s.tx.f_code), readonly_setter),
+        "f_code": GetSet(getset_build(lambda s: s.f_code), readonly_setter),
     }
 
 

@@ -2,9 +2,12 @@
 
 import contextlib
 import dataclasses
+import gc
 import operator
 import sys
 import unittest
+import weakref
+from unittest import mock
 
 import torch
 import torch._dynamo.config
@@ -14,7 +17,11 @@ import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
 from torch._dynamo.exc import Unsupported
-from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
+from torch._dynamo.symbolic_convert import (
+    InstructionTranslatorBase,
+    SpeculationLog,
+    SpeculationLogDivergence,
+)
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1804,6 +1811,32 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(Unsupported, "Unsupported frame attribute"):
             opt_fn(torch.randn(4))
+
+    @torch._dynamo.config.patch(run_gc_after_compile=False)
+    def test_exception_traceback_frame_no_tx_cycle(self):
+        # The tb_frame VT must not keep its translator alive; otherwise every
+        # traced value (here the optimizer state) waits for a full gc cycle.
+        # run_gc_after_compile would hide a young cycle, so it is disabled.
+        txs = []
+        orig_init = InstructionTranslatorBase.__init__
+
+        def init(tx, *args, **kwargs):
+            txs.append(weakref.ref(tx))
+            orig_init(tx, *args, **kwargs)
+
+        model = torch.nn.Linear(8, 8, bias=False)
+        optimizer = torch.optim.Adadelta(model.parameters(), lr=0.01)
+        model(torch.ones(8)).sum().backward()
+        gc.collect()
+        gc.disable()
+        try:
+            with mock.patch.object(InstructionTranslatorBase, "__init__", init):
+                torch.compile(optimizer.step, backend="eager")()
+            alive = sum(ref() is not None for ref in txs)
+        finally:
+            gc.enable()
+        self.assertGreater(len(txs), 0)
+        self.assertEqual(alive, 0)
 
     def test_exception_traceback_chain_lineno(self):
         # Each entry is the line where its frame called the next one.
