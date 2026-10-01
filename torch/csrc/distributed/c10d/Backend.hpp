@@ -154,19 +154,6 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     use_pg_for_symm_mem_rendezvous_ = value;
   }
 
-  // Backends opting in must consume or reject opts.config in each collective.
-  virtual bool supports_collective_config() const {
-    return false;
-  }
-
-  void check_collective_config(const OptionalCollectiveConfig& config) const {
-    TORCH_CHECK(
-        !config.has_value() || supports_collective_config(),
-        "Backend ",
-        getBackendName(),
-        " does not support per-collective configuration");
-  }
-
   virtual bool supportsSplitting() const {
     return false;
   }

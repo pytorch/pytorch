@@ -370,18 +370,6 @@ class PyBackend : public Backend {
   // we use py::getattr to access them through normal Python attribute
   // resolution, which handles both @property and regular methods.
 
-  bool supports_collective_config() const override {
-    pybind11::gil_scoped_acquire gil;
-    auto self = pybind11::cast(this);
-    auto attr = pybind11::type::of(self).attr("supports_collective_config");
-    auto base =
-        pybind11::type::of<Backend>().attr("supports_collective_config");
-    if (attr.is(base)) {
-      return Backend::supports_collective_config();
-    }
-    return self.attr("supports_collective_config").cast<bool>();
-  }
-
   bool supportsSplitting() const override {
     return getPropertyOverride(
         "supports_splitting", Backend::supportsSplitting());
