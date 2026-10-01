@@ -223,7 +223,6 @@ static void upsample_out_template(const Tensor& input,
       cachedGraph->outputSizeTensor : sizeTensorData,
     };
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-
   }
 }
 

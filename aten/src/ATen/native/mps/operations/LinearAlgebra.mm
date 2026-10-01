@@ -1551,8 +1551,8 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
       //.matrices is a readonly property so we need a separate descriptor.
       MPSNDArrayDescriptor *aDescLastBatch_, *bDescLastBatch_, *resDescLastBatch_;
       if (lastBatchSize != 0) {
-        aDescLastBatch_ =
-            [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:@[ @(lastBatchSize), @(aRowsTiled), @(aCols) ]];
+        aDescLastBatch_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
+                                                                 shape:@[ @(lastBatchSize), @(aRowsTiled), @(aCols) ]];
         aDescLastBatch_.preferPackedRows = true;
         bDescLastBatch_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
                                                                  shape:@[ @(lastBatchSize), @(bRows), @(bCols) ]];
@@ -1568,8 +1568,8 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
         aDescLastTile_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
                                                                 shape:@[ @(batchSize), @(lastTileSize), @(aCols) ]];
         aDescLastTile_.preferPackedRows = true;
-        resDescLastTile_ =
-            [MPSNDArrayDescriptor descriptorWithDataType:dtype shape:@[ @(batchSize), @(lastTileSize), @(resCols) ]];
+        resDescLastTile_ = [MPSNDArrayDescriptor descriptorWithDataType:dtype
+                                                                  shape:@[ @(batchSize), @(lastTileSize), @(resCols) ]];
         resDescLastTile_.preferPackedRows = true;
       }
 
@@ -1595,14 +1595,13 @@ static Tensor& tiled_bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2
 
           auto aMatrix = [[[MPSNDArray alloc] initWithBuffer:aBuffer
                                                       offset:(batch1.storage_offset() + aArrayOffset) * aElemSize
-                                                    descriptor:aDesc] autorelease];
+                                                  descriptor:aDesc] autorelease];
           auto bMatrix = [[[MPSNDArray alloc] initWithBuffer:bBuffer
                                                       offset:(batch2.storage_offset() + bArrayOffset) * bElemSize
-                                                    descriptor:bDesc] autorelease];
-          auto resMatrix =
-              [[[MPSNDArray alloc] initWithBuffer:resBuffer
-                                           offset:(result.storage_offset() + resArrayOffset) * resElemSize
-                                       descriptor:resDesc] autorelease];
+                                                  descriptor:bDesc] autorelease];
+          auto resMatrix = [[[MPSNDArray alloc] initWithBuffer:resBuffer
+                                                        offset:(result.storage_offset() + resArrayOffset) * resElemSize
+                                                    descriptor:resDesc] autorelease];
           [matmul encodeToCommandEncoder:computeEncoder
                            commandBuffer:commandBuffer
                             sourceArrays:@[ aMatrix, bMatrix ]

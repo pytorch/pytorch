@@ -762,8 +762,7 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    const auto input_for_graph =
-        materialize_for_conv(input_t, input_suggested_layout);
+    const auto input_for_graph = materialize_for_conv(input_t, input_suggested_layout);
     auto inputPlaceholder = make_conv_placeholder(cachedGraph->inputTensor_, input_for_graph, input_suggested_layout);
     auto outputPlaceholder = make_conv_placeholder(cachedGraph->outputTensor_, output_t, input_suggested_layout);
     // MPSGraph conv miscomputes for non-dense (offset/gapped) weight views; gather instead of using the strided API.
@@ -830,8 +829,8 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   constexpr auto kContiguous = at::MemoryFormat::Contiguous;
   // Backward uses NDHWC+DHWIO only when the full fast path is beneficial; for
   // factorized kernels / small Cin / depthwise the NCDHW+OIDHW fallback wins.
-  const bool use_dhwio = is3DConv && is_packed_channels_last_3d(grad_output_t) &&
-      conv3d_dhwio_is_beneficial(weight_t.sizes());
+  const bool use_dhwio =
+      is3DConv && is_packed_channels_last_3d(grad_output_t) && conv3d_dhwio_is_beneficial(weight_t.sizes());
   const bool use_nhwc = !is3DConv && is_packed_channels_last_2d(grad_output_t);
   const auto desc_layout = use_dhwio ? kChannelsLast3d : use_nhwc ? kChannelsLast : kContiguous;
   // Allocate grad_input in the caller-supplied layout so it matches input.
@@ -1001,8 +1000,7 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   // Require BOTH inputs CL3d-packed; otherwise we'd permute the non-packed one each call.
   const bool use_dhwio = is3DConv && !half_precision_wg && is_packed_channels_last_3d(input_t) &&
       is_packed_channels_last_3d(grad_output_t) && conv3d_dhwio_is_beneficial(weight_size);
-  const bool use_hwio = !is3DConv &&
-      (is_packed_channels_last_2d(input_t) || is_packed_channels_last_2d(grad_output_t));
+  const bool use_hwio = !is3DConv && (is_packed_channels_last_2d(input_t) || is_packed_channels_last_2d(grad_output_t));
   const auto desc_layout = use_dhwio ? kChannelsLast3d : use_hwio ? kChannelsLast : kContiguous;
   // grad_weight allocation: 2D follows the caller-supplied layout; 3D always
   // stays contiguous OIDHW (the graph already transposes DHWIO -> OIDHW).
