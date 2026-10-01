@@ -1528,6 +1528,69 @@ class TestVmapOperators(Namespace.TestVmapBase):
     def _vmap_view_test(self, *args, **kwargs):
         self._vmap_test(*args, **kwargs, check_view=True)
 
+    # multi_margin_loss's weight is a shared per-class vector, so the OpInfo vmap
+    # tests (which only batch positional args) never batch it. Cover the
+    # batched-weight path of its batch rule here against a for-loop reference.
+    @parametrize("reduction", ["none", "mean", "sum"])
+    @parametrize("p", [1, 2])
+    @parametrize("case", ["rank2_weight_only", "rank2_all", "rank1"])
+    def test_multi_margin_loss_batched_weight(self, reduction, p, case):
+        B, N, C = 2, 4, 5
+        if case == "rank1":  # logical rank 1 input -> nframe == 1 branch
+            inp = torch.randn(C)
+            tgt = torch.randint(0, C, ())
+            inp_bdim = None
+        elif case == "rank2_all":
+            inp = torch.randn(B, N, C)
+            tgt = torch.randint(0, C, (N,))
+            inp_bdim = 0
+        else:  # rank2_weight_only: only weight is batched
+            inp = torch.randn(N, C)
+            tgt = torch.randint(0, C, (N,))
+            inp_bdim = None
+        wgt = torch.randn(B, C)
+
+        def op(i, w):
+            return F.multi_margin_loss(i, tgt, p=p, weight=w, reduction=reduction)
+
+        expected = torch.stack(
+            [op(inp[b] if inp_bdim == 0 else inp, wgt[b]) for b in range(B)]
+        )
+        actual = vmap(op, in_dims=(inp_bdim, 0))(inp, wgt)
+        self.assertEqual(actual, expected)
+
+    # Exercises the backward batch rule's batched-weight path via vmap(grad),
+    # which the forward-only _vmap_test above does not reach.
+    @parametrize("reduction", ["mean", "sum"])
+    @parametrize("p", [1, 2])
+    def test_multi_margin_loss_batched_weight_backward(self, reduction, p):
+        B, N, C = 2, 4, 5
+        inp = torch.randn(N, C)
+        tgt = torch.randint(0, C, (N,))
+        wgt = torch.randn(B, C)
+
+        def loss(i, w):
+            return F.multi_margin_loss(i, tgt, p=p, weight=w, reduction=reduction)
+
+        grad_fn = grad(loss)  # grad wrt input
+        expected = torch.stack([grad_fn(inp, wgt[b]) for b in range(B)])
+        actual = vmap(grad_fn, in_dims=(None, 0))(inp, wgt)
+        self.assertEqual(actual, expected)
+
+    def test_multi_margin_loss_batched_weight_size_mismatch(self):
+        # A batched weight bypasses the native weight-size check, so the batch rule
+        # must re-validate; otherwise vmap silently gathers instead of erroring.
+        N, C = 4, 5
+        inp = torch.randn(N, C)
+        tgt = torch.randint(0, C, (N,))
+        wgt = torch.randn(2, C + 2)  # wrong number of classes
+
+        def op(w):
+            return F.multi_margin_loss(inp, tgt, weight=w, reduction="sum")
+
+        with self.assertRaisesRegex(RuntimeError, "inconsistent weight size"):
+            vmap(op)(wgt)
+
     def _test_unary(self, op, getter, device, *args, **kwargs):
         test = functools.partial(self._vmap_test, *args, **kwargs)
         B0, B1 = 7, 11
@@ -4703,7 +4766,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("nn.functional.triplet_margin_loss", ""),
                 xfail("nn.functional.pdist", ""),
                 xfail("nn.functional.max_unpool1d", "grad"),
-                xfail("nn.functional.multi_margin_loss", ""),
                 xfail("nn.functional.multilabel_margin_loss", ""),
                 xfail("nn.functional.max_unpool3d", "grad"),
                 xfail("nn.functional.max_unpool2d", ""),
