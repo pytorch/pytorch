@@ -5990,15 +5990,21 @@ class TestLinalg(TestCase):
         else:
             def make_diagonally_dominant(t):
                 # This bounds the growth factor by 2
-                t_diag = t.diagonal(dim1=-2, dim2=-1)
+                t_diag = t.diagonal(dim1=-2, dim2=-1).zero_()
                 col_abs_sum = t.abs().sum(-2)
-                t_diag.copy_(t_diag.sgn() * col_abs_sum)
+                t_diag.copy_(col_abs_sum)
                 return t
 
             def make_well_conditioned(*shape):
+                # Inspired by the tests in the HPL-AI benchmark, see
+                # https://eprints.maths.manchester.ac.uk/2797/1/fahi20a.pdf, formula (2.2),
+                # although we use dominance by cols.
+                # Paragraph 2.1 of the aforementioned reference states these matrices
+                # are extremely well conditioned, with inf-norm about 4 for large n.
                 # Diagonal dominance limits the growth factor to be no larger than 2,
                 # so that nopiv Gaussian elimination becomes stable.
-                t = make_well_conditioned_system(*shape)
+                shift = 0.5 + 0.5j if dtype.is_complex else 0.5
+                t = torch.rand(*shape, device=device, dtype=dtype).sub_(shift)
                 return make_diagonally_dominant(t)
 
             def make_ill_conditioned(*shape):
