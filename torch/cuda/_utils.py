@@ -1,4 +1,5 @@
 import ctypes
+import re
 import sys
 from typing import Any
 
@@ -345,8 +346,9 @@ def _nvrtc_compile(
         libnvrtc.nvrtcCreateProgram(
             ctypes.byref(prog),
             source_bytes,
-            # Template expressions in kernel_name are not valid filenames on Windows.
-            b"kernel.cu",
+            # Template expressions in kernel_name are not valid filenames on Windows,
+            # where HIPRTC then fails with an empty log (ROCm/TheRock#8216).
+            f"{re.sub(r'[^\w.-]', '_', kernel_name)}.cu".encode(),
             0,
             None,
             None,
