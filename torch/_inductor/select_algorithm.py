@@ -2286,8 +2286,6 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
     """
 
     def __init__(self, template_buffer: "ir.TemplateBuffer") -> None:
-        self._template_buffer = template_buffer
-
         class _RealOutputNode:
             def get_size(self) -> list:
                 return list(template_buffer.get_size())
@@ -2310,6 +2308,7 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             call_sizes=[],
             hint_override=None,
         )
+        self._template_buffer = template_buffer
         # External templates currently support producer fusion only in prologues.
         self.load_input_fusion_allowed_inputs.update(
             template_buffer.load_input_fusion_allowed_inputs
@@ -2375,16 +2374,7 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
     def _compute_fusion_metadata(
         self, scheduling, epilogue_nodes, buf_name_to_prologue_group
     ):
-        """Compute epilogue and load-input prologue metadata for external backends.
-
-        ``epilogue_nodes`` contains the nodes ordered after the template in the
-        fused scheduler group; eligible downstream consumers are selected from it.
-        ``buf_name_to_prologue_group`` maps each load-input
-        buffer to its ordered producer group. Store-output producer groups are
-        stored in ``self.store_output_input_producer_groups`` and do not reach
-        this method.
-
-        Determines eligible epilogues and computes prologue sources before render().
+        """Compute external fusion metadata before render().
 
         Hook setup (_setup_epilogue_hook / _setup_prologue_hook) cannot
         happen here because it requires V.kernel context, which is only
@@ -4467,7 +4457,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
                     return timings
 
-            # Preserve placement-specific eligibility across all template choices.
+            # No choice has won yet, so take the union of inputs allowed at each
+            # producer-fusion placement. During benchmark fusion, exclude choices
+            # that do not support the full union for the enabled placements.
             load_input_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
             store_output_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
             for c in choices:

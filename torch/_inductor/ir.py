@@ -6492,23 +6492,15 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         render = self.make_kernel_render
         prev_kind = self._render_kind
         prev_caller = self._render_caller
-        prev_load_inputs = self.load_input_fusion_allowed_inputs
-        prev_store_inputs = self.store_output_fusion_allowed_inputs
         self.make_kernel_render = caller.get_make_kernel_render()
         self._render_kind = "triton"
         self._render_caller = caller
-        self.load_input_fusion_allowed_inputs = caller.load_input_fusion_allowed_inputs
-        self.store_output_fusion_allowed_inputs = (
-            caller.store_output_fusion_allowed_inputs
-        )
         try:
             yield
         finally:
             self.make_kernel_render = render
             self._render_kind = prev_kind
             self._render_caller = prev_caller
-            self.load_input_fusion_allowed_inputs = prev_load_inputs
-            self.store_output_fusion_allowed_inputs = prev_store_inputs
 
     def finalize_as_triton_caller(self, caller: TritonTemplateCallerBase) -> None:
         if not isinstance(
@@ -6522,10 +6514,6 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self.make_kernel_render = caller.get_make_kernel_render()
         self._render_kind = "triton"
         self._render_caller = caller
-        self.load_input_fusion_allowed_inputs = caller.load_input_fusion_allowed_inputs
-        self.store_output_fusion_allowed_inputs = (
-            caller.store_output_fusion_allowed_inputs
-        )
 
     @contextlib.contextmanager
     def swap_as_nvgemm_caller(self, caller: ChoiceCaller) -> Iterator[None]:
@@ -6567,8 +6555,6 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self.make_kernel_render = caller.get_make_kernel_render()
         self._render_kind = "nvgemm"
         self._render_caller = caller
-        self.load_input_fusion_allowed_inputs = OrderedSet()
-        self.store_output_fusion_allowed_inputs = OrderedSet()
 
     def get_min_choice(
         self, hint_override: int | None = None
