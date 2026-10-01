@@ -141,8 +141,9 @@ class TextGenerationPrefillModel(torch.nn.Module):
                     f"{type(self.model).__name__} cannot preallocate a static cache"
                 )
             num_heads, head_dim = cache_shape
+            config = self.model.config.get_text_config(decoder=True)
             self.cache = StaticCache(
-                config=self.model.config.get_text_config(decoder=True),
+                config=config,
                 max_cache_len=self.cache_capacity,
             )
             self.cache.early_initialization(
@@ -152,6 +153,29 @@ class TextGenerationPrefillModel(torch.nn.Module):
                 dtype=self.model.dtype,
                 device=self.model.device,
             )
+            if config.model_type == "qwen3_5_text":
+                # KV early initialization skips the hybrid cache's linear layers.
+                key_dim = config.linear_num_key_heads * config.linear_key_head_dim
+                value_dim = config.linear_num_value_heads * config.linear_value_head_dim
+                conv_states = torch.empty(
+                    self.batch_size,
+                    2 * key_dim + value_dim,
+                    config.linear_conv_kernel_dim,
+                    dtype=self.model.dtype,
+                    device=self.model.device,
+                )
+                recurrent_shape = (
+                    self.batch_size,
+                    config.linear_num_value_heads,
+                    config.linear_key_head_dim,
+                    config.linear_value_head_dim,
+                )
+                recurrent_states = conv_states.new_empty(recurrent_shape)
+                for layer, is_linear in zip(self.cache.layers, self.cache.is_linear):
+                    if is_linear:
+                        layer.lazy_initialization(
+                            conv_states=conv_states, recurrent_states=recurrent_states
+                        )
         else:
             self.cache.reset()
 
@@ -184,4 +208,5 @@ PREFILL_MODELS = {
     "meta-llama/Llama-3.2-1B",
     "google/gemma-2-2b",
     "Qwen/Qwen3-0.6B",
+    "Qwen/Qwen3.5-0.8B",
 }
