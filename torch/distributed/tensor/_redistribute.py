@@ -27,7 +27,6 @@ from torch.distributed.tensor._dtensor_spec import (
 from torch.distributed.tensor._utils import assert_no_mixed_partial_types
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
-    _is_block_shard,
     _is_shard_like,
     _StridedShard,
     _validate_block_shard_placements,
@@ -1588,100 +1587,6 @@ def _gen_transform_infos(
     )
 
 
-def _redistribute_block_shard(
-    local_tensor: torch.Tensor,
-    current_spec: DTensorSpec,
-    target_spec: DTensorSpec,
-    *,
-    async_op: bool,
-    use_graph_based_transform: bool | None,
-    is_explicit: bool,
-) -> torch.Tensor:
-    """Redistribute when either spec uses BlockShard.
-
-    BlockShard is only combined with Replicate/Partial, so it goes through
-    Replicate: all-gather the merged view for a BlockShard source, run the
-    regular planner on the remaining mesh dims, and take a local chunk of the
-    merged view for a BlockShard target. Partial -> BlockShard on one mesh dim
-    with everything else unchanged is a direct reduce-scatter.
-    """
-    shape = current_spec.shape
-    _validate_block_shard_placements(current_spec.placements, shape)
-    _validate_block_shard_placements(target_spec.placements, shape)
-    mesh = current_spec.mesh
-    current_placements = list(current_spec.placements)
-    target_placements = target_spec.placements
-
-    changed = [
-        i
-        for i, (c, t) in enumerate(zip(current_placements, target_placements))
-        if c != t
-    ]
-    if len(changed) == 1:
-        i = changed[0]
-        current, target = current_placements[i], target_placements[i]
-        if isinstance(target, BlockShard) and isinstance(current, Partial):
-            return target._reduce_shard_tensor(local_tensor, mesh, current.reduce_op, i)
-
-    new_local_tensor = local_tensor
-    for i, placement in enumerate(current_placements):
-        if isinstance(placement, BlockShard) and placement != target_placements[i]:
-            new_local_tensor = placement._to_replicate_tensor(
-                new_local_tensor, mesh, i, shape
-            )
-            current_placements[i] = Replicate()
-
-    intermediate_placements = tuple(
-        Replicate() if isinstance(t, BlockShard) and t != c else t
-        for c, t in zip(current_spec.placements, target_placements)
-    )
-    if any(_is_block_shard(p) for p in intermediate_placements):
-        # The unchanged BlockShard mesh dim keeps its merged-view local tensor,
-        # and the other mesh dims are Replicate/Partial, whose transforms don't
-        # depend on the shape. Plan them as if that mesh dim were Replicate.
-        local_meta = TensorMeta(
-            new_local_tensor.shape, new_local_tensor.stride(), new_local_tensor.dtype
-        )
-        src_spec = DTensorSpec(
-            mesh,
-            tuple(Replicate() if _is_block_shard(p) else p for p in current_placements),
-            tensor_meta=local_meta,
-        )
-        dst_spec = DTensorSpec(
-            mesh,
-            tuple(
-                Replicate() if _is_block_shard(p) else p
-                for p in intermediate_placements
-            ),
-            tensor_meta=local_meta,
-        )
-    else:
-        src_spec = DTensorSpec(
-            mesh, tuple(current_placements), tensor_meta=current_spec.tensor_meta
-        )
-        dst_spec = DTensorSpec(
-            mesh, intermediate_placements, tensor_meta=target_spec.tensor_meta
-        )
-    if src_spec.placements != dst_spec.placements:
-        new_local_tensor = redistribute_local_tensor(
-            new_local_tensor,
-            src_spec,
-            dst_spec,
-            async_op=async_op,
-            use_graph_based_transform=use_graph_based_transform,
-            is_explicit=is_explicit,
-        )
-
-    for i, (placement, target) in enumerate(
-        zip(intermediate_placements, target_placements)
-    ):
-        if isinstance(target, BlockShard) and placement != target:
-            new_local_tensor = target._replicate_to_block_shard(
-                new_local_tensor, mesh, i, mesh._sym_get_coordinate(i)
-            )
-    return new_local_tensor
-
-
 def redistribute_local_tensor(
     local_tensor: torch.Tensor,
     current_spec: DTensorSpec,
@@ -1702,11 +1607,6 @@ def redistribute_local_tensor(
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
 
-    if current_spec.use_strided_shard_as_shard_order is None:
-        raise ValueError(
-            "use_strided_shard_as_shard_order should be initialized in DTensorSpec.__post_init__()"
-        )
-
     # We do not see a valid use case for mixing different partial types in the same DTensor.
     # in principle it could be supported, but since nonlinear reductions (e.g. max) exist, relative ordering
     # of different partials would become semantically critical.  Without a motivating use case, we prohibit this.
@@ -1721,19 +1621,35 @@ def redistribute_local_tensor(
         # which should be an empty tensor
         return local_tensor
 
-    if any(
-        _is_block_shard(p)
-        for p in itertools.chain(current_spec.placements, target_spec.placements)
-    ):
+    if any(isinstance(p, BlockShard) for p in target_spec.placements):
         if current_spec.placements == target_spec.placements:
             return local_tensor
-        return _redistribute_block_shard(
-            local_tensor,
-            current_spec,
-            target_spec,
-            async_op=async_op,
-            use_graph_based_transform=use_graph_based_transform,
-            is_explicit=is_explicit,
+        raise NotImplementedError(
+            f"Redistributing to BlockShard is not supported: {current_spec} -> {target_spec}"
+        )
+    if any(isinstance(p, BlockShard) for p in current_spec.placements):
+        block_shard_layout = _validate_block_shard_placements(
+            current_spec.placements, current_spec.shape, device_mesh.shape
+        )
+        if block_shard_layout is None:
+            raise AssertionError(f"Expected a BlockShard layout in {current_spec}")
+        # BlockShard applies last, so undo it first: all-gather its merged view
+        # (of the Shard(0) slice, if any), then plan the remaining mesh dims.
+        mesh_dim = block_shard_layout.mesh_dim
+        local_tensor = new_local_tensor = (
+            block_shard_layout.placement._to_replicate_tensor(
+                local_tensor, device_mesh, mesh_dim, block_shard_layout.block_shape
+            )
+        )
+        placements = list(current_spec.placements)
+        placements[mesh_dim] = Replicate()
+        current_spec = DTensorSpec(
+            device_mesh, tuple(placements), tensor_meta=current_spec.tensor_meta
+        )
+
+    if current_spec.use_strided_shard_as_shard_order is None:
+        raise ValueError(
+            "use_strided_shard_as_shard_order should be initialized in DTensorSpec.__post_init__()"
         )
 
     if _are_we_tracing():
@@ -2014,11 +1930,7 @@ def _redistribute_backward(
     # unreachable because Partial -> _StridedShard is not implemented.
     normalized_placements: list[Placement] = []
     for current, target in zip(current_spec.placements, previous_spec.placements):
-        if (
-            _is_shard_like(current)
-            or _is_block_shard(current)
-            or current.is_replicate()
-        ) and target.is_partial():
+        if (_is_shard_like(current) or current.is_replicate()) and target.is_partial():
             normalized_placements.append(Replicate())
         else:
             normalized_placements.append(target)

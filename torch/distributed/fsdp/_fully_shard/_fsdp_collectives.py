@@ -559,11 +559,6 @@ def _default_reduce_scatter_input_fn(
         for i, (fsdp_param, unsharded_grad) in enumerate(
             zip(fsdp_params, unsharded_grads)
         ):
-            if (block_shard := fsdp_param._block_shard) is not None:
-                # Pad and scatter merged rows, not dim 0 of the parameter.
-                merged = block_shard._merged_shape(unsharded_grad.shape)
-                unsharded_grads[i] = unsharded_grad.reshape(merged)
-                continue
             if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
                 continue
             if unsharded_grad.size(shard_dim) % world_size != 0:

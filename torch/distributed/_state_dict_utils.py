@@ -18,7 +18,9 @@ if dist.is_available() or TYPE_CHECKING:
     from torch.distributed._shard.sharded_tensor import ShardedTensor
     from torch.distributed.tensor import distribute_tensor, DTensor, Replicate
     from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
-    from torch.distributed.tensor.placement_types import BlockShard
+    from torch.distributed.tensor.placement_types import (
+        _validate_block_shard_placements,
+    )
 
 
 def _identity_func(
@@ -613,16 +615,22 @@ def _distribute_tensors(
         full_tensor = _local_state[1]
 
         mesh = local_state.device_mesh
-        block_shard_dims = [
-            i for i, p in enumerate(local_state.placements) if isinstance(p, BlockShard)
-        ]
-        if block_shard_dims:
-            # BlockShard local tensors are a row range of the merged view, which
-            # is not one slice of the full tensor.
-            i = block_shard_dims[0]
-            block_shard = cast(BlockShard, local_state.placements[i])
-            local_slice = block_shard._replicate_to_block_shard(
-                full_tensor, mesh, i, mesh._sym_get_coordinate(i)
+        layout = _validate_block_shard_placements(
+            local_state.placements, full_tensor.shape, mesh.shape
+        )
+        if layout is not None:
+            # BlockShard local tensors are a row range of the merged view (of the
+            # Shard(0) slice, if any), which is not one slice of the full tensor.
+            block_input = full_tensor
+            if layout.shard0_mesh_dim is not None:
+                rows = layout.block_shape[0]
+                start = mesh._sym_get_coordinate(layout.shard0_mesh_dim) * rows
+                block_input = full_tensor.narrow(0, start, rows)
+            local_slice = layout.placement._replicate_to_block_shard(
+                block_input,
+                mesh,
+                layout.mesh_dim,
+                mesh._sym_get_coordinate(layout.mesh_dim),
             )
         else:
             shape, offset = compute_local_shape_and_global_offset(

@@ -8,10 +8,10 @@ from typing import Any, cast, NamedTuple
 import torch
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
-    _is_block_shard,
     _is_shard_like,
     _MaskPartial,
     _StridedShard,
+    _validate_block_shard_placements,
     Partial,
     Placement,
     Replicate,
@@ -612,7 +612,7 @@ class DTensorSpec:
     def num_shards(self) -> int:
         num_shards = 1
         for i, placement in enumerate(self.placements):
-            if _is_shard_like(placement) or _is_block_shard(placement):
+            if _is_shard_like(placement):
                 num_shards *= self.mesh.size(i)
         return num_shards
 
@@ -747,12 +747,9 @@ class DTensorSpec:
 
     def is_sharded(self) -> bool:
         """
-        return True if the current DTensorSpec uses Shard(), _StridedShard(), or BlockShard() placement on any mesh dims (devices)
+        return True if the current DTensorSpec uses Shard() or _StridedShard() placement on any mesh dims (devices)
         """
-        return any(
-            _is_shard_like(placement) or _is_block_shard(placement)
-            for placement in self.placements
-        )
+        return any(_is_shard_like(placement) for placement in self.placements)
 
     def shallow_copy_with_tensor_meta(
         self, tensor_meta: TensorMeta | None
@@ -768,3 +765,31 @@ class DTensorSpec:
             tensor_meta=tensor_meta,
             use_strided_shard_as_shard_order=self.use_strided_shard_as_shard_order,
         )
+
+
+def _lower_block_shard_spec(spec: DTensorSpec) -> DTensorSpec:
+    """Return ``spec`` with BlockShard lowered to Shard(0) on its merged view.
+
+    BlockShard applies after the Shard(0) mesh dim (if any), so when that mesh
+    dim comes later in the mesh it lowers to ``_StridedShard(0, split_factor)``,
+    the same nested dim-0 layout FSDP2 uses for Shard(0) after expert
+    parallelism. Specs without BlockShard are returned as is.
+    """
+    if spec.tensor_meta is None:
+        return spec
+    layout = _validate_block_shard_placements(
+        spec.placements, spec.shape, spec.mesh.shape
+    )
+    if layout is None:
+        return spec
+    placements = list(spec.placements)
+    shard0_dim = layout.shard0_mesh_dim
+    placements[layout.mesh_dim] = (
+        _StridedShard(0, split_factor=spec.mesh.size(shard0_dim))
+        if shard0_dim is not None and shard0_dim > layout.mesh_dim
+        else Shard(0)
+    )
+    merged_shape = layout.placement._merged_shape(spec.shape)
+    stride = torch._prims_common.make_contiguous_strides_for(merged_shape)
+    meta = TensorMeta(merged_shape, stride, spec.tensor_meta.dtype)
+    return DTensorSpec(spec.mesh, tuple(placements), tensor_meta=meta)

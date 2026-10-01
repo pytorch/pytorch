@@ -35,9 +35,9 @@ from torch.distributed.tensor._utils import (
     normalize_to_torch_size,
 )
 from torch.distributed.tensor.placement_types import (
+    _block_shard_local_boxes,
     _StridedShard,
     _validate_block_shard_placements,
-    BlockShard,
     Partial,
     Placement,
     Replicate,
@@ -134,25 +134,6 @@ class _ToTorchTensor(torch.autograd.Function):
         if grad_placements is None:
             # See DTensor.from_local docstring for gradient placement guarantees
             grad_placements = _normalize_placements_for_grad(dtensor_spec.placements)
-
-        if any(isinstance(p, BlockShard) for p in dtensor_spec.placements):
-            # BlockShard local tensors use the merged-view shape, so the stride
-            # checks below (which compare local and global strides) don't apply.
-            if tuple(grad_placements) != dtensor_spec.placements:
-                raise NotImplementedError(
-                    f"to_local() backward with BlockShard requires grad_placements "
-                    f"{dtensor_spec.placements}, got {tuple(grad_placements)}"
-                )
-            return (
-                DTensor.from_local(
-                    grad_output,
-                    mesh,
-                    dtensor_spec.placements,
-                    shape=dtensor_meta.shape,
-                    stride=dtensor_meta.stride,
-                ),
-                None,
-            )
 
         from torch._prims_common import check_contiguous_sizes_strides
         from torch.fx.experimental.symbolic_shapes import guard_or_false
@@ -650,16 +631,6 @@ class DTensor(torch.Tensor):
         # Validate that placements don't contain mixed Partial reduce types
         assert_no_mixed_partial_types(placements)
 
-        if any(isinstance(p, BlockShard) for p in placements):
-            # The global shape can't be inferred from a merged-view local tensor.
-            if shape is None:
-                raise ValueError(
-                    "DTensor.from_local with BlockShard placements requires shape="
-                )
-            if stride is None:
-                stride = torch._prims_common.make_contiguous_strides_for(shape)
-            _validate_block_shard_placements(placements, shape)
-
         # `from_local` is differentiable, and the gradient of the dist tensor this function
         # created should flow back the gradients to the local_tensor, so we call an autograd
         # function to construct the dist tensor instead.
@@ -926,15 +897,15 @@ class DTensor(torch.Tensor):
     ) -> list[tuple[tuple[int, ...], tuple[int, ...], int, int]] | None:
         """Boxes of the global tensor owned by this rank under BlockShard, if used."""
         mesh = self.device_mesh
-        for mesh_dim, placement in enumerate(self._spec.placements):
-            if isinstance(placement, BlockShard):
-                coordinate = mesh.get_coordinate()
-                if coordinate is None:
-                    return []
-                return placement._local_boxes(
-                    self.shape, mesh.size(mesh_dim), coordinate[mesh_dim]
-                )
-        return None
+        layout = _validate_block_shard_placements(
+            self._spec.placements, self.shape, mesh.shape
+        )
+        if layout is None:
+            return None
+        coordinate = mesh.get_coordinate()
+        if coordinate is None:
+            return []
+        return _block_shard_local_boxes(layout, mesh.shape, coordinate)
 
     def __create_write_items__(self, fqn: str, object: Any):
         self._raise_if_contains_partial_placements()
@@ -1145,7 +1116,6 @@ def distribute_tensor(
         return tensor
 
     local_tensor = tensor.detach()
-    _validate_block_shard_placements(placements, tensor.shape)
 
     # TODO(xilun): address sharding order
     # distribute the tensor according to the placements.
@@ -1172,10 +1142,6 @@ def distribute_tensor(
                 placements[idx] = _StridedShard(
                     placement_dim, split_factor=placement.split_factor
                 )
-        elif isinstance(placement, BlockShard):
-            local_tensor = placement._shard_tensor(
-                local_tensor, device_mesh, idx, src_data_rank
-            )
         elif isinstance(placement, Replicate):
             local_tensor = Replicate._make_replicate_tensor(
                 local_tensor, device_mesh, idx, src_data_rank
