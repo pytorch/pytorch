@@ -1158,6 +1158,7 @@ _ANNOTATION_CONFIG_KEYS: dict[str, tuple[typing.Any, tuple[typing.Any, ...] | No
     "key_by": ("exec", ("exec", "source", "auto")),
     "record_py_stacks": (False, (False, True)),
     "py_stack_filter_paths": (None, None),
+    "collectives": (True, (False, True)),
 }
 
 
@@ -1256,6 +1257,11 @@ class graph:
             Paths are matched on directory boundaries; relative paths are resolved when
             capture begins. ``None`` uses the defaults; an empty list disables filtering.
             Used only with ``record_py_stacks=True``.
+            ``"collectives"`` (bool, default ``True``) tags the kernels of every c10d
+            collective captured on an existing process group with the fields
+            ``record_param_comms`` gives it in eager mode (``"Collective name"``,
+            ``"Process Group Name"``, ``"Seq"``, ...). Pass ``False`` when a wrapper
+            already annotates its collectives.
         check_input_liveness (bool, optional): If ``True``, tracks external tensor inputs during graph capture and
             raises an error if any are deallocated before replay. This helps debug "use after free" errors
             where input tensors are garbage collected between capture and replay. Default: ``False``.
@@ -1307,6 +1313,7 @@ class graph:
         self.cuda_graph = cuda_graph
         self.capture_error_mode = capture_error_mode
         self._enable_annotations = enable_annotations
+        self._collective_annotations: typing.Any = None
         self.check_input_liveness = check_input_liveness
 
     def __enter__(self) -> None:
@@ -1444,7 +1451,19 @@ class graph:
                     )
                 backend = "edge_walk"
             _set_annotation_backend(backend)
+            if (
+                self._enable_annotations
+                and self._annotation_config["collectives"]
+                and torch.distributed.is_available()
+                and torch.distributed.is_initialized()
+            ):
+                from torch.distributed._cuda_graph_annotations import (
+                    CollectiveAnnotations,
+                )
+
+                self._collective_annotations = CollectiveAnnotations()
         except BaseException:
+            self._close_collective_annotations()
             _graph_node_callbacks.disarm()
             _set_annotations_enabled(False)
             try:
@@ -1454,6 +1473,14 @@ class graph:
                 pass
             self.stream_ctx.__exit__(None, None, None)
             raise
+
+    def _close_collective_annotations(self) -> None:
+        if self._collective_annotations is not None:
+            annotations, self._collective_annotations = (
+                self._collective_annotations,
+                None,
+            )
+            annotations.close()
 
     def __exit__(self, *args: object) -> None:
         from torch.cuda import _graph_node_callbacks
@@ -1465,6 +1492,7 @@ class graph:
         )
 
         try:
+            self._close_collective_annotations()
             # Stop recording before capture_end: the CUPTI backend has already attributed
             # every node as it was created, and leaving the callback enabled would also pick
             # up nodes created while instantiating.
@@ -1492,6 +1520,7 @@ class graph:
             # Annotation recording is capture-scoped; clear it unconditionally. disarm() is
             # idempotent, so repeating it here just covers a capture that raised before the
             # call above (it must not stay armed past this context either way).
+            self._close_collective_annotations()
             _graph_node_callbacks.disarm()
             _set_annotations_enabled(False)
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
