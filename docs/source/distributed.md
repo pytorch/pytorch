@@ -212,6 +212,31 @@ You can tune NCCL communicators even further using `torch.distributed.ProcessGro
 and `torch.distributed.ProcessGroupNCCL.Options`. Learn more about them using `help`
 (e.g. `help(torch.distributed.ProcessGroupNCCL.NCCLConfig)`) in the interpreter.
 
+(nccl-collective-config)=
+
+### Per-collective NCCL configuration
+
+The `nccl2` backend accepts a keyword-only `config` on supported collective
+functions. This requires NCCL 2.31 or later and
+[nccl4py](https://pypi.org/project/nccl4py/) 0.5.0 or later:
+
+```python
+from nccl.core import NCCLCollConfig
+import torch.distributed as dist
+
+dist.init_process_group("nccl2")
+config = NCCLCollConfig(max_ctas=4, alg_selection="ring")
+dist.all_reduce(tensor, config=config)
+```
+
+Unset fields inherit NCCL or communicator defaults. Use the same configuration
+on every participating rank; mismatches can hang. Configurations within an NCCL
+group must agree on `cga_cluster_size`. Passing `None` preserves existing behavior
+and does not require nccl4py.
+
+Backends handle `config` through their collective options. NCCL2 rejects unsupported
+operations, uneven splits, coalescing capture, and time estimation. External NCCL group scopes are unsupported.
+
 (distributed-basics)=
 
 ## Basics
