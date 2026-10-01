@@ -3477,68 +3477,28 @@ class SIMDScheduling(BaseScheduling):
     ) -> tuple[float, str]:
         raise NotImplementedError
 
-    def _mix_order_split_size(self, node1, numel):
-        # the overridden has highest priority
-        if config.triton.mix_order_reduction_split_size is not None:
-            return config.triton.mix_order_reduction_split_size
-
-        # heuristics based on number of SMs
-        device_prop = DeviceProperties.create(node1.get_device())
-        num_sm = device_prop.multi_processor_count
-        estimated_num_splits = num_sm * 8
-
-        # split_size is decided based on hint.
-        # optimization_hint is fine here: the result is clamped to [16, 128],
-        # so any fallback value still produces a valid split size.
-        numel_hint = V.graph.sizevars.optimization_hint(numel)
-        split_size = max(last_power_of_2(numel_hint // estimated_num_splits), 16)
-        split_size = min(split_size, 128)
-        return split_size
-
-    def _mix_order_kernel_features(self, node1, node2_reductions, numel, rnumel):
-        """Convert node2's reductions in place for the mix-order kernel."""
-        converted_nodes = []
-        for subnode in node2_reductions:
-            subnode.cancel_reduction_split()
-            converted = subnode.extract_pw_from_reduction()
-            converted.swap_pw_red_dimension()
-            converted_nodes.append(converted)
-        node_schedule = self.generate_node_schedule(
-            node1.get_nodes() + converted_nodes, numel, rnumel
-        )
-        return converted_nodes, SIMDKernelFeatures(node_schedule, numel, rnumel)
-
-    def benchmark_mix_order_reduction(self, node) -> tuple[float, str] | None:
-        """Time the kernel codegen_mix_order_reduction would emit for node,
-        leaving node's loops unchanged. None if node2 has epilogue nodes."""
-        node1, node2 = node.node1, node.node2
-        numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
-        node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
-            node2
-        )
-        if node2_epilogue:
-            return None
-        snapshot = scheduler._LoopStateSnapshot.create(tuple(node2_reductions))
-        try:
-            _, kernel_features = self._mix_order_kernel_features(
-                node1, node2_reductions, numel, rnumel
-            )
-            kernel = self._create_kernel_for_mix_order_reduction(
-                kernel_features, self._mix_order_split_size(node1, numel)
-            )
-            _, src_code = self._generate_kernel_code_for_mix_order_reduction(
-                kernel, for_benchmark=True
-            )
-        finally:
-            snapshot.restore()
-            for subnode in node2_reductions:
-                # cancel_reduction_split caches the unsplit body.
-                subnode.node.get_default_sizes_body.clear_cache(subnode.node)
-        return self.benchmark_codegened_module(PyCodeCache.load(src_code))
-
     def _codegen_mix_order_reduction(self, node1, node2):
         numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
-        initial_split_size = self._mix_order_split_size(node1, numel)
+
+        def _pick_split_size():
+            # the overridden has highest priority
+            if config.triton.mix_order_reduction_split_size is not None:
+                return config.triton.mix_order_reduction_split_size
+
+            # heuristics based on number of SMs
+            device_prop = DeviceProperties.create(node1.get_device())
+            num_sm = device_prop.multi_processor_count
+            estimated_num_splits = num_sm * 8
+
+            # split_size is decided based on hint.
+            # optimization_hint is fine here: the result is clamped to [16, 128],
+            # so any fallback value still produces a valid split size.
+            numel_hint = V.graph.sizevars.optimization_hint(numel)
+            split_size = max(last_power_of_2(numel_hint // estimated_num_splits), 16)
+            split_size = min(split_size, 128)
+            return split_size
+
+        initial_split_size = _pick_split_size()
 
         # pyrefly: ignore [bad-assignment]
         metrics.codegen_mix_order_reduction += 1
@@ -3548,10 +3508,16 @@ class SIMDScheduling(BaseScheduling):
             node2
         )
 
-        converted_nodes, kernel_features = self._mix_order_kernel_features(
-            node1, node2_reductions, numel, rnumel
+        converted_nodes = []
+        for subnode in node2_reductions:
+            subnode.cancel_reduction_split()
+            converted = subnode.extract_pw_from_reduction()
+            converted.swap_pw_red_dimension()
+            converted_nodes.append(converted)
+        node_schedule = self.generate_node_schedule(
+            node1.get_nodes() + converted_nodes, numel, rnumel
         )
-        node_schedule = kernel_features.node_schedule
+        kernel_features = SIMDKernelFeatures(node_schedule, numel, rnumel)
         kernel = self._create_kernel_for_mix_order_reduction(
             kernel_features, initial_split_size
         )
