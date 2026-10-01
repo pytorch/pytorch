@@ -1142,6 +1142,20 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(fn(x), opt_fn(x_opt))
         self.assertEqual(x, x_opt)
 
+    def test_aot_autograd_expand_mutation_multiple_aliases(self):
+        # https://github.com/pytorch/pytorch/issues/198382
+        def fn(x):
+            y = x.expand(2, *x.shape)
+            y[:, 0] = 1.0
+            return y[0].to(torch.int64)
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+
+        x = torch.randn(2, 2)
+        x_opt = x.detach().clone()
+        self.assertEqual(fn(x), opt_fn(x_opt))
+        self.assertEqual(x, x_opt)
+
     def test_aot_autograd_expand_mutation_backwards(self):
         def fn(x, z):
             y = x.expand(3, *x.shape)
