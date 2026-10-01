@@ -15,6 +15,7 @@ from concurrent.futures import (
     TimeoutError as FuturesTimeoutError,
 )
 from concurrent.futures.process import BrokenProcessPool
+from contextlib import nullcontext
 from functools import partial
 from time import time, time_ns
 from typing import Any, TYPE_CHECKING
@@ -546,7 +547,26 @@ class AsyncCompile:
             # this process, even when the original cache miss used the process
             # pool. Invalid-artifact recovery therefore scopes Triton's force
             # flag in the parent; it does not submit _worker_compile_triton.
-            def compile_kernel() -> CachingAutotuner:
+            compile_context = nullcontext()
+            force_context = nullcontext()
+            if force_recompile:
+                from torch._dynamo.convert_frame import compile_lock
+                from torch._inductor.utils import _set_env
+
+                compile_context = compile_lock
+                force_context = _set_env("TRITON_ALWAYS_COMPILE", "1")
+
+            with (
+                dynamo_timed(
+                    "async_compile.precompile",
+                    log_pt2_compile_event=True,
+                    dynamo_compile_column_us="triton_compile_time_us",
+                    log_waitcounter=True,
+                    waitcounter_name_override="compile_triton",
+                ),
+                compile_context,
+                force_context,
+            ):
                 fail = None
                 try:
                     start_ns = time_ns()
@@ -566,21 +586,6 @@ class AsyncCompile:
                     raise
                 finally:
                     log_triton_builds(fail=fail)
-
-            with dynamo_timed(
-                "async_compile.precompile",
-                log_pt2_compile_event=True,
-                dynamo_compile_column_us="triton_compile_time_us",
-                log_waitcounter=True,
-                waitcounter_name_override="compile_triton",
-            ):
-                if not force_recompile:
-                    return compile_kernel()
-                from torch._dynamo.convert_frame import compile_lock
-                from torch._inductor.utils import _set_env
-
-                with compile_lock, _set_env("TRITON_ALWAYS_COMPILE", "1"):
-                    return compile_kernel()
 
         if (future := CompiledTritonKernels.get(source_code)) is not None:
             counters["inductor"]["async_compile_cache_hit"] += 1
