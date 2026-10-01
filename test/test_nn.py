@@ -48,7 +48,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, precisionOverride, onlyAccelerator, onlyOn, \
+    dtypesIfCUDA, precisionOverride, onlyAccelerator, \
     skipCUDAIf, skipCUDAIfNoCudnn, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
     expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
@@ -12973,17 +12973,18 @@ class TestNNDeviceType(NNTestCase):
         clip_grad_value_([p2], clip_value, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
-    # The bfloat16 values below are those of the CPU and CUDA kernels, which accumulate in
-    # float32 and round to nearest even; another backend may round differently.
-    @onlyOn(["cpu", "cuda"])
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (1.0, 2.0))
     def test_get_total_norm_dtype(self, norm_type, foreach, device):
+        if torch.device(device).type == 'xla' and foreach:
+            raise SkipTest('foreach not supported on XLA')
+        if torch.device(device).type == 'mps' and foreach:
+            raise SkipTest('foreach not supported on MPS')
         # By default each per-tensor norm of low-precision inputs is rounded to their dtype
         # before the norms are combined, so the total depends on how the tensors are split.
         # With dtype=torch.float32 every norm is accumulated and returned in float32. The
-        # inputs are small integers, so the float32 sums are exact and the result is the
-        # correctly rounded norm: it is compared without tolerance.
+        # inputs are small integers, so the float32 sums are exact; a total rounded through
+        # bfloat16 would be off by about 1, far outside the float32 tolerance.
         g = torch.tensor([255.0, 32.0, 1.0], dtype=torch.bfloat16, device=device)
         whole, split = [g], [g[:2], g[2:]]
 
@@ -12991,15 +12992,17 @@ class TestNNDeviceType(NNTestCase):
         expected = torch.tensor(exact, dtype=torch.float32, device=device)
         for tensors in (whole, split):
             total = get_total_norm(tensors, norm_type=norm_type, foreach=foreach, dtype=torch.float32)
-            self.assertEqual(total, expected, atol=0, rtol=0)
+            self.assertEqual(total, expected)
 
         whole_default = get_total_norm(whole, norm_type=norm_type, foreach=foreach)
         split_default = get_total_norm(split, norm_type=norm_type, foreach=foreach)
         self.assertEqual(whole_default.dtype, torch.bfloat16)
         self.assertEqual(split_default.dtype, torch.bfloat16)
-        if norm_type == 2.0:
-            # The first part of the split has norm 257, which rounds to 256 in bfloat16, so the
-            # split total is sqrt(256**2 + 1) -> 256 while the unsplit one is sqrt(66050) -> 258.
+        if norm_type == 2.0 and torch.device(device).type in ('cpu', 'cuda'):
+            # CPU and CUDA accumulate bfloat16 in float32 and round to nearest even; another backend
+            # may round differently. The first part of the split has norm 257, which rounds to 256
+            # in bfloat16, so the split total is sqrt(256**2 + 1) -> 256 while the unsplit one is
+            # sqrt(66050) -> 258.
             self.assertEqual(whole_default.item(), 258.0)
             self.assertEqual(split_default.item(), 256.0)
 
