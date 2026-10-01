@@ -2487,6 +2487,21 @@ class BuiltinVariable(BaseBuiltinVariable):
             return VariableTracker.build(tx, dir(arg.value))
         if isinstance(arg, BuiltinVariable):
             return VariableTracker.build(tx, dir(arg.fn))
+        if isinstance(arg, (variables.UserFunctionVariable, variables.UserMethodVariable)):
+            # dir() on functions and bound methods must include attributes
+            # buffered in Dynamo's function __dict__ side-effect tracker. A
+            # constant-folded dir(real_function) misses writes made earlier in
+            # the same trace because they have not been replayed yet.
+            fn_vt = arg.im_func if isinstance(arg, variables.UserMethodVariable) else arg
+            names = set(dir(arg.get_function()))
+            if isinstance(arg, variables.UserMethodVariable):
+                names.update(dir(types.MethodType))
+            for key in fn_vt.get_dict_vt(tx).unpack_var_sequence(tx):
+                if key.is_python_constant():
+                    name = key.as_python_constant()
+                    if isinstance(name, str):
+                        names.add(name)
+            return VariableTracker.build(tx, sorted(names))
         # Enable specialized VTs for constants to work with dir()
         if arg.is_python_constant():
             return VariableTracker.build(tx, dir(arg.as_python_constant()))
