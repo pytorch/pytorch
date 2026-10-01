@@ -8024,9 +8024,13 @@ class TestNNDeviceType(NNTestCase):
         N = 2 * warp_size
         M = (2**32 - 1) // warp_size + 1
         x = torch.randn(M, N, dtype=torch.bfloat16, device=device)
-        norm = torch.rms_norm if rms else torch.layer_norm
-        y = norm(x, [N])
-        self.assertEqual(y[-1], norm(x[-1:], [N])[0])
+        # Check the saved mean/rstd as well as the output.
+        if rms:
+            norm = partial(torch._fused_rms_norm, normalized_shape=[N], weight=None, eps=None)
+        else:
+            norm = partial(torch.native_layer_norm, normalized_shape=[N], weight=None, bias=None, eps=1e-5)
+        for out, ref in zip(norm(x), norm(x[-1:])):
+            self.assertEqual(out[-1], ref[-1])
 
     @onlyAccelerator
     @largeTensorTest("1GB")
