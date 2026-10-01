@@ -10,6 +10,8 @@
 
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
+#include <algorithm>
+
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
@@ -53,6 +55,16 @@ void untrackNcclAllocatorSegment(void* ptr, int device) {
       "NCCL allocator freed an address that was not tracked");
 }
 #endif
+
+bool isEqualSplit(
+    const std::vector<int64_t>& split_sizes,
+    const at::Tensor& tensor,
+    int group_size) {
+  return split_sizes.empty() ||
+      std::all_of(split_sizes.begin(), split_sizes.end(), [&](int64_t size) {
+           return size * group_size == tensor.size(0);
+         });
+}
 
 std::vector<uint64_t> normalizeSplitSizes(
     const std::vector<int64_t>& split_sizes,
@@ -187,7 +199,6 @@ void ProcessGroupNCCL::startTimeEstimate() {
   checkInitialized();
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
-  ++time_estimate_depth_;
 #else
   TORCH_CHECK(false, "NCCL time estimation requires NCCL 2.22 or later");
 #endif
@@ -195,9 +206,6 @@ void ProcessGroupNCCL::startTimeEstimate() {
 
 float ProcessGroupNCCL::endTimeEstimate() {
 #ifdef NCCL_SIM_INFO_INITIALIZER
-  if (time_estimate_depth_ != 0) {
-    --time_estimate_depth_;
-  }
   ncclSimInfo_t simInfo = NCCL_SIM_INFO_INITIALIZER;
   NCCL_CHECK(
       nccl_api_,
@@ -466,7 +474,7 @@ bool ProcessGroupNCCL::supportsWindow() const {
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::broadcast(
     std::vector<at::Tensor>& tensors,
     const ::c10d::BroadcastOptions& opts) {
-  const auto config = prepareCollectiveConfig(opts.config);
+  const auto config = materializeCollConfig(opts.config);
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
   auto tensor = tensors.at(0);
   if (tensor.is_complex()) {
@@ -486,7 +494,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::broadcast(
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce(
     std::vector<at::Tensor>& tensors,
     const ::c10d::AllreduceOptions& opts) {
-  const auto config = prepareCollectiveConfig(opts.config);
+  const auto config = materializeCollConfig(opts.config);
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
   auto tensor = tensors.at(0);
   if (tensor.is_complex()) {
@@ -519,7 +527,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_sparse(
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
     std::vector<at::Tensor>& tensors,
     const ::c10d::AllreduceCoalescedOptions& opts) {
-  const auto config = prepareCollectiveConfig(opts.config);
+  const auto config = materializeCollConfig(opts.config);
   TORCH_CHECK(!tensors.empty(), "Tensor list must be nonempty");
   ++sequence_number_;
   std::vector<c10::intrusive_ptr<WorkNCCL>> works;
@@ -542,7 +550,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reduce(
     std::vector<at::Tensor>& tensors,
     const ::c10d::ReduceOptions& opts) {
-  const auto config = prepareCollectiveConfig(opts.config);
+  const auto config = materializeCollConfig(opts.config);
   TORCH_CHECK(tensors.size() == 1, "Only single tensor supported");
   auto tensor = tensors.at(0);
   if (tensor.is_complex()) {
@@ -569,7 +577,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather(
     std::vector<std::vector<at::Tensor>>& outputTensors,
     std::vector<at::Tensor>& inputTensors,
     const ::c10d::AllgatherOptions& opts) {
-  const auto config = prepareCollectiveConfig(opts.config);
+  const auto config = materializeCollConfig(opts.config);
   TORCH_CHECK(
       outputTensors.size() == 1 && inputTensors.size() == 1,
       "Only single tensor / single list supported");
@@ -613,7 +621,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather_coalesced(
     std::vector<std::vector<at::Tensor>>& outputTensorLists,
     std::vector<at::Tensor>& inputTensors,
     const ::c10d::AllgatherOptions& opts) {
-  const auto config = prepareCollectiveConfig(opts.config);
+  const auto config = materializeCollConfig(opts.config);
   TORCH_CHECK(
       !inputTensors.empty() && outputTensorLists.size() == inputTensors.size(),
       "Input and output tensor lists must have the same nonzero size");
@@ -645,7 +653,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
         std::vector<at::Tensor>& outputs,
         std::vector<at::Tensor>& inputs,
         const ::c10d::AllgatherOptions& opts) {
-  const auto config = prepareCollectiveConfig(opts.config);
+  const auto config = materializeCollConfig(opts.config);
   TORCH_CHECK(
       !inputs.empty() && outputs.size() == inputs.size(),
       "Input and output tensor lists must have the same nonzero size");
@@ -671,7 +679,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_allgather_base(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const ::c10d::AllgatherOptions& opts) {
-  const auto config = prepareCollectiveConfig(opts.config);
+  const auto config = materializeCollConfig(opts.config);
   if (inputBuffer.dtype() != outputBuffer.dtype()) {
     C10_THROW_ERROR(
         TypeError, "output tensor must have the same type as input tensor");
@@ -732,7 +740,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather_single(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const ::c10d::GatherOptions& opts) {
-  const auto config = prepareCollectiveConfig(opts.config);
+  const auto config = materializeCollConfig(opts.config);
   TORCH_CHECK(
       opts.rootRank >= 0 && opts.rootRank < getSize(),
       "invalid root rank: ",
@@ -762,6 +770,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather_single(
       static_cast<int>(opts.rootRank),
       opts.asyncOp,
       operationTimeout(opts.timeout),
+      /*contiguous_output=*/true,
       config);
   work->setOutputs(std::vector<at::Tensor>{outputBuffer});
   return work;
@@ -804,7 +813,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reduce_scatter(
     std::vector<at::Tensor>& outputTensors,
     std::vector<std::vector<at::Tensor>>& inputTensors,
     const ::c10d::ReduceScatterOptions& opts) {
-  const auto config = prepareCollectiveConfig(opts.config);
+  const auto config = materializeCollConfig(opts.config);
   TORCH_CHECK(
       outputTensors.size() == 1 && inputTensors.size() == 1,
       "Only single tensor / single list supported");
@@ -825,7 +834,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
         std::vector<at::Tensor>& outputs,
         std::vector<at::Tensor>& inputs,
         const ::c10d::ReduceScatterOptions& opts) {
-  const auto config = prepareCollectiveConfig(opts.config);
+  const auto config = materializeCollConfig(opts.config);
   TORCH_CHECK(
       !outputs.empty() && inputs.size() == outputs.size(),
       "Input and output tensor lists must have the same nonzero size");
@@ -852,7 +861,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_reduce_scatter_base(
     at::Tensor& outputBuffer,
     at::Tensor& inputBuffer,
     const ::c10d::ReduceScatterOptions& opts) {
-  const auto config = prepareCollectiveConfig(opts.config);
+  const auto config = materializeCollConfig(opts.config);
   if (inputBuffer.dtype() != outputBuffer.dtype()) {
     C10_THROW_ERROR(
         TypeError, "input tensor must be the same type as the output tensor.");
@@ -882,8 +891,15 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::alltoall_base(
     const ::c10d::AllToAllOptions& opts) {
   ++sequence_number_;
   auto timeout = operationTimeout(opts.timeout);
-  if (outputSplitSizes.empty() && inputSplitSizes.empty()) {
-    const auto config = prepareCollectiveConfig(opts.config);
+  // ncclAlltoAllv has no Config variant.
+  TORCH_CHECK(
+      !opts.config.has_value() ||
+          (isEqualSplit(outputSplitSizes, outputBuffer, size_) &&
+           isEqualSplit(inputSplitSizes, inputBuffer, size_)),
+      "Per-collective NCCL configuration requires equal all_to_all split sizes");
+  if (opts.config.has_value() ||
+      (outputSplitSizes.empty() && inputSplitSizes.empty())) {
+    const auto config = materializeCollConfig(opts.config);
     c10d::checkSplitSizes(inputSplitSizes, inputBuffer, size_);
     c10d::checkSplitSizes(outputSplitSizes, outputBuffer, size_);
     auto work = allToAllSingleImpl(
@@ -891,9 +907,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::alltoall_base(
     work->setOutputs(std::vector<at::Tensor>{outputBuffer});
     return work;
   }
-  TORCH_CHECK(
-      !opts.config.has_value(),
-      "Per-collective NCCL configuration requires equal all_to_all split sizes");
   auto work = all_to_all_v_single(
       outputBuffer,
       inputBuffer,

@@ -394,8 +394,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void waitForNcclOperation(
       ncclResult_t status,
       std::chrono::milliseconds timeout,
-      std::string_view operation,
-      const MaterializedCollectiveConfig& config = {});
+      std::string_view operation);
   // Tears the NCCL communicator down. This NEVER terminates the process --
   // a user-initiated abort()/shutdown() must be survivable, matching
   // ::c10d::ProcessGroupNCCL::abort(). Callers that are handling a
@@ -439,9 +438,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const at::Tensor& inputTensor);
 
  private:
-  MaterializedCollectiveConfig prepareCollectiveConfig(
-      const OptionalCollectiveConfig& config);
-
   // RAII helper that cleans up NCCL premul-sum reduction ops. Built from a
   // c10d::ReduceOp (the premul factor is read from its supplement).
   struct RedOpRAII {
@@ -596,6 +592,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       int root,
       bool async_op,
       std::chrono::milliseconds timeout,
+      bool contiguous_output = false,
       const MaterializedCollectiveConfig& config = {});
 
   // Resolve a c10d per-op timeout (kUnsetTimeout -> communicator default).
@@ -734,9 +731,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // startCoalescing() and endCoalescing(); send()/recv() append into it.
   std::optional<BatchSendRecv> coalescing_batch_;
   c10::intrusive_ptr<WorkNCCL> coalesced_work_;
-
-  // NCCL groups span communicators on the calling thread.
-  static thread_local size_t time_estimate_depth_;
 
   std::unordered_map<
       unsigned long long,
