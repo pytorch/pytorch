@@ -403,5 +403,125 @@ class BlockShardCheckpointTest(DTensorContinuousTestBase):
         self.assertEqual(loaded["w"].full_tensor(), full)
 
 
+# Expert parallelism (Shard(0) on the experts dim) then BlockShard on the merged
+# rows of the local experts, on a 2 x 2 mesh in both mesh dim orders. Shapes
+# cover rows crossing expert boundaries and an uneven last rank.
+EP_SHAPES = [(6, 2, 3), (2, 3, 4), (4, 5, 2)]
+
+
+class BlockShardExpertParallelTest(DTensorContinuousTestBase):
+    world_size = 4
+
+    def _layouts(self):
+        for names in [("efsdp", "ep"), ("ep", "efsdp")]:
+            mesh = init_device_mesh(self.device_type, (2, 2), mesh_dim_names=names)
+            yield mesh, names.index("efsdp"), names.index("ep")
+
+    def _placements(self, b, e, shape):
+        placements: list[Placement] = [Replicate(), Replicate()]
+        placements[b] = BlockShard((shape[2],))
+        placements[e] = Shard(0)
+        return tuple(placements)
+
+    def test_distribute_and_redistribute(self):
+        for mesh, b, e in self._layouts():
+            for shape in EP_SHAPES:
+                x = torch.randn(shape, device=self.device_type)
+                placements = self._placements(b, e, shape)
+                d = distribute_tensor(x, mesh, placements)
+                coordinate = mesh.get_coordinate()
+                local_experts = shape[0] // 2
+                rows = x[
+                    coordinate[e] * local_experts : (coordinate[e] + 1) * local_experts
+                ]
+                rows = rows.reshape(-1, shape[2])
+                q = -(-rows.shape[0] // 2)
+                self.assertEqual(
+                    d.to_local(), rows[coordinate[b] * q : (coordinate[b] + 1) * q]
+                )
+                self.assertEqual(d.full_tensor(), x)
+                for target in [
+                    (Replicate(), Replicate()),
+                    tuple(Shard(0) if i == e else Replicate() for i in range(2)),
+                    tuple(
+                        BlockShard((shape[2],)) if i == b else Replicate()
+                        for i in range(2)
+                    ),
+                ]:
+                    r = d.redistribute(mesh, target)
+                    self.assertEqual(r.full_tensor(), x)
+                    self.assertEqual(
+                        r.redistribute(mesh, placements).to_local(), d.to_local()
+                    )
+
+                partial_placements = list(placements)
+                partial_placements[b] = Partial()
+                local_rows = x[
+                    coordinate[e] * local_experts : (coordinate[e] + 1) * local_experts
+                ]
+                partial = DTensor.from_local(
+                    local_rows.clone(),
+                    mesh,
+                    partial_placements,
+                    shape=x.shape,
+                    stride=x.stride(),
+                )
+                self.assertEqual(
+                    partial.redistribute(mesh, placements).full_tensor(), x * 2
+                )
+
+    def test_ops(self):
+        for mesh, b, e in self._layouts():
+            for shape in EP_SHAPES:
+                placements = self._placements(b, e, shape)
+                x, y = (
+                    torch.randn(shape, device=self.device_type),
+                    torch.randn(shape, device=self.device_type),
+                )
+                dx = distribute_tensor(x, mesh, placements)
+                dy = distribute_tensor(y, mesh, placements)
+                comm_mode = CommDebugMode()
+                with comm_mode:
+                    out = dx * 2 + dy
+                    torch._foreach_mul_([out], 0.5)
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+                self.assertEqual(out.placements, placements)
+                self.assertEqual(out.full_tensor(), x + 0.5 * y)
+                self.assertEqual(torch._foreach_norm([dx])[0].full_tensor(), x.norm())
+                self.assertEqual(dx.sum().full_tensor(), x.sum())
+                self.assertEqual(dx.sum(dim=1).full_tensor(), x.sum(1))
+
+    def test_unsupported_layouts(self):
+        mesh = init_device_mesh(self.device_type, (2, 2))
+        x = torch.randn(3, 4, 5, device=self.device_type)
+        for placements in [
+            (BlockShard((5,)), Shard(0)),  # 3 experts don't divide over 2 ranks
+            (BlockShard((5,)), Shard(1)),
+            (BlockShard((5,)), BlockShard((5,))),
+        ]:
+            with self.assertRaises(NotImplementedError):
+                distribute_tensor(x, mesh, placements)
+
+    @with_temp_dir
+    def test_checkpoint(self):
+        torch.manual_seed(0)
+        full = torch.randn(6, 2, 3, device=self.device_type)
+        mesh, b, e = next(self._layouts())
+        placements = self._placements(b, e, full.shape)
+        dcp.save(
+            {"w": distribute_tensor(full, mesh, placements)},
+            checkpoint_id=self.temp_dir,
+        )
+        mesh_1d = self.build_device_mesh()
+        for target in [
+            distribute_tensor(torch.zeros_like(full), mesh, placements),
+            distribute_tensor(torch.zeros_like(full), mesh_1d, [BlockShard((3,))]),
+            distribute_tensor(torch.zeros_like(full), mesh_1d, [Replicate()]),
+        ]:
+            loaded = {"w": target}
+            dcp.load(loaded, checkpoint_id=self.temp_dir)
+            self.assertEqual(loaded["w"].full_tensor(), full)
+
+
 if __name__ == "__main__":
     run_tests()

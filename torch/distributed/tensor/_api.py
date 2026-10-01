@@ -35,6 +35,7 @@ from torch.distributed.tensor._utils import (
     normalize_to_torch_size,
 )
 from torch.distributed.tensor.placement_types import (
+    _block_shard_local_boxes,
     _StridedShard,
     _validate_block_shard_placements,
     BlockShard,
@@ -658,7 +659,7 @@ class DTensor(torch.Tensor):
                 )
             if stride is None:
                 stride = torch._prims_common.make_contiguous_strides_for(shape)
-            _validate_block_shard_placements(placements, shape)
+            _validate_block_shard_placements(placements, shape, device_mesh.shape)
 
         # `from_local` is differentiable, and the gradient of the dist tensor this function
         # created should flow back the gradients to the local_tensor, so we call an autograd
@@ -926,15 +927,15 @@ class DTensor(torch.Tensor):
     ) -> list[tuple[tuple[int, ...], tuple[int, ...], int, int]] | None:
         """Boxes of the global tensor owned by this rank under BlockShard, if used."""
         mesh = self.device_mesh
-        for mesh_dim, placement in enumerate(self._spec.placements):
-            if isinstance(placement, BlockShard):
-                coordinate = mesh.get_coordinate()
-                if coordinate is None:
-                    return []
-                return placement._local_boxes(
-                    self.shape, mesh.size(mesh_dim), coordinate[mesh_dim]
-                )
-        return None
+        layout = _validate_block_shard_placements(
+            self._spec.placements, self.shape, mesh.shape
+        )
+        if layout is None:
+            return None
+        coordinate = mesh.get_coordinate()
+        if coordinate is None:
+            return []
+        return _block_shard_local_boxes(layout, mesh.shape, coordinate)
 
     def __create_write_items__(self, fqn: str, object: Any):
         self._raise_if_contains_partial_placements()
@@ -1145,12 +1146,20 @@ def distribute_tensor(
         return tensor
 
     local_tensor = tensor.detach()
-    _validate_block_shard_placements(placements, tensor.shape)
+    block_shard_layout = _validate_block_shard_placements(
+        placements, tensor.shape, device_mesh.shape
+    )
 
     # TODO(xilun): address sharding order
     # distribute the tensor according to the placements.
     placements = list(placements)
-    for idx, placement in enumerate(placements):
+    mesh_dim_order = list(range(len(placements)))
+    if block_shard_layout is not None:
+        # BlockShard applies to the local tensor left by the other mesh dims.
+        mesh_dim_order.remove(block_shard_layout.mesh_dim)
+        mesh_dim_order.append(block_shard_layout.mesh_dim)
+    for idx in mesh_dim_order:
+        placement = placements[idx]
         if isinstance(placement, Shard | _StridedShard):
             placement_dim = (
                 placement.dim + tensor.ndim if placement.dim < 0 else placement.dim
