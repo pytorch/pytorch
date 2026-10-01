@@ -1633,6 +1633,9 @@ def gen_pyi(
                     "None",
                 )
             ],
+            "tobytes": [
+                defs("tobytes", ["self", "order: str | bytes | None = 'C'"], "bytes")
+            ],
             "tolist": [defs("tolist", ["self"], "list")],
             "requires_grad_": [
                 defs("requires_grad_", ["self", "mode: _bool = True"], "Tensor")

@@ -5443,6 +5443,38 @@ In-place version of :meth:`~Tensor.tanh`
 )
 
 add_docstr_all(
+    "tobytes",
+    r"""
+tobytes(order='C') -> bytes
+
+Returns a copy of the tensor's data as a Python :class:`bytes` object.
+Only strided, non-quantized, non-nested CPU tensors are supported. NumPy is
+not required. The result owns its data, so later changes to the tensor do
+not change the returned bytes.
+
+Elements are copied in logical index order, including for non-contiguous
+tensors and tensors with conjugate or negative view bits. Each element uses
+its dtype's native representation and byte order. Shape, dtype, strides,
+and other tensor metadata are not included. This operation is not differentiable.
+
+Args:
+    order (str, optional): ``'C'`` copies elements in row-major order (the
+        default), ``'F'`` in column-major order, and ``'A'`` in column-major
+        order when the tensor is Fortran-contiguous, otherwise row-major order.
+        Lowercase letters and byte strings are also accepted. ``None`` and
+        ``'K'`` use row-major order, matching :meth:`numpy.ndarray.tobytes`.
+
+Example::
+
+    >>> t = torch.tensor([[1, 2], [3, 4]], dtype=torch.uint8)
+    >>> t.tobytes()
+    b'\x01\x02\x03\x04'
+    >>> t.tobytes(order='F')
+    b'\x01\x03\x02\x04'
+""",
+)
+
+add_docstr_all(
     "tolist",
     r"""
 tolist() -> list or number
