@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 
+import abc
 import enum
 import itertools
 import operator
@@ -243,6 +244,538 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(type(ref), type(res))
         self.assertEqual(ref["x"], res["x"])
         self.assertEqual(ref["y"], res["y"])
+
+    def test_dict_subclass_fromkeys(self):
+        def fn(x):
+            return SimpleDict.fromkeys(("a", "b"), x + 1)
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual), SimpleDict)
+        self.assertEqual(actual, expected)
+
+    def test_dict_subclass_fromkeys_bound(self):
+        def fn(x):
+            return SimpleDict().fromkeys(("a", "b"), x + 1)
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual), SimpleDict)
+        self.assertEqual(actual, expected)
+
+    def test_dict_subclass_fromkeys_setitem(self):
+        class PrefixDict(dict):
+            def __setitem__(self, key, value):
+                dict.__setitem__(self, f"key_{key}", value)
+
+        def fn(x):
+            return PrefixDict.fromkeys(("a", "b"), x + 1)
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual), PrefixDict)
+        self.assertEqual(actual, expected)
+
+    def test_dict_subclass_fromkeys_repeated_keys(self):
+        class RecordingDict(dict):
+            def __init__(self):
+                self.calls = []
+
+            def __setitem__(self, key, value):
+                self.calls.append(key)
+                dict.__setitem__(self, key, value)
+
+        def fn(x):
+            return RecordingDict.fromkeys(("a", "a", "b"), x + 1)
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual), RecordingDict)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual.calls, expected.calls)
+
+    def test_dict_subclass_fromkeys_setitem_raises(self):
+        class RejectDict(dict):
+            def __setitem__(self, key, value):
+                raise ValueError("rejected")
+
+        def fn(x):
+            try:
+                RejectDict.fromkeys(("a",), x + 1)
+            except ValueError:
+                return x + 2
+            return x + 3
+
+        x = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_dict_subclass_fromkeys_init(self):
+        class InitDict(dict):
+            def __init__(self):
+                dict.__init__(self, initial=1)
+
+        def fn(x):
+            return InitDict.fromkeys(("a", "b"), x + 1)
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual), InitDict)
+        self.assertEqual(actual, expected)
+
+    def test_dict_subclass_fromkeys_non_none_init(self):
+        def bad_init(self):
+            return 1
+
+        class BadInit(dict):
+            __init__ = bad_init
+
+        def fn(x):
+            try:
+                BadInit.fromkeys(("a",), x + 1)
+            except TypeError:
+                return x + 2
+            return x + 3
+
+        x = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_dict_subclass_fromkeys_custom_new(self):
+        class NewDict(dict):
+            def __new__(cls):
+                result = dict.__new__(cls)
+                result.created = True
+                return result
+
+        def fn(x):
+            return NewDict.fromkeys(("a",), x + 1)
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual), NewDict)
+        self.assertTrue(actual.created)
+        self.assertEqual(actual, expected)
+
+    def test_dict_subclass_fromkeys_new_returns_other_type(self):
+        existing = {"z": 0}
+
+        class UserDictResult(dict):
+            def __new__(cls):
+                return UserDict()
+
+            def __init__(self):
+                raise AssertionError("__init__ runs only for instances of cls")
+
+        class ExistingResult(dict):
+            def __new__(cls):
+                return existing
+
+        class Base(dict):
+            def __new__(cls):
+                return dict.__new__(Child)
+
+        class Child(Base):
+            def __init__(self):
+                self.inited = True
+
+            def __setitem__(self, key, value):
+                dict.__setitem__(self, key.upper(), value)
+
+        def fn(x):
+            y = x + 1
+            return (
+                UserDictResult.fromkeys(("a", "b"), y),
+                ExistingResult.fromkeys(("a",), y),
+                Base.fromkeys(("a",), y),
+            )
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual[0]), UserDict)
+        self.assertIs(actual[1], existing)
+        self.assertIs(type(actual[2]), Child)
+        self.assertTrue(actual[2].inited)
+        self.assertEqual(actual, expected)
+
+        class TupleResult(dict):
+            def __new__(cls):
+                return ()
+
+        def tuple_fn(x):
+            return TupleResult.fromkeys(("a",), x + 1)
+
+        with self.assertRaisesRegex(Unsupported, "__new__ returned an unsupported"):
+            torch.compile(tuple_fn, backend="eager", fullgraph=True)(x)
+        with self.assertRaisesRegex(TypeError, "does not support item assignment"):
+            torch.compile(tuple_fn, backend="eager")(x)
+
+    def test_dict_subclass_fromkeys_returned_type_function_changes(self):
+        class Result(UserDict):
+            def __setitem__(self, key, value, prefix="first_"):
+                UserDict.__setitem__(self, prefix + key, value)
+
+        class ResultDict(dict):
+            def __new__(cls):
+                return Result()
+
+        class Base(dict):
+            def __new__(cls):
+                return dict.__new__(Child)
+
+        class Child(Base):
+            def __init__(self, marker="one"):
+                dict.__setitem__(self, "marker", marker)
+
+        def fn(x):
+            y = x + 1
+            return ResultDict.fromkeys(("a",), y), Base.fromkeys(("a",), y)
+
+        x = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+        Result.__setitem__.__defaults__ = ("second_",)
+        self.assertEqual(compiled(x), fn(x))
+
+        def setitem(self, key, value, prefix="unused_"):
+            UserDict.__setitem__(self, "changed_" + key, value)
+
+        Result.__setitem__.__code__ = setitem.__code__
+        self.assertEqual(compiled(x), fn(x))
+
+        def init(self, marker="unused"):
+            dict.__setitem__(self, "changed_marker", marker)
+
+        Child.__init__.__code__ = init.__code__
+        Child.__init__.__defaults__ = ("two",)
+        self.assertEqual(compiled(x), fn(x))
+
+        def replaced(self, key, value):
+            UserDict.__setitem__(self, "replaced_" + key, value)
+
+        Result.__setitem__ = replaced
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_dict_subclass_fromkeys_custom_metaclass(self):
+        class Meta(type):
+            def __call__(cls):
+                result = super().__call__()
+                result["metaclass"] = True
+                return result
+
+        class MetaDict(dict, metaclass=Meta):
+            pass
+
+        def fn(x):
+            return MetaDict.fromkeys(("a",), x + 1)
+
+        x = torch.randn(2)
+        with self.assertRaisesRegex(Unsupported, "Unsupported dict subclass fromkeys"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager")(x)
+        self.assertIs(type(actual), MetaDict)
+        self.assertEqual(actual, expected)
+
+    def test_dict_subclass_fromkeys_method_changes(self):
+        class MutableDict(dict):
+            pass
+
+        def fn(x):
+            return MutableDict.fromkeys(("a",), x + 1)
+
+        x = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+        def setitem(self, key, value):
+            dict.__setitem__(self, f"changed_{key}", value)
+
+        MutableDict.__setitem__ = setitem
+        self.assertEqual(compiled(x), fn(x))
+
+        def init(self):
+            dict.__init__(self, initial=1)
+
+        MutableDict.__init__ = init
+        self.assertEqual(compiled(x), fn(x))
+
+        def new(cls):
+            result = dict.__new__(cls)
+            dict.__setitem__(result, "new", 1)
+            return result
+
+        MutableDict.__new__ = staticmethod(new)
+        self.assertEqual(compiled(x), fn(x))
+
+        MutableDict.__new__ = staticmethod(lambda cls: UserDict(initial=2))
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_dict_subclass_fromkeys_function_changes(self):
+        prefix = "first_"
+
+        class MutableDict(dict):
+            def __init__(self, marker="one"):
+                dict.__setitem__(self, "marker", marker)
+
+            def __setitem__(self, key, value):
+                dict.__setitem__(self, prefix + key, value)
+
+        def fn(x):
+            return MutableDict.fromkeys(("a",), x + 1)
+
+        x = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+        MutableDict.__init__.__defaults__ = ("two",)
+        self.assertEqual(compiled(x), fn(x))
+
+        prefix = "later_"
+        self.assertEqual(compiled(x), fn(x))
+
+        def changed(self, key, value):
+            dict.__setitem__(self, prefix + "changed_" + key, value)
+
+        MutableDict.__setitem__.__code__ = changed.__code__
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_dict_subclass_fromkeys_static_setitem(self):
+        def setitem(self, key, value):
+            dict.__setitem__(self, key, value)
+
+        class StaticDict(dict):
+            __setitem__ = staticmethod(setitem)
+
+        def fn(x):
+            return StaticDict.fromkeys(("a",), x + 1)
+
+        x = torch.randn(2)
+        with self.assertRaises(TypeError):
+            fn(x)
+        with self.assertRaisesRegex(Unsupported, "Unsupported dict subclass fromkeys"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    def test_dict_subclass_fromkeys_input(self):
+        class OtherDict(dict):
+            pass
+
+        def fn(cls, d, x):
+            y = x + 1
+            return cls.fromkeys("a", y), d.fromkeys("b", y), type(d).fromkeys("c", y)
+
+        x = torch.randn(2)
+        cnts = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnts, fullgraph=True)
+        for cls in (SimpleDict, OtherDict):
+            expected = fn(cls, cls(), x)
+            actual = compiled(cls, cls(), x)
+            self.assertEqual([type(d) for d in actual], [cls] * 3)
+            self.assertEqual(actual, expected)
+        self.assertEqual(cnts.frame_count, 2)
+
+    def test_dict_subclass_fromkeys_bad_args(self):
+        def fn(x):
+            errors = 0
+            for call in (
+                lambda: SimpleDict.fromkeys(),
+                lambda: SimpleDict.fromkeys("a", value=1),
+                lambda: SimpleDict.fromkeys("a", 1, 2),
+            ):
+                try:
+                    call()
+                except TypeError:
+                    errors += 1
+            return x + errors
+
+        x = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), x + 3)
+
+    def test_dict_subclass_fromkeys_super(self):
+        class SuperDict(dict):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.inited = True
+
+            def __setitem__(self, key, value):
+                super().__setitem__(key.upper(), value)
+
+        def fn(x):
+            return SuperDict.fromkeys("ab", x + 1)
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual), SuperDict)
+        self.assertEqual(actual, expected)
+        self.assertTrue(actual.inited)
+
+    def test_dict_subclass_fromkeys_defaultdict(self):
+        class MyDefaultDict(defaultdict):
+            pass
+
+        def fn(x):
+            return MyDefaultDict.fromkeys("ab", x + 1)
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertIs(type(actual), MyDefaultDict)
+        self.assertIsNone(actual.default_factory)
+        self.assertEqual(actual, expected)
+
+    def test_dict_subclass_fromkeys_abc_metaclass(self):
+        class Meta(abc.ABCMeta):
+            pass
+
+        class ABCDict(dict, metaclass=Meta):
+            pass
+
+        def fn(x):
+            return ABCDict.fromkeys("a", x + 1)
+
+        x = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        actual = compiled(x)
+        self.assertIs(type(actual), ABCDict)
+        self.assertEqual(actual, fn(x))
+
+        def call(cls):
+            result = type.__call__(cls)
+            dict.__setitem__(result, "meta", 1)
+            return result
+
+        Meta.__call__ = call
+        with self.assertRaisesRegex(Unsupported, "Unsupported dict subclass fromkeys"):
+            compiled(x)
+
+    def test_dict_subclass_fromkeys_metaclass_getattribute(self):
+        class Meta(type):
+            pass
+
+        class MetaDict(dict, metaclass=Meta):
+            pass
+
+        def fn(x):
+            return MetaDict.fromkeys(("a",), x + 1)
+
+        x = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+        def getattribute(cls, name):
+            # CPython's fromkeys uses the __setitem__ slot, not this lookup.
+            if name == "__setitem__":
+                return lambda self, k, v: dict.__setitem__(self, k, v * 10)
+            return type.__getattribute__(cls, name)
+
+        Meta.__getattribute__ = getattribute
+        with self.assertRaisesRegex(Unsupported, "Unsupported dict subclass fromkeys"):
+            compiled(x)
+
+    def test_dict_subclass_fromkeys_metaclass_data_descriptor(self):
+        def meta_setitem(cls):
+            # cls.__setitem__ finds this, but CPython's fromkeys uses the slot.
+            return lambda self, k, v: dict.__setitem__(self, "meta_" + k, v)
+
+        class Meta(type):
+            pass
+
+        class MetaDict(dict, metaclass=Meta):
+            pass
+
+        def fn(x):
+            return MetaDict.fromkeys(("a",), x + 1)
+
+        x = torch.randn(2)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+        Meta.__setitem__ = property(meta_setitem)
+        expected = fn(x)
+        self.assertEqual(list(expected), ["a"])
+        # Code traced before the descriptor existed already uses the slot.
+        self.assertEqual(compiled(x), expected)
+
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "metaclass data descriptor"):
+            compiled(x)
+        self.assertEqual(torch.compile(fn, backend="eager")(x), expected)
+
+    def test_dict_subclass_fromkeys_metaclass_hooks(self):
+        calls = []
+
+        class Meta(type):
+            def __instancecheck__(cls, obj):
+                calls.append("instancecheck")
+                return type.__instancecheck__(cls, obj)
+
+            def __subclasscheck__(cls, sub):
+                calls.append("subclasscheck")
+                return type.__subclasscheck__(cls, sub)
+
+        class Base(dict, metaclass=Meta):
+            def __new__(cls):
+                return dict.__new__(Child if cls is Base else cls)
+
+        class Child(Base):
+            pass
+
+        def fn(x):
+            y = x + 1
+            return Base.fromkeys(("a",), y), Child.fromkeys(("b",), y)
+
+        x = torch.randn(2)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual([type(d) for d in actual], [Child, Child])
+        self.assertEqual(actual, expected)
+        self.assertEqual(calls, [])
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_dict_subclass_fromkeys_class_created_during_tracing(self):
+        def plain(x):
+            class SuperDict(dict):
+                def __setitem__(self, key, value):
+                    super().__setitem__(key.upper(), value)
+
+            return list(SuperDict.fromkeys("a", x + 1).items())
+
+        def rebound_new(x):
+            d = {"old": 0}
+
+            class NewDict(dict):
+                def __new__(cls):
+                    return d
+
+            d = {"new": 0}
+            return list(NewDict.fromkeys("a", x + 1).items())
+
+        def rebound_setitem(x):
+            prefix = "old_"
+
+            class SetDict(dict):
+                def __setitem__(self, key, value):
+                    dict.__setitem__(self, prefix + key, value)
+
+            prefix = "new_"
+            return list(SetDict.fromkeys("a", x + 1).items())
+
+        x = torch.randn(2)
+        actual = torch.compile(plain, backend="eager", fullgraph=True)(x)
+        self.assertEqual([k for k, _ in actual], ["A"])
+        self.assertEqual(actual, plain(x))
+        # Dynamo builds these classes with copies of the closure cells, so the
+        # traced methods would not see d or prefix being rebound.
+        for fn in (rebound_new, rebound_setitem):
+            with self.assertRaisesRegex(Unsupported, "closes over an enclosing"):
+                torch.compile(fn, backend="eager", fullgraph=True)(x)
 
     def test_dict_subclass_methods_fallback_mutation(self):
         def fn(sd, x):

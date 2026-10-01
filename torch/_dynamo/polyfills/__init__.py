@@ -528,6 +528,28 @@ def construct_dict(
     return self
 
 
+def dict_subclass_fromkeys(
+    result_type: Any,
+    result: Any,
+    call_init: bool,
+    /,
+    iterable: Iterable[Any],
+    value: Any = None,
+) -> Any:
+    # The rest of cls.fromkeys after result = cls.__new__(cls): cls() calls
+    # type(result).__init__ only if result is an instance of cls, then
+    # result[key] = value for each key. result_type is type(result).
+    if call_init:
+        init_result = result_type.__init__(result)
+        if init_result is not None:
+            raise TypeError(
+                f"__init__() should return None, not '{type(init_result).__name__}'"
+            )
+    for key in iterable:
+        result_type.__setitem__(result, key, value)
+    return result
+
+
 def foreach_map_fn(*args: Any) -> Any:
     op = args[0]
     new_args: list[Any] = []

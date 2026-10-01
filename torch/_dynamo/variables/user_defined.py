@@ -124,6 +124,7 @@ from .hashable import HashableTracker
 from .lists import DequeVariable, ListVariable, TupleVariable
 from .object_protocol import (
     _resolve_descriptor_get,
+    generic_getattr,
     generic_is_true,
     generic_repr,
     is_nb_not_implemented,
@@ -1197,6 +1198,104 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .object_protocol import generic_size
 
             return generic_size(tx, args[0])
+        elif (
+            name == "fromkeys"
+            and issubclass(self.value, dict)
+            and not issubclass(self.value, collections.OrderedDict)
+        ):
+            no_keywords(tx, f"{self.value.__name__}.fromkeys", kwargs)
+            check_positional(tx, "fromkeys", len(args), 1, 2)
+            meta_attrs = ("__call__", "__getattribute__")
+            builtin_methods = (
+                dict.__init__,
+                collections.defaultdict.__init__,
+                dict.__setitem__,
+            )
+
+            def unsupported(reason: str) -> NoReturn:
+                unimplemented(
+                    gb_type="Unsupported dict subclass fromkeys()",
+                    context=f"class={self.value}, reason={reason}",
+                    explanation="Dynamo cannot safely trace this dict subclass's "
+                    "construction or item insertion behavior.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+            def check_and_guard(
+                klass: UserDefinedClassVariable, names: tuple[str, ...]
+            ) -> None:
+                # klass.<name> must find what CPython's slots find in the MRO.
+                for attr in meta_attrs:
+                    if klass.lookup_metaclass_attr(attr) is not type.__dict__[attr]:
+                        unsupported(f"custom metaclass {attr}")
+                for method_name in names:
+                    # It would shadow klass.<name>, but not the slot.
+                    shadow = klass.lookup_metaclass_attr(method_name)
+                    if inspect.isdatadescriptor(shadow):
+                        unsupported(f"metaclass data descriptor {method_name}")
+                    method = klass.lookup_cls_mro_attr(method_name)
+                    if method_name == "fromkeys":
+                        ok = method is dict.__dict__["fromkeys"]
+                    elif method_name == "__new__":
+                        ok = method is dict.__new__ or (
+                            isinstance(method, staticmethod)
+                            and isinstance(method.__func__, types.FunctionType)
+                        )
+                    else:
+                        ok = isinstance(method, types.FunctionType) or any(
+                            method is fn for fn in builtin_methods
+                        )
+                    if not ok:
+                        unsupported(f"custom {method_name} descriptor")
+                    fn = method.__func__ if isinstance(method, staticmethod) else method
+                    # A class built during tracing has no source, and its functions
+                    # close over copies of the enclosing cells, which miss rebinds.
+                    if (
+                        not klass.source
+                        and isinstance(fn, types.FunctionType)
+                        and set(fn.__code__.co_freevars) - {"__class__"}
+                    ):
+                        unsupported(f"{method_name} closes over an enclosing variable")
+                if klass.source:
+                    install_guard(klass.source.make_guard(GuardBuilder.ID_MATCH))
+                    for method_name in names:
+                        source = klass.get_source_by_walking_mro(tx, method_name)
+                        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+                    if type(klass.value) is not type:
+                        for attr in meta_attrs:
+                            source = AttrSource(TypeSource(klass.source), attr)
+                            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+
+            check_and_guard(self, ("fromkeys", "__new__", "__init__", "__setitem__"))
+            result = generic_getattr(tx, self, "__new__").call_function(tx, [self], {})
+            try:
+                result_type = result.python_type()
+            except NotImplementedError:
+                unsupported("__new__ returned an object of unknown type")
+            # PyType_IsSubtype, without a metaclass __subclasscheck__.
+            call_init = type.__subclasscheck__(self.value, result_type)
+            if result_type is self.value:
+                result_type_vt: VariableTracker = self
+            elif result_type is dict:
+                # Exact dicts are filled without calling any Python code.
+                result_type_vt = VariableTracker.build(tx, dict)
+            else:
+                # Look up result's methods through its class, which has a
+                # source even when result was created during tracing.
+                type_vt = VariableTracker.build(tx, type)
+                result_type_vt = type_vt.call_function(tx, [result], {})
+                if not (
+                    isinstance(result_type_vt, UserDefinedClassVariable)
+                    and result_type_vt.source
+                ):
+                    unsupported(f"__new__ returned an unsupported {result_type}")
+                names = ("__init__", "__setitem__") if call_init else ("__setitem__",)
+                check_and_guard(result_type_vt, names)
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.dict_subclass_fromkeys),
+                [result_type_vt, result, ConstantVariable.create(call_init), *args],
+                kwargs,
+            )
         elif issubclass(self.value, dict) and name != "__new__":
             # __new__ is handled below
             return SourcelessBuilder.create(tx, dict).call_method(

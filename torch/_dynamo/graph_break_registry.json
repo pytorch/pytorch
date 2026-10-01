@@ -6602,6 +6602,16 @@
       ]
     }
   ],
+  "GB4566": [
+    {
+      "Gb_type": "Unsupported dict subclass fromkeys()",
+      "Context": "class={self.value}, reason={reason}",
+      "Explanation": "Dynamo cannot safely trace this dict subclass's construction or item insertion behavior.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB2544": [
     {
       "Gb_type": "missing sq_inplace_concat",
