@@ -117,8 +117,10 @@ from .eval_frame import (
 from .exc import (
     augment_exc_message,
     BackendCompilerFailed,
+    CompileOnOneRankUnsupported,
     FailOnRecompileLimitHit,
     format_error_msg,
+    format_user_stack,
     InternalTorchDynamoError,
     PackageError,
     ResumePrologueTracingError,
@@ -1715,6 +1717,13 @@ def _compile(
         ValidationException,
     )
 
+    if isinstance(innermost_backend(compiler_fn), torch._TorchCompileInductorWrapper):
+        # Overlap the one-time source hashing for Inductor's cache keys with
+        # Dynamo and AOTAutograd tracing.
+        from torch._inductor.codecache import prefetch_cache_keys
+
+        prefetch_cache_keys()
+
     # Only nonlocal defs here please!
     # Time spent compiling this frame before restarting or failing analysis
     dynamo_time_before_restart: float = 0.0
@@ -1964,16 +1973,20 @@ def _compile(
             check_fn = dynamo_output.build_guards(
                 code,
                 hooks=hooks,
-                save=package is not None,
+                save=output.package is not None,
                 cache_entries=cache_entries,
             )
 
-        if package is not None:
+        # bypass_package sets output.package to None when this compile cannot be
+        # packaged (the local `package` still holds the object). Skip the whole
+        # block in that case: a bypassed compile contributes none of its guards,
+        # inlined source, or device type to the package.
+        if output.package is not None:
             if check_fn.guards_state is None:
                 raise AssertionError("check_fn.guards_state must not be None")
-            package.add_guarded_code(check_fn.guards_state, out_code)
-            package.add_inlined_source(output.tracing_context.traced_code)
-            package.update_device_type(output.current_tracer.graph)
+            output.package.add_guarded_code(check_fn.guards_state, out_code)
+            output.package.add_inlined_source(output.tracing_context.traced_code)
+            output.package.update_device_type(output.current_tracer.graph)
 
         compile_id_str = str(compile_id) if compile_id is not None else "Unknown"
         annotation_str = "Torch-Compiled Region: " + compile_id_str
@@ -2230,6 +2243,7 @@ def _compile(
                     ShortenTraceback,
                     PackageError,
                     ResumePrologueTracingError,
+                    CompileOnOneRankUnsupported,
                     unittest.SkipTest,
                 ),
             ):
@@ -2424,7 +2438,9 @@ class ConvertFrame:
             # need to make these exceptions not get wrapped
 
             # We intentionally don't want to suppress error here.
-            if isinstance(e, UncapturedHigherOrderOpError):
+            if isinstance(
+                e, (UncapturedHigherOrderOpError, CompileOnOneRankUnsupported)
+            ):
                 raise
 
             soft_fail = isinstance(e, (Unsupported, UserError))
@@ -2445,9 +2461,7 @@ class ConvertFrame:
                 if hasattr(e, "compile_id") and hasattr(e, "real_stack"):
                     with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
                         user_stack = e.real_stack
-                        user_stack_formatted = "".join(
-                            traceback.format_list(user_stack)
-                        )
+                        user_stack_formatted = format_user_stack(user_stack)
                         frame_info = exc.format_frame_info(code)
                         user_stack_trace = (
                             "Graph break: torch.compile cannot properly resume from this graph break, which results in a skip.\n"
@@ -2485,14 +2499,15 @@ class ConvertFrame:
             else:
                 log.warning(error_msg, exc_info=True)
 
-            # Check if the exception has a specific frame execution strategy
-            if (
-                isinstance(e, exc.TorchDynamoException)
-                and e.frame_exec_strategy is not None
+            # Check if the exception overrides the default frame execution behavior.
+            if isinstance(e, exc.TorchDynamoException) and (
+                e.frame_exec_strategy is not None or not e.apply_to_code
             ):
                 return ConvertFrameReturn(
-                    frame_exec_strategy=e.frame_exec_strategy,
-                    skip_reason="compilation failed with a custom frame execution strategy",
+                    frame_exec_strategy=e.frame_exec_strategy
+                    or FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT),
+                    apply_to_code=e.apply_to_code,
+                    skip_reason="compilation failed with exception-directed frame execution",
                 )
 
         return ConvertFrameReturn(

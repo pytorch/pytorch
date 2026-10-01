@@ -19,6 +19,7 @@ aspects of contributing to PyTorch.
   - [Building](#building)
   - [Linting](#linting)
     - [default lint](#default-lint)
+  - [Testing](#testing)
   - [Regenerating](#regenerating)
 - [Unit testing](#unit-testing)
   - [Python Unit Testing](#python-unit-testing)
@@ -27,6 +28,7 @@ aspects of contributing to PyTorch.
     - [Running `pyrefly`](#running-pyrefly)
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
+  - [Skip CI while iterating](#skip-ci-while-iterating)
 - [Merging your Change](#merging-your-change)
 - [GreenLight](#greenlight)
 - [Writing documentation](#writing-documentation)
@@ -348,6 +350,12 @@ Since some linters take a long time to run, we categorize all linters as either
 fast or slow. In the default lint, only the fast linters are run on all files;
 the slow linters are run on the changed files only.
 
+### Testing
+
+|command||
+|-|-|
+|`test`|run tests with pytest; all arguments are forwarded, e.g. `spin test test/test_nn.py -k Linear`. `spin test --ci ARGS` forwards to `test/run_test.py`, the orchestrator CI uses, instead|
+
 ### Regenerating
 
 PyTorch makes use of a number of code generations, which range from the version
@@ -385,7 +393,8 @@ suite with
 python test/run_test.py
 ```
 
-or run individual test suites using the command `python test/FILENAME.py`,
+(`spin test --ci ARGS` forwards `ARGS` to the same runner), or run individual
+test suites using the command `python test/FILENAME.py`,
 where `FILENAME` represents the file containing the test suite you wish
 to run.
 
@@ -415,7 +424,9 @@ python test/test_jit.py TestJit.test_Sequential
 
 We don't officially support `pytest`, but it works well with our
 `unittest` tests and offers a number of useful features for local
-developing. Install it via `pip install pytest`.
+developing. Install it via `pip install pytest` (`pip install --group dev`
+includes it). `spin test ARGS` runs `pytest ARGS` with the same interpreter
+that has torch installed, editable or not.
 
 If you want to just run tests that contain a specific substring, you can
 use the `-k` flag:
@@ -503,6 +514,29 @@ ghstack submit
 **NB**: It is not recommended to use this workflow unless you are also using
 [`ghstack`](https://github.com/ezyang/ghstack). It creates a large commit that is
 of very low signal to reviewers.
+
+### Skip CI while iterating
+
+Prefix your PR title with `[no-ci]` to disable CI while iterating, for example
+`[no-ci] Add a new operator`. The prefix is checked on PR runs and on runs
+triggered by `ciflow/*` labels, including when those labels trigger CI again
+after a push. A check in the runner selector, or a separate `check-ci` job,
+fails with an explanation before the build, test, and lint jobs start. This
+failure keeps the PR from being merged without CI. PR administration, such
+as CLA and mergeability checks, still runs. If GitHub cannot return the PR
+title after retries, CI runs normally.
+
+The prefix must be in the title when the run starts; adding it does not cancel
+CI that is already running. To enable CI, remove the prefix and push a new
+commit. You can also rerun the failed workflows: the check reads the current
+PR title each time. Branch CI, such as `main` and nightly runs, is unaffected.
+
+With `ghstack`, the initial PR title comes from your commit subject. Once the
+PR exists, you can edit its title on GitHub, and normal `ghstack` updates
+preserve it, so you do not need to repeat the prefix on each update.
+`ghstack -u` replaces the PR title from the commit subject, so keep the prefix
+there too if you use that option. This is separate from GitHub's `[no ci]`
+commit-message directive, which applies only to the commit that contains it.
 
 ## Merging your Change
 If you know the right people or team that should approve your PR (and you have the required permissions to do so), add them to the Reviewers list.

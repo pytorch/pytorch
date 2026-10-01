@@ -455,6 +455,9 @@ def set_logs(
             needs to be set. This can be done by providing the fully-qualified module
             name as the key, with the log level as the value. Default: ``None``
 
+        cudagraphs (:class:`bool`):
+            Whether to emit debug info from wrapping Inductor generated code with CUDA graphs. Default: ``False``
+
         cudagraph_static_inputs (:class:`bool`):
             Whether to emit debug info for cudagraph static input detection. Default: ``False``
 
@@ -475,6 +478,16 @@ def set_logs(
 
         hierarchical_compile (:class:`bool`):
             Whether to emit debug info for hierarchical compilation. Default: ``False``
+
+        compiled_autograd (:class:`bool`):
+            Whether to emit compiled autograd logs, including graphs. Default: ``False``
+
+        compiled_autograd_verbose (:class:`bool`):
+            Whether to emit verbose compiled autograd logs with C++ info, such as
+            autograd node to FX node mappings. Default: ``False``
+
+        compute_dependencies (:class:`bool`):
+            Whether to emit Inductor compute dependency information. Default: ``False``
 
         caching (:class:`bool`):
             Whether to emit detailed Inductor caching information. Default: ``False``

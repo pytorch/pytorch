@@ -2103,7 +2103,7 @@ def gen_per_operator_headers(
         dispatch_namespace = dispatch_key.lower()
         dispatch_names = []
 
-        for name, functions in functions_by_root_name.items():
+        for name in functions_by_root_name:
             grouped_functions = grouped_functions_by_root_name.get(name, [])
             declarations = list(
                 concatMap(
@@ -2427,15 +2427,6 @@ def gen_source_files(
                 return headers
 
         backend_index = backend_indices[dispatch_key]
-        ns_grouped_native_functions = defaultdict(list)
-        for grouped_native_function in grouped_native_functions:
-            namespace = (
-                grouped_native_function.namespace
-                if isinstance(grouped_native_function, NativeFunction)
-                else grouped_native_function.functional.namespace
-            )
-            ns_grouped_native_functions[namespace].append(grouped_native_function)
-
         dispatch_namespace = str(dispatch_key).lower()
 
         # CompositeImplicitAutogradNestdTensor does not currently user the helpers generated
