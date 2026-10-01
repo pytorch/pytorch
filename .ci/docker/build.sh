@@ -325,6 +325,12 @@ case "$tag" in
     ACL=yes
     OPENBLAS=yes
     ;;
+  pytorch-linux-jammy-aarch64-py3.11-clang21)
+    ANACONDA_PYTHON_VERSION=3.11
+    CLANG_VERSION=21
+    ACL=yes
+    OPENBLAS=yes
+    ;;
   pytorch-linux-jammy-aarch64-cuda13.0-cudnn9-py3.11-gcc13)
     CUDA_VERSION=13.0.3
     ANACONDA_PYTHON_VERSION=3.11
