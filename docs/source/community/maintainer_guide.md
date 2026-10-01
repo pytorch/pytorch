@@ -1,7 +1,3 @@
----
-orphan: true
----
-
 # PyTorch Governance | Maintainer Guide
 
 This page describes what is expected from module maintainers when handling issues and pull requests.
