@@ -1342,7 +1342,7 @@ class _CollOp:
         dst_tensor (Tensor, optional): Provided when source and destination tensors are not the same.
         redop (ReduceOp, optional): reduce operation.
         root (int, optional): root of broadcast or reduce.
-        config (optional): Must be None; coalescing does not preserve configurations.
+        config (optional): per-collective configuration.
     """
 
     def __init__(
@@ -1355,15 +1355,12 @@ class _CollOp:
         *,
         config: object | None = None,
     ) -> None:
-        if config is not None:
-            raise NotImplementedError(
-                "per-collective configuration is not supported with coalescing"
-            )
         self.op = op
         self.tensor = tensor
         self.dst_tensor = dst_tensor
         self.redop = redop
         self.root = root
+        self.config = config
 
 
 # DO NOT USE THESE FIELDS DIRECTLY.
@@ -3793,12 +3790,18 @@ def _coalescing_manager(
                 "Coalescing manager requires all collectives to be the same type, "
                 f"but got mixed types: {set(op.op.__name__ for op in op_list)}"  # noqa: C401
             )
+        config = op_list[0].config
+        if any(op.config != config for op in op_list):
+            raise RuntimeError(
+                "Coalescing manager requires all collectives to use the same config"
+            )
 
         if op0 is all_reduce:
             tensors = [op.tensor for op in op_list]
             all_reduce_opts = AllreduceCoalescedOptions()
             all_reduce_opts.reduceOp = not_none(op_list[0].redop)
             all_reduce_opts.asyncOp = async_ops
+            all_reduce_opts.config = config
             work = group.allreduce_coalesced(tensors, all_reduce_opts)
         elif op0 is all_gather_single:
             inputs = []
@@ -3808,6 +3811,7 @@ def _coalescing_manager(
                 outputs.append(not_none(op.dst_tensor))
             all_gather_opts = AllgatherOptions()
             all_gather_opts.asyncOp = async_ops
+            all_gather_opts.config = config
             work = group.all_gather_single_coalesced(outputs, inputs, all_gather_opts)
         elif op0 is reduce_scatter_single:
             inputs = []
@@ -3818,6 +3822,7 @@ def _coalescing_manager(
             reduce_opts = ReduceScatterOptions()
             reduce_opts.reduceOp = not_none(op_list[0].redop)
             reduce_opts.asyncOp = async_ops
+            reduce_opts.config = config
             work = group.reduce_scatter_single_coalesced(outputs, inputs, reduce_opts)
         else:
             raise AssertionError(
@@ -3889,10 +3894,8 @@ def _time_estimator(
         )
     backend._start_time_estimate()
     cm = _TimeEstimator()
-    try:
-        yield cm
-    finally:
-        cm.estimated_time = backend._end_time_estimate()
+    yield cm
+    cm.estimated_time = backend._end_time_estimate()
 
 
 def batch_isend_irecv(p2p_op_list: list[P2POp]) -> list[Work]:
