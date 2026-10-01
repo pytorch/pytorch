@@ -241,6 +241,7 @@ from .functions import (
     GetSetDescriptorVariable,
     LocalGeneratorFunctionVariable,
     MemberDescriptorVariable,
+    MethodDescriptorVariable,
     MethodWrapperVariable,
     PropertyVariable,
     SysFunctionVariable,
@@ -5663,6 +5664,9 @@ class SourcelessBuilder:
         )
         handlers[types.MemberDescriptorType] = (
             lambda tx, value: MemberDescriptorVariable(value)
+        )
+        handlers[types.MethodDescriptorType] = lambda tx, value: MethodDescriptorVariable(
+            value, UserDefinedClassVariable(value.__objclass__)
         )
         handlers[property] = lambda tx, value: PropertyVariable(value)
         handlers[inspect.Parameter] = lambda tx, value: UserDefinedObjectVariable(
