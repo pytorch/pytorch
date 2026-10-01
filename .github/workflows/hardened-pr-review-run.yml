@@ -814,7 +814,11 @@ jobs:
           # deny rule refused its Read, it got the same Read outcomes as the
           # main session, and restrict-write.sh's hook fired on its Write. That
           # hook refuses every sub-agent write, so only the reviewer writes the
-          # verdict.
+          # verdict. A Read outside every allow rule with NO deny rule could not
+          # be tested there, so the credential paths carry explicit Read denies
+          # in --disallowedTools. Checked the same way, each against a no-deny
+          # control that succeeded: they refused a sub-agent's Read, and the
+          # main session's Grep and Glob on those paths.
           #
           # `--setting-sources user`, and the value is load-bearing in BOTH
           # directions. It must not be empty: the action's parser treats a flag
@@ -836,7 +840,7 @@ jobs:
           claude_args: |
             --model ${{ env.REVIEW_MODEL }}
             --allowedTools "Read(/${{ github.workspace }}/pr/**),Grep(/${{ github.workspace }}/pr/**),Glob(/${{ github.workspace }}/pr/**),Read(/${{ github.workspace }}/trusted/.claude/skills/pr-review-readiness/**),Read(/${{ github.workspace }}/trusted/.claude/skills/pr-review/**),Read(//tmp/pr-diff.txt),Read(//tmp/pr-files.txt),Read(/${{ runner.temp }}/pr-review-findings.json),Write,Agent"
-            --disallowedTools "Bash,Edit,NotebookEdit,WebFetch,WebSearch"
+            --disallowedTools "Bash,Edit,NotebookEdit,WebFetch,WebSearch,Read(//proc/**),Read(~/.aws/**)"
             --setting-sources user
             --add-dir ${{ runner.temp }}
             --strict-mcp-config

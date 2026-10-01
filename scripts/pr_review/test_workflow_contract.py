@@ -1217,7 +1217,12 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         # see the comment above `claude_args:`.
         "Agent"
     )
-    EXPECTED_DISALLOWED_TOOLS = "Bash,Edit,NotebookEdit,WebFetch,WebSearch"
+    EXPECTED_DISALLOWED_TOOLS = (
+        "Bash,Edit,NotebookEdit,WebFetch,WebSearch,"
+        # Explicit denies for the credential paths, so they do not rest on
+        # "no allow rule matches" alone, which was never tested for sub-agents.
+        "Read(//proc/**),Read(~/.aws/**)"
+    )
 
     def test_the_tool_policy_is_exactly_what_was_reviewed(self):
         for flag, expected in (
