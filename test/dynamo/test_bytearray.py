@@ -298,12 +298,14 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(b.hex(), "0102ff")
         self.assertEqual(b.hex(":", 2), "01:02ff")
         self.assertEqual(b.hex("-", -2), "0102-ff")
+        with self.assertRaises(OverflowError):
+            b.hex("-", 1 << 100)
 
     @make_dynamo_test
     def test_decode(self):
-        b = self.type2test(b"caf\xc3\xa9")
-        self.assertEqual(b.decode(), "caf\xe9")
-        self.assertEqual(b.decode("utf-8", "strict"), "caf\xe9")
+        b = self.type2test(b"foo\xc3\xa9")
+        self.assertEqual(b.decode(), "foo\xe9")
+        self.assertEqual(b.decode("utf-8", "strict"), "foo\xe9")
 
         invalid = self.type2test(b"\xffabc")
         self.assertEqual(invalid.decode(errors="replace"), "\ufffdabc")
