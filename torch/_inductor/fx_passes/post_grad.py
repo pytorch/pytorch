@@ -838,7 +838,9 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                     )
                     for ys_out in ys_outputs
                 ]
-                return list(init) + empty_ys
+                # Wrap in a tuple like the map lowering
+                # TODO: this is error-prone; disambiguate on the matched node's value instead.
+                return (list(init) + empty_ys,)
 
             loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
 
@@ -909,7 +911,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                 ),
                 operands_spec,
             )
-            return list(last_carry) + list(ys_outs)
+            return (list(last_carry) + list(ys_outs),)
 
         lower_to_while_loop_args, tree_spec = pytree.tree_flatten(
             (

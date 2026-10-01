@@ -2114,8 +2114,7 @@ class ScanModels:
                 torch.cat(grad_inputs, dim=0) / chunks,
             )
 
-    # A pure reduction: one carry leaf and no per-step output, so the flat output of
-    # the while_loop decomposition is a one-element pack.
+    # One carry and no ys: the while_loop decomposition has a single flat output.
     class ScanReduceOnly(torch.nn.Module):
         def forward(self, scan_op, initial, xs):
             def step(acc, x):
