@@ -8,7 +8,7 @@
 #include <limits>
 #include <type_traits>
 
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
+namespace c10 {
 // In some versions of MSVC, there will be a compiler error when building.
 // C4146: unary minus operator applied to unsigned type, result still unsigned
 // C4804: unsafe use of type 'bool' in operation
@@ -43,25 +43,26 @@ std::enable_if_t<std::is_same_v<From, bool>, bool> overflows(
 template <typename To, typename From>
 std::enable_if_t<std::is_integral_v<From> && !std::is_same_v<From, bool>, bool>
 overflows(From f, bool strict_unsigned = false) {
-  using limit = std::numeric_limits<typename scalar_value_type<To>::type>;
+  using limit = std::numeric_limits<
+      typename torch::headeronly::scalar_value_type<To>::type>;
   if constexpr (!limit::is_signed && std::numeric_limits<From>::is_signed) {
     // allow for negative numbers to wrap using two's complement arithmetic.
     // For example, with uint8, this allows for `a - b` to be treated as
     // `a + 255 * b`.
     if (!strict_unsigned) {
-      return greater_than_max<To>(f) ||
-          (is_negative(f) &&
+      return c10::greater_than_max<To>(f) ||
+          (c10::is_negative(f) &&
            -static_cast<uint64_t>(f) > static_cast<uint64_t>(limit::max()));
     }
   }
-  return less_than_lowest<To>(f) || greater_than_max<To>(f);
+  return c10::less_than_lowest<To>(f) || c10::greater_than_max<To>(f);
 }
 
 template <typename To, typename From>
 std::enable_if_t<std::is_floating_point_v<From>, bool> overflows(
     From f,
     bool strict_unsigned [[maybe_unused]] = false) {
-  using ToScalar = typename scalar_value_type<To>::type;
+  using ToScalar = typename torch::headeronly::scalar_value_type<To>::type;
   using limit = std::numeric_limits<ToScalar>;
   if (limit::has_infinity && std::isinf(static_cast<double>(f))) {
     return false;
@@ -93,27 +94,27 @@ C10_CLANG_DIAGNOSTIC_POP()
 #endif
 
 template <typename To, typename From>
-std::enable_if_t<is_complex<From>::value, bool> overflows(
+std::enable_if_t<torch::headeronly::is_complex<From>::value, bool> overflows(
     From f,
     bool strict_unsigned = false) {
   // casts from complex to real are considered to overflow if the
   // imaginary component is non-zero
-  if (!is_complex<To>::value && f.imag() != 0) {
+  if (!torch::headeronly::is_complex<To>::value && f.imag() != 0) {
     return true;
   }
   // Check for overflow componentwise
   // (Technically, the imag overflow check is guaranteed to be false
   // when !is_complex<To>, but any optimizer worth its salt will be
   // able to figure it out.)
-  return overflows<
-             typename scalar_value_type<To>::type,
+  return c10::overflows<
+             typename torch::headeronly::scalar_value_type<To>::type,
              typename From::value_type>(f.real(), strict_unsigned) ||
-      overflows<
-             typename scalar_value_type<To>::type,
+      c10::overflows<
+             typename torch::headeronly::scalar_value_type<To>::type,
              typename From::value_type>(f.imag(), strict_unsigned);
 }
-HIDDEN_NAMESPACE_END(torch, headeronly)
-
-namespace c10 {
-using torch::headeronly::overflows;
 } // namespace c10
+
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
+using c10::overflows;
+HIDDEN_NAMESPACE_END(torch, headeronly)
