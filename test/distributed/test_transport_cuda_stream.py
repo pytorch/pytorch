@@ -95,8 +95,11 @@ def _worker(rank, pipe, capture=False):
         if pipe.recv_bytes() != b"written":
             raise RuntimeError("unexpected control message")
         torch.testing.assert_close(destination, torch.full_like(destination, 2 - rank))
+        # An explicit stream overrides the current stream.
+        transport.read_stream(
+            local_destination.to_mutable_view(), remote_source, stream=stream
+        )
         with torch.cuda.stream(stream):
-            transport.read_stream(local_destination.to_mutable_view(), remote_source)
             consumer.copy_(destination, non_blocking=True)
         stream.synchronize()  # Verify results only; no synchronization in enqueue.
         torch.testing.assert_close(consumer, torch.full_like(consumer, 2 - rank))

@@ -185,9 +185,10 @@ class Transport(ABC):
         local_buffer: MemoryView,
         remote_buffer: RemoteBuffer,
         *,
+        stream: torch.cuda.Stream | None = None,
         timeout: float | None = None,
     ) -> None:
-        """Write a local view in order on the current CUDA stream.
+        """Write a local view in order on ``stream`` (default: current).
 
         Returns once enqueued. Backends with native stream support may override this.
         """
@@ -196,22 +197,27 @@ class Transport(ABC):
             raise ValueError("stream transfers require a positive timeout")
         self._check_transfer(local_buffer, remote_buffer, mutable=False)
         submit = partial(self.write_async, local_buffer, remote_buffer, timeout=timeout)
-        self._cuda_stream(torch.cuda.current_stream()).enqueue(submit, local_buffer)
+        self._cuda_stream(stream or torch.cuda.current_stream()).enqueue(
+            submit, local_buffer
+        )
 
     def read_stream(
         self,
         local_buffer: MutableMemoryView,
         remote_buffer: RemoteBuffer,
         *,
+        stream: torch.cuda.Stream | None = None,
         timeout: float | None = None,
     ) -> None:
-        """Read into a local view in order on the current CUDA stream."""
+        """Read into a local view in order on ``stream`` (default: current)."""
         _validate_timeout(timeout)
         if timeout == 0:
             raise ValueError("stream transfers require a positive timeout")
         self._check_transfer(local_buffer, remote_buffer, mutable=True)
         submit = partial(self.read_async, local_buffer, remote_buffer, timeout=timeout)
-        self._cuda_stream(torch.cuda.current_stream()).enqueue(submit, local_buffer)
+        self._cuda_stream(stream or torch.cuda.current_stream()).enqueue(
+            submit, local_buffer
+        )
 
     def _check_transfer(  # noqa: B027
         self, local_buffer: MemoryView, remote_buffer: RemoteBuffer, *, mutable: bool
