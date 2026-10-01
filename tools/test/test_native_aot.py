@@ -387,7 +387,7 @@ class TestNativeAotWorkflow(unittest.TestCase):
             ".ci/pytorch/build.sh",
             ".ci/pytorch/test.sh",
             ".ci/pytorch/common_utils.sh",
-            ".ci/manywheel/build.sh",
+            ".ci/wheel/linux/build.sh",
             "caffe2/CMakeLists.txt",
             "cmake/EnvVarForwarding.cmake",
             "torchgen/native_aot_decl.py",

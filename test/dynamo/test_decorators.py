@@ -639,6 +639,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
         torch._library.opaque_object.register_custom_class(State, typ="constant")
+        self.addCleanup(torch._library.opaque_object.unregister_custom_class, State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -935,6 +936,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
         torch._library.opaque_object.register_custom_class(State, typ="symbolic")
+        self.addCleanup(torch._library.opaque_object.unregister_custom_class, State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -1345,6 +1347,9 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 return polyfill(data, newline=newline)
 
         wrapped = torch._dynamo.substitute_in_graph(binascii.b2a_base64)(wrapper)
+
+        unregister = torch._dynamo.decorators._unregister_substitute_in_graph
+        self.addCleanup(unregister, binascii.b2a_base64)
 
         cnts = torch._dynamo.testing.CompileCounter()
         fn = binascii.b2a_base64
@@ -2989,6 +2994,50 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         # invoked again and the first-compile annotation sticks.
         callee(torch.randn(4))
         self.assertEqual(annotations, [])
+
+    def test_nonstrict_trace_bound_method_in_region(self):
+        # `nonstrict_trace` applied to a bound method inside the compiled
+        # region must keep the receiver bound, matching what decorating the
+        # bound method outside the region already does.
+        class Counter:
+            def __init__(self, bias):
+                self.bias = bias
+
+            def m(self, x):
+                torch._dynamo.graph_break()
+                return x + self.bias
+
+        obj = Counter(10)
+
+        def fn(x):
+            return torch._dynamo.nonstrict_trace(obj.m)(x)
+
+        x = torch.randn(3)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_nonstrict_trace_bound_method_matches_decorated(self):
+        class Counter:
+            def __init__(self, bias):
+                self.bias = bias
+
+            def m(self, x):
+                return x + self.bias
+
+        obj = Counter(10)
+        decorated = torch._dynamo.nonstrict_trace(obj.m)
+
+        def inside(x):
+            return torch._dynamo.nonstrict_trace(obj.m)(x)
+
+        def outside(x):
+            return decorated(x)
+
+        x = torch.randn(3)
+        a = torch.compile(inside, fullgraph=True, backend="aot_eager")(x)
+        b = torch.compile(outside, fullgraph=True, backend="aot_eager")(x)
+        self.assertEqual(a, b)
+        self.assertEqual(a, obj.m(x))
 
 
 instantiate_parametrized_tests(DecoratorTests)

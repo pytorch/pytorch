@@ -297,6 +297,7 @@ XPU_BLOCKLIST = [
 
 XPU_TEST = [
     "test_xpu",
+    "test_xpu_expandable_segments",
 ]
 
 # The tests inside these files should never be run in parallel with each other
@@ -1419,7 +1420,6 @@ CUSTOM_HANDLERS = {
     "distributed/test_c10d_spawn_gloo": run_test_with_subprocess,
     "distributed/test_c10d_spawn_nccl": run_test_with_subprocess,
     "distributed/test_c10d_spawn_ucc": run_test_with_subprocess,
-    "distributed/test_store": run_test_with_subprocess,
     "distributed/test_pg_wrapper": run_test_with_subprocess,
     "distributed/rpc/test_faulty_agent": run_test_with_subprocess,
     "distributed/rpc/test_tensorpipe_agent": run_test_with_subprocess,
@@ -1472,6 +1472,17 @@ def parse_args():
         "GPUs; `not-multigpu` runs only single-GPU "
         "tests, which can run on a single-GPU runner. Combined (AND) with the "
         "existing serial/not-serial split.",
+    )
+    parser.add_argument(
+        "--multigpu-min-gpus",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Further restrict the `multigpu` tests to those needing at least N "
+        "GPUs (resolved at collection, see test/conftest.py); pass-through to "
+        "pytest's --multigpu-min-gpus. 0 (default) disables it. Use with "
+        "`--multigpu-filter multigpu` on a larger-than-2-GPU runner to run just "
+        "the >2-GPU distributed tests (e.g. N=3 on a 4-GPU runner).",
     )
     parser.add_argument(
         "--include-cpython-tests",
@@ -1841,6 +1852,7 @@ def get_selected_tests(options) -> list[str]:
             "test_metal",
             "test_modules",
             "test_linalg",
+            "test_scaled_matmul_cuda",
             "nn/test_convolution",
             "nn/test_dropout",
             "nn/test_pooling",
@@ -1919,7 +1931,9 @@ def get_selected_tests(options) -> list[str]:
         ]
     )
 
-    selected_tests = exclude_tests(options.exclude, selected_tests)
+    # Exact match: a caller asking to exclude "inductor/test_torchinductor" means
+    # that file, not every file whose name starts with it.
+    selected_tests = exclude_tests(options.exclude, selected_tests, exact_match=True)
 
     if IS_WINDOWS and not options.ignore_win_blocklist:
         from torch.testing._internal.common_cuda import SM120OrLater, SM89OrLater
@@ -2171,11 +2185,17 @@ def run_tests(
     }.get(getattr(options, "multigpu_filter", None))
     periodic_marker = "periodic" if TEST_CONFIG == "periodic" else None
 
+    # Orthogonal min-GPU threshold on the `multigpu` tests, applied by a pytest
+    # plugin (see test/conftest.py). 0 disables it, so it is a no-op unless a
+    # larger-runner config passes --multigpu-min-gpus.
+    min_gpus = getattr(options, "multigpu_min_gpus", 0) or 0
+
     def marker_args(serial_expr: str | None) -> list[str]:
         exprs = [e for e in (serial_expr, multigpu_marker, periodic_marker) if e]
-        if not exprs:
-            return []
-        return ["-m", " and ".join(f"({e})" for e in exprs)]
+        args = ["-m", " and ".join(f"({e})" for e in exprs)] if exprs else []
+        if min_gpus > 0:
+            args += ["--multigpu-min-gpus", str(min_gpus)]
+        return args
 
     # NB: This is a hack to make conftest.py and files it depends on available
     # on CPP_TESTS_DIR. We should see if the file could be turned into a
