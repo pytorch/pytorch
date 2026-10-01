@@ -50,6 +50,7 @@ from cutlass.cute.nvgpu import cpasync, tcgen05
 
 log = common_efc.log
 
+from torch._inductor.kernel.gemm_epilogue import GEMM_REDUCTION_FRAGMENT_WIDTH
 from torch._inductor.kernel.vendored_templates.cutedsl.reduction_utils import (
     get_lane_warp_layouts,
     partition_for_epilogue,
@@ -521,7 +522,13 @@ class PersistentDenseGemmEFCKernel:
                 )
                 or (
                     self.local_reduce_axis == 1
-                    and self.local_reduce_group > self.epi_tile_n
+                    and (
+                        self.local_reduce_group > GEMM_REDUCTION_FRAGMENT_WIDTH
+                        or (
+                            self.tensor_epilogue_returns_local_reduce
+                            and self.local_reduce_combine is not None
+                        )
+                    )
                 )
             )
         )
@@ -1328,19 +1335,6 @@ class PersistentDenseGemmEFCKernel:
             self.efc.kernel.copy_and_partition_supplemental_rmem_tensors(
                 tiled_copy_t2r, tTR_rAcc, epi_tidx, epi_tile
             )
-            tDrGeneratedReduce: typing.Any = None
-            if cutlass.const_expr(self.tensor_epilogue_returns_local_reduce):
-                reduce_tile = cute.make_rmem_tensor(
-                    cute.make_layout(self.cta_tile_shape_mnk[:2]), self.acc_dtype
-                )
-                tDrGeneratedReduce = partition_for_epilogue(
-                    reduce_tile,
-                    epi_tile=epi_tile,
-                    tiled_copy=tiled_copy_t2r,
-                    tidx=epi_tidx,
-                    reference_src=False,
-                )
-
             #
             # Persistent tile scheduling loop
             #
@@ -1405,6 +1399,10 @@ class PersistentDenseGemmEFCKernel:
                 subtile_cnt = cute.size(tTR_tAcc.shape, mode=[3])
                 num_prev_subtiles = tile_sched.num_tiles_executed * subtile_cnt
                 epi_tile_n = cutlass.const_expr(self.epi_tile_n)
+                tiled_copy_r2s = self.efc.kernel.tiled_copy_r2s[self.d_name_bigger]
+                local_reduce_fragment_width = cute.size(
+                    tiled_copy_r2s.retile(tTR_rAcc).shape, mode=[0]
+                )
                 local_reduce_partial: typing.Any = None
                 if cutlass.const_expr(
                     (local_reduce_tensor is not None or self.local_reduce_feeds_main)
@@ -1412,7 +1410,7 @@ class PersistentDenseGemmEFCKernel:
                     and self.local_reduce_group > self.epi_tile_n
                 ):
                     local_reduce_partial = cute.make_rmem_tensor(
-                        ((1, self.epi_tile_n, 1), 1, 1), self.acc_dtype
+                        ((1, local_reduce_fragment_width, 1), 1, 1), self.acc_dtype
                     )
                 for subtile_idx in cutlass.range(subtile_cnt):
                     #
@@ -1448,7 +1446,6 @@ class PersistentDenseGemmEFCKernel:
                     #
                     # Perform epilogue op on accumulator.
                     #
-                    tiled_copy_r2s = self.efc.kernel.tiled_copy_r2s[self.d_name_bigger]
                     log(f"tiled_copy_r2s = {tiled_copy_r2s!s}")
                     # Use a SimpleNamespace to pass easily some local content as
                     # an extensible class compatible with CuTe DSL
@@ -1462,9 +1459,9 @@ class PersistentDenseGemmEFCKernel:
                         tiled_copy_r2s.retile(tTR_rAcc).load().to(self.epi_dtype)
                     )
                     if cutlass.const_expr(self.tensor_epilogue_returns_local_reduce):
-                        epilogue_context.local_reduce = tDrGeneratedReduce[
-                            (None, None, None, 0, subtile_idx)
-                        ]
+                        epilogue_context.local_reduce = cute.make_rmem_tensor_like(
+                            epilogue_context.acc_vec, self.acc_dtype
+                        )
                     log(f"before .retile tTR_rAcc = {tTR_rAcc!s}")
                     log(
                         f"tiled_copy_r2s.retile(tTR_rAcc) = {tiled_copy_r2s.retile(tTR_rAcc)!s}"
@@ -2089,7 +2086,12 @@ class PersistentDenseGemmEFCKernel:
                         assert not self.local_reduce_feeds_main
                         group = cutlass.const_expr(self.local_reduce_group)
                         assert group > 1
-                        returned_fragment = epilogue_context.local_reduce
+                        returned_fragment = cute.make_rmem_tensor_like(
+                            epilogue_context.acc_vec, self.acc_dtype
+                        )
+                        returned_fragment.store(
+                            epilogue_context.local_reduce.to(self.acc_dtype)
+                        )
                         returned_flt = cute.filter_zeros(returned_fragment)
                         returned_coordinates = partition_for_epilogue(
                             cute.make_identity_tensor(self.cta_tile_shape_mnk[:2]),
@@ -2099,6 +2101,64 @@ class PersistentDenseGemmEFCKernel:
                             reference_src=False,
                         )[(None, None, None, 0, subtile_idx)]
                         returned_coord_flt = cute.filter_zeros(returned_coordinates)
+                        returned_fragment_width = cutlass.const_expr(
+                            cute.size(returned_fragment.shape, mode=[0])
+                        )
+                        if cutlass.const_expr(group > returned_fragment_width):
+                            _, warp_layout_mn = get_lane_warp_layouts(
+                                tiled_copy_t2r, reference_src=False
+                            )
+                            physical_group = cutlass.const_expr(min(group, epi_tile_n))
+                            group_warps = cutlass.const_expr(
+                                physical_group // returned_fragment_width
+                            )
+                            warp_n = warp_layout_mn[1]
+                            warps_in_n = cutlass.const_expr(cute.size(warp_n))
+                            assert group_warps <= warps_in_n
+                            epilogue_warp_idx = cute.arch.make_warp_uniform(
+                                epi_tidx // cute.arch.WARP_SIZE
+                            )
+                            warp_n_idx = warp_layout_mn.get_hier_coord(
+                                epilogue_warp_idx
+                            )[1]
+                            for i in cutlass.range(
+                                cute.size(returned_flt), unroll_full=True
+                            ):
+                                row_idx = returned_coord_flt[i][0]
+                                n_idx = returned_coord_flt[i][1]
+                                local_group_idx = (n_idx % epi_tile_n) // physical_group
+                                group_warp_start = local_group_idx * group_warps
+                                group_warp_idx = warp_n_idx - group_warp_start
+                                if (
+                                    n_idx % returned_fragment_width == 0
+                                    and group_warp_idx > 0
+                                    and group_warp_idx < group_warps
+                                ):
+                                    sLocalReduce[row_idx, group_warp_idx - 1] = (
+                                        returned_flt[i]
+                                    )
+                            epilogue_sync_barrier.arrive_and_wait()
+                            for i in cutlass.range(
+                                cute.size(returned_flt), unroll_full=True
+                            ):
+                                row_idx = returned_coord_flt[i][0]
+                                n_idx = returned_coord_flt[i][1]
+                                local_group_idx = (n_idx % epi_tile_n) // physical_group
+                                group_warp_start = local_group_idx * group_warps
+                                if (
+                                    n_idx % physical_group == 0
+                                    and warp_n_idx == group_warp_start
+                                ):
+                                    value = returned_flt[i]
+                                    for warp_offset in cutlass.range_constexpr(
+                                        1, group_warps
+                                    ):
+                                        value = self.local_reduce_combine(
+                                            value,
+                                            sLocalReduce[row_idx, warp_offset - 1],
+                                        )
+                                    returned_flt[i] = value
+                            epilogue_sync_barrier.arrive_and_wait()
                         groups_per_cta = cutlass.const_expr(
                             self.cta_tile_shape_mnk[1] // group
                         )
@@ -2126,9 +2186,15 @@ class PersistentDenseGemmEFCKernel:
                             )
                             fragment_idx = subtile_n_idx % fragments_per_group
                             partial = local_reduce_partial.load()
-                            current = returned_fragment.load().reshape(
-                                local_reduce_partial.shape
+                            current_fragment = cute.make_rmem_tensor_like(
+                                local_reduce_partial, self.acc_dtype
                             )
+                            current_flt = cute.filter_zeros(current_fragment)
+                            for i in cutlass.range(
+                                cute.size(current_flt), unroll_full=True
+                            ):
+                                current_flt[i] = returned_flt[i]
+                            current = current_fragment.load()
                             if fragment_idx == 0:
                                 partial = current
                             else:
@@ -2194,7 +2260,12 @@ class PersistentDenseGemmEFCKernel:
                                     and row_idx < limit_m
                                     and global_group_idx < limit_groups
                                 ):
-                                    g_reduce[row_idx, group_idx] = returned_flt[i].to(
+                                    value = returned_flt[i]
+                                    if cutlass.const_expr(
+                                        self.local_reduce_finalize is not None
+                                    ):
+                                        value = self.local_reduce_finalize(value, group)
+                                    g_reduce[row_idx, group_idx] = value.to(
                                         local_reduce_tensor.element_type
                                     )
                     if cutlass.const_expr(
@@ -2204,7 +2275,12 @@ class PersistentDenseGemmEFCKernel:
                         assert local_reduce_tensor is not None
                         assert not self.local_reduce_feeds_main
                         group = cutlass.const_expr(self.local_reduce_group)
-                        returned_fragment = epilogue_context.local_reduce
+                        returned_fragment = cute.make_rmem_tensor_like(
+                            epilogue_context.acc_vec, self.acc_dtype
+                        )
+                        returned_fragment.store(
+                            epilogue_context.local_reduce.to(self.acc_dtype)
+                        )
                         reduced_flt = cute.filter_zeros(returned_fragment)
                         coordinates = partition_for_epilogue(
                             cute.make_identity_tensor(self.cta_tile_shape_mnk[:2]),
@@ -2213,7 +2289,9 @@ class PersistentDenseGemmEFCKernel:
                             tidx=epi_tidx,
                             reference_src=False,
                         )[(None, None, None, 0, subtile_idx)]
-                        coord_flt = cute.filter_zeros(coordinates)
+                        coord_flt = cute.filter_zeros(
+                            tiled_copy_r2s.retile(coordinates)
+                        )
                         lane_layout_mn, warp_layout_mn = get_lane_warp_layouts(
                             tiled_copy_t2r, reference_src=False
                         )
@@ -2521,7 +2599,7 @@ class PersistentDenseGemmEFCKernel:
         gC_mnl: cute.Tensor,
         epi_tile: cute.Tile,
         sC: cute.Tensor,
-        dtype: type[cutlass.Numeric],
+        dtype: type[cutlass.Numeric] | None = None,
     ) -> tuple[cute.CopyAtom, cute.Tensor, cute.Tensor]:
         """Make tiledCopy for global memory store, then use it to:
         - partition register array (source) and global memory (destination) for non-TMA store version;

@@ -274,7 +274,7 @@ def _opted_out() -> bool:
 
 
 # The oldest CUDA major that gets embedded kernels. CUDA 12 tops out at sm_90
-# (.ci/manywheel/build_env_setup.py's arch table) and every 13.x config builds
+# (.ci/wheel/linux/build_env_setup.py's arch table) and every 13.x config builds
 # sm_90 too, so a 12.x export is a strict subset of what the 13.x wheels already
 # ship. In should_run() rather than per-toolchain because the CI shells install
 # the DSL wheels only when it says RUN, so 12.x also skips the ~440MB install.
@@ -315,12 +315,12 @@ def _dsl_runtime_archive() -> str | None:
     """The DSL dialect runtime archive the CuTeDSL kernel objects need, preferring
     this build's CUDA major.
 
-    4.5.x shipped one archive at <root>/lib/; 4.6.x splits it per major (cu12/lib/,
-    cu13/lib/) and only cu12 is a hard dependency, so a CUDA 13 environment often
-    holds cu12 alone. A mismatch warns rather than failing: in 4.6.2 the archives
-    are the same objects (`ar p | md5sum` equal, differing only in ar timestamps)
-    and a CUDA 13.2 build linked against cu12 passed the AOT suite. Still preferred
-    and reported, since the per-major split says they may diverge."""
+    4.5.x shipped one archive at <root>/lib/; 4.6 and later split it per major
+    (cu12/lib/, cu13/lib/) and only cu12 is a hard dependency, so a CUDA 13
+    environment often holds cu12 alone. A mismatch warns rather than failing:
+    in 4.6.2 the archives were the same objects (`ar p | md5sum` equal, differing
+    only in ar timestamps), and a CUDA 13.2 build linked against cu12 passed the
+    AOT suite. Still preferred and reported, since newer archives may diverge."""
     import importlib.util
 
     spec = importlib.util.find_spec("nvidia_cutlass_dsl")
@@ -411,8 +411,8 @@ def should_run() -> bool:
             return False
 
     # Also "not applicable": the DSL wheels are cp-tagged and do not exist for
-    # every interpreter the release matrix builds. For the pinned 4.6.2 the
-    # -libs-* packages publish cp310-cp314 plus cp314t, manylinux only, no sdist,
+    # every interpreter the release matrix builds. For the pinned 4.8.0 the
+    # -libs-* packages publish cp310-cp314 plus cp314t on Linux, with no sdist,
     # while the matrix also builds 3.13t/3.15/3.15t. Those wheels keep the JIT
     # path; demanding an unresolvable tag would fail the build on nothing anyone
     # can fix.
@@ -831,7 +831,7 @@ def _invalidate_stale_include() -> None:
     """Stop this build tree from embedding what a PREVIOUS run wired up.
 
     caffe2/CMakeLists.txt include()s the generated file unconditionally, and
-    .ci/manywheel/build_all.sh shares one build/ across eight interpreters. OVERWRITTEN
+    .ci/wheel/linux/build_all.sh shares one build/ across eight interpreters. OVERWRITTEN
     rather than deleted: CMake registers an include()d file as a configure dependency
     only if it existed at configure time."""
     from tools.native_aot.gen_aot_lib import CMAKE_INCLUDE, write_nothing_to_embed
