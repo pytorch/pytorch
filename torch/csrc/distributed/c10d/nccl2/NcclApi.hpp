@@ -4,14 +4,11 @@
 
 #ifdef USE_C10D_NCCL
 
-#include <cstdint>
 #include <mutex>
 #include <string>
 #include <string_view>
 
 #include <nccl.h>
-
-#include <torch/csrc/distributed/c10d/Types.hpp>
 
 // NCCL_SHRINK_ABORT was introduced in NCCL 2.27 alongside ncclCommShrink.
 // Define a fallback so dependents compile against older NCCL headers; the
@@ -44,21 +41,6 @@ typedef struct ncclWindow_vidmem* ncclWindow_t;
 #endif
 
 namespace c10d::nccl2 {
-
-struct MaterializedCollectiveConfig {
-  const void* data = nullptr;
-  // Keep native storage alive through group completion and nonblocking polling.
-  c10::IValue owner;
-};
-
-using collective_config_converter_t =
-    MaterializedCollectiveConfig (*)(const c10::IValue&);
-
-TORCH_API collective_config_converter_t& get_collective_config_converter();
-// May call Python; invoke before taking locks or opening an NCCL group.
-TORCH_API MaterializedCollectiveConfig
-materializeCollConfig(const OptionalCollectiveConfig& config);
-
 /**
  * Abstract interface for NCCL API operations.
  * This allows for dependency injection and testing by providing
@@ -164,8 +146,7 @@ class NcclApi {
       ncclDataType_t datatype,
       int root,
       ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) = 0;
+      cudaStream_t stream) = 0;
 
   [[nodiscard]] virtual ncclResult_t bcast(
       void* buff,
@@ -173,8 +154,7 @@ class NcclApi {
       ncclDataType_t datatype,
       int root,
       ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) = 0;
+      cudaStream_t stream) = 0;
 
   [[nodiscard]] virtual ncclResult_t allReduce(
       const void* sendbuff,
@@ -183,8 +163,7 @@ class NcclApi {
       ncclDataType_t datatype,
       ncclRedOp_t op,
       ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) = 0;
+      cudaStream_t stream) = 0;
 
   [[nodiscard]] virtual ncclResult_t reduce(
       const void* sendbuff,
@@ -194,8 +173,7 @@ class NcclApi {
       ncclRedOp_t op,
       int root,
       ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) = 0;
+      cudaStream_t stream) = 0;
 
   [[nodiscard]] virtual ncclResult_t allGather(
       const void* sendbuff,
@@ -203,8 +181,7 @@ class NcclApi {
       size_t sendcount,
       ncclDataType_t datatype,
       ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) = 0;
+      cudaStream_t stream) = 0;
 
   [[nodiscard]] virtual ncclResult_t reduceScatter(
       const void* sendbuff,
@@ -213,8 +190,7 @@ class NcclApi {
       ncclDataType_t datatype,
       ncclRedOp_t op,
       ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) = 0;
+      cudaStream_t stream) = 0;
 
   [[nodiscard]] virtual ncclResult_t allToAll(
       const void* sendbuff,
@@ -222,18 +198,7 @@ class NcclApi {
       size_t count,
       ncclDataType_t datatype,
       ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) = 0;
-
-  [[nodiscard]] virtual ncclResult_t gather(
-      const void* sendbuff,
-      void* recvbuff,
-      size_t count,
-      ncclDataType_t datatype,
-      int root,
-      ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) = 0;
+      cudaStream_t stream) = 0;
 
   // Group operations
   [[nodiscard]] virtual ncclResult_t groupStart() = 0;
@@ -431,8 +396,7 @@ class DefaultNcclApi : public NcclApi {
       ncclDataType_t datatype,
       int root,
       ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) override;
+      cudaStream_t stream) override;
 
   [[nodiscard]] ncclResult_t bcast(
       void* buff,
@@ -440,8 +404,7 @@ class DefaultNcclApi : public NcclApi {
       ncclDataType_t datatype,
       int root,
       ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) override;
+      cudaStream_t stream) override;
 
   [[nodiscard]] ncclResult_t allReduce(
       const void* sendbuff,
@@ -450,8 +413,7 @@ class DefaultNcclApi : public NcclApi {
       ncclDataType_t datatype,
       ncclRedOp_t op,
       ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) override;
+      cudaStream_t stream) override;
 
   [[nodiscard]] ncclResult_t reduce(
       const void* sendbuff,
@@ -461,8 +423,7 @@ class DefaultNcclApi : public NcclApi {
       ncclRedOp_t op,
       int root,
       ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) override;
+      cudaStream_t stream) override;
 
   [[nodiscard]] ncclResult_t allGather(
       const void* sendbuff,
@@ -470,8 +431,7 @@ class DefaultNcclApi : public NcclApi {
       size_t sendcount,
       ncclDataType_t datatype,
       ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) override;
+      cudaStream_t stream) override;
 
   [[nodiscard]] ncclResult_t reduceScatter(
       const void* sendbuff,
@@ -480,8 +440,7 @@ class DefaultNcclApi : public NcclApi {
       ncclDataType_t datatype,
       ncclRedOp_t op,
       ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) override;
+      cudaStream_t stream) override;
 
   [[nodiscard]] ncclResult_t allToAll(
       const void* sendbuff,
@@ -489,18 +448,7 @@ class DefaultNcclApi : public NcclApi {
       size_t count,
       ncclDataType_t datatype,
       ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) override;
-
-  [[nodiscard]] ncclResult_t gather(
-      const void* sendbuff,
-      void* recvbuff,
-      size_t count,
-      ncclDataType_t datatype,
-      int root,
-      ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) override;
+      cudaStream_t stream) override;
 
   // Group operations
   [[nodiscard]] ncclResult_t groupStart() override;
