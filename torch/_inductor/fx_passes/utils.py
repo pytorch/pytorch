@@ -68,6 +68,7 @@ class BitsetAncestors:
         node_to_idx: dict[fx.Node, int] = {nd: i for i, nd in enumerate(nodes)}
         bits = [0] * n
         extra = extra_inputs or {}
+        self.extra_inputs = extra
 
         for i, node in enumerate(nodes):
             b = 0
