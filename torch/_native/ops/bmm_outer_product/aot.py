@@ -65,7 +65,7 @@ def covered_axes(self, mat2):
         and self.shape[0] <= _INT32_MAX
         and self.stride(0) <= _INT32_MAX
         and mat2.stride(0) <= _INT32_MAX
-        and self.numel() * mat2.shape[2] <= _INT32_MAX
+        and self.numel() <= _INT32_MAX // mat2.shape[2]
     )
     return {
         "dtype": self.dtype,
@@ -104,7 +104,7 @@ def cpp_covers():
           mat2.stride(0) > std::numeric_limits<int32_t>::max()) return false;
       // A functional out is contiguous (B, M, N), so this bounds its numel and both
       // of the strides the ABI narrows.
-      if (self.numel() * N > std::numeric_limits<int32_t>::max()) return false;
+      if (self.numel() > std::numeric_limits<int32_t>::max() / N) return false;
       return {buckets};
     """
 

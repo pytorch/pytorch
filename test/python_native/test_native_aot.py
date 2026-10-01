@@ -92,7 +92,7 @@ print("PROBE_RESULTS=" + json.dumps(results))
 """
 
 
-def _ran_dsl(x, k=64) -> bool:
+def _runs_dsl(x, k=64) -> bool:
     """Whether topk(x, k) launched a DSL kernel, in this process.
 
     Which layer served it is decided by the caller's environment: both launch the
@@ -358,9 +358,9 @@ class TestNativeAotTopK(TestCase):
         self.assertTrue(_native.aot_enabled())
         with pn.cutedsl.disabled():
             self.assertFalse(_native.aot_enabled())
-            self.assertFalse(_ran_dsl(x))
+            self.assertFalse(_runs_dsl(x))
         self.assertTrue(_native.aot_enabled())
-        self.assertTrue(_ran_dsl(x))
+        self.assertTrue(_runs_dsl(x))
 
     def test_covered_call_correct_regardless_of_routing(self):
         # Correct whichever layer serves it, including stock aten with no AOT lib.

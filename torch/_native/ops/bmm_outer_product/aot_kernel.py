@@ -37,6 +37,9 @@ def _bmm_outer_product_aot_kernel(
     # of the output gigabytes before its buffer.
     pid = tl.program_id(0).to(tl.int64)
 
+    # Widen before cdiv adds BLOCK_* - 1, including when a dimension is INT32_MAX.
+    M = tl.cast(M, tl.int64)
+    N = tl.cast(N, tl.int64)
     grid_m = tl.cdiv(M, BLOCK_M)
     grid_n = tl.cdiv(N, BLOCK_N)
     tiles_per_batch = grid_m * grid_n
@@ -88,7 +91,7 @@ def build(spec: dict) -> dict:
         + ["i32", "1", "i32", "1", "i32", "i32", "1"]  # am/bn/on baked to 1
         + [str(bm), str(bn)]
     )
-    grid_x = f"B_dim*(((M+{bm - 1})/{bm})*((N+{bn - 1})/{bn}))"
+    grid_x = f"B_dim*(((M+{bm - 1}LL)/{bm})*((N+{bn - 1}LL)/{bn}))"
     return {
         "kind": "triton",
         "prefix": prefix,

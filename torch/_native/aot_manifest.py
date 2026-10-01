@@ -6,8 +6,10 @@ call, ahead of its cond chain, so a covered call declines the Python route and
 reaches the embedded kernel through the router's aten fallback. Anything uncovered
 keeps its JIT override eligibility.
 
-A call is covered iff some point of the declaration's ``kernel_precompile_grid()``
-matches every field ``covered_axes()`` returns; dtypes match by canonical torch
+A call is covered only when the build embedded kernels for its op and device.
+The generated C++ predicate is authoritative; its Python fallback checks whether
+some point of ``kernel_precompile_grid()`` matches every field
+``covered_axes()`` returns. Dtypes match by canonical torch
 dtype, grid-only fields like block sizes are ignored, and an exception degrades to
 uncovered. The C++ dispatch chain in the AOT library is the authority on what
 actually launches, and drift is benign: a call both sides decline lands on stock
@@ -46,6 +48,22 @@ class _Coverage:
         # because the library loads after coverage is built.
         self._cpp_covers: Callable[..., bool] | None = None
         self._cpp_probed = False
+        self._archs: tuple[int, ...] | None = None
+
+    def is_available(self, device: torch.device) -> bool:
+        """Whether this build embedded this op for the given device."""
+        if device.type != "cuda" or torch.version.hip is not None:
+            return False
+        if self._archs is None:
+            try:
+                name = f"archs_{decl_id_for_op(self._op)}"
+                self._archs = tuple(getattr(torch.ops._native_aot, name)())
+            except (AttributeError, RuntimeError):
+                self._archs = ()
+        if not self._archs:
+            return False
+        major, minor = torch.cuda.get_device_capability(device)
+        return major * 10 + minor in self._archs
 
     def _resolve_cpp_covers(self) -> Callable[..., bool] | None:
         if not self._cpp_probed:
@@ -72,6 +90,12 @@ class _Coverage:
             except Exception:
                 # Arguments the schema cannot bind: uncovered, so the cond decides.
                 return False
+        tensor = next(
+            (arg for arg in (*args, *kwargs.values()) if isinstance(arg, torch.Tensor)),
+            None,
+        )
+        if tensor is None or not self.is_available(tensor.device):
+            return False
         try:
             values = self._covered_axes(*args, **kwargs)
         except Exception:
