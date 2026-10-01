@@ -1185,8 +1185,7 @@ class TestFxGraphCache(TestCase):
     @requires_cuda_and_triton
     @config.patch(STATIC_TRITON_BUNDLE_CONFIG)
     def test_bundle_without_cubin_uses_local_binary(self):
-        def fn(x):
-            return x.sin()
+        fn = torch.sin
 
         x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
             fn
@@ -1237,8 +1236,7 @@ class TestFxGraphCache(TestCase):
     @requires_cuda_and_triton
     @config.patch(STATIC_TRITON_BUNDLE_CONFIG)
     def test_bundle_and_cache_without_cubin_falls_back_to_jit(self):
-        def fn(x):
-            return x.sin()
+        fn = torch.sin
 
         x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
             fn
@@ -1275,8 +1273,7 @@ class TestFxGraphCache(TestCase):
     @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     @parametrize("compile_threads", (1, 2))
     def test_invalid_bundled_cubin_falls_back_to_jit(self, compile_threads):
-        def fn(x):
-            return x.sin()
+        fn = torch.sin
 
         with config.patch(compile_threads=compile_threads):
             x, expected, graph, bundle, static_autotuner = (
@@ -1448,8 +1445,7 @@ class TestFxGraphCache(TestCase):
         if compile_on_one_rank and not TEST_MULTIGPU:
             self.skipTest("device-agnostic case requires two GPUs")
 
-        def fn(x):
-            return x.sin()
+        fn = torch.sin
 
         with torch.compiler.config.patch(compile_on_one_rank=compile_on_one_rank):
             x, expected, graph, bundle, static_autotuner = (
@@ -1490,8 +1486,7 @@ class TestFxGraphCache(TestCase):
     @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     @parametrize("cache_state", ("present", "missing"))
     def test_loader_oom_does_not_rewrite_bundled_cubin(self, cache_state):
-        def fn(x):
-            return x.sin()
+        fn = torch.sin
 
         _, _, graph, bundle, static_autotuner = self.compile_unary_static_graph(fn)
 
@@ -1522,8 +1517,7 @@ class TestFxGraphCache(TestCase):
     @torch.compiler.config.patch(compile_on_one_rank=True)
     @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     def test_device_agnostic_ignores_damaged_local_binary(self):
-        def fn(x):
-            return x.sin()
+        fn = torch.sin
 
         x0, _, graph, bundle, static_autotuner = self.compile_unary_static_graph(
             fn, device=0
@@ -1563,8 +1557,7 @@ class TestFxGraphCache(TestCase):
     def test_ambiguous_device_agnostic_bundle_falls_back_to_jit(
         self, conflicting_device
     ):
-        def fn(x):
-            return x.sin()
+        fn = torch.sin
 
         x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
             fn, device=0
@@ -1603,8 +1596,7 @@ class TestFxGraphCache(TestCase):
     @torch.compiler.config.patch(compile_on_one_rank=True)
     @config.patch({**STATIC_TRITON_BUNDLE_CONFIG, "keep_static_cubin_raw": True})
     def test_retained_cubin_ignores_damaged_bundle(self, bundle_damage):
-        def fn(x):
-            return x.sin()
+        fn = torch.sin
 
         x0, _, graph, bundle, static_autotuner = self.compile_unary_static_graph(
             fn, device=0
@@ -1722,8 +1714,7 @@ class TestFxGraphCache(TestCase):
     @torch.compiler.config.patch(compile_on_one_rank=True)
     @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     def test_ambiguous_bundle_recovers_preexisting_local_artifact(self):
-        def fn(x):
-            return x.sin()
+        fn = torch.sin
 
         x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
             fn
@@ -1761,8 +1752,7 @@ class TestFxGraphCache(TestCase):
     @torch.compiler.config.patch(compile_on_one_rank=True)
     @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     def test_bundled_cubin_on_second_device_recovers_without_jit(self, cache_damage):
-        def fn(x):
-            return x.sin()
+        fn = torch.sin
 
         x0, _, graph, bundle, static_autotuner = self.compile_unary_static_graph(
             fn, device=0
@@ -1806,8 +1796,7 @@ class TestFxGraphCache(TestCase):
     def test_concurrent_first_device_load_is_serialized(self):
         import threading
 
-        def fn(x):
-            return x.sin()
+        fn = torch.sin
 
         x0, _, graph, bundle, static_autotuner = self.compile_unary_static_graph(
             fn, device=0
@@ -1855,8 +1844,7 @@ class TestFxGraphCache(TestCase):
     @requires_cuda_and_triton
     @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
     def test_single_device_corrupt_bundled_cubin_recovers(self):
-        def fn(x):
-            return x.sin()
+        fn = torch.sin
 
         x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
             fn
@@ -1929,8 +1917,7 @@ class TestFxGraphCache(TestCase):
         if load_device == 1 and not TEST_MULTIGPU:
             self.skipTest("cross-device cleanup requires two GPUs")
 
-        def fn(x):
-            return x.sin()
+        fn = torch.sin
 
         x, expected, graph, bundle, static_autotuner = self.compile_unary_static_graph(
             fn, device=load_device
