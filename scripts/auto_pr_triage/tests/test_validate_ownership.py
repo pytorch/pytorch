@@ -199,7 +199,7 @@ class OwnershipResultMainTest(unittest.TestCase):
         result = llm_result(
             uncovered_concerns=[
                 {
-                    "description": "![x](https://evil.example) <img src=x>\n## Heading",
+                    "description": "![x](x.png) <img src=x>\n## Heading",
                     "reason": "`code` | cell",
                     "files": ["torch/file.py"],
                 }
@@ -209,7 +209,7 @@ class OwnershipResultMainTest(unittest.TestCase):
         _, _, step_summary = self.run_processor(prepared=llm_input(), result=result)
 
         self.assertIn(
-            "- Uncovered concern: !\\[x\\](https://evil.example) \\<img src=x\\> "
+            "- Uncovered concern: !\\[x\\](x.png) \\<img src=x\\> "
             "\\#\\# Heading Why uncovered: \\`code\\` \\| cell "
             "Evidence: torch/file.py\n",
             step_summary,
