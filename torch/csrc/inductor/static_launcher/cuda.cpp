@@ -152,6 +152,13 @@ void* getTmaDescPtr(PyObject* obj) {
 
 #define SHARED_MEM_STATIC_MAX 49152 // 48 KB
 
+#if !defined(USE_ROCM)
+// CUDA 13 cuda.h values, spelled out so older toolkits still build.
+constexpr int kDeviceAttrMaxOversizedSharedMemoryPerBlock = 150;
+constexpr int kFuncAttrSharedMemoryMode = 17;
+constexpr int kSharedMemoryModeAllowOversized = 3;
+#endif
+
 #if defined(USE_ROCM)
 std::vector<char> readKernelImage(const std::string& filePath) {
   std::ifstream file(filePath, std::ios::binary);
@@ -178,6 +185,7 @@ std::pair<CUmodule, CUfunction> loadKernel(
   }
   CUmodule mod = nullptr;
   CUfunction func = nullptr;
+  uint32_t shared_needed = sharedMemBytes;
 
 #if defined(USE_ROCM)
   // Unlike cuModuleLoad, hipModuleLoad keeps a file descriptor for the loaded
@@ -199,6 +207,27 @@ std::pair<CUmodule, CUfunction> loadKernel(
       CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_BLOCK_OPTIN,
       device));
 
+  int shared_static = 0;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncGetAttribute(
+      &shared_static, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, func));
+  shared_needed += static_cast<uint32_t>(shared_static);
+
+  // Some devices (sm_107) allow more shared memory than the opt-in limit, but
+  // only in the oversized shared memory mode. Use it only when needed.
+  bool use_oversized = false;
+  if (shared_needed > static_cast<uint32_t>(shared_optin)) {
+    int shared_oversized = 0;
+    if (nvrtc().cuDeviceGetAttribute(
+            &shared_oversized,
+            static_cast<CUdevice_attribute>(
+                kDeviceAttrMaxOversizedSharedMemoryPerBlock),
+            device) == CUDA_SUCCESS &&
+        shared_oversized > shared_optin) {
+      use_oversized = shared_needed <= static_cast<uint32_t>(shared_oversized);
+      shared_optin = shared_oversized;
+    }
+  }
+
 #endif
 
   // Shared memory logic from triton/third-party/nvidia/backend/driver.c
@@ -208,8 +237,6 @@ std::pair<CUmodule, CUfunction> loadKernel(
   // the static shared memory and total max shared memory allowed on the device.
   // This prevents us from setting shared memory above the maximum
 
-  // TODO: Unify the CUDA and ROCm shared memory checks. Currently using <= for
-  // ROCm and < for CUDA because ROCm hits the boundary case more often.
 #if defined(USE_ROCM)
   TORCH_CHECK_WITH(
       OutOfMemoryError,
@@ -224,17 +251,25 @@ std::pair<CUmodule, CUfunction> loadKernel(
 #else
   TORCH_CHECK_WITH(
       OutOfMemoryError,
-      sharedMemBytes < static_cast<uint32_t>(shared_optin),
+      shared_needed <= static_cast<uint32_t>(shared_optin),
       "out of resource: ",
       funcName,
       " Required: ",
-      sharedMemBytes,
+      shared_needed,
       " Hardware limit:",
       shared_optin,
       " Reducing block sizes or `num_stages` may help.");
+
+  if (use_oversized) {
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncSetAttribute(
+        func,
+        static_cast<CUfunction_attribute>(kFuncAttrSharedMemoryMode),
+        kSharedMemoryModeAllowOversized));
+    return {mod, func};
+  }
 #endif
 
-  if (sharedMemBytes > SHARED_MEM_STATIC_MAX &&
+  if (shared_needed > SHARED_MEM_STATIC_MAX &&
       shared_optin > SHARED_MEM_STATIC_MAX) {
 #if defined(USE_ROCM)
     AT_CUDA_DRIVER_CHECK(hipFuncSetCacheConfig(func, hipFuncCachePreferShared));
@@ -253,13 +288,6 @@ std::pair<CUmodule, CUfunction> loadKernel(
 #else
     AT_CUDA_DRIVER_CHECK(
         nvrtc().cuFuncSetCacheConfig(func, CU_FUNC_CACHE_PREFER_SHARED));
-    int shared_total = 0, shared_static = 0;
-    AT_CUDA_DRIVER_CHECK(nvrtc().cuDeviceGetAttribute(
-        &shared_total,
-        CU_DEVICE_ATTRIBUTE_MAX_SHARED_MEMORY_PER_MULTIPROCESSOR,
-        device));
-    AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncGetAttribute(
-        &shared_static, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, func));
     AT_CUDA_DRIVER_CHECK(nvrtc().cuFuncSetAttribute(
         func,
         CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
