@@ -2214,15 +2214,14 @@ def kpack_supported() -> bool:
     is excluded because the Triton compiler forces kpack to 1 regardless
     (triton/backends/amd/compiler.py), so a kpack > 1 default is a no-op.
     """
-    if not torch.version.hip:
-        return False
-    arch = torch.cuda.get_device_properties(0).gcnArchName
-    return "gfx908" in arch or "gfx90a" in arch or "gfx942" in arch
+    return rocm_gfx_arch() in ("gfx908", "gfx90a", "gfx942")
 
 
 def get_default_kpack(block_k: int = 16) -> int:
     if not torch.version.hip:
         return 0
+    if rocm_gfx_arch() == "gfx942" and block_k <= 16:
+        return 1
     if kpack_supported() and block_k >= 16:
         return 2
     return 1
@@ -2267,12 +2266,10 @@ def mfma_kdim(dtype_size: int, matrix_instr_nonkdim: int) -> int | None:
     """MFMA K-extent for the current CDNA arch, None for an unknown
     (dtype_size, nonkdim) pair. Only gfx908/gfx90a/gfx942 are distinguished since
     kpack > 1 (the sole consumer) is limited to those archs."""
-    if not torch.version.hip:
-        return None
-    arch = torch.cuda.get_device_properties(0).gcnArchName
-    if "gfx908" in arch or "gfx90a" in arch:
+    arch = rocm_gfx_arch()
+    if arch in ("gfx908", "gfx90a"):
         return _MFMA_KDIM_CDNA1_CDNA2.get((dtype_size, matrix_instr_nonkdim))
-    elif "gfx942" in arch:
+    elif arch == "gfx942":
         return _MFMA_KDIM_CDNA3.get((dtype_size, matrix_instr_nonkdim))
     else:
         return None

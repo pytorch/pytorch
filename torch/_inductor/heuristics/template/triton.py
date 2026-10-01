@@ -2141,10 +2141,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 return self.exhaustive_flex_attn_fwd_configs
             flex_attn_fwd_configs += self.flex_attn_fwd_autotune_configs
 
-        # The attention MFMAs contract over head_dim (Q.K^T) and BLOCK_N (P.V), so
-        # the effective block_k for the kpack default is the smaller of the two.
+        default_kpack = get_default_kpack()
+
         if head_dim <= 256:
-            default_kpack = get_default_kpack(min(head_dim, 64))  # BLOCK_N == 64
             if dtype == torch.float32:
                 default_config = ROCmFlexConfig(64, 64, 1, 4, kpack=default_kpack)
             else:
@@ -2169,10 +2168,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 ).get((dtype, head_dim), default_config)
         else:
             if dtype == torch.float32:
-                default_kpack = get_default_kpack(min(head_dim, 16))  # BLOCK_N == 16
                 default_config = ROCmFlexConfig(32, 16, 1, 4, kpack=default_kpack)
             else:
-                default_kpack = get_default_kpack(min(head_dim, 32))  # BLOCK_N == 32
                 default_config = ROCmFlexConfig(64, 32, 1, 4, kpack=default_kpack)
 
         if default_config not in flex_attn_fwd_configs:
@@ -2190,33 +2187,32 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 return self.exhaustive_flex_attn_bwd_configs
             flex_attn_bwd_configs += self.flex_attn_bwd_autotune_configs
 
-        # block_k for the bwd attention MFMAs is bounded by head_dim and the KV
-        # block (block_n1); use the smaller as the kpack default's block_k.
+        default_kpack = get_default_kpack()
         arch_bwd_config = self.flex_bwd_config_by_arch.get(rocm_gfx_arch(), {}).get(
             (dtype, head_dim)
         )
         if dtype == torch.float32:
             default_config = ROCmFlexBwDConfig(
-                16, 16, 16, 16, 1, 4, kpack=get_default_kpack(min(head_dim, 16))
+                16, 16, 16, 16, 1, 4, kpack=default_kpack
             )
         elif arch_bwd_config is not None:
             default_config = arch_bwd_config
         elif head_dim <= 256:
             if head_dim == 64:
                 default_config = ROCmFlexBwDConfig(
-                    64, 64, 64, 64, 1, 4, kpack=get_default_kpack(min(head_dim, 64))
+                    64, 64, 64, 64, 1, 4, kpack=default_kpack
                 )
             elif head_dim == 128:
                 default_config = ROCmFlexBwDConfig(
-                    64, 128, 128, 64, 1, 4, kpack=get_default_kpack(min(head_dim, 128))
+                    64, 128, 128, 64, 1, 4, kpack=default_kpack
                 )
             else:
                 default_config = ROCmFlexBwDConfig(
-                    64, 64, 64, 64, 1, 4, kpack=get_default_kpack(min(head_dim, 64))
+                    64, 64, 64, 64, 1, 4, kpack=default_kpack
                 )
         else:
             default_config = ROCmFlexBwDConfig(
-                16, 16, 16, 16, 1, 4, kpack=get_default_kpack(min(head_dim, 16))
+                16, 16, 16, 16, 1, 4, kpack=default_kpack
             )
 
         if default_config not in flex_attn_bwd_configs:
@@ -2234,8 +2230,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 return self.exhaustive_flex_decode_configs
             flex_decode_configs += self.flex_decode_autotune_configs
 
-        # block_k is bounded by head_dim (Q.K^T) and BLOCK_N (P.V); use the smaller.
-        default_kpack = get_default_kpack(min(head_dim, 64))  # BLOCK_N == 64
+        default_kpack = get_default_kpack()
         default_config = ROCmFlexDecodeConfig(64, 1, 4, kpack=default_kpack)
 
         if default_config not in flex_decode_configs:
