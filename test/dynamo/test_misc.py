@@ -2986,6 +2986,36 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(res, ref_res)
         self.assertEqual(new.cell_contents, ref_new.cell_contents)
 
+    def test_cell_delete_contents_empty_at_exit(self):
+        # fn's own free variable cell: an existing, sourced CellVariable that
+        # is still empty when the graph exits.
+        def make_fn(x):
+            a = x
+
+            def fn(y):
+                def f():
+                    return a
+
+                cell = f.__closure__[0]
+                z = cell.cell_contents + y
+                del cell.cell_contents
+                return z, f
+
+            def read():
+                return a
+
+            return fn, read
+
+        x = torch.ones(2)
+        fn, read = make_fn(x)
+        z, f = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(z, x + x)
+        for g in (f, read):
+            with self.assertRaises(NameError):
+                g()
+        with self.assertRaisesRegex(ValueError, "Cell is empty"):
+            f.__closure__[0].cell_contents
+
     def test_return_nested_function(self):
         out = None
 
