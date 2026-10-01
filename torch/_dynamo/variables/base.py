@@ -561,16 +561,21 @@ def load_pending_mutation(
 def getset_load_or_build(
     accessor: Callable[[Any], Any],
     name: str,
-    source: Callable[[Any], Source | None] = lambda self: None,
+    source: Callable[[Any], Source | None] | None = None,
 ) -> Getter:
     """Getter that builds a VT from the raw value returned by `accessor`,
-    attaching the Source returned by `source` (defaults to sourceless)."""
+    attaching the Source returned by `source` (defaults to `self.source.name`)."""
+
+    def default_source(self: Any) -> Source | None:
+        return self.source and AttrSource(self.source, name)
+
+    get_source = default_source if source is None else source
 
     def getter(self, tx: InstructionTranslatorBase) -> VariableTracker:
         pending = load_pending_mutation(tx, self, name)
         if pending is not None:
             return pending
-        return VariableTracker.build(tx, accessor(self), source(self))
+        return VariableTracker.build(tx, accessor(self), get_source(self))
 
     return getter
 
@@ -1898,7 +1903,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             elif istype(cur, (list, tuple)):
                 children = list(cur)
             elif istype(cur, (dict, collections.OrderedDict)):
+                # Preserve the existing values-first visitation order, then visit
+                # keys, including VariableTrackers wrapped for hashing.
+                # The local import avoids a base.py <-> hashable.py cycle.
+                from .hashable import HashableTracker
+
                 children = list(cur.values())
+                children.extend(
+                    key.vt if isinstance(key, HashableTracker) else key for key in cur
+                )
             else:
                 continue
             worklist.extend(reversed(children))

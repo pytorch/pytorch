@@ -2607,12 +2607,11 @@ def object_generic_setattr_str(
         # The descriptor lives in a class __dict__ along the MRO, so it is
         # sourced by walking it (as the getattr path does).  AttrSource(
         # obj.source, name) would instead name the value it computes.
-        descr_source = None
-        if obj.source and isinstance(
-            obj,
-            (variables.UserDefinedObjectVariable, variables.UserDefinedClassVariable),
-        ):
-            descr_source = obj.get_source_by_walking_mro(tx, name)
+        descr_source = (
+            mro_attr_source(tx, py_type, TypeSource(obj.source), name)
+            if obj.source
+            else None
+        )
 
         result = _resolve_descriptor_set(tx, attr, obj, value, descr_source)
         if result is not None:
@@ -2641,6 +2640,7 @@ def object_generic_setattr_str(
         )
     else:
         se = tx.output.side_effects
+        obj = obj.realize()
         if not se.is_attribute_mutation(obj):
             if isinstance(obj, variables.UserDefinedObjectVariable):
                 # A user-defined object reaches a write untracked only when it
