@@ -304,43 +304,6 @@ def _rmsnorm_mxfp8_scale_swizzle(x, weight, G):
     return payload.view(B, D), _swizzle_scale(scale_u8)
 
 
-MLA_HEAD_DIM = 256
-MLA_ROPE_DIM = 64
-
-
-def _shifted_mla_indexer(x, ln_w, ln_b, cos, sin):
-    mean = x.mean(-1, keepdim=True)
-    var = ((x - mean) ** 2).mean(-1, keepdim=True)
-    normed = (x - mean) / torch.sqrt(var + 1e-5) * ln_w + ln_b
-    k_rot, k_pass = torch.split(
-        normed.unsqueeze(2),
-        [MLA_ROPE_DIM, x.shape[-1] - MLA_ROPE_DIM],
-        dim=-1,
-    )
-    return k_rot * cos + k_rot * sin, k_pass
-
-
-def _make_mla_inputs(
-    *, device, batch_size, seq_len, head_dim=MLA_HEAD_DIM, projection=False
-):
-    torch.manual_seed(0)
-    dtype = torch.bfloat16
-    input_dim = 7168 if projection else head_dim
-    rope_shape = (batch_size, seq_len, 1, MLA_ROPE_DIM)
-    inputs = [torch.randn(batch_size, seq_len, input_dim, device=device, dtype=dtype)]
-    if projection:
-        inputs.append(torch.randn(head_dim, input_dim, device=device, dtype=dtype))
-    inputs.extend(
-        (
-            torch.randn(head_dim, device=device, dtype=dtype),
-            torch.randn(head_dim, device=device, dtype=dtype),
-            torch.randn(rope_shape, device=device, dtype=dtype),
-            torch.randn(rope_shape, device=device, dtype=dtype),
-        )
-    )
-    return tuple(inputs)
-
-
 @instantiate_parametrized_tests
 class _NestedReductionBase:
     """Tests for fusing dependent cross-axis reductions into a single kernel."""
@@ -2735,6 +2698,42 @@ class NestedReductionNonPersistentTest(_NestedReductionBase, TestBase):
 
 
 class TranslatedSubParentEpilogueTest(TestCase):
+    MLA_HEAD_DIM = 256
+    MLA_ROPE_DIM = 64
+
+    @classmethod
+    def _shifted_mla_indexer(cls, x, ln_w, ln_b, cos, sin):
+        mean = x.mean(-1, keepdim=True)
+        var = ((x - mean) ** 2).mean(-1, keepdim=True)
+        normed = (x - mean) / torch.sqrt(var + 1e-5) * ln_w + ln_b
+        k_rot, k_pass = torch.split(
+            normed.unsqueeze(2),
+            [cls.MLA_ROPE_DIM, x.shape[-1] - cls.MLA_ROPE_DIM],
+            dim=-1,
+        )
+        return k_rot * cos + k_rot * sin, k_pass
+
+    @classmethod
+    def _make_mla_inputs(
+        cls, *, device, batch_size, seq_len, head_dim=MLA_HEAD_DIM, projection=False
+    ):
+        torch.manual_seed(0)
+        dtype = torch.bfloat16
+        in_dim = 7168 if projection else head_dim
+        rope_shape = (batch_size, seq_len, 1, cls.MLA_ROPE_DIM)
+        inputs = [torch.randn(batch_size, seq_len, in_dim, device=device, dtype=dtype)]
+        if projection:
+            inputs.append(torch.randn(head_dim, in_dim, device=device, dtype=dtype))
+        inputs.extend(
+            (
+                torch.randn(head_dim, device=device, dtype=dtype),
+                torch.randn(head_dim, device=device, dtype=dtype),
+                torch.randn(rope_shape, device=device, dtype=dtype),
+                torch.randn(rope_shape, device=device, dtype=dtype),
+            )
+        )
+        return tuple(inputs)
+
     def assert_outputs(self, actual, expected):
         self.assertEqual(len(actual), len(expected))
         for result, reference in zip(actual, expected):
@@ -2753,7 +2752,7 @@ class TranslatedSubParentEpilogueTest(TestCase):
                 node.get_nodes(), numel, rnumel
             )
             self.assertIsNotNone(plan)
-            self.assertEqual(plan.parent_rnumel, MLA_HEAD_DIM)
+            self.assertEqual(plan.parent_rnumel, self.MLA_HEAD_DIM)
             self.assertEqual(len(plan.sub_parent_stages), 1)
             stage = plan.sub_parent_stages[0]
             self.assertEqual(stage.factor, 4)
@@ -2899,7 +2898,7 @@ class TranslatedSubParentEpilogueTest(TestCase):
     def test_translated_fusion(
         self, device, shape_name, batch_size, seq_len, reorder, memory_planning
     ):
-        inputs = _make_mla_inputs(
+        inputs = self._make_mla_inputs(
             device=device,
             batch_size=batch_size,
             seq_len=seq_len,
@@ -2908,9 +2907,9 @@ class TranslatedSubParentEpilogueTest(TestCase):
         if shape_name == "projection":
 
             def fn(hidden, weight, *args):
-                return _shifted_mla_indexer(F.linear(hidden, weight), *args)
+                return self._shifted_mla_indexer(F.linear(hidden, weight), *args)
         else:
-            fn = _shifted_mla_indexer
+            fn = self._shifted_mla_indexer
         if shape_name == "smoke":
             disabled = self.compile_and_check(
                 fn,
@@ -2939,7 +2938,7 @@ class TranslatedSubParentEpilogueTest(TestCase):
     )
     def test_dynamic_shapes(self, device, dynamic_feature_width, shapes):
         input_sets = tuple(
-            _make_mla_inputs(
+            self._make_mla_inputs(
                 device=device, batch_size=batch, seq_len=seq, head_dim=width
             )
             for batch, seq, width in shapes
@@ -2957,7 +2956,7 @@ class TranslatedSubParentEpilogueTest(TestCase):
                 else:
                     torch._dynamo.mark_static(tensor, dim)
         self.compile_and_check(
-            _shifted_mla_indexer,
+            self._shifted_mla_indexer,
             input_sets,
             dynamic=True,
             expected=not dynamic_feature_width,
@@ -2978,7 +2977,7 @@ class TranslatedSubParentEpilogueTest(TestCase):
     def test_unsupported_candidate_falls_back(self, device, kind, head_dim, options):
         def fn(x, ln_w, ln_b, cos, sin, indices=None):
             if kind not in ("strided", "indirect", "equal_split"):
-                return _shifted_mla_indexer(x, ln_w, ln_b, cos, sin)
+                return self._shifted_mla_indexer(x, ln_w, ln_b, cos, sin)
             mean = x.mean(-1, keepdim=True)
             var = ((x - mean) ** 2).mean(-1, keepdim=True)
             normed = (x - mean) / torch.sqrt(var + 1e-5) * ln_w + ln_b
@@ -2992,7 +2991,7 @@ class TranslatedSubParentEpilogueTest(TestCase):
             leading = selected[..., :32]
             return leading * cos[..., :32] + leading * sin[..., :32], selected[..., 32:]
 
-        inputs = _make_mla_inputs(
+        inputs = self._make_mla_inputs(
             device=device, batch_size=2, seq_len=8, head_dim=head_dim
         )
         if kind == "indirect":
