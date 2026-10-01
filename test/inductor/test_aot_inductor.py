@@ -8208,6 +8208,28 @@ class AOTInductorTestsTemplate:
             )
         FileCheck().check_not(INFERRED_BOUND).run(code)
 
+    def test_unbacked_relation_assert_lite_mode(self):
+        # Lite mode retraces the graph (selective_decompose), re-allocating the
+        # unbacked symbols the deferred assert is keyed on.
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                shorter = torch.nonzero(a).size(0)
+                longer = torch.nonzero(b).size(0)
+                torch._check(shorter <= longer)
+                return a.new_ones([shorter]), b.new_ones([longer])
+
+        def mask(*bits):
+            return torch.tensor(bits, dtype=torch.float, device=self.device)
+
+        with config.patch(torch._inductor.lite_mode_options):
+            so_path = AOTIRunnerUtil.legacy_compile(
+                Model(), (mask(1, 1, 0, 0), mask(1, 1, 1, 0))
+            )
+        compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
+        # Same sizes as the example, so only the relational assert can catch it.
+        with self.assertRaisesRegex(RuntimeError, r"Expected u\d+ <= u\d+"):
+            compiled(mask(1, 1, 1, 0), mask(1, 0, 0, 0))
+
     def test_multi_input_nonzero_slice_shared_dim(self):
         # Regression: when multiple inputs share a dynamic batch dim and are
         # sliced with the same nonzero result, the generated C++ guard code
