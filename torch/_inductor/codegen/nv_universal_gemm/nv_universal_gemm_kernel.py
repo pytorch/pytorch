@@ -420,6 +420,7 @@ def _worker_nvgemm_autotuning_precompile(
             device=output_tensor_meta.device,
             dtype=output_tensor_meta.dtype,
         )
+    logical_m = out.shape[-2]
 
     output_scale = None
     if has_output_scale:
@@ -440,19 +441,21 @@ def _worker_nvgemm_autotuning_precompile(
             input_tensors = (b.t(), a.t()) + input_tensors[2:]
         out = out.t()
 
-    helper_kwargs: dict[str, Any] = {}
+    helper_kwargs: dict[str, Any] = {"logical_m": logical_m}
     if variant_name == "SCALED_GEMM":
         scale_mode_a, swizzle_mode_a, scale_mode_b, swizzle_mode_b = (
             _get_scaled_gemm_modes(
                 scale_type_a, swizzle_type_a, scale_type_b, swizzle_type_b
             )
         )
-        helper_kwargs = {
-            "scale_mode_a": scale_mode_a,
-            "swizzle_mode_a": swizzle_mode_a,
-            "scale_mode_b": scale_mode_b,
-            "swizzle_mode_b": swizzle_mode_b,
-        }
+        helper_kwargs.update(
+            {
+                "scale_mode_a": scale_mode_a,
+                "swizzle_mode_a": swizzle_mode_a,
+                "scale_mode_b": scale_mode_b,
+                "swizzle_mode_b": swizzle_mode_b,
+            }
+        )
 
     # For an addmm bias choice the last input is the bias, consumed by a
     # bias-add epilogue; the rest are the GEMM operands. Building the epilogue
@@ -476,6 +479,7 @@ def _worker_nvgemm_autotuning_precompile(
         has_epilogue=has_bias_epilogue,
         aux_tensors=aux_tensors,
         epilogue_source=epilogue_source,
+        logical_m=logical_m,
     )
     dev_idx = input_tensors[0].device.index or 0
     disk_config_key = _make_disk_config_key(
@@ -585,6 +589,7 @@ def _create_gemm_arguments(
     output_scale: Any | None = None,
     epilogue: Any | None = None,
     local_reduce: GemmReductionArguments | None = None,
+    logical_m: Any | None = None,
 ):
     import cutlass.operators
 
@@ -611,6 +616,8 @@ def _create_gemm_arguments(
             # has no stride metadata for TensorWrapper, so expose it as a
             # one-element view without allocating or launching another kernel.
             args.alpha = TensorWrapper(output_scale.reshape(1), alignment_bytes=4)
+        if logical_m is not None:
+            args.logical_m = logical_m
         return args
 
     if epilogue is not None and variant_name == "GROUPED_GEMM":
@@ -755,9 +762,12 @@ def _create_gemm_cache_key(
     aux_tensors: tuple = (),
     epilogue_source: str = "",
     epilogue_specialization: tuple = (),
+    logical_m: Any | None = None,
 ):
     cache_key = tuple(s for t in input_tensors for s in _tensor_sig(t))
     cache_key = (*cache_key, *_tensor_sig(out))
+    if logical_m is not None:
+        cache_key = (*cache_key, "logical_m", logical_m)
 
     if has_epilogue:
         aux_sig = tuple(_tensor_sig(t) for t in aux_tensors)
@@ -982,14 +992,13 @@ def _nvgemm_run(
     use_pdl: bool | None = None,
     kernel_output_dtype: torch.dtype | str | None = None,
 ):
+    variant_kwargs = dict(variant_kwargs or {})
+    variant_kwargs["logical_m"] = out.shape[-2]
     if swap_ab and len(input_tensors) >= 2:
         import torch
 
-        reduction = variant_kwargs.get("local_reduce") if variant_kwargs else None
+        reduction = variant_kwargs.get("local_reduce")
         if isinstance(reduction, GemmReductionArguments) and reduction.enabled:
-            if variant_kwargs is None:
-                raise AssertionError("expected local-reduction keyword arguments")
-            variant_kwargs = dict(variant_kwargs)
             variant_kwargs["local_reduce"] = _transpose_local_reduce_tensors(reduction)
         a, b = input_tensors[0], input_tensors[1]
         if len(input_tensors) >= 4:
@@ -1036,6 +1045,7 @@ def _nvgemm_run(
         aux_tensors=aux_tensors,
         epilogue_source=epilogue_source,
         epilogue_specialization=epilogue_specialization,
+        logical_m=variant_kwargs["logical_m"],
     )
     dev_idx = input_tensors[0].device.index or 0
     mem_key = (cache_key, dev_idx)
@@ -1247,6 +1257,8 @@ def _nvgemm_precompile(
 
     input_tensors = tuple(tensors[n] for n in input_param_names)
     out = tensors["output"]
+    variant_kwargs = dict(variant_kwargs or {})
+    variant_kwargs["logical_m"] = out.shape[-2]
 
     output_scale = (
         tensors[output_scale_param_name]
@@ -1269,7 +1281,9 @@ def _nvgemm_precompile(
 
     patched = _patch_max_active_clusters(max_active_clusters)
     try:
-        cache_key = _create_gemm_cache_key(input_tensors, out)
+        cache_key = _create_gemm_cache_key(
+            input_tensors, out, logical_m=variant_kwargs["logical_m"]
+        )
         mem_key = (cache_key, device_index)
         if mem_key not in compiled_cache:
             cc = (

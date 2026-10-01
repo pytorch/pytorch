@@ -31,6 +31,9 @@ ConfigKey = tuple[int, int, int, int]
 
 _NVFP4_MAX_PROFILING_CONFIGS = 3
 _NVFP4_AUTOTUNE_CUDAGRAPH_UNROLL = 16
+_NVFP4_PDL_MAX_M = 256
+_NVFP4_PDL_MIN_WIDTH = 1024
+_NVFP4_PDL_MAX_WIDTH = 65536
 
 # Hand-picked configs in the space nvMatmulHeuristics does not currently
 # explore. The final entries are NVFP4 oracle-best configs from an 83-shape
@@ -252,6 +255,69 @@ def nvgemm_cold_cache_shape(
     return len(output_shape) == 2 and 0 < output_shape[0] <= 256
 
 
+def _logical_nvfp4_k(packed_k: int) -> int:
+    return 2 * packed_k
+
+
+def use_nvfp4_pdl(logical_m: int, logical_n: int, packed_k: int) -> bool:
+    """Whether an NVFP4 shape should use programmatic dependent launch."""
+    if config.nvgemm_pdl == "1":
+        return True
+    if config.nvgemm_pdl != "auto":
+        return False
+    logical_k = _logical_nvfp4_k(packed_k)
+    width_min = min(logical_n, logical_k)
+    width_max = max(logical_n, logical_k)
+    return (
+        0 < logical_m <= _NVFP4_PDL_MAX_M
+        and _NVFP4_PDL_MIN_WIDTH <= width_min
+        and width_max <= _NVFP4_PDL_MAX_WIDTH
+        # Hybrid models regress in this intermediate-width batch 33-64 band.
+        and not (32 < logical_m <= 64 and 2048 < width_min < 4096)
+    )
+
+
+def use_nvfp4_late_pdl_wait(
+    *, use_pdl: bool, sf_vec_size: int, logical_m: int, logical_k: int
+) -> bool:
+    """Whether descriptor setup should overlap the NVFP4 PDL wait."""
+    return (
+        use_pdl
+        and sf_vec_size == 16
+        and (
+            (logical_m <= 32 and logical_k <= 4096)
+            or (32 < logical_m <= 64 and logical_k <= 5120)
+        )
+    )
+
+
+def kernel_uses_pdl(kernel) -> bool:
+    return bool(
+        getattr(
+            getattr(kernel, "impl", None),
+            "use_pdl",
+            getattr(kernel.metadata.design, "use_pdl", False),
+        )
+    )
+
+
+def prefer_pdl_kernels(
+    non_efc_kernels: list[Any],
+    efc_kernels: list[Any],
+    use_pdl: bool,
+) -> tuple[list[Any], list[Any]]:
+    """Prefer generated PDL variants while retaining a safe base fallback."""
+    if not use_pdl:
+        return non_efc_kernels, efc_kernels
+    pdl_non_efc_kernels = [
+        kernel for kernel in non_efc_kernels if kernel_uses_pdl(kernel)
+    ]
+    pdl_efc_kernels = [kernel for kernel in efc_kernels if kernel_uses_pdl(kernel)]
+    if not pdl_non_efc_kernels and not pdl_efc_kernels:
+        return non_efc_kernels, efc_kernels
+    return pdl_non_efc_kernels, pdl_efc_kernels
+
+
 def _nvfp4_candidate_configs(
     *,
     logical_m: int,
@@ -309,7 +375,7 @@ def _nvfp4_candidate_configs(
     # Decode-shaped transposed winners absent from the CUTLASS3 discovery set.
     if swap_ab and n_is_static and logical_m <= 32 and logical_n >= 1024:
         targeted.update(((128, 32, 1, 1), (128, 64, 1, 1), (128, 32, 4, 1)))
-        logical_k = 2 * packed_k
+        logical_k = _logical_nvfp4_k(packed_k)
         if min(logical_n, logical_k) <= 4608 or max(logical_n, logical_k) <= 8192:
             targeted.add((128, 32, 2, 1))
             prefetch.add((128, 32, 4, 1))
