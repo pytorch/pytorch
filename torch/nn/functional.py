@@ -1,6 +1,7 @@
 """Functional interface."""
 
 import dataclasses
+import enum
 import importlib
 import math
 import warnings
@@ -36,6 +37,13 @@ from torch.overrides import (
 # Set visibility of the bound enums to this module
 ScalingType.__module__ = "torch.nn.functional"
 SwizzleType.__module__ = "torch.nn.functional"
+
+
+class InnerScaleCalc(enum.IntEnum):
+    r"""Method used to calculate block scales for :func:`quantize_tensor`."""
+
+    RCEIL_E8M0 = 0
+
 
 if TYPE_CHECKING:
     from torch.nn.modules.linear_cross_entropy_options import LinearCrossEntropyOptions
@@ -7227,6 +7235,144 @@ def _enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
     if not isinstance(l, list):
         l = [l]
     return [li.value for li in l]
+
+
+def quantize_tensor(
+    input: Tensor,
+    *,
+    qdata_dtype: torch.dtype,
+    inner_scale_calc: InnerScaleCalc,
+    scaling_type: ScalingType,
+    swizzle_type: SwizzleType,
+    scaling_type_square_block_and_expand: bool = False,
+) -> tuple[Tensor, Tensor]:
+    r"""quantize_tensor(input, *, qdata_dtype, inner_scale_calc, scaling_type, swizzle_type, scaling_type_square_block_and_expand=False) -> tuple[Tensor, Tensor]
+
+    Quantize a 2D tensor. Returns ``(qdata, scale)`` for use with
+    :func:`scaled_mm`.  See the code samples at the bottom of this docblock
+    for supported formats.
+
+    A contiguous input is quantized along its last dimension (dim-k). Pass a
+    transposed view of a contiguous tensor to quantize along its last dimension
+    using the dim-m kernel.
+
+    This implementation requires an NVIDIA SM100 or newer GPU and the optional
+    ``nvidia-cutlass-dsl`` and ``apache-tvm-ffi`` packages. Autograd is not supported.
+
+    Args:
+        input (Tensor): Contiguous 2D tensor or a transposed view of one, with
+          shape :math:`(M, K)` and dtype ``float16``, ``bfloat16``, or
+          ``float32``. ``K`` must be divisible by 32. For a transposed view
+          (dim-m), ``M`` must also be divisible by 16; for square-block scaling
+          (dim-k), ``M`` must be divisible by 32. Both dimensions must fit in
+          signed int32, and the data pointer must be 16-byte aligned.
+        qdata_dtype (:class:`torch.dtype`): Must be ``torch.float8_e4m3fn``.
+        inner_scale_calc (InnerScaleCalc): Must be ``InnerScaleCalc.RCEIL_E8M0``.
+        scaling_type (ScalingType): Must be ``ScalingType.BlockWise1x32``.
+        swizzle_type (SwizzleType): ``NO_SWIZZLE`` or ``SWIZZLE_32_4_4``.
+          Dim-m and square-block scaling require ``SWIZZLE_32_4_4``.
+        scaling_type_square_block_and_expand (bool, optional): When ``True``,
+          compute one scale for each 32x32 block, then expand it into the
+          GEMM-facing 1x32 swizzled layout. Only supported for dim-k with
+          both dimensions divisible by 32. Default: ``False``.
+
+    Returns:
+        tuple[Tensor, Tensor]: Quantized data in the logical input shape and
+        E8M0 scales. Compact dim-k scales have shape ``(rows, cols // 32)``;
+        swizzled scales have shape ``(ceil(rows / 128), ceil(cols / 128), 32, 16)``.
+
+    Examples::
+
+        >>> import torch.nn.functional as F
+        >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        >>> mx_kwargs = dict(
+        ...     qdata_dtype=torch.float8_e4m3fn,
+        ...     inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0,
+        ...     scaling_type=F.ScalingType.BlockWise1x32,
+        ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
+        ... )
+        >>> # mxfp8 dim-k with swizzled scales
+        >>> qdata_k, scale_k = F.quantize_tensor(x, **mx_kwargs)
+        >>> # mxfp8 dim-m: pass a transposed view of the contiguous input
+        >>> qdata_m, scale_m = F.quantize_tensor(x.t(), **mx_kwargs)
+        >>> # mxfp8 dim-k with scales shared over 32x32 blocks
+        >>> qdata_square, scale_square = F.quantize_tensor(
+        ...     x, **mx_kwargs, scaling_type_square_block_and_expand=True
+        ... )
+        >>> # mxfp8 dim-k with compact, unswizzled scales
+        >>> plain_kwargs = {**mx_kwargs, "swizzle_type": F.SwizzleType.NO_SWIZZLE}
+        >>> qdata_plain, scale_plain = F.quantize_tensor(x, **plain_kwargs)
+    """
+    # TODO(future PR): add torch.export support for the native quantization op.
+    outputs = torch.ops.aten._quantize_tensor.default(
+        input,
+        qdata_dtype=qdata_dtype,
+        inner_scale_calc=getattr(inner_scale_calc, "value", inner_scale_calc),
+        scaling_type=scaling_type.value,
+        swizzle_type=swizzle_type.value,
+        scaling_type_square_block_and_expand=scaling_type_square_block_and_expand,
+    )
+    return outputs[0], outputs[1]
+
+
+def quantize_tensor_dual(
+    input: Tensor,
+    *,
+    qdata_dtype: torch.dtype,
+    inner_scale_calc: InnerScaleCalc,
+    scaling_type: ScalingType,
+    swizzle_type: SwizzleType,
+    scaling_type_square_block_and_expand: bool = False,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    r"""quantize_tensor_dual(input, *, qdata_dtype, inner_scale_calc, scaling_type, swizzle_type, scaling_type_square_block_and_expand=False) -> tuple[Tensor, Tensor, Tensor, Tensor]
+
+    Quantize a contiguous 2D tensor along both dim-k and dim-m dimensions in one
+    pass. See :func:`quantize_tensor` to quantize along one dimension.
+
+    This implementation requires an NVIDIA SM100 or newer GPU and the optional
+    ``nvidia-cutlass-dsl`` and ``apache-tvm-ffi`` packages. Autograd is not supported.
+
+    Args:
+        input (Tensor): Contiguous 2D tensor of shape :math:`(M, K)` with dtype
+          ``float16``, ``bfloat16``, or ``float32``. Both ``M`` and ``K`` must
+          be divisible by 32 and fit in signed int32, and the data pointer must
+          be 16-byte aligned.
+        qdata_dtype (:class:`torch.dtype`): Must be ``torch.float8_e4m3fn``.
+        inner_scale_calc (InnerScaleCalc): Must be ``InnerScaleCalc.RCEIL_E8M0``.
+        scaling_type (ScalingType): Must be ``ScalingType.BlockWise1x32``.
+        swizzle_type (SwizzleType): Must be ``SWIZZLE_32_4_4``.
+        scaling_type_square_block_and_expand (bool, optional): Square-block
+          scaling is not supported. Must be ``False``. Default: ``False``.
+
+    Returns:
+        tuple[Tensor, Tensor, Tensor, Tensor]: ``(qdata_k, scale_k, qdata_m,
+        scale_m)``. For input of shape ``(M, K)``, the quantized tensors have
+        shapes ``(M, K)`` and ``(K, M)``. Their E8M0 scales have shapes
+        ``(ceil(M / 128), ceil(K / 128), 32, 16)`` and
+        ``(ceil(K / 128), ceil(M / 128), 32, 16)``, respectively.
+
+    Examples::
+
+        >>> import torch.nn.functional as F
+        >>> x = torch.randn(128, 128, device="cuda", dtype=torch.bfloat16)
+        >>> mx_kwargs = dict(
+        ...     qdata_dtype=torch.float8_e4m3fn,
+        ...     inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0,
+        ...     scaling_type=F.ScalingType.BlockWise1x32,
+        ...     swizzle_type=F.SwizzleType.SWIZZLE_32_4_4,
+        ... )
+        >>> # mxfp8 dim-km with swizzled scales
+        >>> qdata_k, scale_k, qdata_m, scale_m = F.quantize_tensor_dual(x, **mx_kwargs)
+    """
+    outputs = torch.ops.aten._quantize_tensor_dual.default(
+        input,
+        qdata_dtype=qdata_dtype,
+        inner_scale_calc=getattr(inner_scale_calc, "value", inner_scale_calc),
+        scaling_type=scaling_type.value,
+        swizzle_type=swizzle_type.value,
+        scaling_type_square_block_and_expand=scaling_type_square_block_and_expand,
+    )
+    return outputs[0], outputs[1], outputs[2], outputs[3]
 
 
 def scaled_mm(
