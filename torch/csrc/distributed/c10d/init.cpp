@@ -1171,6 +1171,13 @@ Example:
       py::arg("group_name"));
 
   // Remove all process groups from the native registry
+  module.def(
+      "_enable_gated_hooks",
+      &::c10d::ProcessGroup::enableGatedHooks,
+      R"(Enable the gated pre/post hooks of every process group, until a
+matching ``_disable_gated_hooks``. Calls nest.)");
+  module.def(
+      "_disable_gated_hooks", &::c10d::ProcessGroup::disableGatedHooks);
   module.def("_unregister_all_process_groups", []() {
     return ::c10d::unregister_all_process_groups();
   });
@@ -3079,27 +3086,46 @@ Arguments:
               "(test whether the process group supports completion hooks)")
           .def(
               "register_pre_hook",
-              &::c10d::ProcessGroup::registerPreHook,
-              py::call_guard<py::gil_scoped_release>(),
+              [](::c10d::ProcessGroup& self,
+                 int64_t hook_id,
+                 ::c10d::PreHook hook,
+                 bool gated) {
+                if (gated) {
+                  self.registerGatedPreHook(hook_id, std::move(hook));
+                } else {
+                  self.registerPreHook(hook_id, std::move(hook));
+                }
+              },
               py::arg("hook_id"),
               py::arg("hook"),
-              "Register a pre-hook, called before each collective is issued")
+              py::arg("gated") = false,
+              R"(Register a pre-hook, called before each collective is issued.
+A gated hook is called only while gated hooks are enabled, see
+``_enable_gated_hooks``.)")
           .def(
               "unregister_pre_hook",
               &::c10d::ProcessGroup::unregisterPreHook,
-              py::call_guard<py::gil_scoped_release>(),
               py::arg("hook_id"))
           .def(
               "register_post_hook",
-              &::c10d::ProcessGroup::registerPostHook,
-              py::call_guard<py::gil_scoped_release>(),
+              [](::c10d::ProcessGroup& self,
+                 int64_t hook_id,
+                 ::c10d::PostHook hook,
+                 bool gated) {
+                if (gated) {
+                  self.registerGatedPostHook(hook_id, std::move(hook));
+                } else {
+                  self.registerPostHook(hook_id, std::move(hook));
+                }
+              },
               py::arg("hook_id"),
               py::arg("hook"),
-              "Register a post-hook, called after each collective is issued")
+              py::arg("gated") = false,
+              R"(Register a post-hook, called after each collective is issued.
+A gated post-hook is called for the collectives whose gated pre-hooks were.)")
           .def(
               "unregister_post_hook",
               &::c10d::ProcessGroup::unregisterPostHook,
-              py::call_guard<py::gil_scoped_release>(),
               py::arg("hook_id"))
           .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
             return torch::jit::toPyObject(c10::IValue(std::move(self)));
