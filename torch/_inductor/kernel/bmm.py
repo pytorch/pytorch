@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import dataclasses
 import itertools
 import logging
 from typing import TYPE_CHECKING
@@ -133,6 +134,40 @@ def _bmm_shared_a_configs(dtype):
             "num_warps": warps,
         }
 
+
+@SymbolicGridFn
+def blackwell_bmm_grid(b, m, n, meta, *, cdiv, max, min):
+    # Flatten batch and matrix tiles into one global persistent work queue.
+    grid_m = cdiv(m, meta["BLOCK_M"])
+    tiles = b * grid_m * cdiv(n, meta["BLOCK_N"])
+    grid_x = min(meta["NUM_SMS"], tiles)
+    return (grid_x, 1, 1)
+
+
+blackwell_ws_persistent_tma_bmm_template = TritonTemplate(
+    name="blackwell_bmm",
+    grid=blackwell_bmm_grid,
+    source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_bmm"),
+    cache_codegen_enabled_for_template=True,
+    prologue_loads_all_inputs=True,
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class BlackwellBMMConfig:
+    block_m: int
+    block_n: int
+    block_k: int
+    num_stages: int
+    num_warps: int
+    epilogue_subtile: int = 1
+
+
+BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
+    BlackwellBMMConfig(64, 64, 128, 5, 4),
+    BlackwellBMMConfig(128, 128, 128, 3, 8),
+    BlackwellBMMConfig(128, 256, 64, 4, 8),
+)
 
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
