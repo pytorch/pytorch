@@ -623,7 +623,6 @@ class TritonTemplateKernel(TritonKernel):
         self.input_nodes = input_nodes
         self.output_node = output_node
         self.named_input_nodes = {}  # type: ignore[var-annotated]
-        self._named_input_indices: dict[str, int] = {}
         self.defines = defines
         self.kernel_name = kernel_name
         self.use_jit = use_jit
@@ -663,7 +662,6 @@ class TritonTemplateKernel(TritonKernel):
 
         # input buffers which we are allowed to prologue fuse into
         self.prologue_supported_inputs: OrderedSet[str] = OrderedSet()
-        # Track which occurrences support prologue fusion before exposing buffer names.
         self._prologue_supported_input_indices: OrderedSet[int] = OrderedSet()
 
         # input buffers which we are fusing into
@@ -723,14 +721,11 @@ class TritonTemplateKernel(TritonKernel):
         return f"_tmp_var{next(self.tmp_var_ctr)}"
 
     def _finalize_prologue_supported_inputs(self) -> None:
-        supported_indices = self._prologue_supported_input_indices
-        unsupported_names = OrderedSet(
+        self.prologue_supported_inputs -= OrderedSet(
             input_node.get_name()
             for index, input_node in enumerate(self.input_nodes)
-            if input_node.get_name() in self.prologue_supported_inputs
-            and index not in supported_indices
+            if index not in self._prologue_supported_input_indices
         )
-        self.prologue_supported_inputs -= unsupported_names
 
     def input_dependent_preserved_state(self) -> str:
         # Not adding self.args.output_buffers on purpose. But we do not need to reproduce it on a cache hit.
@@ -1050,12 +1045,9 @@ class TritonTemplateKernel(TritonKernel):
             # get args in correct order
             self.args.input(input_node.get_name())
 
-        for named_index, (name, input_node) in enumerate(
-            zip(argnames, named_args), start=self.prefix_args
-        ):
+        for name, input_node in zip(argnames, named_args):
             arg_name = f"arg_{name}"
             self.named_input_nodes[name] = input_node
-            self._named_input_indices[name] = named_index
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
             if input_node.get_name() in self.prologue_fused_inputs:
@@ -1064,13 +1056,11 @@ class TritonTemplateKernel(TritonKernel):
             self.args.input_buffers[input_node.get_name()] = arg_name
 
         # The args may be duplicated, so renaming must be after args are de-duplicated.
-        for name in argnames:
+        for named_index, name in enumerate(argnames, start=self.prefix_args):
             input_node = self.named_input_nodes[name]
             if self.prologue_loads_all_inputs:
                 self.prologue_supported_inputs.add(input_node.get_name())
-                self._prologue_supported_input_indices.add(
-                    self._named_input_indices[name]
-                )
+                self._prologue_supported_input_indices.add(named_index)
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
             if input_node.get_name() in self.prologue_fused_inputs:
@@ -1343,9 +1333,10 @@ class TritonTemplateKernel(TritonKernel):
         input_node = self.named_input_nodes[input_name]
         if not self.prologue_loads_all_inputs:
             self.prologue_supported_inputs.add(input_node.get_name())
-            self._prologue_supported_input_indices.add(
-                self._named_input_indices[input_name]
+            named_input_index = self.prefix_args + list(self.named_input_nodes).index(
+                input_name
             )
+            self._prologue_supported_input_indices.add(named_input_index)
 
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
