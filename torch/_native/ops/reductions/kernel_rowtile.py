@@ -382,8 +382,9 @@ def _launch_itree(
     nouts: int = 1,
     dsts: Sequence[torch.dtype] = (),
     align: int = 0,
+    compact: bool = True,
 ) -> None:
-    """Launch one stage, keying the baked alignment to prevent overstating later pointers."""
+    """Launch one stage, keying the input layout and baked alignment."""
     op = tile.TileReduce(
         trait,
         dt,
@@ -416,7 +417,7 @@ def _launch_itree(
         )
 
     # Destination types are baked, so include them to prevent a wrong cached plan.
-    key = (tag, trait_key, dt, tuple(dsts), align) + op.cache_sig
+    key = (tag, trait_key, dt, tuple(dsts), align, compact) + op.cache_sig
     build = lambda: _compile(op, *_args(fakes))  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*_args(operands))
 
@@ -428,23 +429,42 @@ def _run_itree(
     out_dtypes: Sequence[torch.dtype],
     itree: _ItreePlan,
     nouts: int = 1,
+    out: Sequence[torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, ...]:
-    """Run one launch per stage; split shapes allocate one partial buffer per trait field."""
+    """Launch each stage; split buffers are per field and supplied outputs are 1-D unit-stride."""
     M, N = x.shape
+
+    def results():
+        if out is not None:
+            return list(out)
+        return [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
+
     dt = torch2cute[x.dtype]
     # Storage offsets may underalign; declare and key the supported width.
-    natural = tile.align_bytes(N, x.element_size())
+    itemsize = x.element_size()
+    natural = tile.align_bytes(N, itemsize)
     align = _L.supported_alignment(x, natural)
+    compact = x.stride(0) == N
+    if not compact:
+        align = min(align, math.gcd(x.stride(0) * itemsize, natural))
     if align < natural and itree.stage_e:
         # Misaligned cp.async fails IR verification; unstaged preserves the same bits.
-        itree = cast(_ItreePlan, itree_plan(N, M, x.element_size(), stage=False))
+        itree = cast(_ItreePlan, itree_plan(N, M, itemsize, stage=False))
     # N is baked into the DAG, so the row extent is static and only M rides in dynamically.
-    fake_in = _L.fake_compact(dt, (_L.sym(), N), stride_order=(1, 0), align=align)
+    if compact:
+        fake_in = _L.fake_compact(dt, (_L.sym(), N), stride_order=(1, 0), align=align)
+    else:
+        fake_in = cute.runtime.make_fake_tensor(
+            dt,
+            (_L.sym(), N),
+            (cute.sym_int64(divisibility=align // itemsize), 1),
+            assumed_align=align,
+        )
     fake_1d = lambda t: _L.fake_compact(  # noqa: E731
         torch2cute[t.dtype], (_L.sym(),)
     )
     if itree.shape != "split":
-        outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
+        outs = results()
         _launch_itree(
             trait,
             trait_key,
@@ -457,6 +477,7 @@ def _run_itree(
             nouts,
             tuple(o.dtype for o in outs),
             align,
+            compact,
         )
         return tuple(outs)
     # Split writes one field-typed partial per (row, batch), then folds them linearly.
@@ -477,8 +498,9 @@ def _run_itree(
         nouts,
         tuple(p.dtype for p in parts),
         align,
+        compact,
     )
-    outs = [torch.empty(M, device=x.device, dtype=d) for d in out_dtypes[:nouts]]
+    outs = results()
     _launch_itree(
         trait,
         trait_key,
@@ -493,6 +515,21 @@ def _run_itree(
         align,
     )
     return tuple(outs)
+
+
+def reduce_row_itree(
+    trait: Any,
+    trait_key: str,
+    x: torch.Tensor,
+    out: torch.Tensor,
+) -> bool:
+    """Write 2-D `x` rows to 1-D `out`; return False only when no inner-tree plan exists."""
+    M, N = x.shape
+    itree = itree_plan(N, M, x.element_size())
+    if itree is None:
+        return False
+    _run_itree(trait, trait_key, x, [out.dtype], itree, out=[out])
+    return True
 
 
 def reduce_row_tile(
