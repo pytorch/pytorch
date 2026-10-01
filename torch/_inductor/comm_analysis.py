@@ -207,11 +207,22 @@ def get_collective_input_size_bytes(node: ir.IRNode) -> int:
     return sz_bytes
 
 
+def _get_collective_group_name(node: ir._CollectiveKernel) -> Any:
+    # group_name isn't the last constant arg when a collective config is passed.
+    names = [arg.name for arg in node.op_overload._schema.arguments]  # type: ignore[union-attr]
+    if "group_name" not in names:
+        return node.constant_args[-1]
+    args, kwargs = node.unflatten_args(node.inputs, node.constant_args)
+    if "group_name" in kwargs:
+        return kwargs["group_name"]
+    return args[names.index("group_name")]
+
+
 def get_collective_group_size(node: ir.IRNode) -> int:
     if isinstance(node, ir._CollectiveKernel) and not isinstance(node, ir._WaitKernel):
         from torch.distributed.distributed_c10d import _get_group_size_by_name
 
-        return _get_group_size_by_name(node.constant_args[-1])
+        return _get_group_size_by_name(_get_collective_group_name(node))
     else:
         raise TypeError(f"Unsupported collective type: {node}")
 
@@ -460,7 +471,7 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> float | None:  # t
     if kernel is None:
         raise AssertionError("snode.node must not be None")
     py_kernel_name = getattr(kernel, "python_kernel_name", "")
-    pg_name = kernel.constant_args[-1]  # type: ignore[attr-defined]
+    pg_name = _get_collective_group_name(kernel)  # type: ignore[arg-type]
     from torch.distributed.distributed_c10d import _resolve_process_group
 
     pg = _resolve_process_group(pg_name)

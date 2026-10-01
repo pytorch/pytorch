@@ -22,7 +22,6 @@ import torch.distributed as dist
 from torch._C._distributed_c10d import (
     AllgatherOptions,
     AllreduceCoalescedOptions,
-    AllreduceOptions,
     ErrorType,
     ReconfigureOptions,
     ReduceScatterOptions,
@@ -538,54 +537,49 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
     @requires_nccl()
     @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
     @skip_if_lt_x_gpu(2)
-    def test_time_estimate_rejects_config(self) -> None:
-        tensor = torch.ones(4, device=self.device)
-        dist.all_reduce(tensor)
-        with self.assertRaisesRegex(
-            RuntimeError, "not supported during time estimation"
-        ):
-            with dist._time_estimator(device=self.device):
-                dist.all_reduce(tensor, config=NCCLCollConfig())
-        self._collective("all_reduce", NCCLCollConfig())
+    def test_all_to_all_splits(self) -> None:
+        size = self.world_size
+        tensor = torch.full((size * 2,), float(self.rank), device=self.device)
+        output = torch.empty_like(tensor)
+        splits = [2] * size
+        dist.all_to_all_single(output, tensor, splits, splits, config=NCCLCollConfig())
+        expected = torch.arange(size, device=self.device).repeat_interleave(2)
+        self.assertEqual(output, expected.float())
 
-    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
-    @parametrize("entrypoint", ["process_group", "backend"])
-    def test_native_time_estimate_rejects_config(self, entrypoint) -> None:
-        tensor = torch.ones(4, device=self.device)
-        dist.all_reduce(tensor)
-        opts = AllreduceOptions()
-        opts.config = NCCLCollConfig()
-        opts.asyncOp = True
-        group = (
-            self.pg
-            if entrypoint == "process_group"
-            else dist.get_backend_impl(device=self.device)
-        )
-        with self.assertRaisesRegex(
-            RuntimeError, "not supported during time estimation"
-        ):
-            with dist._time_estimator(device=self.device):
-                group.allreduce([tensor], opts)
+        splits = [1] * (size - 1) + [size + 1]
+        output = torch.empty(splits[self.rank] * size, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "equal all_to_all split sizes"):
+            dist.all_to_all_single(
+                output,
+                tensor,
+                [splits[self.rank]] * size,
+                splits,
+                config=NCCLCollConfig(),
+            )
         self._collective("all_reduce", NCCLCollConfig())
 
     @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
     @parametrize("name", ["all_reduce", "all_gather_single", "reduce_scatter_single"])
     @parametrize("native_batch", [False, True])
-    def test_coalescing_capture_rejects_config(self, name, native_batch) -> None:
+    def test_coalescing_config(self, name, native_batch) -> None:
         size = self.world_size
         tensor = torch.ones(size * 2, device=self.device)
-        args = {
-            "all_reduce": (tensor,),
+        output, expected = {
+            "all_reduce": (tensor, torch.full_like(tensor, size)),
             "all_gather_single": (
                 torch.empty(size * tensor.numel(), device=self.device),
-                tensor,
+                torch.ones(size * tensor.numel(), device=self.device),
             ),
-            "reduce_scatter_single": (torch.empty(2, device=self.device), tensor),
+            "reduce_scatter_single": (
+                torch.empty(2, device=self.device),
+                torch.full((2,), float(size), device=self.device),
+            ),
         }[name]
-        with self.assertRaisesRegex(NotImplementedError, "with coalescing"):
-            with dist._coalescing_manager(device=self.device if native_batch else None):
-                getattr(dist, name)(*args, config=NCCLCollConfig())
-        self._collective("all_reduce", NCCLCollConfig())
+        args = (tensor,) if name == "all_reduce" else (output, tensor)
+        with dist._coalescing_manager(device=self.device if native_batch else None):
+            getattr(dist, name)(*args, config=NCCLCollConfig())
+        torch.cuda.synchronize(self.device)
+        self.assertEqual(output, expected)
 
     @classmethod
     def opts(cls, high_priority_stream=False):

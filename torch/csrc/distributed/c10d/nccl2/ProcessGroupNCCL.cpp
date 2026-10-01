@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <unordered_set>
 
 #include <ATen/Context.h>
@@ -26,8 +27,6 @@
 #include <torch/csrc/distributed/c10d/nccl2/TracingGuard.hpp>
 
 namespace c10d::nccl2 {
-
-thread_local size_t ProcessGroupNCCL::time_estimate_depth_ = 0;
 
 namespace {
 
@@ -153,24 +152,8 @@ void waitForNcclChildComm(
 void ProcessGroupNCCL::waitForNcclOperation(
     ncclResult_t status,
     std::chrono::milliseconds timeout,
-    std::string_view operation,
-    const MaterializedCollectiveConfig& config) {
-  try {
-    waitForNcclCompletion(*nccl_api_, nccl_comm_, status, timeout, operation);
-  } catch (...) {
-    if (config.data != nullptr && status == ncclInProgress) {
-      abortNcclComm();
-    }
-    throw;
-  }
-}
-
-MaterializedCollectiveConfig ProcessGroupNCCL::prepareCollectiveConfig(
-    const OptionalCollectiveConfig& config) {
-  TORCH_CHECK(
-      !config.has_value() || time_estimate_depth_ == 0,
-      "Per-collective NCCL configuration is not supported during time estimation");
-  return materializeCollConfig(config);
+    std::string_view operation) {
+  waitForNcclCompletion(*nccl_api_, nccl_comm_, status, timeout, operation);
 }
 
 ncclResult_t NCCLException::getResult() const noexcept {
@@ -970,8 +953,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
           stream,
           native_config),
       timeout,
-      "NCCL Broadcast failed",
-      native_config);
+      "NCCL Broadcast failed");
 
   // Record end event after NCCL operation
   work->recordEnd();
@@ -1016,8 +998,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
           stream,
           native_config),
       timeout,
-      "NCCL AllReduce failed",
-      native_config);
+      "NCCL AllReduce failed");
 
   // Record end event after NCCL operation
   work->recordEnd();
@@ -1064,8 +1045,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
           stream,
           native_config),
       timeout,
-      "NCCL Reduce failed",
-      native_config);
+      "NCCL Reduce failed");
 
   // Record end event after NCCL operation
   work->recordEnd();
@@ -1165,18 +1145,11 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
           "NCCL Broadcast failed in all_gather");
     }
   } catch (...) {
-    const auto group_status = nccl_api_->groupEnd();
-    if (native_config.data != nullptr && group_status == ncclInProgress) {
-      waitForNcclOperation(
-          group_status, timeout, "NCCL GroupEnd failed", native_config);
-    } else {
-      NCCL_CHECK_IGNORE(nccl_api_, group_status, "NCCL GroupEnd failed");
-    }
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
     throw;
   }
 
-  waitForNcclOperation(
-      nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed", native_config);
+  waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
   if (needs_staging) {
     at::cuda::CUDAStreamGuard stream_guard(operation_stream);
@@ -1239,8 +1212,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
           stream,
           native_config),
       timeout,
-      "NCCL AllGather failed",
-      native_config);
+      "NCCL AllGather failed");
 
   work->recordEnd();
 
@@ -1335,18 +1307,11 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
       }
     }
   } catch (...) {
-    const auto group_status = nccl_api_->groupEnd();
-    if (native_config.data != nullptr && group_status == ncclInProgress) {
-      waitForNcclOperation(
-          group_status, timeout, "NCCL GroupEnd failed", native_config);
-    } else {
-      NCCL_CHECK_IGNORE(nccl_api_, group_status, "NCCL GroupEnd failed");
-    }
+    NCCL_CHECK_IGNORE(nccl_api_, nccl_api_->groupEnd(), "NCCL GroupEnd failed");
     throw;
   }
 
-  waitForNcclOperation(
-      nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed", native_config);
+  waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 
   work->recordEnd();
 
@@ -1404,8 +1369,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
           stream,
           native_config),
       timeout,
-      "NCCL ReduceScatter failed",
-      native_config);
+      "NCCL ReduceScatter failed");
 
   // Record end event after NCCL operation
   work->recordEnd();
@@ -1469,8 +1433,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
           stream,
           native_config),
       timeout,
-      "NCCL AllToAll failed",
-      native_config);
+      "NCCL AllToAll failed");
 #else
   size_t offset = chunk_size * wordSize(data_type);
   char* sptr = static_cast<char*>(input.data_ptr());
@@ -1501,8 +1464,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
     throw;
   }
 
-  waitForNcclOperation(
-      nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed", native_config);
+  waitForNcclOperation(nccl_api_->groupEnd(), timeout, "NCCL GroupEnd failed");
 #endif
 
   // Record end event after NCCL operation
@@ -1912,6 +1874,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
     int root,
     bool async_op,
     std::chrono::milliseconds timeout,
+    bool contiguous_output,
     const MaterializedCollectiveConfig& native_config) {
   checkInitialized();
   checkAndAbortIfTimedOutOrError();
@@ -1955,18 +1918,10 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
   // Record start event before NCCL operations
   work->recordStart("gather");
 
-  if (native_config.data != nullptr) {
-    void* recvbuff = nullptr;
-    if (rank_ == root) {
-      recvbuff = output_tensor_list.front().data_ptr();
-      auto* expected = static_cast<char*>(recvbuff);
-      for (const auto& output : output_tensor_list) {
-        TORCH_CHECK(
-            output.data_ptr() == expected,
-            "Per-collective NCCL configuration requires contiguous gather output");
-        expected += input_tensor.nbytes();
-      }
-    }
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3) && !defined(USE_ROCM)
+  if (contiguous_output) {
+    void* recvbuff =
+        rank_ == root ? output_tensor_list.front().data_ptr() : nullptr;
     waitForNcclOperation(
         nccl_api_->gather(
             input_tensor.data_ptr(),
@@ -1978,12 +1933,14 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
             stream,
             native_config),
         timeout,
-        "NCCL Gather failed",
-        native_config);
+        "NCCL Gather failed");
     work->recordEnd();
     enqueueWork(work, stream);
     return work;
   }
+#else
+  std::ignore = std::tie(contiguous_output, native_config);
+#endif
 
   if (rank_ == root) {
     // Root receives from all ranks (except itself)

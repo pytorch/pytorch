@@ -35,15 +35,15 @@ class FunctionalCollectiveConfigTest(TestCase):
             self.assertTrue(argument.has_default_value())
             self.assertIsNone(argument.default_value)
             self.assertFalse(hasattr(torch.ops._c10d_functional, name + "_config"))
-            from torch._inductor.utils import has_collective_config
+            from torch._inductor.utils import get_collective_config
 
             graph = torch.fx.Graph()
             args = (None,) * (len(op._schema.arguments) - 1)
             for config in (None, {}, {"min_ctas": 2}):
                 positional = graph.call_function(op, (*args, config))
                 keyword = graph.call_function(op, args, {"config": config})
-                self.assertEqual(has_collective_config(positional), config is not None)
-                self.assertEqual(has_collective_config(keyword), config is not None)
+                self.assertEqual(get_collective_config(positional), config)
+                self.assertEqual(get_collective_config(keyword), config)
 
     @contextmanager
     def _backend(self, device="cpu", supports_config=True):
@@ -107,7 +107,9 @@ class FunctionalCollectiveConfigTest(TestCase):
 
             class Module(torch.nn.Module):
                 def forward(self, tensor):
-                    return op(tensor, *args, group_name, config)
+                    return torch.ops._c10d_functional.wait_tensor(
+                        op(tensor, *args, group_name, config)
+                    )
 
             tensor = torch.ones(4)
             if frontend.startswith("export"):
@@ -126,35 +128,6 @@ class FunctionalCollectiveConfigTest(TestCase):
             self.assertEqual(len(backend.calls), 1)
             self.assertEqual(backend.calls[0][-1].config, config)
             self.assertEqual(backend.wait_count, 1)
-
-    @parametrize("reverse", [False, True])
-    @parametrize("device", ["cpu", "cuda"])
-    def test_order_and_unused_collective(self, reverse, device):
-        with self._backend(device) as (backend, group):
-            group_name = group.group_name
-            op = torch.ops._c10d_functional.all_reduce
-
-            def fn(x):
-                first = op(x, "sum", group_name, {"user_profiler_tag": 1})
-                op(x, "sum", group_name, {"user_profiler_tag": 2})
-                plain = torch.ops._c10d_functional.all_reduce(x, "sum", group_name)
-                plain = torch.ops._c10d_functional.wait_tensor(plain)
-                last = op(x, "sum", group_name, {"user_profiler_tag": 3})
-                return (last, plain, first) if reverse else (first, plain, last)
-
-            torch.compile(
-                fn, fullgraph=True, options={"reorder_for_compute_comm_overlap": True}
-            )(torch.ones(4, device=device))
-            self.assertEqual(
-                [
-                    None
-                    if call[-1].config is None
-                    else call[-1].config["user_profiler_tag"]
-                    for call in backend.calls
-                ],
-                [1, 2, None, 3],
-            )
-            self.assertEqual(backend.wait_count, 4)
 
     def test_unsupported_backend(self):
         with self._backend(supports_config=False) as (backend, group):

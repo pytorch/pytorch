@@ -1717,7 +1717,9 @@ def _all_to_all_single_meta(
         return input.new_empty(out_size)
 
 
-def _all_gather_into_tensor_out_native_meta(input, group_size, group_name, *, out):
+def _all_gather_into_tensor_out_native_meta(
+    input, group_size, group_name, config=None, *, out
+):
     return _make_all_gather_out_tensor(input, group_size)
 
 
@@ -1802,31 +1804,6 @@ lib_impl_autograd.impl(
     "reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta"
 )
 lib_impl_autograd.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
-
-
-# Configured collectives must survive DCE and retain enqueue order. Leave
-# ordinary collectives on their existing optimization path.
-from torch._higher_order_ops.effects import _register_effectful_op
-
-
-def _has_functional_config(args, kwargs):
-    return kwargs.get("config") is not None or bool(args and isinstance(args[-1], dict))
-
-
-_config_effect_handles = []
-for _name in (
-    "all_reduce",
-    "all_gather_into_tensor",
-    "reduce_scatter_tensor",
-    "all_to_all_single",
-):
-    _op = getattr(torch.ops._c10d_functional, _name).default
-    _config_effect_handles.append(
-        _register_effectful_op(
-            _op, torch.library.EffectType.ORDERED, predicate=_has_functional_config
-        )
-    )
-    torch.fx.node.has_side_effect(_op)
 
 
 # Mark these ops as side effectful so that DCE does not remove communication
@@ -1984,13 +1961,6 @@ def all_to_all_inplace(
 ):
     if async_op:
         _raise_async_op_remap_error()
-
-    if config is not None and (
-        output_split_sizes is not None or input_split_sizes is not None
-    ):
-        raise RuntimeError(
-            "Per-collective NCCL configuration requires equal all_to_all split sizes"
-        )
 
     group = group or dist.group.WORLD
     if group is None:

@@ -4105,23 +4105,26 @@ def is_output_of_multi_outputs_template(
     )
 
 
-def has_collective_config(node: torch.fx.Node) -> bool:
-    """Whether a functional collective has a non-default configuration."""
+def get_collective_config(node: torch.fx.Node) -> dict[str, Any] | None:
+    """A functional collective's per-collective configuration, if any."""
     target = node.target
     if (
         not isinstance(target, torch._ops.OpOverload)
         or target.namespace != "_c10d_functional"
     ):
-        return False
+        return None
     for index, arg in enumerate(target._schema.arguments):
         if arg.name == "config":
-            value = (
-                node.args[index]
-                if index < len(node.args)
-                else node.kwargs.get("config")
-            )
-            return value is not None
-    return False
+            if index < len(node.args):
+                return node.args[index]  # type: ignore[return-value]
+            return node.kwargs.get("config")  # type: ignore[return-value]
+    return None
+
+
+def collective_config_key(node: torch.fx.Node) -> tuple[tuple[str, Any], ...] | None:
+    """A hashable form of the collective's configuration."""
+    config = get_collective_config(node)
+    return None if config is None else tuple(sorted(config.items()))
 
 
 def is_collective(

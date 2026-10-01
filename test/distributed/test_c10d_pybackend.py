@@ -16,7 +16,6 @@ from torch._C._distributed_c10d import (
 from torch.distributed.distributed_c10d import (
     _coalescing_manager,
     _get_default_group,
-    _time_estimator,
     _world,
 )
 from torch.testing._internal.common_distributed import MultiProcessTestCase
@@ -501,38 +500,26 @@ class TestPyBackend(TestCase):
 
     @parametrize("name", ["all_reduce", "all_gather_single", "reduce_scatter_single"])
     @parametrize("device", [None, torch.device("cpu")])
-    @parametrize("pending", [False, True])
-    def test_collective_config_coalescing(self, name, device, pending) -> None:
+    def test_collective_config_coalescing(self, name, device) -> None:
         backend = RecordingBackend(0, 1, "custom-config-backend")
         group = create_process_group(backend)
         args, kwargs = _collective_inputs(name)
-        collective = getattr(dist, name)
-        with self.assertRaisesRegex(
-            NotImplementedError, "configuration is not supported with coalescing"
-        ):
-            with _coalescing_manager(group, device):
-                if pending:
-                    collective(*args, group=group, **kwargs)
-                collective(*args, group=group, config=object(), **kwargs)
+        config = object()
+        with _coalescing_manager(group, device):
+            getattr(dist, name)(*args, group=group, config=config, **kwargs)
         self.assertNotIn(group, _world.pg_coalesce_state)
-        self.assertEqual(backend.calls, [])
-        self.assertEqual(backend.start_coalescing_count, int(device is not None))
-        self.assertEqual(backend.end_coalescing_count, int(device is not None))
-        collective(*args, group=group, **kwargs)
         self.assertEqual(
-            [call[0] for call in backend.calls], [_CONFIG_COLLECTIVES[name]]
+            [call[0] for call in backend.calls],
+            [_CONFIG_COLLECTIVES[name] + "_coalesced"],
         )
+        self.assertIs(backend.calls[0][-1].config, config)
 
-    def test_collop_rejects_config(self) -> None:
-        from torch.distributed.distributed_c10d import _CollOp
-
-        tensor = torch.ones(2)
-        for kwargs in ({}, {"config": None}):
-            op = _CollOp(dist.all_reduce, tensor, **kwargs)
-            self.assertIs(op.tensor, tensor)
-        for config in (object(), {}, 0, False):
-            with self.assertRaisesRegex(NotImplementedError, "with coalescing"):
-                _CollOp(dist.all_reduce, tensor, config=config)
+    def test_collective_config_coalescing_mismatch(self) -> None:
+        group = create_process_group(RecordingBackend(0, 1, "custom-config-backend"))
+        with self.assertRaisesRegex(RuntimeError, "same config"):
+            with _coalescing_manager(group):
+                dist.all_reduce(torch.ones(2), group=group)
+                dist.all_reduce(torch.ones(2), group=group, config=object())
 
     def test_uncaptured_config_in_coalescing_scope(self) -> None:
         backend = RecordingBackend(0, 1, "custom-config-backend")
@@ -547,20 +534,6 @@ class TestPyBackend(TestCase):
         self.assertIs(backend.calls[0][-1].config, config)
         self.assertIs(other_backend.calls[0][-1].config, config)
         self.assertNotIn(group, _world.pg_coalesce_state)
-
-    def test_collective_config_time_estimator_cleanup(self) -> None:
-        backend = RecordingBackend(0, 1, "custom-config-backend")
-        group = create_process_group(backend)
-        tensor = torch.zeros(2)
-        with self.assertRaisesRegex(RuntimeError, "body failed"):
-            with _time_estimator(group, torch.device("cpu")):
-                self.assertTrue(backend.time_estimate_started)
-                raise RuntimeError("body failed")
-        self.assertFalse(backend.time_estimate_started)
-        self.assertEqual(backend.calls, [])
-        dist.all_reduce(tensor, group=group, config=object())
-        self.assertEqual(tensor, torch.full((2,), 2.0))
-        self.assertEqual([call[0] for call in backend.calls], ["allreduce"])
 
     def test_attr_overrides(self) -> None:
         backend = RecordingBackend(0, 1)

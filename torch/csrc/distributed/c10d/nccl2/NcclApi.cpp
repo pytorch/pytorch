@@ -241,10 +241,6 @@ ncclResult_t DefaultNcclApi::broadcast(
     cudaStream_t stream,
     const MaterializedCollectiveConfig& config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-  if (config.data == nullptr) {
-    return ncclBroadcast(
-        sendbuff, recvbuff, count, datatype, root, comm, stream);
-  }
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0) && !defined(USE_ROCM)
   return ncclBroadcastConfig(
       sendbuff,
@@ -256,7 +252,10 @@ ncclResult_t DefaultNcclApi::broadcast(
       stream,
       getCollConfig(config));
 #else
-  return ncclInvalidUsage;
+  if (config.data != nullptr) {
+    return ncclInvalidUsage;
+  }
+  return ncclBroadcast(sendbuff, recvbuff, count, datatype, root, comm, stream);
 #endif
 }
 
@@ -269,14 +268,14 @@ ncclResult_t DefaultNcclApi::bcast(
     cudaStream_t stream,
     const MaterializedCollectiveConfig& config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-  if (config.data == nullptr) {
-    return ncclBcast(buff, count, datatype, root, comm, stream);
-  }
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0) && !defined(USE_ROCM)
   return ncclBroadcastConfig(
       buff, buff, count, datatype, root, comm, stream, getCollConfig(config));
 #else
-  return ncclInvalidUsage;
+  if (config.data != nullptr) {
+    return ncclInvalidUsage;
+  }
+  return ncclBcast(buff, count, datatype, root, comm, stream);
 #endif
 }
 
@@ -290,9 +289,6 @@ ncclResult_t DefaultNcclApi::allReduce(
     cudaStream_t stream,
     const MaterializedCollectiveConfig& config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-  if (config.data == nullptr) {
-    return ncclAllReduce(sendbuff, recvbuff, count, datatype, op, comm, stream);
-  }
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0) && !defined(USE_ROCM)
   return ncclAllReduceConfig(
       sendbuff,
@@ -304,7 +300,10 @@ ncclResult_t DefaultNcclApi::allReduce(
       stream,
       getCollConfig(config));
 #else
-  return ncclInvalidUsage;
+  if (config.data != nullptr) {
+    return ncclInvalidUsage;
+  }
+  return ncclAllReduce(sendbuff, recvbuff, count, datatype, op, comm, stream);
 #endif
 }
 
@@ -319,10 +318,6 @@ ncclResult_t DefaultNcclApi::reduce(
     cudaStream_t stream,
     const MaterializedCollectiveConfig& config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-  if (config.data == nullptr) {
-    return ncclReduce(
-        sendbuff, recvbuff, count, datatype, op, root, comm, stream);
-  }
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0) && !defined(USE_ROCM)
   return ncclReduceConfig(
       sendbuff,
@@ -335,7 +330,11 @@ ncclResult_t DefaultNcclApi::reduce(
       stream,
       getCollConfig(config));
 #else
-  return ncclInvalidUsage;
+  if (config.data != nullptr) {
+    return ncclInvalidUsage;
+  }
+  return ncclReduce(
+      sendbuff, recvbuff, count, datatype, op, root, comm, stream);
 #endif
 }
 
@@ -348,9 +347,6 @@ ncclResult_t DefaultNcclApi::allGather(
     cudaStream_t stream,
     const MaterializedCollectiveConfig& config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-  if (config.data == nullptr) {
-    return ncclAllGather(sendbuff, recvbuff, sendcount, datatype, comm, stream);
-  }
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0) && !defined(USE_ROCM)
   return ncclAllGatherConfig(
       sendbuff,
@@ -361,7 +357,10 @@ ncclResult_t DefaultNcclApi::allGather(
       stream,
       getCollConfig(config));
 #else
-  return ncclInvalidUsage;
+  if (config.data != nullptr) {
+    return ncclInvalidUsage;
+  }
+  return ncclAllGather(sendbuff, recvbuff, sendcount, datatype, comm, stream);
 #endif
 }
 
@@ -375,10 +374,6 @@ ncclResult_t DefaultNcclApi::reduceScatter(
     cudaStream_t stream,
     const MaterializedCollectiveConfig& config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-  if (config.data == nullptr) {
-    return ncclReduceScatter(
-        sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
-  }
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0) && !defined(USE_ROCM)
   return ncclReduceScatterConfig(
       sendbuff,
@@ -390,7 +385,11 @@ ncclResult_t DefaultNcclApi::reduceScatter(
       stream,
       getCollConfig(config));
 #else
-  return ncclInvalidUsage;
+  if (config.data != nullptr) {
+    return ncclInvalidUsage;
+  }
+  return ncclReduceScatter(
+      sendbuff, recvbuff, recvcount, datatype, op, comm, stream);
 #endif
 }
 
@@ -404,14 +403,14 @@ ncclResult_t DefaultNcclApi::allToAll(
     const MaterializedCollectiveConfig& config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
-  if (config.data == nullptr) {
-    return ncclAlltoAll(sendbuff, recvbuff, count, datatype, comm, stream);
-  }
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0) && !defined(USE_ROCM)
   return ncclAlltoAllConfig(
       sendbuff, recvbuff, count, datatype, comm, stream, getCollConfig(config));
 #else
-  return ncclInvalidUsage;
+  if (config.data != nullptr) {
+    return ncclInvalidUsage;
+  }
+  return ncclAlltoAll(sendbuff, recvbuff, count, datatype, comm, stream);
 #endif
 #else
   std::ignore =
@@ -432,11 +431,7 @@ ncclResult_t DefaultNcclApi::gather(
     cudaStream_t stream,
     const MaterializedCollectiveConfig& config) {
   std::lock_guard<std::mutex> lock(api_mutex_);
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3) && !defined(USE_ROCM)
-  if (config.data == nullptr) {
-    return ncclGather(sendbuff, recvbuff, count, datatype, root, comm, stream);
-  }
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0) && !defined(USE_ROCM)
   return ncclGatherConfig(
       sendbuff,
       recvbuff,
@@ -446,9 +441,11 @@ ncclResult_t DefaultNcclApi::gather(
       comm,
       stream,
       getCollConfig(config));
-#else
-  return ncclInvalidUsage;
-#endif
+#elif NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 3) && !defined(USE_ROCM)
+  if (config.data != nullptr) {
+    return ncclInvalidUsage;
+  }
+  return ncclGather(sendbuff, recvbuff, count, datatype, root, comm, stream);
 #else
   std::ignore =
       std::tie(sendbuff, recvbuff, count, datatype, root, comm, stream, config);

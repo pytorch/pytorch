@@ -187,6 +187,11 @@ def _one_shot_all_reduce(inp: ir.TensorBox, reduce_op, group_name):
     )
 
 
+def _config_args(config) -> tuple:
+    # Omit config when unset so ordinary collective codegen is unchanged.
+    return () if config is None else (config,)
+
+
 def _create_out_of_place(kernel, inputs, *args) -> ir.IRNode:
     node = ir._CollectiveKernel.create_out_of_place(kernel, inputs, *args)
     if not isinstance(node, ir.IRNode):
@@ -227,12 +232,10 @@ def register_comm_lowerings():
         reduce_op: str,
         group_name: "torch.distributed.distributed_c10d.GroupName",
         config=None,
-    ) -> ir.IRNode:
-        if config is not None:
-            return _create_out_of_place(
-                c10d.all_reduce.default, inp, reduce_op, group_name, config
-            )
-        if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
+    ) -> ir.TensorBox:
+        if config is None and _should_lower_as_one_shot_all_reduce(
+            inp, reduce_op, group_name
+        ):
             return _one_shot_all_reduce(inp, reduce_op, group_name)
 
         # Lower as c10d.all_reduce_
@@ -254,6 +257,7 @@ def register_comm_lowerings():
             inp,  # type: ignore[arg-type]
             reduce_op,
             group_name,  # type: ignore[arg-type]
+            *_config_args(config),
         )
         return inp  # type: ignore[return-value]
 
@@ -262,8 +266,11 @@ def register_comm_lowerings():
         inp: ir.TensorBox,
         reduce_op: str,
         group_name: "torch.distributed.distributed_c10d.GroupName",
+        config=None,
     ) -> ir.TensorBox:
-        if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
+        if config is None and _should_lower_as_one_shot_all_reduce(
+            inp, reduce_op, group_name
+        ):
             ret = copy_(
                 inp,
                 _one_shot_all_reduce(inp, reduce_op, group_name),
@@ -279,6 +286,7 @@ def register_comm_lowerings():
             inp,  # type: ignore[arg-type]
             reduce_op,
             group_name,  # type: ignore[arg-type]
+            *_config_args(config),
         )
         return inp  # type: ignore[return-value]
 
@@ -310,7 +318,7 @@ def register_comm_lowerings():
             inp,
             group_size,
             group_name,
-            config,
+            *_config_args(config),
         )
 
     @register_comm_lowering(c10d.all_gather_into_tensor_coalesced)
@@ -326,12 +334,13 @@ def register_comm_lowerings():
         )
 
     @register_comm_lowering(c10d.all_gather_into_tensor_out)
-    def _all_gather_into_tensor_out(inp, group_size, group_name, *, out):
+    def _all_gather_into_tensor_out(inp, group_size, group_name, config=None, *, out):
         ir._CollectiveKernel.create_inplace(
             c10d.all_gather_into_tensor_out.default,
             inp,
             group_size,
             group_name,
+            *_config_args(config),
             out=out,
         )
         return out
@@ -344,7 +353,7 @@ def register_comm_lowerings():
             reduce_op,
             group_size,
             group_name,
-            config,
+            *_config_args(config),
         )
 
     @register_comm_lowering(c10d.reduce_scatter_tensor_out)
@@ -382,7 +391,7 @@ def register_comm_lowerings():
             output_split_sizes,
             input_split_sizes,
             group_name,
-            config,
+            *_config_args(config),
         )
 
     @register_comm_lowering(c10d.broadcast)
