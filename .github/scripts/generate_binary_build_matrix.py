@@ -69,7 +69,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "13.4": (
         # The toolkit's cublas and cusolver extras both pin cuBLAS to 13.7.0.27.
         "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusparse,cufile,nvjitlink,nvtx]==13.4.1; platform_system == 'Linux' | "
-        "nvidia-cublas==13.8.1.7; platform_system == 'Linux' | "
+        "nvidia-cublas>=13.7.0.27,<=13.8.1.7; platform_system == 'Linux' | "
         "nvidia-cusolver==12.3.2.15; platform_system == 'Linux' | "
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
         "cupti-python==13.4.0; platform_system == 'Linux' and python_version < '3.15' | "
