@@ -1749,14 +1749,17 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
 
 
 class TestCredentialDuration(unittest.TestCase):
-    """900s is the STS minimum and the stated policy; the role ceiling is 1h.
+    """Each role assumption requests exactly the lifetime its job needs.
 
-    Omitting the line does not fail anything — it silently widens a stolen
-    credential from 15 minutes to an hour, which is exactly why a comment in
-    this workflow calls the line load-bearing.
+    `prepare` and `publish` take the 900s STS minimum. The review job takes
+    3600s, the role's ceiling, because its model step may run for 55 minutes; its
+    role is Bedrock-only. Omitting the line does not fail anything — it silently
+    defaults the credential to an hour — so every value is pinned.
     """
 
-    def test_every_role_assumption_requests_the_minimum(self):
+    EXPECTED = ("900", "3600", "900")
+
+    def test_every_role_assumption_requests_its_pinned_lifetime(self):
         # EVERY STEP THAT ASSUMES A ROLE, found by its `uses:` VALUE. Splitting
         # the file on the literal `uses: aws-actions/configure-aws-credentials`
         # missed a fourth assumption written `uses: 'aws-actions/…'` — legal,
@@ -1772,10 +1775,11 @@ class TestCredentialDuration(unittest.TestCase):
             # satisfies one too, while the action receives no bound at all.
             # `with_block` is what makes it the input rather than the text.
             seen = mapping_items(with_block(step)).get("role-duration-seconds")
+            expected = self.EXPECTED[i - 1]
             self.assertEqual(
                 seen,
-                "900",
-                f"assumption #{i} requests {seen!r} seconds, not '900'",
+                expected,
+                f"assumption #{i} requests {seen!r} seconds, not {expected!r}",
             )
 
 

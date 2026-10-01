@@ -31,7 +31,7 @@ even if one were enforced:
 None of this closes the channel, and it is not the thing keeping us safe. A few
 hundred characters of prose can still carry a secret via an acrostic or semantic
 encoding, and no output filter fixes that. The control that actually bounds the
-damage is upstream: a 15-minute, Bedrock-only role with no S3 and no GitHub
+damage is upstream: a one-hour, Bedrock-only role with no S3 and no GitHub
 write. This script raises the cost of the naive attempts and makes the
 deliberate ones narrow.
 
@@ -89,7 +89,7 @@ _BLOB = re.compile(r"[A-Za-z0-9+/=_-]{120,}")
 # hex digest is 128 characters, which is over the floor.
 # ACCEPTED COST: this leaves a hole exactly the width of a digest — an attacker
 # can hex-encode up to 64 bytes and shape it like one. That is far below a
-# session token, and the 15-minute Bedrock-only credential is what bounds the
+# session token, and the one-hour Bedrock-only credential is what bounds the
 # damage anyway.
 _DIGEST_LENGTHS = {32, 40, 56, 64, 96, 128}
 _HEX_ONLY = re.compile(r"^[0-9a-fA-F]+$")
@@ -233,7 +233,7 @@ def check_no_encoded_blob(text: str, where: str) -> None:
     splitting a payload into sub-120-character runs, or base64ing text that
     decodes back to printable ASCII, both walk straight past it. It catches the
     careless case cheaply. What bounds the damage is that the review job's
-    credential is Bedrock-only and expires in fifteen minutes.
+    credential is Bedrock-only and expires within an hour.
     """
     # Scanned TWICE: a tag can keep each half under the floor, and stripping
     # rejoins them. Neither subsumes the other -- stripping eats a bracketed

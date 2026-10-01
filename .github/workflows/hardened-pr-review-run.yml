@@ -471,13 +471,15 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.fresh == 'true' && needs.prepare.outputs.too_large != 'true'
     runs-on: ubuntu-latest
-    # 20 was calibrated on ciforge. Here the model step alone may take 12, and a
+    # 20 was calibrated on ciforge. Here the model step alone may take 55 (about
+    # an hour while sub-agent fan-out is new; tighten once live durations are
+    # known), and a
     # job-level timeout lands AFTER the model call is paid for and is then
     # recorded as `model_error` - the infra/model conflation `downgrade()`
     # exists to avoid. The headroom above that is for the checkout: the PR tree
     # is fetched shallow and then deepened only to the merge base, which is
     # ordinarily one round but is not bounded by anything we control.
-    timeout-minutes: 30
+    timeout-minutes: 90
     # A second, narrower guard than Stage 1's. Stage-1 concurrency cannot cancel
     # a Stage 2 that has already started, so without this a burst of pushes can
     # still put several reviews in flight against one PR.
@@ -691,7 +693,9 @@ jobs:
         with:
           role-to-assume: ${{ env.REVIEW_ROLE }}
           aws-region: ${{ env.AWS_REGION }}
-          role-duration-seconds: 900
+          # The role's ceiling. The review step's 55-minute timeout leaves room
+          # for the steps between here and it. The credential stays Bedrock-only.
+          role-duration-seconds: 3600
 
       - name: Check the findings path resolved
         if: steps.diff.outputs.too_large == 'false'
@@ -723,7 +727,7 @@ jobs:
       - name: Run the PR review
         id: claude
         if: steps.diff.outputs.too_large == 'false'
-        timeout-minutes: 12
+        timeout-minutes: 55
         env:
           # Read by the validation hooks below AND by the model's own on-demand
           # runs of the same script. Setting them here keeps the paths in one
@@ -1177,8 +1181,8 @@ jobs:
             exit 0
           fi
 
-          # FRESHNESS, re-checked here and not only in `prepare`. The review job
-          # is allowed 20 minutes, and job-level concurrency is declared on
+          # FRESHNESS, re-checked here and not only in `prepare`. The review's
+          # model step may run for most of an hour, and job-level concurrency is declared on
           # `review` so it does not cancel a `publish` already under way. A
           # commit pushed in that window would otherwise get the ready marker
           # for a review of code nobody looked at — and because the gating label
