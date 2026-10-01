@@ -191,34 +191,25 @@ class FunctionalCollectiveConfigTest(TestCase):
             self.assertEqual(result, expected)
             self.assertEqual([call[-1].config for call in backend.calls], [config])
 
-    def test_serialization(self):
+    def test_config_dict(self):
         try:
-            from nccl.core import NCCLCollConfig, VendorOption
+            from nccl.core import NCCLCollConfig
         except ImportError:
             self.skipTest("nccl4py required")
-        from torch.distributed._collective_config import (
-            _deserialize_nccl_config,
-            _serialize_nccl_config,
-        )
+        from torch.distributed._collective_config import _collective_config_dict
 
-        config = NCCLCollConfig(
-            min_ctas=1,
-            max_ctas=2,
-            force_alg_selection=False,
-            vendor_options=(
-                VendorOption(1, 2, int_value=3),
-                VendorOption(4, 5, str_value="value"),
-            ),
-        )
-        values = _serialize_nccl_config(config)
-        self.assertEqual(_deserialize_nccl_config(values), config)
+        config = NCCLCollConfig(min_ctas=1, max_ctas=2, force_alg_selection=False)
+        values = _collective_config_dict(config)
+        expected = dict(config.__dict__)
+        del expected["vendor_options"]
+        self.assertEqual(values, expected)
+        self.assertEqual(NCCLCollConfig(**values), config)
         config.max_ctas = 4
         self.assertEqual(values["max_ctas"], 2)
-        with self.assertRaisesRegex(TypeError, "config must be"):
-            _serialize_nccl_config(object())
-        config.vendor_options = (VendorOption(1, 2, raw_value=1),)
-        with self.assertRaisesRegex(NotImplementedError, "raw-pointer vendor options"):
-            _serialize_nccl_config(config)
+        self.assertIsNone(_collective_config_dict(None))
+        self.assertEqual(_collective_config_dict({"min_ctas": 2}), {"min_ctas": 2})
+        with self.assertRaises(TypeError):
+            _collective_config_dict(object())
 
     @parametrize("frontend", ["eager", "aot_eager", "inductor"])
     @parametrize(

@@ -125,7 +125,8 @@ TORCH_API bool isComplexViewAsRealAllowed(const ReduceOp& reduceOp);
 
 constexpr auto kUnsetTimeout = std::chrono::milliseconds(-1);
 
-using OptionalCollectiveConfig = std::optional<c10::IValue>;
+using OptionalCollectiveConfig =
+    std::optional<c10::Dict<std::string, c10::IValue>>;
 
 struct BroadcastOptions {
   int64_t rootRank = 0;

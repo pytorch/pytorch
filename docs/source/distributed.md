@@ -234,12 +234,12 @@ on every participating rank; mismatches can hang. Configurations within an NCCL
 group must agree on `cga_cluster_size`. Passing `None` preserves existing behavior
 and does not require nccl4py.
 
-Backends handle `config` through their collective options. NCCL2 rejects unsupported
+Backends receive `config` as its attribute dictionary (`vars(config)`); a plain
+`dict` with the same keys is equivalent. NCCL2 rejects vendor options, unsupported
 operations and uneven splits. External NCCL group scopes are unsupported.
 
 Supported synchronous calls can use `torch.compile` and `torch.export`.
-Configuration values are graph constants; changing them recompiles. Raw-pointer
-options cannot be traced.
+Configuration values are graph constants; changing them recompiles.
 
 (distributed-basics)=
 

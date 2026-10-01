@@ -16,7 +16,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
 from . import _functional_collectives_impl as fun_col_impl
-from ._collective_config import _serialize_nccl_config
+from ._collective_config import _collective_config_dict
 
 
 try:
@@ -202,7 +202,7 @@ def all_reduce(
         self,
         reduce_op,
         _group_or_group_name(group),
-        config=None if config is None else _serialize_nccl_config(config),
+        config=_collective_config_dict(config),
     )
     return _maybe_wrap_tensor(tensor)
 
@@ -241,7 +241,7 @@ def all_gather_single(
         self,
         group_size,
         _group_or_group_name(group),
-        config=None if config is None else _serialize_nccl_config(config),
+        config=_collective_config_dict(config),
     )
     res = _maybe_wrap_tensor(tensor)
     if gather_dim != 0:
@@ -317,7 +317,7 @@ def reduce_scatter_single(
         reduceOp.lower(),
         group_size,
         _group_or_group_name(group),
-        config=None if config is None else _serialize_nccl_config(config),
+        config=_collective_config_dict(config),
     )
     res = _maybe_wrap_tensor(tensor)
     return res
@@ -456,7 +456,7 @@ def all_reduce_coalesced(
         self,
         reduce_op,
         _group_or_group_name(group),
-        config=None if config is None else _serialize_nccl_config(config),
+        config=_collective_config_dict(config),
     )
     return _maybe_wrap_tensors(tensor_list)
 
@@ -486,7 +486,7 @@ def all_gather_single_coalesced(
         self,
         group_size,
         _group_or_group_name(group),
-        config=None if config is None else _serialize_nccl_config(config),
+        config=_collective_config_dict(config),
     )
     return _maybe_wrap_tensors(tensor_list)
 
@@ -536,7 +536,7 @@ def reduce_scatter_single_coalesced(
         reduceOp.lower(),
         group_size,
         _group_or_group_name(group),
-        config=None if config is None else _serialize_nccl_config(config),
+        config=_collective_config_dict(config),
     )
 
     return _maybe_wrap_tensors(tensor_list)
@@ -644,7 +644,7 @@ def all_to_all_single(
         output_split_sizes,
         input_split_sizes,
         _group_or_group_name(group),
-        config=None if config is None else _serialize_nccl_config(config),
+        config=_collective_config_dict(config),
     )
     return _maybe_wrap_tensor(tensor)
 

@@ -573,13 +573,13 @@ at::Tensor all_to_all_single_dispatch(
     c10::SymIntArrayRef output_split_sizes,
     c10::SymIntArrayRef input_split_sizes,
     const c10::IValue& group_name,
-    const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
+    const c10d::OptionalCollectiveConfig& config) {
   return c10d::all_to_all_single(
       input,
       output_split_sizes,
       input_split_sizes,
       get_process_group(group_name, "all_to_all_single"),
-      config ? std::make_optional(c10::IValue(*config)) : std::nullopt);
+      config);
 }
 
 } // namespace
@@ -592,13 +592,12 @@ TORCH_LIBRARY(_c10d_functional, m) {
           [](const at::Tensor& input,
              const c10::IValue& reduce_op,
              const c10::IValue& group,
-             const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
+             const c10d::OptionalCollectiveConfig& config) {
             return c10d::all_reduce(
                 input,
                 get_reduce_op(reduce_op, "all_reduce"),
                 get_process_group(group, "all_reduce"),
-                config ? std::make_optional(c10::IValue(*config))
-                       : std::nullopt);
+                config);
           }),
       {at::Tag::pt2_compliant_tag});
 
@@ -609,14 +608,12 @@ TORCH_LIBRARY(_c10d_functional, m) {
           [](at::Tensor& input,
              const c10::IValue& reduce_op,
              const c10::IValue& group,
-             const std::optional<c10::Dict<std::string, c10::IValue>>& config)
-              -> at::Tensor& {
+             const c10d::OptionalCollectiveConfig& config) -> at::Tensor& {
             return c10d::all_reduce_(
                 input,
                 get_reduce_op(reduce_op, "all_reduce_"),
                 get_process_group(group, "all_reduce_"),
-                config ? std::make_optional(c10::IValue(*config))
-                       : std::nullopt);
+                config);
           }),
       {at::Tag::pt2_compliant_tag});
 
@@ -627,13 +624,12 @@ TORCH_LIBRARY(_c10d_functional, m) {
           [](std::vector<at::Tensor> inputs,
              const c10::IValue& reduce_op,
              const c10::IValue& group,
-             const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
+             const c10d::OptionalCollectiveConfig& config) {
             return c10d::all_reduce_coalesced(
                 inputs,
                 get_reduce_op(reduce_op, "all_reduce_coalesced"),
                 get_process_group(group, "all_reduce_coalesced"),
-                config ? std::make_optional(c10::IValue(*config))
-                       : std::nullopt);
+                config);
           }),
       {at::Tag::pt2_compliant_tag});
 
@@ -644,13 +640,12 @@ TORCH_LIBRARY(_c10d_functional, m) {
           [](std::vector<at::Tensor> inputs,
              const c10::IValue& reduce_op,
              const c10::IValue& group,
-             const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
+             const c10d::OptionalCollectiveConfig& config) {
             return c10d::all_reduce_coalesced_(
                 inputs,
                 get_reduce_op(reduce_op, "all_reduce_coalesced_"),
                 get_process_group(group, "all_reduce_coalesced_"),
-                config ? std::make_optional(c10::IValue(*config))
-                       : std::nullopt);
+                config);
           }),
       {at::Tag::pt2_compliant_tag});
 
@@ -661,15 +656,14 @@ TORCH_LIBRARY(_c10d_functional, m) {
           [](at::Tensor& input,
              int64_t group_size,
              const c10::IValue& group,
-             const std::optional<c10::Dict<std::string, c10::IValue>>& config,
+             const c10d::OptionalCollectiveConfig& config,
              at::Tensor& output) -> at::Tensor& {
             return c10d::all_gather_into_tensor_out(
                 input,
                 group_size,
                 get_process_group(group, "all_gather_into_tensor_out"),
                 output,
-                config ? std::make_optional(c10::IValue(*config))
-                       : std::nullopt);
+                config);
           }),
       {at::Tag::pt2_compliant_tag,
        at::Tag::needs_contiguous_strides,
@@ -682,13 +676,12 @@ TORCH_LIBRARY(_c10d_functional, m) {
           [](const at::Tensor& input,
              int64_t group_size,
              const c10::IValue& group,
-             const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
+             const c10d::OptionalCollectiveConfig& config) {
             return c10d::all_gather_into_tensor(
                 input,
                 group_size,
                 get_process_group(group, "all_gather_into_tensor"),
-                config ? std::make_optional(c10::IValue(*config))
-                       : std::nullopt);
+                config);
           }),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
@@ -699,13 +692,12 @@ TORCH_LIBRARY(_c10d_functional, m) {
           [](std::vector<at::Tensor> inputs,
              int64_t group_size,
              const c10::IValue& group,
-             const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
+             const c10d::OptionalCollectiveConfig& config) {
             return c10d::all_gather_into_tensor_coalesced(
                 inputs,
                 group_size,
                 get_process_group(group, "all_gather_into_tensor_coalesced"),
-                config ? std::make_optional(c10::IValue(*config))
-                       : std::nullopt);
+                config);
           }),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
@@ -717,14 +709,13 @@ TORCH_LIBRARY(_c10d_functional, m) {
              std::string reduce_op,
              int64_t group_size,
              const c10::IValue& group,
-             const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
+             const c10d::OptionalCollectiveConfig& config) {
             return c10d::reduce_scatter_tensor(
                 input,
                 std::move(reduce_op),
                 group_size,
                 get_process_group(group, "reduce_scatter_tensor"),
-                config ? std::make_optional(c10::IValue(*config))
-                       : std::nullopt);
+                config);
           }),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
@@ -756,14 +747,13 @@ TORCH_LIBRARY(_c10d_functional, m) {
              std::string reduce_op,
              int64_t group_size,
              const c10::IValue& group,
-             const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
+             const c10d::OptionalCollectiveConfig& config) {
             return c10d::reduce_scatter_tensor_coalesced(
                 inputs,
                 std::move(reduce_op),
                 group_size,
                 get_process_group(group, "reduce_scatter_tensor_coalesced"),
-                config ? std::make_optional(c10::IValue(*config))
-                       : std::nullopt);
+                config);
           }),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
