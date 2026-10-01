@@ -10,11 +10,17 @@ import os
 import subprocess
 import sys
 import tempfile
+import types
 import unittest.mock as mock
 
 import torch
 from torch._native import aot_manifest
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
 # A minimal declaration module (contract: tools/native_aot/decl.py). covered_axes()
@@ -67,11 +73,16 @@ class ManifestFixture:
             f.write(self.body)
         self._patch = mock.patch.object(aot_manifest, "_OPS_DIR", self._dir.name)
         self._patch.start()
+        self._available = mock.patch.object(
+            aot_manifest._Coverage, "is_available", return_value=True
+        )
+        self._available.start()
         aot_manifest._load_coverage.cache_clear()
         return self
 
     def __exit__(self, *exc):
         self._patch.stop()
+        self._available.stop()
         aot_manifest._load_coverage.cache_clear()
         self._dir.cleanup()
 
@@ -213,6 +224,47 @@ class TestGetCoverage(TestCase):
         self.assertIn("coverage.covers(args, kwargs)", src)
 
 
+class TestEmbeddedCoverage(TestCase):
+    @parametrize("other_op_embedded", [False, True])
+    def test_missing_op_does_not_claim_python_coverage(self, other_op_embedded):
+        axes = mock.Mock(return_value={"covered": True})
+        coverage = aot_manifest._Coverage("bmm", axes, [{"covered": True}])
+        namespace = types.SimpleNamespace()
+        if other_op_embedded:
+            namespace = types.SimpleNamespace(archs_topk=lambda: [100])
+        with mock.patch.object(torch.ops, "_native_aot", namespace):
+            self.assertFalse(coverage.covers((torch.empty(1),), {}))
+            self.assertFalse(coverage.is_available(torch.device("cuda")))
+        axes.assert_not_called()
+
+    @parametrize("capability,expected", [((9, 0), True), ((10, 0), False)])
+    def test_availability_uses_embedded_archs_and_requested_device(
+        self, capability, expected
+    ):
+        coverage = aot_manifest._Coverage("bmm", lambda *args: {}, [])
+        namespace = types.SimpleNamespace(archs_bmm=lambda: [90])
+        device = torch.device("cuda:1")
+        with (
+            mock.patch.object(torch.ops, "_native_aot", namespace),
+            mock.patch.object(torch.version, "hip", None),
+            mock.patch.object(
+                torch.cuda, "get_device_capability", return_value=capability
+            ) as get_capability,
+        ):
+            self.assertEqual(coverage.is_available(device), expected)
+            get_capability.assert_called_once_with(device)
+
+    @parametrize("device,hip", [("cpu", None), ("meta", None), ("cuda", "7.0")])
+    def test_unavailable_backend_does_not_probe_cuda(self, device, hip):
+        coverage = aot_manifest._Coverage("bmm", lambda *args: {}, [])
+        with (
+            mock.patch.object(torch.version, "hip", hip),
+            mock.patch.object(torch.cuda, "get_device_capability") as get_capability,
+        ):
+            self.assertFalse(coverage.is_available(torch.device(device)))
+            get_capability.assert_not_called()
+
+
 class TestAotContextSwitch(TestCase):
     def test_masked_switch_restores_jit_coverage(self):
         # With AOT masked, coverage must report uncovered, so covered calls keep
@@ -294,6 +346,9 @@ class TestEmbedDetection(TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("LAZY_OK", proc.stdout)
+
+
+instantiate_parametrized_tests(TestEmbeddedCoverage)
 
 
 if __name__ == "__main__":
