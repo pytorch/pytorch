@@ -4,6 +4,10 @@ import copy
 import pickle
 
 import torch
+import torch.distributed.checkpoint as dcp
+from torch.distributed.checkpoint.planner_helpers import (
+    _create_default_metadata_only_plan,
+)
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     distribute_tensor,
@@ -19,6 +23,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorContinuousTestBase,
 )
+from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 funcol = torch.ops.c10d_functional
@@ -320,6 +325,82 @@ class BlockShardPropagationTest(DTensorContinuousTestBase):
             for ref, param, (_, plc) in zip(ref_params, params, shapes_and_placements):
                 self.assertEqual(param.placements, tuple(plc))
                 self.assertEqual(param.full_tensor(), ref)
+
+
+class BlockShardCheckpointTest(DTensorContinuousTestBase):
+    world_size = 4
+
+    def test_chunk_list_and_write_items(self):
+        mesh = self.build_device_mesh()
+        shape = (3, 4, 5)
+        p = BlockShard((5,))
+        d = distribute_tensor(torch.randn(shape, device=self.device_type), mesh, [p])
+        boxes = p._local_boxes(shape, self.world_size, self.rank)
+        chunks = d.__create_chunk_list__()
+        self.assertEqual(
+            [(tuple(c.offsets), tuple(c.sizes)) for c in chunks],
+            [(offset, size) for offset, size, _, _ in boxes],
+        )
+        items = _create_default_metadata_only_plan({"w": d}).items
+        self.assertEqual(len(items), len(boxes))
+        for item, (offset, size, start, stop) in zip(items, boxes):
+            self.assertEqual(tuple(item.tensor_data.chunk.sizes), size)
+            self.assertEqual(item.tensor_data.size, torch.Size(shape))
+            shard = d.__get_tensor_shard__(item.index)
+            self.assertEqual(shard.data_ptr(), d.to_local()[start:stop].data_ptr())
+            self.assertEqual(shard.shape, size)
+
+    @with_temp_dir
+    def test_save_load_reshard(self):
+        mesh = self.build_device_mesh()
+        mesh_2d = init_device_mesh(self.device_type, (2, 2))
+        shapes = [(3, 4, 5), (2, 3, 2)]
+        torch.manual_seed(0)
+        full = {
+            f"w{i}": torch.randn(shape, device=self.device_type)
+            for i, shape in enumerate(shapes)
+        }
+        state_dict = {
+            name: distribute_tensor(t, mesh, [BlockShard((t.shape[2],))])
+            for name, t in full.items()
+        }
+        dcp.save(state_dict, checkpoint_id=self.temp_dir)
+
+        targets = {
+            "block_shard": lambda t: distribute_tensor(
+                torch.zeros_like(t), mesh, [BlockShard((t.shape[2],))]
+            ),
+            "block_shard_2_ranks": lambda t: distribute_tensor(
+                torch.zeros_like(t), mesh_2d, [Replicate(), BlockShard((t.shape[2],))]
+            ),
+            "replicate": lambda t: distribute_tensor(
+                torch.zeros_like(t), mesh, [Replicate()]
+            ),
+            "shard_1": lambda t: distribute_tensor(
+                torch.zeros_like(t), mesh, [Shard(1)]
+            ),
+        }
+        for target_name, make in targets.items():
+            loaded = {name: make(t) for name, t in full.items()}
+            dcp.load(loaded, checkpoint_id=self.temp_dir)
+            for name, t in full.items():
+                self.assertEqual(loaded[name].full_tensor(), t, msg=target_name)
+
+    @with_temp_dir
+    def test_load_into_block_shard(self):
+        mesh = self.build_device_mesh()
+        torch.manual_seed(0)
+        full = torch.randn(3, 4, 5, device=self.device_type)
+        dcp.save(
+            {"w": distribute_tensor(full, mesh, [Shard(1)])},
+            checkpoint_id=self.temp_dir,
+        )
+        loaded = {
+            "w": distribute_tensor(torch.zeros_like(full), mesh, [BlockShard((5,))])
+        }
+        dcp.load(loaded, checkpoint_id=self.temp_dir)
+        self.assertEqual(loaded["w"].placements, (BlockShard((5,)),))
+        self.assertEqual(loaded["w"].full_tensor(), full)
 
 
 if __name__ == "__main__":
