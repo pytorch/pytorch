@@ -1,13 +1,14 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
-import threading
+import gc
+import weakref
 from unittest import mock
 
 import torch
 import torch.distributed as dist
-import torch.distributed._cuda_graph_annotations as cga
-from torch.distributed._cuda_graph_annotations import (
+import torch.distributed._collective_annotations as ca
+from torch.distributed._collective_annotations import (
     _format_ranks,
     _GroupHooks,
     _launches_kernels,
@@ -37,11 +38,14 @@ class TestFormatRanks(TestCase):
         )
 
 
+_MARK_KERNELS = "torch.cuda._graph_annotations.mark_kernels"
+
+
 @contextlib.contextmanager
 def _as_captured(*, launches=True, capturing=True):
     # Gloo runs collectives on CPU tensors outside a capture, which are skipped.
     with (
-        mock.patch.object(cga, "_launches_kernels", return_value=launches),
+        mock.patch.object(ca, "_launches_kernels", return_value=launches),
         mock.patch("torch.cuda.is_current_stream_capturing", return_value=capturing),
     ):
         yield
@@ -67,7 +71,7 @@ class TestCollectiveMetadata(MultiProcContinuousTest):
         with (
             _as_captured(**filters),
             mock.patch(
-                "torch.distributed._cuda_graph_annotations.mark_kernels",
+                _MARK_KERNELS,
                 fake_mark_kernels,
             ),
         ):
@@ -123,7 +127,7 @@ class TestCollectiveMetadata(MultiProcContinuousTest):
         group = mock.Mock(group_desc="", group_name="pg")
         group.rank.return_value = 0
         with mock.patch.object(dist, "get_process_group_ranks", return_value=[0]):
-            fields = cga._GroupFields(group)
+            fields = ca._GroupFields(group)
         self.assertNotIn("Process Group Description", fields.static)
 
     def test_skips_outside_capture(self):
@@ -164,7 +168,7 @@ class TestCollectiveMetadata(MultiProcContinuousTest):
         with (
             _as_captured(),
             mock.patch(
-                "torch.distributed._cuda_graph_annotations.mark_kernels",
+                _MARK_KERNELS,
                 side_effect=RuntimeError("boom"),
             ),
         ):
@@ -182,11 +186,11 @@ class TestCollectiveMetadata(MultiProcContinuousTest):
         with (
             _as_captured(),
             mock.patch(
-                "torch.distributed._cuda_graph_annotations.collective_metadata",
+                "torch.distributed._collective_annotations.collective_metadata",
                 return_value={},
             ),
             mock.patch(
-                "torch.distributed._cuda_graph_annotations.mark_kernels",
+                _MARK_KERNELS,
                 return_value=scope,
             ),
         ):
@@ -194,57 +198,33 @@ class TestCollectiveMetadata(MultiProcContinuousTest):
         scope.__enter__.assert_called_once()
         return hooks, scope
 
-    def test_close_exits_own_scopes(self):
-        # A backend that raises after the pre hook leaves its scope open.
+    def test_post_exits_scope(self):
         hooks, scope = self._hooks_with_scope(op_id=7)
-        hooks.close()
-        scope.__exit__.assert_called_once()
-        self.assertEqual(hooks._scopes, {})
-
-    def test_close_leaves_other_thread_scope_to_post(self):
-        result = []
-        thread = threading.Thread(
-            target=lambda: result.append(self._hooks_with_scope(op_id=7))
-        )
-        thread.start()
-        thread.join()
-        hooks, scope = result[0]
-        group = mock.Mock(wraps=hooks._group)
-        hooks._group = group
-        hooks.close()
-        scope.__exit__.assert_not_called()
-        group.unregister_post_hook.assert_not_called()
         hooks._post(mock.Mock(op_id=7))
         scope.__exit__.assert_called_once()
-        group.unregister_post_hook.assert_called_once_with(hooks._post_id)
-
-    def test_pre_after_close_exits_scope(self):
-        scope = mock.MagicMock()
-        hooks = _GroupHooks(_get_default_group())
-        hooks.close()
-        with (
-            _as_captured(),
-            mock.patch(
-                "torch.distributed._cuda_graph_annotations.collective_metadata",
-                return_value={},
-            ),
-            mock.patch(
-                "torch.distributed._cuda_graph_annotations.mark_kernels",
-                return_value=scope,
-            ),
-        ):
-            hooks._pre(mock.Mock(op_id=7))
-        scope.__exit__.assert_called_once()
         self.assertEqual(hooks._scopes, {})
 
-    def test_close_unregisters_hooks(self):
-        with (
-            _as_captured(),
-            mock.patch(
-                "torch.distributed._cuda_graph_annotations.mark_kernels"
-            ) as mark_kernels,
-        ):
-            CollectiveAnnotations().close()
+    def test_new_group_is_hooked(self):
+        group = dist.new_group()
+        recorded = self._record(lambda: dist.all_reduce(torch.ones(1), group=group))
+        self.assertEqual(
+            [a["Process Group Name"] for a in recorded], [group.group_name]
+        )
+        dist.destroy_process_group(group)
+
+    def test_hooks_do_not_keep_group_alive(self):
+        group = dist.new_group()
+        ref = weakref.ref(group)
+        dist.destroy_process_group(group)
+        del group
+        gc.collect()
+        self.assertIsNone(ref())
+
+    def test_disabled_after_close(self):
+        with _as_captured(), mock.patch(_MARK_KERNELS) as mark_kernels:
+            annotations = CollectiveAnnotations()
+            annotations.close()
+            annotations.close()
             dist.all_reduce(torch.ones(1))
         mark_kernels.assert_not_called()
 
@@ -292,7 +272,7 @@ class TestCollectiveGraphAnnotations(MultiProcContinuousTest):
     def _record_during_capture(self, **kwargs):
         recorded = []
         with mock.patch(
-            "torch.distributed._cuda_graph_annotations.mark_kernels",
+            _MARK_KERNELS,
             lambda annotation, *, backward: recorded.append(annotation)
             or mock.MagicMock(),
         ):

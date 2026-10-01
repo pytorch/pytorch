@@ -1258,10 +1258,9 @@ class graph:
             capture begins. ``None`` uses the defaults; an empty list disables filtering.
             Used only with ``record_py_stacks=True``.
             ``"collectives"`` (bool, default ``True``) tags the kernels of every c10d
-            collective captured on an existing process group with the fields
-            ``record_param_comms`` gives it in eager mode (``"Collective name"``,
-            ``"Process Group Name"``, ``"Seq"``, ...). Pass ``False`` when a wrapper
-            already annotates its collectives.
+            collective captured with the fields ``record_param_comms`` gives it in
+            eager mode (``"Collective name"``, ``"Process Group Name"``, ``"Seq"``,
+            ...). Pass ``False`` when a wrapper already annotates its collectives.
         check_input_liveness (bool, optional): If ``True``, tracks external tensor inputs during graph capture and
             raises an error if any are deallocated before replay. This helps debug "use after free" errors
             where input tensors are garbage collected between capture and replay. Default: ``False``.
@@ -1457,7 +1456,7 @@ class graph:
                 and torch.distributed.is_available()
                 and torch.distributed.is_initialized()
             ):
-                from torch.distributed._cuda_graph_annotations import (
+                from torch.distributed._collective_annotations import (
                     CollectiveAnnotations,
                 )
 
