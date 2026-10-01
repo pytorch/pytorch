@@ -20,6 +20,7 @@ from torch._decomp import (
 from torch._decomp.decompositions import (
     _grid_sampler_2d as decomp_grid_sampler_2d,
     _index_add,
+    adaptive_max_pool3d as decomp_adaptive_max_pool3d,
     embedding_dense_backward as decomp_embedding_dense_backward,
     pw_cast_for_opmath,
     pw_cast_for_opmath_non_tensor_args,
@@ -67,7 +68,7 @@ inductor_decompositions = get_decompositions(
     [
         aten._adaptive_avg_pool2d_backward,
         aten.adaptive_max_pool2d,
-        aten.adaptive_max_pool3d,
+        aten.adaptive_max_pool3d.out,
         aten.index_select,
         aten.addmv,
         aten.arange,
@@ -160,6 +161,15 @@ def register_decomposition(
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
+
+
+@register_decomposition(aten.adaptive_max_pool3d.default)
+def adaptive_max_pool3d(input, output_size):
+    # max_pool3d_with_indices returns channels-last indices, but the native
+    # adaptive_max_pool3d backward expects its forward's contiguous indices.
+    if suggest_memory_format(input) == torch.channels_last_3d:
+        return NotImplemented
+    return decomp_adaptive_max_pool3d(input, output_size)
 
 
 @register_decomposition([aten.special_log_ndtr])
