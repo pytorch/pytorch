@@ -31,7 +31,6 @@ from torch.distributed.tensor.placement_types import (
     _is_shard_like,
     _StridedShard,
     _validate_block_shard_placements,
-    BlockShard,
     Partial,
     Placement,
     Replicate,
@@ -1599,59 +1598,77 @@ def _redistribute_block_shard(
 ) -> torch.Tensor:
     """Redistribute when either spec uses BlockShard.
 
-    BlockShard is only combined with Replicate/Partial, so it goes through
-    Replicate: all-gather the merged view for a BlockShard source, run the
-    regular planner on the remaining mesh dims, and take a local chunk of the
-    merged view for a BlockShard target. Partial -> BlockShard on one mesh dim
-    with everything else unchanged is a direct reduce-scatter.
+    BlockShard goes through Replicate: all-gather the merged view for a
+    BlockShard source, run the regular planner on the remaining mesh dims, and
+    take a local chunk of the merged view for a BlockShard target. BlockShard
+    applies to the local tensor left by a Shard(0) mesh dim, so it is undone
+    first and applied last. Partial -> BlockShard on one mesh dim with
+    everything else unchanged is a direct reduce-scatter.
     """
     shape = current_spec.shape
-    _validate_block_shard_placements(current_spec.placements, shape)
-    _validate_block_shard_placements(target_spec.placements, shape)
     mesh = current_spec.mesh
+    current_layout = _validate_block_shard_placements(
+        current_spec.placements, shape, mesh.shape
+    )
+    target_layout = _validate_block_shard_placements(
+        target_spec.placements, shape, mesh.shape
+    )
     current_placements = list(current_spec.placements)
     target_placements = target_spec.placements
+    # BlockShard's local tensor depends on the Shard(0) it applies after, so it
+    # only stays in place if that is unchanged too.
+    block_shard_unchanged = (
+        current_layout is not None
+        and target_layout is not None
+        and current_layout[:3] == target_layout[:3]
+    )
 
     changed = [
         i
         for i, (c, t) in enumerate(zip(current_placements, target_placements))
         if c != t
     ]
-    if len(changed) == 1:
-        i = changed[0]
-        current, target = current_placements[i], target_placements[i]
-        if isinstance(target, BlockShard) and isinstance(current, Partial):
-            return target._reduce_shard_tensor(local_tensor, mesh, current.reduce_op, i)
+    if (
+        target_layout is not None
+        and changed == [target_layout.mesh_dim]
+        and isinstance(current_placements[target_layout.mesh_dim], Partial)
+    ):
+        current = cast(Partial, current_placements[target_layout.mesh_dim])
+        return target_layout.placement._reduce_shard_tensor(
+            local_tensor, mesh, current.reduce_op, target_layout.mesh_dim
+        )
 
     new_local_tensor = local_tensor
-    for i, placement in enumerate(current_placements):
-        if isinstance(placement, BlockShard) and placement != target_placements[i]:
-            new_local_tensor = placement._to_replicate_tensor(
-                new_local_tensor, mesh, i, shape
-            )
-            current_placements[i] = Replicate()
+    if current_layout is not None and not block_shard_unchanged:
+        new_local_tensor = current_layout.placement._to_replicate_tensor(
+            new_local_tensor, mesh, current_layout.mesh_dim, current_layout.block_shape
+        )
+        current_placements[current_layout.mesh_dim] = Replicate()
 
-    intermediate_placements = tuple(
-        Replicate() if isinstance(t, BlockShard) and t != c else t
-        for c, t in zip(current_spec.placements, target_placements)
-    )
-    if any(_is_block_shard(p) for p in intermediate_placements):
-        # The unchanged BlockShard mesh dim keeps its merged-view local tensor,
-        # and the other mesh dims are Replicate/Partial, whose transforms don't
-        # depend on the shape. Plan them as if that mesh dim were Replicate.
+    intermediate_placements = list(target_placements)
+    if target_layout is not None and not block_shard_unchanged:
+        intermediate_placements[target_layout.mesh_dim] = Replicate()
+    if block_shard_unchanged:
+        # The BlockShard and Shard(0) mesh dims keep their local tensor, and the
+        # other mesh dims are Replicate/Partial, whose transforms don't depend
+        # on the shape. Plan them as if those mesh dims were Replicate.
         local_meta = TensorMeta(
             new_local_tensor.shape, new_local_tensor.stride(), new_local_tensor.dtype
         )
+        kept = {current_layout.mesh_dim, current_layout.shard0_mesh_dim}  # type: ignore[union-attr]
         src_spec = DTensorSpec(
             mesh,
-            tuple(Replicate() if _is_block_shard(p) else p for p in current_placements),
+            tuple(
+                Replicate() if i in kept else p
+                for i, p in enumerate(current_placements)
+            ),
             tensor_meta=local_meta,
         )
         dst_spec = DTensorSpec(
             mesh,
             tuple(
-                Replicate() if _is_block_shard(p) else p
-                for p in intermediate_placements
+                Replicate() if i in kept else p
+                for i, p in enumerate(intermediate_placements)
             ),
             tensor_meta=local_meta,
         )
@@ -1660,7 +1677,7 @@ def _redistribute_block_shard(
             mesh, tuple(current_placements), tensor_meta=current_spec.tensor_meta
         )
         dst_spec = DTensorSpec(
-            mesh, intermediate_placements, tensor_meta=target_spec.tensor_meta
+            mesh, tuple(intermediate_placements), tensor_meta=target_spec.tensor_meta
         )
     if src_spec.placements != dst_spec.placements:
         new_local_tensor = redistribute_local_tensor(
@@ -1672,13 +1689,13 @@ def _redistribute_block_shard(
             is_explicit=is_explicit,
         )
 
-    for i, (placement, target) in enumerate(
-        zip(intermediate_placements, target_placements)
-    ):
-        if isinstance(target, BlockShard) and placement != target:
-            new_local_tensor = target._replicate_to_block_shard(
-                new_local_tensor, mesh, i, mesh._sym_get_coordinate(i)
-            )
+    if target_layout is not None and not block_shard_unchanged:
+        new_local_tensor = target_layout.placement._replicate_to_block_shard(
+            new_local_tensor,
+            mesh,
+            target_layout.mesh_dim,
+            mesh._sym_get_coordinate(target_layout.mesh_dim),
+        )
     return new_local_tensor
 
 

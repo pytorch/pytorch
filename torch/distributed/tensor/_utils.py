@@ -15,9 +15,11 @@ from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor.placement_types import (
+    _block_shard_local_boxes,
     _is_shard_like,
     _StridedShard,
     _StridedShardOffsetMode,
+    _validate_block_shard_placements,
     BlockShard,
     Partial,
     Placement,
@@ -236,28 +238,35 @@ def _compute_local_shape_and_global_offset(
               empty tuple.
     """
 
-    for mesh_dim, placement in enumerate(placements):
-        if isinstance(placement, BlockShard):
-            # BlockShard is only combined with Replicate/Partial, so its mesh dim
-            # alone decides the local shape. The offset is the first local
-            # element's global coordinate; use BlockShard._local_boxes for the
-            # full set of owned boxes.
-            coordinate = (
-                my_coordinate[mesh_dim]
-                if isinstance(my_coordinate, (list, tuple))
-                else my_coordinate(mesh_dim)  # type: ignore[misc]
-            )
-            num_chunks = int(mesh_shape[mesh_dim])
-            local_shape = placement._local_shape(global_shape, num_chunks, coordinate)
-            if skip_offset:
-                return tuple(local_shape), ()
-            boxes = placement._local_boxes(global_shape, num_chunks, int(coordinate))
-            first_offset = (
-                boxes[0][0]
-                if boxes
-                else (global_shape[0], *([0] * (len(global_shape) - 1)))
-            )
-            return tuple(local_shape), tuple(first_offset)
+    if any(isinstance(p, BlockShard) for p in placements):
+        # BlockShard is combined only with Replicate/Partial and at most one
+        # Shard(0), so it and that Shard(0) decide the local shape. The offset is
+        # the first local element's global coordinate; use _local_boxes for the
+        # full set of owned boxes.
+        layout = _validate_block_shard_placements(placements, global_shape, mesh_shape)
+        if layout is None:
+            raise AssertionError(f"Expected a BlockShard layout in {placements}")
+        coordinate = [
+            my_coordinate[d]
+            if isinstance(my_coordinate, (list, tuple))
+            else my_coordinate(d)  # type: ignore[misc]
+            for d in range(len(mesh_shape))
+        ]
+        num_chunks = int(mesh_shape[layout.mesh_dim])
+        local_shape = layout.placement._local_shape(
+            layout.block_shape, num_chunks, coordinate[layout.mesh_dim]
+        )
+        if skip_offset:
+            return tuple(local_shape), ()
+        boxes = _block_shard_local_boxes(
+            layout, [int(m) for m in mesh_shape], [int(c) for c in coordinate]
+        )
+        first_offset = (
+            boxes[0][0]
+            if boxes
+            else (global_shape[0], *([0] * (len(global_shape) - 1)))
+        )
+        return tuple(local_shape), tuple(first_offset)
 
     if isinstance(my_coordinate, (list, tuple)):
         _coord: list | tuple = my_coordinate
