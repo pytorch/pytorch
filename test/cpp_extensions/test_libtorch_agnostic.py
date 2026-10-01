@@ -384,6 +384,43 @@ class TestLibtorchAgnostic(TestCase):
         pinned = torch.randn(2, 3, device="cpu", pin_memory=True)
         self.assertTrue(libtorch_agnostic.ops.my_is_pinned(pinned))
 
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize("descending", [False, True])
+    @parametrize("dim", [0, 1, -1, -3])
+    def test_my_sort(self, device, dim, descending):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        my_sort = libtorch_agnostic.ops.my_sort
+
+        t = torch.randint(-2, 2, (3, 8, 5), device=device)
+        values, _ = my_sort(t, dim=dim, descending=descending)
+        self.assertEqual(values, torch.sort(t, dim=dim, descending=descending).values)
+
+        values, _ = my_sort(t)
+        self.assertEqual(values, torch.sort(t).values)
+
+    @skipIfTorchVersionLessThan(2, 10)
+    @parametrize("descending", [False, True])
+    @parametrize("dim", [0, 1, -1, -3])
+    def test_my_sort_stable(self, device, dim, descending):
+        import libtorch_agn_2_10 as libtorch_agnostic
+
+        my_sort_stable = libtorch_agnostic.ops.my_sort_stable
+
+        t = torch.randint(-2, 2, (3, 8, 5), device=device)
+        values, indices = my_sort_stable(t, stable=True, dim=dim, descending=descending)
+        expected = torch.sort(t, stable=True, dim=dim, descending=descending)
+        self.assertEqual(values, expected.values)
+        self.assertEqual(indices, expected.indices)
+
+        t_view = t.transpose(0, 2)[:, ::2, :]
+        values, indices = my_sort_stable(
+            t_view, stable=True, dim=dim, descending=descending
+        )
+        expected = torch.sort(t_view, stable=True, dim=dim, descending=descending)
+        self.assertEqual(values, expected.values)
+        self.assertEqual(indices, expected.indices)
+
     # These exercise the use case: a raw PyObject passed straight from Python
     # (GIL held, no dispatcher boxing) into from_pyobject / to_pyobject, via the
     # extension's importable PyMethodDef module (_interop).
