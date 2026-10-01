@@ -512,6 +512,29 @@ class AbstractFaultToleranceTest:
         self._reconfigure(1901, handles)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
+    def test_reconfigure_with_dead_peer_raises(self):
+        if self.backend_name != "nccl2":
+            self.skipTest("nonblocking NCCL initialization behavior")
+        # Fail the bootstrap connect to the dead peer quickly.
+        os.environ["NCCL_SOCKET_RETRY_CNT"] = "1"
+        handles = self._create_reconfigured_pg("ft_dead_peer", 2000)
+        self._store_barrier("ft_dead_peer_ready")
+        # Exit without teardown: the dead peer leaves the comm unusable.
+        if self.rank == 1:
+            os._exit(0)
+        if self.rank == 2:
+            self.store.get("ft_dead_peer_done")
+            os._exit(0)
+
+        try:
+            with self.assertRaises(RuntimeError):
+                dist._reconfigure(
+                    2001, handles[:2], timeout=timedelta(seconds=10)
+                ).wait()
+        finally:
+            self.store.set("ft_dead_peer_done", "1")
+        os._exit(0)
+
 
 def _make_fault_tolerance_test_class(backend):
     class FaultToleranceTest(AbstractFaultToleranceTest, MultiProcessTestCase):
