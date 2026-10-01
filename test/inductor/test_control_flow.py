@@ -2393,14 +2393,15 @@ class ScanTests(TestCase):
     # Not @requires_gpu: the bug this guards is a CPU-reproducible lowering failure.
     @parametrize("device", ["cpu"] + ([GPU_TYPE] if HAS_GPU else []))
     @parametrize("dynamic", [True, False])
+    @parametrize("scan_length", [3, 0])
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
-    def test_scan_single_flat_output(self, device, dynamic):
+    def test_scan_single_flat_output(self, device, dynamic, scan_length):
         # Forward only: eager scan's backward does not support an empty ys.
         self._run_test(
             model=ScanModels.ScanReduceOnly(),
             inputs=(
                 torch.randn(4, 5),
-                torch.randn(3, 4, 5),
+                torch.randn(scan_length, 4, 5),
             ),
             device=device,
             dynamic=dynamic,

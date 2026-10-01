@@ -815,6 +815,9 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
         num_init_leaves = len(fx_init)
         _, ys_outputs = _extract_carry_and_out(cur_node.meta["val"], num_init_leaves)
 
+        # The outer tuple makes replace_by_example treat the list as the scan node's
+        # unpacked outputs; a bare one-element list would replace the node 1:1.
+        # TODO: error-prone for any tuple-valued node; disambiguate on its meta["val"].
         def lower_to_while_loop(*args, **kwargs):
             """
             The traced graph of this function will be used to replace the original scan fx_node.
@@ -838,8 +841,6 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
                     )
                     for ys_out in ys_outputs
                 ]
-                # Wrap in a tuple like the map lowering
-                # TODO: this is error-prone; disambiguate on the matched node's value instead.
                 return (list(init) + empty_ys,)
 
             loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
