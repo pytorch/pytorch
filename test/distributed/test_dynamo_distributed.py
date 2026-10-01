@@ -672,7 +672,7 @@ class TestMultiGPU(torch._inductor.test_case.TestCase):
             return x
 
         initial_dev = torch.accelerator.current_device_index()
-        x = torch.randn((2, 2), device=f"{device_type}:0")
+        x = torch.randn((2, 2), device=f"{device_type}")
         ref = fn(x)
         opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
         res = opt_fn(x)
@@ -1019,6 +1019,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
 
     @skip_if_lt_x_gpu(2)
     @requires_gpu_and_triton
+    @skipIfXpu(
+        msg="Inductor cudagraph trees are not supported on XPU, https://github.com/intel/torch-xpu-ops/issues/5338"
+    )
     def test_ddp_optimizer_cudagraph(self):
         class Net(nn.Module):
             def __init__(self):
