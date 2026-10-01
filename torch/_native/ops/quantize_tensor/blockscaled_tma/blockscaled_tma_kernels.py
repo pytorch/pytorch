@@ -10,6 +10,7 @@ import cutlass.utils as utils
 from cutlass.cute.nvgpu import cpasync, tcgen05
 
 import torch
+from torch._native.cutedsl.dtypes import torch2cute
 from torch._native.instrumentation import instrumented_cutedsl_cache
 
 from .utils import (
@@ -19,12 +20,6 @@ from .utils import (
     _store_unswizzled_scale_groups_as_uint,
 )
 
-
-_TORCH_TO_CUTE_DTYPE = {
-    torch.bfloat16: cutlass.BFloat16,
-    torch.float16: cutlass.Float16,
-    torch.float32: cutlass.Float32,
-}
 
 _QUANT_ORIENTATION_DIM_K = 0
 _QUANT_ORIENTATION_DIM_M = 1
@@ -116,52 +111,6 @@ class _BlockscaledTma:
         qdata_storage_elements_per_32 = 32
         do_dim_k = quant_orientation != _QUANT_ORIENTATION_DIM_M
         do_dim_m = quant_orientation != _QUANT_ORIENTATION_DIM_K
-
-        if cutlass.const_expr(quant_orientation == _QUANT_ORIENTATION_DIM_K):
-            if cutlass.const_expr(output_k_tma_atom is None):
-                raise AssertionError("expected output_k_tma_atom, got None")
-            if cutlass.const_expr(output_k_tma_tensor is None):
-                raise AssertionError("expected output_k_tma_tensor, got None")
-            if cutlass.const_expr(mScaleKLogical is None):
-                raise AssertionError("expected mScaleKLogical, got None")
-            if cutlass.const_expr(output_k_smem_layout is None):
-                raise AssertionError("expected output_k_smem_layout, got None")
-            if cutlass.const_expr(data_k_tv_layout is None):
-                raise AssertionError("expected data_k_tv_layout, got None")
-            if cutlass.const_expr(output_k_tv_layout is None):
-                raise AssertionError("expected output_k_tv_layout, got None")
-        elif cutlass.const_expr(quant_orientation == _QUANT_ORIENTATION_DIM_M):
-            if cutlass.const_expr(output_m_tma_atom is None):
-                raise AssertionError("expected output_m_tma_atom, got None")
-            if cutlass.const_expr(output_m_tma_tensor is None):
-                raise AssertionError("expected output_m_tma_tensor, got None")
-            if cutlass.const_expr(mScaleMLogical is None):
-                raise AssertionError("expected mScaleMLogical, got None")
-            if cutlass.const_expr(output_m_smem_layout is None):
-                raise AssertionError("expected output_m_smem_layout, got None")
-        else:
-            if cutlass.const_expr(quant_orientation != _QUANT_ORIENTATION_DIM_KM):
-                raise AssertionError(f"expected dim-KM, got {quant_orientation}")
-            if cutlass.const_expr(output_k_tma_atom is None):
-                raise AssertionError("expected output_k_tma_atom, got None")
-            if cutlass.const_expr(output_k_tma_tensor is None):
-                raise AssertionError("expected output_k_tma_tensor, got None")
-            if cutlass.const_expr(mScaleKLogical is None):
-                raise AssertionError("expected mScaleKLogical, got None")
-            if cutlass.const_expr(output_k_smem_layout is None):
-                raise AssertionError("expected output_k_smem_layout, got None")
-            if cutlass.const_expr(data_k_tv_layout is None):
-                raise AssertionError("expected data_k_tv_layout, got None")
-            if cutlass.const_expr(output_k_tv_layout is None):
-                raise AssertionError("expected output_k_tv_layout, got None")
-            if cutlass.const_expr(output_m_tma_atom is None):
-                raise AssertionError("expected output_m_tma_atom, got None")
-            if cutlass.const_expr(output_m_tma_tensor is None):
-                raise AssertionError("expected output_m_tma_tensor, got None")
-            if cutlass.const_expr(mScaleMLogical is None):
-                raise AssertionError("expected mScaleMLogical, got None")
-            if cutlass.const_expr(output_m_smem_layout is None):
-                raise AssertionError("expected output_m_smem_layout, got None")
 
         # bookkeeping
         tidx, _, _ = cute.arch.thread_idx()
@@ -524,14 +473,14 @@ class _BlockscaledTma:
                     )
 
                 if cutlass.const_expr(needs_boundary_masking and is_scale_swizzled):
-                    ncb_k = _ceil_div(K, scale_group_size * 4)
+                    s_num_col_blk_k = _ceil_div(K, scale_group_size * 4)
                     grid_n = _ceil_div(K, tile_k_size)
                     covered_groups = grid_n * groups_per_row_k
-                    if covered_groups < ncb_k * 4:
+                    if covered_groups < s_num_col_blk_k * 4:
                         if tile_k_idx == grid_n - 1:
                             for offset in cutlass.range_constexpr(3):
                                 col = covered_groups + offset
-                                if col < ncb_k * 4:
+                                if col < s_num_col_blk_k * 4:
                                     mScaleKLogical[(input_row_k, col)] = cutlass.Uint8(
                                         0
                                     )
@@ -698,11 +647,11 @@ class _BlockscaledTma:
             )
 
             if cutlass.const_expr(is_scale_swizzled):
-                nrb_k = _ceil_div(M, 128)
-                ncb_k = _ceil_div(K, scale_group_size * 4)
-                scale_k_row_block_stride = cutlass.Int64(ncb_k) * 32 * 16
+                s_num_row_blk_k = _ceil_div(M, 128)
+                s_num_col_blk_k = _ceil_div(K, scale_group_size * 4)
+                scale_k_row_block_stride = cutlass.Int64(s_num_col_blk_k) * 32 * 16
                 scale_k_layout = cute.make_layout(
-                    ((32, 4, nrb_k), (4, ncb_k)),
+                    ((32, 4, s_num_row_blk_k), (4, s_num_col_blk_k)),
                     stride=((16, 4, scale_k_row_block_stride), (1, 32 * 16)),
                 )
                 mScaleKLogical = cute.make_tensor(mScaleK.iterator, scale_k_layout)
@@ -814,11 +763,11 @@ class _BlockscaledTma:
                 (tile_k_size, tile_m_size),
             )
 
-            nrb_m = _ceil_div(K, 128)
-            ncb_m = _ceil_div(M, scale_group_size * 4)
-            scale_m_row_block_stride = cutlass.Int64(ncb_m) * 32 * 16
+            s_num_row_blk_m = _ceil_div(K, 128)
+            s_num_col_blk_m = _ceil_div(M, scale_group_size * 4)
+            scale_m_row_block_stride = cutlass.Int64(s_num_col_blk_m) * 32 * 16
             scale_m_layout = cute.make_layout(
-                ((32, 4, nrb_m), (4, ncb_m)),
+                ((32, 4, s_num_row_blk_m), (4, s_num_col_blk_m)),
                 stride=((16, 4, scale_m_row_block_stride), (1, 32 * 16)),
             )
             mScaleMLogical = cute.make_tensor(mScaleM.iterator, scale_m_layout)
@@ -922,7 +871,7 @@ def _compile_blockscaled_tma(
     is_square_scaling: bool,
     is_scale_swizzled: bool,
 ) -> Callable[..., None]:
-    input_element_type = _TORCH_TO_CUTE_DTYPE[input_dtype]
+    input_element_type = torch2cute[input_dtype]
     do_dim_k = quant_orientation != _QUANT_ORIENTATION_DIM_M
     do_dim_m = quant_orientation != _QUANT_ORIENTATION_DIM_K
 

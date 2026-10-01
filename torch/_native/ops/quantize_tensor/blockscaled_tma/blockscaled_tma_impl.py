@@ -1,6 +1,5 @@
 """PyTorch-facing implementation for TMA-based block-scaled quantization."""
 
-from functools import cache
 from typing import NamedTuple, TypeAlias
 
 import torch
@@ -41,10 +40,10 @@ class _BlockscaledTmaSpec(NamedTuple):
     do_dim_m: bool
     is_square_scaling: bool
     is_scale_swizzled: bool
-    nrb_k: int | None
-    ncb_k: int | None
-    nrb_m: int | None
-    ncb_m: int | None
+    s_num_row_blk_k: int | None
+    s_num_col_blk_k: int | None
+    s_num_row_blk_m: int | None
+    s_num_col_blk_m: int | None
 
 
 class _PreparedBlockscaledTmaLaunch(NamedTuple):
@@ -55,11 +54,6 @@ class _PreparedBlockscaledTmaLaunch(NamedTuple):
     scale_k: torch.Tensor | None
     output_m: torch.Tensor | None
     scale_m: torch.Tensor | None
-
-
-@cache
-def _cuda_capability(device: int) -> tuple[int, int]:
-    return torch.cuda.get_device_capability(device)
 
 
 def _validate_and_normalize_blockscaled_tma(
@@ -103,26 +97,26 @@ def _validate_and_normalize_blockscaled_tma(
             f"got shape ({M}, {K})"
         )
     if is_square_scaling and M % 32 != 0:
-        raise ValueError("32x32 v2 requires M % 32 == 0")
+        raise ValueError("32x32 requires M % 32 == 0")
     if do_dim_m:
         if M % 32 != 0:
-            raise ValueError("v2 dim-M requires M % 32 == 0")
+            raise ValueError("dim-M requires M % 32 == 0")
         if K % 16 != 0:
-            raise ValueError("v2 dim-M requires K % 16 == 0")
+            raise ValueError("dim-M requires K % 16 == 0")
         if do_dim_k and K % 32 != 0:
-            raise ValueError("v2 dim-K requires K % 32 == 0")
+            raise ValueError("dim-K requires K % 32 == 0")
     elif K % 32 != 0:
-        raise ValueError("v2 requires K % 32 == 0")
+        raise ValueError("requires K % 32 == 0")
 
-    nrb_k = ncb_k = None
+    s_num_row_blk_k = s_num_col_blk_k = None
     if do_dim_k:
-        nrb_k = _ceil_div(M, 128)
-        ncb_k = _ceil_div(K, 128)
+        s_num_row_blk_k = _ceil_div(M, 128)
+        s_num_col_blk_k = _ceil_div(K, 128)
 
-    nrb_m = ncb_m = None
+    s_num_row_blk_m = s_num_col_blk_m = None
     if do_dim_m:
-        nrb_m = _ceil_div(K, 128)
-        ncb_m = _ceil_div(M, 128)
+        s_num_row_blk_m = _ceil_div(K, 128)
+        s_num_col_blk_m = _ceil_div(M, 128)
 
     quant_orientation_id = {
         "dim_k": _QUANT_ORIENTATION_DIM_K,
@@ -139,10 +133,10 @@ def _validate_and_normalize_blockscaled_tma(
         do_dim_m=do_dim_m,
         is_square_scaling=is_square_scaling,
         is_scale_swizzled=is_scale_swizzled,
-        nrb_k=nrb_k,
-        ncb_k=ncb_k,
-        nrb_m=nrb_m,
-        ncb_m=ncb_m,
+        s_num_row_blk_k=s_num_row_blk_k,
+        s_num_col_blk_k=s_num_col_blk_k,
+        s_num_row_blk_m=s_num_row_blk_m,
+        s_num_col_blk_m=s_num_col_blk_m,
     )
 
 
@@ -162,6 +156,11 @@ def _prepare_blockscaled_tma_launch(
             is_square_scaling=spec.is_square_scaling,
         )
     if plan is not None and (
+        # the grid_k condition is unreachable since tile_k_size >= 32 and
+        #   K <= 2**31-1, we keep it here for completeness to cover both x and
+        #   y grid vals
+        # the grid_m condition is technically reachable (with a shape such as
+        #   (8,388,481, 32)), we keep it here for correctness
         plan.grid_k > _CUDA_GRID_X_MAX or plan.grid_m > _CUDA_GRID_Y_MAX
     ):
         raise ValueError(
@@ -172,10 +171,14 @@ def _prepare_blockscaled_tma_launch(
 
     output_m = scale_m = None
     if spec.do_dim_m:
-        if spec.nrb_m is None:
-            raise AssertionError(f"expected nrb_m, got {spec.nrb_m}")
-        if spec.ncb_m is None:
-            raise AssertionError(f"expected ncb_m, got {spec.ncb_m}")
+        if spec.s_num_row_blk_m is None:
+            raise AssertionError(
+                f"expected s_num_row_blk_m, got {spec.s_num_row_blk_m}"
+            )
+        if spec.s_num_col_blk_m is None:
+            raise AssertionError(
+                f"expected s_num_col_blk_m, got {spec.s_num_col_blk_m}"
+            )
         output_m = torch.empty(
             spec.K,
             spec.M,
@@ -183,17 +186,21 @@ def _prepare_blockscaled_tma_launch(
             device=input.device,
         )
         scale_m = torch.empty(
-            spec.nrb_m * spec.ncb_m * 32 * 16,
+            spec.s_num_row_blk_m * spec.s_num_col_blk_m * 32 * 16,
             dtype=torch.uint8,
             device=input.device,
         )
 
     output_k = scale_k = None
     if spec.do_dim_k:
-        if spec.nrb_k is None:
-            raise AssertionError(f"expected nrb_k, got {spec.nrb_k}")
-        if spec.ncb_k is None:
-            raise AssertionError(f"expected ncb_k, got {spec.ncb_k}")
+        if spec.s_num_row_blk_k is None:
+            raise AssertionError(
+                f"expected s_num_row_blk_k, got {spec.s_num_row_blk_k}"
+            )
+        if spec.s_num_col_blk_k is None:
+            raise AssertionError(
+                f"expected s_num_col_blk_k, got {spec.s_num_col_blk_k}"
+            )
         output_k = torch.empty(
             spec.M,
             spec.K,
@@ -204,7 +211,7 @@ def _prepare_blockscaled_tma_launch(
         # memset.
         if spec.is_scale_swizzled:
             scale_k = torch.empty(
-                spec.nrb_k * spec.ncb_k * 32 * 16,
+                spec.s_num_row_blk_k * spec.s_num_col_blk_k * 32 * 16,
                 dtype=torch.uint8,
                 device=input.device,
             )
@@ -238,11 +245,15 @@ def _format_blockscaled_tma_output(
             raise AssertionError("expected output_m, got None")
         if scale_m is None:
             raise AssertionError("expected scale_m, got None")
-        if spec.nrb_m is None:
-            raise AssertionError(f"expected nrb_m, got {spec.nrb_m}")
-        if spec.ncb_m is None:
-            raise AssertionError(f"expected ncb_m, got {spec.ncb_m}")
-        scale_m = scale_m.view(spec.nrb_m, spec.ncb_m, 32, 16).view(
+        if spec.s_num_row_blk_m is None:
+            raise AssertionError(
+                f"expected s_num_row_blk_m, got {spec.s_num_row_blk_m}"
+            )
+        if spec.s_num_col_blk_m is None:
+            raise AssertionError(
+                f"expected s_num_col_blk_m, got {spec.s_num_col_blk_m}"
+            )
+        scale_m = scale_m.view(spec.s_num_row_blk_m, spec.s_num_col_blk_m, 32, 16).view(
             torch.float8_e8m0fnu
         )
     if spec.do_dim_k:
@@ -250,12 +261,16 @@ def _format_blockscaled_tma_output(
             raise AssertionError("expected output_k, got None")
         if scale_k is None:
             raise AssertionError("expected scale_k, got None")
-        if spec.nrb_k is None:
-            raise AssertionError(f"expected nrb_k, got {spec.nrb_k}")
-        if spec.ncb_k is None:
-            raise AssertionError(f"expected ncb_k, got {spec.ncb_k}")
+        if spec.s_num_row_blk_k is None:
+            raise AssertionError(
+                f"expected s_num_row_blk_k, got {spec.s_num_row_blk_k}"
+            )
+        if spec.s_num_col_blk_k is None:
+            raise AssertionError(
+                f"expected s_num_col_blk_k, got {spec.s_num_col_blk_k}"
+            )
         if spec.is_scale_swizzled:
-            scale_k = scale_k.view(spec.nrb_k, spec.ncb_k, 32, 16)
+            scale_k = scale_k.view(spec.s_num_row_blk_k, spec.s_num_col_blk_k, 32, 16)
         else:
             scale_k = scale_k.view(spec.M, spec.K // 32)
         scale_k = scale_k.view(torch.float8_e8m0fnu)
@@ -342,7 +357,7 @@ def _blockscaled_tma_impl(
         raise ValueError("blockscaled TMA requires a CUDA input")
 
     device = input.get_device()
-    capability = _cuda_capability(device)
+    capability = torch.cuda.get_device_capability(device)
     if capability < (10, 0):
         raise RuntimeError(
             "blockscaled TMA requires CUDA capability 10.0 or newer; "
