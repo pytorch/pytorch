@@ -3005,5 +3005,49 @@ class TestAdvisorNotRelated(TestCase):
         self.assertEqual(classified["flaky job"].classification, "FLAKY")
 
 
+class TestMergebotRebase(TestCase):
+    def _pr(self, actor: str, before: str, after: str) -> Any:
+        pr = mock.MagicMock(spec=GitHubPR)
+        pr.org, pr.project, pr.pr_num = "pytorch", "pytorch", 1
+        pr.last_commit_sha.return_value = "head"
+        push = {
+            "actor": {"login": actor},
+            "beforeCommit": {"oid": before},
+            "afterCommit": {"oid": after},
+        }
+        rc = {
+            "data": {
+                "repository": {"pullRequest": {"timelineItems": {"nodes": [push]}}}
+            }
+        }
+        self.addCleanup(mock.patch.stopall)
+        mock.patch("trymerge.gh_graphql", return_value=rc).start()
+        return pr
+
+    def test_is_mergebot_rebase_of(self) -> None:
+        for actor, before, after, expected in [
+            ("pytorchmergebot", "orig", "head", True),
+            ("someone", "orig", "head", False),
+            ("pytorchmergebot", "other", "head", False),
+            ("pytorchmergebot", "orig", "other", False),
+        ]:
+            pr = self._pr(actor, before, after)
+            self.assertEqual(GitHubPR.is_mergebot_rebase_of(pr, "orig"), expected)
+
+    def test_merge_changes_locally_accepts_mergebot_rebase(self) -> None:
+        pr = self._pr("pytorchmergebot", "orig", "head")
+        pr.get_commit_sha_at_comment.return_value = "orig"
+        pr.is_ghstack_pr.return_value = False
+        pr.is_mergebot_rebase_of.side_effect = (
+            lambda sha: GitHubPR.is_mergebot_rebase_of(pr, sha)
+        )
+        pr.gen_commit_message.return_value = "msg"
+        repo = mock.MagicMock(spec=GitRepo)
+        repo.fetch.side_effect = RuntimeError("stop after check")
+        with self.assertRaisesRegex(RuntimeError, "stop after check"):
+            GitHubPR.merge_changes_locally(pr, repo, comment_id=1)
+        repo.fetch.assert_called_once_with("head", "__pull-request-1__init__")
+
+
 if __name__ == "__main__":
     main()

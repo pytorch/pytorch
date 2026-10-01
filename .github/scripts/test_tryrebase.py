@@ -6,7 +6,7 @@ from test_trymerge import mocked_gh_graphql
 from trymerge import GitHubPR
 from tryrebase import (
     additional_rebase_failure_info,
-    approve_pending_ci,
+    approve_rebased_ci,
     rebase_ghstack_onto,
     rebase_onto,
 )
@@ -235,9 +235,9 @@ class TestRebase(TestCase):
 
     @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
     @mock.patch("gitutils.GitRepo._run_git")
-    @mock.patch("gitutils.GitRepo.rev_parse", side_effect=mocked_rev_parse)
+    @mock.patch("gitutils.GitRepo.rev_parse")
     @mock.patch("tryrebase.gh_post_comment")
-    @mock.patch("tryrebase.approve_pending_ci")
+    @mock.patch("tryrebase.approve_rebased_ci")
     def test_rebase_approves_ci(
         self,
         mocked_approve: Any,
@@ -246,36 +246,110 @@ class TestRebase(TestCase):
         mocked_run_git: Any,
         mocked_gql: Any,
     ) -> None:
-        "Tests CI is approved only when the rebased head is approve_ci_sha"
-        mocked_run_git.side_effect = make_mocked_run_git()
+        "Tests CI of the rebased commit is approved against the original commit"
+        rebased = False
+
+        def run_git(*args: str) -> str:
+            nonlocal rebased
+            rebased = rebased or args[0] == "rebase"
+            return make_mocked_run_git()(*args)
+
+        def rev_parse(branch: str) -> str:
+            if branch != "pull/31093/head":
+                return branch
+            return "rebased sha" if rebased else "orig sha"
+
+        mocked_run_git.side_effect = run_git
+        mocked_rp.side_effect = rev_parse
         pr = GitHubPR("pytorch", "pytorch", 31093)
         repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
-        rebase_onto(pr, repo, MAIN_BRANCH, approve_ci_sha="other sha")
+        rebase_onto(pr, repo, MAIN_BRANCH, dry_run=True)
         mocked_approve.assert_not_called()
-        rebase_onto(pr, repo, MAIN_BRANCH, approve_ci_sha="pull/31093/head")
-        mocked_approve.assert_called_once_with(pr, "pull/31093/head")
+
+        rebased = False
+        mocked_approve.side_effect = RuntimeError("API error")
+        self.assertTrue(rebase_onto(pr, repo, MAIN_BRANCH))
+        mocked_approve.assert_called_once_with(pr, "orig sha", "rebased sha")
+
+    @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+    @mock.patch("tryrebase.time")
+    @mock.patch("tryrebase.gh_fetch_url")
+    @mock.patch("tryrebase.gh_fetch_json_dict")
+    def test_approve_rebased_ci(
+        self,
+        mocked_fetch_runs: Any,
+        mocked_fetch_url: Any,
+        mocked_time: Any,
+        mocked_gql: Any,
+    ) -> None:
+        "Tests held runs of the PR are approved once, across polls"
+        runs_url = "https://api.github.com/repos/pytorch/pytorch/actions/runs"
+
+        def run(id: int, conclusion: str | None = None, branch: str = "master") -> Any:
+            return {
+                "id": id,
+                "html_url": f"{runs_url}/{id}",
+                "head_branch": branch,
+                "head_repository": {"full_name": "mingxiaoh/pytorch"},
+                "conclusion": conclusion,
+                "created_at": "t0",
+                "updated_at": "t1",
+            }
+
+        mocked_fetch_runs.side_effect = [
+            {"workflow_runs": [run(1, "success"), run(2, "action_required", "x")]},
+            {"workflow_runs": [run(3)]},
+            {"workflow_runs": [run(3), run(4), run(5, branch="other")]},
+        ]
+        mocked_fetch_url.side_effect = [RuntimeError("API error"), None]
+        mocked_time.monotonic.side_effect = [0, 10, 60]
+        pr = GitHubPR("pytorch", "pytorch", 31093)
+        approve_rebased_ci(pr, "orig", "rebased")
+
+        params = {"event": "pull_request", "per_page": 100}
+        self.assertEqual(
+            mocked_fetch_runs.call_args_list,
+            [
+                mock.call(runs_url, {"head_sha": "orig", **params}),
+                *[
+                    mock.call(
+                        runs_url,
+                        {"head_sha": "rebased", **params, "status": "action_required"},
+                    )
+                ]
+                * 2,
+            ],
+        )
+        self.assertEqual(
+            [c.args[0] for c in mocked_fetch_url.call_args_list],
+            [f"{runs_url}/3/approve", f"{runs_url}/4/approve"],
+        )
 
     @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
     @mock.patch("tryrebase.gh_fetch_url")
     @mock.patch("tryrebase.gh_fetch_json_dict")
-    def test_approve_pending_ci(
+    def test_approve_rebased_ci_unapproved(
         self, mocked_fetch_runs: Any, mocked_fetch_url: Any, mocked_gql: Any
     ) -> None:
-        "Tests held runs of the commit are approved once"
-        runs_url = "https://api.github.com/repos/pytorch/pytorch/actions/runs"
-        mocked_fetch_runs.return_value = {
-            "workflow_runs": [{"id": 1, "html_url": f"{runs_url}/1"}]
-        }
+        "Tests nothing is approved unless CI of the original commit was approved"
         pr = GitHubPR("pytorch", "pytorch", 31093)
-        approve_pending_ci(pr, "abc", timeout=0.01, interval=0)
-        mocked_fetch_runs.assert_called_with(
-            runs_url,
-            {"head_sha": "abc", "status": "action_required", "per_page": 100},
-        )
-        self.assertGreater(mocked_fetch_runs.call_count, 1)
-        mocked_fetch_url.assert_called_once()
-        self.assertEqual(mocked_fetch_url.call_args[0][0], f"{runs_url}/1/approve")
-        self.assertEqual(mocked_fetch_url.call_args[1]["method"], "POST")
+        for runs in [
+            [],
+            [{"conclusion": "action_required"}],
+            [{"conclusion": "failure", "created_at": "t0", "updated_at": "t0"}],
+        ]:
+            for r in runs:
+                r.update(
+                    head_branch="master",
+                    head_repository={"full_name": "mingxiaoh/pytorch"},
+                    created_at=r.get("created_at", "t0"),
+                    updated_at=r.get("updated_at", "t1"),
+                )
+            mocked_fetch_runs.reset_mock()
+            mocked_fetch_runs.return_value = {"workflow_runs": runs}
+            approve_rebased_ci(pr, "orig", "rebased")
+            mocked_fetch_runs.assert_called_once()
+        mocked_fetch_url.assert_not_called()
 
 
 if __name__ == "__main__":

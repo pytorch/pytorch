@@ -66,6 +66,8 @@ if TYPE_CHECKING:
 MERGE_IN_PROGRESS_LABEL = "merging"
 MERGE_COMPLETE_LABEL = "merged"
 
+MERGEBOT_LOGIN = "pytorchmergebot"
+
 
 class JobCheckState(NamedTuple):
     name: str
@@ -419,6 +421,30 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 }
 """
 )
+
+GH_GET_PR_LAST_FORCE_PUSH_QUERY = """
+query ($owner: String!, $name: String!, $number: Int!) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      timelineItems(last: 1, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) {
+        nodes {
+          ... on HeadRefForcePushedEvent {
+            actor {
+              login
+            }
+            beforeCommit {
+              oid
+            }
+            afterCommit {
+              oid
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
 
 GH_GET_REPO_SUBMODULES = """
 query ($owner: String!, $name: String!) {
@@ -1181,6 +1207,24 @@ class GitHubPR:
         print(f"Did not find comment with id {comment_id} in the PR timeline")
         return None
 
+    def is_mergebot_rebase_of(self, sha: str) -> bool:
+        """Whether the PR head is mergebot's rebase of sha, e.g. by `merge -r`."""
+        rc = gh_graphql(
+            GH_GET_PR_LAST_FORCE_PUSH_QUERY,
+            name=self.project,
+            owner=self.org,
+            number=self.pr_num,
+        )
+        nodes = rc["data"]["repository"]["pullRequest"]["timelineItems"]["nodes"]
+        if not nodes:
+            return False
+        push = nodes[-1]
+        return (
+            (push["actor"] or {}).get("login") == MERGEBOT_LOGIN
+            and (push["beforeCommit"] or {}).get("oid") == sha
+            and (push["afterCommit"] or {}).get("oid") == self.last_commit_sha()
+        )
+
     def get_pr_creator_login(self) -> str:
         return cast(str, self.info["author"]["login"])
 
@@ -1682,6 +1726,11 @@ class GitHubPR:
 
         # Validate that this commit is the latest commit on the PR
         latest_commit = self.last_commit_sha()
+        if commit_to_merge != latest_commit and self.is_mergebot_rebase_of(
+            commit_to_merge
+        ):
+            print(f"Merging {latest_commit}, mergebot's rebase of {commit_to_merge}")
+            commit_to_merge = latest_commit
         if commit_to_merge != latest_commit:
             raise RuntimeError(
                 f"Commit {commit_to_merge} was HEAD when comment {comment_id} was posted "
