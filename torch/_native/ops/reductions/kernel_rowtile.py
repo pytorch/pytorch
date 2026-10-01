@@ -20,6 +20,7 @@ from .traits import WARP
 _compile = _L.compile_kernel
 _stream = _L.stream
 _CACHE = {}
+_INT32_LIMIT = 1 << 31
 
 
 # First matching B200 threads-per-row anchor wins; small rows pack without cross-warp merge.
@@ -511,6 +512,8 @@ def reduce_row_tile(
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
     M, N = x.shape
+    if M >= _INT32_LIMIT or N >= _INT32_LIMIT:
+        raise AssertionError(f"row reduction needs M and N < 2^31, got M={M}, N={N}")
     # leaf/combine serves every trait and N. The opt-in gate leaves partial stages and
     # explicit launch shapes on the default order; explicit requests raise below.
     if order not in (None, "linear", "inner_tree"):
