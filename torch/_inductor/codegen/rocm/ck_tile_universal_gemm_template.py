@@ -186,8 +186,32 @@ class CKTileGemmOperation:
         return asdict(self).items()
 
 
+# Block tiles offered to autotune, per architecture.
+#
+# gfx9 keeps the tiles this template has always emitted.
+_GFX9_BLOCK_TILES = ((256, 256, 32), (256, 256, 64))
+_GFX9_COMPV4_BLOCK_TILES = ((256, 256, 32),)
+
+# These come from an internal bf16 autotuning sweep.
+# The set is weighted towards `Mem`, which leads `CompV3` on most shapes and by
+# the wider margins.
+_GFX1250_BLOCK_TILES = (
+    (256, 256, 64),
+    (128, 128, 64),
+    (128, 128, 128),
+    (64, 64, 256),
+)
+# CompV4 asserts DoubleSmemBuffer and returns 2 * Policy::GetSmemSize(), so it
+# takes a single tile at half the staging footprint.
+_GFX1250_COMPV4_BLOCK_TILES = ((128, 128, 64),)
+
+
 @functools.cache
-def ops(warp_tile=(32, 32, 16)):
+def ops(
+    warp_tile=(32, 32, 16),
+    block_tiles=_GFX9_BLOCK_TILES,
+    compv4_block_tiles=_GFX9_COMPV4_BLOCK_TILES,
+):
     """
     Generate the supported instance dataclasses.
 
@@ -197,6 +221,11 @@ def ops(warp_tile=(32, 32, 16)):
     (unused) warp-tile divisibility check; ``emit_ck_instance`` renders the K as
     ``ck_tile::get_k_warp_tile<T, 16>()`` on gfx1250 so CK remains the device-side
     source of truth.
+
+    ``block_tiles`` and ``compv4_block_tiles`` are the (M, N, K) block tiles to
+    emit; CompV4 takes its own set because it double-buffers LDS. Both default to
+    the gfx9 sets, so callers that do not pass them get the historical instances.
+    All arguments must stay hashable -- this function is ``functools.cache``d.
     """
     import itertools
 
@@ -232,7 +261,7 @@ def ops(warp_tile=(32, 32, 16)):
             ("Row", "Col", "Row"),
         ]
         for (datatype_a, datatype_b, datatype_c) in gemm_dtypes
-        for (tile_m, tile_n, tile_k) in [(256, 256, 32), (256, 256, 64)]
+        for (tile_m, tile_n, tile_k) in block_tiles
         for (warp_m, warp_n, warp_k) in [(2, 2, 1)]
         for (warp_tile_m, warp_tile_n, warp_tile_k) in [(wt_m, wt_n, wt_k)]
         for m_is_padded in ["true", "false"]
@@ -270,9 +299,8 @@ def ops(warp_tile=(32, 32, 16)):
             ("Row", "Col", "Row"),
         ]
         for (datatype_a, datatype_b, datatype_c) in gemm_dtypes
-        for (tile_m, tile_n, tile_k) in [
-            (256, 256, 32)
-        ]  # half the tile size since it has double buffering
+        # half the tile size since it has double buffering
+        for (tile_m, tile_n, tile_k) in compv4_block_tiles
         for (warp_m, warp_n, warp_k) in [(2, 2, 1)]
         for (warp_tile_m, warp_tile_n, warp_tile_k) in [(wt_m, wt_n, wt_k)]
         for m_is_padded in ["true", "false"]
@@ -310,7 +338,7 @@ def ops(warp_tile=(32, 32, 16)):
             ("Row", "Col", "Row"),
         ]
         for (datatype_a, datatype_b, datatype_c) in gemm_dtypes
-        for (tile_m, tile_n, tile_k) in [(256, 256, 32), (256, 256, 64)]
+        for (tile_m, tile_n, tile_k) in block_tiles
         for (warp_m, warp_n, warp_k) in [(2, 2, 1)]
         for (warp_tile_m, warp_tile_n, warp_tile_k) in [(wt_m, wt_n, wt_k)]
         for m_is_padded in ["true", "false"]
@@ -973,8 +1001,19 @@ class CKTileGemmTemplate(CKTileTemplate):
         # stubs and are discarded at autotune, so we replace (not augment) the product.
         # K=32 is the concrete value get_k_warp_tile<T,16>() returns for fp16/bf16;
         # emit_ck_instance renders the actual C++ as the function call.
-        warp_tile = (16, 16, 32) if self._is_gfx1250() else (32, 32, 16)
-        instances = ops(warp_tile)
+        #
+        # The block tiles are selected on the same axis: gfx9 keeps its historical
+        # set, gfx1250 gets the tiles that measure well for the pipelines emitted
+        # here. See the block tile constants above ops().
+        if self._is_gfx1250():
+            warp_tile = (16, 16, 32)
+            block_tiles = _GFX1250_BLOCK_TILES
+            compv4_block_tiles = _GFX1250_COMPV4_BLOCK_TILES
+        else:
+            warp_tile = (32, 32, 16)
+            block_tiles = _GFX9_BLOCK_TILES
+            compv4_block_tiles = _GFX9_COMPV4_BLOCK_TILES
+        instances = ops(warp_tile, block_tiles, compv4_block_tiles)
         if not instances:
             raise AssertionError(
                 "No Composable Kernel Universal GEMM instances found. "
