@@ -422,6 +422,33 @@ class TestPruningNN(NNTestCase):
         self.assertEqual(len(container), 1)
         self.assertIsNone(getattr(container, "_tensor_name", None))
 
+    def test_pruning_container_multi_arg_construction(self):
+        # PruningContainer(m1, m2) feeds each method through
+        # add_pruning_method, so the same name rules apply: the first known
+        # name wins and a later mismatch is rejected.
+        p = prune.L1Unstructured(amount=2)
+        p._tensor_name = "weight"
+        q = prune.L1Unstructured(amount=2)
+        q._tensor_name = "weight"
+        container = prune.PruningContainer(p, q)
+        self.assertEqual(container._tensor_name, "weight")
+        self.assertEqual(len(container), 2)
+
+        # an unnamed method alongside a named one adopts the known name
+        container = prune.PruningContainer(prune.L1Unstructured(amount=2), p)
+        self.assertEqual(container._tensor_name, "weight")
+        self.assertEqual(len(container), 2)
+
+        r = prune.L1Unstructured(amount=2)
+        r._tensor_name = "bias"
+        with self.assertRaises(ValueError):
+            prune.PruningContainer(p, r)
+
+        # a single unnamed method goes through the same defensive path
+        container = prune.PruningContainer(prune.L1Unstructured(amount=2))
+        self.assertIsNone(container._tensor_name)
+        self.assertEqual(len(container), 1)
+
     def test_pruning_container_compute_mask(self):
         r"""Test `compute_mask` of pruning container with a known `t` and
         `default_mask`. Indirectly checks that Ln structured pruning is

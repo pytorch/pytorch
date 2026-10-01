@@ -283,7 +283,7 @@ class PruningContainer(BasePruningMethod):
             self.add_pruning_method(args)
 
         elif len(args) == 1:  # only 1 item in a tuple
-            self._tensor_name = args[0]._tensor_name
+            self._tensor_name = getattr(args[0], "_tensor_name", None)
 
             self.add_pruning_method(args[0])
         else:  # manual construction from list or other iterable (or no args)
