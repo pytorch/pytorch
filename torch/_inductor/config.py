@@ -321,7 +321,7 @@ epilogue_fusion_first = False
 epilogue_fusion_user_defined_triton_kernel = False
 
 # Enable experimental polyhedral fusion analysis.
-polyhedral_fusion = False
+polyhedral_fusion = True
 
 # enable pattern match+replace optimizations
 pattern_matcher = True
