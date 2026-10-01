@@ -3767,13 +3767,7 @@ def _coalescing_manager(
     if device:
         group._start_coalescing(device)
     cm = _CoalescingManager()
-    try:
-        yield cm
-    except BaseException:
-        _world.pg_coalesce_state.pop(group)
-        if device:
-            group._end_coalescing(device)
-        raise
+    yield cm
 
     work = None
     op_list = _world.pg_coalesce_state.pop(group)
@@ -3792,6 +3786,8 @@ def _coalescing_manager(
             )
         config = op_list[0].config
         if any(op.config != config for op in op_list):
+            if device:
+                group._end_coalescing(device)
             raise RuntimeError(
                 "Coalescing manager requires all collectives to use the same config"
             )
