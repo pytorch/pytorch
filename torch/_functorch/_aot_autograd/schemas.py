@@ -1198,6 +1198,9 @@ class AOTConfig:
     # This mode is used to track torch_fn metadata but can interfere with
     # certain tracing scenarios.
     _disable_torch_fn_metadata_mode: bool = False
+    # Debug names for the flat GraphModule inputs, indexed by PlainAOTInput.
+    # Deliberately excluded from CacheableAOTConfig: names do not affect execution.
+    original_input_names: tuple[str, ...] | None = None
 
     def to_cacheable(self) -> CacheableAOTConfig:
         return CacheableAOTConfig(

@@ -899,9 +899,9 @@ def normalize_placeholder_names(
     Context manager that normalizes the placeholder names in the graph module.
     This is used while generating a cache key for AOTAutogradCache, so that two graphs
     that are isomorphic when normalizing names can hit the same cache entry.
-    This is safe because nothing underneath AOTAutograd uses the node names on the
-    original dynamo graph: AOTAutograd re-traces with its own nodes, and guards are
-    in terms of original sources rather than placeholder names.
+    AOTAutograd uses the original names only for debugging: it re-traces with its
+    own nodes, and guards use original sources rather than placeholder names.
+    Cached graphs may retain the debug names from the first compilation.
     """
     # Standalone inductor: we're bypassing AOTAutogradCache anyway, so return the graph
     # as-is

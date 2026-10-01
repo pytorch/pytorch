@@ -9,7 +9,11 @@ from .common import CantChunk, ChunkingMeta
 
 
 def is_tangent_node(node: Node) -> bool:
-    return node.op == "placeholder" and "tangent" in node.name
+    return (
+        node.op == "placeholder"
+        and not node.name.startswith("primals_")
+        and "tangent" in node.name
+    )
 
 
 def get_args_of_node_type(node: Node) -> Sequence[Node]:
