@@ -491,6 +491,27 @@ class AbstractFaultToleranceTest:
         self._reconfigure(1401, handles)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
+    def test_reconfigure_after_failed_join_has_unique_handle(self):
+        if self.backend_name != "nccl2":
+            self.skipTest("nonblocking NCCL initialization behavior")
+        self._init_reconfigurable_pg()
+        handles = self._collect_handles("ft_failed_join_initial")
+
+        # Rank 1 fails as new rank 0 and has no communicator, like fresh rank 0.
+        if self.rank == 1:
+            with self.assertRaisesRegex(RuntimeError, "timed out"):
+                dist._reconfigure(
+                    1900,
+                    [handles[1], handles[2]],
+                    timeout=timedelta(milliseconds=500),
+                ).wait()
+        self._store_barrier("ft_failed_join_observed")
+
+        handles = self._collect_handles("ft_failed_join_current")
+        self.assertEqual(len(set(handles)), self.world_size)
+        self._reconfigure(1901, handles)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
 
 def _make_fault_tolerance_test_class(backend):
     class FaultToleranceTest(AbstractFaultToleranceTest, MultiProcessTestCase):

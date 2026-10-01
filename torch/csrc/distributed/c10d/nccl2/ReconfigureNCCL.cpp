@@ -72,10 +72,15 @@ NCCLReconfigureHandle parseNCCLReconfigureHandle(
   auto third = handle.find(':', second + 1);
   TORCH_CHECK(
       third != std::string::npos, "Invalid nccl2 reconfigure handle: ", handle);
+  auto fourth = handle.find(':', third + 1);
+  TORCH_CHECK(
+      fourth != std::string::npos,
+      "Invalid nccl2 reconfigure handle: ",
+      handle);
   return {
       .rank = std::stoi(handle.substr(first + 1, second - first - 1)),
       .uuid = std::stoll(handle.substr(second + 1, third - second - 1)),
-      .storeAddress = handle.substr(third + 1)};
+      .storeAddress = handle.substr(fourth + 1)};
 }
 
 std::vector<::c10d::ReconfigureHandle> getOrderedReconfigureHandles(
@@ -346,6 +351,8 @@ c10::intrusive_ptr<::c10d::Work> makeCompletedWork() {
       rank_,
       ":",
       reconfigure_uuid_,
+      ":",
+      reconfigure_instance_id_,
       ":",
       getStoreAddress(store_));
 }
