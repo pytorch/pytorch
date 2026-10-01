@@ -361,6 +361,25 @@ class AbstractFaultToleranceTest:
             self.backend.set_timeout(timedelta(seconds=30))
             self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
+    def test_shrink_with_pending_work(self):
+        # Rank 0's unmatched collective is in flight when the survivors shrink
+        # away the last rank.
+        handles = self._create_reconfigured_pg("ft_shrink_pending", 1800)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+        last = self.world_size - 1
+        if self.rank == last:
+            self._store_barrier("ft_shrink_pending_done")
+            return
+        self.backend.set_timeout(timedelta(milliseconds=100))
+        work = None
+        if self.rank == 0:
+            work = dist.all_reduce(torch.ones(4, device=self.device), async_op=True)
+        self._reconfigure(1801, handles[:last])
+        del work
+        self.backend.set_timeout(timedelta(seconds=30))
+        self._assert_all_reduce_sum(sum(range(1, self.world_size)))
+        self._store_barrier("ft_shrink_pending_done")
+
     def test_reconfigure_rejects_reused_uuid(self):
         self._init_reconfigurable_pg()
         if self.backend_name != "nccl2":
