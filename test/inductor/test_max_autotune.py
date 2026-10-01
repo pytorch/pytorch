@@ -626,7 +626,6 @@ class TestMaxAutotune(TestCase):
         self.assertIn("RANK3_TMA_OUTPUT : tl.constexpr = True", codes[0])
         self.assertIn("make_tensor_descriptor(out_ptr0", codes[0])
 
-
     @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
     @unittest.skipUnless(meta_ws_enabled(), "2CTA Blackwell BMM requires MetaWS")
     def test_blackwell_bmm_template_2cta_rejects_m_tail(self) -> None:
