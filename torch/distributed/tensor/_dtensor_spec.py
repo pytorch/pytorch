@@ -8,6 +8,7 @@ from typing import Any, cast, NamedTuple
 import torch
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _is_block_shard,
     _is_shard_like,
     _MaskPartial,
     _StridedShard,
@@ -611,7 +612,7 @@ class DTensorSpec:
     def num_shards(self) -> int:
         num_shards = 1
         for i, placement in enumerate(self.placements):
-            if _is_shard_like(placement):
+            if _is_shard_like(placement) or _is_block_shard(placement):
                 num_shards *= self.mesh.size(i)
         return num_shards
 
@@ -746,9 +747,12 @@ class DTensorSpec:
 
     def is_sharded(self) -> bool:
         """
-        return True if the current DTensorSpec uses Shard() or _StridedShard() placement on any mesh dims (devices)
+        return True if the current DTensorSpec uses Shard(), _StridedShard(), or BlockShard() placement on any mesh dims (devices)
         """
-        return any(_is_shard_like(placement) for placement in self.placements)
+        return any(
+            _is_shard_like(placement) or _is_block_shard(placement)
+            for placement in self.placements
+        )
 
     def shallow_copy_with_tensor_meta(
         self, tensor_meta: TensorMeta | None
