@@ -272,6 +272,8 @@ def _move_overlap_nodes(
         for ag_start in sorted_starts:
             if node_positions[ag_start] < ag_wait_pos:
                 continue
+            # Dependencies already before the wait are early enough and should
+            # stay in place rather than moving past their existing users.
             for node in _collect_nodes_must_be_before(
                 ag_start, node_positions, ag_wait_pos
             ):
