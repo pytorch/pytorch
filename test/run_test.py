@@ -726,7 +726,11 @@ def run_test(
             # binary files under build/bin that are not C++ test at the time of
             # this writing have been excluded and new ones should be added to
             # the list of exclusions in tools/testing/discover_tests.py
-            ret_code = 0 if ret_code == 5 else ret_code
+            # A C++ test that collects nothing is a failure: pytest-cpp skips a
+            # binary whose --help fails, e.g. on a missing shared library, and
+            # under xdist that is reported as 5 rather than 4.
+            if ret_code == 5 and not is_cpp_test:
+                ret_code = 0
 
     if options.pipe_logs and print_log:
         handle_log_file(
@@ -2230,8 +2234,11 @@ def run_tests(
             ):
                 raise RuntimeError(failure.message + keep_going_message)
 
-        # Run tests marked as serial first
+        # Run tests marked as serial first. pytest-cpp items carry no markers,
+        # so this pass would collect nothing from a C++ test.
         for test in selected_tests_parallel:
+            if _is_cpp_test(test.name):
+                continue
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
