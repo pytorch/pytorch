@@ -1894,7 +1894,11 @@ static void linalg_solve_triangular_mps_impl(const Tensor& A,
   TORCH_CHECK(scalar_type == kFloat || scalar_type == kComplexFloat,
               "linalg.solve_triangular(): MPS only supports float32 and complex64, got ",
               scalar_type);
-  TORCH_CHECK(A.scalar_type() == B.scalar_type(), "linalg.solve_triangular(): A and B must have the same dtype");
+  TORCH_CHECK(c10::canCast(B.scalar_type(), scalar_type),
+              "linalg.solve_triangular(): can't cast B of dtype ",
+              B.scalar_type(),
+              " to A's dtype ",
+              scalar_type);
   // MPS ops get no generated device check and the solvers write into out= directly,
   // so its device and dtype have to be validated here.
   TORCH_CHECK(out.device() == A.device(),
@@ -1954,7 +1958,8 @@ static void linalg_solve_triangular_mps_impl(const Tensor& A,
   // in place: the blocked path works in place, and the kernel reads b[t] before
   // writing x[t] at every step, taking everything else from threadgroup memory.
   Tensor Brhs = left ? B_t : B_t.mT();
-  if (!is_direct(Brhs)) {
+  // Like on CPU/CUDA, a B of another dtype is converted to A's here; autocast relies on it in backward.
+  if (!is_direct(Brhs) || Brhs.scalar_type() != scalar_type) {
     X.copy_(Brhs);
     Brhs = X;
   }

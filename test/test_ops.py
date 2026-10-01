@@ -2952,23 +2952,6 @@ fake_backward_mps_xfails = {
     )
 }
 
-# Under autocast the backward of these ops calls linalg.solve_triangular with
-# mismatched dtypes on MPS
-fake_autocast_backward_mps_xfails = {
-    xfail(name, device_type="mps")
-    for name in (
-        "linalg.cholesky",
-        "linalg.cholesky_ex",
-        "linalg.lu",
-        "linalg.lu_factor",
-        "linalg.lu_factor_ex",
-        "linalg.lu_solve",
-        "linalg.qr",
-        "lu",
-        "lu_solve",
-    )
-}
-
 
 @unMarkDynamoStrictTest
 class TestFakeTensor(TestCase):
@@ -3234,10 +3217,7 @@ class TestFakeTensor(TestCase):
     @onlyAccelerator
     @ops([op for op in op_db if op.supports_autograd], allowed_dtypes=(torch.float,))
     @skipOps(
-        fake_backward_xfails
-        | fake_autocast_backward_xfails
-        | fake_backward_mps_xfails
-        | fake_autocast_backward_mps_xfails
+        fake_backward_xfails | fake_autocast_backward_xfails | fake_backward_mps_xfails
     )
     def test_fake_crossref_backward_amp(self, device, dtype, op):
         self._test_fake_crossref_helper(

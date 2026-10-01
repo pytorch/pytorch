@@ -757,7 +757,9 @@ METAL_FUNC bool apply_triangular_inverse(
 // MPP tensors need a unit stride along their first dimension, so a
 // column-major x is produced as x^T = b^T inv(L)^T, whose tiles are row-major.
 // The matrix inputs are then (col, row) of x and the operands swap sides.
-template <uint n, bool general, bool x_col_major>
+// b is loaded in its own layout and transposed by the matmul when it differs
+// from x's.
+template <uint n, bool general, bool x_col_major, bool b_col_major>
 METAL_FUNC bool apply_triangular_inverse_mpp(
     threadgroup const float* inverse,
     device const float* b,
@@ -769,21 +771,20 @@ METAL_FUNC bool apply_triangular_inverse_mpp(
   bool nonfinite = false;
   constexpr uint mpp_rows = kTriangularSolveMppRows;
   constexpr uint mpp_cols = kTriangularSolveMppCols;
+  constexpr bool transpose_b = x_col_major != b_col_major;
   constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
       x_col_major ? mpp_cols : mpp_rows,
       x_col_major ? mpp_rows : mpp_cols,
       mpp_rows,
-      false,
-      false,
+      x_col_major && transpose_b,
+      !x_col_major && transpose_b,
       false,
       mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate);
   mpp::tensor_ops::matmul2d<desc, execution_simdgroup> op;
   const uint col_tiles = c10::metal::ceil_div(p.k, mpp_cols);
   constexpr uint row_tiles = n / mpp_rows;
-  // Leading dimension of x, and of b when it goes through a tensor load, which
-  // needs its layout to match x.
-  const int ld = x_col_major ? int(n) : int(p.k);
-  const bool load_b = !reverse && p.b_col_major == x_col_major;
+  const int x_ld = x_col_major ? int(n) : int(p.k);
+  const int b_ld = b_col_major ? int(n) : int(p.k);
   for (uint tile = sg; tile < row_tiles * col_tiles; tile += groups) {
     // Same traversal as the simdgroup_matrix overload, but a pass spans
     // groups / row_tiles column tiles, so rotate by the pass, not the column.
@@ -793,12 +794,13 @@ METAL_FUNC bool apply_triangular_inverse_mpp(
         mpp_rows;
     const uint col = col_tile * mpp_cols;
     const int cols = min(mpp_cols, p.k - col);
-    const auto extents = x_col_major ? dextents<int32_t, 2>(mpp_rows, cols)
-                                     : dextents<int32_t, 2>(cols, mpp_rows);
+    // (unit-stride, outer) extents of a row block by column block tile
+    const auto row_inner = dextents<int32_t, 2>(mpp_rows, cols);
+    const auto col_inner = dextents<int32_t, 2>(cols, mpp_rows);
     tensor<device float, dextents<int32_t, 2>, tensor_inline> out(
         x + rhs_offset(row, col, p, x_col_major),
-        extents,
-        array<int32_t, 2>{1, ld});
+        x_col_major ? row_inner : col_inner,
+        array<int32_t, 2>{1, x_ld});
     auto lhs =
         op.template get_left_input_cooperative_tensor<float, float, float>();
     auto rhs =
@@ -835,21 +837,21 @@ METAL_FUNC bool apply_triangular_inverse_mpp(
         const uint c = j + idx[x_col_major ? 1 : 0];
         inv_op[i] = r >= c ? inverse[triangular_elem_offset(r, c)] : 0;
       }
-      if (load_b) {
+      if (!reverse) {
         tensor<device float, dextents<int32_t, 2>, tensor_inline> in(
-            const_cast<device float*>(b + rhs_offset(j, col, p, p.b_col_major)),
-            extents,
-            array<int32_t, 2>{1, ld});
+            const_cast<device float*>(b + rhs_offset(j, col, p, b_col_major)),
+            b_col_major ? row_inner : col_inner,
+            array<int32_t, 2>{1, b_ld});
         b_op.load(in);
       } else {
 #pragma unroll
         for (uint16_t i = 0; i < b_op.get_capacity(); ++i) {
+          // Indices follow the stored layout, which is b's.
           auto idx = b_op.get_multidimensional_index(i);
-          const uint r = j + idx[x_col_major ? 0 : 1];
-          const uint c = idx[x_col_major ? 1 : 0];
+          const uint r = j + idx[b_col_major ? 0 : 1];
+          const uint c = idx[b_col_major ? 1 : 0];
           b_op[i] = int(c) < cols
-              ? b[rhs_offset(
-                    reverse ? n - 1 - r : r, col + c, p, p.b_col_major)]
+              ? b[rhs_offset(reverse ? n - 1 - r : r, col + c, p, b_col_major)]
               : 0;
         }
       }
@@ -885,9 +887,17 @@ METAL_FUNC bool apply_triangular_inverse(
     constant TriangularSolveParams& p,
     uint,
     uint sg) {
-  return p.x_col_major
-      ? apply_triangular_inverse_mpp<n, general, true>(inverse, b, x, p, sg)
-      : apply_triangular_inverse_mpp<n, general, false>(inverse, b, x, p, sg);
+  if (p.x_col_major) {
+    return p.b_col_major
+        ? apply_triangular_inverse_mpp<n, general, true, true>(
+              inverse, b, x, p, sg)
+        : apply_triangular_inverse_mpp<n, general, true, false>(
+              inverse, b, x, p, sg);
+  }
+  return p.b_col_major ? apply_triangular_inverse_mpp<n, general, false, true>(
+                             inverse, b, x, p, sg)
+                       : apply_triangular_inverse_mpp<n, general, false, false>(
+                             inverse, b, x, p, sg);
 }
 #endif
 
