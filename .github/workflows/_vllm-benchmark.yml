@@ -67,7 +67,9 @@ jobs:
       - name: Fix workspace permissions
         shell: bash
         run: |
-          sudo chmod -R 777 "$GITHUB_WORKSPACE"
+          if sudo -n true 2>/dev/null; then
+            sudo chmod -R 777 "$GITHUB_WORKSPACE"
+          fi
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Checkout PyTorch
