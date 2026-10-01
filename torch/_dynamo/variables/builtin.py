@@ -74,6 +74,7 @@ from ..utils import (
     dict_methods,
     extract_fake_example_value,
     get_fake_value,
+    has_torch_function,
     is_tensor_getset_descriptor,
     istype,
     no_keywords,
@@ -106,7 +107,13 @@ from .dicts import (
     OrderedDictVariable,
 )
 from .hashable import is_hashable
-from .lists import BaseListVariable, ListVariable, TupleIteratorVariable, TupleVariable
+from .lists import (
+    BaseListVariable,
+    ByteArrayVariable,
+    ListVariable,
+    TupleIteratorVariable,
+    TupleVariable,
+)
 from .misc import CellVariable, NullVariable, StringFormatVariable
 from .object_protocol import (
     _NO_DEFAULT,
@@ -286,8 +293,8 @@ _MISSING_SENTINEL = object()
 
 # Runtime-raising ops (e.g. truediv) excluded: recompute escapes traced handlers
 _COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY: dict[int, frozenset[Callable[..., Any]]] = {
-    # invert is excluded: SymNodeVariable has no nb_invert_impl for symbolic realization
-    1: frozenset([operator.neg, operator.pos, operator.abs, operator.not_]),
+    # invert/str excluded: SymNodeVariable lacks nb_invert_impl/tp_repr_impl
+    1: frozenset([operator.neg, operator.pos, operator.abs, operator.not_, len, bool]),
     2: frozenset(
         [
             operator.add,
@@ -302,6 +309,8 @@ _COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY: dict[int, frozenset[Callable[..., Any]]] =
             operator.le,
             operator.gt,
             operator.ge,
+            min,
+            max,
         ]
     ),
 }
@@ -490,10 +499,11 @@ class BaseBuiltinVariable(VariableTracker):
         # to super().
         fn = self.as_python_constant()
         source = self.source and AttrSource(self.source, name)
-        attr = getattr(fn, name, None)
-        return variables.GetAttrVariable(
-            self, name, py_type=type(attr) if attr is not None else None, source=source
-        )
+        try:
+            attr = getattr(fn, name)
+        except AttributeError as e:
+            raise_observed_exception(AttributeError, tx, args=list(e.args))
+        return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslatorBase", name: str
@@ -1681,19 +1691,44 @@ class BuiltinVariable(BaseBuiltinVariable):
         if kwargs and not self.tensor_args(*args, *kwargs.values()):
             return None
 
+        from .torch_function import (
+            can_dispatch_torch_function,
+            dispatch_torch_function,
+            TensorWithTFOverrideVariable,
+        )
+
+        fn = self.fn
+
+        def use_numpy_operator() -> bool:
+            # NumpyNdarrayVariable inherits from TensorVariable for implementation
+            # sharing, but ndarray-only operators should keep NumPy semantics.
+            return check_numpy_ndarray_args(args, kwargs) and not any(
+                type(arg) in (TensorVariable, TensorWithTFOverrideVariable)
+                for arg in itertools.chain(args, kwargs.values())
+            )
+
         # insert handling for torch function here
         from .builder import SourcelessBuilder
-        from .torch_function import can_dispatch_torch_function, dispatch_torch_function
 
         global BUILTIN_TO_TENSOR_RFN_MAP, BUILTIN_TO_TENSOR_FN_MAP
-        if can_dispatch_torch_function(tx, args, kwargs):
+        skip_torch_function_for_numpy = use_numpy_operator() and not any(
+            has_torch_function(arg) for arg in itertools.chain(args, kwargs.values())
+        )
+        if (
+            can_dispatch_torch_function(tx, args, kwargs)
+            and not skip_torch_function_for_numpy
+        ):
             # Only remap the fn to tensor methods if we aren't exporting
             # export serde does not handle method descriptors today
             if not tx.export:
                 # Ensure the builtin maps are populated before accessing them
                 populate_builtin_to_tensor_fn_map()
                 # Use sourceless builder, we built the map ourselves
-                if not args[0].is_tensor():
+                # NumpyNdarrayVariable is a TensorVariable subclass, but eager
+                # ndarray operands defer to the tensor's reflected method.
+                if not args[0].is_tensor() or isinstance(
+                    args[0], variables.NumpyNdarrayVariable
+                ):
                     if self.fn in BUILTIN_TO_TENSOR_RFN_MAP:
                         func = BUILTIN_TO_TENSOR_RFN_MAP[self.fn]
                     else:
@@ -1712,7 +1747,6 @@ class BuiltinVariable(BaseBuiltinVariable):
 
             return dispatch_torch_function(tx, fn_var, args, kwargs)
 
-        fn = self.fn
         try:
             # Constant fold for constant tensor and python constants
             if self.python_and_tensor_constant_only(*args, **kwargs):
@@ -1759,9 +1793,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             #   We prefer the tensor op whenever there are tensors involved
             # NB: Use exact type check here - NumpyNdarrayVariable is a TensorVariable
             # subclass but should NOT trigger the tensor path
-            if check_numpy_ndarray_args(args, kwargs) and not any(
-                type(arg) is TensorVariable for arg in args
-            ):
+            if use_numpy_operator():
                 proxy = tx.output.create_proxy(
                     "call_function",
                     numpy_operator_wrapper(fn),
@@ -2991,10 +3023,11 @@ class BuiltinVariable(BaseBuiltinVariable):
                 raise_observed_exception(AttributeError, tx)
             if not callable(value):
                 return VariableTracker.build(tx, value, source)
-        attr = getattr(self.fn, name, None)
-        return variables.GetAttrVariable(
-            self, name, py_type=type(attr) if attr is not None else None, source=source
-        )
+        try:
+            attr = getattr(self.fn, name)
+        except AttributeError as e:
+            raise_observed_exception(AttributeError, tx, args=list(e.args))
+        return variables.GetAttrVariable(self, name, py_type=type(attr), source=source)
 
     def call_delattr(
         self,
@@ -4121,6 +4154,75 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                 )
 
         return super().call_method(tx, name, args, kwargs)
+
+
+class ByteArrayBuiltinVariable(BaseBuiltinVariable):
+    """Variable tracker for the `bytearray` builtin constructor."""
+
+    _fn = bytearray
+
+    def __init__(self, value: type = bytearray, **kwargs: Any) -> None:
+        if value is not bytearray:
+            raise AssertionError(
+                f"ByteArrayBuiltinVariable value must be bytearray, got {value}"
+            )
+        super().__init__(**kwargs)
+
+    def __repr__(self) -> str:
+        return "ByteArrayBuiltinVariable()"
+
+    def _constant_fold_constructor(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> ByteArrayVariable:
+        all_args = [a.as_python_constant() for a in args]
+        all_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        try:
+            result = bytearray(*all_args, **all_kwargs)
+        except TypeError as e:
+            raise_type_error(tx, str(e))
+        except ValueError as e:
+            raise_observed_exception(ValueError, tx, args=list(e.args))
+        return ByteArrayVariable(result, mutation_type=ValueMutationNew())
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if len(args) == 0 and not kwargs:
+            return ByteArrayVariable(bytearray(), mutation_type=ValueMutationNew())
+
+        if kwargs or len(args) >= 2:
+            if not all(a.is_python_constant() for a in args) or not all(
+                v.is_python_constant() for v in kwargs.values()
+            ):
+                raise_type_error(tx, "bytearray() takes only constant arguments")
+            return self._constant_fold_constructor(tx, args, kwargs)
+
+        arg = args[0]
+
+        if arg.is_python_constant():
+            return self._constant_fold_constructor(tx, args, kwargs)
+
+        try:
+            unpacked = arg.unpack_var_sequence(tx)
+            values = [v.as_python_constant() for v in unpacked]
+            return ByteArrayVariable(
+                bytearray(values), mutation_type=ValueMutationNew()
+            )
+        except NotImplementedError:
+            pass
+
+        unimplemented(
+            gb_type="bytearray constructor",
+            context=f"arg type: {type(arg).__name__}",
+            explanation="Dynamo cannot trace bytearray() with this argument type.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
 
 
 # pyrefly: ignore [deprecated]

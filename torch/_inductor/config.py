@@ -326,6 +326,10 @@ pattern_matcher = True
 # set to True to enable the back-to-back GEMM pass
 b2b_gemm_pass = False
 
+# fuse shared var/std reduction computations in the post-grad pattern matcher.
+# opt-in until scheduler-level dedup is implemented.
+var_std_reduction_dedup = False
+
 # register custom graph optimization pass hook. so far, pre/post passes are
 # only applied before/after pattern_matcher in post_grad_passes.
 #
@@ -705,8 +709,8 @@ bmm_shared_a: bool = Config(
 # heuristic-ranked configs to profile per kernel family in max_autotune.
 # Explicitly supplemental, shape-scoped configs may be added after this cap.
 # Set to 0, None, or env var "none"/"all" to tune all configs.
-def _nvgemm_max_profiling_configs_default(env_name: str, default: str) -> int | None:
-    env_val = os.environ.get(env_name, default)
+def _nvgemm_max_profiling_configs_default() -> int | None:
+    env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "10")
     if env_val.lower() in ("none", "all"):
         return None
     return int(env_val)
@@ -715,9 +719,7 @@ def _nvgemm_max_profiling_configs_default(env_name: str, default: str) -> int | 
 # BF16 medium-M shapes can require a deeper heuristic pool; a sweep over
 # GDN2/attention/MoE and FLUX shapes found that 10 recovered nearly all of the
 # available performance while lower caps lost up to 11%.
-nvgemm_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default(
-    "TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "10"
-)
+nvgemm_max_profiling_configs: int | None = _nvgemm_max_profiling_configs_default()
 
 # When enabled, adds supplement kernel configs that nvMatmulHeuristics
 # doesn't explore (certain tile/cluster combos that empirically beat
