@@ -133,14 +133,12 @@ try:
     from .huggingface_llm_models import (
         HF_LLM_MODELS,
         PREFILL_MODELS,
-        TextGenerationBenchmark,
         TextGenerationPrefillModel,
     )
 except ImportError:
     from huggingface_llm_models import (
         HF_LLM_MODELS,
         PREFILL_MODELS,
-        TextGenerationBenchmark,
         TextGenerationPrefillModel,
     )
 
@@ -349,7 +347,6 @@ class HuggingfaceRunner(BenchmarkRunner):
         super().__init__()
         self.suite_name = "huggingface"
         self.hf_llm = False
-        self.hf_inference_mode = None
 
     @property
     def _config(self):
@@ -423,8 +420,10 @@ class HuggingfaceRunner(BenchmarkRunner):
 
     def validate_args(self, args):
         if args.hf_inference_mode != "prefill":
+            if args.prompt_length is not None:
+                raise ValueError("--prompt-length requires --hf-inference-mode=prefill")
             return
-        if args.prompt_length <= 0:
+        if args.prompt_length is not None and args.prompt_length <= 0:
             raise ValueError(
                 f"--prompt-length must be positive, got {args.prompt_length}"
             )
@@ -475,14 +474,14 @@ class HuggingfaceRunner(BenchmarkRunner):
             )
 
     def get_performance_workload(self):
-        if self.hf_inference_mode == "prefill":
+        if self.args.hf_inference_mode == "prefill":
             return self.prefill_forward, self.setup_prefill
         if self.hf_llm:
             return self.generate, None
         return super().get_performance_workload()
 
     def use_model_forward_for_compilation(self):
-        return self.hf_inference_mode == "prefill"
+        return self.args.hf_inference_mode == "prefill"
 
     def setup_prefill(self, model, example_inputs):
         torch.compiler.cudagraph_mark_step_begin()
@@ -534,17 +533,14 @@ class HuggingfaceRunner(BenchmarkRunner):
         # Get model and example inputs
         if model_name in HF_LLM_MODELS:
             benchmark_cls = HF_LLM_MODELS[model_name]
-            self.hf_inference_mode = self.args.hf_inference_mode
-            if (
-                benchmark_cls is TextGenerationBenchmark
-                and self.hf_inference_mode == "prefill"
-            ):
+            if self.args.hf_inference_mode == "prefill":
+                prompt_length = self.args.prompt_length or benchmark_cls.INPUT_LENGTH
                 model, example_inputs = benchmark_cls.get_model_and_inputs(
                     model_name,
                     device,
                     batch_size=batch_size,
-                    prompt_length=self.args.prompt_length,
-                    inference_mode=self.hf_inference_mode,
+                    prompt_length=prompt_length,
+                    inference_mode="prefill",
                 )
                 self.model_iter_fn = self.prefill
             else:
@@ -559,7 +555,6 @@ class HuggingfaceRunner(BenchmarkRunner):
 
         else:
             self.hf_llm = False
-            self.hf_inference_mode = None
 
             model_cls, config = self._get_model_cls_and_config(model_name)
             model = self._download_model(model_name)

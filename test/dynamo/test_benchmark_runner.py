@@ -2,9 +2,12 @@
 
 import collections
 import contextlib
+import csv
 import functools
 import importlib.metadata
+import os
 import sys
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -21,17 +24,18 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT))
+# Bind the namespace package explicitly: some CI images install pysbd, whose wheel
+# ships a regular top-level `benchmarks` package that would shadow the repo's.
+sys.modules["benchmarks"] = types.ModuleType("benchmarks")
+sys.modules["benchmarks"].__path__ = [str(REPO_ROOT / "benchmarks")]
 from benchmarks.dynamo import common
-
-
-sys.path.remove(str(REPO_ROOT))
 
 
 requires_distributed = unittest.skipIf(
@@ -67,6 +71,7 @@ class BenchmarkRunnerTests(TestCase):
         self.assertEqual(elapsed, 20.0)
         self.assertEqual(calls, {"setup": 2, "forward": 2})
 
+    @skipIfTorchDynamo("speedup_experiment calls set_stance")
     @parametrize("mode", ("generate", "prefill"))
     def test_prefill_timing_units_and_setup(self, mode):
         args = common.parse_args(
@@ -76,7 +81,6 @@ class BenchmarkRunnerTests(TestCase):
                 "--backend=eager",
                 f"--hf-inference-mode={mode}",
                 "--iterations-per-run=4",
-                "--prompt-length=3",
                 "--repeat=1",
                 "--export-profiler-trace",
             ]
@@ -87,6 +91,7 @@ class BenchmarkRunnerTests(TestCase):
         setup = mock.Mock() if mode == "prefill" else None
         model = torch.nn.Identity()
         model.name = "Qwen/Qwen3-0.6B"
+        inputs = {"input_ids": torch.zeros(2, 3, dtype=torch.long)}
         with (
             mock.patch.object(common, "current_batch_size", 2),
             mock.patch.object(common, "output_filename", "results.csv"),
@@ -103,7 +108,7 @@ class BenchmarkRunnerTests(TestCase):
             ),
         ):
             common.speedup_experiment(
-                args, mock.Mock(), model, (), hf_llm=True, setup_fn=setup
+                args, mock.Mock(), model, inputs, hf_llm=True, setup_fn=setup
             )
         _, headers, values = write.call_args_list[0].args
         row = dict(zip(headers, values))
@@ -136,6 +141,13 @@ class BenchmarkRunnerTests(TestCase):
         self.assertIs(policy.func, size_based_auto_wrap_policy)
         self.assertEqual(policy.keywords["min_num_params"], int(1e5))
 
+    @skipIfTorchDynamo("parse_args is slow to trace")
+    @parametrize("flag", ("--hf-inference-mode=prefill", "--prompt-length=8"))
+    def test_prefill_options_require_huggingface(self, flag):
+        args = common.parse_args(["--performance", "--inference", flag])
+        with self.assertRaisesRegex(ValueError, "require the huggingface suite"):
+            common.BenchmarkRunner().validate_args(args)
+
     @requires_distributed
     def test_diffusion_fsdp_policy_imports_current_model_class(self):
         from torch.distributed.fsdp.wrap import ModuleWrapPolicy
@@ -155,6 +167,7 @@ class BenchmarkRunnerTests(TestCase):
 
 
 class TestHuggingFaceLLMPerformance(TestCase):
+    @skipIfTorchDynamo("run_performance_test calls set_stance")
     @parametrize("prefill", (False, True))
     def test_compilation_latency_uses_matched_work(self, prefill):
         calls = collections.Counter()
@@ -231,6 +244,7 @@ class TestHuggingFaceLLMPerformance(TestCase):
         self.assertEqual(result["dynamo_stats"], {"calls_captured": 5})
 
 
+@skipIfTorchDynamo("drives the benchmark harness, which calls set_stance")
 class HuggingFacePrefillTestCase(TestCase):
     def setUp(self):
         super().setUp()
@@ -298,6 +312,22 @@ class HuggingFacePrefillTestCase(TestCase):
         model = model_cls(config).eval().to(device=device, dtype=dtype)
         return TextGenerationPrefillModel(model, 2, 4, 11).eval()
 
+    @contextlib.contextmanager
+    def _mock_pretrained(self):
+        from benchmarks.dynamo import huggingface_llm_models as llm
+
+        model = self._make_model("Llama", "cpu").model
+        tokenizer = types.SimpleNamespace(vocab_size=32, eos_token_id=2)
+        with (
+            mock.patch.object(
+                llm.AutoTokenizer, "from_pretrained", return_value=tokenizer
+            ),
+            mock.patch.object(
+                llm.AutoModelForCausalLM, "from_pretrained", return_value=model
+            ),
+        ):
+            yield
+
 
 class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
     @parametrize(
@@ -343,28 +373,76 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         with self.assertRaisesRegex(ValueError, "does not support openai/whisper-tiny"):
             runner.validate_args(args)
 
-    def test_requested_input_dimensions(self):
-        from benchmarks.dynamo import huggingface_llm_models as llm
-
+    def test_prompt_length_requires_prefill(self):
         runner = self.huggingface.HuggingfaceRunner()
-        runner.args = self._runner_args("--prompt-length=7", "--batch-size=3")
-        model = self._make_model("Llama", "cpu").model
-        tokenizer = types.SimpleNamespace(vocab_size=32, eos_token_id=2)
-        with (
-            mock.patch.object(
-                llm.AutoTokenizer, "from_pretrained", return_value=tokenizer
-            ),
-            mock.patch.object(
-                llm.AutoModelForCausalLM, "from_pretrained", return_value=model
-            ),
-            mock.patch.object(runner, "validate_model"),
-        ):
+        args = common.parse_args(["--performance", "--inference", "--prompt-length=8"])
+        with self.assertRaisesRegex(ValueError, "requires --hf-inference-mode=prefill"):
+            runner.validate_args(args)
+
+    @parametrize("prompt_length", (None, 7))
+    def test_requested_input_dimensions(self, prompt_length):
+        runner = self.huggingface.HuggingfaceRunner()
+        extra = () if prompt_length is None else (f"--prompt-length={prompt_length}",)
+        runner.args = self._runner_args("--batch-size=3", *extra)
+        with self._mock_pretrained(), mock.patch.object(runner, "validate_model"):
             _, _, model, inputs, batch_size = runner.load_model(
                 "cpu", "Qwen/Qwen3-0.6B", batch_size=3
             )
-        self.assertEqual(inputs["input_ids"].shape, (3, 7))
+        expected_length = prompt_length or 1000
+        self.assertEqual(inputs["input_ids"].shape, (3, expected_length))
         self.assertEqual(batch_size, 3)
-        self.assertEqual(model.cache_capacity, 2006)
+        self.assertEqual(model.cache_capacity, expected_length + 1999)
+
+    def test_prompt_must_fit_generation_context(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        runner.args = self._runner_args("--prompt-length=2097")
+        with (
+            self._mock_pretrained(),
+            self.assertRaisesRegex(ValueError, "exceeds .* context length 4096"),
+        ):
+            runner.load_model("cpu", "Qwen/Qwen3-0.6B", batch_size=1)
+
+    def test_prefill_performance_run(self):
+        runner = self.huggingface.HuggingfaceRunner()
+        original_forward = runner.prefill_forward
+        cache_lengths = []
+
+        def prefill_forward(model, example_inputs, collect_outputs=True):
+            before = int(model.cache.get_seq_length())
+            result = original_forward(model, example_inputs, collect_outputs)
+            cache_lengths.append((before, int(model.cache.get_seq_length())))
+            return result
+
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            torch._dynamo.config.patch(base_dir=tmp),
+            # run() rebinds module globals such as output_filename and current_name.
+            mock.patch.dict(vars(common)),
+            mock.patch.object(runner, "prefill_forward", prefill_forward),
+            self._mock_pretrained(),
+        ):
+            args = self._runner_args(
+                "--only=Qwen/Qwen3-0.6B",
+                "--batch-size=2",
+                "--prompt-length=7",
+                "--repeat=1",
+                "--iterations-per-run=2",
+                "--export-profiler-trace",
+            )
+            common.run(runner, args)
+            self.assertTrue(
+                os.path.exists(os.path.join(tmp, "eager_prefill_Qwen_Qwen3-0.6B.json"))
+            )
+            with open(os.path.join(tmp, "speedup_eager_prefill.csv")) as f:
+                (row,) = csv.DictReader(f)
+        # validate_model, eager and compiled warmup, timed runs, and profiled runs.
+        self.assertEqual(cache_lengths, [(0, 7)] * 15)
+        self.assertEqual(row["name"], "Qwen/Qwen3-0.6B")
+        self.assertEqual(int(row["batch_size"]), 2)
+        tokens_per_second = 2 * 2 * 7 / (float(row["abs_latency"]) / 1000)
+        self.assertEqual(
+            float(row["input_tokens_per_second"]), tokens_per_second, rtol=1e-3, atol=0
+        )
 
 
 class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
@@ -411,7 +489,6 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
         runner.args = self._runner_args()
         runner.args.performance, runner.args.accuracy = False, True
         runner.hf_llm = True
-        runner.hf_inference_mode = "prefill"
         runner.model_iter_fn = runner.prefill
         model = self._make_model("Llama", device)
         inputs = {"input_ids": torch.randint(0, 32, (2, 4), device=device)}

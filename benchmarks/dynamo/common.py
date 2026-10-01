@@ -1202,7 +1202,7 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     headers = first_headers + ["speedup", "abs_latency"]
     row = first_fields + [float(speedup), median[1] * 1000]
     if getattr(args, "hf_inference_mode", "generate") == "prefill":
-        input_tokens = times * current_batch_size * args.prompt_length
+        input_tokens = times * example_inputs["input_ids"].numel()
         headers += ["eager_prefill_latency", "input_tokens_per_second"]
         row += [median[0] * 1000, input_tokens / median[1]]
     msg = f"{speedup:.3f}x"
@@ -2043,9 +2043,10 @@ class BenchmarkRunner:
         return 1
 
     def validate_args(self, args):
-        if args.hf_inference_mode == "prefill":
+        if args.hf_inference_mode == "prefill" or args.prompt_length is not None:
             raise ValueError(
-                "--hf-inference-mode=prefill requires the huggingface suite"
+                "--hf-inference-mode=prefill and --prompt-length require the "
+                "huggingface suite"
             )
 
     def get_performance_workload(self):
@@ -3467,8 +3468,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--prompt-length",
         type=int,
-        default=1000,
-        help="Uniform prompt length for Hugging Face prefill benchmarks.",
+        help="Uniform prompt length for Hugging Face prefill benchmarks (default: 1000).",
     )
     parser.add_argument(
         "--iterations", type=int, default=2, help="how many iterations to run"
@@ -4790,14 +4790,14 @@ def run(runner, args, original_dir=None):
             }
 
         if args.profiler_trace_name is None:
-            if args.hf_inference_mode == "prefill" and output_filename:
-                args.profiler_trace_name = os.path.splitext(output_filename)[0]
-            elif args.backend:
+            if args.backend:
                 args.profiler_trace_name = args.backend
             elif args.inductor:
                 args.profiler_trace_name = "inductor"
             else:
                 args.profiler_trace_name = "profile"
+            if args.hf_inference_mode == "prefill":
+                args.profiler_trace_name += "_prefill"
         else:
             args.profiler_trace_name = args.profiler_trace_name
 
