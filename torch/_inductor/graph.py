@@ -2103,6 +2103,16 @@ class GraphLowering(torch.fx.Interpreter):
                 debug("")
                 result = super().run_node(n)
 
+            # Cut off recursive CPU pointwise expansion before reuse heuristics
+            # request complete op/read counts or consumers inline this body.
+            if (
+                isinstance(result, TensorBox)
+                and isinstance(result.data, StorageBox)
+                and isinstance(result.data.data, Pointwise)
+                and result.data.data.has_exceeded_max_expanded_ops()
+            ):
+                result.realize()
+
             # require the same stride order for dense outputs,
             # 1. user-land view() will not throw because inductor
             # output different strides than eager
