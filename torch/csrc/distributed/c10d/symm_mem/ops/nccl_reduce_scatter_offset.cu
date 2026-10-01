@@ -7,6 +7,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
 
 // Simultaneously reduce N blocks of a 2-D input tensor from a symmetric memory
 // buffer, routing each block to a specific destination rank (dst_ranks[i]).
@@ -358,6 +359,12 @@ void nccl_reduce_scatter_offset(
       input.scalar_type(),
       "nccl_reduce_scatter_offset",
       [&]() {
+        // The LSA barriers belong to the group's device communicator, shared
+        // by every call of this op on the group: calls on different streams
+        // must run in issue order, or ranks pair one call's barrier with
+        // another's. Taken inside the dispatch so a rejected dtype leaves the
+        // group's ordering alone.
+        GroupStreamGuard stream_guard(group_name);
         if (use_multimem) {
           reduce_scatter_offset_kernel<scalar_t, true>
               <<<total_ctas, RS_THREADS_PER_CTA, 0, stream>>>(
