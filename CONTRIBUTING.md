@@ -82,7 +82,7 @@ Issues are where we receive all feedback and decide what should be done about it
 PRs are only the place to discuss the implementation of a change and make sure it is correct.
 
 Labels track the state of every issue and PR, so that both contributors and maintainers can tell what the next step is and who is expected to take it.
-What we expect from maintainers is described in the [maintainer guide](https://docs.pytorch.org/docs/main/community/maintainer_guide.html).
+What we expect from maintainers is described in the [maintainer guide](docs/source/community/maintainer_guide.md).
 
 ### Current status
 
