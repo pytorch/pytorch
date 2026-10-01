@@ -187,8 +187,8 @@ class _GroupHooks:
         self._scopes[args.op_id] = scope
 
     def _post(self, args: PostHookArgs) -> None:
-        # c10d fires the post hook whenever the pre hook fired, even if the
-        # backend raised or the gate closed in between.
+        # c10d fires the post hook whenever the pre hook fired, even if the gate
+        # closed in between.
         scope = self._scopes.pop(args.op_id, None)
         if scope is None:
             return
