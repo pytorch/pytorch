@@ -34,6 +34,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
     PLATFORM_SUPPORTS_MX_GEMM,
     PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
+    prefer_cublaslt_grouped_gemm,
     SM100OrLater,
     SM89OrLater,
     SM90OrLater,
@@ -3804,6 +3805,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("out_dtype", [torch.bfloat16, torch.float16, torch.float32])
     @parametrize("fast_accum", [False, True])
+    @prefer_cublaslt_grouped_gemm(True)
     def test_scaled_grouped_gemm_cublaslt_mxfp8(self, op, out_dtype, fast_accum, device):
         A, B_T, scale_a, scale_b, offs, a_groups, b_groups, out_cat = (
             self.scaled_grouped_gemm_cublaslt_mxfp8_helper(op, device)
@@ -3838,11 +3840,44 @@ class TestFP8Matmul(TestCase):
     @skipIfRocm
     @unittest.skipIf(
         not (PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM and not IS_SM90),
+        cublaslt_mxfp8_grouped_mm_skip_msg,
+    )
+    @parametrize("use_cublaslt", [False, True])
+    @parametrize("api", ["v1", "v2", "meta"])
+    def test_scaled_grouped_gemm_mxfp8_backend_preference(self, device, use_cublaslt, api):
+        a, b_t, sa, sb, offs, *_ = self.scaled_grouped_gemm_cublaslt_mxfp8_helper("2d/3d", device)
+        b = b_t.transpose(-2, -1)
+        with prefer_cublaslt_grouped_gemm(use_cublaslt):
+            if api == "meta":
+                from torch._meta_registrations import _should_use_scaled_cublaslt_grouped_gemm
+
+                self.assertEqual(
+                    _should_use_scaled_cublaslt_grouped_gemm(a, b, sa, sb, offs, torch.float32),
+                    use_cublaslt,
+                )
+                return
+            error_context = contextlib.nullcontext() if use_cublaslt else self.assertRaisesRegex(
+                ValueError, "Only bf16 high precision output types"
+            )
+            with error_context:
+                result = scaled_grouped_mm_wrap(
+                    a, b, sa, sb, ScalingType.BlockWise1x32, ScalingType.BlockWise1x32,
+                    swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+                    swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+                    offs=offs, out_dtype=torch.float32, wrap_v2=api == "v2",
+                )
+                self.assertEqual(result.dtype, torch.float32)
+
+    @onlyCUDA
+    @skipIfRocm
+    @unittest.skipIf(
+        not (PLATFORM_SUPPORTS_CUBLASLT_FP8_GROUPED_GEMM and not IS_SM90),
         cublaslt_mxfp8_grouped_mm_skip_msg
     )
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("fast_accum", [False, True])
     @parametrize("mode", ["default", "reduce-overhead"])
+    @prefer_cublaslt_grouped_gemm(True)
     def test_scaled_grouped_gemm_cublaslt_mxfp8_compiled(self, op, fast_accum, mode, device):
         out_dtype = torch.bfloat16
         A, B_T, scale_a, scale_b, offs, *_ = (
@@ -3918,6 +3953,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("recipe", ["mxfp8", "nvfp4", "nvfp4_two_level"])
     @parametrize("side", ["a", "b"])
     @parametrize("bad_swizzle", [SwizzleType.NO_SWIZZLE, SwizzleType.SWIZZLE_32_8, []])
+    @prefer_cublaslt_grouped_gemm(True)
     def test_scaled_grouped_gemm_cublaslt_swizzle_validation(self, device, recipe, side, bad_swizzle):
         if recipe == "mxfp8":
             a, b_t, sa, sb, offs, *_ = self.scaled_grouped_gemm_cublaslt_mxfp8_helper(
@@ -4358,6 +4394,7 @@ if __name__ == '__main__':
             "blockwise_too_few_elements",
         ]
     )
+    @prefer_cublaslt_grouped_gemm(True)
     def test_scaled_grouped_gemm_cublaslt_mxfp8_scale_recipe_errors(self, case, device):
         e8m0 = torch.float8_e8m0fnu
         if case == "blockwise_too_few_elements":

@@ -9103,8 +9103,11 @@ def _should_use_scaled_cublaslt_grouped_gemm(
         lambda: f"cuBLASLt grouped GEMM requires a supported scale recipe pair; got {scaling_a} and {scaling_b}",
     )
 
-    if scaling_a == "BlockWise1x32" and torch.cuda.get_device_capability()[0] == 9:
-        return False
+    if scaling_a == "BlockWise1x32":
+        if not torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm:
+            return False
+        if torch.cuda.get_device_capability()[0] == 9:
+            return False
 
     fp8_dtypes = (torch.float8_e4m3fn, torch.float8_e5m2)
     if not (

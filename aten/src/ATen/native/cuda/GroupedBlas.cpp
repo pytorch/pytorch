@@ -337,6 +337,11 @@ bool should_use_scaled_cublaslt_grouped_gemm(
   }
   check_cublaslt_grouped_scale_pair(*scaling_a, *scaling_b);
 
+  if (*scaling_a == ScalingType::BlockWise1x32 &&
+      !at::globalContext().preferCublasltGroupedGemm()) {
+    return false;
+  }
+
   const bool uses_hopper_block = *scaling_a == ScalingType::BlockWise1x128 || *scaling_a == ScalingType::BlockWise128x128;
   bool valid_device;
   const auto dprops = at::cuda::getCurrentDeviceProperties();
