@@ -133,7 +133,10 @@ class TestRankBootstrap(TestCase):
                 "torch.distributed._transport._bootstrap.new_transport",
                 return_value=transport,
             ),
-            self.assertRaisesRegex(ValueError, "bind failed") as error,
+            self.assertRaisesRegex(ValueError, "bind failed"),
+            self.assertLogs(
+                "torch.distributed._transport._bootstrap", level="WARNING"
+            ) as logs,
         ):
             new_transport_rank(
                 "test",
@@ -142,7 +145,7 @@ class TestRankBootstrap(TestCase):
                 peer_rank=1,
                 bootstrap_timeout=1,
             )
-        self.assertIn("close failed", error.exception.__notes__[0])
+        self.assertIn("close failed", logs.output[0])
 
     def test_rank_override_and_attempt_count(self):
         store = dist.HashStore()
