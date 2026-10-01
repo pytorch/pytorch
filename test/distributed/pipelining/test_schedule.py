@@ -43,16 +43,20 @@ from torch.distributed.pipelining.schedules import (
     _add_reduce_grad,
     _add_send_recv,
     _add_unshard_reshard,
+    _add_wait_send,
+    _add_wait_send_budget,
     _batch_p2p,
     _build_recv_ops,
     _defer_recv_ops,
     _format_pipeline_order,
     _merge_bw,
+    _PendingSendTracker,
     _PipelineSchedule,
     _PipelineScheduleRuntime,
     _resolve_unshard_lookahead,
     _simulate_comms_compute,
     _validate_schedule,
+    _validate_send_waits,
     B,
     F,
     get_schedule_class,
@@ -68,6 +72,9 @@ from torch.distributed.pipelining.schedules import (
     SEND_F,
     UNSHARD,
     W,
+    WAIT_REDUCE_GRAD,
+    WAIT_SEND_B,
+    WAIT_SEND_F,
 )
 from torch.distributed.pipelining.stage import _PipelineStageBase, PipelineStage
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -1773,7 +1780,12 @@ class TestSchedulePlan(TestCase):
         def simulation_actions(actions):
             result = []
             for action in actions:
-                if action.computation_type in (UNSHARD, RESHARD, REDUCE_GRAD):
+                if action.computation_type in (
+                    UNSHARD,
+                    RESHARD,
+                    REDUCE_GRAD,
+                    WAIT_REDUCE_GRAD,
+                ):
                     continue
                 if action.computation_type == OVERLAP_F_B:
                     self.assertIsNotNone(action.sub_actions)
@@ -1861,6 +1873,625 @@ class TestSchedulePlan(TestCase):
             schedule.pipeline_order_with_comms,
             format="compute_comms",
         )
+
+    def test_wait_reduce_grad_round_trip(self):
+        action = _Action(3, WAIT_REDUCE_GRAD, None)
+        self.assertEqual(str(action), "3WAIT_REDUCE_GRAD")
+        self.assertEqual(_Action.from_str(str(action)), action)
+
+    def test_wait_send_round_trip(self):
+        for action, text in (
+            (_Action(1, WAIT_SEND_F, 2), "1WAIT_SEND_F2"),
+            (_Action(3, WAIT_SEND_B, 4), "3WAIT_SEND_B4"),
+        ):
+            self.assertEqual(str(action), text)
+            self.assertEqual(_Action.from_str(str(action)), action)
+
+    def test_pending_send_tracker_owns_and_retires_send(self):
+        tracker = _PendingSendTracker()
+        key = (SEND_F, 1, 2)
+        op = MagicMock()
+        work = MagicMock()
+        retire = MagicMock()
+        ops = [op]
+        works = [work]
+
+        tracker.register(key, ops, works, retire)
+
+        self.assertIs(tracker._pending[key].ops[0], op)
+        tracker.wait(key)
+        work.wait.assert_called_once_with()
+        retire.assert_called_once_with()
+        self.assertEqual(ops, [])
+        self.assertEqual(works, [])
+        self.assertNotIn(key, tracker._pending)
+        tracker.assert_empty()
+
+        with self.assertRaisesRegex(AssertionError, "Duplicate pipeline send"):
+            tracker.register(key, [], [])
+        with self.assertRaisesRegex(AssertionError, "No pending pipeline send"):
+            tracker.wait(key)
+
+    def test_wait_send_lowering(self):
+        actions = {
+            0: [
+                _Action(0, SEND_F, 0),
+                _Action(0, F, 1),
+                _Action(0, B, 0),
+                _Action(0, SEND_B, 0),
+                _Action(1, SEND_F, 1),
+            ]
+        }
+
+        self.assertEqual(
+            _add_wait_send(actions),
+            {
+                0: [
+                    _Action(0, SEND_F, 0),
+                    _Action(0, F, 1),
+                    _Action(0, B, 0),
+                    _Action(0, WAIT_SEND_F, 0),
+                    _Action(0, SEND_B, 0),
+                    _Action(1, SEND_F, 1),
+                    _Action(0, WAIT_SEND_B, 0),
+                    _Action(1, WAIT_SEND_F, 1),
+                ]
+            },
+        )
+
+    @parametrize(
+        "actions,error",
+        [
+            ([_Action(0, WAIT_SEND_F, 0)], "has no pending send"),
+            ([_Action(0, SEND_F, 0)], "have no matching wait"),
+            (
+                [
+                    _Action(0, SEND_F, 0),
+                    _Action(0, SEND_F, 0),
+                    _Action(0, WAIT_SEND_F, 0),
+                ],
+                "Duplicate pipeline send",
+            ),
+            (
+                [
+                    _Action(0, SEND_F, 0),
+                    _Action(0, WAIT_SEND_F, 0),
+                    _Action(0, WAIT_SEND_F, 0),
+                ],
+                "has no pending send",
+            ),
+        ],
+    )
+    def test_validate_send_waits(self, actions, error):
+        with self.assertRaisesRegex(ValueError, error):
+            _validate_send_waits({0: actions})
+
+    def test_wait_send_simulation(self):
+        actions = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, SEND_F, 0),
+                _Action(0, WAIT_SEND_F, 0),
+                _Action(0, RECV_B, 0),
+                _Action(0, B, 0),
+            ],
+            1: [
+                # This order delays RECV_F to exercise the peer dependency.
+                _Action(1, B, 0),
+                _Action(1, SEND_B, 0),
+                _Action(1, RECV_F, 0),
+                _Action(1, WAIT_SEND_B, 0),
+                _Action(1, F, 0),
+            ],
+        }
+        _simulate_comms_compute(actions, lambda stage: stage, num_stages=2)
+
+        actions[0][1:3] = reversed(actions[0][1:3])
+        with self.assertRaisesRegex(ValueError, "Schedule is not progressing"):
+            _simulate_comms_compute(actions, lambda stage: stage, num_stages=2)
+
+        cyclic_waits = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, SEND_F, 0),
+                _Action(0, WAIT_SEND_F, 0),
+                _Action(0, RECV_B, 0),
+                _Action(0, B, 0),
+            ],
+            1: [
+                _Action(1, B, 0),
+                _Action(1, SEND_B, 0),
+                _Action(1, WAIT_SEND_B, 0),
+                _Action(1, RECV_F, 0),
+                _Action(1, F, 0),
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "Schedule is not progressing"):
+            _simulate_comms_compute(cyclic_waits, lambda stage: stage, num_stages=2)
+
+    @parametrize(
+        "actions,error",
+        [
+            ([_Action(0, WAIT_SEND_F, 0)], "No pending pipeline send"),
+            ([_Action(0, WAIT_SEND_B, 0)], "No pending pipeline send"),
+            ([_Action(0, SEND_F, 0)], "have no matching wait"),
+            (
+                [_Action(0, SEND_F, 0), _Action(0, SEND_F, 0)],
+                "Duplicate pipeline send",
+            ),
+            (
+                [_Action(0, SEND_B, 0), _Action(0, SEND_B, 0)],
+                "Duplicate pipeline send",
+            ),
+        ],
+    )
+    def test_wait_send_runtime_errors(self, actions, error):
+        stage = MockPipelineStage(num_stages=1)
+        stage.stage_index = 0
+        stage.get_fwd_send_ops = MagicMock(return_value=[])
+        stage.get_bwd_send_ops = MagicMock(return_value=[])
+        stage.release_fwd_send_outputs = MagicMock()
+        work = MagicMock()
+        schedule = _PipelineScheduleRuntime(
+            [stage], n_microbatches=1, loss_fn=MagicMock()
+        )
+        schedule.pipeline_order_with_comms = {0: actions}
+
+        with (
+            patch.object(schedule, "_initialize_stages"),
+            patch(
+                "torch.distributed.pipelining.schedules._batch_p2p",
+                return_value=[work],
+            ) as batch_p2p,
+            self.assertRaisesRegex(AssertionError, error),
+        ):
+            schedule._step_microbatches()
+
+        if "Duplicate" in error:
+            batch_p2p.assert_called_once()
+
+    def test_explicit_wait_owns_send_across_custom_overlap(self):
+        stage = MockPipelineStage(num_stages=1)
+        stage.stage_index = 0
+        stage.get_fwd_send_ops = MagicMock(return_value=[])
+        stage.release_fwd_send_outputs = MagicMock()
+        work = MagicMock()
+        overlap = _Action(
+            -1,
+            OVERLAP_F_B,
+            None,
+            (_Action(0, F, 0), _Action(0, B, 0)),
+        )
+        schedule = _PipelineScheduleRuntime(
+            [stage], n_microbatches=1, loss_fn=MagicMock()
+        )
+        schedule.pipeline_order_with_comms = {
+            0: [
+                _Action(0, SEND_F, 0),
+                overlap,
+                _Action(0, WAIT_SEND_F, 0),
+            ]
+        }
+
+        def overlap_callback(_action, _ctx):
+            work.wait.assert_not_called()
+
+        schedule.register_custom_function(OVERLAP_F_B, overlap_callback)
+        with (
+            patch.object(schedule, "_initialize_stages"),
+            patch(
+                "torch.distributed.pipelining.schedules._batch_p2p",
+                return_value=[work],
+            ),
+        ):
+            schedule._step_microbatches()
+
+        work.wait.assert_called_once_with()
+        stage.release_fwd_send_outputs.assert_called_once_with(0)
+
+    def test_pending_send_drained_after_action_error(self):
+        stage = MockPipelineStage(num_stages=1)
+        stage.stage_index = 0
+        stage.get_fwd_send_ops = MagicMock(return_value=[])
+        stage.release_fwd_send_outputs = MagicMock()
+        work = MagicMock()
+        schedule = _PipelineScheduleRuntime([stage], n_microbatches=1)
+        schedule.pipeline_order_with_comms = {
+            0: [_Action(0, SEND_F, 0), _Action(0, F, 0)]
+        }
+
+        def fail(_action, _ctx):
+            raise RuntimeError("action failed")
+
+        schedule.register_custom_function(F, fail)
+        with (
+            patch.object(schedule, "_initialize_stages"),
+            patch(
+                "torch.distributed.pipelining.schedules._batch_p2p",
+                return_value=[work],
+            ),
+            self.assertRaisesRegex(RuntimeError, "action failed"),
+        ):
+            schedule._step_microbatches()
+
+        work.wait.assert_called_once_with()
+        stage.release_fwd_send_outputs.assert_called_once_with(0)
+
+    def _wait_send_schedule(self, num_stages=4, num_microbatches=8):
+        compute = {
+            rank: [_Action(rank, F, mb) for mb in range(num_microbatches)]
+            + [_Action(rank, B, mb) for mb in range(num_microbatches)]
+            for rank in range(num_stages)
+        }
+        with_comms = _add_send_recv(
+            compute, stage_to_rank=lambda stage: stage, num_stages=num_stages
+        )
+        return _add_wait_send(with_comms)
+
+    @staticmethod
+    def _outstanding_sends(actions):
+        pending = set()
+        peak = 0
+        for action in actions:
+            if action.computation_type in (SEND_F, SEND_B):
+                pending.add(
+                    (
+                        action.computation_type,
+                        action.stage_index,
+                        action.microbatch_index,
+                    )
+                )
+                peak = max(peak, len(pending))
+            elif action.computation_type in (WAIT_SEND_F, WAIT_SEND_B):
+                send_type = SEND_F if action.computation_type == WAIT_SEND_F else SEND_B
+                pending.remove((send_type, action.stage_index, action.microbatch_index))
+        return peak, len(pending)
+
+    def test_send_budget_caps_forward_and_backward_sends(self):
+        uncapped = self._wait_send_schedule()
+        capped = _add_wait_send_budget(
+            uncapped, stage_to_rank=lambda stage: stage, max_outstanding_sends=4
+        )
+
+        self.assertTrue(
+            any(
+                action.computation_type == WAIT_SEND_B
+                for actions in capped.values()
+                for action in actions
+            )
+        )
+        for rank, actions in capped.items():
+            peak, remaining = self._outstanding_sends(actions)
+            _, uncapped_remaining = self._outstanding_sends(uncapped[rank])
+            self.assertLessEqual(peak, 4)
+            self.assertLessEqual(remaining, uncapped_remaining)
+
+    def test_send_budget_preserves_non_wait_actions(self):
+        uncapped = self._wait_send_schedule()
+        capped = _add_wait_send_budget(
+            uncapped, stage_to_rank=lambda stage: stage, max_outstanding_sends=4
+        )
+        wait_types = (WAIT_SEND_F, WAIT_SEND_B)
+        for rank, actions in capped.items():
+            self.assertEqual(
+                [
+                    action
+                    for action in actions
+                    if action.computation_type not in wait_types
+                ],
+                [
+                    action
+                    for action in uncapped[rank]
+                    if action.computation_type not in wait_types
+                ],
+            )
+
+    def test_send_budget_uses_reachability_for_independent_receive(self):
+        actions = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, F, 1),
+                _Action(0, SEND_F, 0),
+                _Action(0, SEND_F, 1),
+                _Action(0, WAIT_SEND_F, 0),
+                _Action(0, WAIT_SEND_F, 1),
+            ],
+            1: [
+                _Action(1, RECV_F, 0),
+                _Action(1, RECV_F, 1),
+                _Action(1, F, 0),
+                _Action(1, F, 1),
+            ],
+        }
+
+        capped = _add_wait_send_budget(
+            actions, stage_to_rank=lambda stage: stage, max_outstanding_sends=1
+        )
+
+        send_one = capped[0].index(_Action(0, SEND_F, 1))
+        self.assertEqual(capped[0][send_one - 1], _Action(0, WAIT_SEND_F, 0))
+        _simulate_comms_compute(capped, lambda stage: stage, num_stages=2)
+
+    def test_send_budget_rejects_cyclic_wait_move(self):
+        actions = {
+            0: [
+                _Action(0, SEND_F, 0),
+                _Action(0, SEND_F, 1),
+                _Action(0, WAIT_SEND_F, 0),
+                _Action(0, WAIT_SEND_F, 1),
+            ],
+            1: [
+                _Action(1, RECV_F, 1),
+                _Action(1, RECV_F, 0),
+            ],
+        }
+
+        with self.assertRaisesRegex(
+            ValueError, "Cannot satisfy max_outstanding_sends=1"
+        ):
+            _add_wait_send_budget(
+                actions, stage_to_rank=lambda stage: stage, max_outstanding_sends=1
+            )
+
+    def test_send_budget_rejects_unsatisfied_limit(self):
+        with self.assertRaisesRegex(
+            ValueError,
+            "Cannot satisfy max_outstanding_sends=0 on pipeline rank 0.*0SEND_F0",
+        ):
+            _add_wait_send_budget(
+                self._wait_send_schedule(2, 2),
+                stage_to_rank=lambda stage: stage,
+                max_outstanding_sends=0,
+            )
+
+    def test_zero_send_budget_accepts_schedule_without_sends(self):
+        actions = {0: [_Action(0, F, 0), _Action(0, B, 0)]}
+        self.assertEqual(
+            _add_wait_send_budget(
+                actions,
+                stage_to_rank=lambda stage: stage,
+                max_outstanding_sends=0,
+            ),
+            actions,
+        )
+
+    @parametrize("value", [-1, 1.5, True])
+    def test_max_outstanding_sends_validation(self, value):
+        with self.assertRaisesRegex(ValueError, "non-negative integer"):
+            _PipelineScheduleRuntime([], 1, max_outstanding_sends=value)
+
+    @parametrize(
+        "ScheduleClass",
+        [
+            ScheduleLoopedBFS,
+            ScheduleInterleaved1F1B,
+            ScheduleInterleavedZeroBubble,
+            ScheduleZBVZeroBubble,
+            ScheduleDualPipeV,
+        ],
+    )
+    def test_max_outstanding_sends_applies_to_runtime_schedule(self, ScheduleClass):
+        stages = [
+            MockPipelineStage(group_size=2, group_rank=0, num_stages=4)
+            for _ in range(2)
+        ]
+        schedule = ScheduleClass(
+            stages,
+            n_microbatches=8,
+            max_outstanding_sends=4,
+        )
+
+        for actions in schedule.pipeline_order_with_comms.values():
+            outstanding = 0
+            peak = 0
+            for action in actions:
+                if action.computation_type in (SEND_F, SEND_B):
+                    outstanding += 1
+                    peak = max(peak, outstanding)
+                elif action.computation_type in (WAIT_SEND_F, WAIT_SEND_B):
+                    outstanding -= 1
+            self.assertLessEqual(peak, 4)
+
+        # The simulator does not support DualPipeV's placeholder stage indices.
+        if ScheduleClass is not ScheduleDualPipeV:
+            communication_schedule = {
+                rank: [
+                    action
+                    for action in actions
+                    if action.computation_type
+                    not in (UNSHARD, RESHARD, REDUCE_GRAD, WAIT_REDUCE_GRAD)
+                ]
+                for rank, actions in schedule.pipeline_order_with_comms.items()
+            }
+            _simulate_comms_compute(
+                communication_schedule,
+                lambda stage: schedule.stage_index_to_group_rank[stage],
+                schedule._num_stages,
+            )
+
+    def test_defer_reduce_grad_wait_lowering(self):
+        actions = [
+            _Action(6, B, 0),
+            _Action(4, B, 0),
+            _Action(2, B, 0),
+        ]
+        default = _add_reduce_grad(actions, n_microbatches=1)
+        self.assertEqual(
+            default,
+            [
+                _Action(6, B, 0),
+                _Action(6, REDUCE_GRAD, None),
+                _Action(6, WAIT_REDUCE_GRAD, None),
+                _Action(4, B, 0),
+                _Action(4, REDUCE_GRAD, None),
+                _Action(4, WAIT_REDUCE_GRAD, None),
+                _Action(2, B, 0),
+                _Action(2, REDUCE_GRAD, None),
+                _Action(2, WAIT_REDUCE_GRAD, None),
+            ],
+        )
+
+        deferred = _add_reduce_grad(
+            actions,
+            n_microbatches=1,
+            defer_reduce_grad_wait=True,
+        )
+        self.assertEqual(
+            deferred,
+            [
+                _Action(6, B, 0),
+                _Action(6, REDUCE_GRAD, None),
+                _Action(4, B, 0),
+                _Action(6, WAIT_REDUCE_GRAD, None),
+                _Action(4, REDUCE_GRAD, None),
+                _Action(2, B, 0),
+                _Action(4, WAIT_REDUCE_GRAD, None),
+                _Action(2, REDUCE_GRAD, None),
+                _Action(2, WAIT_REDUCE_GRAD, None),
+            ],
+        )
+
+        schedule = _PipelineScheduleRuntime(
+            [MockPipelineStage(num_stages=1)],
+            n_microbatches=1,
+        )
+        with self.assertRaisesRegex(ValueError, "REDUCE_GRAD without WAIT_REDUCE_GRAD"):
+            schedule._prepare_schedule_with_comms(
+                {
+                    0: [
+                        _Action(0, F, 0),
+                        _Action(0, B, 0),
+                        _Action(0, REDUCE_GRAD),
+                    ]
+                },
+                format="compute_comms",
+            )
+
+        stages = [MockPipelineStage(num_stages=2) for _ in range(2)]
+        for stage_idx, stage in enumerate(stages):
+            stage.stage_index = stage_idx
+        multi_stage_schedule = _PipelineScheduleRuntime(
+            stages,
+            n_microbatches=1,
+            defer_reduce_grad_wait=True,
+        )
+        ordered_reductions = {
+            0: [
+                _Action(0, F, 0),
+                _Action(0, B, 0),
+                _Action(0, REDUCE_GRAD),
+                _Action(0, WAIT_REDUCE_GRAD),
+                _Action(1, F, 0),
+                _Action(1, B, 0),
+                _Action(1, REDUCE_GRAD),
+                _Action(1, WAIT_REDUCE_GRAD),
+            ]
+        }
+        multi_stage_schedule._prepare_schedule_with_comms(
+            ordered_reductions,
+            format="compute_comms",
+        )
+        self.assertEqual(
+            multi_stage_schedule.pipeline_order_with_comms,
+            ordered_reductions,
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "while stage 0 has a pending reduction"
+        ):
+            multi_stage_schedule._prepare_schedule_with_comms(
+                {
+                    0: [
+                        _Action(0, F, 0),
+                        _Action(0, B, 0),
+                        _Action(0, REDUCE_GRAD),
+                        _Action(1, F, 0),
+                        _Action(1, B, 0),
+                        _Action(1, REDUCE_GRAD),
+                        _Action(0, WAIT_REDUCE_GRAD),
+                        _Action(1, WAIT_REDUCE_GRAD),
+                    ]
+                },
+                format="compute_comms",
+            )
+
+        with self.assertRaisesRegex(ValueError, "without a pending reduction"):
+            schedule._prepare_schedule_with_comms(
+                {
+                    0: [
+                        _Action(0, F, 0),
+                        _Action(0, B, 0),
+                        _Action(0, WAIT_REDUCE_GRAD),
+                    ]
+                },
+                format="compute_comms",
+            )
+
+    def test_defer_reduce_grad_wait_schedule_invariants(self):
+        def make_schedule(defer_reduce_grad_wait):
+            stages = [
+                MockPipelineStage(group_size=2, group_rank=0, num_stages=8)
+                for _ in range(4)
+            ]
+            return ScheduleInterleaved1F1B(
+                stages,
+                n_microbatches=8,
+                defer_reduce_grad_wait=defer_reduce_grad_wait,
+            )
+
+        default = make_schedule(False).pipeline_order_with_comms
+        deferred = make_schedule(True).pipeline_order_with_comms
+        p2p_types = {SEND_F, RECV_F, SEND_B, RECV_B}
+
+        for rank in default:
+            default_actions = default[rank]
+            deferred_actions = deferred[rank]
+            default_compute = [
+                action
+                for action in default_actions
+                if action.computation_type not in p2p_types
+                and action.computation_type != WAIT_REDUCE_GRAD
+            ]
+            deferred_compute = [
+                action
+                for action in deferred_actions
+                if action.computation_type not in p2p_types
+                and action.computation_type != WAIT_REDUCE_GRAD
+            ]
+            self.assertEqual(deferred_compute, default_compute)
+
+            for p2p_type in p2p_types:
+                self.assertEqual(
+                    sum(
+                        action.computation_type == p2p_type
+                        for action in deferred_actions
+                    ),
+                    sum(
+                        action.computation_type == p2p_type
+                        for action in default_actions
+                    ),
+                )
+
+            pending_stage = None
+            num_reductions = 0
+            num_waits = 0
+            for action in deferred_actions:
+                if action.computation_type == REDUCE_GRAD:
+                    self.assertIsNone(pending_stage)
+                    pending_stage = action.stage_index
+                    num_reductions += 1
+                elif action.computation_type == WAIT_REDUCE_GRAD:
+                    self.assertEqual(action.stage_index, pending_stage)
+                    pending_stage = None
+                    num_waits += 1
+            self.assertIsNone(pending_stage)
+            self.assertEqual(num_waits, num_reductions)
+            reduction_actions = [
+                action
+                for action in deferred_actions
+                if action.computation_type in (REDUCE_GRAD, WAIT_REDUCE_GRAD)
+            ]
+            self.assertEqual(reduction_actions[-1].computation_type, WAIT_REDUCE_GRAD)
 
     @parametrize(
         "ScheduleClass",
@@ -2120,7 +2751,14 @@ class TestScheduleLowering(ScheduleLoweringTestBase):
         [
             {
                 "compute": ["0F0", "0F1", "   ", "0B0", "0B1"],
-                "comms": ["0F0", "0F1", "0B0", "0B1", "0REDUCE_GRAD"],
+                "comms": [
+                    "0F0",
+                    "0F1",
+                    "0B0",
+                    "0B1",
+                    "0REDUCE_GRAD",
+                    "0WAIT_REDUCE_GRAD",
+                ],
             },
             {
                 "compute": ["0F0", "0F1", "1F0", "1F1", "1B0", "1B1", "0B0", "0B1"],
@@ -2132,9 +2770,11 @@ class TestScheduleLowering(ScheduleLoweringTestBase):
                     "1B0",
                     "1B1",
                     "1REDUCE_GRAD",
+                    "1WAIT_REDUCE_GRAD",
                     "0B0",
                     "0B1",
                     "0REDUCE_GRAD",
+                    "0WAIT_REDUCE_GRAD",
                 ],
             },
         ],
