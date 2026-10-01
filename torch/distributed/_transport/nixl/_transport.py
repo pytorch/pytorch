@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager, contextmanager
 from datetime import timedelta
 from importlib import import_module
 from threading import RLock
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch
 
@@ -216,6 +216,13 @@ class NIXLTransport(Transport):
             if not registration.active:
                 return
             if any(
+                cast(NIXLMemoryView, view)._memory._registration is registration
+                for view in self._cuda_stream_views()
+            ):
+                raise RuntimeError(
+                    "memory is retained by CUDA stream transfers or graphs"
+                )
+            if any(
                 work._buffers[0]._memory._registration is registration
                 for work in self._pending.values()
             ):
@@ -247,16 +254,9 @@ class NIXLTransport(Transport):
             metadata,
         )
 
-    def _submit(
-        self,
-        operation: str,
-        local_buffer: MemoryView,
-        remote_buffer: RemoteBuffer,
-        *,
-        mutable: bool,
-        timeout: float,
-    ) -> _NIXLWork:
-        agent = self._ensure_open()
+    def _check_transfer(
+        self, local_buffer: MemoryView, remote_buffer: RemoteBuffer, *, mutable: bool
+    ) -> None:
         expected_type = NIXLMutableMemoryView if mutable else NIXLMemoryView
         if not isinstance(local_buffer, expected_type) or (
             local_buffer._memory._transport is not self
@@ -277,6 +277,21 @@ class NIXLTransport(Transport):
             raise RuntimeError(
                 "registered tensor was resized or its storage was replaced"
             )
+
+    def _submit(
+        self,
+        operation: str,
+        local_buffer: MemoryView,
+        remote_buffer: RemoteBuffer,
+        *,
+        mutable: bool,
+        timeout: float,
+    ) -> _NIXLWork:
+        agent = self._ensure_open()
+        self._check_transfer(local_buffer, remote_buffer, mutable=mutable)
+        local_buffer = cast(NIXLMemoryView, local_buffer)
+        remote_buffer = cast(NIXLRemoteBuffer, remote_buffer)
+        registration = local_buffer._memory._registration
         work = _NIXLWork(self, local_buffer, remote_buffer, timeout)
         if local_buffer.size() == 0:
             work._done = True
@@ -432,6 +447,7 @@ class NIXLTransport(Transport):
             return list(self._pending.values())
 
     def close(self, *, timeout: float | None = None) -> None:
+        self._close_cuda_streams()
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
@@ -460,6 +476,7 @@ class NIXLTransport(Transport):
         Retry close after pending work completes. Native cleanup is not
         interruptible; peer access must already have been stopped externally.
         """
+        self._close_cuda_streams()
         timeout = self._timeout if timeout is None else timeout
         _validate_timeout(timeout)
         deadline = time.monotonic() + timeout
