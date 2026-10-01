@@ -427,6 +427,8 @@ class DistTensorCPUOffloadRandomOpTest(DTensorTestBase):
     @property
     def backend(self):
         # CPU-offloaded DTensor ops need a CPU backend for their collectives.
+        if self.device_type == "cpu":
+            return "gloo"
         device_backend = dist.get_default_backend_for_device(self.device_type)
         return f"cpu:gloo,{self.device_type}:{device_backend}"
 
