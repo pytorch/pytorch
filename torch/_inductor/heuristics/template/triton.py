@@ -3019,11 +3019,13 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 template_kwargs.get("WARP_SPECIALIZE", True)
                 and not constraints_violated
             )
-            # Meta WS pass has only validated flatten=False; OSS Triton uses flatten=True
+            # Meta WS pass has only validated flatten=False; OSS Triton uses flatten=True.
+            # The Meta WS knob is global in Triton, so it rewrites every WS kernel,
+            # not just the use_meta_ws configs.
             flatten = (
                 template_kwargs.get("FLATTEN", True)
                 and not constraints_violated
-                and not use_meta_ws
+                and not (use_meta_ws or USE_META_WS)
             )
             two_ctas = template_kwargs.get("TWO_CTAS", False)
             out = {
