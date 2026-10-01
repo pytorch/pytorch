@@ -7407,6 +7407,42 @@ class ShapeEnv:
 
         return None
 
+    def _maybe_evaluate_singleton_int(self, expr: sympy.Basic) -> sympy.Basic | None:
+        # Substituting SingletonInt into a sympy tree rebuilds Mul/Add without
+        # SingletonInt's operator overloads (2*j0 becomes Mul(2, j0) instead of
+        # coeff=2), so only evaluate relations whose sides are integer constants
+        # or positive integer multiples of a SingletonInt-valued symbol.
+        if not isinstance(expr, Relational):
+            return None
+
+        def evaluate_side(term: sympy.Basic) -> sympy.Integer | SingletonInt | None:
+            if isinstance(term, sympy.Integer):
+                return term
+            if not isinstance(term, sympy.Expr):
+                # Boolean operands (e.g. Eq(Eq(u0, 1), True)) have no coefficient.
+                return None
+            coeff, sym = term.as_coeff_Mul()
+            val = self.backed_var_to_val.get(sym)
+            if not isinstance(val, SingletonInt) or not (
+                isinstance(coeff, sympy.Integer) and coeff > 0
+            ):
+                return None
+            return coeff * val
+
+        lhs, rhs = evaluate_side(expr.lhs), evaluate_side(expr.rhs)
+        if lhs is None or rhs is None:
+            return None
+        if not isinstance(lhs, SingletonInt) and not isinstance(rhs, SingletonInt):
+            return None
+
+        try:
+            result = type(expr)(lhs, rhs)
+        except (NotImplementedError, TypeError, ValueError):
+            return None
+        if isinstance(result, sympy.logic.boolalg.BooleanAtom):
+            return result
+        return None
+
     def _maybe_evaluate_range_only(
         self,
         expr: sympy.Basic,
@@ -7466,6 +7502,10 @@ class ShapeEnv:
             )
 
         expr = canonicalize_bool_expr(expr)
+
+        singleton_int_expr = self._maybe_evaluate_singleton_int(expr)
+        if singleton_int_expr is not None:
+            return singleton_int_expr
 
         def resimplify_floor_div(axioms: dict[sympy.Expr, sympy.Expr]) -> None:
             if not self._resimplify_floor_div_axioms:
