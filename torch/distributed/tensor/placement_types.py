@@ -6,7 +6,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Any, cast, TypeGuard, TypeVar
+from typing import Any, cast, NamedTuple, TypeGuard, TypeVar
 
 import torch
 import torch._C
@@ -2048,108 +2048,6 @@ class _MaskPartial(Partial):
         )
 
 
-def _canonicalize_block_pattern(
-    block_numels: Sequence[int],
-    block_repeats: Sequence[int] | None,
-) -> tuple[tuple[int, ...], tuple[int, ...] | None]:
-    """Validate a ``BlockShard`` pattern and return its canonical form.
-
-    Canonicalization merges adjacent entries with equal ``numel``, reduces the
-    pattern to a shorter period when the entries repeat, and sets
-    ``block_repeats`` to ``None`` when every repeat is one.
-    """
-    numels = tuple(block_numels)
-    repeats = (1,) * len(numels) if block_repeats is None else tuple(block_repeats)
-    if not numels:
-        raise ValueError("BlockShard block_numels must be non-empty.")
-    if len(repeats) != len(numels):
-        raise ValueError(
-            "BlockShard block_repeats must have the same length as block_numels: "
-            f"got {len(repeats)} and {len(numels)}."
-        )
-    for numel in numels:
-        if isinstance(numel, bool) or not isinstance(numel, int) or numel < 0:
-            raise ValueError(
-                f"BlockShard block_numels must be non-negative ints, got {numels}."
-            )
-    for repeat in repeats:
-        if isinstance(repeat, bool) or not isinstance(repeat, int) or repeat < 1:
-            raise ValueError(
-                f"BlockShard block_repeats must be positive ints, got {repeats}."
-            )
-    if not any(numels):
-        raise ValueError(
-            f"BlockShard block_numels must contain a positive entry, got {numels}."
-        )
-
-    runs: list[list[int]] = []
-    for numel, repeat in zip(numels, repeats):
-        if runs and runs[-1][0] == numel:
-            runs[-1][1] += repeat
-        else:
-            runs.append([numel, repeat])
-    if len(runs) == 1:
-        # The pattern tiles the tensor, so one run of n equal blocks has period 1.
-        runs[0][1] = 1
-    else:
-        # Reduce to the shortest sub-list of runs that repeats. A period whose
-        # first and last blocks have equal numel merges across the boundary and
-        # is not reduced here.
-        for period in range(1, len(runs) // 2 + 1):
-            if len(runs) % period == 0 and all(
-                runs[i] == runs[i % period] for i in range(len(runs))
-            ):
-                runs = runs[:period]
-                break
-
-    canonical_numels = tuple(numel for numel, _ in runs)
-    canonical_repeats = tuple(repeat for _, repeat in runs)
-    if all(repeat == 1 for repeat in canonical_repeats):
-        return canonical_numels, None
-    return canonical_numels, canonical_repeats
-
-
-def _range_to_boxes(
-    dims: Sequence[int], start: int, stop: int
-) -> list[tuple[tuple[int, ...], tuple[int, ...]]]:
-    """Decompose the row-major index range [start, stop) over ``dims`` into boxes.
-
-    Returns at most ``2 * len(dims) - 1`` (offset, size) boxes, in row-major order.
-    """
-    if start >= stop:
-        return []
-    if len(dims) == 1:
-        return [((start,), (stop - start,))]
-    inner = math.prod(dims[1:])
-    start_outer, start_inner = divmod(start, inner)
-    stop_outer, stop_inner = divmod(stop, inner)
-    if start_outer == stop_outer:
-        return [
-            ((start_outer, *offset), (1, *size))
-            for offset, size in _range_to_boxes(dims[1:], start_inner, stop_inner)
-        ]
-    boxes: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
-    if start_inner != 0:
-        boxes.extend(
-            ((start_outer, *offset), (1, *size))
-            for offset, size in _range_to_boxes(dims[1:], start_inner, inner)
-        )
-        start_outer += 1
-    if stop_outer > start_outer:
-        boxes.append(
-            (
-                (start_outer, *([0] * (len(dims) - 1))),
-                (stop_outer - start_outer, *dims[1:]),
-            )
-        )
-    if stop_inner != 0:
-        boxes.extend(
-            ((stop_outer, *offset), (1, *size))
-            for offset, size in _range_to_boxes(dims[1:], 0, stop_inner)
-        )
-    return boxes
-
-
 class BlockShard(Placement):
     """
     The ``BlockShard`` placement shards a tensor in contiguous blocks of its
@@ -2159,25 +2057,31 @@ class BlockShard(Placement):
     ``torch.repeat_interleave(block_numels, block_repeats)`` and tiles the
     tensor's row-major elements. Blocks are assigned to ranks contiguously, in
     rank order, following the ``torch.chunk`` semantic over the block count, so
-    each rank owns one contiguous range of elements and the last ranks may own
-    fewer or none.
+    each rank owns one contiguous range of elements.
 
-    Currently only one pattern is supported: a single block whose size is the
-    product of the trailing dims ``shape[k:]`` for some ``k >= 2``. This is
-    ``Shard(0)`` on ``tensor.view(prod(shape[:k]), *shape[k:])``. The local
-    tensor always has that merged-view shape, ``[local_rows, *shape[k:]]``. For
-    example, ``BlockShard(block_numels=(I,))`` on MoE expert weights
-    ``[E, O, I]`` shards the ``E * O`` rows across ranks even when ``E`` is
-    smaller than the mesh size. ``k == 1`` is rejected because it is exactly
-    ``Shard(0)``.
+    Currently only a single block equal to the product of the trailing dims
+    ``shape[k:]`` with ``k >= 2`` is supported. That is ``Shard(0)`` on the
+    merged view ``(prod(shape[:k]), *shape[k:])``, and the local tensor has the
+    merged-view shape ``[local_rows, *shape[k:]]``. For example,
+    ``BlockShard(block_numels=(I,))`` on MoE expert weights ``[E, O, I]``
+    shards the ``E * O`` rows even when ``E`` is smaller than the mesh size.
+    ``k == 1`` is rejected because it is exactly ``Shard(0)``.
+
+    On other mesh dims, ``BlockShard`` can be combined with ``Replicate``,
+    ``Partial``, and ``Shard(0)`` on at most one mesh dim, which must evenly
+    divide ``shape[0]``. ``BlockShard`` then applies to the local tensor left by
+    that ``Shard(0)``, whatever the mesh dim order: for example, expert
+    parallelism on the experts dim followed by FSDP on the merged rows of each
+    rank's local experts.
 
     Args:
         block_numels (Sequence[int]): elements per block in one period, each >= 0.
         block_repeats (Sequence[int], optional): consecutive repeats of each
             ``block_numels`` entry, each >= 1. ``None`` means all ones.
 
-    .. warning:: ``BlockShard`` is experimental and subject to change. It can
-        only be combined with ``Replicate`` or ``Partial`` on other mesh dims.
+    .. warning:: ``BlockShard`` is experimental. It is meant for FSDP2 storage:
+        only ops that elementwise optimizers and gradient clipping need are
+        supported on it.
     """
 
     block_numels: tuple[int, ...]
@@ -2189,7 +2093,24 @@ class BlockShard(Placement):
         block_repeats: Sequence[int] | None = None,
     ) -> None:
         super().__init__()
-        numels, repeats = _canonicalize_block_pattern(block_numels, block_repeats)
+        numels = tuple(block_numels)
+        repeats = None if block_repeats is None else tuple(block_repeats)
+        if not numels or any(
+            isinstance(n, bool) or not isinstance(n, int) or n < 0 for n in numels
+        ):
+            raise ValueError(
+                f"BlockShard block_numels must be non-negative ints, got {numels}."
+            )
+        if repeats is not None and (
+            len(repeats) != len(numels)
+            or any(
+                isinstance(r, bool) or not isinstance(r, int) or r < 1 for r in repeats
+            )
+        ):
+            raise ValueError(
+                "BlockShard block_repeats must be positive ints with the same length "
+                f"as block_numels, got {repeats} for {numels}."
+            )
         self.block_numels = numels
         self.block_repeats = repeats
         self._hash = hash((BlockShard, numels, repeats))
@@ -2203,9 +2124,6 @@ class BlockShard(Placement):
                 f"{tuple(shape)}, got k={k}. k=1 is Shard(0); use Shard(0)."
             )
         return cls(block_numels=(math.prod(shape[k:]),))
-
-    def is_block_shard(self) -> bool:
-        return True
 
     def __eq__(self, other: object) -> bool:
         return (
@@ -2229,9 +2147,7 @@ class BlockShard(Placement):
         )
 
     def __str__(self) -> str:
-        if self.block_repeats is None:
-            return f"BS{self.block_numels}"
-        return f"BS({self.block_numels}, {self.block_repeats})"
+        return f"BS{self.block_numels}"
 
     def __fx_repr__(self):
         return (
@@ -2253,7 +2169,7 @@ class BlockShard(Placement):
                         )
                     return k
         raise NotImplementedError(
-            f"{self!r} is not supported yet for shape {tuple(shape)}: BlockShard "
+            f"{self!r} is not supported for shape {tuple(shape)}: BlockShard "
             "currently requires block_numels=(prod(shape[k:]),) with k >= 2 and "
             "block_repeats=None; valid block_numels: "
             f"{[(math.prod(shape[k:]),) for k in range(2, len(shape) + 1)]}"
@@ -2263,56 +2179,6 @@ class BlockShard(Placement):
         """Shape ``M`` such that this placement on ``shape`` is ``Shard(0)`` on ``M``."""
         k = self._split_dim(shape)
         return torch.Size((math.prod(shape[:k]), *shape[k:]))
-
-    def _local_shape(
-        self, shape: Sequence[int], num_chunks: int, rank: RankType
-    ) -> torch.Size:
-        merged = self._merged_shape(shape)
-        rows, _ = Shard.local_shard_size_and_offset(merged[0], num_chunks, rank)
-        # pyrefly: ignore [bad-argument-type]
-        return torch.Size((rows, *merged[1:]))
-
-    def _local_boxes(
-        self, shape: Sequence[int], num_chunks: int, rank: int
-    ) -> list[tuple[tuple[int, ...], tuple[int, ...], int, int]]:
-        """Boxes of ``shape`` owned by ``rank``, in row-major order.
-
-        Each entry is ``(global_offset, size, local_row_start, local_row_stop)``,
-        where the local rows index the merged-view local tensor. A rank's rows
-        cover at most ``2k - 1`` boxes.
-        """
-        k = self._split_dim(shape)
-        merged = self._merged_shape(shape)
-        rows, row_offset = Shard.local_shard_size_and_offset(
-            merged[0], num_chunks, rank
-        )
-        trailing = tuple(shape[k:])
-        boxes = []
-        local_row = 0
-        for offset, size in _range_to_boxes(
-            tuple(shape[:k]), row_offset, row_offset + rows
-        ):
-            box_rows = math.prod(size)
-            boxes.append(
-                (
-                    (*offset, *([0] * len(trailing))),
-                    (*size, *trailing),
-                    local_row,
-                    local_row + box_rows,
-                )
-            )
-            local_row += box_rows
-        return boxes
-
-    def _shard_tensor(
-        self,
-        tensor: torch.Tensor,
-        mesh: DeviceMesh,
-        mesh_dim: int,
-        src_data_rank: int | None = 0,
-    ) -> torch.Tensor:
-        merged = tensor.reshape(self._merged_shape(tensor.shape))
-        return Shard(0)._shard_tensor(merged, mesh, mesh_dim, src_data_rank)
 
     def _to_replicate_tensor(
         self,
@@ -2325,54 +2191,66 @@ class BlockShard(Placement):
         result = Shard(0)._to_replicate_tensor(local_tensor, mesh, mesh_dim, merged)
         return result.view(current_logical_shape)
 
-    def _replicate_to_block_shard(
-        self,
-        local_tensor: torch.Tensor,
-        mesh: DeviceMesh,
-        mesh_dim: int,
-        shard_index: IntLikeType,
-    ) -> torch.Tensor:
-        merged = local_tensor.reshape(self._merged_shape(local_tensor.shape))
-        return Shard(0)._replicate_to_shard(merged, mesh, mesh_dim, shard_index)
 
-    def _reduce_shard_tensor(
-        self,
-        tensor: torch.Tensor,
-        mesh: DeviceMesh,
-        reduce_op: str,
-        mesh_dim: int,
-    ) -> torch.Tensor:
-        merged = tensor.reshape(self._merged_shape(tensor.shape))
-        return Shard(0)._reduce_shard_tensor(merged, mesh, reduce_op, mesh_dim)
+class _BlockShardLayout(NamedTuple):
+    """Where a supported BlockShard layout sits on the mesh.
 
+    ``block_shape`` is the shape BlockShard applies to: the tensor shape after
+    the ``Shard(0)`` mesh dim (e.g. expert parallelism) if there is one.
+    """
 
-def _is_block_shard(p: object) -> TypeGuard[BlockShard]:
-    return isinstance(p, BlockShard)
+    mesh_dim: int
+    placement: BlockShard
+    shard0_mesh_dim: int | None
+    block_shape: tuple[int, ...]
 
 
 def _validate_block_shard_placements(
-    placements: Sequence[Placement], shape: Sequence[int]
-) -> None:
-    """Check the currently supported ``BlockShard`` layouts.
+    placements: Sequence[Placement],
+    shape: Sequence[int],
+    mesh_shape: Sequence[int],
+) -> _BlockShardLayout | None:
+    """Check a BlockShard layout; return ``None`` if no mesh dim uses BlockShard.
 
-    At most one mesh dim may use ``BlockShard``, and every other mesh dim must be
-    ``Replicate`` or ``Partial``. The ``BlockShard`` pattern must be supported
-    for ``shape``.
+    At most one mesh dim may use ``BlockShard``. Every other mesh dim must be
+    ``Replicate``, ``Partial``, or (on at most one mesh dim) ``Shard(0)`` that
+    evenly divides ``shape[0]``.
     """
-    block_shards = [p for p in placements if isinstance(p, BlockShard)]
-    if not block_shards:
-        return
-    if len(block_shards) > 1:
+    block_shard_dims = [
+        i for i, p in enumerate(placements) if isinstance(p, BlockShard)
+    ]
+    if not block_shard_dims:
+        return None
+    shard0_dims = [
+        i for i, p in enumerate(placements) if type(p) is Shard and p.dim == 0
+    ]
+    others = [
+        p
+        for i, p in enumerate(placements)
+        if i not in block_shard_dims
+        and i not in shard0_dims
+        and not (p.is_replicate() or p.is_partial())
+    ]
+    if len(block_shard_dims) > 1 or len(shard0_dims) > 1 or others:
         raise NotImplementedError(
-            f"BlockShard on more than one mesh dim is not supported: {tuple(placements)}"
+            "BlockShard supports one BlockShard mesh dim combined with Replicate, "
+            f"Partial, and at most one Shard(0), got {tuple(placements)}"
         )
-    for p in placements:
-        if not isinstance(p, BlockShard) and not (p.is_replicate() or p.is_partial()):
+    block_shape = tuple(shape)
+    shard0_mesh_dim = shard0_dims[0] if shard0_dims else None
+    if shard0_mesh_dim is not None:
+        num_chunks = mesh_shape[shard0_mesh_dim]
+        if shape[0] % num_chunks != 0:
             raise NotImplementedError(
-                "BlockShard can only be combined with Replicate or Partial on other "
-                f"mesh dims, got {tuple(placements)}"
+                f"BlockShard with Shard(0) requires shape[0] ({shape[0]}) to be "
+                f"divisible by the Shard(0) mesh dim size ({num_chunks})"
             )
-    block_shards[0]._split_dim(shape)
+        block_shape = (shape[0] // num_chunks, *shape[1:])
+    placement = cast(BlockShard, placements[block_shard_dims[0]])
+    placement._split_dim(block_shape)
+    return _BlockShardLayout(
+        block_shard_dims[0], placement, shard0_mesh_dim, block_shape
+    )
 
 
 def _register_placements_as_opaque():
