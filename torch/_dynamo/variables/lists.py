@@ -2364,9 +2364,55 @@ class ByteArrayVariable(VariableTracker):
                 kwargs,
             )
 
+    def bytearray_hex(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            unimplemented(
+                gb_type="bytearray.hex with non-constant arguments",
+                context=f"args={args}, kwargs={kwargs}",
+                explanation="Dynamo only supports bytearray.hex() with constant formatting arguments.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        try:
+            result = self.data.hex(*const_args, **const_kwargs)
+        except (TypeError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ConstantVariable.create(result)
+
+    def bytearray_decode(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            unimplemented(
+                gb_type="bytearray.decode with non-constant arguments",
+                context=f"args={args}, kwargs={kwargs}",
+                explanation="Dynamo only supports bytearray.decode() with constant encoding and error arguments.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        try:
+            result = self.data.decode(*const_args, **const_kwargs)
+        except (LookupError, TypeError, UnicodeError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ConstantVariable.create(result)
+
     tp_methods = {
         "index": Method(bytearray_index),
         "count": Method(bytearray_count),
+        "hex": Method(bytearray_hex),
+        "decode": Method(bytearray_decode),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
