@@ -220,13 +220,29 @@ function test_non_pool_free_without_alloc() {
     }],
   });
 
-  const result = process_alloc_data(snapshot, 0, false, 15000, false);
-  // max_size is only updated inside the actions loop AFTER the free decrements total_mem,
-  // so for a free-without-alloc element, max_size ends up 0.
-  // The actual peak (300) is captured in max_at_time instead.
-  assertEqual(result.max_size, 0, 'non-pool free-without-alloc: max_size is 0 (peak is in max_at_time)');
-  assert(Math.max(...result.max_at_time) === 300,
-    'non-pool free-without-alloc: max_at_time peak should be 300');
+  for (const detail of [0, 15000]) {
+    const result = process_alloc_data(snapshot, 0, false, detail, false);
+    assertEqual(result.max_size, 300, 'peak includes the initially allocated block');
+    assertEqual(Math.max(...result.max_at_time), 300, 'minimap includes the initial peak');
+  }
+}
+
+function test_peak_independent_of_detail() {
+  console.log('test_peak_independent_of_detail');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 2048, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1800, size: 1024, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x1800, size: 1024, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x1000, size: 2048, frames: [], stream: 0 },
+    ],
+  });
+
+  for (const detail of [0, 1, 2]) {
+    const result = process_alloc_data(snapshot, 0, false, detail, false);
+    assertEqual(result.max_size, 3072, `detail ${detail}: peak includes summarized allocations`);
+    assertEqual(result.max_size, Math.max(...result.max_at_time), 'plot and minimap peaks agree');
+  }
 }
 
 function test_mixed_pool_and_nonpool() {
@@ -1581,6 +1597,7 @@ test_pool_free_without_alloc_no_inflation();
 test_pool_alloc_then_free_normal();
 test_multiple_pool_frees_without_alloc();
 test_non_pool_free_without_alloc();
+test_peak_independent_of_detail();
 test_mixed_pool_and_nonpool();
 test_include_private_inactive_false_ignores_pools();
 test_formatSize_bytes();

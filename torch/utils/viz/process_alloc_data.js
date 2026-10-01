@@ -380,10 +380,8 @@ function format_frames(frames) {
  *   elements_length: number,
  *   context_for_id: function(number): string
  * }}
- *   - max_size: peak total memory observed during the action replay (used for
- *     y-axis scaling). Note: this is only updated inside the action loop, so
- *     the initial state from initially_allocated may not be reflected here
- *     (use max_at_time for the true peak).
+ *   - max_size: peak total memory, including initial and summarized allocations
+ *     (used for y-axis scaling).
  *   - allocations_over_time: array of stacked-area data objects, each with
  *     {elem, timesteps[], offsets[], size, color}.
  *   - max_at_time: total memory at each timestep (for minimap rendering).
@@ -560,12 +558,14 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
 
   // Record the current memory state and advance time by n steps
   function advance(n) {
+    const total = total_mem + total_summarized_mem;
+    max_size = Math.max(max_size, total);
     summarized_mem.timesteps.push(timestep);
     summarized_mem.offsets.push(total_mem);
     summarized_mem.size.push(total_summarized_mem);
     timestep += n;
     for (let i = 0; i < n; i++) {
-      max_at_time.push(total_mem + total_summarized_mem);
+      max_at_time.push(total);
     }
   }
 
@@ -1015,7 +1015,6 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
         }
         delete pool_active_elems[elem];
       }
-      max_size = Math.max(total_mem + total_summarized_mem, max_size);
       continue;
     }
 
@@ -1053,7 +1052,6 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
       }
       total_mem -= size;
     }
-    max_size = Math.max(total_mem + total_summarized_mem, max_size);
   }
 
   // Process any remaining segment events after the last action
@@ -1064,7 +1062,6 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     if (pool.reserved > pool.max && pool.envelope_data) {
       grow_pool_envelope(pool, se.pool_key, pool.reserved);
     }
-    max_size = Math.max(total_mem + total_summarized_mem, max_size);
     seg_event_idx++;
   }
 
