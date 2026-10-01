@@ -313,17 +313,21 @@ def list_cmp(
 
 
 def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
-    if (len(d) != len(other)) or (d.keys() != other.keys()):
+    # dict_equal reads the C struct (ma_used, dk_entries, _Py_dict_lookup), so
+    # every access below goes through the unbound dict methods -- a dict
+    # subclass overriding __len__ / keys / __getitem__ must not be consulted.
+    # https://github.com/python/cpython/blob/e76aa128fe/Objects/dictobject.c#L4125-L4185
+    if (dict.__len__(d) != dict.__len__(other)) or (dict.keys(d) != dict.keys(other)):
         return False
 
     if all(isinstance(a, OrderedDict) for a in (d, other)):
-        return list(d.items()) == list(other.items())
+        return list(dict.items(d)) == list(dict.items(other))
 
     # CPython's dict_equal uses PyObject_RichCompareBool for value
     # comparison, which has an identity shortcut (if v is w, eq is True).
     # This matters for NaN: {k: nan} == {k: nan} is True when same nan.
-    for k, v in d.items():
-        ov = other[k]
+    for k, v in dict.items(d):
+        ov = dict.__getitem__(other, k)
         if v is not ov and v != ov:
             return False
 
@@ -638,3 +642,10 @@ def import_fresh_module(name: str, blocked: list[str]) -> ModuleType:
     finally:
         _save_and_remove_modules(names)
         py_sys.modules.update(orig_modules)
+
+
+def property_isabstractmethod(prop: property) -> bool:
+    for accessor in (prop.fget, prop.fset, prop.fdel):
+        if getattr(accessor, "__isabstractmethod__", False):
+            return True
+    return False
