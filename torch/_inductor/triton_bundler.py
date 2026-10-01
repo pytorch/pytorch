@@ -544,8 +544,6 @@ class TritonBundler:
                 tmp_dir = None
                 try:
                     if os.path.exists(directory) and os.listdir(directory):
-                        # If directory already exists, leave local disk to take
-                        # care of caching.
                         log.debug(
                             "Bailing out TritonBundler.read_and_emit, %s is non empty",
                             directory,
@@ -568,7 +566,6 @@ class TritonBundler:
                             file.write(payload)
                         extension = os.path.splitext(artifact.filename)[1]
                         if extension in GPU_KERNEL_BIN_EXTS.values():
-                            # Append the binary name without its extension.
                             emitted_kernel_names.append(Path(artifact.filename).stem)
 
                     if _IS_WINDOWS:
@@ -577,7 +574,6 @@ class TritonBundler:
                                 shutil.rmtree(directory)
                             os.replace(tmp_dir, directory)
                     else:
-                        # Atomic on POSIX systems
                         os.replace(tmp_dir, directory)
                     tmp_dir = None
                     kernel_names.extend(emitted_kernel_names)
