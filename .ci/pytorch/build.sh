@@ -294,6 +294,7 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* ]]; then
     # ONE owner of the decision: stage 2 prints the verdict, we install only on RUN.
     if [[ "$(python tools/native_aot/build_stage2.py --print-verdict)" == "RUN" ]]; then
       install_cutlass_dsl
+      retry bash scripts/install_triton_wheel.sh
     fi
     # One wheel expected; a stale second would be glued into one argument. nullglob
     # so an empty dist/ counts as zero.
