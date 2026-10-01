@@ -2593,7 +2593,7 @@ elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
       if [[ "${BUILD_ENVIRONMENT}" == *cuda12.8* ]]; then
         BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu128"
       elif [[ "${BUILD_ENVIRONMENT}" == *cuda13* ]]; then
-        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu130"
+        BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/cu132"
       elif [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
         # Keep in sync with the ROCm version in the benchmarks docker image
         BASELINE_INDEX_URL="https://download.pytorch.org/whl/nightly/rocm7.2"
