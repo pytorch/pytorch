@@ -6589,10 +6589,7 @@ class AOTInductorTestsTemplate:
         self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
 
     @unittest.skipIf(config.triton.native_matmul, "matmul is generated")
-    @config.patch(fallback_by_default=False, selective_decompose=False)
     def test_aoti_debug_printer_codegen(self):
-        # Check instrumentation on the addmm out shim. Lite mode routes addmm
-        # through the proxy executor instead, so require normal lowering here.
         # basic addmm model to test codegen for aoti intermediate debug printer
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -6680,10 +6677,7 @@ class AOTInductorTestsTemplate:
     )
     @common_utils.parametrize("enable_kernel_profile", (True, False))
     @common_utils.parametrize("enable_kernel_context_guard", (True, False))
-    @config.patch(fallback_by_default=False, selective_decompose=False)
     def test_aoti_profiler(self, enable_kernel_context_guard, enable_kernel_profile):
-        # The assertions below target the addmm out shim, not lite mode's
-        # proxy-executor call.
         # basic addmm model
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -6819,10 +6813,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
-    @config.patch(fallback_by_default=False, selective_decompose=False)
     def test_aoti_profiler_multi_output_fallback_input_shapes(self):
-        # Lower transpose to a ReinterpretView. Lite mode materializes a
-        # transpose through the proxy executor and has no view handle to test.
         # A tuple-returning fallback (scaled_dot_product_attention) is the
         # representative kernel reaching generate_c_shim_fallback_kernel;
         # zero-output and dict-returning fallbacks route there too. Its q/k/v
@@ -7617,14 +7608,7 @@ class AOTInductorTestsTemplate:
                     count,
                 ).run(code)
 
-    @config.patch(
-        fallback_by_default=False,
-        selective_decompose=False,
-        use_joint_graph_passes=True,
-    )
     def test_aoti_debug_printer_cpp_kernel(self):
-        # This test requires a fused C++ kernel, rather than ATen fallbacks.
-        # Joint passes also remove lift_fresh_copy from its descriptive name.
         if self.device != "cpu":
             raise unittest.SkipTest("cpu test case only")
 
