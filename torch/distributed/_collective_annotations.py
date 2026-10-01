@@ -19,7 +19,6 @@ from __future__ import annotations
 import contextlib
 import functools
 import logging
-import threading
 import weakref
 from typing import Any, TYPE_CHECKING
 
@@ -37,6 +36,8 @@ from torch._C._distributed_c10d import (
 if TYPE_CHECKING:
     from collections.abc import Callable
     from contextlib import AbstractContextManager
+
+    Annotator = Callable[[dict[str, Any]], AbstractContextManager[None]]
 
 
 logger = logging.getLogger(__name__)
@@ -177,16 +178,16 @@ class _GroupHooks:
 
     # A raising hook fails the collective, so annotation errors are only logged.
     def _pre(self, args: PreHookArgs) -> None:
-        annotators = _annotators
         group = self._group()
-        if not annotators or group is None or not _launches_kernels(args):
+        if not _annotators or group is None or not _launches_kernels(args):
             return
         scopes = contextlib.ExitStack()
         try:
             if self._fields is None:
                 self._fields = _GroupFields(group)
             metadata = collective_metadata(group, args, self._fields)
-            for annotate in annotators:
+            # A capture and a profiler can both be open with the same annotator.
+            for annotate in dict.fromkeys(_annotators):
                 scopes.enter_context(annotate(metadata))
         except Exception:
             logger.exception("Failed to annotate %s", args.name)
@@ -195,8 +196,8 @@ class _GroupHooks:
         self._scopes[args.op_id] = scopes
 
     def _post(self, args: PostHookArgs) -> None:
-        # c10d fires the post hook whenever the pre hook fired, even if the
-        # backend raised or the gate closed in between.
+        # c10d fires the post hook whenever the pre hook fired, even if the gate
+        # closed in between.
         scopes = self._scopes.pop(args.op_id, None)
         if scopes is not None:
             self._exit(scopes)
@@ -216,11 +217,8 @@ def register_hooks(group: dist.ProcessGroup) -> None:
     group.register_post_hook(_POST_HOOK_ID, hooks._post, gated=True)
 
 
-# Annotators of the open CollectiveAnnotations, each with its number of instances.
-# _annotators is the immutable snapshot the hooks read.
-_open: dict[Callable[[dict[str, Any]], AbstractContextManager[None]], int] = {}
-_open_lock = threading.Lock()
-_annotators: tuple[Callable[[dict[str, Any]], AbstractContextManager[None]], ...] = ()
+# One entry per open CollectiveAnnotations.
+_annotators: list[Annotator] = []
 
 
 class CollectiveAnnotations:
@@ -234,27 +232,17 @@ class CollectiveAnnotations:
 
     def __init__(
         self,
-        annotate: Callable[
-            [dict[str, Any]], AbstractContextManager[None]
-        ] = _mark_kernels,
+        annotate: Annotator = _mark_kernels,
     ) -> None:
-        global _annotators
         self._annotate = annotate
-        with _open_lock:
-            _open[annotate] = _open.get(annotate, 0) + 1
-            _annotators = tuple(_open)
+        _annotators.append(annotate)
         _enable_gated_hooks()
         self._closed = False
 
     def close(self) -> None:
         """Never raises: ``torch.cuda.graph`` calls it before ending the capture."""
-        global _annotators
         if self._closed:
             return
         self._closed = True
         _disable_gated_hooks()
-        with _open_lock:
-            _open[self._annotate] -= 1
-            if not _open[self._annotate]:
-                del _open[self._annotate]
-            _annotators = tuple(_open)
+        _annotators.remove(self._annotate)
