@@ -59,6 +59,17 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
+  linux-aarch64-gb300-runner-check:
+    if: github.repository_owner == 'pytorch'
+    needs: get-label-type
+    runs-on: nv-l-arm64grace-16-200-gb300
+    container:
+      image: ghcr.io/pytorch/ci-image:pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13-${{ needs.get-label-type.outputs.ci-docker-hash }}
+      options: --gpus all
+    steps:
+      - name: Check GPU
+        run: nvidia-smi
+
   # B200 CUDA 13.2 sm100 smoke coverage, staged here to gauge B200 runner
   # reliability/availability on every main commit before it graduates to trunk.
   linux-jammy-cuda13_2-py3_12-gcc11-sm100-build:
