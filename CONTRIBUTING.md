@@ -11,9 +11,9 @@ aspects of contributing to PyTorch.
 <!-- toc -->
 
 - [Issue and PR Workflow](#issue-and-pr-workflow)
-  - [Current status](#current-status)
   - [Issue lifecycle](#issue-lifecycle)
   - [PR lifecycle](#pr-lifecycle)
+  - [Current status](#current-status)
   - [Why was my issue or PR closed?](#why-was-my-issue-or-pr-closed)
 - [Developing PyTorch](#developing-pytorch)
   - [Tips and Debugging](#tips-and-debugging)
@@ -83,19 +83,7 @@ Once a change and design is agreed upon, pull requests are the place to discuss 
 
 For clarity, PyTorch uses labels to track the state of every issue and PR, so that both contributors and maintainers can tell what the next step is and who is expected to take it.
 
-### Current status
-
-This workflow is being rolled out. The following parts are still in progress:
-
-| In progress | Until it lands |
-|---|---|
-| The `no automated triage` and `no automated review` labels | The labels exist, but the bots do not act on them yet. |
-| Requesting re-evaluation of an issue by removing its label. This needs `@pytorchbot` to support removing labels: today `@pytorchbot label` can only add labels, for any label, and there is no command to remove one. | Comment on the issue with the new information and mention the maintainer who applied the label. |
-| PR triage: a bot assigns one reviewer per module and adds `triaged` | Reviewers are requested through [CODEOWNERS](CODEOWNERS) and manual reviewer assignment. |
-| Automated review | It runs on PRs labeled `in progress` and replaces that label with `ready for review` when it passes, but it does not post its findings on the PR yet. Run the [pr-review skill](.claude/skills/pr-review/SKILL.md) locally to see what it checks. A "Request changes" review does not move the PR back to `in progress` automatically yet. |
-| [GreenLight](#greenlight) | It only approves PRs for a small set of authors. |
-| Closing PRs without an actionable issue or maintainer sponsor | These PRs are labeled `missing actionable issue` today. Maintainers can add these PRs back to their usual workflow by removing this label. |
-| Bots closing issues and PRs with a comment giving the reason | Maintainers close issues and PRs that do not meet the pre-conditions manually, with a reason. The stale bot closes PRs without a comment. |
+This workflow is being rolled out and not all of it is live yet, see [Current status](#current-status).
 
 ### Issue lifecycle
 
@@ -124,7 +112,7 @@ Rectangles are states. Rounded boxes are processes that move an item between sta
 
 | Label | Meaning | What you can do |
 |---|---|---|
-| `needs reproduction` | The problem has not been reproduced yet. | Provide a minimal, self-contained reproduction. A maintainer then validates it. |
+| `needs reproduction` | The problem has not been reproduced yet. | Reproduce the issue that was reported. A maintainer then validates it. |
 | `needs research` | We have not decided yet whether the bug is real or whether we want the feature. | Provide supporting evidence that the feature is useful or the bug is valid. A maintainer then decides whether it is worth pursuing. |
 | `needs design` | We want to fix the bug or add the feature, but how to do it is not settled. | Propose a design on the issue. A maintainer then validates it. |
 | `actionable` | The issue has enough detail for anyone to write a good PR, and the maintainer who applied the label is willing to review it. | Send a PR, see [PR lifecycle](#pr-lifecycle). |
@@ -213,6 +201,20 @@ Based on that:
 
 **Stale PRs**: PRs without any update for 60 days get the `Stale` label and are closed 30 days later. PRs labeled `high priority` or `no-stale` are exempt.
 Remove the `Stale` label (or ask a maintainer to) if the PR is still active.
+
+### Current status
+
+This workflow is being rolled out. The following parts are still in progress:
+
+| In progress | Until it lands |
+|---|---|
+| The `no automated triage` and `no automated review` labels | The labels exist, but the bots do not act on them yet. |
+| Requesting re-evaluation of an issue by removing its label. This needs `@pytorchbot` to support removing labels: today `@pytorchbot label` can only add labels, for any label, and there is no command to remove one. | Comment on the issue with the new information and mention the maintainer who applied the label. |
+| PR triage: a bot assigns one reviewer per module and adds `triaged` | Reviewers are requested through [CODEOWNERS](CODEOWNERS) and manual reviewer assignment. |
+| Automated review | It runs on PRs labeled `in progress` and replaces that label with `ready for review` when it passes, but it does not post its findings on the PR yet. Run the [pr-review skill](.claude/skills/pr-review/SKILL.md) locally to see what it checks. A "Request changes" review does not move the PR back to `in progress` automatically yet. |
+| [GreenLight](#greenlight) | It only approves PRs for a small set of authors. |
+| Closing PRs without an actionable issue or maintainer sponsor | These PRs are labeled `missing actionable issue` today. Maintainers can add these PRs back to their usual workflow by removing this label. |
+| Bots closing issues and PRs with a comment giving the reason | Maintainers close issues and PRs that do not meet the pre-conditions manually, with a reason. The stale bot closes PRs without a comment. |
 
 ### Why was my issue or PR closed?
 
