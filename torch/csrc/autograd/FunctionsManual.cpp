@@ -183,6 +183,30 @@ static Tensor handle_r_to_c(const Tensor& self, Tensor gradient_result) {
   return gradient_result;
 }
 
+Tensor addr_self_backward(
+    const Tensor& grad,
+    const Scalar& beta,
+    ScalarType self_type,
+    ScalarType vec1_type,
+    ScalarType vec2_type) {
+  auto dtype =
+      c10::promoteTypes(self_type, c10::promoteTypes(vec1_type, vec2_type));
+  return handle_r_to_c(self_type, maybe_multiply(grad.to(dtype), beta.conj()));
+}
+
+Tensor addr_vec_backward(
+    const Tensor& grad,
+    const Tensor& vec,
+    const Scalar& alpha,
+    ScalarType input_type) {
+  // addr_ can have a lower precision output than its promoted inputs.
+  auto dtype = c10::promoteTypes(
+      grad.scalar_type(), c10::promoteTypes(vec.scalar_type(), input_type));
+  return handle_r_to_c(
+      input_type,
+      maybe_multiply(grad.to(dtype).mv(vec.to(dtype).conj()), alpha.conj()));
+}
+
 Tensor restore_reduced_dims(
     const Tensor& output,
     IntArrayRef dims,
