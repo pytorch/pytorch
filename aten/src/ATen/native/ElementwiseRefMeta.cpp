@@ -15,6 +15,7 @@
 #include <c10/core/Contiguity.h>
 #include <c10/core/DefaultDtype.h>
 #include <c10/core/SymNodeImpl.h>
+#include <c10/core/impl/PyInterpreterHooks.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
 #include <c10/util/safe_numerics.h>
@@ -50,7 +51,7 @@ bool is_nested_int(const c10::SymInt& s) {
 }
 
 bool any_heap(c10::SymIntArrayRef xs) {
-  return std::any_of(xs.begin(), xs.end(), [](const c10::SymInt& s) { return s.is_heap_allocated(); });
+  return std::ranges::any_of(xs, &c10::SymInt::is_heap_allocated);
 }
 
 bool desc_is_symbolic(const MetaDesc& d) {
@@ -141,7 +142,7 @@ bool is_contiguous_or_false(const MetaDesc& a) {
   if (TORCH_GUARD_OR_FALSE(sym_numel(a.sizes).sym_lt(2))) {
     return true;
   }
-  return c10::_compute_contiguous_or_false(a.sizes, a.strides);
+  return c10::_is_contiguous_or_false(a.sizes, a.strides);
 }
 
 // K.__lt__ in _prims_common, on strides only.
@@ -190,6 +191,15 @@ void python_sort(std::vector<int64_t>& a, Lt lt) {
   }
 }
 
+// _prims_common._is_non_overlapping_and_dense_or_false, whose unbacked semantics
+// differ from TensorImpl::is_non_overlapping_and_dense_or_false. For unbacked
+// sizes, TensorImpl evaluates IsNonOverlappingAndDenseIndicator(sizes, strides)
+// == 1 (via SymbolicShapeMeta), which sympy only folds when every stride is an
+// integer. Here the strides are sorted size-obliviously first (stride_lt proves
+// e.g. u0 < 2 * u0), so this can return true where TensorImpl returns false,
+// e.g. sizes (s0, u0) with strides (1, s0). Backed sizes give the same result,
+// though the guards may be phrased differently.
+// TODO: unify the unbacked semantics of the two.
 bool is_non_overlapping_and_dense_or_false(const MetaDesc& a) {
   if (TORCH_GUARD_OR_FALSE(sym_numel(a.sizes).sym_lt(2))) {
     return true;
@@ -208,7 +218,7 @@ bool is_non_overlapping_and_dense_or_false(const MetaDesc& a) {
     sorted_sizes.push_back(a.sizes[*it]);
     sorted_strides.push_back(a.strides[*it]);
   }
-  return c10::_compute_contiguous_or_false(sorted_sizes, sorted_strides);
+  return c10::_is_contiguous_or_false(sorted_sizes, sorted_strides);
 }
 
 // a >= b assuming a >= 0, b >= 0.
@@ -238,7 +248,7 @@ DimVector compute_elementwise_output_logical_to_physical_perm(const std::vector<
   bool is_channels_last = true;
   for (const auto* t : tensors) {
     is_contiguous = is_contiguous && is_contiguous_or_false(*t);
-    is_channels_last = is_channels_last && c10::_compute_channels_last_contiguous_2d_or_false(t->sizes, t->strides);
+    is_channels_last = is_channels_last && c10::_is_channels_last_contiguous_2d_or_false(t->sizes, t->strides);
   }
 
   DimVector perm(ndim);
@@ -322,17 +332,8 @@ std::optional<int64_t> guarding_hint(const c10::SymInt& s) {
   return s.is_heap_allocated() ? s.toSymNodeImplUnowned()->guarding_hint() : s.as_int_unchecked();
 }
 
-// Whether backed_size_oblivious is set, asked through any symbolic size since
-// it only matters when there is one.
-bool backed_size_oblivious(ArrayRef<c10::SymIntArrayRef> shapes) {
-  for (const auto& shape : shapes) {
-    for (const auto& s : shape) {
-      if (s.is_heap_allocated()) {
-        return s.toSymNodeImplUnowned()->backed_size_oblivious();
-      }
-    }
-  }
-  return false;
+bool backed_size_oblivious() {
+  return (*c10::impl::getGlobalPyInterpreter())->backed_size_oblivious();
 }
 
 // torch._check's default message.
@@ -347,7 +348,6 @@ c10::SymDimVector _broadcast_shapes(ArrayRef<c10::SymIntArrayRef> shapes) {
   }
   const int64_t common_len = static_cast<int64_t>(maxlen);
   c10::SymDimVector common_shape(maxlen, c10::SymInt(1));
-  const bool backed_so = backed_size_oblivious(shapes);
   for (const auto arg_idx : c10::irange(shapes.size())) {
     const auto& shape = shapes[arg_idx];
     const int64_t len = static_cast<int64_t>(shape.size());
@@ -360,7 +360,9 @@ c10::SymDimVector _broadcast_shapes(ArrayRef<c10::SymIntArrayRef> shapes) {
         }
       } else {
         // Under backed_size_oblivious, specialize a size to 1 if broadcasting
-        // is the only way to handle the example inputs.
+        // is the only way to handle the example inputs. The checks are trivially
+        // true between plain ints, so only read the flag when there's a SymInt.
+        const bool backed_so = (s.is_heap_allocated() || common.is_heap_allocated()) && backed_size_oblivious();
         const auto s_hint = backed_so ? guarding_hint(s) : std::nullopt;
         const auto common_hint = backed_so ? guarding_hint(common) : std::nullopt;
         if (s_hint && common_hint) {
@@ -459,7 +461,6 @@ MetaDesc expand(const MetaDesc& a, c10::SymIntArrayRef shape) {
   TORCH_CHECK(static_cast<int64_t>(shape.size()) >= ndim, "expand: the requested shape has too few dimensions!");
   const int64_t offset = static_cast<int64_t>(shape.size()) - ndim;
   c10::SymDimVector shape_(shape.begin(), shape.end());
-  const bool backed_so = backed_size_oblivious({a.sizes, shape});
   for (const auto idx : c10::irange(ndim)) {
     const auto& x = a.sizes[idx];
     const int64_t offset_idx = idx + offset;
@@ -467,7 +468,7 @@ MetaDesc expand(const MetaDesc& a, c10::SymIntArrayRef shape) {
     if (TORCH_GUARD_OR_FALSE(requested_length.sym_eq(-1))) {
       shape_[offset_idx] = x;
     } else {
-      if (backed_so) {
+      if ((x.is_heap_allocated() || requested_length.is_heap_allocated()) && backed_size_oblivious()) {
         const auto x_hint = guarding_hint(x);
         const auto requested_hint = guarding_hint(requested_length);
         if (x_hint == 1 && requested_hint && *requested_hint != 1) {
@@ -722,30 +723,6 @@ bool is_noncontiguous_supported(const Tensor& self, const Tensor& other) {
   return !first.key_set().has_backend(BackendComponent::HPUBit);
 }
 
-// Unlike at::infer_size_symdimvector, compares sizeA == sizeB in Python's
-// operand order.
-c10::SymDimVector infer_size(c10::SymIntArrayRef a, c10::SymIntArrayRef b) {
-  const auto dims_a = static_cast<int64_t>(a.size());
-  const auto dims_b = static_cast<int64_t>(b.size());
-  const auto ndim = std::max(dims_a, dims_b);
-  c10::SymDimVector expanded_sizes(ndim);
-  for (int64_t i = ndim - 1; i >= 0; --i) {
-    const int64_t offset = ndim - 1 - i;
-    const int64_t dim_a = dims_a - 1 - offset;
-    const int64_t dim_b = dims_b - 1 - offset;
-    const c10::SymInt size_a = dim_a >= 0 ? a[dim_a] : c10::SymInt(1);
-    const c10::SymInt size_b = dim_b >= 0 ? b[dim_b] : c10::SymInt(1);
-    if (!TORCH_GUARD_OR_FALSE(size_a.sym_eq(1)) && !TORCH_GUARD_OR_FALSE(size_b.sym_eq(1))) {
-      TORCH_SYM_CHECK(
-          size_a.sym_eq(size_b),
-          "The size of tensor a (", size_a, ") must match the size of tensor b (", size_b,
-          ") at non-singleton dimension ", i);
-    }
-    expanded_sizes[i] = TORCH_GUARD_OR_FALSE(size_a.sym_eq(1)) ? size_b : size_a;
-  }
-  return expanded_sizes;
-}
-
 // The SymInt, SymFloat or SymBool a symbolic wrapped number stands for, which
 // the refs see as the Python number. Its placeholder value has the matching
 // dtype: kLong, kDouble or kBool.
@@ -971,7 +948,7 @@ Tensor fast_binary_impl(const Tensor& self, const Tensor& other, ELEMENTWISE_TYP
   const std::array<const Tensor*, 2> operands = {&self, &other};
   c10::SymDimVector final_shape(self.sym_sizes().begin(), self.sym_sizes().end());
   for (const auto* op : operands) {
-    final_shape = infer_size(final_shape, op->sym_sizes());
+    final_shape = at::infer_size_symdimvector(final_shape, op->sym_sizes());
   }
 
   bool obvious = false;
@@ -1026,7 +1003,7 @@ Tensor fast_binary_impl(const Tensor& self, const Tensor& other, ELEMENTWISE_TYP
   if (common_device.type() != kHPU) {
     for (const auto& desc : descs) {
       contiguous = contiguous && is_contiguous_or_false(desc);
-      channels_last = channels_last && c10::_compute_channels_last_contiguous_2d_or_false(desc.sizes, desc.strides);
+      channels_last = channels_last && c10::_is_channels_last_contiguous_2d_or_false(desc.sizes, desc.strides);
     }
   }
   if (!contiguous && !channels_last) {
