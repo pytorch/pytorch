@@ -36,7 +36,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
-    SM53OrLater, SM80OrLater, SM90OrLater, with_tf32_off, TEST_CUDNN,
+    SM53OrLater, SM80OrLater, SM90OrLater, SM100OrLater, with_tf32_off, TEST_CUDNN,
     _get_torch_cuda_version,
 )
 from torch.testing._internal.common_quantized import (
@@ -7456,6 +7456,35 @@ def sample_inputs_linear_cross_entropy_chunked(op_info, device, dtype, requires_
 
 def sample_inputs_linear_cross_entropy_chunked_none(op_info, device, dtype, requires_grad, **kw):
     yield from sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, chunked=True, chunked_none=True, **kw)
+
+
+def sample_inputs_cutedsl_quantize_tensor(op_info, device, dtype, requires_grad, **kwargs_unused):
+    from torch.nn import functional as F
+
+    # Dtype probes request gradients even for ops that do not support autograd.
+    input = make_tensor((160, 160), device=device, dtype=dtype, requires_grad=False)
+    recipe = {
+        "qdata_dtype": torch.float8_e4m3fn,
+        "inner_scale_calc": F.InnerScaleCalc.RCEIL_E8M0,
+        "scaling_type": F.ScalingType.BlockWise1x32,
+        "swizzle_type": F.SwizzleType.NO_SWIZZLE,
+    }
+    yield SampleInput(input, kwargs=recipe)
+    yield SampleInput(input.t(), kwargs={**recipe, "swizzle_type": F.SwizzleType.SWIZZLE_32_4_4})
+    yield SampleInput(input, kwargs={**recipe, "swizzle_type": F.SwizzleType.SWIZZLE_32_4_4,
+                                     "scaling_type_square_block_and_expand": True})
+
+
+def sample_inputs_cutedsl_quantize_tensor_dual(op_info, device, dtype, requires_grad, **kwargs_unused):
+    from torch.nn import functional as F
+
+    input = make_tensor((160, 192), device=device, dtype=dtype, requires_grad=False)
+    yield SampleInput(input, kwargs={
+        "qdata_dtype": torch.float8_e4m3fn,
+        "inner_scale_calc": F.InnerScaleCalc.RCEIL_E8M0,
+        "scaling_type": F.ScalingType.BlockWise1x32,
+        "swizzle_type": F.SwizzleType.SWIZZLE_32_4_4,
+    })
 
 
 def _cutedsl_linear_cross_entropy_eligible(sample):
@@ -23134,6 +23163,60 @@ dsl_ops_by_dsl.setdefault('triton', []).append(
 )
 
 if "cutedsl" in dsl_ops_by_dsl:
+    dsl_ops_by_dsl["cutedsl"].append(
+        OpInfo(
+            "nn.functional.quantize_tensor",
+            variant_test_name="cutedsl",
+            aten_name="_quantize_tensor",
+            dtypes=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            dtypesIfCUDA=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            sample_inputs_func=sample_inputs_cutedsl_quantize_tensor,
+            supports_autograd=False,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=False,
+            supports_out=False,
+            supports_cow_input_no_materialize_forward=False,
+            decorators=[
+                DecorateInfo(onlyCUDA),
+                DecorateInfo(skipIfNoCuteDSL),
+                DecorateInfo(skipIfRocm),
+                DecorateInfo(skipCUDAIf(not SM100OrLater, "requires NVIDIA SM100+")),
+            ],
+            skips=(
+                DecorateInfo(unittest.skip("requires supported input layout"), "TestCommon", "test_noncontiguous_samples"),
+                DecorateInfo(unittest.skip("export is deferred"), "TestExportOpInfo"),
+                DecorateInfo(unittest.skip("export is deferred"), "TestExportOnFakeCuda"),
+            ),
+        )
+    )
+    dsl_ops_by_dsl["cutedsl"].append(
+        OpInfo(
+            "nn.functional.quantize_tensor_dual",
+            variant_test_name="cutedsl",
+            aten_name="_quantize_tensor_dual",
+            dtypes=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            dtypesIfCUDA=custom_types(torch.float16, torch.bfloat16, torch.float32),
+            sample_inputs_func=sample_inputs_cutedsl_quantize_tensor_dual,
+            supports_autograd=False,
+            supports_forward_ad=False,
+            supports_fwgrad_bwgrad=False,
+            supports_out=False,
+            supports_cow_input_no_materialize_forward=False,
+            decorators=[
+                DecorateInfo(onlyCUDA),
+                DecorateInfo(skipIfNoCuteDSL),
+                DecorateInfo(skipIfRocm),
+                DecorateInfo(skipCUDAIf(not SM100OrLater, "requires NVIDIA SM100+")),
+            ],
+            skips=(
+                DecorateInfo(
+                    unittest.skip("requires contiguous input"), "TestCommon", "test_noncontiguous_samples"
+                ),
+                DecorateInfo(unittest.skip("export is deferred"), "TestExportOpInfo"),
+                DecorateInfo(unittest.skip("export is deferred"), "TestExportOnFakeCuda"),
+            ),
+        )
+    )
     dsl_ops_by_dsl["cutedsl"].append(
         OpInfo(
             "nn.functional.rms_norm",

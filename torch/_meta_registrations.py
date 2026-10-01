@@ -7492,6 +7492,140 @@ def meta_scaled_mm(
     )
 
 
+def _check_quantize_tensor_recipe(
+    input: torch.Tensor,
+    qdata_dtype: torch.dtype,
+    inner_scale_calc: int,
+    scaling_type: int,
+    op_name: str,
+) -> None:
+    torch._check_value(
+        input.dtype in (torch.float16, torch.bfloat16, torch.float32),
+        lambda: f"{op_name} supports only fp16, bf16, and fp32 input",
+    )
+    torch._check_value(
+        qdata_dtype == torch.float8_e4m3fn,
+        lambda: f"{op_name} supports only float8_e4m3fn qdata",
+    )
+    torch._check_value(
+        inner_scale_calc == 0,
+        lambda: f"{op_name} supports only RCEIL_E8M0 inner scales",
+    )
+    torch._check_value(
+        scaling_type == 3,
+        lambda: f"{op_name} supports only BlockWise1x32 scaling",
+    )
+
+
+@register_meta([aten._quantize_tensor.default])
+def meta_quantize_tensor(
+    input: torch.Tensor,
+    qdata_dtype: torch.dtype,
+    inner_scale_calc: int,
+    scaling_type: int,
+    swizzle_type: int,
+    scaling_type_square_block_and_expand: bool = False,
+) -> list[torch.Tensor]:
+    torch._check_value(input.dim() == 2, lambda: "quantize_tensor requires a 2D input")
+    rows, cols = input.shape
+    torch._check_value(
+        cols % 32 == 0, lambda: "quantize_tensor requires columns divisible by 32"
+    )
+    is_dim_k = input.is_contiguous()
+    if not is_dim_k:
+        torch._check_value(
+            input.t().is_contiguous(),
+            lambda: "input must be contiguous or a transpose of contiguous",
+        )
+    _check_quantize_tensor_recipe(
+        input, qdata_dtype, inner_scale_calc, scaling_type, "quantize_tensor"
+    )
+    torch._check_value(
+        swizzle_type in (0, 1),
+        lambda: "unsupported swizzle type",
+    )
+    torch._check_value(
+        is_dim_k or swizzle_type == 1,
+        lambda: "dim-m quantization requires SWIZZLE_32_4_4",
+    )
+    torch._check_value(
+        not scaling_type_square_block_and_expand or (is_dim_k and swizzle_type == 1),
+        lambda: "32x32 MXFP8 scaling requires dim-k and SWIZZLE_32_4_4",
+    )
+    if not is_dim_k:
+        torch._check_value(rows % 16 == 0)
+    if scaling_type_square_block_and_expand:
+        torch._check_value(rows % 32 == 0)
+    if input.device.type not in ("cuda", "meta") or (
+        input.device.type == "cuda" and torch.version.hip is not None
+    ):
+        raise RuntimeError("quantize_tensor requires an NVIDIA CUDA tensor")
+
+    scale_shape = (
+        ((rows + 127) // 128, (cols + 127) // 128, 32, 16)
+        if swizzle_type == 1
+        else (rows, cols // 32)
+    )
+    return [
+        torch.empty((rows, cols), device=input.device, dtype=qdata_dtype),
+        torch.empty(scale_shape, device=input.device, dtype=torch.float8_e8m0fnu),
+    ]
+
+
+@register_meta([aten._quantize_tensor_dual.default])
+def meta_quantize_tensor_dual(
+    input: torch.Tensor,
+    qdata_dtype: torch.dtype,
+    inner_scale_calc: int,
+    scaling_type: int,
+    swizzle_type: int,
+    scaling_type_square_block_and_expand: bool = False,
+) -> list[torch.Tensor]:
+    torch._check_value(
+        input.dim() == 2, lambda: "quantize_tensor_dual requires a 2D input"
+    )
+    rows, cols = input.shape
+    torch._check_value(
+        rows % 32 == 0,
+        lambda: "dual quantization requires both dimensions divisible by 32",
+    )
+    torch._check_value(
+        cols % 32 == 0,
+        lambda: "dual quantization requires both dimensions divisible by 32",
+    )
+    torch._check_value(
+        input.is_contiguous(), lambda: "dual quantization requires contiguous input"
+    )
+    _check_quantize_tensor_recipe(
+        input, qdata_dtype, inner_scale_calc, scaling_type, "quantize_tensor_dual"
+    )
+    torch._check_value(
+        swizzle_type == 1, lambda: "dual quantization requires SWIZZLE_32_4_4"
+    )
+    torch._check_value(
+        not scaling_type_square_block_and_expand,
+        lambda: "dual quantization does not support 32x32 MXFP8 scaling",
+    )
+    if input.device.type not in ("cuda", "meta") or (
+        input.device.type == "cuda" and torch.version.hip is not None
+    ):
+        raise RuntimeError("quantize_tensor_dual requires an NVIDIA CUDA tensor")
+    return [
+        torch.empty((rows, cols), device=input.device, dtype=qdata_dtype),
+        torch.empty(
+            ((rows + 127) // 128, (cols + 127) // 128, 32, 16),
+            device=input.device,
+            dtype=torch.float8_e8m0fnu,
+        ),
+        torch.empty((cols, rows), device=input.device, dtype=qdata_dtype),
+        torch.empty(
+            ((cols + 127) // 128, (rows + 127) // 128, 32, 16),
+            device=input.device,
+            dtype=torch.float8_e8m0fnu,
+        ),
+    ]
+
+
 @register_meta([aten._scaled_mm_v2.default])
 def meta_scaled_mm_v2(
     self: torch.Tensor,

@@ -7,6 +7,7 @@ os.environ["KINETO_LOG_LEVEL"] = "6"
 
 import torch
 from torch._inductor.utils import do_bench_using_profiling
+from torch.nn import functional as F
 from torch.nn.functional import SwizzleType
 from torch.testing._internal.common_quantized import mxfp8_32x32_swizzle_f, to_mxfp
 
@@ -63,16 +64,22 @@ def _reference(input, orientation, square, swizzled):
 
 
 def _benchmark_one(kernel, M, K, dtype):
-    from torch._native.ops.quantize_tensor.blockscaled_tma.blockscaled_tma_impl import (
-        _blockscaled_tma_impl,
-    )
-
     torch.manual_seed(0)
     input = torch.randn(M, K, dtype=dtype, device="cuda")
     orientation, square, swizzled = _KERNELS[kernel]
+    api_input = input.t() if orientation == "dim_m" else input
+    swizzle_type = SwizzleType.SWIZZLE_32_4_4 if swizzled else SwizzleType.NO_SWIZZLE
+    quantize = F.quantize_tensor_dual if orientation == "dim_km" else F.quantize_tensor
 
     def run():
-        return _blockscaled_tma_impl(input, orientation, square, swizzled)
+        return quantize(
+            api_input,
+            qdata_dtype=torch.float8_e4m3fn,
+            inner_scale_calc=F.InnerScaleCalc.RCEIL_E8M0,
+            scaling_type=F.ScalingType.BlockWise1x32,
+            swizzle_type=swizzle_type,
+            scaling_type_square_block_and_expand=square,
+        )
 
     outputs = run()
     torch.cuda.synchronize()
