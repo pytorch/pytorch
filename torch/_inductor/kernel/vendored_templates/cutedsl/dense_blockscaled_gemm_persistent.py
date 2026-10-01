@@ -198,6 +198,8 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         mma_tiler_mn: Tuple[int, int],
         cluster_shape_mn: Tuple[int, int],
         use_prefetch: bool = False,
+        use_pdl: bool = False,
+        late_pdl_wait: bool = False,
     ):
         """Initializes the configuration for a Blackwell dense GEMM kernel.
 
@@ -233,6 +235,8 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         # TMA-prefetch tactic: prefetch A/B/SF tiles ahead in the K-loop to
         # hide latency; helps small-M large-K.
         self.use_prefetch = use_prefetch
+        self.use_pdl = use_pdl
+        self.late_pdl_wait = late_pdl_wait
 
         self.occupancy = 1
         # Set specialized warp ids
@@ -808,6 +812,7 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             cluster=(*self.cluster_shape_mn, 1),
             stream=stream,
             min_blocks_per_mp=1,
+            use_pdl=self.use_pdl,
         )
         return
 
@@ -847,10 +852,15 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         """
         GPU device kernel performing the Persistent batched GEMM computation.
         """
-        # Alpha is always supplied by the wrapper (one when output scaling is
-        # absent). Load it once so every epilogue subtile reuses the same FP32
-        # register instead of rebuilding the tensor load in the inner loop.
-        alpha_value = alpha_tensor[0].to(cutlass.Float32)
+        # Small decode kernels can overlap descriptor and layout setup with the
+        # preceding grid. Other kernels keep the conservative entry wait.
+        if cutlass.const_expr(self.use_pdl and not self.late_pdl_wait):
+            cute.arch.griddepcontrol_wait()
+
+        if cutlass.const_expr(not self.late_pdl_wait):
+            # Alpha is always supplied by the wrapper (one when output scaling
+            # is absent). Load it once for all epilogue subtiles.
+            alpha_value = alpha_tensor[0].to(cutlass.Float32)
 
         warp_idx = cute.arch.warp_idx()
         warp_idx = cute.arch.make_warp_uniform(warp_idx)
@@ -1123,6 +1133,11 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
         # Cluster wait before tensor memory alloc
         #
         pipeline_init_wait(cluster_shape_mn=self.cluster_shape_mn)
+
+        if cutlass.const_expr(self.use_pdl and self.late_pdl_wait):
+            cute.arch.griddepcontrol_wait()
+        if cutlass.const_expr(self.late_pdl_wait):
+            alpha_value = alpha_tensor[0].to(cutlass.Float32)
 
         #
         # Specialized TMA load warp
@@ -2216,6 +2231,14 @@ class Sm100BlockScaledPersistentDenseGemmKernel:
             # Wait for C store complete
             #
             c_pipeline.producer_tail()
+
+        if cutlass.const_expr(self.use_pdl):
+            # Deliberately release while the epilogue's output stores are still
+            # draining so the next grid can launch concurrently. Every CTA
+            # reaches this call at least once; the dependent kernel's prologue
+            # wait supplies the completion and memory-visibility guarantee
+            # before any dependent read.
+            cute.arch.griddepcontrol_launch_dependents()
 
     def mainloop_s2t_copy_and_partition(
         self,
