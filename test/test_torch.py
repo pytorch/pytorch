@@ -6842,9 +6842,11 @@ class TestTorchCUDA(TestCase):
         size = 4
         x = torch.rand(size, device=device)
         y = torch.rand((), device=device)
+        y_cpu = y.cpu()
         ind = torch.randint(size, (3,), device=device)
         ind_2d = torch.randint(size, (2, 3), device=device)
         ind_cpu = ind.cpu()
+        scalar_ind = torch.randint(size, (), device=device)
         repeats = torch.full((1,), 2, device=device)
         mask = torch.randint(2, (size,), device=device, dtype=bool)
         mask_cpu = mask.cpu()
@@ -6853,6 +6855,8 @@ class TestTorchCUDA(TestCase):
                           lambda: _ind_put_fn(x, ind, y),
                           lambda: _ind_put_fn(x, ind, 1.),
                           lambda: _ind_put_fn(x, ind_2d, 1.),
+                          lambda: _ind_put_fn(x, scalar_ind, y),
+                          lambda: _ind_put_fn(x, scalar_ind, 1.),
                           lambda: _ind_put_fn(x, 0, 5.),
                           lambda: _ind_put_fn(x, slice(0, 1), 5.),
                           lambda: _ind_get_fn(x, mask_cpu),
@@ -6866,6 +6870,7 @@ class TestTorchCUDA(TestCase):
                           lambda: torch.normal(x, x))
         expect_sync = (lambda: _ind_put_fn(x, mask, y),
                        lambda: _ind_put_fn(x, ind_cpu, y),
+                       lambda: _ind_put_fn(x, scalar_ind, y_cpu),
                        lambda: _ind_get_fn(x, mask),
                        lambda: _ind_get_fn(x, ind_cpu),
                        lambda: x.nonzero(),
