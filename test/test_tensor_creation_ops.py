@@ -4761,7 +4761,8 @@ class TestAsArrayCpuOnly(_TestAsArrayBase):
                 raise RuntimeError("dlpack export failed")
 
             def __dlpack_device__(self):
-                return torch.zeros(1).__dlpack_device__()
+                # kDLCPU, reported as plain ints the way numpy does
+                return (1, 0)
 
         with self.assertRaisesRegex(RuntimeError, "dlpack export failed"):
             torch.asarray(_NoFallback())
