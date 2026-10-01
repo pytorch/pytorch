@@ -12,7 +12,6 @@
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/NanCheckHook.hpp>
 #include <string_view>
-#include <tuple>
 #include <utility>
 #include <vector>
 #ifndef _WIN32
@@ -106,41 +105,6 @@ bool registerGilChecker() {
 }
 
 static bool registered = registerGilChecker();
-
-::c10d::nccl2::MaterializedCollectiveConfig materializeCollectiveConfig(
-    const c10::IValue& config) {
-  TORCH_CHECK_TYPE(
-      config.isPyObject(), "Collective config must be a Python object");
-  pybind11::gil_scoped_acquire gil;
-  auto config_obj = py::reinterpret_borrow<py::object>(config.toPyObject());
-  auto nccl_core = py::module_::import("nccl.core.communicator");
-  TORCH_CHECK_TYPE(
-      py::isinstance(config_obj, nccl_core.attr("NCCLCollConfig")),
-      "config must be an nccl.core.NCCLCollConfig");
-  // The tuple owns the native config and its vendor extension chain.
-  auto materialized =
-      nccl_core.attr("_materialize_coll_config")(config_obj).cast<py::tuple>();
-  auto lowpp = materialized[0];
-  auto config_type =
-      py::module_::import("nccl.bindings.nccl").attr("CollConfig");
-  TORCH_CHECK_TYPE(
-      py::isinstance(lowpp, config_type),
-      "config must materialize an nccl.bindings.nccl.CollConfig");
-  auto data = lowpp.attr("ptr").cast<uintptr_t>();
-  TORCH_CHECK(data != 0, "config.ptr must be nonzero");
-  return {
-      reinterpret_cast<const void*>(data), // NOLINT(performance-no-int-to-ptr)
-      torch::jit::toIValue(std::move(materialized), c10::PyObjectType::get())};
-}
-
-bool registerCollectiveConfigConverter() {
-  ::c10d::nccl2::get_collective_config_converter() =
-      &materializeCollectiveConfig;
-  return true;
-}
-
-static bool collective_config_converter_registered =
-    registerCollectiveConfigConverter();
 #endif // USE_C10D_NCCL
 
 // Wrapper to ensure GIL is released before destructing ProcessGroupGloo
@@ -214,7 +178,13 @@ void setCollectiveConfig(Options& options, const py::object& config) {
     options.config = std::nullopt;
     return;
   }
-  options.config = torch::jit::toIValue(config, c10::PyObjectType::get());
+  // Generic Python configs are passed as their attribute dictionaries.
+  auto values =
+      py::isinstance<py::dict>(config) ? config : config.attr("__dict__");
+  static const auto type =
+      c10::DictType::create(c10::StringType::get(), c10::AnyType::get());
+  options.config = torch::jit::toIValue(values, type)
+                       .to<c10::Dict<std::string, c10::IValue>>();
 }
 
 py::bytes toPyBytes(const std::vector<uint8_t>& data) {
