@@ -14,7 +14,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Deprecated.h>
-#include <c10/util/Logging.h>
 
 // *************************************************************************
 // PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
@@ -1190,7 +1189,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   // Returned by firePreHook and passed to the matching firePostHook, so the
   // post-hooks of an op fire the gated hooks iff its pre-hooks did.
-  struct HookOp {
+  struct HookOpId {
     int64_t id = 0;
     bool gated = false;
   };
@@ -1284,7 +1283,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   bool hasGatedHooks_ = false;
   bool hasUngatedHooks_ = false;
   // Monotonic id correlating a pre-hook call with its matching post-hook call.
-  // Starts at 1: HookOp{} (id 0) means no hook fired.
+  // Starts at 1: HookOpId{} (id 0) means no hook fired.
   std::atomic<int64_t> hookOpIdCounter_{1};
 
   void updateHookFlags() {
@@ -1317,14 +1316,14 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return flat;
   }
 
-  HookOp firePreHookImpl(
+  HookOpId firePreHookImpl(
       HookOpName name,
       bool async_op,
       int64_t root,
       bool gated,
       std::vector<at::Tensor> input_tensors,
       std::vector<at::Tensor> output_tensors) {
-    HookOp op{hookOpIdCounter_++, gated};
+    HookOpId op{hookOpIdCounter_++, gated};
     if (!preHooks_.empty()) {
       PreHookArgs args{
           name,
@@ -1343,13 +1342,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
  public:
-  // Fire registered pre-hooks for a collective and return the op assigned to
-  // it (id 0 when no hook fires). The tensor lists are only copied / flattened
-  // into the hook args when a hook fires, so the common no-hook path adds no
-  // work. Overloaded for the various collective tensor shapes (flat,
-  // list-of-lists, single tensor, none). Invoked from the dispatcher kernels in
-  // Ops.cpp; see firePostHook for the matching post-hook.
-  HookOp firePreHook(
+  // Fire registered pre-hooks for a collective and return the op_id assigned to
+  // it (id 0 when no hooks fire). The tensor lists are only copied /
+  // flattened into the hook args when a pre-hook is registered, so the common
+  // no-hook path adds no work. Overloaded for the various collective tensor
+  // shapes (flat, list-of-lists, single tensor, none). Invoked from the
+  // dispatcher kernels in Ops.cpp; see firePostHook for the matching post-hook.
+  HookOpId firePreHook(
       HookOpName name,
       bool async_op,
       int64_t root,
@@ -1363,7 +1362,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         name, async_op, root, gated, input_tensors, output_tensors);
   }
 
-  HookOp firePreHook(
+  HookOpId firePreHook(
       HookOpName name,
       bool async_op,
       int64_t root,
@@ -1382,7 +1381,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         flattenTensorLists(output_tensor_lists));
   }
 
-  HookOp firePreHook(
+  HookOpId firePreHook(
       HookOpName name,
       bool async_op,
       int64_t root,
@@ -1401,7 +1400,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         output_tensors);
   }
 
-  HookOp firePreHook(
+  HookOpId firePreHook(
       HookOpName name,
       bool async_op,
       int64_t root,
@@ -1415,7 +1414,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
         name, async_op, root, gated, {input_tensor}, {output_tensor});
   }
 
-  HookOp firePreHook(HookOpName name, bool async_op, int64_t root) {
+  HookOpId firePreHook(HookOpName name, bool async_op, int64_t root) {
     bool gated = false;
     if (!hooksActive(gated)) {
       return {};
@@ -1423,49 +1422,12 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return firePreHookImpl(name, async_op, root, gated, {}, {});
   }
 
-  // Fires the post-hooks with a null work if destroyed before dismiss(), so
-  // hooks still see the end of an op whose backend threw after the pre-hooks.
-  class PostHookGuard {
-   public:
-    PostHookGuard(ProcessGroup* pg, HookOpName name, bool async_op, HookOp op)
-        : pg_(pg), name_(name), async_op_(async_op), op_(op) {}
-    PostHookGuard(const PostHookGuard&) = delete;
-    PostHookGuard& operator=(const PostHookGuard&) = delete;
-    PostHookGuard(PostHookGuard&&) = delete;
-    PostHookGuard& operator=(PostHookGuard&&) = delete;
-    ~PostHookGuard() {
-      if (pg_ == nullptr) {
-        return;
-      }
-      // Runs during unwinding, so a throwing hook must not escape.
-      try {
-        pg_->firePostHook(name_, async_op_, op_, {});
-      } catch (const std::exception& e) {
-        LOG(ERROR) << "Post-hook failed after a failed collective: "
-                   << e.what();
-      }
-    }
-    void dismiss() {
-      pg_ = nullptr;
-    }
-
-   private:
-    ProcessGroup* pg_;
-    HookOpName name_;
-    bool async_op_;
-    HookOp op_;
-  };
-
-  PostHookGuard postHookGuard(HookOpName name, bool async_op, HookOp op) {
-    return PostHookGuard(op.id == 0 ? nullptr : this, name, async_op, op);
-  }
-
   // Fire registered post-hooks for a collective, correlated with the matching
-  // pre-hook via op.
+  // pre-hook via op_id.
   void firePostHook(
       HookOpName name,
       bool async_op,
-      HookOp op,
+      HookOpId op,
       const c10::intrusive_ptr<Work>& work) {
     if (op.id == 0) {
       return;
