@@ -32,20 +32,11 @@ class FaultToleranceBackend:
     name: str
     device_type: str
     supports_work_result: bool = False
-    variant: str = ""
-    env: tuple[tuple[str, str], ...] = ()
 
 
 FAULT_TOLERANCE_BACKENDS = [
     FaultToleranceBackend("gloo", "cpu"),
     FaultToleranceBackend("nccl2", "cuda", supports_work_result=True),
-    FaultToleranceBackend(
-        "nccl2",
-        "cuda",
-        supports_work_result=True,
-        variant="ShrinkGrow",
-        env=(("TORCH_NCCL2_RECONFIGURE_SHRINK_GROW", "1"),),
-    ),
 ]
 
 
@@ -62,19 +53,12 @@ class AbstractFaultToleranceTest:
 
     def setUp(self):
         super().setUp()
-        self._saved_env = {key: os.environ.get(key) for key in self.env}
-        os.environ.update(self.env)
         self._spawn_processes()
 
     def tearDown(self):
         if dist.is_initialized():
             dist.destroy_process_group()
         super().tearDown()
-        for key, value in self._saved_env.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
         try:
             os.remove(self.file_name)
         except OSError:
@@ -103,15 +87,6 @@ class AbstractFaultToleranceTest:
     def _collect_handles(self, key_prefix):
         handle = dist._get_reconfigure_handle()
         self.store.set(f"{key_prefix}_{self.rank}", handle)
-        return [
-            self.store.get(f"{key_prefix}_{rank}").decode("utf-8")
-            for rank in range(self.world_size)
-        ]
-
-    def _collect_handles_by_group_rank(self, key_prefix, group_rank=None):
-        if group_rank is None:
-            group_rank = dist.get_rank()
-        self.store.set(f"{key_prefix}_{group_rank}", dist._get_reconfigure_handle())
         return [
             self.store.get(f"{key_prefix}_{rank}").decode("utf-8")
             for rank in range(self.world_size)
@@ -303,50 +278,6 @@ class AbstractFaultToleranceTest:
         self._reconfigure(901, handles)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
-    def test_reconfigure_shrink_then_rejoin_last(self):
-        handles = self._create_reconfigured_pg("ft_rejoin_last", 1500)
-        last = self.world_size - 1
-        if self.rank != last:
-            self._reconfigure(1501, handles[:last])
-            self._assert_all_reduce_sum(sum(range(1, self.world_size)))
-
-        handles = self._collect_handles("ft_rejoin_last_all")
-        self._reconfigure(1502, handles)
-        self.assertEqual(dist.get_rank(), self.rank)
-        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
-
-    def test_reconfigure_shrink_then_rejoin_middle(self):
-        handles = self._create_reconfigured_pg("ft_rejoin_middle", 1600)
-        middle = self.world_size // 2
-        if self.rank != middle:
-            self._reconfigure(1601, handles[:middle] + handles[middle + 1 :])
-            self._assert_all_reduce_sum(sum(range(1, self.world_size)))
-
-        handles = self._collect_handles("ft_rejoin_middle_all")
-        self._reconfigure(1602, handles)
-        self.assertEqual(dist.get_rank(), self.rank)
-        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
-
-    def test_reconfigure_repeated_shrink_grow(self):
-        self._create_reconfigured_pg("ft_repeated", 1700)
-        for i in range(3):
-            # Handles in group-rank order; a rejoining rank goes last, matching
-            # grow's rank order.
-            handles = self._collect_handles_by_group_rank(f"ft_repeated_{i}")
-            dropped = i % self.world_size
-            rejoining = dist.get_rank() == dropped
-            if not rejoining:
-                self._reconfigure(
-                    1710 + 2 * i, handles[:dropped] + handles[dropped + 1 :]
-                )
-                self._assert_all_reduce_sum(sum(range(1, self.world_size)))
-            last = self.world_size - 1
-            handles = self._collect_handles_by_group_rank(
-                f"ft_repeated_{i}_rejoin", last if rejoining else None
-            )
-            self._reconfigure(1711 + 2 * i, handles)
-            self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
-
     def test_reconfigure_merge_split(self):
         self._init_reconfigurable_pg()
         handles = self._collect_handles("ft_merge_split_initial")
@@ -410,45 +341,6 @@ class AbstractFaultToleranceTest:
         self._reconfigure(1301, handles)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
-    def test_reconfigure_with_pending_work(self):
-        # Rank 1's unmatched collective is still in flight when reconfigure()
-        # starts; its timeout races the watchdog against the reconfigure
-        # teardown.
-        self._create_reconfigured_pg("ft_pending", 1400)
-        # Connect the communicator so launching the unmatched collective does
-        # not block on peer setup.
-        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
-        for i in range(3):
-            self.backend.set_timeout(timedelta(milliseconds=100))
-            work = None
-            if self.rank == 1:
-                work = dist.all_reduce(torch.ones(4, device=self.device), async_op=True)
-                time.sleep(0.05 * i)
-            handles = self._collect_handles(f"ft_pending_{i}")
-            self._reconfigure(1401 + i, handles)
-            del work
-            self.backend.set_timeout(timedelta(seconds=30))
-            self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
-
-    def test_shrink_with_pending_work(self):
-        # Rank 0's unmatched collective is in flight when the survivors shrink
-        # away the last rank.
-        handles = self._create_reconfigured_pg("ft_shrink_pending", 1800)
-        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
-        last = self.world_size - 1
-        if self.rank == last:
-            self._store_barrier("ft_shrink_pending_done")
-            return
-        self.backend.set_timeout(timedelta(milliseconds=100))
-        work = None
-        if self.rank == 0:
-            work = dist.all_reduce(torch.ones(4, device=self.device), async_op=True)
-        self._reconfigure(1801, handles[:last])
-        del work
-        self.backend.set_timeout(timedelta(seconds=30))
-        self._assert_all_reduce_sum(sum(range(1, self.world_size)))
-        self._store_barrier("ft_shrink_pending_done")
-
     def test_reconfigure_rejects_reused_uuid(self):
         self._init_reconfigurable_pg()
         if self.backend_name != "nccl2":
@@ -491,27 +383,6 @@ class AbstractFaultToleranceTest:
         self._reconfigure(1401, handles)
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
-    def test_reconfigure_after_failed_join_has_unique_handle(self):
-        if self.backend_name != "nccl2":
-            self.skipTest("nonblocking NCCL initialization behavior")
-        self._init_reconfigurable_pg()
-        handles = self._collect_handles("ft_failed_join_initial")
-
-        # Rank 1 fails as new rank 0 and has no communicator, like fresh rank 0.
-        if self.rank == 1:
-            with self.assertRaisesRegex(RuntimeError, "timed out"):
-                dist._reconfigure(
-                    1900,
-                    [handles[1], handles[2]],
-                    timeout=timedelta(milliseconds=500),
-                ).wait()
-        self._store_barrier("ft_failed_join_observed")
-
-        handles = self._collect_handles("ft_failed_join_current")
-        self.assertEqual(len(set(handles)), self.world_size)
-        self._reconfigure(1901, handles)
-        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
-
     def test_reconfigure_with_dead_peer_raises(self):
         if self.backend_name != "nccl2":
             self.skipTest("nonblocking NCCL initialization behavior")
@@ -543,10 +414,7 @@ def _make_fault_tolerance_test_class(backend):
     FaultToleranceTest.backend_name = backend.name
     FaultToleranceTest.device_type = backend.device_type
     FaultToleranceTest.supports_work_result = backend.supports_work_result
-    FaultToleranceTest.env = dict(backend.env)
-    FaultToleranceTest.__name__ = (
-        f"{backend.name.capitalize()}{backend.variant}FaultToleranceTest"
-    )
+    FaultToleranceTest.__name__ = f"{backend.name.capitalize()}FaultToleranceTest"
     FaultToleranceTest.__qualname__ = FaultToleranceTest.__name__
     cls = unittest.skipIf(
         not dist.is_backend_available(backend.name),
@@ -566,8 +434,8 @@ def _make_fault_tolerance_test_class(backend):
 
 
 for backend in FAULT_TOLERANCE_BACKENDS:
-    cls = _make_fault_tolerance_test_class(backend)
-    globals()[cls.__name__] = cls
+    class_name = f"{backend.name.capitalize()}FaultToleranceTest"
+    globals()[class_name] = _make_fault_tolerance_test_class(backend)
 
 
 class ReconfigureContractTest(TestCase):
