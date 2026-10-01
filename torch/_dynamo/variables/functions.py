@@ -5206,6 +5206,27 @@ class MemberDescriptorVariable(DescriptorVariable):
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L180-L196
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         name = self.descriptor.__name__
+
+        # type.__doc__ has two useful error cases that are independent of the
+        # value being assigned: deletion is always rejected, and immutable
+        # static types reject writes. Model those without eagerly invoking the
+        # C setter (which could mutate a user class at trace time).
+        if self.descriptor is type.__dict__["__doc__"]:
+            obj_value = obj.as_python_constant()
+            if value is None:
+                raise_type_error(
+                    tx,
+                    f"cannot delete '__doc__' attribute of immutable type "
+                    f"'{obj_value.__name__}'",
+                )
+            # Py_TPFLAGS_IMMUTABLETYPE
+            if obj_value.__flags__ & (1 << 8):
+                raise_type_error(
+                    tx,
+                    f"cannot set '__doc__' attribute of immutable type "
+                    f"'{obj_value.__name__}'",
+                )
+
         entry = obj.lookup_tp_getset_member(name)
         if entry is not None:
             # A READONLY PyMemberDef is modeled by readonly_setter, which raises
