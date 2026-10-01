@@ -61,9 +61,7 @@ class BenchmarkRunnerTests(TestCase):
         with (
             mock.patch.object(common, "synchronize", side_effect=synchronize),
             mock.patch.object(common, "reset_rng_state"),
-            mock.patch.object(
-                common.time, "perf_counter", side_effect=lambda: clock[0]
-            ),
+            mock.patch.object(common.time, "perf_counter", new=lambda: clock[0]),
         ):
             elapsed = common.timed(None, forward, (), times=2, setup_fn=setup)
         self.assertEqual(elapsed, 20.0)
@@ -97,9 +95,7 @@ class BenchmarkRunnerTests(TestCase):
             ) as timed,
             mock.patch.object(torch._dynamo, "run", side_effect=lambda fn: fn),
             mock.patch.object(common, "write_outputs") as write,
-            mock.patch.object(
-                torch._dynamo.utils, "compile_times", return_value=([], [])
-            ),
+            mock.patch("torch._dynamo.utils.compile_times", return_value=([], [])),
             mock.patch.object(common, "output_signpost"),
             mock.patch(
                 "torch._inductor.utils.maybe_profile",
@@ -219,9 +215,7 @@ class TestHuggingFaceLLMPerformance(TestCase):
                 "get_peak_memory",
                 side_effect=lambda: calls["compiled"] or calls["eager"],
             ),
-            mock.patch.object(
-                common.time, "perf_counter", side_effect=lambda: clock[0]
-            ),
+            mock.patch.object(common.time, "perf_counter", new=lambda: clock[0]),
             mock.patch.object(torch.cuda, "reset_peak_memory_stats"),
             mock.patch.object(common, "speedup_experiment", experiment),
         ):
@@ -277,7 +271,8 @@ class HuggingFacePrefillTestCase(TestCase):
         from benchmarks.dynamo.huggingface_llm_models import TextGenerationPrefillModel
 
         model_cls = getattr(transformers, model_type + "ForCausalLM")
-        config_cls = getattr(transformers, model_type + "Config")
+        config_name = "Qwen3_5Text" if model_type == "Qwen3_5" else model_type
+        config_cls = getattr(transformers, config_name + "Config")
         config_kwargs = {
             "vocab_size": 32,
             "hidden_size": 16,
@@ -291,6 +286,14 @@ class HuggingFacePrefillTestCase(TestCase):
             config_kwargs["head_dim"] = 8
         if model_type == "Gemma2":
             config_kwargs["sliding_window"] = 8
+        if model_type == "Qwen3_5":
+            config_kwargs.update(
+                layer_types=["linear_attention", "full_attention"],
+                linear_num_key_heads=1,
+                linear_num_value_heads=2,
+                linear_key_head_dim=8,
+                linear_value_head_dim=8,
+            )
         config = config_cls(**config_kwargs)
         model = model_cls(config).eval().to(device=device, dtype=dtype)
         return TextGenerationPrefillModel(model, 2, 4, 11).eval()
@@ -324,8 +327,8 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
         with self.assertRaisesRegex(ValueError, "requires --backend or --inductor"):
             runner.validate_args(args)
 
-    def test_prefill_honors_model_filter(self):
-        name = "Qwen/Qwen3-0.6B"
+    @parametrize("name", ("Qwen/Qwen3-0.6B", "Qwen/Qwen3.5-0.8B"))
+    def test_prefill_honors_model_filter(self, name):
         runner = self.huggingface.HuggingfaceRunner()
         args = self._runner_args()
         args.filter, args.exclude, args.exclude_exact = ["."], ["^$"], []
@@ -334,6 +337,8 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
             self.huggingface.BATCH_SIZE_KNOWN_MODELS, {name: 8}, clear=True
         ):
             self.assertEqual(list(runner.iter_model_names(args)), [name])
+        args.only = name
+        runner.validate_args(args)
         args.only = "openai/whisper-tiny"
         with self.assertRaisesRegex(ValueError, "does not support openai/whisper-tiny"):
             runner.validate_args(args)
@@ -363,7 +368,15 @@ class TestHuggingFacePrefill(HuggingFacePrefillTestCase):
 
 
 class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
-    @parametrize("model_type", ("Llama", "Gemma2", "Qwen3"))
+    def _cache_tensors(self, model):
+        return [
+            (layer.conv_states, layer.recurrent_states)
+            if is_linear
+            else (layer.keys, layer.values)
+            for layer, is_linear in zip(model.cache.layers, model.cache.is_linear)
+        ]
+
+    @parametrize("model_type", ("Llama", "Gemma2", "Qwen3", "Qwen3_5"))
     def test_prefill_resets_cache(self, device, model_type):
         runner = self.huggingface.HuggingfaceRunner()
         runner.args = self._runner_args("--iterations=2")
@@ -373,7 +386,13 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
         starting_lengths = []
 
         def forward(*args, **kwargs):
-            starting_lengths.append(int(kwargs["past_key_values"].get_seq_length()))
+            cache = kwargs["past_key_values"]
+            starting_lengths.append(int(cache.get_seq_length()))
+            for layer, is_linear in zip(cache.layers, cache.is_linear):
+                if is_linear:
+                    self.assertFalse(layer.has_previous_state)
+                    for states in (layer.conv_states, layer.recurrent_states):
+                        self.assertEqual(states, torch.zeros_like(states))
             return original_forward(*args, **kwargs)
 
         with (
@@ -416,7 +435,14 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
     @unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA and Triton are required")
     @parametrize(
         "model_type, cudagraphs",
-        [("Llama", False), ("Llama", True), ("Gemma2", True), ("Qwen3", True)],
+        [
+            ("Llama", False),
+            ("Llama", True),
+            ("Gemma2", True),
+            ("Qwen3", True),
+            ("Qwen3_5", False),
+            ("Qwen3_5", True),
+        ],
     )
     def test_inductor_prefill_cache(self, device, model_type, cudagraphs):
         from torch._dynamo.utils import counters
@@ -432,14 +458,13 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
             ),
         ):
             model.prepare_for_prefill(inputs)
+            cache = self._cache_tensors(model)
+            pointers = [
+                (first.data_ptr(), second.data_ptr()) for first, second in cache
+            ]
             expected = model(inputs)
             expected_cache = [
-                (layer.keys.clone(), layer.values.clone())
-                for layer in model.cache.layers
-            ]
-            pointers = [
-                (layer.keys.data_ptr(), layer.values.data_ptr())
-                for layer in model.cache.layers
+                (first.clone(), second.clone()) for first, second in cache
             ]
             compiled = torch.compile(model.forward, backend="inductor", fullgraph=True)
             for _ in range(3):
@@ -448,7 +473,7 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
                 self.assertEqual(int(model.cache.get_seq_length()), 0)
                 self.assertEqual(compiled(inputs), expected)
                 self.assertEqual(int(model.cache.get_seq_length()), 4)
-                cache = [(layer.keys, layer.values) for layer in model.cache.layers]
+                cache = self._cache_tensors(model)
                 self.assertEqual(cache, expected_cache)
                 actual_pointers = [(k.data_ptr(), v.data_ptr()) for k, v in cache]
                 self.assertEqual(actual_pointers, pointers)

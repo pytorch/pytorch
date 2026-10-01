@@ -82,7 +82,8 @@ A complete list of options can be seen by running each of the runners with the `
 
 Registered Hugging Face text-generation models use `--hf-inference-mode=generate`
 by default. Prefill is opt-in and supports `meta-llama/Llama-3.2-1B`,
-`google/gemma-2-2b`, and `Qwen/Qwen3-0.6B` with fixed, unpadded prompts:
+`google/gemma-2-2b`, `Qwen/Qwen3-0.6B`, and `Qwen/Qwen3.5-0.8B` with fixed,
+unpadded prompts:
 
 ```
 ./benchmarks/dynamo/huggingface.py --performance --inference --bfloat16 \
@@ -91,7 +92,7 @@ by default. Prefill is opt-in and supports `meta-llama/Llama-3.2-1B`,
 ```
 
 Prefill measures one forward over the prompt, returning last-position logits and
-populating a reusable static KV cache. Cache allocation and reset occur outside
+populating a reusable static cache. Cache allocation and reset occur outside
 the compiled and timed forward. Use `--accuracy` to check correctness or
 `--disable-cudagraphs` to measure without CUDA graphs. Prefill requires inference
 and a backend; autocast, dynamic shapes, distributed execution, and export modes
