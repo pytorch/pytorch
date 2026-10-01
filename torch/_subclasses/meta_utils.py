@@ -338,6 +338,13 @@ class MetaTensorDescriber:
             # put it in for accuracy
             storage = self.describe_storage(t.untyped_storage(), data=data, trace=trace)
             storage_offset = t.storage_offset()  # type: ignore[assignment]
+            if is_view and (base := t._base) is not None:
+                # set_() can rebind a tensor's storage without clearing the
+                # stale _base link; a genuine view still shares its base's
+                # storage, so a mismatch means the view metadata is stale and
+                # the tensor must be built standalone from its own storage.
+                if base.untyped_storage()._cdata != t.untyped_storage()._cdata:
+                    is_view = False
 
         stride = None
         if not (
