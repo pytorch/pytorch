@@ -45,18 +45,6 @@ if torch.backends.mps.is_available():
             "sparse.sampled_addmm",
         }
 
-        MACOS_BEFORE_14_4_XFAILLIST = {
-            # These ops work fine in 14.4 but fail in 14.2 or 13.x
-            "fft.hfft2": [torch.complex64],
-        }
-
-        MACOS_BEFORE_15_0_XFAILLIST = {
-            # matrix_exp is disabled on MPS before macOS 15 (TORCH_CHECK): MPSGraph
-            # complex matmul is numerically unreliable there and breaks the
-            # scale-and-square recurrence, so the op raises for every dtype.
-            "matrix_exp": None,
-        }
-
         # Those ops are not expected to work
         UNIMPLEMENTED_XFAILLIST: dict[str, list | None] = {
             # Failures due to lack of op implementation on MPS backend
@@ -490,32 +478,6 @@ if torch.backends.mps.is_available():
                         op,
                         DecorateInfo(unittest.expectedFailure, dtypes=xfaillist[key]),
                     )
-
-            if (
-                key in MACOS_BEFORE_14_4_XFAILLIST
-                and key not in xfail_exclusion
-                and (MACOS_VERSION < 14.4)
-            ):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure,
-                        dtypes=MACOS_BEFORE_14_4_XFAILLIST[key],
-                    ),
-                )
-
-            if (
-                key in MACOS_BEFORE_15_0_XFAILLIST
-                and key not in xfail_exclusion
-                and (MACOS_VERSION < 15.0)
-            ):
-                addDecorator(
-                    op,
-                    DecorateInfo(
-                        unittest.expectedFailure,
-                        dtypes=MACOS_BEFORE_15_0_XFAILLIST[key],
-                    ),
-                )
 
             # If op is not supported for complex types, expect it to fail
             if key in UNSUPPORTED_COMPLEX_OPS:
