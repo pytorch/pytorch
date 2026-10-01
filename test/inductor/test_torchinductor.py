@@ -96,7 +96,6 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     e4m3_type,
     expectedFailureXPU,
-    instantiate_device_type_tests,
     largeTensorTest,
 )
 from torch.testing._internal.common_dtype import (
@@ -6145,6 +6144,46 @@ for dtype in (torch.int32, torch.int64):
         self.common(
             fn,
             (torch.randn([10]),),
+        )
+
+    @requires_gpu()
+    @parametrize(
+        "size,view",
+        ((2, "reshape"), (64, "transpose"), (64, "slice")),
+    )
+    def test_to_device_constant_view(self, size, view):
+        def fn(x):
+            src_device = GPU_TYPE if x.device.type == "cpu" else "cpu"
+            const = torch.tensor(
+                list(range(size)), dtype=torch.float32, device=src_device
+            )
+            if view == "reshape":
+                const = const.view(-1, 2)
+            elif view == "transpose":
+                const = const.view(-1, 2).t()
+            else:
+                const = const[1:]
+            return const.to(x), const
+
+        self.common(
+            fn,
+            (torch.empty(0),),
+            assert_equal=functools.partial(TestCase.assertEqual, exact_device=True),
+        )
+
+    @skip_if_cpu
+    def test_to_device_constant_view_slice_assignment(self):
+        def fn(x):
+            center = torch.tensor([256, 256], dtype=torch.float32).view(1, 2)
+            center = (center / 2.0 - 0.5).expand(x.shape[0], -1)
+            matrix = torch.eye(3, device=x.device).repeat(x.shape[0], 1, 1)
+            matrix[:, :2, 2] = center.to(x)
+            return matrix, center
+
+        self.common(
+            fn,
+            (torch.empty(3),),
+            assert_equal=functools.partial(TestCase.assertEqual, exact_device=True),
         )
 
     @requires_gpu()
@@ -20553,51 +20592,6 @@ if RUN_GPU or HAS_MPS:
         gen = InputGen(10, GPU_TYPE)
 
     SweepInputsGPUTest.populate()
-
-    class TestDeviceCopy(TestCase):
-        @parametrize("to_cpu", (False, True))
-        @parametrize(
-            "size,view",
-            ((2, "reshape"), (64, "transpose"), (64, "slice"), (2, "expand")),
-        )
-        def test_to_device_constant_view(self, device, size, view, to_cpu):
-            src_device, dst_device = (device, "cpu") if to_cpu else ("cpu", device)
-
-            def fn(x):
-                const = torch.tensor(
-                    list(range(size)), dtype=torch.float32, device=src_device
-                )
-                if view == "reshape":
-                    const = const.view(-1, 2)
-                elif view == "transpose":
-                    const = const.view(-1, 2).t()
-                elif view == "slice":
-                    const = const[1::2]
-                else:
-                    const = const.unsqueeze(0).expand(3, -1)
-                return const.to(x), const
-
-            x = torch.empty(0, device=dst_device)
-            expected = fn(x)
-            actual = torch.compile(fn, fullgraph=True)(x)
-            self.assertEqual(actual, expected, exact_device=True)
-
-        def test_to_device_constant_view_slice_assignment(self, device):
-            def fn(x):
-                center = torch.tensor([256, 256], dtype=torch.float32).view(1, 2)
-                center = (center / 2.0 - 0.5).expand(x.shape[0], -1)
-                matrix = torch.eye(3, device=x.device).repeat(x.shape[0], 1, 1)
-                matrix[:, :2, 2] = center.to(x)
-                return matrix, center
-
-            x = torch.empty(3, device=device)
-            expected = fn(x)
-            actual = torch.compile(fn, fullgraph=True)(x)
-            self.assertEqual(actual, expected, exact_device=True)
-
-    instantiate_device_type_tests(
-        TestDeviceCopy, globals(), only_for=GPU_TYPE, allow_mps=True, allow_xpu=True
-    )
 
     class GPUTests(TestCase):
         common = check_model_gpu
