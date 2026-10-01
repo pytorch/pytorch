@@ -225,35 +225,40 @@ bool _compute_channels_last_contiguous_3d(
   }
 }
 
+// When this function return True, result always true. When it return False,
+// result could be False or data dependent.
+inline static bool _is_channels_last_contiguous_3d_or_false(
+    ArrayRef<c10::SymInt> sizes,
+    ArrayRef<c10::SymInt> strides) {
+  if (sizes.size() != 5) {
+    return false;
+  }
+  c10::SymInt expected = 1;
+  for (auto& d : {1, 4, 3, 2, 0}) {
+    const auto& size_d = sizes[d];
+    // Not taking this branch could make this return False instead of True
+    // but not vice-versa. so its ok.
+    if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 1))) {
+      continue;
+    }
+    // Taking this branch could make this return False instead of True
+    // but not vice-versa. so its ok.
+    if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected))) {
+      return false;
+    }
+    expected *= size_d;
+  }
+  return true;
+}
+
 inline static c10::SymBool _compute_channels_last_contiguous_3d_sym(
     ArrayRef<c10::SymInt> sizes,
     ArrayRef<c10::SymInt> strides) {
   switch (sizes.size()) {
     case 5: {
-      // When this function return True, result always true. When it return
-      // False, result could be False or data dependent.
-      auto guard_or_false = [&]() {
-        c10::SymInt expected = 1;
-        for (auto& d : {1, 4, 3, 2, 0}) {
-          const auto& size_d = sizes[d];
-          // Not taking this branch could make this return False instead of True
-          // but not vice-versa. so its ok.
-          if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 1))) {
-            continue;
-          }
-          // Taking this branch could make this return False instead of True
-          // but not vice-versa. so its ok.
-          if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected))) {
-            return false;
-          }
-          expected *= size_d;
-        }
-        return true;
-      };
-
       // We try to minimize creating large symbolic expressions when not needed
       // to avoid symbolic evaluation perf issues.
-      if (guard_or_false()) {
+      if (_is_channels_last_contiguous_3d_or_false(sizes, strides)) {
         return c10::SymBool(true);
       }
 
