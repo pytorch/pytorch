@@ -21,7 +21,9 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
         PyGILState_Check(),
         "torch_is_tensor_pyobject requires the GIL to be held");
     TORCH_CHECK(obj != nullptr, "py_obj must not be null");
-    return THPVariable_Check(obj);
+    return THPVariableClass &&
+        PyObject_TypeCheck(
+               obj, reinterpret_cast<PyTypeObject*>(THPVariableClass));
   }
 
   at::Tensor tensor_from_pyobject(PyObject* obj) const override {
@@ -32,7 +34,9 @@ struct ConcretePyObjectConversion final : PyObjectConversionInterface {
         "torch_tensor_from_pyobject requires the GIL to be held");
     TORCH_CHECK(obj != nullptr, "py_obj must not be null");
     TORCH_CHECK(
-        THPVariable_Check(obj),
+        THPVariableClass &&
+            PyObject_TypeCheck(
+                obj, reinterpret_cast<PyTypeObject*>(THPVariableClass)),
         "torch_tensor_from_pyobject: expected torch.Tensor, got ",
         Py_TYPE(obj)->tp_name);
     return THPVariable_Unpack(obj);
@@ -121,6 +125,12 @@ struct RegisterPyObjectConversion {
   RegisterPyObjectConversion() {
     setPyObjectConversionImpl(&impl);
   }
+  RegisterPyObjectConversion(const RegisterPyObjectConversion&) = delete;
+  RegisterPyObjectConversion& operator=(const RegisterPyObjectConversion&) =
+      delete;
+  RegisterPyObjectConversion(RegisterPyObjectConversion&&) = delete;
+  RegisterPyObjectConversion& operator=(RegisterPyObjectConversion&&) = delete;
+
   ~RegisterPyObjectConversion() {
     // On libtorch_python teardown, reset g_impl to the libtorch-resident no-op
     // so a late conversion errors cleanly instead of using this destroyed impl
