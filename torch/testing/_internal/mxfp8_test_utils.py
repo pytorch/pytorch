@@ -216,110 +216,90 @@ def make_mxfp8_semantic_cases(
 
         elif name == "fp32_subnormals":
             # Migrated from torchao's test_to_mx_rceil ("fp32 denorm").
-            # Varied FP32 subnormals stay nonzero at the minimum E8M0 scale.
+            # Four FP32 subnormals stay nonzero at the minimum E8M0 scale.
+            inputs[idx].fill_(0.0)
+            expected_data[idx].fill_(0x00)
+
             # fmt: off
-            inputs[idx] = torch.tensor(
-                [
-                    6142315, 5096174, 3345704, 6178415,
-                    5728750, 419002, 1716691, 4335089,
-                    5785800, 6234845, 1697524, 33075,
-                    3975816, 3714822, 5411407, 3040844,
-                    7400945, 4474166, 7257182, 1273750,
-                    5872176, 4694081, 2096530, 6273621,
-                    67028, 7585260, 4532315, 4599275,
-                    6133942, 4542483, 5992199, 6862780,
-                ],
-                dtype=torch.uint32,
-            ).view(torch.float32).to(device)
+            inputs[idx, :4] = torch.tensor([
+                6142315,  # 8.60721658e-39
+                5096174,  # 7.1412608e-39
+                3345704,  # 4.68832988e-39
+                33075,  # 4.63479467e-41
+            ], dtype=torch.uint32).view(torch.float32).to(device)
+            expected_data[idx, :4] = torch.tensor([
+                60,  # 1.5
+                58,  # 1.25
+                53,  # 0.8125
+                4,  # 0.0078125
+            ], dtype=torch.uint8)
             expected_scales[idx] = 0  # 2^-127
-            expected_data[idx] = torch.tensor(
-                [
-                    60, 58, 53, 60, 59, 29, 45, 56,
-                    59, 60, 45, 4, 55, 54, 58, 52,
-                    62, 57, 62, 42, 59, 57, 48, 60,
-                    8, 62, 57, 57, 60, 57, 59, 61,
-                ],
-                dtype=torch.uint8,
-            )
             # fmt: on
 
         elif name == "bf16_subnormals":
             # Migrated from torchao's test_to_mx_rceil ("bf16 denorm").
-            # Varied BF16 subnormals stay nonzero at the minimum E8M0 scale.
+            # Four BF16 subnormals stay nonzero at the minimum E8M0 scale.
+            inputs[idx].fill_(0.0)
+            expected_data[idx].fill_(0x00)
+
             # fmt: off
-            inputs[idx] = torch.tensor(
-                [
-                    101, 3, 47, 54, 36, 19, 70, 79,
-                    35, 95, 28, 120, 84, 94, 20, 92,
-                    18, 42, 98, 58, 3, 26, 64, 86,
-                    60, 86, 52, 23, 61, 70, 59, 74,
-                ],
-                dtype=torch.uint16,
-            ).view(torch.bfloat16).to(device)
+            inputs[idx, :4] = torch.tensor([
+                101,  # 9.27538511e-39
+                3,  # 2.75506488e-40
+                47,  # 4.31626832e-39
+                120,  # 1.10202595e-38
+            ], dtype=torch.uint16).view(torch.bfloat16).to(device)
+            expected_data[idx, :4] = torch.tensor([
+                61,  # 1.625
+                20,  # 0.046875
+                52,  # 0.75
+                63,  # 1.875
+            ], dtype=torch.uint8)
             expected_scales[idx] = 0  # 2^-127
-            expected_data[idx] = torch.tensor(
-                [
-                    61, 20, 52, 54, 49, 42, 57, 58,
-                    49, 60, 46, 63, 58, 60, 42, 60,
-                    41, 50, 60, 54, 20, 45, 56, 59,
-                    55, 59, 53, 44, 55, 57, 55, 57,
-                ],
-                dtype=torch.uint8,
-            )
             # fmt: on
 
         elif name == "fp32_realistic_vals":
             # Migrated from torchao's test_to_mx_rceil ("fp32 normal").
-            # Varied normal FP32 values exercise E4M3 rounding at scale 2^-8.
+            # Four normal FP32 values exercise E4M3 rounding at scale 2^-8.
+            inputs[idx].fill_(0.0)
+            expected_data[idx].fill_(0x00)
+
             # fmt: off
-            inputs[idx] = torch.tensor(
-                [
-                    1037408064, 1058534842, 1053630662, 1063310394,
-                    994704128, 1057245441, 1060663708, 1058053571,
-                    1052395648, 1064831570, 1038427336, 1064777688,
-                    1059248393, 1060959028, 1062878286, 1057799482,
-                    1057854101, 1053562724, 1027482352, 1060498324,
-                    1063238522, 1060472055, 1054346794, 1029092912,
-                    1056687298, 1059146141, 1037992128, 1064097772,
-                    1056522806, 1059255744, 1064364912, 1060606252,
-                ],
-                dtype=torch.uint32,
-            ).view(torch.float32).to(device)
+            inputs[idx, :4] = torch.tensor([
+                1037408064,  # 0.104292393
+                1058534842,  # 0.59359324
+                994704128,  # 0.00308197737
+                1064831570,  # 0.968907475
+            ], dtype=torch.uint32).view(torch.float32).to(device)
+            expected_data[idx, :4] = torch.tensor([
+                93,  # 26.0
+                113,  # 144.0
+                53,  # 0.8125
+                120,  # 256.0
+            ], dtype=torch.uint8)
             expected_scales[idx] = 119  # 2^-8
-            expected_data[idx] = torch.tensor(
-                [
-                    93, 113, 109, 118, 53, 112, 116, 113,
-                    108, 120, 94, 119, 114, 116, 118, 113,
-                    113, 109, 84, 115, 118, 115, 110, 85,
-                    112, 114, 94, 119, 112, 114, 119, 115,
-                ],
-                dtype=torch.uint8,
-            )
             # fmt: on
 
         elif name == "bf16_realistic_vals":
             # Migrated from torchao's test_to_mx_rceil ("bf16 normal").
-            # Varied normal BF16 values exercise E4M3 rounding at scale 2^-8.
+            # Four normal BF16 values exercise E4M3 rounding at scale 2^-8.
+            inputs[idx].fill_(0.0)
+            expected_data[idx].fill_(0x00)
+
             # fmt: off
-            inputs[idx] = torch.tensor(
-                [
-                    15752, 16143, 16182, 15896, 16195, 16186, 16048, 16223,
-                    15988, 16231, 16140, 16088, 16032, 16240, 16228, 16133,
-                    16210, 16024, 16248, 16187, 16050, 15696, 16060, 15956,
-                    16131, 16251, 15896, 16014, 15808, 16024, 16159, 16186,
-                ],
-                dtype=torch.uint16,
-            ).view(torch.bfloat16).to(device)
+            inputs[idx, :4] = torch.tensor([
+                16223,  # 0.87109375
+                16248,  # 0.96875
+                15696,  # 0.05078125
+                15956,  # 0.20703125
+            ], dtype=torch.uint16).view(torch.bfloat16).to(device)
+            expected_data[idx, :4] = torch.tensor([
+                118,  # 224.0
+                120,  # 256.0
+                85,  # 13.0
+                101,  # 52.0
+            ], dtype=torch.uint8)
             expected_scales[idx] = 119  # 2^-8
-            expected_data[idx] = torch.tensor(
-                [
-                    88, 113, 115, 98, 116, 116, 107, 118,
-                    103, 118, 113, 110, 106, 119, 118, 112,
-                    117, 106, 120, 116, 107, 85, 108, 101,
-                    112, 120, 98, 105, 92, 106, 114, 116,
-                ],
-                dtype=torch.uint8,
-            )
             # fmt: on
 
         else:
