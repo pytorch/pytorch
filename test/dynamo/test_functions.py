@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 # flake8: noqa: E731, C405, F811, C418, C417
+import builtins
 import cmath
 import collections
 import collections.abc
@@ -13,6 +14,7 @@ import math
 import operator
 import random
 import sys
+import time
 import types
 import typing
 import unittest
@@ -1355,6 +1357,18 @@ partial_fn = functools.partial(fn, scale=2)
         return F.avg_pool2d(
             torch.unsqueeze(a, 0) * torch.unsqueeze(b, 1), kernel_size=2, padding=1
         )
+
+    def test_builtin_function_self_metadata(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return (
+                len.__self__ is builtins,
+                time.sleep.__self__ is time,
+                str.maketrans.__self__ is None,
+                bytes.maketrans.__self__ is None,
+            )
+
+        self.assertEqual(fn(), (True,) * 4)
 
     @make_test
     def test_return_tuple1(a, b):
