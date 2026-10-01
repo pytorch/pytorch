@@ -22545,11 +22545,7 @@ if RUN_GPU:
             torch.testing.assert_close(result, fn(inp))
 
         def test_3d_reductions_with_max_tiles_3(self):
-            # Inductor only supports at most two reduction iteration ranges, R0 and R1, which the
-            # reduction component of the kernel can be tiled across.
-            # When max_tiles>=3, SIMDScheduling.create_tiling would previously incorrectly allow the
-            # tiling of the kernel in three dimensions, despite there being no pointwise component
-            # of the kernel.
+            """Test that max_tiles=3 permits an R0/R1/R2 pure reduction."""
 
             @torch._inductor.config.patch(
                 {
@@ -22580,9 +22576,41 @@ if RUN_GPU:
             torch.testing.assert_close(actual=actual, expected=expected)
 
             fc = FileCheck()
-            # There's no pointwise work to do, so xnumel should be 1...
             fc.check("xnumel = 1")
+            fc.check("R2_BLOCK")
             fc.run(code[0])
+
+        @torch._inductor.config.patch(
+            {
+                "triton.prefer_nd_tiling": True,
+                "triton.max_tiles": 3,
+                "triton.tile_reductions": True,
+            }
+        )
+        def test_3d_reduction_respects_tensor_rank_limit(self):
+            """Keep three reduction tiles while limiting total tensor rank to five.
+
+            max_tiles=3 applies independently to the pointwise and reduction
+            tilings. With R0/R1/R2 present, the three pointwise dimensions must
+            therefore collapse to Y/X rather than producing a sixth tensor axis.
+            """
+
+            def reduce_3d(x):
+                return torch.sum(x, dim=(3, 4, 5))
+
+            inp = torch.empty_strided(
+                (12, 3, 4, 4, 4, 4),
+                (1536, 128, 4, 384, 32, 1),
+                device=GPU_TYPE,
+            ).normal_()
+
+            actual, code = run_and_get_code(torch.compile(reduce_3d), inp)
+
+            torch.testing.assert_close(actual=actual, expected=reduce_3d(inp))
+            for block_arg in ("YBLOCK", "XBLOCK", "R0_BLOCK", "R1_BLOCK", "R2_BLOCK"):
+                self.assertIn(block_arg, code[0])
+            self.assertNotIn("ZBLOCK", code[0])
+            self.assertIn("tl.load", code[0])
 
         @config.patch({"triton.decompose_sort_ops": True})
         def test_median_decompose_sort_ops(self):
