@@ -40,6 +40,14 @@ When a PR introduces new API patterns, carefully evaluate the broader implicatio
 - [ ] **Appropriate complexity** - Solutions are as simple as possible for the current requirements
 - [ ] **Documentation shows correct patterns only** - Docs and markdown files should show the right way to do things directly, not anti-patterns followed by corrections. Code examples must have correct indentation, names, and syntax
 
+### Warnings and Logging
+
+Applies to every new `warnings.warn`, `TORCH_WARN*`, and logger `.warning()`/`.error()` call. Deprecation warnings are covered by the deprecation items under PyTorch Infrastructure.
+
+- [ ] **Correct level** - A warning must be something the user can and should act on. Expected environment variation, internal fallbacks, and missing optional information are `log.debug`/`log.info`. Choose deliberately between `warnings.warn` (user-facing, filterable, use a specific category) and `log.warning` (operator diagnostics). `.error()` is for failures, not for conditions execution recovers from
+- [ ] **No spam** - Ask how often it fires in a real workload: per call, per op, per iteration, per compile, per process. Anything reachable from a hot path or loop must be deduplicated (`TORCH_WARN_ONCE`, `warning_once`, a module-level flag). All of these dedupe only per process (`warning_once` and `functools.cache` also per argument), so compile workers and distributed ranks each still print it: such code should usually log only on rank 0 or the main process
+- [ ] **Actionable message** - The message says what happened, its consequence, and how to fix or silence it. If ignoring it is the only possible response, it should not be a warning
+
 ### Initialization and Module Design
 
 - [ ] **No fragile init ordering** - If multiple imports/calls must happen in a specific undocumented order, flag the design. Dependencies should be explicit or combined into a single entry point
