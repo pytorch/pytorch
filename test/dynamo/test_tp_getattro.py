@@ -598,6 +598,28 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(result, 10)
 
+    def test_type_doc_getset_descriptor_write_errors(self):
+        descr = type.__dict__["__doc__"]
+
+        class C:
+            pass
+
+        def set_immutable_type():
+            descr.__set__(list, "blah")
+
+        def delete_mutable_type_doc():
+            descr.__delete__(C)
+
+        with self.assertRaisesRegex(
+            TypeError, "cannot set '__doc__' attribute of immutable type 'list'"
+        ):
+            torch.compile(set_immutable_type, backend="eager", fullgraph=True)()
+
+        with self.assertRaisesRegex(
+            TypeError, "cannot delete '__doc__' attribute of immutable type 'C'"
+        ):
+            torch.compile(delete_mutable_type_doc, backend="eager", fullgraph=True)()
+
     def test_property_setter(self):
         class MyObj:
             def __init__(self):
