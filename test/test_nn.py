@@ -48,7 +48,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     module_tests, criterion_tests, loss_reference_fns, _create_basic_net, \
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
-    dtypesIfCUDA, precisionOverride, onlyAccelerator, \
+    dtypesIfCUDA, precisionOverride, onlyAccelerator, onlyCUDA, \
     skipCUDAIf, skipCUDAIfNoCudnn, skipMPSIf, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
     expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
@@ -8012,6 +8012,21 @@ class TestNNDeviceType(NNTestCase):
         for row in [boundary_row, boundary_row + 1]:
             ref = torch.layer_norm(x[row:row + 1], [N], gamma, beta)
             self.assertEqual(y[row], ref[0])
+
+    @onlyCUDA
+    @largeTensorTest("40GB")
+    @parametrize_test("rms", [False, True])
+    def test_layer_norm_grid_chunk_offset_overflow(self, device, rms):
+        # test for https://github.com/pytorch/pytorch/issues/199037
+        # ROCm caps the vectorized kernel's grid at UINT32_MAX // warp_size rows and
+        # launches the remaining rows separately; their N * rows offset must not wrap.
+        warp_size = torch.cuda.get_device_properties(device).warp_size
+        N = 2 * warp_size
+        M = (2**32 - 1) // warp_size + 1
+        x = torch.randn(M, N, dtype=torch.bfloat16, device=device)
+        norm = torch.rms_norm if rms else torch.layer_norm
+        y = norm(x, [N])
+        self.assertEqual(y[-1], norm(x[-1:], [N])[0])
 
     @onlyAccelerator
     @largeTensorTest("1GB")
