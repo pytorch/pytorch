@@ -63,7 +63,6 @@ jobs:
           sudo apt-get install -y git unzip
 
       - name: Ack Git cache ownership
-        if: ${{ !contains(inputs.runner, 'dgx') }}
         shell: bash
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
