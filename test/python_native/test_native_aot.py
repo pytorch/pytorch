@@ -162,7 +162,7 @@ class TestNativeAotTopKDeclaration(TestCase):
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @skipIfNoCuteDSL
 class TestNativeAotTopK(TestCase):
-    @skipIfNoNativeAot
+    @skipIfNoNativeAot("topk")
     def test_covered_grid_routes_to_aot(self):
         cases = [
             {"dtype": dtype, "n": n, "k": k}
@@ -177,7 +177,7 @@ class TestNativeAotTopK(TestCase):
             self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
             self.assertEqual(r["index_dtype"], "torch.int64")
 
-    @skipIfNoNativeAot
+    @skipIfNoNativeAot("topk")
     def test_register_grid_routing(self):
         cases = [
             {"dtype": "float32", "n": n, "k": 16} for n in (64, 128, 256, 512, 1024)
@@ -194,7 +194,7 @@ class TestNativeAotTopK(TestCase):
             self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
             self.assertEqual(r["index_dtype"], "torch.int64")
 
-    @skipIfNoNativeAot
+    @skipIfNoNativeAot("topk")
     def test_dynamic_n_and_work_rungs_route_to_aot(self):
         shapes = (
             (64, 3072),
@@ -222,7 +222,7 @@ class TestNativeAotTopK(TestCase):
             self.assertTrue(r["values_ok"], f"values mismatch for {case}")
             self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
 
-    @skipIfNoNativeAot
+    @skipIfNoNativeAot("topk")
     def test_deterministic_mode_routes_to_aot_bit_exact(self):
         # Det mode is on the grid, so its kernel must fire and match aten bit-exactly.
         # Probe values are torch.randn; ties are exercised in the next test.
@@ -236,7 +236,7 @@ class TestNativeAotTopK(TestCase):
             self.assertTrue(r["values_ok"], f"values mismatch for {case}")
             self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
 
-    @skipIfNoNativeAot
+    @skipIfNoNativeAot("topk")
     def test_deterministic_ties_bit_exact(self):
         # Tie-heavy input, so det-mode indices must match aten's exactly. The
         # reference runs under disabled(), or it would come from the route under test.
@@ -254,7 +254,7 @@ class TestNativeAotTopK(TestCase):
         finally:
             torch.use_deterministic_algorithms(prior)
 
-    @skipIfNoNativeAot
+    @skipIfNoNativeAot("topk")
     def test_out_variant_routes_to_aot(self):
         results = _run_probe(
             [{"dtype": "float32", "n": 4096, "k": 64, "out_variant": True}],
@@ -263,7 +263,7 @@ class TestNativeAotTopK(TestCase):
         self.assertTrue(results[0]["ran_dsl"])
         self.assertTrue(results[0]["values_ok"])
 
-    @skipIfNoNativeAot
+    @skipIfNoNativeAot("topk")
     def test_uncovered_calls_avoid_aot(self):
         cases = [
             *({"dtype": "float32", "n": n, "k": k} for k, n in JIT_ONLY_REGISTER),
@@ -347,7 +347,7 @@ class TestNativeAotTopK(TestCase):
             self.assertTrue(r["values_ok"], f"values mismatch for {case}")
             self.assertTrue(r["gather_ok"], f"gather mismatch for {case}")
 
-    @skipIfNoNativeAot
+    @skipIfNoNativeAot("topk")
     def test_disabled_context_masks_aot_in_process(self):
         # cutedsl.disabled() flips the native-AOT Context switch as well as the JIT
         # layer, so no DSL kernel may run inside the block.

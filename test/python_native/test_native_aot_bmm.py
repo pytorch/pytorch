@@ -20,18 +20,10 @@ from torch.testing._internal.common_utils import (
     lazy_skip_if,
     parametrize,
     run_tests,
+    skipIfNoNativeAot,
     skipIfNoTritonDSL,
     TestCase,
 )
-
-
-def skipIfNoNativeAotBmm(fn):
-    from torch._native.aot_manifest import get_coverage
-
-    return lazy_skip_if(
-        lambda: not get_coverage("bmm", "CUDA").is_available(torch.device("cuda")),
-        "BMM AOT kernels not embedded for this device",
-    )(fn)
 
 
 def _ran_aot(fn) -> bool:
@@ -125,7 +117,7 @@ class TestNativeAotBmmOuter(TestCase):
             ),
         }
 
-    @skipIfNoNativeAotBmm
+    @skipIfNoNativeAot("bmm")
     @parametrize("dtype", [torch.float32, torch.bfloat16])
     @parametrize("m", [48, 128])  # one M per BLOCK_M bucket
     def test_covered_buckets_route_to_aot(self, dtype, m):
@@ -139,7 +131,7 @@ class TestNativeAotBmmOuter(TestCase):
             out = torch.bmm(a, b)
         self.assertEqual(out, ref, atol=0, rtol=0)
 
-    @skipIfNoNativeAotBmm
+    @skipIfNoNativeAot("bmm")
     @parametrize("n", [129, 200, 255, 384])
     def test_n_tails_are_masked_and_exact(self, n):
         # BLOCK_N is 128 for every exported point, so each of these N values leaves a
@@ -206,14 +198,11 @@ class TestNativeAotBmmOuter(TestCase):
     @unittest.skipIf(
         torch.cuda.device_count() < 2, "requires at least 2 visible CUDA devices"
     )
+    @skipIfNoNativeAot("bmm", device="cuda:1")
     def test_a_covered_shape_runs_on_a_non_current_device(self):
         # The launcher caches one CUfunction per device and establishes a context if
         # the calling thread has none; both are per-device state a single-GPU run
         # never exercises.
-        from torch._native.aot_manifest import get_coverage
-
-        if not get_coverage("bmm", "CUDA").is_available(torch.device("cuda:1")):
-            self.skipTest("BMM AOT kernels not embedded for cuda:1")
         old_device = torch.cuda.current_device()
         try:
             torch.cuda.set_device(0)
@@ -230,7 +219,7 @@ class TestNativeAotBmmOuter(TestCase):
         finally:
             torch.cuda.set_device(old_device)
 
-    @skipIfNoNativeAotBmm
+    @skipIfNoNativeAot("bmm")
     def test_every_m_is_covered_across_the_bucket_boundary(self):
         with _jit_masked():
             for m, covered in (
@@ -258,7 +247,7 @@ class TestNativeAotBmmOuter(TestCase):
                     f"{label} must not route to AOT",
                 )
 
-    @skipIfNoNativeAotBmm
+    @skipIfNoNativeAot("bmm")
     @skipIfNoTritonDSL
     def test_a_covered_shape_leaves_the_jit_compile_cache_cold(self):
         from torch._native.instrumentation import _triton_cache_size
@@ -276,7 +265,7 @@ class TestNativeAotBmmOuter(TestCase):
         )
         self.assertEqual(out, _reference(a, b), atol=0, rtol=0)
 
-    @skipIfNoNativeAotBmm
+    @skipIfNoNativeAot("bmm")
     def test_a_transposed_view_is_served_and_matches(self):
         torch.manual_seed(1)
         a = torch.randn(16, 1, 48, device="cuda").transpose(1, 2)
@@ -286,7 +275,7 @@ class TestNativeAotBmmOuter(TestCase):
             out = torch.bmm(a, b)
         self.assertEqual(out, _reference(a, b), atol=0, rtol=0)
 
-    @skipIfNoNativeAotBmm
+    @skipIfNoNativeAot("bmm")
     def test_out_variant_routes_to_aot(self):
         a, b = self._outer(16, 48, 256, seed=3)
         out = torch.empty(16, 48, 256, device="cuda")
