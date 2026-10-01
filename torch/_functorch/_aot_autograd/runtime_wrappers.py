@@ -35,6 +35,7 @@ from torch._dynamo.utils import (
     deferred_full_gc,
     dynamo_timed,
     get_metrics_context,
+    nothing,
 )
 from torch._guards import (
     compile_context,
@@ -117,11 +118,13 @@ if typing.TYPE_CHECKING:
 
 def _snapshot_external_objects(ctx: Any) -> None:
     """Snapshot the external object registry onto ctx for backward restore."""
-    ctx._external_objects = {
-        k: r
-        for k, ref in enumerate(index_to_external_object_weakref)
-        if (r := ref()) is not None
-    }
+    # Empty dict is common (for backward passes), short circuit.
+    if index_to_external_object_weakref:
+        ctx._external_objects = {
+            k: r
+            for k, ref in enumerate(index_to_external_object_weakref)
+            if (r := ref()) is not None
+        }
 
 
 def _unwrap_tensor_subclasses_no_symints(
@@ -515,6 +518,10 @@ class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
         return True
 
 
+# Construction cost for nullcontext is measurable on hot paths; construct only once.
+_NULL_CONTEXT = nullcontext()
+
+
 class _FirstInvocationContext:
     """
     Context manager that tracks first invocation and conditionally enables _AnalyzeCustomOpInputOutputMode.
@@ -540,7 +547,7 @@ class _FirstInvocationContext:
         ):
             self._is_first = False
             return _AnalyzeCustomOpInputOutputMode()
-        return nullcontext()
+        return _NULL_CONTEXT
 
 
 # Note [RuntimeWrapper codegen specification methods]
@@ -1194,6 +1201,12 @@ def _create_runtime_wrapper(
 
     @simple_wraps(_inner_compiled_fn)
     def runtime_wrapper(args: list[Any]) -> Any:
+        # Short-circuit eval when not profiling.
+        if not torch.autograd.profiler._is_profiler_enabled:
+            return _codegen_runtime_wrapper(
+                _inner_compiled_fn, _first_invocation_ctx, nothing, args
+            )
+
         cm = record_runtime_wrapper_prologue_enter()
         prologue_exited = False
 
@@ -1212,7 +1225,6 @@ def _create_runtime_wrapper(
             )
         finally:
             exit_prologue()
-        del args
         return result
 
     if not (trace_joint and _should_disable_saved_tensors_hooks()):
@@ -2897,7 +2909,7 @@ class _AutogradBackwardCompiler:
         saved_context = self.lazy_backward_info.saved_context
         saved_compile_context = self.lazy_backward_info.saved_compile_context
 
-        context = torch._C._DisableAutocast if self.disable_amp else nullcontext
+        context = torch._C._DisableAutocast() if self.disable_amp else _NULL_CONTEXT
         metrics_context = get_metrics_context()
         with (
             # Lazily compiling the backward builds as much graph as the forward
@@ -2906,7 +2918,7 @@ class _AutogradBackwardCompiler:
             deferred_full_gc(),
             tracing(saved_context),
             compile_context(saved_compile_context),
-            context(),
+            context,
             track_graph_compiling(self.aot_config, "backward"),
             metrics_context,
             dynamo_timed(
@@ -3566,10 +3578,10 @@ class _AOTDispatchAutogradFunctionFactory:
         _codegen_transform_raw_returns: Callable[..., list[Any]] = buf.build()  # type: ignore[assignment]
         # Config variable resolution is expensive; get it off the hot path.
         do_debug_assert = config.debug_assert
+        num_forward_returns = fw_metadata.num_forward_returns
 
         # Monkey-patch forward_epilogue.finalize to use codegen'd transform
         def _codegen_finalize(ctx: Any, fw_outs: Any) -> tuple[Any, ...]:
-            num_forward_returns = fw_metadata.num_forward_returns
             raw_returns = list(fw_outs[:num_forward_returns])
             fw_outs_not_requiring_grad = _codegen_transform_raw_returns(raw_returns)
             if do_debug_assert:
@@ -3593,7 +3605,8 @@ class _AOTDispatchAutogradFunctionFactory:
                         raise AssertionError(
                             "expected no TensorAlias in intermediates_raw"
                         )
-            ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
+            if fw_outs_not_requiring_grad:
+                ctx.mark_non_differentiable(*fw_outs_not_requiring_grad)
             ctx._materialize_non_diff_grads = False
             _snapshot_external_objects(ctx)
 

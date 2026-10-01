@@ -131,6 +131,10 @@ The review checklist is large. You cannot hold the full context of every infrast
 
 Sub-agents overlap on purpose. Expect the same defect back from two or three of them in different words; that signals importance, not multiplicity. Reconcile in Step 4, before spending verification agents on it.
 
+## Directory Review Guides (`REVIEW.md`)
+
+Any directory may contain a `REVIEW.md` with review rules for code under it. It applies to every changed file under that directory at any depth; for renames and deletions, check both the old and new paths.
+
 ## Review Workflow
 
 ### Step 1: Understand Context
@@ -140,10 +144,13 @@ Before reviewing, build understanding of what the PR touches and why:
 2. Group changes by type (new code, tests, config, docs)
 3. Note the scope of changes (files affected, lines changed)
 4. Spawn sub-agents to read the unchanged code surrounding each significantly changed file to understand existing patterns and infrastructure
+5. List the `REVIEW.md` files that apply to each changed file (see "Directory Review Guides" above); leave reading them to sub-agents unless you review or fact-check a file yourself
 
 ### Step 2: Deep Review
 
 Go through **every changed line** in the diff and evaluate it against the review checklist in [review-checklist.md](review-checklist.md).
+
+Review every changed file covered by a `REVIEW.md` with its rules applied, in a sub-agent where possible; split the work along `REVIEW.md` directories. Give each sub-agent the `REVIEW.md` paths covering its files; it reads them and applies them alongside the checklist, including any rules they relax.
 
 ### Step 3: Check Backward Compatibility
 
@@ -163,9 +170,9 @@ Only then assign each survivor to exactly one section (see "One finding, one sec
 
 ### Step 5: Fact-Check
 
-Fact-check the **consolidated** list — one sub-agent per surviving finding, never one per raw candidate.
+Fact-check the **consolidated** list, never the raw candidates. Scale the number of agents to the task: group findings that touch the same code or subsystem into one agent, and give a finding its own agent only when verifying it needs deep investigation. A small PR usually needs 1-2 agents; rarely spawn more than 5.
 
-Spawn the agents in parallel. Each independently verifies the claim by re-reading the relevant code and surrounding context, and returns **valid**, **invalid**, or **needs rewording**. Drop invalid issues, reword the rest. If unsure, leave the issue with a comment for the author that this is low confidence.
+Spawn the agents in parallel. Each independently verifies its findings by re-reading the relevant code and surrounding context (give each agent the paths of any `REVIEW.md` covering its findings' files), and returns **valid**, **invalid**, or **needs rewording** for each. Drop invalid issues, reword the rest. If unsure, leave the issue with a comment for the author that this is low confidence.
 
 ## Time Budget
 
@@ -179,7 +186,7 @@ Applies only when your system prompt has a "Time budget" section and the job's h
 
 Structure your review as follows. **Omit sections where you have no problems to report** — most reviews should only have a few sections. Do not write "No concerns", "Looks good", or any affirmative commentary. Every sentence in the review must identify a problem or request a change.
 
-The Summary section is the one exception: it should briefly state what the PR does (1 sentence) and then state the problems found, or explicitly say no issues were found.
+The Summary section is the one exception: it should briefly state what the PR does (1 sentence), list any applied `REVIEW.md` files, and then state the problems found, or explicitly say no issues were found.
 
 ```markdown
 ## PR Review: #<number>
@@ -187,7 +194,7 @@ The Summary section is the one exception: it should briefly state what the PR do
 ## Branch Review: <branch-name> (vs main)
 
 ### Summary
-What the PR does (1 sentence), then the overall verdict.
+What the PR does (1 sentence), applied `REVIEW.md` files (if any), then the overall verdict.
 
 ### Code Quality
 [Problems only]

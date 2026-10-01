@@ -10,6 +10,7 @@ etc.) live in their respective VT files.
 import abc
 import collections
 import enum
+import inspect
 import operator
 import sys
 import types
@@ -474,7 +475,12 @@ def generic_repr(
             if obj_type in sentinel:
                 return ConstantVariable.create(sentinel[obj_type])
             return ConstantVariable.create(obj.repr_recursive_sentinel())
-        _repr_running.add(obj_id)
+        # UserList/UserDict.__repr__ is `repr(self.data)`; PyObject_Repr does not
+        # register it, so the inner list/dict catches the cycle.
+        repr_fn = inspect.getattr_static(obj_type, "__repr__")
+        user_reprs = (collections.UserList.__repr__, collections.UserDict.__repr__)
+        if repr_fn not in user_reprs:
+            _repr_running.add(obj_id)
         try:
             result = obj.tp_repr_impl(tx)
         finally:

@@ -3,10 +3,12 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorIndexing.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/CachingHostAllocator.h>
 #include <c10/core/ScalarType.h>
 #include <c10/cuda/CUDAStream.h>
 
+#include <algorithm>
 #include <bit>
 #include <cstdlib>
 
@@ -315,6 +317,44 @@ TEST(CachingHostAllocatorTest, free_does_not_propagate_record_failure) {
       ptr, ctx, c10::Stream(c10::Stream::DEFAULT, c10::Device(c10::kCPU))));
 
   EXPECT_NO_THROW(allocator.free(ctx));
+}
+
+// empty_cache() holds instance_mutex_ exclusively while it processes the
+// events of released private pools. Returning a block whose event completed
+// used to take instance_mutex_ again to find its pool, which fails with
+// "Resource deadlock avoided".
+TEST(CachingHostAllocatorTest, empty_cache_released_pool_with_completed_event) {
+  if (!at::cuda::is_available()) {
+    return;
+  }
+
+  auto* allocator = at::getHostAllocator(at::kCUDA);
+  auto pool_id = at::cuda::graph_pool_handle();
+  auto stream = at::cuda::getStreamFromPool();
+
+  void* ptr{nullptr};
+  void* ctx{nullptr};
+  {
+    allocator->begin_allocate_to_pool(
+        pool_id, [](c10::Stream) { return true; });
+    auto pinned_tensor = at::empty(
+        {N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
+    allocator->end_allocate_to_pool(pool_id);
+    ptr = pinned_tensor.data_ptr();
+    ctx = pinned_tensor.storage().data_ptr().get_context();
+    auto segments = allocator->get_segments();
+    auto seg = std::find_if(segments.begin(), segments.end(), [&](const auto& s) {
+      return s.address == reinterpret_cast<size_t>(ptr);
+    });
+    ASSERT_NE(seg, segments.end());
+    ASSERT_EQ(seg->owner_private_pool_id, pool_id);
+    ASSERT_TRUE(allocator->record_event(ptr, ctx, stream.unwrap()));
+    allocator->release_pool(pool_id);
+  }
+  stream.synchronize();
+
+  ASSERT_NO_THROW(allocator->empty_cache());
+  ASSERT_FALSE(allocator->record_event(ptr, ctx, stream.unwrap()));
 }
 
 int main(int argc, char* argv[]) {
