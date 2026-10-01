@@ -9,6 +9,7 @@
 #include <ostream>
 #include <sstream>
 #include <thread>
+#include <vector>
 
 #include <c10/core/Allocator.h>
 #include <c10/core/CPUAllocator.h>
@@ -905,10 +906,14 @@ void PyTorchStreamWriter::writeSerializationId() {
   // 1) a combined hash of record name hashes
   // 2) a combined crc32 of the record uncompressed data
   // This is best effort to create a fixed-length, unique and deterministic id
-  // for the serialized files without incurring additional computation overhead.
+  // for the serialized files.
   if (files_written_.find(kSerializationIdRecordName) == files_written_.end()) {
+    // Do not depend on unordered_set iteration order when combining hashes.
+    std::vector<std::string> record_names(
+        files_written_.begin(), files_written_.end());
+    std::sort(record_names.begin(), record_names.end());
     uint64_t combined_record_name_hash = 0;
-    for (const std::string& record_name : files_written_) {
+    for (const std::string& record_name : record_names) {
       size_t record_name_hash = c10::hash<std::string>{}(record_name);
       combined_record_name_hash =
           c10::hash_combine(combined_record_name_hash, record_name_hash);
