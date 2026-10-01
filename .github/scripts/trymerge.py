@@ -760,6 +760,7 @@ def parse_args() -> Any:
     parser.add_argument("--ignore-current", action="store_true")
     parser.add_argument("--check-mergeability", action="store_true")
     parser.add_argument("--comment-id", type=int)
+    parser.add_argument("--rebased", action="store_true")
     parser.add_argument("--reason", type=str)
     parser.add_argument("pr_num", type=int)
     return parser.parse_args()
@@ -1559,6 +1560,7 @@ class GitHubPR:
         comment_id: int,
         ignore_current_checks: set[tuple[int, str]] | None = None,
         greenlight_wait: GreenlightWaitWindow | None = None,
+        rebased: bool = False,
     ) -> None:
         skip_internal_checks = can_skip_internal_checks(self, comment_id)
         # Raises exception if matching rule is not found
@@ -1612,6 +1614,7 @@ class GitHubPR:
                 comment_id,
                 ghstack_prs=ghstack_prs,
                 ignore_current_checks=ignore_current_checks,
+                rebased=rebased,
             )
 
             # Log, but do not block on, a docker land race.
@@ -1689,9 +1692,11 @@ class GitHubPR:
         skip_all_rule_checks: bool = False,
         ghstack_prs: list[tuple[GitHubPR, str]] | None = None,
         ignore_current_checks: set[tuple[int, str]] | None = None,
+        rebased: bool = False,
     ) -> list[GitHubPR]:
         """
         :param skip_all_rule_checks: If true, skips all rule checks on ghstack PRs, useful for dry-running merge locally
+        :param rebased: If true, the merge command rebased the PR before this merge
         """
         branch_to_merge_into = self.default_branch() if branch is None else branch
         if repo.current_branch() != branch_to_merge_into:
@@ -1726,8 +1731,10 @@ class GitHubPR:
 
         # Validate that this commit is the latest commit on the PR
         latest_commit = self.last_commit_sha()
-        if commit_to_merge != latest_commit and self.is_mergebot_rebase_of(
-            commit_to_merge
+        if (
+            rebased
+            and commit_to_merge != latest_commit
+            and self.is_mergebot_rebase_of(commit_to_merge)
         ):
             print(f"Merging {latest_commit}, mergebot's rebase of {commit_to_merge}")
             commit_to_merge = latest_commit
@@ -3131,6 +3138,7 @@ def merge(
     timeout_minutes: int = 400,
     stale_pr_days: int = 3,
     ignore_current: bool = False,
+    rebased: bool = False,
 ) -> None:
     initial_commit_sha = pr.last_commit_sha()
     pr_link = f"https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num}"
@@ -3169,6 +3177,7 @@ def merge(
             skip_mandatory_checks=skip_mandatory_checks,
             comment_id=comment_id,
             greenlight_wait=None,
+            rebased=rebased,
         )
 
     # Check for approvals
@@ -3275,6 +3284,7 @@ def merge(
                 comment_id=comment_id,
                 ignore_current_checks=ignore_current_checks,
                 greenlight_wait=greenlight_wait,
+                rebased=rebased,
             )
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
@@ -3409,6 +3419,7 @@ def main() -> None:
             dry_run=args.dry_run,
             skip_mandatory_checks=args.force,
             ignore_current=args.ignore_current,
+            rebased=args.rebased,
         )
     except Exception as e:
         handle_exception(e)
