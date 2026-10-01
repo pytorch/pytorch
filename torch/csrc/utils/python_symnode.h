@@ -116,13 +116,6 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
                        : std::optional<int64_t>(r.cast<int64_t>());
   }
 
-  bool backed_size_oblivious() override {
-    py::gil_scoped_acquire acquire;
-    return py::module::import("torch.fx.experimental._config")
-        .attr("backed_size_oblivious")
-        .cast<bool>();
-  }
-
   int64_t guard_int(const char* file, int64_t line) override {
     py::gil_scoped_acquire acquire;
     return getPyObj().attr("guard_int")(file, line).cast<int64_t>();
