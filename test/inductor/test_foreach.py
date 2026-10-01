@@ -242,6 +242,29 @@ class ForeachTests(TestCase):
         self.assertEqual(actual, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 0)
 
+    @parametrize("device", ("cpu", GPU_TYPE))
+    @parametrize("source_order", ("self_first", "self_last", "cross_first"))
+    def test_foreach_copy_cross_aliasing_with_self_source(self, device, source_order):
+        if device == GPU_TYPE and not HAS_GPU:
+            self.skipTest("requires GPU")
+
+        def fn(x, y):
+            if source_order == "self_first":
+                sources = [x.T * 1.0, y + x]
+            elif source_order == "self_last":
+                sources = [x + 1.0, x.T * 1.0]
+            else:
+                sources = [y + x, x.T * 1.0]
+            torch._foreach_copy_([x, y], sources)
+            return x, y
+
+        x = torch.arange(9.0, device=device).reshape(3, 3)
+        y = torch.arange(9.0, 18.0, device=device).reshape(3, 3)
+
+        expected = fn(x.clone(), y.clone())
+        actual = torch.compile(fn, fullgraph=True)(x.clone(), y.clone())
+        self.assertEqual(actual, expected)
+
     def _test_single_list(self, op):
         if op in un_ops_under_test:
 

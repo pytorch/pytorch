@@ -11,7 +11,7 @@ import os
 import sys
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
@@ -7737,19 +7737,24 @@ def pow(a, b):
     return pow_native(a, b)
 
 
-def mutate_to(changed, val, unsafe_alias=False, share_value=True):
+def _materialize_destination_backed_view(val, destination_names: Collection[str]):
     src_data = val
     while isinstance(src_data, MutableBox):
         src_data = src_data.data
-    changed_name = changed.maybe_get_name()
-    if (
-        isinstance(src_data, BaseView)
-        and changed_name is not None
-        and changed_name in val.get_read_names()
+    if isinstance(src_data, BaseView) and any(
+        name in val.get_read_names() for name in destination_names
     ):
         # A destination-backed view may read different indices than the mutation writes.
         val = clone(val)
         val.realize()
+    return val
+
+
+def mutate_to(changed, val, unsafe_alias=False, share_value=True):
+    changed_name = changed.maybe_get_name()
+    val = _materialize_destination_backed_view(
+        val, (changed_name,) if changed_name is not None else ()
+    )
 
     if isinstance(changed, TensorBox):
         changed_data = changed.data
@@ -9037,7 +9042,11 @@ def foreach_copy_inplace(destinations, sources, non_blocking=False):
         for destination_name, source in zip(destination_names, sources, strict=True)
     )
     if has_ambiguous_or_repeated_destination or has_cross_destination_read:
-        foreach_copy_inplace_fallback(destinations, sources, non_blocking)
+        materialized_sources = [
+            _materialize_destination_backed_view(source, named_destinations)
+            for source in sources
+        ]
+        foreach_copy_inplace_fallback(destinations, materialized_sources, non_blocking)
         return destinations
 
     results = foreach_copy(destinations, sources, non_blocking)
