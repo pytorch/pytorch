@@ -245,6 +245,38 @@ function test_peak_independent_of_detail() {
   }
 }
 
+function test_global_summary_coordinates() {
+  console.log('test_global_summary_coordinates');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 512, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1200, size: 2048, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1a00, size: 256, frames: [], stream: 0 },
+    ],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 1, false);
+  const summary = result.summarized_mem;
+  assertEqual(summary.offsets.length, summary.timesteps.length, 'summary coordinates align');
+  assertEqual(summary.size.length, summary.timesteps.length, 'summary sizes align');
+  assertEqual(summary.offsets.join(','), '0,2048,2048,2048', 'summary stays above the drawn allocation');
+  assertEqual(summary.size.join(','), '512,512,768,768', 'summary includes both small allocations');
+  assertEqual(summary.timesteps.at(-1), result.max_at_time.length, 'summary reaches the end of the trace');
+}
+
+function test_summarized_only_allocation() {
+  console.log('test_summarized_only_allocation');
+  const snapshot = makeSnapshot({
+    traces: [{ action: 'alloc', addr: 0x1000, size: 512, frames: [], stream: 0 }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 0, false);
+  const summary = result.summarized_mem;
+  assertEqual(summary.timesteps.join(','), '0,1', 'summarized allocation has nonzero width');
+  assertEqual(summary.offsets.join(','), '0,0', 'summary starts at the bottom');
+  assertEqual(summary.size.join(','), '512,512', 'summary retains its size to the end');
+}
+
 function test_mixed_pool_and_nonpool() {
   console.log('test_mixed_pool_and_nonpool');
   // Mix of pool and non-pool allocations
@@ -1598,6 +1630,8 @@ test_pool_alloc_then_free_normal();
 test_multiple_pool_frees_without_alloc();
 test_non_pool_free_without_alloc();
 test_peak_independent_of_detail();
+test_global_summary_coordinates();
+test_summarized_only_allocation();
 test_mixed_pool_and_nonpool();
 test_include_private_inactive_false_ignores_pools();
 test_formatSize_bytes();

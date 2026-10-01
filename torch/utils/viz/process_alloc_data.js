@@ -550,7 +550,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
   const summarized_mem = {
     elem: 'summarized',
     timesteps: [],
-    offsets: [total_mem],
+    offsets: [],
     size: [],
     color: 0,
   };
@@ -1086,6 +1086,9 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
       sd.size.push(sd.size.at(-1));
     }
   }
+  summarized_mem.timesteps.push(timestep);
+  summarized_mem.offsets.push(total_mem);
+  summarized_mem.size.push(total_summarized_mem);
   data.push(summarized_mem);
 
   return {
