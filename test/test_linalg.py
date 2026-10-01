@@ -5196,8 +5196,9 @@ class TestLinalg(TestCase):
                 (t + 2, t / 4, t.new_tensor(0), 3 - t, 2 * t + 1, 1 - t / 3, t.new_tensor(0), t + 4)
             ).reshape(2, 2, 2)
             b = t.new_tensor([[[1, 2], [3, -1]], [[2, -2], [1, 4]]])
+            w = t.new_tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])
             x = torch.triangular_solve(b, a, upper=True, transpose=False, unitriangular=True)[0]
-            return sum((1 + 4 * r + 2 * i + j) * x[r, i, j] for r in range(2) for i in range(2) for j in range(2))
+            return (x * w).sum()
 
         t = torch.tensor(-10.0, dtype=dtype, device=device)
         _, actual = torch.func.jvp(f, (t,), (torch.ones_like(t),))
