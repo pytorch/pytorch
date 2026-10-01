@@ -25,8 +25,7 @@ from typing import Any, TYPE_CHECKING
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import (
-    _disable_gated_hooks,
-    _enable_gated_hooks,
+    _set_gated_hooks_enabled,
     HookOpName,
     PostHookArgs,
     PreHookArgs,
@@ -218,6 +217,7 @@ class CollectiveAnnotations:
     it defaults to :func:`~torch.cuda.graph_annotations.mark_kernels` for
     collectives issued from a capturing stream, and a no-op otherwise. Each open
     annotator is entered once per collective, however many instances use it.
+    Instances must be closed in the reverse order they were opened.
     """
 
     def __init__(
@@ -226,7 +226,7 @@ class CollectiveAnnotations:
     ) -> None:
         self._annotate = annotate
         _annotators.append(annotate)
-        _enable_gated_hooks()
+        self._was_enabled = _set_gated_hooks_enabled(True)
         self._closed = False
 
     def close(self) -> None:
@@ -234,5 +234,5 @@ class CollectiveAnnotations:
         if self._closed:
             return
         self._closed = True
-        _disable_gated_hooks()
+        _set_gated_hooks_enabled(self._was_enabled)
         _annotators.remove(self._annotate)
