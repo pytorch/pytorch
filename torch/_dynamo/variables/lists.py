@@ -2377,7 +2377,7 @@ class ByteArrayVariable(VariableTracker):
             return None
         try:
             result = self.data.hex(*const_args, **const_kwargs)
-        except (TypeError, ValueError) as e:
+        except (OverflowError, TypeError, ValueError) as e:
             raise_observed_exception(type(e), tx, args=list(e.args))
         return ConstantVariable.create(result)
 
