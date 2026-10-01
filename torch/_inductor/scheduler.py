@@ -133,15 +133,13 @@ def affine_proof_strides(
     Returns:
         The affine strides, or None if the access is not affine.
     """
-    zero = {var: sympy.S.Zero for var in dep.var_names}
+    zero = dict.fromkeys(dep.var_names, sympy.S.Zero)
     offset = sympy_subs(dep.index, zero)
     strides = []
     for var in dep.var_names:
         one = dict(zero)
         one[var] = sympy.S.One
-        strides.append(
-            context.simplify(sympy_subs(dep.index, one) - offset)
-        )
+        strides.append(context.simplify(sympy_subs(dep.index, one) - offset))
     reconstructed = offset + sum(
         (stride * var for stride, var in zip(strides, dep.var_names)),
         sympy.S.Zero,
@@ -183,8 +181,7 @@ def prove_translation_pair(
     # Dense row-major strides: each axis steps over all trailing dimensions.
     # The innermost axis therefore has stride 1.
     expected_strides = tuple(
-        sympy_product(producer.size[axis + 1 :])
-        for axis in range(producer.num_vars)
+        sympy_product(producer.size[axis + 1 :]) for axis in range(producer.num_vars)
     )
     if any(
         not context.statically_known_equals(coefficient, expected)
@@ -192,9 +189,7 @@ def prove_translation_pair(
     ):
         return None
     if any(
-        not context.statically_known_equals(
-            producer_coefficient, consumer_coefficient
-        )
+        not context.statically_known_equals(producer_coefficient, consumer_coefficient)
         for producer_coefficient, consumer_coefficient in zip(
             producer_strides, consumer_strides
         )
@@ -237,9 +232,7 @@ def prove_translation_pair(
         (stride * offset for stride, offset in zip(producer_strides, translation)),
         sympy.S.Zero,
     )
-    if not context.statically_known_equals(
-        translated_offset, consumer.get_offset()
-    ):
+    if not context.statically_known_equals(translated_offset, consumer.get_offset()):
         return None
 
     return TranslationProof(
@@ -274,14 +267,11 @@ def prove_translation(
         return None
 
     raw_proofs = tuple(
-        prove_translation_pair(source, consumer_access, context)
-        for source in sources
+        prove_translation_pair(source, consumer_access, context) for source in sources
     )
     if any(proof is None for proof in raw_proofs):
         return None
-    proofs = typing.cast(
-        tuple[TranslationProof, ...], raw_proofs
-    )
+    proofs = typing.cast(tuple[TranslationProof, ...], raw_proofs)
     first = proofs[0]
     if any(
         proof.translation != first.translation
@@ -292,9 +282,7 @@ def prove_translation(
     return dataclasses.replace(
         first,
         matched_dependencies=tuple(
-            match
-            for proof in proofs
-            for match in proof.matched_dependencies
+            match for proof in proofs for match in proof.matched_dependencies
         ),
     )
 
@@ -2663,7 +2651,7 @@ class SubParentAccessRelation:
         consumer_access: MemoryDep,
         *,
         sizevars: SizeVarAllocator,
-    ) -> "TranslationProof | None":
+    ) -> TranslationProof | None:
         """Prove a dense translation relation.
 
         Args:
@@ -2674,9 +2662,7 @@ class SubParentAccessRelation:
         Returns:
             The proof, or None if the relation is invalid.
         """
-        return prove_translation(
-            source_accesses, consumer_access, context=sizevars
-        )
+        return prove_translation(source_accesses, consumer_access, context=sizevars)
 
 
 @dataclasses.dataclass(frozen=True)

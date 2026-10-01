@@ -152,12 +152,8 @@ class TestScheduler(TestCase):
         self.assertIsNotNone(shifted)
         self.assertEqual(zero.translation, (0, 0))
         self.assertEqual(shifted.translation, (0, 64))
-        self.assertEqual(
-            shifted.compatible_extents, ((4, 4), (192, 128))
-        )
-        self.assertEqual(
-            shifted.matched_dependencies[0].write, producer
-        )
+        self.assertEqual(shifted.compatible_extents, ((4, 4), (192, 128)))
+        self.assertEqual(shifted.matched_dependencies[0].write, producer)
         self.assertEqual(
             shifted.matched_dependencies[0].read,
             consumer(192 * row + feature + 64),
@@ -182,9 +178,7 @@ class TestScheduler(TestCase):
             consumer(192 * row - feature + 127),
             consumer(193 * row + feature + 64),
             # Data-dependent indexing is outside the affine proof.
-            consumer(
-                sympy.Symbol("indirect_index", integer=True) + feature
-            ),
+            consumer(sympy.Symbol("indirect_index", integer=True) + feature),
         )
         for invalid_consumer in rejected:
             with self.subTest(invalid_consumer=invalid_consumer):
