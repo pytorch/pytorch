@@ -13371,6 +13371,7 @@ class TestAutogradForwardMode(TestCase):
 class TestAutogradDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @skipIfTorchDynamo("compiled autograd does not support torch::autograd::Identity")
     @parametrize("train", [None, False, True])
     @parametrize("p", [0.0, 0.2, 0.5, 1.0])
     def test_native_dropout_optional_train(self, device, train, p):

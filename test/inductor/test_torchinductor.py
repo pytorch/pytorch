@@ -428,28 +428,6 @@ class TestCase(InductorTestCase):
             if elapsed >= 120:
                 raise AssertionError(f"Test took too long: {elapsed:.1f}s >= 120s")
 
-    def _check_native_dropout(self, train, p, requires_grad):
-        @torch.compile(fullgraph=True)
-        def fn(x):
-            return torch.ops.aten.native_dropout.default(x, p, train)
-
-        x = torch.ones(256, device=self.device, requires_grad=requires_grad)
-        output, mask = fn(x)
-        if requires_grad:
-            output.sum().backward()
-        scale = 1.0 if train is False else (0.0 if p == 1 else 1.0 / (1.0 - p))
-        self.assertEqual(output, x * mask * scale)
-        if requires_grad:
-            self.assertEqual(x.grad, mask * scale)
-        if train is False or p == 0:
-            self.assertEqual(mask, torch.ones_like(mask))
-        elif p == 1:
-            self.assertEqual(mask, torch.zeros_like(mask))
-        else:
-            self.assertTrue(mask.any())
-            self.assertFalse(mask.all())
-
-
 class ToTuple(torch.nn.Module):
     def forward(self, x):
         return (x,)
@@ -1520,6 +1498,28 @@ def target_assert_alignment_regex(
 
 @instantiate_parametrized_tests
 class CommonTemplate:
+    @staticmethod
+    def _check_native_dropout(self, train, p, requires_grad):
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return torch.ops.aten.native_dropout.default(x, p, train)
+
+        x = torch.ones(256, device=self.device, requires_grad=requires_grad)
+        output, mask = fn(x)
+        if requires_grad:
+            output.sum().backward()
+        scale = 1.0 if train is False else (0.0 if p == 1 else 1.0 / (1.0 - p))
+        self.assertEqual(output, x * mask * scale)
+        if requires_grad:
+            self.assertEqual(x.grad, mask * scale)
+        if train is False or p == 0:
+            self.assertEqual(mask, torch.ones_like(mask))
+        elif p == 1:
+            self.assertEqual(mask, torch.zeros_like(mask))
+        else:
+            self.assertTrue(mask.any())
+            self.assertFalse(mask.all())
+
     def is_dtype_supported(self, dtype: torch.dtype) -> bool:
         device_interface = get_interface_for_device(self.device)
         return device_interface.is_dtype_supported(dtype)
@@ -12827,7 +12827,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @parametrize("p", [0.0, 0.2, 0.5, 1.0])
     @parametrize("requires_grad", [False, True])
     def test_native_dropout_optional_train(self, train, p, requires_grad):
-        self._check_native_dropout(train, p, requires_grad)
+        CommonTemplate._check_native_dropout(self, train, p, requires_grad)
 
     def test_dropout_trivial_0(self):
         def fn1(a):
@@ -20541,7 +20541,7 @@ if RUN_GPU and GPU_TYPE == "cuda":
         @parametrize("requires_grad", [False, True])
         @torch._functorch.config.patch(functionalize_rng_ops=True)
         def test_native_dropout_optional_train(self, train, p, requires_grad):
-            self._check_native_dropout(train, p, requires_grad)
+            CommonTemplate._check_native_dropout(self, train, p, requires_grad)
 
 
 if RUN_CPU:
