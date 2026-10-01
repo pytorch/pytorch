@@ -1466,8 +1466,9 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         self.assertEqual(cnt.frame_count, 1)
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
-    @requires_multigpu
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
+    )
     @compiler_config.patch(compile_on_one_rank=True)
     @parametrize(
         "origin",
@@ -1477,9 +1478,9 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             "generic_none_constructor",
             "generic_bare_constructor",
             "generic_cpu_constructor",
-            "cuda_default_constructor",
+            f"{device_type}_default_constructor",
             "accelerator_current",
-            "cuda_current",
+            f"{device_type}_current",
         ),
     )
     @parametrize("attr", ("device", "device_index", "device_index_via_device"))
@@ -1494,15 +1495,15 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             elif origin == "generic_none_constructor":
                 stream = torch.Stream(device=None)
             elif origin == "generic_bare_constructor":
-                stream = torch.Stream(device="cuda")
+                stream = torch.Stream(device=device_type)
             elif origin == "generic_cpu_constructor":
                 stream = torch.Stream(device="cpu")
-            elif origin == "cuda_default_constructor":
-                stream = torch.cuda.Stream()
+            elif origin == f"{device_type}_default_constructor":
+                stream = device_module.Stream()
             elif origin == "accelerator_current":
                 stream = torch.accelerator.current_stream(x.device)
             else:
-                stream = torch.cuda.current_stream(x.device)
+                stream = device_module.current_stream(x.device)
             observation = (
                 stream.device.index
                 if attr == "device_index_via_device"
@@ -1513,17 +1514,19 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         cnt = CompileCounter()
         torch._dynamo.reset()
         compiled = torch.compile(f, backend=cnt, fullgraph=True)
-        with torch.cuda.device(0):
-            compiled(torch.zeros(1, device="cuda:0"))
-        with torch.cuda.device(1):
-            x = torch.zeros(1, device="cuda:1")
+        with device_module.device(0):
+            compiled(torch.zeros(1, device=f"{device_type}:0"))
+        with device_module.device(1):
+            x = torch.zeros(1, device=f"{device_type}:1")
             self.assertEqual(compiled(x), f(x))
 
         self.assertEqual(cnt.frame_count, 1)
 
-    @requires_multigpu
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
+    )
     @compiler_config.patch(compile_on_one_rank=True)
-    @parametrize("stream_kind", ("generic", "cuda"))
+    @parametrize("stream_kind", ("generic", device_type))
     @parametrize("comparison", ("eq", "ne"))
     @parametrize("matches_current", (True, False))
     def test_current_stream_equality_under_coor(
@@ -1535,7 +1538,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             current = (
                 torch.accelerator.current_stream(x.device)
                 if stream_kind == "generic"
-                else torch.cuda.current_stream(x.device)
+                else device_module.current_stream(x.device)
             )
             matches = stream == current if comparison == "eq" else stream != current
             return x + (1 if matches else 2)
@@ -1543,17 +1546,17 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         def make_stream(matches):
             if stream_kind == "generic":
                 return torch.accelerator.current_stream() if matches else torch.Stream()
-            return torch.cuda.current_stream() if matches else torch.cuda.Stream()
+            return device_module.current_stream() if matches else device_module.Stream()
 
         cnt = CompileCounter()
         torch._dynamo.reset()
         compiled = torch.compile(f, backend=cnt, fullgraph=True)
-        with torch.cuda.device(0):
-            x = torch.zeros(1, device="cuda:0")
+        with device_module.device(0):
+            x = torch.zeros(1, device=f"{device_type}:0")
             stream = make_stream(matches_current)
             compiled(x, stream)
-        with torch.cuda.device(1):
-            x = torch.zeros(1, device="cuda:1")
+        with device_module.device(1):
+            x = torch.zeros(1, device=f"{device_type}:1")
             stream = make_stream(matches_current)
             self.assertEqual(compiled(x, stream), f(x, stream))
 
@@ -1562,13 +1565,15 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         self.assertEqual(cnt.frame_count, 2)
 
-    @requires_multigpu
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
+    )
     @compiler_config.patch(compile_on_one_rank=True)
-    @parametrize("stream_kind", ("generic", "cuda"))
+    @parametrize("stream_kind", ("generic", device_type))
     def test_other_device_current_stream_under_coor(self, stream_kind):
         from torch._dynamo.testing import CompileCounter
 
-        mod = torch.accelerator if stream_kind == "generic" else torch.cuda
+        mod = torch.accelerator if stream_kind == "generic" else device_module
 
         def f(x, stream):
             return x + (1 if stream == mod.current_stream() else 2)
@@ -1576,9 +1581,9 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         cnt = CompileCounter()
         torch._dynamo.reset()
         compiled = torch.compile(f, backend=cnt, fullgraph=True)
-        with torch.cuda.device(0):
-            x = torch.zeros(1, device="cuda:0")
-            # Current on cuda:1 but not on the current device, so not "current".
+        with device_module.device(0):
+            x = torch.zeros(1, device=f"{device_type}:0")
+            # Current on device 1 but not on the current device, so not "current".
             other = mod.current_stream(1)
             self.assertEqual(compiled(x, other), f(x, other))
             own = mod.current_stream(0)
@@ -1586,22 +1591,22 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
 
         self.assertEqual(cnt.frame_count, 2)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_cpu_stream_equality_under_coor(self):
         def f(x, stream):
             return x + (1 if stream == torch.accelerator.current_stream() else 2)
 
         compiled = torch.compile(f, backend="eager", fullgraph=True)
-        x = torch.zeros(1, device="cuda")
+        x = torch.zeros(1, device=device_type)
         stream = torch.Stream(device="cpu")
         self.assertEqual(compiled(x, stream), f(x, stream))
         self.assertEqual(compiled(x, stream), f(x, stream))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
-    @parametrize("stream_kind", ("generic", "cuda", "subclass"))
-    @parametrize("query", ("generic", "cuda"))
+    @parametrize("stream_kind", ("generic", device_type, "subclass"))
+    @parametrize("query", ("generic", device_type))
     @parametrize("comparison", ("eq", "ne"))
     def test_mixed_type_current_stream_comparison_under_coor(
         self, stream_kind, query, comparison
@@ -1609,10 +1614,10 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
         class SubStream(torch.Stream):
             pass
 
-        cls = {"generic": torch.Stream, "cuda": torch.cuda.Stream}.get(
+        cls = {"generic": torch.Stream, device_type: device_module.Stream}.get(
             stream_kind, SubStream
         )
-        mod = torch.accelerator if query == "generic" else torch.cuda
+        mod = torch.accelerator if query == "generic" else device_module
 
         def f(x, stream):
             current = mod.current_stream()
@@ -1620,7 +1625,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             return x + (1 if matches else 2)
 
         compiled = torch.compile(f, backend="eager", fullgraph=True)
-        x = torch.zeros(1, device="cuda")
+        x = torch.zeros(1, device=device_type)
         # Non-current first, so a guard that misses the flip reuses the wrong graph.
         for base in (torch.Stream(), torch.accelerator.current_stream()):
             stream = cls(
@@ -1630,7 +1635,7 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             )
             self.assertEqual(compiled(x, stream), f(x, stream))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_current_stream_ordering_raises_under_coor(self):
         def f(x, stream):
@@ -1640,13 +1645,15 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
                 return x + 3
 
         compiled = torch.compile(f, backend="eager", fullgraph=True)
-        x = torch.zeros(1, device="cuda")
+        x = torch.zeros(1, device=device_type)
         stream = torch.Stream()
         self.assertEqual(compiled(x, stream), f(x, stream))
 
-    @requires_multigpu
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_MULTIACCELERATOR, "test requires 2+ accelerators"
+    )
     @compiler_config.patch(compile_on_one_rank=True)
-    @parametrize("stream_kind", ("generic", "cuda"))
+    @parametrize("stream_kind", ("generic", device_type))
     def test_nested_current_device_stream_observation_under_coor(self, stream_kind):
         from torch._dynamo.testing import CompileCounter
 
@@ -1654,28 +1661,28 @@ class TestCompileOnOneRankDeviceAsParameter(TestCase):
             stream = (
                 torch.Stream(device=x.device)
                 if stream_kind == "generic"
-                else torch.cuda.Stream(device=x.device)
+                else device_module.Stream(device=x.device)
             )
             with stream:
                 current = (
                     torch.accelerator.current_stream(x.device)
                     if stream_kind == "generic"
-                    else torch.cuda.current_stream(x.device)
+                    else device_module.current_stream(x.device)
                 )
                 return x + current.device.index, current == stream
 
         cnt = CompileCounter()
         torch._dynamo.reset()
         compiled = torch.compile(f, backend=cnt, fullgraph=True)
-        with torch.cuda.device(0):
-            compiled(torch.zeros(1, device="cuda:0"))
-        with torch.cuda.device(1):
-            x = torch.zeros(1, device="cuda:1")
+        with device_module.device(0):
+            compiled(torch.zeros(1, device=f"{device_type}:0"))
+        with device_module.device(1):
+            x = torch.zeros(1, device=f"{device_type}:1")
             self.assertEqual(compiled(x), f(x))
 
         self.assertEqual(cnt.frame_count, 1)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    @unittest.skipIf(not torch.accelerator.is_available(), "requires accelerator")
     @compiler_config.patch(compile_on_one_rank=True)
     def test_explicit_index_stream_is_an_error_under_coor(self):
         from torch._dynamo.exc import CompileOnOneRankUnsupported
