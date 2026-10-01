@@ -340,15 +340,17 @@ def _nvrtc_compile(
     num_options = len(options)
     options_array = (ctypes.c_char_p * num_options)(*options)
 
+    # Template expressions in kernel_name are not valid filenames on Windows,
+    # where HIPRTC then fails with an empty log (ROCm/TheRock#8216).
+    source_name = re.sub(r"[^\w.-]", "_", kernel_name) + ".cu"
+
     # Create program
     prog = ctypes.c_void_p()
     check_nvrtc(
         libnvrtc.nvrtcCreateProgram(
             ctypes.byref(prog),
             source_bytes,
-            # Template expressions in kernel_name are not valid filenames on Windows,
-            # where HIPRTC then fails with an empty log (ROCm/TheRock#8216).
-            f"{re.sub(r'[^\w.-]', '_', kernel_name)}.cu".encode(),
+            source_name.encode(),
             0,
             None,
             None,
