@@ -2071,7 +2071,6 @@ class TestGeneratorPEP(GeneratorTestsBase):
 
         self.assertEqual(list(f()), [1, 2, 4, 5, 8, 9, 10, 11])
 
-    @unittest.expectedFailure
     @make_dynamo_test
     def test_recursive_inorder_tree(self):
         class Tree:

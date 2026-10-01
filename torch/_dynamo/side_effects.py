@@ -52,7 +52,14 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
-from .source import AttrSource, GlobalSource, LocalCellSource, Source, TempLocalSource
+from .source import (
+    AttrSource,
+    ConstantSource,
+    GlobalSource,
+    LocalCellSource,
+    Source,
+    TempLocalSource,
+)
 from .utils import (
     is_frozen_dataclass,
     is_namedtuple_cls,
@@ -646,6 +653,8 @@ class SideEffects:
                 f"Expected VariableTracker, got {type(value)} in store_cell"
             )
         self.store_attr(cellvar, "cell_contents", value)
+        if cellvar.linked_cell is not None:
+            self.store_attr(cellvar.linked_cell, "cell_contents", value)
 
     def load_cell(self, cellvar: VariableTracker) -> VariableTracker:
         if not isinstance(cellvar, variables.CellVariable):
@@ -999,6 +1008,35 @@ class SideEffects:
         self.keepalive.append(cell)
         return variable
 
+    def track_cell_alias(self, cellvar: VariableTracker) -> CellType:
+        """Create a real, empty cell to stand in for `cellvar`, which has not
+        been populated yet.
+
+        Used when a function closing over `cellvar` must be materialized as a
+        real function, e.g. a method of a class built by `__build_class__`
+        before the name it refers to is bound. The real cell is tracked as a
+        pre-existing cell linked to `cellvar`: stores to either are mirrored
+        to the other, so inlined calls of the real function see the current
+        value, and the final value is written to the real cell after the graph
+        runs.
+        """
+        if not isinstance(cellvar, variables.CellVariable):
+            raise AssertionError(
+                f"Expected CellVariable, got {type(cellvar)} in track_cell_alias"
+            )
+        output_graph = self.output_graph_weakref()
+        if output_graph is None:
+            raise AssertionError("output_graph weakref is dead in track_cell_alias")
+        cell = CellType()
+        name = output_graph.install_global_by_id("___cell", cell)
+        output_graph.update_co_names(name)
+        alias = self.track_cell_existing(
+            ConstantSource(name), cell, variables.DeletedVariable()
+        )
+        cellvar.linked_cell = alias
+        alias.linked_cell = cellvar  # type: ignore[attr-defined]
+        return cell
+
     def track_global_existing(self, source: Source, item: object) -> VariableTracker:
         variable = variables.NewGlobalVariable(
             mutation_type=AttributeMutationExisting(),
@@ -1213,7 +1251,13 @@ class SideEffects:
                 # `MAKE_CELL` or by them being in `co_cellvars`, so we only emit
                 # `make_cell` for the non-root-frame cells here.
                 # TODO generalize this so we never need to call `make_cell`.
-                if var.local_name is None:
+                #
+                # A cell linked to a real cell (see `track_cell_alias`) is
+                # codegen'd as that real cell, so functions holding the real
+                # cell and code resumed after a graph break share one cell.
+                if var.linked_cell is not None:
+                    var.source = var.linked_cell.source
+                elif var.local_name is None:
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "make_cell")
                     )
