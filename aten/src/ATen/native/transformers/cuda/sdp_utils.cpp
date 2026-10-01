@@ -428,44 +428,35 @@ bool check_data_ptr_alignment_mem_efficient(sdp_params const& params, bool debug
 #if defined(USE_ROCM)
   return true;
 #else
-  if (!has_only_dense_inputs(params)) {
-    return true;
-  }
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (dprops->major < 8) {
     return true;
   }
   const int64_t alignment_bytes =
       minimum_gemm_alignment(params) * params.query.element_size();
-  // The CUDA caching allocator returns base pointers aligned to >= 256 bytes,
-  // which exceeds the alignment_bytes the CUTLASS kernels require. So pointer
-  // alignment is fully determined by storage_offset * element_size. Computing
-  // it symbolically avoids touching data_ptr() (which calls numel() and would
-  // throw on FakeTensors with symbolic shapes during tracing).
-  const auto offset_bytes = [](const at::Tensor& tensor) {
-    return tensor.sym_storage_offset() * tensor.element_size();
-  };
-  // Empty tensors need no alignment. For symbolic offsets (FakeTensors),
-  // assume aligned so the chooser does not regress tracing; the eager runtime
-  // call re-checks.
   const auto is_aligned = [&](const at::Tensor& tensor) {
-    const auto offset_is_aligned =
-        (offset_bytes(tensor) % alignment_bytes).sym_eq(0);
-    return TORCH_GUARD_OR_FALSE(tensor.sym_numel().sym_eq(0)) ||
-        TORCH_GUARD_OR_TRUE(offset_is_aligned);
+    return is_aligned_for_sdpa(tensor, alignment_bytes, /*check_strides=*/true);
   };
   if (!is_aligned(params.query) || !is_aligned(params.key) ||
       !is_aligned(params.value)) {
     if (debug) {
       TORCH_WARN(
-          "Mem efficient attention on sm80 or newer requires q, k, and v storage offsets * element_size to be aligned to ",
+          "Mem efficient attention on sm80 or newer requires q, k, and v storage offsets and strides * element_size to be aligned to ",
           alignment_bytes,
-          " bytes. Got query.storage_offset() * element_size % alignment_bytes: ",
-          offset_bytes(params.query) % alignment_bytes,
-          ", key.storage_offset() * element_size % alignment_bytes: ",
-          offset_bytes(params.key) % alignment_bytes,
-          ", value.storage_offset() * element_size % alignment_bytes: ",
-          offset_bytes(params.value) % alignment_bytes,
+          " bytes. Got query storage offset ",
+          params.query.sym_storage_offset(),
+          " and strides ",
+          params.query.sym_strides(),
+          ", key storage offset ",
+          params.key.sym_storage_offset(),
+          " and strides ",
+          params.key.sym_strides(),
+          ", value storage offset ",
+          params.value.sym_storage_offset(),
+          " and strides ",
+          params.value.sym_strides(),
+          ", with element_size ",
+          params.query.element_size(),
           ".");
     }
     return false;
@@ -1243,8 +1234,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
       check_tensor_shapes,
-      check_head_dim_size_mem_efficient,
-      check_data_ptr_alignment_mem_efficient
+      check_head_dim_size_mem_efficient
   });
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
@@ -1276,7 +1266,8 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
     constexpr auto dense_constraints = std::to_array<bool (*)(sdp_params const&, bool)>({
         check_nonzero_sequence_lengths_dense,
         check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim=*/>,
-        check_batch_size_and_num_heads_dense<supports_gqa, true, supports_mqa>});
+        check_batch_size_and_num_heads_dense<supports_gqa, true, supports_mqa>,
+        check_data_ptr_alignment_mem_efficient});
     for (auto& constraint : dense_constraints) {
       if (!constraint(params, debug)) {
         return false;

@@ -120,8 +120,12 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     std::optional<int64_t> window_size_right) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
-  //  CUDA code assumes that dout is contiguous
-  auto contiguous_grad_out = grad_out.contiguous();
+  //  CUDA code assumes that dout is contiguous and 16-byte aligned. Autograd
+  //  may pass a misaligned grad_out view (e.g. from cat backward).
+  auto contiguous_grad_out =
+      reinterpret_cast<uintptr_t>(grad_out.const_data_ptr()) % 16 == 0
+      ? grad_out.contiguous()
+      : grad_out.clone(at::MemoryFormat::Contiguous);
   auto contiguous_out = out.contiguous();
 
 #ifdef USE_ROCM  // ROCM backend accepts std::optional for window_size_left/right directly.
