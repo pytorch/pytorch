@@ -94,6 +94,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
 
+from . import config
 from .graph_utils import _get_flat_args
 
 
@@ -129,8 +130,6 @@ try:
     import torch._numpy as tnp
     from torch._guards import detect_fake_mode  # noqa: F401
     from torch._logging import LazyString
-
-    from . import config
 
     # NOTE: Make sure `NP_SUPPORTED_MODULES` and `NP_TO_TNP_MODULE` are in sync.
     if np:
@@ -1442,9 +1441,14 @@ def lazily_unpack(
         return
 
     iterator = generic_getiter(tx, iterable)  # type: ignore[bad-argument-type]
+    disable_ngb = config.patch(nested_graph_breaks=False)
     while True:
         try:
-            yield pyiter_next(tx, iterator)  # type: ignore[bad-argument-type]
+            # This host-side iteration has no resumable frame. Compute the item
+            # before yielding so the config patch does not leak to the caller.
+            with disable_ngb:
+                item = pyiter_next(tx, iterator)  # type: ignore[bad-argument-type]
+            yield item
         except ObservedUserStopIteration:
             handle_observed_exception(tx)
             break
