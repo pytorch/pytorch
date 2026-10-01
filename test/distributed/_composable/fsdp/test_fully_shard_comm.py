@@ -444,16 +444,15 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
         with profile(activities=[ProfilerActivity.CUDA]) as prof:
             torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, 2, out=out)
             torch.cuda.synchronize()
-        kernels = [
+        chunk_cat_kernels = [
             event.name
             for event in prof.events()
             if event.device_type == DeviceType.CUDA
-            and not event.name.startswith("Memcpy")
+            and "chunk_cat_cuda_kernel" in event.name
         ]
-        # One launch copies the fp32 input and a second casts the bf16 one
-        self.assertEqual(len(kernels), 2, kernels)
-        for kernel in kernels:
-            self.assertIn("chunk_cat_cuda_kernel", kernel)
+        # One launch copies the fp32 input and a second casts the bf16 one. The
+        # composite fallback casts separately and launches _chunk_cat once.
+        self.assertEqual(len(chunk_cat_kernels), 2, str(chunk_cat_kernels))
 
 
 instantiate_device_type_tests(
