@@ -5,7 +5,13 @@ from unittest import mock
 
 import torch
 import torch.distributed as dist
+import torch.distributed.checkpoint as dcp
 import torch.nn as nn
+from torch.distributed.checkpoint.state_dict import (
+    get_model_state_dict,
+    set_model_state_dict,
+    StateDictOptions,
+)
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.fsdp._fully_shard import _fsdp_collectives
 from torch.distributed.tensor import DTensor, init_device_mesh, Replicate, Shard
@@ -17,6 +23,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
 )
+from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 device_type = torch.device(get_devtype())
@@ -183,6 +190,42 @@ class TestFullyShardBlockShard(FSDPTestContinuous):
             self.assertEqual(param.full_tensor(), ref_param)
         inp = torch.randn(4, DIM, device=device_type)
         self.assertEqual(new_model(inp), ref_model(inp))
+
+    @skip_if_lt_x_gpu(4)
+    def test_full_state_dict_broadcast(self):
+        model, ref_model = self._init_models()
+        with torch.no_grad():
+            for param in model.parameters():
+                param.zero_()
+        full_state_dict = ref_model.state_dict() if self.rank == 0 else {}
+        set_model_state_dict(
+            model,
+            full_state_dict,
+            options=StateDictOptions(full_state_dict=True, broadcast_from_rank0=True),
+        )
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            self.assertEqual(param.full_tensor(), ref_param)
+        gathered = get_model_state_dict(
+            model, options=StateDictOptions(full_state_dict=True)
+        )
+        if self.rank == 0:
+            for name, value in ref_model.state_dict().items():
+                self.assertEqual(gathered[name], value)
+
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    def test_dcp_round_trip(self):
+        model, ref_model = self._init_models()
+        dcp.save(get_model_state_dict(model), checkpoint_id=self.temp_dir)
+        new_model, _ = self._init_models()
+        with torch.no_grad():
+            for param in new_model.parameters():
+                param.zero_()
+        state_dict = get_model_state_dict(new_model)
+        dcp.load(state_dict, checkpoint_id=self.temp_dir)
+        set_model_state_dict(new_model, state_dict)
+        for param, ref_param in zip(new_model.parameters(), ref_model.parameters()):
+            self.assertEqual(param.full_tensor(), ref_param)
 
 
 instantiate_parametrized_tests(TestFullyShardBlockShard)
