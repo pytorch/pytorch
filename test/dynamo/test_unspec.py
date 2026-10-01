@@ -63,7 +63,10 @@ _TIME_FUNCTION_TEST_CASES = tuple(
 )
 
 
-@torch._dynamo.config.patch(assume_static_by_default=False)
+UNSPEC_CONFIG = {"assume_static_by_default": False}
+
+
+@torch._dynamo.config.patch(**UNSPEC_CONFIG)
 @instantiate_parametrized_tests
 class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_time_function_names(self):
@@ -160,6 +163,29 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
+
+    def test_random_seed_takes_effect_on_first_call(self):
+        # An in-function random.seed() must be visible to a scalar draw
+        # traced right after it, including on the very first (compiling)
+        # call - unlike test_feed_random_values_into_graph_only and
+        # test_random_values_with_graph_break above, this deliberately does
+        # NOT "shake out" the compile before comparing, since that's exactly
+        # the call this is testing.
+        def fn(x):
+            random.seed(0)
+            return x + random.random(), random.random(), random.randint(0, 100)
+
+        x = torch.zeros(1)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        for _ in range(3):
+            res1 = fn(x)
+            eager_state = random.getstate()
+            res2 = opt_fn(x)
+            compiled_state = random.getstate()
+            self.assertEqual(res1, res2)
+            self.assertEqual(eager_state, compiled_state)
+        self.assertEqual(cnts.frame_count, 1)
 
     # Really annoying intersection of specialization and RandomValueSource
     # If we get a RandomValueSource with a single element tensor, we should return a ConstantVariable like other
@@ -545,6 +571,7 @@ else:
         # if Dynamo calls random methods.
 
         exit_stack = contextlib.ExitStack()
+        self.addCleanup(exit_stack.close)
 
         def patch_fn_with_rng_burn(name):
             orig_fn = eval(name)

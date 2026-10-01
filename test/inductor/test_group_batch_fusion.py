@@ -318,9 +318,7 @@ class _TestDropout(torch.nn.Module):
         super().__init__()
         self.device = device
 
-    def forward(
-        self, x: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
         split = x.split([20, 20, 20, 20, 20], 1)
         getitem_1 = split[0]
         getitem_2 = split[1]
@@ -342,6 +340,25 @@ class _TestDropout(torch.nn.Module):
         dropout_4 = torch.nn.functional.dropout(
             getitem_5, p=0.05, training=True, inplace=False
         )
+        return (dropout, dropout_1, dropout_2, dropout_3, dropout_4)
+
+
+class _TestDropoutMixedArgs(torch.nn.Module):
+    def __init__(self, device):
+        super().__init__()
+        self.device = device
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        split = x.split([20, 20, 20, 20, 20], 1)
+        dropout = torch.nn.functional.dropout(split[0], 0.05, True, False)
+        dropout_1 = torch.nn.functional.dropout(split[1], 0.05, True, False)
+        dropout_2 = torch.nn.functional.dropout(
+            split[2], p=0.05, training=True, inplace=False
+        )
+        dropout_3 = torch.nn.functional.dropout(
+            split[3], p=0.05, training=True, inplace=False
+        )
+        dropout_4 = torch.nn.functional.dropout(split[4], 0.05)
         return (dropout, dropout_1, dropout_2, dropout_3, dropout_4)
 
 
@@ -918,6 +935,56 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_clamp"], 2)
         counters.clear()
 
+    @config.patch(
+        is_predispatch=True,
+        pre_grad_fusion_options={"batch_clamp": {}},
+    )
+    def test_math_op_fusion_predispatch_keyword_input(self):
+        counters.clear()
+
+        def fn(x):
+            return torch.stack(
+                [torch.clamp(input=x, min=-1.0, max=1.0) for _ in range(5)]
+            )
+
+        x = torch.randn(8)
+        self.assertEqual(fn(x), torch.compile(fn, fullgraph=True)(x))
+        self.assertEqual(counters["inductor"]["batch_clamp"], 1)
+        counters.clear()
+
+    @config.patch(
+        is_predispatch=True,
+        pre_grad_fusion_options={"batch_clamp": {}},
+    )
+    def test_math_op_fusion_predispatch_normalizes_args(self):
+        counters.clear()
+
+        def fn(x):
+            return torch.stack(
+                [torch.clamp(x + i, -1.0) for i in range(3)]
+                + [torch.clamp(input=x + i, min=-1.0, max=None) for i in range(3, 6)]
+            )
+
+        x = torch.randn(8)
+        self.assertEqual(fn(x), torch.compile(fn, fullgraph=True)(x))
+        self.assertEqual(counters["inductor"]["batch_clamp"], 1)
+        counters.clear()
+
+    @config.patch(
+        is_predispatch=True,
+        pre_grad_fusion_options={"batch_clamp": {}},
+    )
+    def test_math_op_fusion_predispatch_skips_tensor_bounds(self):
+        counters.clear()
+
+        def fn(x, bound):
+            return torch.stack([torch.clamp(x + i, min=bound) for i in range(5)])
+
+        x, bound = torch.randn(8), torch.randn(8)
+        self.assertEqual(fn(x, bound), torch.compile(fn, fullgraph=True)(x, bound))
+        self.assertEqual(counters["inductor"]["batch_clamp"], 0)
+        counters.clear()
+
     @requires_gpu()
     @torch._inductor.config.patch(
         pre_grad_fusion_options={
@@ -934,6 +1001,38 @@ class TestGroupBatchFusion(TestCase):
         traced(*input)
         self.assertEqual(counters["inductor"]["normalization_pass"], 1)
         self.assertEqual(counters["inductor"]["batch_dropout"], 1)
+        counters.clear()
+
+    @requires_gpu()
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={
+            "normalization_pass": {},
+            "batch_dropout": {},
+        }
+    )
+    def test_batch_dropout_pre_grad_fusion_mixed_args(self):
+        counters.clear()
+        module = _TestDropoutMixedArgs(GPU_TYPE)
+        input = [torch.randn(10, 100, requires_grad=True, device=GPU_TYPE)]
+        traced = torch.compile(module)
+        module(*input)
+        traced(*input)
+        self.assertEqual(counters["inductor"]["normalization_pass"], 1)
+        self.assertEqual(counters["inductor"]["batch_dropout"], 1)
+        counters.clear()
+
+    @config.patch(pre_grad_fusion_options={"batch_dropout": {}})
+    def test_batch_dropout_pre_grad_fusion_skips_inplace(self):
+        counters.clear()
+
+        def fn(x):
+            return [
+                torch.nn.functional.dropout(s, p=0.05, training=True, inplace=True)
+                for s in (x + 1).split([20, 20, 20, 20, 20], 1)
+            ]
+
+        torch.compile(fn)(torch.randn(10, 100))
+        self.assertEqual(counters["inductor"]["batch_dropout"], 0)
         counters.clear()
 
     @unittest.skipUnless(torch.xpu.is_available(), "batch_linear_lhs is XPU-only")
@@ -1100,11 +1199,57 @@ class _TestBMMFusionModule(torch.nn.Module):
         return output
 
 
+class _TestMixedDtypeBMMFusionModule(torch.nn.Module):
+    """Same-shape linears split across two dtypes, as autocast-exempt layers produce."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Each dtype needs its own fusable group, so >= MIN_FUSE_SET_SIZE of each.
+        self.fp32_modules = torch.nn.ModuleList(
+            [torch.nn.Linear(10, 10) for _ in range(5)]
+        )
+        self.bf16_modules = torch.nn.ModuleList(
+            [torch.nn.Linear(10, 10).to(torch.bfloat16) for _ in range(5)]
+        )
+
+    def forward(self, fp32_inputs, bf16_inputs):
+        fp32_output = None
+        for linear, input in zip(self.fp32_modules, fp32_inputs):
+            fp32_output = (
+                linear(input) if fp32_output is None else fp32_output + linear(input)
+            )
+        bf16_output = None
+        for linear, input in zip(self.bf16_modules, bf16_inputs):
+            bf16_output = (
+                linear(input) if bf16_output is None else bf16_output + linear(input)
+            )
+        return fp32_output, bf16_output
+
+
 @requires_gpu()
 @torch._inductor.config.patch(
     post_grad_fusion_options={"batch_linear_post_grad": {"require_fbgemm": False}}
 )
 class TestPostGradBatchLinearFusion(TestCase):
+    def test_batch_linear_post_grad_fusion_mixed_dtype(self):
+        # Grouping only on shape would batch the fp32 and bf16 addmms together;
+        # the stack lowers to aten.cat, which type-promotes instead of erroring,
+        # and the promoted operand then fails a downstream mm/addmm.
+        counters.clear()
+        pt1_module = _TestMixedDtypeBMMFusionModule().to(GPU_TYPE)
+        fp32_inputs = [torch.randn(10, 10, device=GPU_TYPE) for _ in range(5)]
+        bf16_inputs = [
+            torch.randn(10, 10, device=GPU_TYPE, dtype=torch.bfloat16) for _ in range(5)
+        ]
+        eager_fp32, eager_bf16 = pt1_module(fp32_inputs, bf16_inputs)
+        pt2_module = torch.compile(pt1_module)
+        compiled_fp32, compiled_bf16 = pt2_module(fp32_inputs, bf16_inputs)
+        self.assertTrue(torch.allclose(eager_fp32, compiled_fp32))
+        # bmm reassociates the sum, which bf16 cannot represent exactly.
+        self.assertTrue(torch.allclose(eager_bf16, compiled_bf16, rtol=1e-2, atol=1e-2))
+        # Each dtype still forms its own batch, so fusion is not merely disabled.
+        self.assertEqual(counters["inductor"]["batch_linear_post_grad"], 2)
+
     def test_batch_linear_post_grad_fusion(self):
         pt1_module = _TestBMMFusionModule().to(GPU_TYPE)
         inputs = []
