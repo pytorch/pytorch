@@ -22,6 +22,7 @@ from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling impo
     EPILOGUE_FN_NAME,
     NVGemmGeneratedSource,
 )
+from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.template.nv_universal_gemm import (
     HeuristicConfig,
@@ -1136,6 +1137,17 @@ class TestNVUniversalGemmScheduling(TestCase):
                 )
             ),
         )
+        self.equal_layout_nested = ir.Buffer(
+            name="equal_layout_nested",
+            layout=ir.NonOwningLayout(
+                ir.ReinterpretView(
+                    data=self.unnamed_nested.layout.view.data,
+                    layout=ir.FixedLayout(
+                        torch.device("cuda"), torch.bfloat16, [2], [1], offset=9
+                    ),
+                )
+            ),
+        )
         self.out = make_buffer("out", [4, 4], [5, 1])
         self.epilogue_input = ir.ReinterpretView(
             data=self.shared_storage,
@@ -1165,6 +1177,7 @@ class TestNVUniversalGemmScheduling(TestCase):
                     self.b,
                     self.nested,
                     self.unnamed_nested,
+                    self.equal_layout_nested,
                     self.out,
                     self.epilogue_input,
                     self.adjacent_epilogue,
@@ -1189,6 +1202,7 @@ class TestNVUniversalGemmScheduling(TestCase):
                     reads=(
                         self.nested.get_name(),
                         self.unnamed_nested.get_name(),
+                        self.equal_layout_nested.get_name(),
                         self.epilogue_input.get_name(),
                         self.adjacent_epilogue.get_name(),
                         self.constant_input.get_name(),
@@ -1216,6 +1230,11 @@ class TestNVUniversalGemmScheduling(TestCase):
                 NVGemmGeneratedSource(source="", kernel=kernel)
             )
             self.assertIn("nv_gemm__main(*args, stream=stream)", source)
+            self.graph.wrapper_code = PythonWrapperCodegen()
+            self.assertEqual(
+                self.equal_layout_nested.layout.view.codegen_reference(),
+                self.shared_storage.get_name(),
+            )
         namespace = {}
         exec(compile(source, "<nvgemm-benchmark>", "exec"), namespace)
         args = namespace["get_args"]()
@@ -1235,6 +1254,7 @@ class TestNVUniversalGemmScheduling(TestCase):
                 ("out_ptr0", "out", "output"),
                 ("nested", "nested", "epilogue"),
                 ("unnamed_nested", "unnamed_nested", "epilogue"),
+                ("equal_layout_nested", "equal_layout_nested", "epilogue"),
                 ("shared_storage", "shared_storage", "epilogue"),
                 ("adjacent", "adjacent", "epilogue"),
                 ("constant_input", "constant_input", "epilogue"),
@@ -1251,6 +1271,7 @@ class TestNVUniversalGemmScheduling(TestCase):
             "out_ptr0": ((4, 4), (5, 1), 0),
             "nested": ((2,), (1,), 3),
             "unnamed_nested": ((2,), (1,), 4),
+            "equal_layout_nested": ((2,), (1,), 0),
             "shared_storage": ((2,), (1,), 2),
             "adjacent": ((2,), (1,), 17),
             "constant_input": ((16,), (1,), 1),
