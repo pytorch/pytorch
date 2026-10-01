@@ -5219,8 +5219,9 @@ class MemberDescriptorVariable(DescriptorVariable):
                     f"cannot delete '__doc__' attribute of immutable type "
                     f"'{obj_value.__name__}'",
                 )
-            # Py_TPFLAGS_IMMUTABLETYPE
-            if obj_value.__flags__ & (1 << 8):
+            # Py_TPFLAGS_IMMUTABLETYPE. Read through type's descriptor
+            # so a custom metaclass cannot shadow __flags__ or run user code.
+            if vars(type)["__flags__"].__get__(obj_value) & (1 << 8):
                 raise_type_error(
                     tx,
                     f"cannot set '__doc__' attribute of immutable type "
