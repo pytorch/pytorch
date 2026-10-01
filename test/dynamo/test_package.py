@@ -233,7 +233,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
         # frozenset(), one cpu-only recompile after a reload re-snapshotted the
         # entry as "cpu" and the cuda code still in it lost its GPU load check.
         # The graphs are fake and never run; is_available is patched so
-        # check_versions accepts the cuda entry on a host without one.
+        # check_versions accepts the cuda entry on a host without one. Save and
+        # reload share the patch so both SystemInfo snapshots see the same
+        # accelerator state.
         with FakeTensorMode():
             cuda = torch.empty(2, device="cuda")
             cpu = torch.empty(2)
@@ -248,9 +250,9 @@ class TestPackage(torch._inductor.test_case.TestCase):
 
         package = CompilePackage(fn)
         package.update_device_type(cuda_graph)
-        saved = pickle.loads(pickle.dumps(package.cache_entry()))
-        self.assertEqual(saved.device_type, "cuda")
         with patch.object(torch.cuda, "is_available", return_value=True):
+            saved = pickle.loads(pickle.dumps(package.cache_entry()))
+            self.assertEqual(saved.device_type, "cuda")
             package = CompilePackage(fn, dynamo=saved)
         self.assertEqual(package.cache_entry().device_type, "cuda")
         package.update_device_type(cpu_graph)
