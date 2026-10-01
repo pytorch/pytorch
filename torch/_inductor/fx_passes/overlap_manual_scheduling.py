@@ -35,7 +35,7 @@ from .graph_view import get_subgraph_by_path, GraphView, make_graph_view
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from torch._inductor.fx_passes.utils import BitsetAncestors
 
@@ -209,28 +209,42 @@ def _all_reduce_bucket_trace_inputs(coll_node: fx.Node) -> list[fx.Node]:
     return _bucket_trace_inputs(coll_node, coll_node.args[0], group_name_arg=2)
 
 
+def _repair_backward_edges(graph: fx.Graph, changed_nodes: Iterable[fx.Node]) -> None:
+    """Restore stable topological order if a changed node crosses an edge.
+
+    Every graph-order mutation made by the callers moves only a node included
+    in ``changed_nodes``. Therefore any newly backward edge is incident to one
+    of these nodes and can be detected without scanning every graph edge.
+    """
+    node_positions = {n: i for i, n in enumerate(graph.nodes)}
+    for node in changed_nodes:
+        if node not in node_positions:
+            continue
+        node_pos = node_positions[node]
+        has_late_input = any(
+            inp in node_positions and node_positions[inp] > node_pos
+            for inp in node.all_input_nodes
+        )
+        has_early_user = any(
+            user in node_positions and node_positions[user] < node_pos
+            for user in node.users
+        )
+        if has_late_input or has_early_user:
+            from torch._dynamo.graph_deduplication import _stable_topological_sort
+
+            _stable_topological_sort(graph, {})
+            return
+
+
 def _move_wait_users_after_latest_inputs(
     graph: fx.Graph,
     replacements: dict[fx.Node, fx.Node],
     replaced_users: dict[fx.Node, list[fx.Node]],
 ) -> None:
-    node_positions = {n: i for i, n in enumerate(graph.nodes)}
-    initial_users: OrderedSet[fx.Node] = OrderedSet()
-    for old_out, new_out in replacements.items():
-        if new_out not in node_positions:
-            continue
-        for user in replaced_users.get(old_out, []):
-            if (
-                user in node_positions
-                and user.op != "output"
-                and node_positions[user] < node_positions[new_out]
-            ):
-                initial_users.add(user)
-
-    if initial_users:
-        from torch._dynamo.graph_deduplication import _stable_topological_sort
-
-        _stable_topological_sort(graph, {})
+    changed_nodes: OrderedSet[fx.Node] = OrderedSet(replacements.values())
+    for old_out in replacements:
+        changed_nodes.update(replaced_users.get(old_out, ()))
+    _repair_backward_edges(graph, changed_nodes)
 
 
 def _move_overlap_nodes(
@@ -243,6 +257,7 @@ def _move_overlap_nodes(
 
     rs_defer: dict[fx.Node, list[fx.Node]] = defaultdict(list)
     ag_prefetch: dict[fx.Node, list[fx.Node]] = defaultdict(list)
+    moved_nodes: OrderedSet[fx.Node] = OrderedSet()
 
     for target, sources in overlap_deps.items():
         for source in sources:
@@ -260,6 +275,7 @@ def _move_overlap_nodes(
         latest_rs_start = max(rs_starts, key=lambda n: node_positions[n])
         node_insert_after = latest_rs_start
         for node in _collect_nodes_must_be_after(rs_wait):
+            moved_nodes.add(node)
             node_insert_after.append(node)
             node_insert_after = node
 
@@ -273,7 +289,12 @@ def _move_overlap_nodes(
             if node_positions[ag_start] < ag_wait_pos:
                 continue
             for node in _collect_nodes_must_be_before(ag_start, node_positions):
+                moved_nodes.add(node)
                 ag_wait.prepend(node)
+
+    # Moving only the closed part of a chain can leave a boundary edge pointing
+    # backward. Repair once after all requested overlap moves have been applied.
+    _repair_backward_edges(graph, moved_nodes)
 
 
 class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
