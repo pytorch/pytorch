@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from typing import Any, TYPE_CHECKING
 
@@ -7,6 +8,9 @@ import torch.distributed as dist
 
 from ._registry import new_transport
 from ._work import _validate_timeout
+
+
+logger = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
@@ -84,11 +88,12 @@ def new_transport_rank(
         store.set(str(rank), transport.bind(timeout=timeout))
         store.wait([str(peer_rank)], bootstrap_timeout)
         transport.connect(store.get(str(peer_rank)), timeout=timeout)
-    except BaseException as error:
+    except BaseException:
         try:
             transport.close(timeout=timeout)
         except Exception as cleanup_error:
-            error.add_note(f"transport bootstrap cleanup failed: {cleanup_error}")
+            # Exception notes require Python 3.11.
+            logger.warning("transport bootstrap cleanup failed", exc_info=cleanup_error)
         raise
 
     return transport
