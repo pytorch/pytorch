@@ -2369,17 +2369,12 @@ class ByteArrayVariable(VariableTracker):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
+    ) -> VariableTracker | None:
         try:
             const_args = [arg.as_python_constant() for arg in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
         except AsPythonConstantNotImplementedError:
-            unimplemented(
-                gb_type="bytearray.hex with non-constant arguments",
-                context=f"args={args}, kwargs={kwargs}",
-                explanation="Dynamo only supports bytearray.hex() with constant formatting arguments.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+            return None
         try:
             result = self.data.hex(*const_args, **const_kwargs)
         except (TypeError, ValueError) as e:
@@ -2391,17 +2386,12 @@ class ByteArrayVariable(VariableTracker):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker:
+    ) -> VariableTracker | None:
         try:
             const_args = [arg.as_python_constant() for arg in args]
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
         except AsPythonConstantNotImplementedError:
-            unimplemented(
-                gb_type="bytearray.decode with non-constant arguments",
-                context=f"args={args}, kwargs={kwargs}",
-                explanation="Dynamo only supports bytearray.decode() with constant encoding and error arguments.",
-                hints=[*graph_break_hints.SUPPORTABLE],
-            )
+            return None
         try:
             result = self.data.decode(*const_args, **const_kwargs)
         except (LookupError, TypeError, UnicodeError) as e:
