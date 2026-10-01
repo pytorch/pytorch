@@ -277,8 +277,9 @@ if sys.platform == "win32":
             ctypes.CDLL("msvcp140.dll")
             if platform.machine() != "ARM64":
                 ctypes.CDLL("vcruntime140_1.dll")
-            # C11 threads used by pthreadpool, shipped since VC++ 14.38
-            ctypes.CDLL("vcruntime140_threads.dll")
+                # C11 threads used by pthreadpool, shipped since VC++ 14.38.
+                # The win_arm64 wheels do not import it.
+                ctypes.CDLL("vcruntime140_threads.dll")
         except OSError:
             print(
                 textwrap.dedent(
