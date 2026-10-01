@@ -155,6 +155,19 @@ class TestCovers(TestCase):
             # Too few args to bind at all:
             self.assertFalse(aot_manifest.covers("fakeop", "CUDA", (), {}))
 
+    def test_availability_failure_is_uncovered(self):
+        with (
+            ManifestFixture(),
+            mock.patch.object(
+                aot_manifest._Coverage,
+                "is_available",
+                side_effect=RuntimeError("device query failed"),
+            ),
+        ):
+            self.assertFalse(
+                aot_manifest.covers("fakeop", "CUDA", (self._covered_tensor(), 8), {})
+            )
+
 
 class TestGetCoverage(TestCase):
     def test_declared_op_has_coverage(self):
@@ -252,7 +265,46 @@ class TestEmbeddedCoverage(TestCase):
             ) as get_capability,
         ):
             self.assertEqual(coverage.is_available(device), expected)
-            get_capability.assert_called_once_with(device)
+            self.assertEqual(coverage.is_available(device), expected)
+            get_capability.assert_called_once_with(device.index)
+
+    def test_availability_cache_tracks_current_device(self):
+        coverage = aot_manifest._Coverage("bmm", lambda *args: {}, [])
+        namespace = types.SimpleNamespace(archs_bmm=lambda: [90])
+        device = torch.device("cuda")
+        with (
+            mock.patch.object(torch.ops, "_native_aot", namespace),
+            mock.patch.object(torch.version, "hip", None),
+            mock.patch.object(torch.cuda, "current_device", side_effect=[0, 1, 0, 1]),
+            mock.patch.object(
+                torch.cuda, "get_device_capability", side_effect=[(9, 0), (10, 0)]
+            ) as get_capability,
+        ):
+            self.assertTrue(coverage.is_available(device))
+            self.assertFalse(coverage.is_available(device))
+            self.assertTrue(coverage.is_available(device))
+            self.assertFalse(coverage.is_available(device))
+            get_capability.assert_has_calls([mock.call(0), mock.call(1)])
+            self.assertEqual(get_capability.call_count, 2)
+
+    def test_availability_retries_failed_device_query(self):
+        coverage = aot_manifest._Coverage("bmm", lambda *args: {}, [])
+        namespace = types.SimpleNamespace(archs_bmm=lambda: [90])
+        device = torch.device("cuda:0")
+        with (
+            mock.patch.object(torch.ops, "_native_aot", namespace),
+            mock.patch.object(torch.version, "hip", None),
+            mock.patch.object(
+                torch.cuda,
+                "get_device_capability",
+                side_effect=[RuntimeError("device query failed"), (9, 0)],
+            ) as get_capability,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "device query failed"):
+                coverage.is_available(device)
+            self.assertTrue(coverage.is_available(device))
+            self.assertTrue(coverage.is_available(device))
+            self.assertEqual(get_capability.call_count, 2)
 
     @parametrize("device,hip", [("cpu", None), ("meta", None), ("cuda", "7.0")])
     def test_unavailable_backend_does_not_probe_cuda(self, device, hip):

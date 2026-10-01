@@ -49,6 +49,7 @@ class _Coverage:
         self._cpp_covers: Callable[..., bool] | None = None
         self._cpp_probed = False
         self._archs: tuple[int, ...] | None = None
+        self._available: dict[int, bool] = {}
 
     def is_available(self, device: torch.device) -> bool:
         """Whether this build embedded this op for the given device."""
@@ -62,8 +63,13 @@ class _Coverage:
                 self._archs = ()
         if not self._archs:
             return False
-        major, minor = torch.cuda.get_device_capability(device)
-        return major * 10 + minor in self._archs
+        index = device.index
+        if index is None:
+            index = torch.cuda.current_device()
+        if index not in self._available:
+            major, minor = torch.cuda.get_device_capability(index)
+            self._available[index] = major * 10 + minor in self._archs
+        return self._available[index]
 
     def _resolve_cpp_covers(self) -> Callable[..., bool] | None:
         if not self._cpp_probed:
@@ -90,17 +96,17 @@ class _Coverage:
             except Exception:
                 # Arguments the schema cannot bind: uncovered, so the cond decides.
                 return False
-        tensor = next(
-            (arg for arg in (*args, *kwargs.values()) if isinstance(arg, torch.Tensor)),
-            None,
-        )
-        if tensor is None or not self.is_available(tensor.device):
-            return False
         try:
+            call_args = (*args, *kwargs.values())
+            tensor = next(
+                (arg for arg in call_args if isinstance(arg, torch.Tensor)),
+                None,
+            )
+            if tensor is None or not self.is_available(tensor.device):
+                return False
             values = self._covered_axes(*args, **kwargs)
         except Exception:
-            # Underspecified call (e.g. a FakeTensor missing the queried attribute):
-            # uncovered, so the cond decides.
+            # Failed availability or argument probes leave the call to the cond chain.
             return False
         for point in self._grid:
             if all(
