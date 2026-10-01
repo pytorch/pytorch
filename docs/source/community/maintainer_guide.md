@@ -15,8 +15,8 @@ Parts of this process that are not automated yet are marked with **TEMPORARY:** 
 - Fully triage issues within 1 week of creation. Example triage queue for autograd module [here](https://github.com/pytorch/pytorch/issues?q=is%3Aissue%20is%3Aopen%20label%3Atriaged%20label%3A%22module%3A%20autograd%22%20-label%3A%22needs%20reproduction%22%20-label%3A%22needs%20research%22%20-label%3A%22needs%20design%22%20-label%3Aactionable%20-label%3A%22won%27t%20fix%22)
   (update the query to the specific module you're interested in).
 - Ensure PRs assigned to your module or to you are moved through the review process (pre-review, review, or closed
-  while further discussion happens on the issue). Example pre-review queue [here](https://github.com/pytorch/pytorch/pulls?q=is%3Apr%20is%3Aopen%20-is%3Adraft%20review-requested%3A%40me%20label%3Atriaged%20-label%3A%22in%20progress%22%20-label%3A%22ready%20for%20review%22) and review queue
-  [here](https://github.com/pytorch/pytorch/pulls?q=is%3Apr%20is%3Aopen%20review-requested%3A%40me%20label%3A%22ready%20for%20review%22).
+  while further discussion happens on the issue). Example pre-review queue [here](https://github.com/pytorch/pytorch/pulls?q=is%3Apr%20is%3Aopen%20-is%3Adraft%20review-requested%3A%40me%20label%3Atriaged%20-label%3A%22in%20progress%22%20-label%3A%22ready%20for%20review%22%20-label%3A%22missing%20actionable%20issue%22) and review queue
+  [here](https://github.com/pytorch/pytorch/pulls?q=is%3Apr%20is%3Aopen%20review-requested%3A%40me%20label%3A%22ready%20for%20review%22%20-label%3A%22missing%20actionable%20issue%22).
 - Provide guidance, reviews, as well as assistance in closing high priority issues and pull requests
 - Ensure proper documentation related to newly added APIs for owned modules
 - Respond within 1 week for cross module issues from other module maintainers
@@ -114,7 +114,7 @@ Do not add `in progress` or `ready for review` by hand, except as described in t
 
 ## Closing Issues and Pull Requests
 
-PRs that do not meet the pre-conditions are closed by the triage automation, with a comment giving the reason.
+We have automation that will close PRs and issues with a comment giving a reason.
 When you close an issue or a pull request yourself, for example when rejecting a pre-review, always give the reason
 and, when it applies, link to
 [Why was my issue or PR closed?](https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#why-was-my-issue-or-pr-closed).
@@ -123,6 +123,5 @@ For example:
 - "Closing this PR because it requires a design discussion that we should continue on the issue.
   Please comment on the linked issue with a summary of the status and approach to further discuss."
 
-**TEMPORARY:** the PR triage automation is not live yet, so PRs that do not meet the pre-conditions are closed by
-hand. For example: "Closing this PR as it is not linked to an issue labeled `actionable`.
-See https://github.com/pytorch/pytorch/blob/main/CONTRIBUTING.md#why-was-my-issue-or-pr-closed for more details."
+**TEMPORARY:** PRs without a linked `actionable` issue or maintainer sponsor are labeled `missing actionable issue`
+instead of being closed. You can add a PR back to your usual workflow by removing this label.
