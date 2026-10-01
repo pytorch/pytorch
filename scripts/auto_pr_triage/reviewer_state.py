@@ -1,22 +1,18 @@
-"""Shared read-only GitHub review collection for Auto PR Triage."""
+"""Read reviewer and round-robin state for planning."""
 
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Protocol
+from typing import Any
 from urllib.parse import quote
 
+from github_api import fetch_timeline, PullRequestRef, TIMELINE_PAGE_SIZE
+from schemas import RoundRobinCursor
 
-MAX_TIMELINE_PAGES = 10
-TIMELINE_PAGE_SIZE = 100
+
 MAX_REPOSITORY_EVENT_PAGES = 10
 MAX_TEAM_STATE_PAGES = 10
 MAX_REVIEW_REQUEST_PAGES = 10
-MAX_ENGAGEMENT_CANDIDATES = 100
-SUBMITTED_REVIEW_STATES = frozenset(
-    {"approved", "changes_requested", "commented", "dismissed"}
-)
-NON_HUMAN_LOGINS = frozenset({"pytorchbot", "pytorchmergebot"})
 
 
 # Team attribution is omitted because its GraphQL fields require read:org,
@@ -71,53 +67,13 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
 """.strip()
 
 
-class GitHubClient(Protocol):
-    """Minimal read interface required to collect reviewer state."""
-
-    def json(self, endpoint: str) -> Any: ...
-    def graphql(self, query: str, variables: dict[str, Any]) -> dict[str, Any]: ...
-
-
-def fetch_user_has_triage_permission(
-    github: GitHubClient,
-    repo: str,
-    login: str,
-) -> bool:
-    """Return whether GitHub grants one user triage-or-higher repository access."""
-
-    encoded_login = quote(login, safe="")
-    response = github.json(f"repos/{repo}/collaborators/{encoded_login}/permission")
-    if not isinstance(response, dict):
-        raise RuntimeError("collaborator permission response is invalid")
-    try:
-        user = response["user"]
-        returned_login = user["login"]
-        permissions = user["permissions"]
-        access = {
-            name: permissions[name] for name in ("triage", "push", "maintain", "admin")
-        }
-    except (KeyError, TypeError, AttributeError) as exc:
-        raise RuntimeError("collaborator permission response is incomplete") from exc
-    if (
-        not isinstance(returned_login, str)
-        or returned_login.casefold() != login.casefold()
-        or not all(isinstance(value, bool) for value in access.values())
-    ):
-        raise RuntimeError("collaborator permission response is inconsistent")
-    return any(access.values())
-
-
-def fetch_requested_reviewer_handles(
-    github: GitHubClient,
-    repo: str,
-    number: int,
-) -> set[str]:
+def fetch_requested_reviewer_handles(pr: PullRequestRef, /) -> set[str]:
     """Return all currently requested user and team handles."""
 
-    response = github.json(f"repos/{repo}/pulls/{number}/requested_reviewers")
+    response = pr.github.json(f"repos/{pr.repo}/pulls/{pr.number}/requested_reviewers")
     if not isinstance(response, dict):
         raise RuntimeError("requested reviewers response is invalid")
-    owner, _ = repo.split("/", 1)
+    owner, _ = pr.repo.split("/", 1)
     try:
         users = {f"@{user['login']}" for user in response["users"]}
         teams = {f"@{owner}/{team['slug']}" for team in response["teams"]}
@@ -126,23 +82,19 @@ def fetch_requested_reviewer_handles(
     return users | teams
 
 
-def fetch_requested_codeowner_handles(
-    github: GitHubClient,
-    repo: str,
-    number: int,
-) -> frozenset[str]:
+def fetch_requested_codeowner_handles(pr: PullRequestRef, /) -> frozenset[str]:
     """Return active review requests GitHub identifies as CODEOWNERS-derived."""
 
-    owner, name = repo.split("/", 1)
+    owner, name = pr.repo.split("/", 1)
     cursor: str | None = None
     reviewers: set[str] = set()
     for _ in range(MAX_REVIEW_REQUEST_PAGES):
-        data = github.graphql(
-            CODEOWNER_REVIEW_REQUESTS_QUERY,
-            {
+        data = pr.github.graphql(
+            query=CODEOWNER_REVIEW_REQUESTS_QUERY,
+            variables={
                 "owner": owner,
                 "name": name,
-                "number": number,
+                "number": pr.number,
                 "cursor": cursor,
             },
         )
@@ -150,7 +102,7 @@ def fetch_requested_codeowner_handles(
             repository = data.get("repository")
             pull_request = repository.get("pullRequest") if repository else None
             if pull_request is None:
-                raise RuntimeError(f"pull request not found: {repo}#{number}")
+                raise RuntimeError(f"pull request not found: {pr.repo}#{pr.number}")
             requests = pull_request["reviewRequests"]
             nodes = requests["nodes"]
             page_info = requests["pageInfo"]
@@ -195,23 +147,19 @@ def fetch_requested_codeowner_handles(
     raise RuntimeError("CODEOWNERS review requests exceed the collection limit")
 
 
-def fetch_submitted_review_state(
-    github: GitHubClient,
-    repo: str,
-    number: int,
-) -> frozenset[str]:
+def fetch_submitted_review_state(pr: PullRequestRef, /) -> frozenset[str]:
     """Return users with a qualifying submitted review."""
 
-    owner, name = repo.split("/", 1)
+    owner, name = pr.repo.split("/", 1)
     cursor: str | None = None
     reviewers: set[str] = set()
     while True:
-        data = github.graphql(
-            SUBMITTED_REVIEWS_QUERY,
-            {
+        data = pr.github.graphql(
+            query=SUBMITTED_REVIEWS_QUERY,
+            variables={
                 "owner": owner,
                 "name": name,
-                "number": number,
+                "number": pr.number,
                 "cursor": cursor,
             },
         )
@@ -219,7 +167,7 @@ def fetch_submitted_review_state(
             repository = data.get("repository")
             pull_request = repository.get("pullRequest") if repository else None
             if pull_request is None:
-                raise RuntimeError(f"pull request not found: {repo}#{number}")
+                raise RuntimeError(f"pull request not found: {pr.repo}#{pr.number}")
             reviews = pull_request["reviews"]
             nodes = reviews["nodes"]
             page_info = reviews["pageInfo"]
@@ -254,10 +202,10 @@ def fetch_submitted_review_state(
 
 
 def fetch_latest_labeled_pull_requests(
-    github: GitHubClient,
-    repo: str,
+    pr: PullRequestRef,
+    /,
+    *,
     team_labels: dict[str, str],
-    current_number: int,
 ) -> tuple[dict[str, tuple[int, int]], dict[int, list[dict[str, Any]]]]:
     """Return the latest prior PR and label-event ID for each team."""
 
@@ -266,8 +214,8 @@ def fetch_latest_labeled_pull_requests(
     timelines: dict[int, list[dict[str, Any]]] = {}
     removed: set[tuple[int, str]] = set()
     for page in range(1, MAX_REPOSITORY_EVENT_PAGES + 1):
-        events = github.json(
-            f"repos/{repo}/issues/events?per_page={TIMELINE_PAGE_SIZE}&page={page}"
+        events = pr.github.json(
+            f"repos/{pr.repo}/issues/events?per_page={TIMELINE_PAGE_SIZE}&page={page}"
         )
         if not isinstance(events, list):
             raise RuntimeError("repository issue events response is invalid")
@@ -292,7 +240,7 @@ def fetch_latest_labeled_pull_requests(
                 team = teams_by_label.get(name.casefold())
                 if (
                     team is None
-                    or number == current_number
+                    or number == pr.number
                     or not isinstance(issue.get("pull_request"), dict)
                 ):
                     continue
@@ -310,116 +258,20 @@ def fetch_latest_labeled_pull_requests(
         if team in found:
             continue
         prior = fetch_latest_pull_request_for_label(
-            github,
-            repo,
-            label,
-            current_number,
-            timelines,
+            pr,
+            label=label,
+            timelines=timelines,
         )
         if prior is not None:
             found[team] = prior
     return found, timelines
 
 
-def fetch_pull_request_timeline(
-    github: GitHubClient,
-    repo: str,
-    number: int,
-) -> list[dict[str, Any]]:
-    """Return one complete pull-request timeline within the configured bound."""
-
-    timeline: list[dict[str, Any]] = []
-    for page in range(1, MAX_TIMELINE_PAGES + 1):
-        events = github.json(
-            f"repos/{repo}/issues/{number}/timeline"
-            f"?per_page={TIMELINE_PAGE_SIZE}&page={page}"
-        )
-        if not isinstance(events, list) or any(
-            not isinstance(event, dict) for event in events
-        ):
-            raise RuntimeError("pull request timeline response is invalid")
-        timeline.extend(events)
-        if len(events) < TIMELINE_PAGE_SIZE:
-            return timeline
-    raise RuntimeError("pull request timeline exceeds the collection limit")
-
-
-def fetch_maintainer_activity(
-    github: GitHubClient,
-    repo: str,
-    number: int,
-    author_login: str,
-) -> tuple[str, tuple[str, ...]] | None:
-    """Return one triage-or-higher maintainer with visible PR activity."""
-
-    candidates: dict[str, set[str]] = {}
-    author_key = author_login.casefold()
-
-    def human_login(value: Any, context: str) -> str | None:
-        if value is None:
-            return None
-        if not isinstance(value, dict):
-            raise RuntimeError(f"{context} user is invalid")
-        login = value.get("login")
-        account_type = value.get("type")
-        if not isinstance(login, str) or not login:
-            raise RuntimeError(f"{context} user is invalid")
-        if not isinstance(account_type, str):
-            raise RuntimeError(f"{context} user is invalid")
-        key = login.casefold()
-        if (
-            account_type != "User"
-            or key == author_key
-            or key in NON_HUMAN_LOGINS
-            or key.endswith("[bot]")
-        ):
-            return None
-        return login
-
-    for event in fetch_pull_request_timeline(github, repo, number):
-        event_name = event.get("event")
-        login: str | None = None
-        signal: str | None = None
-        if event_name in {"commented", "reviewed"}:
-            if event_name == "reviewed":
-                state = event.get("state")
-                if not isinstance(state, str):
-                    raise RuntimeError("review event state is invalid")
-                if state.casefold() not in SUBMITTED_REVIEW_STATES:
-                    continue
-            login = human_login(event.get("user"), "engagement")
-            signal = "comment" if event_name == "commented" else "review"
-        elif event_name == "review_requested":
-            requested = event.get("requested_reviewer")
-            if requested is None:
-                continue
-            actor = human_login(event.get("actor"), "review-request actor")
-            reviewer = human_login(requested, "requested reviewer")
-            if (
-                actor is None
-                or reviewer is None
-                or actor.casefold() != reviewer.casefold()
-            ):
-                continue
-            login = actor
-            signal = "self_review_request"
-        if login is None or signal is None:
-            continue
-        candidates.setdefault(login.casefold(), set()).add(signal)
-        if len(candidates) > MAX_ENGAGEMENT_CANDIDATES:
-            raise RuntimeError("maintainer engagement exceeds the candidate limit")
-
-    for login in sorted(candidates):
-        if fetch_user_has_triage_permission(github, repo, login):
-            return f"@{login}", tuple(sorted(candidates[login]))
-    return None
-
-
 def fetch_latest_pull_request_for_label(
-    github: GitHubClient,
-    repo: str,
+    pr: PullRequestRef,
+    /,
+    *,
     label: str,
-    current_number: int,
     timelines: dict[int, list[dict[str, Any]]],
 ) -> tuple[int, int] | None:
     """Recover the newest durable owner-label event from labeled pull requests."""
@@ -427,8 +279,8 @@ def fetch_latest_pull_request_for_label(
     encoded_label = quote(label, safe="")
     latest: tuple[int, int] | None = None
     for page in range(1, MAX_TEAM_STATE_PAGES + 1):
-        issues = github.json(
-            f"repos/{repo}/issues?state=all&labels={encoded_label}"
+        issues = pr.github.json(
+            f"repos/{pr.repo}/issues?state=all&labels={encoded_label}"
             f"&per_page={TIMELINE_PAGE_SIZE}&page={page}"
         )
         if not isinstance(issues, list) or any(
@@ -441,11 +293,11 @@ def fetch_latest_pull_request_for_label(
                 issue.get("pull_request"), dict
             ):
                 raise RuntimeError("owner label is not dedicated to pull requests")
-            if number == current_number:
+            if number == pr.number:
                 continue
             timeline = timelines.get(number)
             if timeline is None:
-                timeline = fetch_pull_request_timeline(github, repo, number)
+                timeline = fetch_timeline(github=pr.github, repo=pr.repo, number=number)
                 timelines[number] = timeline
             matching_ids: list[int] = []
             for event in timeline:
@@ -474,6 +326,7 @@ def fetch_latest_pull_request_for_label(
 
 
 def fetch_assigned_member(
+    *,
     timeline: list[dict[str, Any]],
     label_event_id: int,
     members: list[str] | tuple[str, ...],
@@ -507,6 +360,7 @@ def fetch_assigned_member(
 
 
 def stable_fallback_member(
+    *,
     repo: str,
     current_number: int,
     owner: str,
@@ -527,6 +381,7 @@ def stable_fallback_member(
 
 
 def next_round_robin_member(
+    *,
     members: list[str] | tuple[str, ...],
     latest_reviewer: str | None,
     ineligible_reviewers: set[str],
@@ -550,81 +405,68 @@ def next_round_robin_member(
     return None
 
 
-def fetch_round_robin_reviewers(
-    github: GitHubClient,
-    repo: str,
-    current_number: int,
-    owners: dict[str, dict[str, Any]],
-    ineligible_reviewers: set[str],
-) -> dict[str, dict[str, str]]:
-    """Derive per-owner assignments from labels and reviewer-request history."""
+def fetch_round_robin_cursors(
+    pr: PullRequestRef,
+    /,
+    *,
+    owners: dict[str, tuple[str, tuple[str, ...]]],
+) -> dict[str, RoundRobinCursor]:
+    """Read each owner's rotation state from label and review-request history.
+
+    owners maps a team owner ID to its routing label and roster.
+    """
 
     if not owners:
         return {}
-
-    for entry in owners.values():
-        label = entry["label"]
-        response = github.json(f"repos/{repo}/labels/{quote(label, safe='')}")
-        actual = response.get("name") if isinstance(response, dict) else None
-        if not isinstance(actual, str) or actual.casefold() != label.casefold():
-            raise RuntimeError("configured owner label is unavailable")
-
     latest_prs, timelines = fetch_latest_labeled_pull_requests(
-        github,
-        repo,
-        {owner: entry["label"] for owner, entry in owners.items()},
-        current_number,
+        pr,
+        team_labels={owner: label for owner, (label, _) in owners.items()},
     )
-    latest_assignments: dict[tuple[int, int, tuple[str, ...]], str | None] = {}
-    selections: dict[str, dict[str, str]] = {}
-    for owner, entry in owners.items():
-        members = tuple(entry["members"])
+    cursors: dict[str, RoundRobinCursor] = {}
+    for owner, (_, members) in owners.items():
         prior = latest_prs.get(owner)
-        latest_reviewer = None
-        if prior is not None:
-            prior_pr, label_event_id = prior
-            timeline = timelines.get(prior_pr)
-            if timeline is None:
-                timeline = fetch_pull_request_timeline(github, repo, prior_pr)
-                timelines[prior_pr] = timeline
-            cache_key = (
-                prior_pr,
-                label_event_id,
-                tuple(member.casefold() for member in members),
-            )
-            if cache_key not in latest_assignments:
-                latest_assignments[cache_key] = fetch_assigned_member(
-                    timeline,
-                    label_event_id,
-                    members,
-                )
-            latest_reviewer = latest_assignments[cache_key]
-        if prior is not None and latest_reviewer is None:
-            selected = stable_fallback_member(
-                repo,
-                current_number,
-                owner,
-                members,
-                ineligible_reviewers,
-            )
-            selection_reason = "stable_fallback"
-            if selected is not None:
-                print(
-                    "Auto PR Triage owner marker has no current-roster assignment; "
-                    f"using stable fallback for {owner}: {selected}."
-                )
-        else:
-            selected = next_round_robin_member(
-                members,
-                latest_reviewer,
-                ineligible_reviewers,
-            )
-            selection_reason = (
-                "round_robin_next" if prior is not None else "round_robin_initial"
-            )
-        if selected is not None:
-            selections[owner] = {
-                "reviewer": selected,
-                "selection_reason": selection_reason,
-            }
-    return selections
+        if prior is None:
+            cursors[owner] = RoundRobinCursor(None, None)
+            continue
+        prior_pr, label_event_id = prior
+        timeline = timelines.get(prior_pr)
+        if timeline is None:
+            timeline = fetch_timeline(github=pr.github, repo=pr.repo, number=prior_pr)
+            timelines[prior_pr] = timeline
+        assigned = fetch_assigned_member(
+            timeline=timeline, label_event_id=label_event_id, members=members
+        )
+        cursors[owner] = RoundRobinCursor(prior_pr, assigned)
+    return cursors
+
+
+def choose_round_robin_member(
+    *,
+    repo: str,
+    current_number: int,
+    owner: str,
+    members: tuple[str, ...],
+    cursor: RoundRobinCursor,
+    ineligible_reviewers: set[str],
+) -> tuple[str, str] | None:
+    """Return the next member and why, or None when nobody is eligible."""
+
+    if cursor.marker_found and cursor.last_assigned is None:
+        # The latest marker has no attributable assignment; the fallback is
+        # stable per PR, and requesting that member repairs the rotation.
+        selected = stable_fallback_member(
+            repo=repo,
+            current_number=current_number,
+            owner=owner,
+            members=members,
+            ineligible_reviewers=ineligible_reviewers,
+        )
+        reason = "stable_fallback"
+    else:
+        selected = next_round_robin_member(
+            members=members,
+            latest_reviewer=cursor.last_assigned,
+            ineligible_reviewers=ineligible_reviewers,
+        )
+        reason = "round_robin_next" if cursor.marker_found else "round_robin_initial"
+    return None if selected is None else (selected, reason)
