@@ -663,8 +663,8 @@ class TritonTemplateKernel(TritonKernel):
 
         # input buffers which we are allowed to prologue fuse into
         self.prologue_supported_inputs: OrderedSet[str] = OrderedSet()
-        # Track which occurrences are covered before exposing physical buffer names.
-        self._producer_fusion_allowed_input_indices: OrderedSet[int] = OrderedSet()
+        # Track which occurrences support prologue fusion before exposing buffer names.
+        self._prologue_supported_input_indices: OrderedSet[int] = OrderedSet()
 
         # input buffers which we are fusing into
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
@@ -723,7 +723,7 @@ class TritonTemplateKernel(TritonKernel):
         return f"_tmp_var{next(self.tmp_var_ctr)}"
 
     def _finalize_prologue_supported_inputs(self) -> None:
-        supported_indices = self._producer_fusion_allowed_input_indices
+        supported_indices = self._prologue_supported_input_indices
         unsupported_names = OrderedSet(
             input_node.get_name()
             for index, input_node in enumerate(self.input_nodes)
@@ -741,7 +741,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.args.sizevars,
                 self.args.workspace_args,
                 self.prologue_supported_inputs,
-                self._producer_fusion_allowed_input_indices,
+                self._prologue_supported_input_indices,
                 self.frozen_layouts_cnt,
             ]
         )
@@ -1068,7 +1068,7 @@ class TritonTemplateKernel(TritonKernel):
             input_node = self.named_input_nodes[name]
             if self.prologue_loads_all_inputs:
                 self.prologue_supported_inputs.add(input_node.get_name())
-                self._producer_fusion_allowed_input_indices.add(
+                self._prologue_supported_input_indices.add(
                     self._named_input_indices[name]
                 )
             if input_node.get_name() in V.graph.removed_buffers:
@@ -1343,7 +1343,7 @@ class TritonTemplateKernel(TritonKernel):
         input_node = self.named_input_nodes[input_name]
         if not self.prologue_loads_all_inputs:
             self.prologue_supported_inputs.add(input_node.get_name())
-            self._producer_fusion_allowed_input_indices.add(
+            self._prologue_supported_input_indices.add(
                 self._named_input_indices[input_name]
             )
 
