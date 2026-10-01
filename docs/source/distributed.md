@@ -2296,8 +2296,8 @@ CUDA streams
 
 ``read_stream`` and ``write_stream`` order a transfer on ``stream``, or the
 current CUDA stream if ``None``. The transfer starts after prior work on the
-stream; later work waits for it to complete. Calls return after enqueueing and no kernel runs while the
-transfer is in flight.
+stream; later work waits for it to complete. Calls return after enqueueing and
+no kernel runs while the transfer is in flight.
 
 .. code-block:: python
 
