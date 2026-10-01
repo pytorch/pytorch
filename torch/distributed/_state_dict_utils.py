@@ -18,6 +18,9 @@ if dist.is_available() or TYPE_CHECKING:
     from torch.distributed._shard.sharded_tensor import ShardedTensor
     from torch.distributed.tensor import distribute_tensor, DTensor, Replicate
     from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
+    from torch.distributed.tensor.placement_types import (
+        _validate_block_shard_placements,
+    )
 
 
 def _identity_func(
@@ -611,16 +614,36 @@ def _distribute_tensors(
         local_state = _local_state[0]
         full_tensor = _local_state[1]
 
-        shape, offset = compute_local_shape_and_global_offset(
-            full_tensor.shape, local_state.device_mesh, local_state.placements
+        mesh = local_state.device_mesh
+        layout = _validate_block_shard_placements(
+            local_state.placements, full_tensor.shape, mesh.shape
         )
-        slices = [
-            slice(cur_offset, cur_offset + cur_shape)
-            for cur_shape, cur_offset in zip(shape, offset)
-        ]
+        if layout is not None:
+            # BlockShard local tensors are a row range of the merged view (of the
+            # Shard(0) slice, if any), which is not one slice of the full tensor.
+            block_input = full_tensor
+            if layout.shard0_mesh_dim is not None:
+                rows = layout.block_shape[0]
+                start = mesh._sym_get_coordinate(layout.shard0_mesh_dim) * rows
+                block_input = full_tensor.narrow(0, start, rows)
+            local_slice = layout.placement._replicate_to_block_shard(
+                block_input,
+                mesh,
+                layout.mesh_dim,
+                mesh._sym_get_coordinate(layout.mesh_dim),
+            )
+        else:
+            shape, offset = compute_local_shape_and_global_offset(
+                full_tensor.shape, mesh, local_state.placements
+            )
+            slices = [
+                slice(cur_offset, cur_offset + cur_shape)
+                for cur_shape, cur_offset in zip(shape, offset)
+            ]
+            local_slice = full_tensor[tuple(slices)]
         if local_state.is_meta:
             # Use .clone() here rather than view to clone and return only the sliced portion, minimizing memory access and cost.
-            local_tensor = full_tensor[tuple(slices)].detach().clone()
+            local_tensor = local_slice.detach().clone()
             # TODO: currently, we cannot handle strided sharding if the dp dimension is not even. For example,
             # one of the case that is not yet supported is when placements = (Shard(0), _StridedShard(0, sf=2)).
             ret = DTensor.from_local(
@@ -632,8 +655,8 @@ def _distribute_tensors(
             )
         else:
             ret = local_state
-            # Copy full_tensor[slices] into local_state.to_local() to reduce memory footprint.
-            ret.to_local().copy_(full_tensor[tuple(slices)])
+            # Copy the local slice into local_state.to_local() to reduce memory footprint.
+            ret.to_local().copy_(local_slice)
         local_state_dict[key] = ret
 
 

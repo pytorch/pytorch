@@ -5,10 +5,22 @@ from unittest import mock
 
 import torch
 import torch.distributed as dist
+import torch.distributed.checkpoint as dcp
 import torch.nn as nn
-from torch.distributed.fsdp import fully_shard
+from torch.distributed.checkpoint.state_dict import (
+    get_model_state_dict,
+    set_model_state_dict,
+    StateDictOptions,
+)
+from torch.distributed.fsdp import DataParallelMeshDims, fully_shard
 from torch.distributed.fsdp._fully_shard import _fsdp_collectives
-from torch.distributed.tensor import DTensor, init_device_mesh, Replicate, Shard
+from torch.distributed.tensor import (
+    distribute_tensor,
+    DTensor,
+    init_device_mesh,
+    Replicate,
+    Shard,
+)
 from torch.distributed.tensor.placement_types import BlockShard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTestContinuous, get_devtype
@@ -17,6 +29,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
 )
+from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 device_type = torch.device(get_devtype())
@@ -79,10 +92,12 @@ class TestFullyShardBlockShard(FSDPTestContinuous):
             placement = BlockShard((ref_param.shape[2],))
             self.assertIsInstance(param, DTensor)
             self.assertEqual(param.placements, (placement,))
-            local_shape = placement._local_shape(
-                ref_param.shape, self.world_size, self.rank
+            # Rank r owns merged rows [r * q, (r + 1) * q).
+            rows = ref_param.reshape(-1, ref_param.shape[2])
+            q = -(-rows.shape[0] // self.world_size)
+            self.assertEqual(
+                param.to_local(), rows[self.rank * q : (self.rank + 1) * q]
             )
-            self.assertEqual(param.to_local().shape, local_shape)
             self.assertEqual(param.full_tensor(), ref_param)
         self.assertEqual(model.in_proj.weight.placements, (Shard(0),))
 
@@ -149,6 +164,28 @@ class TestFullyShardBlockShard(FSDPTestContinuous):
             self.assertEqual(param.full_tensor(), ref_param)
 
     @skip_if_lt_x_gpu(4)
+    def test_meta_init(self):
+        # Init after sharding draws the same values per element as Shard(0) on
+        # the merged view, so ranks don't repeat values.
+        with torch.device("meta"):
+            model = MoEModel()
+        fully_shard(model.experts, shard_placement_fn=_block_shard_placement_fn)
+        fully_shard(model)
+        model.to_empty(device=device_type)
+        mesh = model.experts.w1.device_mesh
+        for name in ("w1", "w2"):
+            param = getattr(model.experts, name)
+            merged_shape = param.placements[0]._merged_shape(param.shape)
+            merged = distribute_tensor(
+                torch.zeros(merged_shape, device=device_type), mesh, [Shard(0)]
+            )
+            torch.manual_seed(3)
+            torch.nn.init.trunc_normal_(param)
+            torch.manual_seed(3)
+            torch.nn.init.trunc_normal_(merged)
+            self.assertEqual(param.to_local(), merged.to_local())
+
+    @skip_if_lt_x_gpu(4)
     def test_no_reorder_copies(self):
         # BlockShard all-gather and reduce-scatter use the dim-0 path, so no
         # chunk-cat reassembly or gradient reordering is needed.
@@ -184,8 +221,177 @@ class TestFullyShardBlockShard(FSDPTestContinuous):
         inp = torch.randn(4, DIM, device=device_type)
         self.assertEqual(new_model(inp), ref_model(inp))
 
+    @skip_if_lt_x_gpu(4)
+    def test_full_state_dict_broadcast(self):
+        model, ref_model = self._init_models()
+        with torch.no_grad():
+            for param in model.parameters():
+                param.zero_()
+        full_state_dict = ref_model.state_dict() if self.rank == 0 else {}
+        set_model_state_dict(
+            model,
+            full_state_dict,
+            options=StateDictOptions(full_state_dict=True, broadcast_from_rank0=True),
+        )
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            self.assertEqual(param.full_tensor(), ref_param)
+        gathered = get_model_state_dict(
+            model, options=StateDictOptions(full_state_dict=True)
+        )
+        if self.rank == 0:
+            for name, value in ref_model.state_dict().items():
+                self.assertEqual(gathered[name], value)
+
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    def test_dcp_round_trip(self):
+        model, ref_model = self._init_models()
+        dcp.save(get_model_state_dict(model), checkpoint_id=self.temp_dir)
+        new_model, _ = self._init_models()
+        with torch.no_grad():
+            for param in new_model.parameters():
+                param.zero_()
+        state_dict = get_model_state_dict(new_model)
+        dcp.load(state_dict, checkpoint_id=self.temp_dir)
+        set_model_state_dict(new_model, state_dict)
+        for param, ref_param in zip(new_model.parameters(), ref_model.parameters()):
+            self.assertEqual(param.full_tensor(), ref_param)
+
+
+# Expert parallelism on the experts dim, then FSDP BlockShard on the merged rows
+# of the local experts, laid out like torchtitan's sparse mesh (efsdp, ep). Each
+# EP rank holds 3 experts, so efsdp rank rows cross expert boundaries.
+EP_NUM_EXPERTS = 6
+
+
+class EPExperts(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.w1 = nn.Parameter(torch.randn(EP_NUM_EXPERTS, HIDDEN, DIM) * 0.1)
+        self.w2 = nn.Parameter(torch.randn(EP_NUM_EXPERTS, DIM, HIDDEN) * 0.1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = torch.bmm(x, self.w1.transpose(1, 2)).relu()
+        return torch.bmm(h, self.w2.transpose(1, 2))
+
+
+class TestFullyShardBlockShardExpertParallel(FSDPTestContinuous):
+    world_size = 4
+
+    _ep_mesh = None
+
+    def _mesh(self):
+        # FSDP2's spmd-mesh path requires the same mesh object across
+        # fully_shard calls in a process, and worker processes are reused
+        # across tests, so build the mesh once.
+        if TestFullyShardBlockShardExpertParallel._ep_mesh is None:
+            TestFullyShardBlockShardExpertParallel._ep_mesh = init_device_mesh(
+                device_type.type, (2, 2), mesh_dim_names=("efsdp", "ep")
+            )
+        return TestFullyShardBlockShardExpertParallel._ep_mesh
+
+    def _init_models(self, mesh, reshard_after_forward=True):
+        torch.manual_seed(42)
+        ref_model = EPExperts().to(device_type)
+        model = copy.deepcopy(ref_model)
+        for name, param in list(model.named_parameters()):
+            dparam = distribute_tensor(param.detach(), mesh, [Replicate(), Shard(0)])
+            setattr(model, name, nn.Parameter(dparam))
+        fully_shard(
+            model,
+            mesh=mesh,
+            dp_mesh_dims=DataParallelMeshDims(shard="efsdp"),
+            shard_placement_fn=_block_shard_placement_fn,
+            reshard_after_forward=reshard_after_forward,
+        )
+        return model, ref_model
+
+    def _input(self, mesh):
+        # Same tokens on every efsdp rank, so the averaged gradients match the
+        # reference gradients.
+        torch.manual_seed(7)
+        x = torch.randn(EP_NUM_EXPERTS, 4, DIM, device=device_type)
+        return x, distribute_tensor(x, mesh, [Replicate(), Shard(0)])
+
+    @skip_if_lt_x_gpu(4)
+    def test_init(self):
+        mesh = self._mesh()
+        model, ref_model = self._init_models(mesh)
+        for name in ("w1", "w2"):
+            param, ref_param = getattr(model, name), getattr(ref_model, name)
+            self.assertEqual(
+                param.placements, (BlockShard((ref_param.shape[2],)), Shard(0))
+            )
+            self.assertEqual(param.full_tensor(), ref_param)
+            # Rank rows come from the local experts of this rank's EP group.
+            efsdp_rank, ep_rank = mesh.get_coordinate()
+            local_experts = EP_NUM_EXPERTS // 2
+            rows = ref_param[ep_rank * local_experts : (ep_rank + 1) * local_experts]
+            rows = rows.reshape(-1, ref_param.shape[2])
+            q = -(-rows.shape[0] // 2)
+            self.assertEqual(
+                param.to_local(), rows[efsdp_rank * q : (efsdp_rank + 1) * q]
+            )
+
+    @skip_if_lt_x_gpu(4)
+    @parametrize("reshard_after_forward", [True, False])
+    def test_train_parity(self, reshard_after_forward):
+        mesh = self._mesh()
+        model, ref_model = self._init_models(mesh, reshard_after_forward)
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2, foreach=True)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2, foreach=True)
+        x, dx = self._input(mesh)
+        for _ in range(4):
+            ref_loss = ref_model(x).sum()
+            loss = model(dx).sum()
+            self.assertEqual(loss.full_tensor(), ref_loss)
+            ref_loss.backward()
+            loss.backward()
+            for name in ("w1", "w2"):
+                grad = getattr(model, name).grad
+                self.assertEqual(grad.placements, getattr(model, name).placements)
+                self.assertEqual(grad.full_tensor(), getattr(ref_model, name).grad)
+            ref_norm = torch.nn.utils.clip_grad_norm_(ref_model.parameters(), 1.0)
+            norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            self.assertEqual(norm.full_tensor(), ref_norm)
+            ref_optim.step()
+            optim.step()
+            ref_optim.zero_grad()
+            optim.zero_grad()
+        for param, ref_param in zip(model.parameters(), ref_model.parameters()):
+            self.assertEqual(param.full_tensor(), ref_param)
+
+    @skip_if_lt_x_gpu(4)
+    @with_temp_dir
+    def test_checkpoint(self):
+        mesh = self._mesh()
+        model, ref_model = self._init_models(mesh)
+        dcp.save(get_model_state_dict(model), checkpoint_id=self.temp_dir)
+        new_model, _ = self._init_models(mesh)
+        with torch.no_grad():
+            for param in new_model.parameters():
+                param.zero_()
+        state_dict = get_model_state_dict(new_model)
+        dcp.load(state_dict, checkpoint_id=self.temp_dir)
+        set_model_state_dict(new_model, state_dict)
+        for param, ref_param in zip(new_model.parameters(), ref_model.parameters()):
+            self.assertEqual(param.full_tensor(), ref_param)
+
+        with torch.no_grad():
+            for param in new_model.parameters():
+                param.zero_()
+        full_state_dict = ref_model.state_dict() if self.rank == 0 else {}
+        set_model_state_dict(
+            new_model,
+            full_state_dict,
+            options=StateDictOptions(full_state_dict=True, broadcast_from_rank0=True),
+        )
+        for param, ref_param in zip(new_model.parameters(), ref_model.parameters()):
+            self.assertEqual(param.full_tensor(), ref_param)
+
 
 instantiate_parametrized_tests(TestFullyShardBlockShard)
+instantiate_parametrized_tests(TestFullyShardBlockShardExpertParallel)
 
 
 if __name__ == "__main__":

@@ -35,9 +35,9 @@ from torch.distributed.tensor._utils import (
     normalize_to_torch_size,
 )
 from torch.distributed.tensor.placement_types import (
+    _block_shard_local_boxes,
     _StridedShard,
     _validate_block_shard_placements,
-    BlockShard,
     Partial,
     Placement,
     Replicate,
@@ -134,25 +134,6 @@ class _ToTorchTensor(torch.autograd.Function):
         if grad_placements is None:
             # See DTensor.from_local docstring for gradient placement guarantees
             grad_placements = _normalize_placements_for_grad(dtensor_spec.placements)
-
-        if any(isinstance(p, BlockShard) for p in dtensor_spec.placements):
-            # BlockShard local tensors use the merged-view shape, so the stride
-            # checks below (which compare local and global strides) don't apply.
-            if tuple(grad_placements) != dtensor_spec.placements:
-                raise NotImplementedError(
-                    f"to_local() backward with BlockShard requires grad_placements "
-                    f"{dtensor_spec.placements}, got {tuple(grad_placements)}"
-                )
-            return (
-                DTensor.from_local(
-                    grad_output,
-                    mesh,
-                    dtensor_spec.placements,
-                    shape=dtensor_meta.shape,
-                    stride=dtensor_meta.stride,
-                ),
-                None,
-            )
 
         from torch._prims_common import check_contiguous_sizes_strides
         from torch.fx.experimental.symbolic_shapes import guard_or_false
@@ -650,16 +631,6 @@ class DTensor(torch.Tensor):
         # Validate that placements don't contain mixed Partial reduce types
         assert_no_mixed_partial_types(placements)
 
-        if any(isinstance(p, BlockShard) for p in placements):
-            # The global shape can't be inferred from a merged-view local tensor.
-            if shape is None:
-                raise ValueError(
-                    "DTensor.from_local with BlockShard placements requires shape="
-                )
-            if stride is None:
-                stride = torch._prims_common.make_contiguous_strides_for(shape)
-            _validate_block_shard_placements(placements, shape)
-
         # `from_local` is differentiable, and the gradient of the dist tensor this function
         # created should flow back the gradients to the local_tensor, so we call an autograd
         # function to construct the dist tensor instead.
@@ -921,12 +892,54 @@ class DTensor(torch.Tensor):
                 "DTensor with partial placements!"
             )
 
+    def _block_shard_boxes(
+        self,
+    ) -> list[tuple[tuple[int, ...], tuple[int, ...], int, int]] | None:
+        """Boxes of the global tensor owned by this rank under BlockShard, if used."""
+        mesh = self.device_mesh
+        layout = _validate_block_shard_placements(
+            self._spec.placements, self.shape, mesh.shape
+        )
+        if layout is None:
+            return None
+        coordinate = mesh.get_coordinate()
+        if coordinate is None:
+            return []
+        return _block_shard_local_boxes(layout, mesh.shape, coordinate)
+
     def __create_write_items__(self, fqn: str, object: Any):
         self._raise_if_contains_partial_placements()
         from torch.distributed.checkpoint.planner_helpers import (
             _create_write_items_for_dtensor,
         )
 
+        if (boxes := self._block_shard_boxes()) is not None:
+            from torch.distributed.checkpoint.metadata import (
+                ChunkStorageMetadata,
+                MetadataIndex,
+                TensorProperties,
+            )
+            from torch.distributed.checkpoint.planner import (
+                TensorWriteData,
+                WriteItem,
+                WriteItemType,
+            )
+
+            properties = TensorProperties.create_from_tensor(self._local_tensor)
+            return [
+                WriteItem(
+                    index=MetadataIndex(fqn, offset, idx),
+                    type=WriteItemType.SHARD,
+                    tensor_data=TensorWriteData(
+                        chunk=ChunkStorageMetadata(
+                            offsets=torch.Size(offset), sizes=torch.Size(size)
+                        ),
+                        properties=properties,
+                        size=self.size(),
+                    ),
+                )
+                for idx, (offset, size, _, _) in enumerate(boxes)
+            ]
         if hasattr(self._local_tensor, "__create_write_items__"):
             return self._local_tensor.__create_write_items__(fqn, object)  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
@@ -950,6 +963,14 @@ class DTensor(torch.Tensor):
             _create_chunk_from_dtensor,
         )
 
+        if (boxes := self._block_shard_boxes()) is not None:
+            # A BlockShard rank may own up to 2k - 1 boxes of the global tensor.
+            from torch.distributed.checkpoint.metadata import ChunkStorageMetadata
+
+            return [
+                ChunkStorageMetadata(offsets=torch.Size(offset), sizes=torch.Size(size))
+                for offset, size, _, _ in boxes
+            ]
         if hasattr(self._local_tensor, "__create_chunk_list__"):
             return self._local_tensor.__create_chunk_list__()  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
@@ -959,6 +980,24 @@ class DTensor(torch.Tensor):
 
     def __get_tensor_shard__(self, index):
         self._raise_if_contains_partial_placements()
+        if (boxes := self._block_shard_boxes()) is not None:
+            # Each box is a contiguous row range of the merged-view local tensor,
+            # so the view is writable and loads land in place.
+            if index.offset is None and len(boxes) != 1:
+                raise ValueError(
+                    f"Cannot look up {index.fqn} with {len(boxes)} BlockShard boxes "
+                    "and no offset"
+                )
+            if index.index is not None and index.index < len(boxes):
+                candidates = [boxes[index.index], *boxes]
+            else:
+                candidates = boxes
+            for offset, size, row_start, row_stop in candidates:
+                if index.offset is None or torch.Size(offset) == index.offset:
+                    return self._local_tensor[row_start:row_stop].view(size)
+            raise ValueError(
+                f"Could not find BlockShard shard at {index.offset} for FQN: {index.fqn}"
+            )
         if hasattr(self._local_tensor, "__get_tensor_shard__"):
             return self._local_tensor.__get_tensor_shard__(index)  # type: ignore[attr-defined]
         elif isinstance(self._local_tensor, torch.Tensor):
@@ -1077,7 +1116,6 @@ def distribute_tensor(
         return tensor
 
     local_tensor = tensor.detach()
-    _validate_block_shard_placements(placements, tensor.shape)
 
     # TODO(xilun): address sharding order
     # distribute the tensor according to the placements.
@@ -1104,10 +1142,6 @@ def distribute_tensor(
                 placements[idx] = _StridedShard(
                     placement_dim, split_factor=placement.split_factor
                 )
-        elif isinstance(placement, BlockShard):
-            local_tensor = placement._shard_tensor(
-                local_tensor, device_mesh, idx, src_data_rank
-            )
         elif isinstance(placement, Replicate):
             local_tensor = Replicate._make_replicate_tensor(
                 local_tensor, device_mesh, idx, src_data_rank
