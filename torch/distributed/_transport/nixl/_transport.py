@@ -102,6 +102,11 @@ class NIXLTransport(Transport):
         self._transfers: dict[int, Any] = {}
         self._pending: dict[int, _NIXLWork] = {}
         self._operation_lock = RLock()
+        # Lifecycle: open -> closing -> closed. Closing rejects new operations and
+        # is terminal; a failed or timed-out close retains unreleased resources
+        # and retrying close only finishes cleanup. Failed transfer-handle or
+        # peer-metadata cleanup also starts closing. Registrations are released
+        # only by unregister or close, independent of Work completion.
         self._closed = False
         self._closing = False
 
