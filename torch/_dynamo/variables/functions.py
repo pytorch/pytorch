@@ -1947,6 +1947,21 @@ class UserMethodVariable(BaseUserFunctionVariable):
     def get_source(self) -> Source | None:
         return self.im_func.get_source()
 
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name in ("__setattr__", "__delattr__"):
+            attr = args[0].as_python_constant()
+            raise_attribute_error(
+                tx,
+                f"'method' object has no attribute '{attr}' and no __dict__ for setting new attributes",
+            )
+        return super().call_method(tx, name, args, kwargs)
+
     def reconstruct_pycode(self, codegen):
         # `source` denotes the bound method itself, which is the expression
         # that regenerates it. im_func's source is the plain function and
