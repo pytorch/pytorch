@@ -5293,6 +5293,21 @@ if HAS_CUDA_AND_TRITON:
             # index_put reads CPU indices, so it runs between two graphs.
             self.assertEqual(self.get_manager().new_graph_id().id, 2)
 
+        @config.patch("graph_partition", True)
+        @parametrize("dtype", (torch.complex64, torch.complex128))
+        @parametrize("copy_to_cpu", (False, True))
+        def test_graph_partition_index_put_output(self, dtype, copy_to_cpu):
+            def fn(x, index):
+                out = torch.zeros_like(x)
+                out[:, index] = x
+                return out.cpu() if copy_to_cpu else out
+
+            fn_c = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
+            index = torch.arange(16, device="cuda").flip(0)
+            for _ in range(3):
+                x = torch.randn(4, 16, device="cuda", dtype=dtype)
+                self.assertEqual(fn_c(x, index), fn(x, index), exact_device=True)
+
         @torch._inductor.config.patch("graph_partition", True)
         @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "needs flash attention")
         def test_graph_partition_sdpa_dropout_not_split(self):

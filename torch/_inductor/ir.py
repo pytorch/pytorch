@@ -9675,8 +9675,6 @@ class FallbackKernel(ExternKernelAlloc):
 
         # args that are aliased
         self.alias_names: list[str] = []
-        # args that are mutated AND returned from the op
-        self.mutation_names: list[str] = []
 
         if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             # We assume here that HOPs with FallbackKernel are functional.
@@ -9706,10 +9704,15 @@ class FallbackKernel(ExternKernelAlloc):
         # AOTAutograd functionalized them away); the only way for an in-place
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
-            self.mutation_names.append(tensor_args[0].get_name())
+            # Partition signatures resolve mutation buffers to their original names.
+            # Track the mutation separately so the returned alias keeps its own name.
+            arg = tensor_args[0]
+            self.mutation_outputs.append(
+                MutationOutput(NoneLayout(device=arg.get_device()), arg, self)
+            )
             # Record aliasing relationship so memory planning doesn't wrongly
             # reuse its storage.
-            self.alias_names.append(tensor_args[0].get_name())
+            self.alias_names.append(arg.get_name())
             return
 
         def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:
@@ -9917,11 +9920,6 @@ class FallbackKernel(ExternKernelAlloc):
             return []
         else:
             return self.alias_names
-
-    def get_mutation_names(self) -> Sequence[str]:
-        if len(self.mutation_names) > 1:
-            raise AssertionError("Expected len(self.mutation_names) <= 1")
-        return self.mutation_names
 
     def export_extern_kernel_node(self):  # type: ignore[no-untyped-def]
         """
