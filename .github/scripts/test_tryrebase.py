@@ -1,10 +1,17 @@
 from typing import Any
 from unittest import main, mock, TestCase
 
+from github_utils import GitHubComment
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from test_trymerge import mocked_gh_graphql
 from trymerge import GitHubPR
-from tryrebase import additional_rebase_failure_info, rebase_ghstack_onto, rebase_onto
+from tryrebase import (
+    additional_rebase_failure_info,
+    approve_pending_ci,
+    maintainer_approved_sha,
+    rebase_ghstack_onto,
+    rebase_onto,
+)
 
 
 def mocked_rev_parse(branch: str) -> str:
@@ -227,6 +234,143 @@ class TestRebase(TestCase):
                 )
             ],
         )
+
+    @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+    @mock.patch("gitutils.GitRepo._run_git")
+    @mock.patch("gitutils.GitRepo.rev_parse")
+    @mock.patch("tryrebase.gh_post_comment")
+    @mock.patch("tryrebase.approve_pending_ci")
+    def test_rebase_approves_ci(
+        self,
+        mocked_approve: Any,
+        mocked_post_comment: Any,
+        mocked_rp: Any,
+        mocked_run_git: Any,
+        mocked_gql: Any,
+    ) -> None:
+        "Tests CI of the rebased commit is approved only if the original was trusted"
+        rebased = False
+
+        def run_git(*args: str) -> str:
+            nonlocal rebased
+            rebased = rebased or args[0] == "rebase"
+            return make_mocked_run_git()(*args)
+
+        def rev_parse(branch: str) -> str:
+            if branch != "pull/31093/head":
+                return branch
+            return "rebased sha" if rebased else "orig sha"
+
+        mocked_run_git.side_effect = run_git
+        mocked_rp.side_effect = rev_parse
+        pr = GitHubPR("pytorch", "pytorch", 31093)
+        repo = GitRepo(get_git_repo_dir(), get_git_remote_name())
+        for kwargs in [
+            {},
+            {"approve_ci_sha": "other sha"},
+            {"approve_ci_sha": "orig sha", "dry_run": True},
+        ]:
+            rebased = False
+            rebase_onto(pr, repo, MAIN_BRANCH, **kwargs)
+        mocked_approve.assert_not_called()
+
+        rebased = False
+        mocked_approve.side_effect = RuntimeError("API error")
+        self.assertTrue(rebase_onto(pr, repo, MAIN_BRANCH, approve_ci_sha="orig sha"))
+        mocked_approve.assert_called_once_with(pr, "rebased sha")
+
+    @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+    @mock.patch("tryrebase.time")
+    @mock.patch("tryrebase.gh_fetch_url")
+    @mock.patch("tryrebase.gh_fetch_json_dict")
+    def test_approve_pending_ci(
+        self,
+        mocked_fetch_runs: Any,
+        mocked_fetch_url: Any,
+        mocked_time: Any,
+        mocked_gql: Any,
+    ) -> None:
+        "Tests held runs of the PR are approved once, across polls"
+        runs_url = "https://api.github.com/repos/pytorch/pytorch/actions/runs"
+
+        def run(
+            id: int, branch: str = "master", repo: str = "mingxiaoh/pytorch"
+        ) -> Any:
+            return {
+                "id": id,
+                "html_url": f"{runs_url}/{id}",
+                "head_branch": branch,
+                "head_repository": {"full_name": repo},
+            }
+
+        mocked_fetch_runs.side_effect = [
+            {"workflow_runs": [run(1)]},
+            {"workflow_runs": [run(1), run(2), run(3, branch="x"), run(4, repo="x")]},
+        ]
+        mocked_fetch_url.side_effect = [RuntimeError("API error"), None]
+        mocked_time.monotonic.side_effect = [0, 10, 60]
+        pr = GitHubPR("pytorch", "pytorch", 31093)
+        approve_pending_ci(pr, "sha")
+
+        params = {
+            "head_sha": "sha",
+            "event": "pull_request",
+            "status": "action_required",
+            "per_page": 100,
+        }
+        self.assertEqual(
+            mocked_fetch_runs.call_args_list, [mock.call(runs_url, params)] * 2
+        )
+        self.assertEqual(
+            [c.args[0] for c in mocked_fetch_url.call_args_list],
+            [f"{runs_url}/1/approve", f"{runs_url}/2/approve"],
+        )
+
+    @mock.patch("trymerge.gh_graphql", side_effect=mocked_gh_graphql)
+    @mock.patch("tryrebase.pr_runs")
+    @mock.patch("tryrebase.gh_fetch_json_dict")
+    def test_maintainer_approved_sha(
+        self, mocked_fetch_perm: Any, mocked_runs: Any, mocked_gql: Any
+    ) -> None:
+        "Tests CI is only approved for unedited merge comments from maintainers"
+        pr = GitHubPR("pytorch", "pytorch", 31093)
+        for editor, permission, sha, run_created, expected in [
+            (None, "write", "sha", "t0", "sha"),
+            (None, "admin", "sha", "t0", "sha"),
+            (None, "read", "sha", "t0", None),
+            (None, "none", "sha", "t0", None),
+            ("someone", "write", "sha", "t0", None),
+            (None, "write", None, "t0", None),
+            # CI of sha was triggered after the comment, e.g. by a backdated commit
+            (None, "write", "sha", "t2", None),
+            (None, RuntimeError("404"), "sha", "t0", None),
+        ]:
+            comment = GitHubComment(
+                body_text="@pytorchbot merge -r",
+                created_at="t1",
+                author_login="maintainer",
+                author_url=None,
+                author_association="CONTRIBUTOR",
+                editor_login=editor,
+                database_id=1,
+                url="",
+            )
+            if isinstance(permission, Exception):
+                mocked_fetch_perm.side_effect = permission
+            else:
+                mocked_fetch_perm.side_effect = None
+                mocked_fetch_perm.return_value = {"permission": permission}
+            mocked_runs.return_value = [{"created_at": run_created}]
+            with (
+                mock.patch.object(pr, "get_comment_by_id", return_value=comment),
+                mock.patch.object(pr, "get_commit_sha_at_comment", return_value=sha),
+            ):
+                self.assertEqual(maintainer_approved_sha(pr, 1), expected)
+        self.assertIsNone(maintainer_approved_sha(pr, None))
+        mocked_fetch_perm.assert_called_with(
+            "https://api.github.com/repos/pytorch/pytorch/collaborators/maintainer/permission"  # @lint-ignore
+        )
+        mocked_runs.assert_called_with(pr, "sha")
 
 
 if __name__ == "__main__":

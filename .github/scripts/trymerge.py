@@ -66,6 +66,8 @@ if TYPE_CHECKING:
 MERGE_IN_PROGRESS_LABEL = "merging"
 MERGE_COMPLETE_LABEL = "merged"
 
+MERGEBOT_LOGIN = "pytorchmergebot"
+
 
 class JobCheckState(NamedTuple):
     name: str
@@ -420,6 +422,30 @@ query ($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 """
 )
 
+GH_GET_PR_LAST_FORCE_PUSH_QUERY = """
+query ($owner: String!, $name: String!, $number: Int!) {
+  repository(name: $name, owner: $owner) {
+    pullRequest(number: $number) {
+      timelineItems(last: 1, itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT]) {
+        nodes {
+          ... on HeadRefForcePushedEvent {
+            actor {
+              login
+            }
+            beforeCommit {
+              oid
+            }
+            afterCommit {
+              oid
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
 GH_GET_REPO_SUBMODULES = """
 query ($owner: String!, $name: String!) {
   repository(owner: $owner, name: $name) {
@@ -734,6 +760,7 @@ def parse_args() -> Any:
     parser.add_argument("--ignore-current", action="store_true")
     parser.add_argument("--check-mergeability", action="store_true")
     parser.add_argument("--comment-id", type=int)
+    parser.add_argument("--rebased", action="store_true")
     parser.add_argument("--reason", type=str)
     parser.add_argument("pr_num", type=int)
     return parser.parse_args()
@@ -1181,6 +1208,24 @@ class GitHubPR:
         print(f"Did not find comment with id {comment_id} in the PR timeline")
         return None
 
+    def is_mergebot_rebase_of(self, sha: str) -> bool:
+        """Whether the PR head is mergebot's rebase of sha, e.g. by `merge -r`."""
+        rc = gh_graphql(
+            GH_GET_PR_LAST_FORCE_PUSH_QUERY,
+            name=self.project,
+            owner=self.org,
+            number=self.pr_num,
+        )
+        nodes = rc["data"]["repository"]["pullRequest"]["timelineItems"]["nodes"]
+        if not nodes:
+            return False
+        push = nodes[-1]
+        return (
+            (push["actor"] or {}).get("login") == MERGEBOT_LOGIN
+            and (push["beforeCommit"] or {}).get("oid") == sha
+            and (push["afterCommit"] or {}).get("oid") == self.last_commit_sha()
+        )
+
     def get_pr_creator_login(self) -> str:
         return cast(str, self.info["author"]["login"])
 
@@ -1515,6 +1560,7 @@ class GitHubPR:
         comment_id: int,
         ignore_current_checks: set[tuple[int, str]] | None = None,
         greenlight_wait: GreenlightWaitWindow | None = None,
+        rebased: bool = False,
     ) -> None:
         skip_internal_checks = can_skip_internal_checks(self, comment_id)
         # Raises exception if matching rule is not found
@@ -1568,6 +1614,7 @@ class GitHubPR:
                 comment_id,
                 ghstack_prs=ghstack_prs,
                 ignore_current_checks=ignore_current_checks,
+                rebased=rebased,
             )
 
             # Log, but do not block on, a docker land race.
@@ -1645,9 +1692,11 @@ class GitHubPR:
         skip_all_rule_checks: bool = False,
         ghstack_prs: list[tuple[GitHubPR, str]] | None = None,
         ignore_current_checks: set[tuple[int, str]] | None = None,
+        rebased: bool = False,
     ) -> list[GitHubPR]:
         """
         :param skip_all_rule_checks: If true, skips all rule checks on ghstack PRs, useful for dry-running merge locally
+        :param rebased: If true, the merge command rebased the PR before this merge
         """
         branch_to_merge_into = self.default_branch() if branch is None else branch
         if repo.current_branch() != branch_to_merge_into:
@@ -1682,6 +1731,13 @@ class GitHubPR:
 
         # Validate that this commit is the latest commit on the PR
         latest_commit = self.last_commit_sha()
+        if (
+            rebased
+            and commit_to_merge != latest_commit
+            and self.is_mergebot_rebase_of(commit_to_merge)
+        ):
+            print(f"Merging {latest_commit}, mergebot's rebase of {commit_to_merge}")
+            commit_to_merge = latest_commit
         if commit_to_merge != latest_commit:
             raise RuntimeError(
                 f"Commit {commit_to_merge} was HEAD when comment {comment_id} was posted "
@@ -3082,6 +3138,7 @@ def merge(
     timeout_minutes: int = 400,
     stale_pr_days: int = 3,
     ignore_current: bool = False,
+    rebased: bool = False,
 ) -> None:
     initial_commit_sha = pr.last_commit_sha()
     pr_link = f"https://github.com/{pr.org}/{pr.project}/pull/{pr.pr_num}"
@@ -3120,6 +3177,7 @@ def merge(
             skip_mandatory_checks=skip_mandatory_checks,
             comment_id=comment_id,
             greenlight_wait=None,
+            rebased=rebased,
         )
 
     # Check for approvals
@@ -3226,6 +3284,7 @@ def merge(
                 comment_id=comment_id,
                 ignore_current_checks=ignore_current_checks,
                 greenlight_wait=greenlight_wait,
+                rebased=rebased,
             )
         except MandatoryChecksMissingError as ex:
             last_exception = str(ex)
@@ -3360,6 +3419,7 @@ def main() -> None:
             dry_run=args.dry_run,
             skip_mandatory_checks=args.force,
             ignore_current=args.ignore_current,
+            rebased=args.rebased,
         )
     except Exception as e:
         handle_exception(e)
