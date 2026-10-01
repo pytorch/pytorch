@@ -34,12 +34,13 @@ namespace c10d::symmetric_memory {
 // group when the caller has not already.
 //
 // Under graph capture the record and wait become graph nodes, ordering
-// streams forked inside one capture. The event belongs to the capture it was
-// recorded in, so the wait is skipped when the next operation runs in a
-// different capture context. A program that warms up on one stream and then
-// captures on another hits that on its first captured operation, which is the
-// normal pattern and not something a caller can act on, so the skip is logged
-// at debug level rather than warned about.
+// streams forked inside one capture. An event can only be waited on from the
+// capture context it was recorded in, so the ordering is per context: eager
+// operations are ordered among themselves, and so are the operations of one
+// capture, each context keeping its own previous stream and event. An
+// operation in another context therefore never drops the ordering between
+// two eager operations, even when a capture starts without synchronizing the
+// device first (a raw CUDAGraph::capture_begin).
 class TORCH_API GroupStreamGuard {
  public:
   struct State;
@@ -55,17 +56,17 @@ class TORCH_API GroupStreamGuard {
   GroupStreamGuard& operator=(GroupStreamGuard&&) = delete;
 
  private:
-  void init_(
-      const std::string& group_name,
-      const c10::intrusive_ptr<c10d::ProcessGroup>& pg);
+  struct Frontier;
+
+  void init_(const c10::intrusive_ptr<c10d::ProcessGroup>& pg);
 
   std::shared_ptr<State> state_;
   // Held until destruction, which is after the kernel launch at every call
   // site. Do not shorten this scope: see the class comment.
   std::unique_lock<std::mutex> lock_;
-  // The stream this operation launched on; the event is recorded here on
-  // destruction.
-  std::optional<c10::cuda::CUDAStream> stream_;
+  // This operation's capture context in state_, whose last_stream is the
+  // stream it launched on. The event is recorded there on destruction.
+  Frontier* frontier_ = nullptr;
 };
 
 } // namespace c10d::symmetric_memory
