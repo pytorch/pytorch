@@ -445,9 +445,22 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         except NotImplementedError as exc:
             log.debug("NVGEMM cannot orient fused reductions: %s", exc)
             return NVGemmVerticalFusionDecision.DEFER
+        if epilogue_program.has_composite_generated_reduction_plan:
+            log.debug("NVGEMM direct EFC supports one generated reduction")
+            return NVGemmVerticalFusionDecision.DEFER
         if reduction_plan is not None and not all(
             variant.supports_reduction(reduction_plan) for variant in variants
         ):
+            return NVGemmVerticalFusionDecision.DEFER
+        if isinstance(ir_node, MultiTemplateBuffer) and not any(
+            isinstance(choice, NVUniversalGemmCaller)
+            and choice.supports_epilogue_fusion
+            and self._supports_reduction_layout(choice, epilogue_program.min_tile_shape)
+            for choice in ir_node._choices
+        ):
+            log.debug(
+                "NVGEMM epilogue fusion: no EFC kernel supports the reduction layout"
+            )
             return NVGemmVerticalFusionDecision.DEFER
 
         for s_node in all_scheduler_nodes:
