@@ -19,6 +19,10 @@ import threading
 from collections import OrderedDict
 from typing import Any, cast, TYPE_CHECKING
 
+
+if TYPE_CHECKING:
+    import torch
+
 from torch._inductor.codegen.common import (
     IndentedBuffer,
     Kernel,
@@ -237,6 +241,9 @@ def _compile_nvgemm(
     fallback_fn=None,
     cc: int | None = None,
     base_kernel=None,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
+    kernel_output_dtype: torch.dtype | str | None = None,
 ):
     """Compile an NVGEMM artifact, trying a fallback (disk cache) first.
 
@@ -274,6 +281,9 @@ def _compile_nvgemm(
             args=args if cc is not None else None,
             cc=cc,
             base_kernel=base_kernel,
+            prefetch_mode=prefetch_mode,
+            use_pdl=use_pdl,
+            kernel_output_dtype=kernel_output_dtype,
             epilogue_specialization=_local_reduce_specialization(args_kwargs),
         )
 
@@ -485,7 +495,12 @@ def _worker_nvgemm_autotuning_precompile(
         # operator space. Done inside the patched region since construction may
         # query max_active_clusters, which the worker can't get from the driver.
         base_kernel = None
+        prefetch_mode = None
+        use_pdl = None
         if metadata is not None:
+            design = getattr(metadata, "design", None)
+            prefetch_mode = "1" if getattr(design, "use_prefetch", False) else "0"
+            use_pdl = getattr(design, "use_pdl", False)
             try:
                 base_kernel = metadata.operator_class(metadata)
             except Exception:
@@ -507,6 +522,8 @@ def _worker_nvgemm_autotuning_precompile(
             epilogue_source=epilogue_source,
             cc=worker_cc,
             base_kernel=base_kernel,
+            prefetch_mode=prefetch_mode,
+            use_pdl=use_pdl,
         )
 
         if was_compiled:
@@ -636,6 +653,9 @@ def _lookup_gemm_kernel(
     args: Any | None = None,
     cc: int | None = None,
     base_kernel: Any | None = None,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
+    kernel_output_dtype: torch.dtype | str | None = None,
     epilogue_specialization: tuple = (),
 ):
     from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
@@ -658,7 +678,14 @@ def _lookup_gemm_kernel(
         # args (e.g. a swap_ab kernel selected for the transposed problem while
         # the worker holds the original operands); fall back to the manifest.
         if kernel is None and fast:
-            kernel = get_kernel_by_name_via_args(kernel_name, args, cc)
+            kernel = get_kernel_by_name_via_args(
+                kernel_name,
+                args,
+                cc,
+                prefetch_mode=prefetch_mode,
+                use_pdl=use_pdl,
+                kernel_output_dtype=kernel_output_dtype,
+            )
         if kernel is None:
             kernel = get_kernel_by_name(kernel_name)
         if kernel is None:
@@ -666,7 +693,14 @@ def _lookup_gemm_kernel(
         return kernel
 
     if base_kernel is None and fast:
-        base_kernel = get_kernel_by_name_via_args(kernel_name, args, cc)
+        base_kernel = get_kernel_by_name_via_args(
+            kernel_name,
+            args,
+            cc,
+            prefetch_mode=prefetch_mode,
+            use_pdl=use_pdl,
+            kernel_output_dtype=kernel_output_dtype,
+        )
     epilogue_args = getattr(args, "epilogue", None) or epilogue_args
     kernel = get_efc_kernel_with_epilogue(
         kernel_name,
@@ -901,6 +935,9 @@ def _nvgemm_run(
     has_epilogue: bool = False,
     aux_tensors: tuple = (),
     swap_ab: bool = False,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
+    kernel_output_dtype: torch.dtype | str | None = None,
 ):
     if swap_ab and len(input_tensors) >= 2:
         import torch
@@ -1037,6 +1074,9 @@ def _nvgemm_run(
             epilogue_source=epilogue_source,
             fallback_fn=disk_fallback,
             cc=_current_target_sm(dev_idx).cc,
+            prefetch_mode=prefetch_mode,
+            use_pdl=use_pdl,
+            kernel_output_dtype=kernel_output_dtype,
         )
 
         if was_compiled:
@@ -1120,6 +1160,10 @@ def _nvgemm_precompile(
     input_param_names: list[str],
     variant_kwargs: dict | None = None,
     max_active_clusters: int | None = None,
+    swap_ab: bool = False,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
+    kernel_output_dtype: torch.dtype | str | None = None,
 ):
     """Precompile an NVGEMM kernel in a subprocess for parallel compilation.
 
@@ -1157,6 +1201,11 @@ def _nvgemm_precompile(
         cache_key = _create_gemm_cache_key(input_tensors, out)
         mem_key = (cache_key, device_index)
         if mem_key not in compiled_cache:
+            cc = (
+                device_capability[0] * 10 + device_capability[1]
+                if device_capability is not None
+                else None
+            )
             artifact, _, _, _ = _compile_nvgemm(
                 variant_name,
                 input_tensors,
@@ -1164,6 +1213,10 @@ def _nvgemm_precompile(
                 accumulator_type,
                 kernel_name=kernel_name,
                 args_kwargs=variant_kwargs,
+                cc=cc,
+                prefetch_mode=prefetch_mode,
+                use_pdl=use_pdl,
+                kernel_output_dtype=kernel_output_dtype,
             )
             disk_cache_set(
                 disk_fn_cache,
@@ -1313,6 +1366,12 @@ class NVUniversalGemmKernel(Kernel):
     def render(self) -> str:
         """Render the Python source for the NVGEMM kernel wrapper."""
         kernel_name_str = self.kernel_metadata["kernel_name"]
+        prefetch_mode = "1" if self.kernel_metadata.get("use_prefetch", False) else "0"
+        use_pdl = bool(self.kernel_metadata.get("use_pdl", False))
+        kernel_output_dtype = self.kernel_metadata.get(
+            "output_dtype", self.output_node.get_dtype()
+        )
+        kernel_output_dtype_name = str(kernel_output_dtype).removeprefix("torch.")
         acc_dtype_str = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
             self.accumulator_type, "cutlass.Float32"
         )
@@ -1553,6 +1612,9 @@ class NVUniversalGemmKernel(Kernel):
                 code.writeline(f"aux_tensors={aux_tensors_expr},")
                 if self.swap_ab:
                     code.writeline("swap_ab=True,")
+                code.writeline(f"prefetch_mode={prefetch_mode!r},")
+                code.writeline(f"use_pdl={use_pdl!r},")
+                code.writeline(f"kernel_output_dtype={kernel_output_dtype_name!r},")
             code.writeline(")")
 
         # -- Precompile hook --
@@ -1581,6 +1643,11 @@ class NVUniversalGemmKernel(Kernel):
                 code.writeline("input_param_names=_INPUT_PARAM_NAMES,")
                 code.writeline("variant_kwargs=_VARIANT_KWARGS,")
                 code.writeline("max_active_clusters=kwargs.get('max_active_clusters'),")
+                if self.swap_ab:
+                    code.writeline("swap_ab=True,")
+                code.writeline(f"prefetch_mode={prefetch_mode!r},")
+                code.writeline(f"use_pdl={use_pdl!r},")
+                code.writeline(f"kernel_output_dtype={kernel_output_dtype_name!r},")
             code.writeline(")")
 
         return code.getvalue()

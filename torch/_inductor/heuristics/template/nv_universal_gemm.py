@@ -3,11 +3,11 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._inductor import config
-from torch._inductor.utils import ensure_nvmatmul_heuristics_available
+from torch._inductor.utils import ensure_nvmatmul_heuristics_available, has_free_symbols
 from torch._logging import getArtifactLogger
 from torch.utils._ordered_set import OrderedSet
 
@@ -28,6 +28,65 @@ autotuning_log = getArtifactLogger(__name__, "autotuning")
 # tile_k excluded because nvMatmulHeuristics and cutlass.operators use it to mean different things.
 # TODO(nikhilap): Extend config key for stages/split_k https://github.com/pytorch/pytorch/issues/177578
 ConfigKey = tuple[int, int, int, int]
+
+_NVFP4_MAX_PROFILING_CONFIGS = 3
+_NVFP4_AUTOTUNE_CUDAGRAPH_UNROLL = 16
+
+# Hand-picked configs in the space nvMatmulHeuristics does not currently
+# explore. The final entries are NVFP4 oracle-best configs from an 83-shape
+# LLM sweep; together, the supplemental pool reaches the oracle-best config on
+# 73 of those shapes.
+_SUPPLEMENT_CONFIGS: tuple[ConfigKey, ...] = (
+    (64, 128, 1, 1),
+    (64, 128, 1, 2),
+    (64, 128, 1, 4),
+    (64, 128, 1, 8),
+    (64, 128, 1, 16),
+    (64, 256, 1, 8),
+    (64, 256, 1, 16),
+    (64, 32, 1, 2),
+    (64, 32, 1, 4),
+    (128, 64, 1, 1),
+    (128, 64, 1, 4),
+    (128, 64, 2, 1),
+    (128, 128, 1, 8),
+    (128, 128, 1, 16),
+    (128, 128, 2, 2),
+    (128, 128, 2, 4),
+    (128, 128, 2, 8),
+    (128, 192, 1, 1),
+    (128, 192, 1, 2),
+    (128, 192, 1, 4),
+    (128, 192, 2, 1),
+    (128, 192, 2, 2),
+    (128, 256, 1, 4),
+    (128, 256, 1, 8),
+    (128, 256, 1, 16),
+    (128, 256, 2, 1),
+    (128, 256, 2, 8),
+    (256, 192, 1, 1),
+    (256, 192, 1, 2),
+    (256, 192, 1, 4),
+    (256, 192, 2, 1),
+    (256, 256, 2, 1),
+    (256, 256, 2, 4),
+    (256, 256, 4, 2),
+    (256, 256, 4, 4),
+    (256, 256, 8, 1),
+    (256, 256, 8, 2),
+    (256, 128, 2, 1),
+    (256, 128, 2, 2),
+    (128, 64, 1, 2),
+    (128, 128, 1, 1),
+    (128, 128, 1, 4),
+    (128, 256, 1, 1),
+    (256, 64, 2, 1),
+    (256, 128, 4, 1),
+    (256, 192, 2, 2),
+    (256, 192, 4, 1),
+    (256, 192, 4, 2),
+    (256, 256, 4, 1),
+)
 
 
 @dataclass
@@ -100,6 +159,169 @@ def _make_config_key_from_heuristics_kernel(kernel) -> ConfigKey:
     )
 
 
+def is_nvfp4_problem(
+    is_scaled_gemm: bool,
+    input_dtype_a: torch.dtype,
+    input_dtype_b: torch.dtype | None,
+    scale_type_a: Any | None,
+    scale_type_b: Any | None,
+) -> bool:
+    """Whether this is the block-scaled NVFP4 recipe tuned below."""
+    from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
+
+    return (
+        is_scaled_gemm
+        and input_dtype_a == torch.float4_e2m1fn_x2
+        and input_dtype_b == torch.float4_e2m1fn_x2
+        and scale_type_a == ScalingType.BlockWise1x16
+        and scale_type_b == ScalingType.BlockWise1x16
+    )
+
+
+def use_swap_ab_for_scaled_gemm(
+    input_dtype_a: torch.dtype,
+    input_dtype_b: torch.dtype,
+    scale_type_a: Any,
+    scale_type_b: Any,
+    logical_m: int,
+    logical_n: int,
+) -> bool:
+    """Expose the transposed candidate family for decode-shaped NVFP4."""
+    return config.nvgemm_swap_ab or (
+        logical_m <= 256
+        and logical_n >= 1024
+        and is_nvfp4_problem(
+            True,
+            input_dtype_a,
+            input_dtype_b,
+            scale_type_a,
+            scale_type_b,
+        )
+    )
+
+
+def nvgemm_max_configs(is_nvfp4: bool, available: int) -> int:
+    """Bound the measured candidate count while retaining the global cap."""
+    general_limit = config.nvgemm_max_profiling_configs
+    if not general_limit:
+        return available
+    if is_nvfp4:
+        return min(general_limit, _NVFP4_MAX_PROFILING_CONFIGS)
+    return general_limit
+
+
+def nvgemm_cudagraph_unroll(
+    is_scaled_gemm: bool,
+    input_dtype_a: torch.dtype,
+    input_dtype_b: torch.dtype | None,
+    output_shape: torch.Size | list[int] | tuple[int, ...],
+    scale_type_a: Any | None,
+    scale_type_b: Any | None,
+    allow_mixed_backend_unroll: bool = False,
+) -> int:
+    """Return one common CUDA-graph unroll for an NVGEMM problem.
+
+    Candidate-dependent unrolls would make the fixed replay overhead differ
+    across choices, so this policy depends only on the GEMM problem. The
+    scoped value is limited to the decode-range NVFP4 cases measured in LLM
+    inference. Other problems retain the global replay count so candidates in
+    the same autotune decision stay comparable.
+    """
+    from torch._inductor.utils import _is_only_autotune_backend
+
+    if (
+        is_nvfp4_problem(
+            is_scaled_gemm,
+            input_dtype_a,
+            input_dtype_b,
+            scale_type_a,
+            scale_type_b,
+        )
+        and len(output_shape) == 2
+        and output_shape[0] <= 256
+        and (_is_only_autotune_backend("NVGEMM") or allow_mixed_backend_unroll)
+    ):
+        return _NVFP4_AUTOTUNE_CUDAGRAPH_UNROLL
+    return max(1, config.autotune_cudagraph_benchmarking_iters)
+
+
+def nvgemm_cold_cache_shape(
+    output_shape: torch.Size | list[int] | tuple[int, ...],
+) -> bool:
+    """Whether to rotate weights for the small-M inference regime."""
+    return len(output_shape) == 2 and 0 < output_shape[0] <= 256
+
+
+def _nvfp4_candidate_configs(
+    *,
+    logical_m: int,
+    logical_n: int,
+    packed_k: int,
+    n_is_static: bool,
+    swap_ab: bool,
+) -> tuple[OrderedSet[ConfigKey], OrderedSet[ConfigKey], OrderedSet[ConfigKey]]:
+    """Return primary, all-variant, and prefetch configs for one NVFP4 shape."""
+    targeted: OrderedSet[ConfigKey] = OrderedSet()
+    all_variants: OrderedSet[ConfigKey] = OrderedSet()
+    prefetch: OrderedSet[ConfigKey] = OrderedSet()
+
+    # nvMatmulHeuristics currently ranks only 128-wide MMA tiles for these
+    # large-M projections. The 256x192 c2x2 family is consistently faster.
+    if not swap_ab and logical_m >= 1024 and config.nvgemm_supplement_configs:
+        config_key = (256, 192, 2, 2)
+        targeted.add(config_key)
+        all_variants.add(config_key)
+
+    # Medium-M native-orientation QKV and projection winners.
+    if not swap_ab and 64 < logical_m <= 256:
+        targeted.update(
+            (
+                (128, 64, 1, 1),
+                (128, 64, 1, 2),
+                (128, 128, 1, 1),
+                (128, 128, 1, 2),
+            )
+        )
+        if logical_n <= 16384:
+            prefetch.update(
+                (
+                    (128, 64, 1, 4),
+                    (128, 128, 1, 2),
+                    (128, 128, 1, 4),
+                )
+            )
+
+    # Medium-M transposed projection winners from a complete candidate sweep.
+    if swap_ab and n_is_static and 64 < logical_m <= 256 and logical_n >= 1024:
+        targeted.update(((256, 128, 4, 1), (256, 64, 2, 2), (128, 64, 2, 2)))
+        if logical_n <= 16384:
+            prefetch.update(((256, 64, 2, 2), (256, 64, 4, 2), (128, 64, 2, 2)))
+
+    # Batch 33-64 transposed projection winners.
+    if swap_ab and n_is_static and 32 < logical_m <= 64 and logical_n >= 1024:
+        targeted.add((128, 64, 1, 1))
+        prefetch.update(((256, 64, 2, 2), (256, 64, 4, 2)))
+
+    # Native batch 33-64 down-projection winner.
+    if not swap_ab and 32 < logical_m <= 64 and logical_n >= 1024 and packed_k >= 3000:
+        targeted.add((256, 64, 2, 2))
+
+    # Decode-shaped transposed winners absent from the CUTLASS3 discovery set.
+    if swap_ab and n_is_static and logical_m <= 32 and logical_n >= 1024:
+        targeted.update(((128, 32, 1, 1), (128, 64, 1, 1), (128, 32, 4, 1)))
+        logical_k = 2 * packed_k
+        if min(logical_n, logical_k) <= 4608 or max(logical_n, logical_k) <= 8192:
+            targeted.add((128, 32, 2, 1))
+            prefetch.add((128, 32, 4, 1))
+        if logical_m <= 8:
+            targeted.update(((128, 8, 1, 1), (128, 8, 4, 1), (128, 16, 1, 1)))
+
+    if config.nvgemm_supplement_configs:
+        targeted.update(_SUPPLEMENT_CONFIGS)
+
+    return targeted, all_variants, prefetch
+
+
 class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
     """
     Heuristics for NVGEMM kernel selection using nvMatmulHeuristics.
@@ -119,6 +341,10 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         inputs: MMKernelInputs,
         count: int,
         accumulator_type: torch.dtype = torch.float32,
+        *,
+        is_nvfp4: bool = False,
+        swap_ab: bool = False,
+        fallback_count: int | None = None,
     ) -> list:
         """
         Filter and rank kernels using nvMatmulHeuristics.
@@ -138,10 +364,26 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         Returns:
             Filtered list of kernels, sorted by estimated performance
         """
+        _, symbolic_n, _ = inputs.mnk_symbolic()
+        n_is_static = not has_free_symbols((symbolic_n,))
+        if is_nvfp4 and not n_is_static:
+            kernels = [
+                kernel
+                for kernel in kernels
+                if getattr(kernel.metadata.design, "tile_shape", (0, 64))[1] >= 64
+            ]
+
+        def is_primary_variant(kernel) -> bool:
+            return not getattr(kernel.metadata.design, "use_prefetch", False)
+
+        primary_kernels = [kernel for kernel in kernels if is_primary_variant(kernel)]
+        fallback_kernels = primary_kernels or kernels
+        fallback_count = count if fallback_count is None else fallback_count
         if not self.should_run(inputs):
-            return kernels[:count]
+            return fallback_kernels[:fallback_count]
 
         m, n, k = inputs.mnk_hinted()
+        logical_m, logical_n = (n, m) if swap_ab else (m, n)
         batch_size = inputs.batch_hinted()
         dtype_a = inputs.dtype(inputs._mat1_idx)
         dtype_b = inputs.dtype(inputs._mat2_idx)
@@ -153,8 +395,11 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         config_to_kernels = self._extract_config_to_kernels(kernels)
 
         if not config_to_kernels:
-            log.debug("Could not extract kernel configs, using first %d kernels", count)
-            return kernels[:count]
+            log.debug(
+                "Could not extract kernel configs, using first %d kernels",
+                fallback_count,
+            )
+            return fallback_kernels[:fallback_count]
 
         heuristic_configs = self._get_heuristic_configs(
             m,
@@ -172,8 +417,10 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         )
 
         if not heuristic_configs:
-            log.debug("No heuristic configs found, using first %d kernels", count)
-            return kernels[:count]
+            log.debug(
+                "No heuristic configs found, using first %d kernels", fallback_count
+            )
+            return fallback_kernels[:fallback_count]
 
         # Match kernels to each distinct heuristic config at its best estimate.
         config_runtimes: dict[ConfigKey, float] = {}
@@ -184,93 +431,78 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             )
 
         matched: list[tuple] = []
+
         for key, runtime in config_runtimes.items():
             kernels_for_key = config_to_kernels.get(key)
             if not kernels_for_key:
                 continue
             for kernel in kernels_for_key:
-                matched.append((kernel, runtime))
+                if is_primary_variant(kernel):
+                    matched.append((kernel, runtime))
 
         if not matched:
             log.debug(
-                "No kernels matched heuristic configs, using first %d kernels", count
+                "No kernels matched heuristic configs, using first %d kernels",
+                fallback_count,
             )
-            return kernels[:count]
+            return fallback_kernels[:fallback_count]
 
         matched.sort(key=lambda x: x[1])
         selected = matched[:count]
         result = [k for k, _ in selected]
 
-        # Supplement with hand-picked configs in the space nvMatmulHeuristics doesn't currently explore.
-        if config.nvgemm_supplement_configs:
-            _SUPPLEMENT_DESIGN_CONFIGS: OrderedSet[ConfigKey] = OrderedSet(
-                [
-                    (64, 128, 1, 1),
-                    (64, 128, 1, 2),
-                    (64, 128, 1, 4),
-                    (64, 128, 1, 8),
-                    (64, 128, 1, 16),
-                    (64, 256, 1, 8),
-                    (64, 256, 1, 16),
-                    (64, 32, 1, 2),
-                    (64, 32, 1, 4),
-                    (128, 64, 1, 1),
-                    (128, 64, 1, 4),
-                    (128, 64, 2, 1),
-                    (128, 128, 1, 8),
-                    (128, 128, 1, 16),
-                    (128, 128, 2, 2),
-                    (128, 128, 2, 4),
-                    (128, 128, 2, 8),
-                    (128, 192, 1, 1),
-                    (128, 192, 1, 2),
-                    (128, 192, 1, 4),
-                    (128, 192, 2, 1),
-                    (128, 192, 2, 2),
-                    (128, 256, 1, 4),
-                    (128, 256, 1, 8),
-                    (128, 256, 1, 16),
-                    (128, 256, 2, 1),
-                    (128, 256, 2, 8),
-                    (256, 192, 1, 1),
-                    (256, 192, 1, 2),
-                    (256, 192, 1, 4),
-                    (256, 192, 2, 1),
-                    (256, 256, 2, 1),
-                    (256, 256, 2, 4),
-                    (256, 256, 4, 2),
-                    (256, 256, 4, 4),
-                    (256, 256, 8, 1),
-                    (256, 256, 8, 2),
-                    (256, 128, 2, 1),
-                    (256, 128, 2, 2),
-                    # NVFP4 oracle-best configs (per-shape autotune winners over
-                    # an 83-shape LLM sweep) that nvMatmulHeuristics does not
-                    # propose; adding them lets autotune reach the oracle-best
-                    # config on 73/83 of those shapes.
-                    (128, 64, 1, 2),
-                    (128, 128, 1, 1),
-                    (128, 128, 1, 4),
-                    (128, 256, 1, 1),
-                    (256, 64, 2, 1),
-                    (256, 128, 4, 1),
-                    (256, 192, 2, 2),
-                    (256, 192, 4, 1),
-                    (256, 192, 4, 2),
-                    (256, 256, 4, 1),
-                ]
+        targeted_configs: OrderedSet[ConfigKey] = OrderedSet()
+        all_kernel_variants_configs: OrderedSet[ConfigKey] = OrderedSet()
+        prefetch_configs: OrderedSet[ConfigKey] = OrderedSet()
+        if is_nvfp4:
+            (
+                targeted_configs,
+                all_kernel_variants_configs,
+                prefetch_configs,
+            ) = _nvfp4_candidate_configs(
+                logical_m=logical_m,
+                logical_n=logical_n,
+                packed_k=k,
+                n_is_static=n_is_static,
+                swap_ab=swap_ab,
             )
-            selected_design_keys = OrderedSet(
-                [_make_config_key_from_kernel_design(k.metadata.design) for k in result]
-            )
-            for kernel in kernels:
-                design_key = _make_config_key_from_kernel_design(kernel.metadata.design)
-                if (
-                    design_key not in selected_design_keys
-                    and design_key in _SUPPLEMENT_DESIGN_CONFIGS
-                ):
-                    result.append(kernel)
-                    selected_design_keys.add(design_key)
+        elif config.nvgemm_supplement_configs:
+            targeted_configs.update(_SUPPLEMENT_CONFIGS)
+
+        # Heuristic matching uses per-CTA tile shapes, but targeted configs
+        # describe the raw generated design. Keep those two namespaces
+        # separate so 2-CTA designs remain discoverable as supplements.
+        design_config_to_kernels: dict[ConfigKey, list] = defaultdict(list)
+        for kernel in kernels:
+            if key := _make_config_key_from_kernel_design(kernel.metadata.design):
+                design_config_to_kernels[key].append(kernel)
+
+        selected_design_keys = OrderedSet(
+            key
+            for kernel in result
+            if (key := _make_config_key_from_kernel_design(kernel.metadata.design))
+            is not None
+        )
+        for key, key_kernels in design_config_to_kernels.items():
+            if key in all_kernel_variants_configs:
+                for kernel in key_kernels:
+                    if is_primary_variant(kernel) and kernel not in result:
+                        result.append(kernel)
+            elif key not in selected_design_keys and key in targeted_configs:
+                primary = next(filter(is_primary_variant, key_kernels), None)
+                if primary is not None:
+                    result.append(primary)
+            if key in prefetch_configs:
+                prefetch = next(
+                    (
+                        kernel
+                        for kernel in key_kernels
+                        if getattr(kernel.metadata.design, "use_prefetch", False)
+                    ),
+                    None,
+                )
+                if prefetch is not None and prefetch not in result:
+                    result.append(prefetch)
 
         log.debug(
             "Heuristic filtered to %d kernels from %d total", len(result), len(kernels)
