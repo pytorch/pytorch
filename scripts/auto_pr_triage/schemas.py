@@ -1,43 +1,235 @@
-"""Data schemas and shared identity constraints for Auto PR Triage."""
+"""Typed records for every Auto PR Triage stage boundary.
+
+Sections follow the pipeline:
+
+  assess_intake -> intake.json -> build_ownership_input -> LLM input
+  -> LLM answer -> validate_ownership -> ownership.json -> plan_actions
+  -> action plan (job output) -> apply_actions (live only)
+"""
 
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from typing import Any
-
-from codepath_owners import (
-    CODEPATH_OWNERS_PATH,
-    OWNER_RE as CODEPATH_OWNER_RE,
-    REPOSITORY_RE,
-)
-from ownership import (
-    EXTRA_OWNERSHIP_METADATA_PATH,
-    OWNER_ID_RE,
-    SHA_RE,
-    TARGET_BASE_REF,
+from dataclasses import asdict, dataclass, field, fields, is_dataclass
+from types import UnionType
+from typing import (
+    Any,
+    ClassVar,
+    get_args,
+    get_origin,
+    get_type_hints,
+    Literal,
+    TYPE_CHECKING,
 )
 
-
-TRIAGE_INPUT_SCHEMA_VERSION = 10
-MAX_CODEPATH_OWNERS = 100
-MAX_ADDITIONAL_OWNERS = 8
-MAX_UNCOVERED_CONCERNS = 8
-MAX_OWNER_PROVENANCE_FILES = 16
-MAX_OWNER_EVIDENCE_ITEMS = 3
-MAX_DIFF_EXCERPT_CHARS = 1_200
-MAX_ANALYSIS_RESULT_BYTES = 64_000
+from identifiers import CODEPATH_OWNER_RE, owner_label, TEAM_OWNER_ID_RE, USER_HANDLE_RE
 
 
-def should_run_ownership_analysis(
+if TYPE_CHECKING:
+    from typing import Self
+
+
+# =============================================================================
+# Record machinery
+# Every boundary record derives from _Record: exact field type checks, JSON
+# round trips, and JSON Schema generation from annotations and field bounds.
+# =============================================================================
+
+
+def _matches_type(*, value: Any, hint: Any) -> bool:
+    """Return whether a value exactly matches a supported field annotation."""
+
+    origin, args = get_origin(hint), get_args(hint)
+    if hint is Any:
+        return True
+    if origin is UnionType:
+        return any(_matches_type(value=value, hint=arg) for arg in args)
+    if origin is Literal:
+        return any(type(value) is type(arg) and value == arg for arg in args)
+    if origin is tuple:
+        return type(value) is tuple and all(
+            _matches_type(value=v, hint=args[0]) for v in value
+        )
+    if origin is dict:
+        return type(value) is dict and all(
+            _matches_type(value=key, hint=args[0])
+            and _matches_type(value=item, hint=args[1])
+            for key, item in value.items()
+        )
+    if is_dataclass(hint):
+        return isinstance(value, hint)
+    return type(value) is hint
+
+
+def _from_json(*, value: Any, hint: Any) -> Any:
+    """Restore nested records and tuples; leave other values for type checks."""
+
+    if isinstance(hint, type) and issubclass(hint, _Record):
+        return hint.from_dict(value)
+    if get_origin(hint) is tuple and isinstance(value, list | tuple):
+        return tuple(_from_json(value=item, hint=get_args(hint)[0]) for item in value)
+    if get_origin(hint) is dict and isinstance(value, dict):
+        return {
+            key: _from_json(value=item, hint=get_args(hint)[1])
+            for key, item in value.items()
+        }
+    if get_origin(hint) is UnionType:
+        options = [arg for arg in get_args(hint) if arg is not type(None)]
+        if value is None:
+            return None
+        for arg in options:
+            if isinstance(arg, type) and issubclass(arg, _Action):
+                if isinstance(value, dict) and value.get("kind") == arg.default_kind():
+                    return arg.from_dict(value)
+        # An optional value, such as X | None, decodes as its one non-None type.
+        if len(options) == 1:
+            return _from_json(value=value, hint=options[0])
+    return value
+
+
+class _Record:
+    """Share exact field type checks and JSON round-trips across schema records."""
+
+    error: ClassVar[type[Exception]] = RuntimeError
+    max_json_bytes: ClassVar[int | None] = None
+
+    def __post_init__(self) -> None:
+        # Every field matches its annotation, recursively (tuples, dicts, nested
+        # records, optionals). Subclasses add their semantic checks after this.
+        hints = get_type_hints(type(self))
+        for item in fields(self):
+            value = getattr(self, item.name)
+            if not _matches_type(value=value, hint=hints[item.name]):
+                name = f"{type(self).__name__}.{item.name}"
+                detail = f"({type(value).__name__}) does not match {item.type}"
+                raise self.error(f"{name} {detail}")
+
+    @classmethod
+    def _fields_from_json(cls, value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise cls.error(f"{cls.__name__} fields are invalid: not an object")
+        expected = {item.name for item in fields(cls)}
+        if set(value) != expected:
+            missing, unexpected = expected - set(value), set(value) - expected
+            detail = f"missing {sorted(missing)}, unexpected {sorted(unexpected)}"
+            raise cls.error(f"{cls.__name__} fields are invalid: {detail}")
+        hints = get_type_hints(cls)
+        return {
+            name: _from_json(value=item, hint=hints[name])
+            for name, item in value.items()
+        }
+
+    @classmethod
+    def from_dict(cls, value: Any) -> Self:
+        """Restore one record from its exact JSON-compatible form."""
+
+        return cls(**cls._fields_from_json(value))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the JSON-compatible form of this record."""
+
+        return json.loads(json.dumps(asdict(self)))
+
+    @classmethod
+    def from_json(cls, raw: str) -> Self:
+        """Parse one bounded single-line record."""
+
+        if cls.max_json_bytes is not None and len(raw.encode()) > cls.max_json_bytes:
+            raise cls.error(f"{cls.__name__} exceeds the size limit")
+        try:
+            value = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise cls.error(f"{cls.__name__} is not valid JSON") from exc
+        return cls.from_dict(value)
+
+    def to_json(self) -> str:
+        """Return the compact single-line form, bounded for job outputs."""
+
+        value = json.dumps(self.to_dict(), separators=(",", ":"))
+        limit = self.max_json_bytes
+        if limit is not None and len(value.encode()) > limit:
+            raise self.error(f"{type(self).__name__} exceeds the size limit")
+        return value
+
+
+def bounds(**keywords: Any) -> dict[str, Any]:
+    """Return field metadata holding JSON Schema keywords for json_schema."""
+
+    return {"schema": keywords}
+
+
+def json_schema(*, hint: Any, bounds: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return the JSON Schema for an annotation plus its field bounds.
+
+    Records become closed objects with every field required, and tuples become
+    arrays whose "items" bounds apply to each element.
+    """
+
+    bounds = dict(bounds or {})
+    if isinstance(hint, type) and issubclass(hint, _Record):
+        hints = get_type_hints(hint)
+        return {
+            "type": "object",
+            "properties": {
+                item.name: json_schema(
+                    hint=hints[item.name], bounds=item.metadata.get("schema")
+                )
+                for item in fields(hint)
+            },
+            "required": [item.name for item in fields(hint)],
+            "additionalProperties": False,
+        }
+    if get_origin(hint) is tuple:
+        items = json_schema(hint=get_args(hint)[0], bounds=bounds.pop("items", None))
+        return {"type": "array", **bounds, "items": items}
+    if get_origin(hint) is UnionType:
+        options = [arg for arg in get_args(hint) if arg is not type(None)]
+        if len(options) != 1 or len(get_args(hint)) != 2:
+            raise TypeError(f"only optional values are supported: {hint}")
+        return {
+            "anyOf": [json_schema(hint=options[0], bounds=bounds), {"type": "null"}]
+        }
+    kinds = {str: "string", int: "integer", bool: "boolean"}
+    return {"type": kinds[hint], **bounds}
+
+
+# =============================================================================
+# Stage 1 -> later stages: intake facts (intake.json)
+# assess_intake.py records the gate facts and the one PR snapshot; planning
+# makes the final admission decision from them. Read by build_ownership_input,
+# validate_ownership, and plan_actions; the identity and facts are also embedded
+# in the action plan.
+# =============================================================================
+
+MAX_HANDOFF_REVIEWERS = 3
+MAX_PART_OF_ISSUES = 5
+
+
+def are_canonical_logins(logins: list[str] | tuple[str, ...]) -> bool:
+    """Return whether logins are unique, sorted, bounded GitHub logins."""
+
+    return (
+        len(logins) <= MAX_HANDOFF_REVIEWERS
+        and all(
+            isinstance(login, str) and USER_HANDLE_RE.fullmatch(f"@{login}")
+            for login in logins
+        )
+        and len({login.casefold() for login in logins}) == len(logins)
+        and list(logins) == sorted(logins, key=str.casefold)
+    )
+
+
+def passes_intake(
     *,
     is_open_non_draft_pr_against_main: bool,
     is_already_handled: bool,
     author_has_triage_permission: bool,
     has_actionable_linked_issue: bool,
     has_maintainer_activity: bool,
+    has_supporter: bool = False,
+    has_related_actionable_issue: bool = False,
 ) -> bool:
-    """Return whether ownership analysis can affect the controller decision."""
+    """Return whether an intake signal admits the PR without a bypass."""
 
     return (
         is_open_non_draft_pr_against_main
@@ -46,887 +238,919 @@ def should_run_ownership_analysis(
             author_has_triage_permission
             or has_actionable_linked_issue
             or has_maintainer_activity
+            or has_supporter
+            or has_related_actionable_issue
         )
     )
 
 
-RESULT_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "analyzed_file_indices": {
-            "type": "array",
-            "maxItems": 2_999,
-            "uniqueItems": True,
-            "items": {"type": "integer", "minimum": 0, "maximum": 2_998},
-        },
-        "additional_owners": {
-            "type": "array",
-            "maxItems": MAX_ADDITIONAL_OWNERS,
-            "uniqueItems": True,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "owner_id": {
-                        "type": "string",
-                        "pattern": f"^{OWNER_ID_RE.pattern}$",
-                    },
-                    "owned_concern": {
-                        "type": "string",
-                        "minLength": 20,
-                        "maxLength": 800,
-                    },
-                    "rationale": {
-                        "type": "array",
-                        "minItems": 3,
-                        "maxItems": 4,
-                        "items": {
-                            "type": "string",
-                            "minLength": 20,
-                            "maxLength": 800,
-                        },
-                    },
-                    "files": {
-                        "type": "array",
-                        "minItems": 1,
-                        "maxItems": 16,
-                        "uniqueItems": True,
-                        "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 500,
-                        },
-                    },
-                    "evidence": {
-                        "type": "array",
-                        "minItems": 1,
-                        "maxItems": MAX_OWNER_EVIDENCE_ITEMS,
-                        "uniqueItems": True,
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "file": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 500,
-                                },
-                                "diff_excerpt": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": MAX_DIFF_EXCERPT_CHARS,
-                                },
-                                "relevance": {
-                                    "type": "string",
-                                    "minLength": 20,
-                                    "maxLength": 800,
-                                },
-                            },
-                            "required": ["file", "diff_excerpt", "relevance"],
-                            "additionalProperties": False,
-                        },
-                    },
-                },
-                "required": [
-                    "owner_id",
-                    "owned_concern",
-                    "rationale",
-                    "files",
-                    "evidence",
-                ],
-                "additionalProperties": False,
-            },
-        },
-        "uncovered_concerns": {
-            "type": "array",
-            "maxItems": MAX_UNCOVERED_CONCERNS,
-            "uniqueItems": True,
-            "items": {
-                "type": "object",
-                "properties": {
-                    "description": {
-                        "type": "string",
-                        "minLength": 20,
-                        "maxLength": 800,
-                    },
-                    "reason": {
-                        "type": "string",
-                        "minLength": 20,
-                        "maxLength": 800,
-                    },
-                    "files": {
-                        "type": "array",
-                        "minItems": 1,
-                        "maxItems": 16,
-                        "uniqueItems": True,
-                        "items": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 500,
-                        },
-                    },
-                },
-                "required": ["description", "reason", "files"],
-                "additionalProperties": False,
-            },
-        },
-        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
-        "security_flags": {
-            "type": "array",
-            "maxItems": 20,
-            "items": {"type": "string", "maxLength": 500},
-        },
-        "rationale": {"type": "string", "maxLength": 2000},
-    },
-    "required": [
-        "analyzed_file_indices",
-        "additional_owners",
-        "uncovered_concerns",
-        "confidence",
-        "security_flags",
-        "rationale",
-    ],
-    "additionalProperties": False,
-}
+@dataclass(frozen=True)
+class PullRequestIdentity(_Record):
+    """Identify the analyzed PR revision and the workflow revision of this run."""
+
+    repository: str
+    number: int
+    head_sha: str
+    workflow_sha: str
+
+    def __post_init__(self) -> None:
+        # Sanity: the PR number is positive.
+        super().__post_init__()
+        if self.number <= 0:
+            raise RuntimeError("pull request number is not positive")
 
 
 @dataclass(frozen=True)
-class AnalysisResult:
-    """Carry validated decision facts and log-only ownership provenance."""
+class IntakeFacts(_Record):
+    """Hold intake's gate facts and handoff reviewers; the LLM never sees them."""
 
     is_open_non_draft_pr_against_main: bool
     is_already_handled: bool
     author_has_triage_permission: bool
     has_actionable_linked_issue: bool
     has_maintainer_activity: bool
-    ownership_analysis: str
-    codepath_owners: tuple[str, ...]
-    additional_owners: tuple[str, ...]
-    analyzed_head_sha: str
-    owner_provenance: dict[str, dict[str, Any]]
-    owner_provenance_truncated: bool = False
-    has_uncovered_concerns: bool = False
+    has_supporter: bool
+    has_related_actionable_issue: bool
+    supporters: tuple[str, ...]
+    actionable_labelers: tuple[str, ...]
+    maintainer_requested_reviewers: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        gate_facts = (
-            self.is_open_non_draft_pr_against_main,
-            self.is_already_handled,
+        # Sanity: the gate facts agree with each other.
+        # - An inactive or handled PR carries no intake signals.
+        # - has_supporter is true exactly when supporters is non-empty.
+        # - Actionable labelers imply an actionable issue.
+        # - Handoff reviewers exist only on a PR that passes intake.
+        super().__post_init__()
+        for name, logins in (
+            ("supporters", self.supporters),
+            ("actionable_labelers", self.actionable_labelers),
+            ("maintainer_requested_reviewers", self.maintainer_requested_reviewers),
+        ):
+            if not are_canonical_logins(logins):
+                raise RuntimeError(f"intake facts {name} are not canonical logins")
+        has_actionable_issue = (
+            self.has_actionable_linked_issue or self.has_related_actionable_issue
+        )
+        signals = (
             self.author_has_triage_permission,
             self.has_actionable_linked_issue,
             self.has_maintainer_activity,
+            self.has_supporter,
         )
-        if any(type(value) is not bool for value in gate_facts):
-            raise ValueError("analysis result has invalid triage facts")
-        if self.has_maintainer_activity and (
-            not self.is_open_non_draft_pr_against_main
-            or self.is_already_handled
-            or self.author_has_triage_permission
-            or self.has_actionable_linked_issue
-        ):
-            raise ValueError("analysis result has inconsistent maintainer activity")
-        if not isinstance(
-            self.ownership_analysis, str
-        ) or self.ownership_analysis not in {
-            "not_run",
-            "completed",
-            "incomplete",
-        }:
-            raise ValueError("analysis result has an invalid ownership analysis")
-        if len(self.codepath_owners) > MAX_CODEPATH_OWNERS:
-            raise ValueError("analysis result has too many codepath owners")
-        if len(self.additional_owners) > MAX_ADDITIONAL_OWNERS:
-            raise ValueError("analysis result has too many additional owners")
-        if not isinstance(self.analyzed_head_sha, str) or not SHA_RE.fullmatch(
-            self.analyzed_head_sha
-        ):
-            raise ValueError("analysis result has an invalid analyzed head SHA")
-        if type(self.owner_provenance_truncated) is not bool:
-            raise ValueError("analysis result has invalid owner provenance")
-        if type(self.has_uncovered_concerns) is not bool:
-            raise ValueError("analysis result has invalid uncovered-concern state")
-
-        owner_keys: list[str] = []
-        for owner in self.codepath_owners:
-            if not isinstance(owner, str) or not CODEPATH_OWNER_RE.fullmatch(owner):
-                raise ValueError("analysis result has an invalid codepath owner")
-            owner_keys.append(owner.casefold())
+        active = self.is_open_non_draft_pr_against_main and not self.is_already_handled
+        if not active and (any(signals) or self.has_related_actionable_issue):
+            raise RuntimeError("intake facts: signals on an inactive or handled PR")
+        if self.has_supporter != bool(self.supporters):
+            raise RuntimeError("intake facts: has_supporter mismatches supporters")
+        if self.actionable_labelers and not has_actionable_issue:
+            raise RuntimeError("intake facts: actionable labelers without an issue")
         if (
-            len(set(owner_keys)) != len(owner_keys)
-            or tuple(sorted(self.codepath_owners, key=str.casefold))
-            != self.codepath_owners
-        ):
-            raise ValueError("analysis result codepath owners are not canonical")
+            self.actionable_labelers or self.maintainer_requested_reviewers
+        ) and not self.passes_intake:
+            raise RuntimeError("intake facts: handoff reviewers without intake")
 
-        if any(
-            not isinstance(owner, str) or not OWNER_ID_RE.fullmatch(owner)
-            for owner in self.additional_owners
-        ):
-            raise ValueError("analysis result has an invalid additional owner")
-        if (
-            len(set(self.additional_owners)) != len(self.additional_owners)
-            or tuple(sorted(self.additional_owners)) != self.additional_owners
-        ):
-            raise ValueError("analysis result additional owners are not canonical")
-        internal_codepath_owners = {
-            owner for owner in self.codepath_owners if not owner.startswith("@")
-        }
-        if internal_codepath_owners & set(self.additional_owners):
-            raise ValueError("analysis result repeats a codepath owner")
+    @property
+    def is_active(self) -> bool:
+        """Return whether the PR is an open, unhandled PR against main."""
 
-        expected_provenance = {
-            **{owner: "codepath" for owner in self.codepath_owners},
-            **{owner: "semantic" for owner in self.additional_owners},
-        }
-        if (
-            not isinstance(self.owner_provenance, dict)
-            or (self.owner_provenance_truncated and self.owner_provenance)
-            or (
-                not self.owner_provenance_truncated
-                and set(self.owner_provenance) != set(expected_provenance)
-            )
-            or tuple(self.owner_provenance) != tuple(sorted(self.owner_provenance))
-        ):
-            raise ValueError("analysis result has invalid owner provenance")
-        for owner, provenance in self.owner_provenance.items():
-            if not isinstance(provenance, dict) or set(provenance) != {
-                "source",
-                "files",
-                "total_file_count",
-                "llm_justification",
-            }:
-                raise ValueError("analysis result has invalid owner provenance")
-            files = provenance["files"]
-            total_file_count = provenance["total_file_count"]
-            if (
-                provenance["source"] != expected_provenance[owner]
-                or not isinstance(files, list)
-                or not files
-                or len(files) > MAX_OWNER_PROVENANCE_FILES
-                or len(set(files)) != len(files)
-                or sorted(files) != files
-                or any(not isinstance(path, str) or not path for path in files)
-                or type(total_file_count) is not int
-                or total_file_count < len(files)
-            ):
-                raise ValueError("analysis result has invalid owner provenance")
-            justification = provenance["llm_justification"]
-            if provenance["source"] == "codepath":
-                if justification is not None:
-                    raise ValueError("codepath provenance has an LLM justification")
-                continue
-            if total_file_count != len(files):
-                raise ValueError("semantic provenance has an invalid file count")
-            if not isinstance(justification, dict) or set(justification) != {
-                "owned_concern",
-                "rationale",
-                "evidence",
-            }:
-                raise ValueError("semantic provenance has an invalid justification")
-            concern = justification["owned_concern"]
-            rationale = justification["rationale"]
-            evidence = justification["evidence"]
-            if (
-                not isinstance(concern, str)
-                or not 20 <= len(concern) <= 800
-                or not isinstance(rationale, list)
-                or not 3 <= len(rationale) <= 4
-                or any(
-                    not isinstance(reason, str) or not 20 <= len(reason) <= 800
-                    for reason in rationale
-                )
-                or not isinstance(evidence, list)
-                or not 1 <= len(evidence) <= MAX_OWNER_EVIDENCE_ITEMS
-            ):
-                raise ValueError("semantic provenance has an invalid justification")
-            evidence_keys: list[tuple[str, str, str]] = []
-            for item in evidence:
-                if not isinstance(item, dict) or set(item) != {
-                    "file",
-                    "diff_excerpt",
-                    "relevance",
-                }:
-                    raise ValueError("semantic provenance has invalid evidence")
-                path = item["file"]
-                excerpt = item["diff_excerpt"]
-                relevance = item["relevance"]
-                if (
-                    not isinstance(path, str)
-                    or path not in files
-                    or not isinstance(excerpt, str)
-                    or not 1 <= len(excerpt) <= MAX_DIFF_EXCERPT_CHARS
-                    or not isinstance(relevance, str)
-                    or not 20 <= len(relevance) <= 800
-                ):
-                    raise ValueError("semantic provenance has invalid evidence")
-                evidence_keys.append((path, excerpt, relevance))
-            if len(set(evidence_keys)) != len(evidence_keys):
-                raise ValueError("semantic provenance has duplicate evidence")
+        return self.is_open_non_draft_pr_against_main and not self.is_already_handled
 
-        if should_run_ownership_analysis(
+    @property
+    def passes_intake(self) -> bool:
+        """Return whether an intake signal admits the PR without a bypass."""
+
+        return passes_intake(
             is_open_non_draft_pr_against_main=self.is_open_non_draft_pr_against_main,
             is_already_handled=self.is_already_handled,
             author_has_triage_permission=self.author_has_triage_permission,
             has_actionable_linked_issue=self.has_actionable_linked_issue,
             has_maintainer_activity=self.has_maintainer_activity,
-        ):
-            if self.ownership_analysis == "not_run":
-                raise ValueError("eligible triage facts require ownership analysis")
-        elif (
-            self.ownership_analysis != "not_run"
-            or self.codepath_owners
-            or self.additional_owners
-        ):
-            raise ValueError("ineligible triage facts carry ownership state")
-        if (
-            self.ownership_analysis in {"not_run", "incomplete"}
-            and self.additional_owners
-        ):
-            raise ValueError("ownership analysis state cannot carry additional owners")
-        if self.ownership_analysis != "completed" and self.has_uncovered_concerns:
-            raise ValueError("ownership analysis state cannot carry uncovered concerns")
+            has_supporter=self.has_supporter,
+            has_related_actionable_issue=self.has_related_actionable_issue,
+        )
+
+
+@dataclass(frozen=True)
+class IntakeResult(_Record):
+    """Hold the intake decision and the one PR snapshot later stages reuse.
+
+    Title and body are attacker-controlled; intake carries them so the ownership
+    stage never reads the PR a second time.
+    """
+
+    identity: PullRequestIdentity
+    facts: IntakeFacts
+    author_login: str
+    title: str
+    body: str
+
+
+# =============================================================================
+# Trusted configuration: checked-in ownership artifacts
+# Codepath resolution and owner metadata loaded from the workflow revision and
+# embedded in the LLM's trusted context.
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class PathGroup(_Record):
+    """Hold changed files whose codepath-owner rules resolved to the same owners.
+
+    If files 0 and 2 both resolve to @soulitzer and the autograd team, the group
+    is PathGroup(owners=("@soulitzer", "autograd"), file_indices=(0, 2)). Indices
+    point into untrusted_context.files.
+    """
+
+    owners: tuple[str, ...]
+    file_indices: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        # Sanity: a group has at least one owner and one file, no repeats.
+        super().__post_init__()
+        if not self.owners or len(set(self.owners)) != len(self.owners):
+            raise RuntimeError("path group owners are empty or repeated")
+        indices = self.file_indices
+        if not indices or len(set(indices)) != len(indices) or min(indices) < 0:
+            raise RuntimeError("path group file indices are invalid")
+
+
+@dataclass(frozen=True)
+class CodepathOwners(_Record):
+    """Hold the codepath-owner resolution for every changed file, by index.
+
+    files_without_owners lists files with no codepath owner, whether no rule
+    matched or the last matching rule listed no owners; the two are the same here.
+    """
+
+    owners: tuple[str, ...]
+    matched_path_groups: tuple[PathGroup, ...]
+    files_without_owners: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        # Sanity: each changed file has exactly one resolution, either in one
+        # path group or in files_without_owners, and owners is exactly the union
+        # of the group owners, canonically sorted.
+        super().__post_init__()
+        if not all(CODEPATH_OWNER_RE.fullmatch(owner) for owner in self.owners):
+            raise RuntimeError("codepath owners contain an invalid owner")
+        owner_keys = [owner.casefold() for owner in self.owners]
+        if len(set(owner_keys)) != len(owner_keys) or owner_keys != sorted(owner_keys):
+            raise RuntimeError("codepath owners are not unique and sorted")
+        grouped = [i for group in self.matched_path_groups for i in group.file_indices]
+        if len(set(grouped)) != len(grouped):
+            raise RuntimeError("changed file appears in multiple codepath-owner groups")
+        unowned = self.files_without_owners
+        if len(set(unowned)) != len(unowned) or any(i < 0 for i in unowned):
+            raise RuntimeError("files without owners are repeated or invalid")
+        if set(grouped) & set(unowned):
+            raise RuntimeError("changed file has conflicting codepath-owner resolution")
+        grouped_owners = {o for group in self.matched_path_groups for o in group.owners}
+        if grouped_owners != set(self.owners):
+            raise RuntimeError("codepath owners do not match path groups")
+
+    @property
+    def file_indices(self) -> set[int]:
+        """Return every changed-file index this resolution accounts for."""
+
+        grouped = {i for group in self.matched_path_groups for i in group.file_indices}
+        return grouped | set(self.files_without_owners)
+
+
+@dataclass(frozen=True)
+class OwnerMetadata(_Record):
+    """Describe one team owner and the PRs it takes without intake gates."""
+
+    description: str
+    bypass_intake_criteria: str | None
+
+    def __post_init__(self) -> None:
+        # Sanity: the texts shown to the LLM are non-empty and bounded.
+        super().__post_init__()
+        for text in (self.description, self.bypass_intake_criteria):
+            if text is not None and (not text.strip() or len(text) > 2_000):
+                raise RuntimeError("extra ownership metadata entry is invalid")
+
+
+# =============================================================================
+# Stage 2a -> LLM: LLM input (llm_input.json and the prompt)
+# build_ownership_input.py partitions trusted and untrusted input; the prompt is
+# LLMInput.to_dict(). The trusted context refers to changed files only by
+# index, so it contains no attacker-controlled text. LLMInput also crosses to
+# validate_ownership as llm_input.json, which checks evidence against the
+# real patches.
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class ChangedFile(_Record):
+    """Hold one changed file exactly as collected from the pull request."""
+
+    path: str
+    status: str
+    additions: int
+    deletions: int
+    patch: str | None
+    patch_truncated_or_unavailable: bool
+
+    def __post_init__(self) -> None:
+        # Sanity: the path is non-empty.
+        super().__post_init__()
+        if not self.path:
+            raise RuntimeError("triage input changed file has an empty path")
+
+
+@dataclass(frozen=True)
+class UntrustedContext(_Record):
+    """Hold attacker-controlled pull-request content shown to the LLM."""
+
+    title: str
+    body: str
+    files: tuple[ChangedFile, ...]
+
+    def __post_init__(self) -> None:
+        # Sanity: no file path repeats, so indices are unambiguous.
+        super().__post_init__()
+        if len({file.path for file in self.files}) != len(self.files):
+            raise RuntimeError("triage input untrusted context repeats a file path")
+
+
+@dataclass(frozen=True)
+class TrustedContext(_Record):
+    """Hold workflow-owned policy and ownership, free of attacker-controlled text."""
+
+    worker_policy: str
+    codepath_owners: CodepathOwners
+    extra_ownership_metadata: dict[str, OwnerMetadata]
+    diff_truncated_or_unavailable: bool
+
+    def __post_init__(self) -> None:
+        # Sanity: the LLM gets a description for every team owner ID it is
+        # shown, and every metadata key is a valid team owner ID.
+        super().__post_init__()
+        if not self.worker_policy.strip():
+            raise RuntimeError("triage input has an empty worker policy")
+        metadata = self.extra_ownership_metadata
+        if not metadata or not all(TEAM_OWNER_ID_RE.fullmatch(o) for o in metadata):
+            raise RuntimeError("extra ownership metadata owners are invalid")
+        internal = {o for o in self.codepath_owners.owners if not o.startswith("@")}
+        if not internal <= set(metadata):
+            raise RuntimeError("team owner ID absent from extra ownership metadata")
+
+    @property
+    def teams_with_intake_bypass(self) -> frozenset[str]:
+        """Return the owners that configured bypass-intake criteria."""
+
+        metadata = self.extra_ownership_metadata
+        return frozenset(o for o, e in metadata.items() if e.bypass_intake_criteria)
+
+
+@dataclass(frozen=True)
+class LLMInput(_Record):
+    """Hold the ownership stage's LLM input with an explicit trust partition."""
+
+    trusted_context: TrustedContext
+    untrusted_context: UntrustedContext
+
+    def __post_init__(self) -> None:
+        # Sanity: the codepath resolution covers exactly the changed files, so
+        # the LLM and validate_ownership see the same file indices.
+        super().__post_init__()
+        expected = set(range(len(self.untrusted_context.files)))
+        if self.trusted_context.codepath_owners.file_indices != expected:
+            raise RuntimeError("codepath artifact does not cover all changed paths")
 
     @classmethod
     def create(
         cls,
         *,
-        is_open_non_draft_pr_against_main: bool,
-        is_already_handled: bool,
-        author_has_triage_permission: bool,
-        has_actionable_linked_issue: bool,
-        has_maintainer_activity: bool,
-        ownership_analysis: str,
-        codepath_owners: list[str] | tuple[str, ...] = (),
-        additional_owners: list[str] | tuple[str, ...] = (),
-        analyzed_head_sha: str,
-        owner_provenance: dict[str, dict[str, Any]] | None = None,
-        owner_provenance_truncated: bool = False,
-        has_uncovered_concerns: bool = False,
-    ) -> AnalysisResult:
-        """Canonicalize one controller-produced result."""
+        worker_policy: str,
+        ownership: dict[str, Any],
+        diff_truncated_or_unavailable: bool,
+        untrusted_context: UntrustedContext,
+    ) -> LLMInput:
+        """Build an input from the resolver's paths and the loaded owner metadata.
 
-        provenance = {} if owner_provenance is None else owner_provenance
-        if not isinstance(provenance, dict) or any(
-            not isinstance(owner, str) for owner in provenance
-        ):
-            raise ValueError("analysis result has invalid owner provenance")
+        Paths are replaced by indices into untrusted_context.files here, so no
+        trusted record ever holds a PR-controlled path.
+        """
 
-        return cls(
-            is_open_non_draft_pr_against_main,
-            is_already_handled,
-            author_has_triage_permission,
-            has_actionable_linked_issue,
-            has_maintainer_activity,
-            ownership_analysis,
-            tuple(sorted(codepath_owners, key=str.casefold)),
-            tuple(sorted(additional_owners)),
-            analyzed_head_sha,
-            dict(sorted(provenance.items())),
-            owner_provenance_truncated,
-            has_uncovered_concerns,
+        index = {file.path: i for i, file in enumerate(untrusted_context.files)}
+
+        def file_index(path: str) -> int:
+            if path not in index:
+                raise RuntimeError("codepath artifact names a file outside the PR")
+            return index[path]
+
+        codepath = ownership["codepath_owners"]
+        codepath_owners = CodepathOwners(
+            tuple(codepath["owners"]),
+            tuple(
+                PathGroup(tuple(g["owners"]), tuple(file_index(p) for p in g["paths"]))
+                for g in codepath["matched_path_groups"]
+            ),
+            tuple(file_index(path) for path in codepath["paths_without_owners"]),
         )
-
-    @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> AnalysisResult:
-        """Parse and validate the exact cross-job result shape."""
-
-        if not isinstance(value, dict) or set(value) != {
-            "is_open_non_draft_pr_against_main",
-            "is_already_handled",
-            "author_has_triage_permission",
-            "has_actionable_linked_issue",
-            "has_maintainer_activity",
-            "ownership_analysis",
-            "codepath_owners",
-            "additional_owners",
-            "analyzed_head_sha",
-            "owner_provenance",
-            "owner_provenance_truncated",
-            "has_uncovered_concerns",
-        }:
-            raise ValueError("analysis result has invalid fields")
-        if (
-            not isinstance(value["codepath_owners"], list)
-            or not isinstance(value["additional_owners"], list)
-            or not isinstance(value["owner_provenance"], dict)
-        ):
-            raise ValueError("analysis result owners must be arrays")
-        codepath_owners = value["codepath_owners"]
-        additional_owners = value["additional_owners"]
-        provenance = value["owner_provenance"]
-        if (
-            any(not isinstance(owner, str) for owner in codepath_owners)
-            or codepath_owners != sorted(codepath_owners, key=str.casefold)
-            or any(not isinstance(owner, str) for owner in additional_owners)
-            or additional_owners != sorted(additional_owners)
-        ):
-            raise ValueError("analysis result is not canonical")
-        return cls.create(
-            is_open_non_draft_pr_against_main=value[
-                "is_open_non_draft_pr_against_main"
-            ],
-            is_already_handled=value["is_already_handled"],
-            author_has_triage_permission=value["author_has_triage_permission"],
-            has_actionable_linked_issue=value["has_actionable_linked_issue"],
-            has_maintainer_activity=value["has_maintainer_activity"],
-            ownership_analysis=value["ownership_analysis"],
-            codepath_owners=codepath_owners,
-            additional_owners=additional_owners,
-            analyzed_head_sha=value["analyzed_head_sha"],
-            owner_provenance=provenance,
-            owner_provenance_truncated=value["owner_provenance_truncated"],
-            has_uncovered_concerns=value["has_uncovered_concerns"],
-        )
-
-    @classmethod
-    def from_json(cls, raw: str) -> AnalysisResult:
-        """Parse a bounded single-line cross-job result."""
-
-        if len(raw.encode()) > MAX_ANALYSIS_RESULT_BYTES:
-            raise ValueError("analysis result exceeds the size limit")
-        try:
-            value = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise ValueError("analysis result is not valid JSON") from exc
-        return cls.from_dict(value)
-
-    def to_dict(self) -> dict[str, Any]:
-        """Return the compact JSON-compatible cross-job record."""
-
-        return {
-            "is_open_non_draft_pr_against_main": self.is_open_non_draft_pr_against_main,
-            "is_already_handled": self.is_already_handled,
-            "author_has_triage_permission": self.author_has_triage_permission,
-            "has_actionable_linked_issue": self.has_actionable_linked_issue,
-            "has_maintainer_activity": self.has_maintainer_activity,
-            "ownership_analysis": self.ownership_analysis,
-            "codepath_owners": list(self.codepath_owners),
-            "additional_owners": list(self.additional_owners),
-            "analyzed_head_sha": self.analyzed_head_sha,
-            "owner_provenance": json.loads(json.dumps(self.owner_provenance)),
-            "owner_provenance_truncated": self.owner_provenance_truncated,
-            "has_uncovered_concerns": self.has_uncovered_concerns,
+        metadata = {
+            owner: OwnerMetadata.from_dict(entry)
+            for owner, entry in ownership["extra_ownership_metadata"]["owners"].items()
         }
-
-    def to_json(self) -> str:
-        """Return the compact single-line cross-job representation."""
-
-        value = json.dumps(self.to_dict(), separators=(",", ":"))
-        if len(value.encode()) > MAX_ANALYSIS_RESULT_BYTES:
-            raise ValueError("analysis result exceeds the size limit")
-        return value
-
-
-def _validate_source(
-    source: Any,
-    *,
-    repository: str,
-    ref: str,
-    paths: set[str],
-) -> None:
-    if not isinstance(source, dict) or set(source) != {
-        "repository",
-        "path",
-        "ref",
-        "blob_sha",
-    }:
-        raise RuntimeError("ownership source is invalid")
-    if (
-        source["repository"] != repository
-        or source["ref"] != ref
-        or source["path"] not in paths
-        or not SHA_RE.fullmatch(source["blob_sha"])
-    ):
-        raise RuntimeError("ownership source does not match the workflow revision")
-
-
-def _canonicalize_ownership(config: dict[str, Any]) -> dict[str, Any]:
-    """Copy analysis ownership artifacts into deterministic in-memory forms."""
-
-    codepath = config["codepath_owners"]
-    extra_metadata = config["extra_ownership_metadata"]
-    return {
-        "codepath_owners": {
-            "source": dict(codepath["source"]),
-            "owners": tuple(codepath["owners"]),
-            "matched_path_groups": tuple(
-                {
-                    "owners": tuple(group["owners"]),
-                    "paths": tuple(group["paths"]),
-                }
-                for group in codepath["matched_path_groups"]
-            ),
-            "paths_without_owners": tuple(
-                {"path": item["path"], "reason": item["reason"]}
-                for item in codepath["paths_without_owners"]
-            ),
-        },
-        "extra_ownership_metadata": {
-            "source": dict(extra_metadata["source"]),
-            "owners": dict(sorted(extra_metadata["owners"].items())),
-        },
-    }
-
-
-def _validate_ownership(
-    ownership: dict[str, Any],
-    *,
-    repository: str,
-    ref: str,
-    changed_paths: set[str],
-) -> None:
-    if not isinstance(ownership, dict) or set(ownership) != {
-        "codepath_owners",
-        "extra_ownership_metadata",
-    }:
-        raise RuntimeError("ownership artifacts are incomplete")
-
-    codepath = ownership["codepath_owners"]
-    extra_metadata = ownership["extra_ownership_metadata"]
-    if not all(isinstance(section, dict) for section in (codepath, extra_metadata)):
-        raise RuntimeError("ownership artifacts are invalid")
-    if set(codepath) != {
-        "source",
-        "owners",
-        "matched_path_groups",
-        "paths_without_owners",
-    }:
-        raise RuntimeError("codepath-owner artifact is invalid")
-    if set(extra_metadata) != {"source", "owners"}:
-        raise RuntimeError("extra ownership metadata is invalid")
-
-    _validate_source(
-        codepath["source"],
-        repository=repository,
-        ref=ref,
-        paths={CODEPATH_OWNERS_PATH},
-    )
-    _validate_source(
-        extra_metadata["source"],
-        repository=repository,
-        ref=ref,
-        paths={EXTRA_OWNERSHIP_METADATA_PATH},
-    )
-    codepath_owners = codepath["owners"]
-    if (
-        not isinstance(codepath_owners, (list, tuple))
-        or any(
-            not isinstance(owner, str) or not CODEPATH_OWNER_RE.fullmatch(owner)
-            for owner in codepath_owners
+        trusted_context = TrustedContext(
+            worker_policy, codepath_owners, metadata, diff_truncated_or_unavailable
         )
-        or len({owner.casefold() for owner in codepath_owners}) != len(codepath_owners)
-        or tuple(sorted(codepath_owners, key=str.casefold)) != tuple(codepath_owners)
-    ):
-        raise RuntimeError("codepath owners are invalid")
-    target_org = repository.split("/", 1)[0].casefold()
-    if any(
-        owner.startswith("@")
-        and "/" in owner
-        and owner[1:].split("/", 1)[0].casefold() != target_org
-        for owner in codepath_owners
-    ):
-        raise RuntimeError("codepath owners contain a foreign team")
+        return cls(trusted_context, untrusted_context)
 
-    grouped_paths: set[str] = set()
-    grouped_owners: set[str] = set()
-    groups = codepath["matched_path_groups"]
-    if not isinstance(groups, (list, tuple)):
-        raise RuntimeError("matched codepath-owner path groups are invalid")
-    for group in groups:
-        if not isinstance(group, dict) or set(group) != {"owners", "paths"}:
-            raise RuntimeError("matched codepath-owner path group is invalid")
-        owners = group["owners"]
-        paths = group["paths"]
-        if (
-            not isinstance(owners, (list, tuple))
-            or not owners
-            or len(set(owners)) != len(owners)
-            or any(owner not in codepath_owners for owner in owners)
-            or not isinstance(paths, (list, tuple))
-            or not paths
-            or len(set(paths)) != len(paths)
-            or any(not isinstance(path, str) or not path for path in paths)
-        ):
-            raise RuntimeError("matched codepath-owner path group is invalid")
-        if grouped_paths & set(paths):
-            raise RuntimeError("changed path appears in multiple codepath-owner groups")
-        grouped_owners.update(owners)
-        grouped_paths.update(paths)
 
-    unmatched_paths: set[str] = set()
-    unmatched = codepath["paths_without_owners"]
-    if not isinstance(unmatched, (list, tuple)):
-        raise RuntimeError("unmatched codepath-owner paths are invalid")
-    for item in unmatched:
-        if (
-            not isinstance(item, dict)
-            or set(item) != {"path", "reason"}
-            or not isinstance(item["path"], str)
-            or not item["path"]
-            or item["reason"] not in {"no_matching_rule", "ownerless_override"}
-            or item["path"] in unmatched_paths
-        ):
-            raise RuntimeError("unmatched codepath-owner path is invalid")
-        unmatched_paths.add(item["path"])
+# =============================================================================
+# LLM -> stage 2c: the LLM's answer (RESULT_SCHEMA)
+# The action enforces RESULT_SCHEMA, generated from these records;
+# validate_ownership.py parses the answer into LLMResult.
+# =============================================================================
 
-    if grouped_owners != set(codepath_owners):
-        raise RuntimeError("codepath owners do not match path groups")
-    if grouped_paths & unmatched_paths:
-        raise RuntimeError("changed path has conflicting codepath-owner resolution")
-    if grouped_paths | unmatched_paths != changed_paths:
-        raise RuntimeError("codepath-owner artifact does not cover all changed paths")
-
-    metadata_owners = extra_metadata["owners"]
-    if not isinstance(metadata_owners, dict) or not metadata_owners:
-        raise RuntimeError("extra ownership metadata owners are invalid")
-    for owner, description in metadata_owners.items():
-        if (
-            not isinstance(owner, str)
-            or not OWNER_ID_RE.fullmatch(owner)
-            or not isinstance(description, str)
-            or not description.strip()
-            or len(description) > 2_000
-        ):
-            raise RuntimeError("extra ownership metadata entry is invalid")
-    internal_codepath_owners = {
-        owner for owner in codepath_owners if not owner.startswith("@")
-    }
-    if not internal_codepath_owners <= set(metadata_owners):
-        raise RuntimeError("codepath owner ID is absent from extra ownership metadata")
+MAX_CODEPATH_OWNERS = 100
+MAX_ADDITIONAL_OWNERS = 8
+MAX_UNCOVERED_CONCERNS = 8
+MAX_CODEPATH_OWNER_CONCERNS = 16
+MAX_OWNER_EVIDENCE_ITEMS = 3
+MAX_DIFF_EXCERPT_CHARS = 1_200
+TEXT_BOUNDS = {"minLength": 20, "maxLength": 800}
+PATH_BOUNDS = {"minLength": 1, "maxLength": 500}
+FILE_LIST_BOUNDS = {
+    "minItems": 1,
+    "maxItems": 16,
+    "uniqueItems": True,
+    "items": PATH_BOUNDS,
+}
 
 
 @dataclass(frozen=True)
-class TriageInput:
-    """Hold one-pass triage inputs with an explicit model trust partition."""
+class Evidence(_Record):
+    """Quote one changed hunk that supports an owner, bypass, or concern."""
 
-    trusted_context: dict[str, Any]
-    untrusted_pr: dict[str, Any]
+    file: str = field(metadata=bounds(**PATH_BOUNDS))
+    diff_excerpt: str = field(
+        metadata=bounds(minLength=1, maxLength=MAX_DIFF_EXCERPT_CHARS)
+    )
+    relevance: str = field(metadata=bounds(**TEXT_BOUNDS))
+
+
+EVIDENCE_BOUNDS = {
+    "minItems": 1,
+    "maxItems": MAX_OWNER_EVIDENCE_ITEMS,
+    "uniqueItems": True,
+}
+
+
+@dataclass(frozen=True)
+class BypassIntakeMatch(_Record):
+    """Justify that a change matches a team's bypass-intake criteria.
+
+    criteria_quote is copied verbatim from that team's bypass_intake_criteria;
+    the rationale and diff evidence show how the change meets it.
+    """
+
+    criteria_quote: str = field(metadata=bounds(minLength=1, maxLength=2_000))
+    rationale: tuple[str, ...] = field(
+        metadata=bounds(minItems=1, maxItems=3, items=TEXT_BOUNDS)
+    )
+    evidence: tuple[Evidence, ...] = field(metadata=bounds(**EVIDENCE_BOUNDS))
+
+
+@dataclass(frozen=True)
+class Concern(_Record):
+    """Describe one distinct, material change and the diff evidence for it."""
+
+    description: str = field(metadata=bounds(**TEXT_BOUNDS))
+    files: tuple[str, ...] = field(metadata=bounds(**FILE_LIST_BOUNDS))
+    evidence: tuple[Evidence, ...] = field(metadata=bounds(**EVIDENCE_BOUNDS))
+
+
+# Every concern the LLM finds lands in exactly one of the next three records,
+# according to who handles it: the existing codepath owners, an additional owner
+# from the metadata, or no configured owner.
+
+
+@dataclass(frozen=True)
+class CodepathOwnerConcern(_Record):
+    """Record a concern the existing codepath owners already handle; no action."""
+
+    concern: Concern
+    codepath_owners: tuple[str, ...] = field(
+        metadata=bounds(
+            minItems=1,
+            uniqueItems=True,
+            items={"pattern": f"^{CODEPATH_OWNER_RE.pattern}$"},
+        )
+    )
+    reason: str = field(metadata=bounds(**TEXT_BOUNDS))
+
+
+@dataclass(frozen=True)
+class AdditionalOwnerConcern(_Record):
+    """Route a concern to one additional owner from the metadata."""
+
+    concern: Concern
+    owner_id: str = field(metadata=bounds(pattern=f"^{TEAM_OWNER_ID_RE.pattern}$"))
+    rationale: tuple[str, ...] = field(
+        metadata=bounds(minItems=3, maxItems=4, items=TEXT_BOUNDS)
+    )
+    confidence: str = field(metadata=bounds(enum=["high", "medium", "low"]))
+    bypass_intake_match: BypassIntakeMatch | None = field(metadata=bounds())
+
+
+@dataclass(frozen=True)
+class UncoveredConcern(_Record):
+    """Record a concern that no configured owner fits."""
+
+    concern: Concern
+    reason: str = field(metadata=bounds(**TEXT_BOUNDS))
+
+
+@dataclass(frozen=True)
+class LLMResult(_Record):
+    """Hold the LLM's structured answer; the action enforces RESULT_SCHEMA.
+
+    OwnershipResult describes how validation turns this into the stage result.
+    """
+
+    codepath_owner_concerns: tuple[CodepathOwnerConcern, ...] = field(
+        metadata=bounds(maxItems=MAX_CODEPATH_OWNER_CONCERNS, uniqueItems=True)
+    )
+    additional_owner_concerns: tuple[AdditionalOwnerConcern, ...] = field(
+        metadata=bounds(maxItems=MAX_ADDITIONAL_OWNERS, uniqueItems=True)
+    )
+    uncovered_concerns: tuple[UncoveredConcern, ...] = field(
+        metadata=bounds(maxItems=MAX_UNCOVERED_CONCERNS, uniqueItems=True)
+    )
+    security_flags: tuple[str, ...] = field(
+        metadata=bounds(maxItems=20, items={"maxLength": 500})
+    )
+
+
+RESULT_SCHEMA = json_schema(hint=LLMResult)
+
+
+# =============================================================================
+# Stage 2c -> planning: ownership result (ownership.json)
+# validate_ownership.py records the trusted codepath owners and the LLM's
+# validated concerns; planning reads the part it needs.
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class OwnershipResult(_Record):
+    """Record everything the ownership stage concluded about the PR's owners.
+
+    This is the validated LLMResult plus the trusted codepath owners. It differs
+    from LLMResult in four ways:
+    - llm_run_status is added. The result also exists when the LLM was skipped
+      (an inactive PR: no owners) or failed (any validation error: codepath
+      owners only). Only a succeeded run carries concerns.
+    - codepath_owners is added from the trusted path rules, not the LLM, and
+      maps each owner to the changed files it matched.
+    - The LLM's additional_owner_concerns are split into accepted and
+      discarded_additional_owner_concerns. A concern is discarded if its
+      confidence is low or it cites a file whose patch was truncated or
+      unavailable.
+    - security_flags is dropped; nothing downstream reads it.
+    The concern records themselves are the LLM's, unchanged.
+    """
+
+    error = ValueError
+
+    llm_run_status: Literal["skipped", "failed", "succeeded"]
+    codepath_owners: dict[str, tuple[str, ...]]
+    codepath_owner_concerns: tuple[CodepathOwnerConcern, ...] = ()
+    additional_owner_concerns: tuple[AdditionalOwnerConcern, ...] = ()
+    discarded_additional_owner_concerns: tuple[AdditionalOwnerConcern, ...] = ()
+    uncovered_concerns: tuple[UncoveredConcern, ...] = ()
 
     def __post_init__(self) -> None:
-        """Reject incomplete inputs and mismatched ownership artifacts."""
+        # Sanity: this result is built by validate_ownership from already
+        # validated LLM output, and planning trusts it.
+        # - Owners are valid, canonically ordered, unique, and within limits.
+        # - llm_run_status bounds the other fields: "skipped" has no owners,
+        #   and only "succeeded" carries concerns.
+        # - No accepted concern has low confidence.
+        super().__post_init__()
+        codepath = tuple(self.codepath_owners)
+        if len(codepath) > MAX_CODEPATH_OWNERS:
+            raise ValueError("ownership result has too many codepath owners")
+        if not all(CODEPATH_OWNER_RE.fullmatch(owner) for owner in codepath):
+            raise ValueError("ownership result has an invalid codepath owner")
+        keys = [owner.casefold() for owner in codepath]
+        if len(set(keys)) != len(keys) or keys != sorted(keys):
+            raise ValueError("ownership result codepath owners are not canonical")
+        if not all(self.codepath_owners.values()):
+            raise ValueError("ownership result codepath owner has no files")
+        additional = self.additional_owners
+        if len(additional) > MAX_ADDITIONAL_OWNERS:
+            raise ValueError("ownership result has too many additional owners")
+        if not all(TEAM_OWNER_ID_RE.fullmatch(owner) for owner in additional):
+            raise ValueError("ownership result has an invalid additional owner")
+        if len(set(additional)) != len(additional) or list(additional) != sorted(
+            additional
+        ):
+            raise ValueError("ownership result additional owners are not canonical")
+        if set(additional) & set(codepath):
+            raise ValueError("ownership result repeats a codepath owner")
+        if any(c.confidence == "low" for c in self.additional_owner_concerns):
+            raise ValueError("ownership result accepted a low-confidence owner")
 
-        try:
-            if set(self.trusted_context) != {
-                "worker_policy",
-                "codepath_owners",
-                "extra_ownership_metadata",
-                "analysis_metadata",
-            }:
-                raise RuntimeError("triage input trusted context is invalid")
-            metadata = self.trusted_context["analysis_metadata"]
-            if set(metadata) != {
-                "target_repository",
-                "target_base_ref",
-                "workflow_sha",
-                "diff_truncated_or_unavailable",
-                "is_open_non_draft_pr_against_main",
-                "is_already_handled",
-                "has_actionable_linked_issue",
-                "author_has_triage_permission",
-                "has_maintainer_activity",
-            }:
-                raise RuntimeError("triage input analysis metadata is invalid")
-            files = self.untrusted_pr["files"]
-            changed_paths = {file["path"] for file in files}
-            _validate_ownership(
-                {
-                    "codepath_owners": self.trusted_context["codepath_owners"],
-                    "extra_ownership_metadata": self.trusted_context[
-                        "extra_ownership_metadata"
-                    ],
-                },
-                repository=metadata["target_repository"],
-                ref=metadata["workflow_sha"],
-                changed_paths=changed_paths,
-            )
-            valid = (
-                isinstance(self.trusted_context["worker_policy"], str)
-                and bool(self.trusted_context["worker_policy"].strip())
-                and isinstance(metadata["target_repository"], str)
-                and REPOSITORY_RE.fullmatch(metadata["target_repository"])
-                and metadata["target_base_ref"] == TARGET_BASE_REF
-                and SHA_RE.fullmatch(metadata["workflow_sha"])
-                and isinstance(metadata["diff_truncated_or_unavailable"], bool)
-                and isinstance(metadata["is_open_non_draft_pr_against_main"], bool)
-                and isinstance(metadata["is_already_handled"], bool)
-                and isinstance(metadata["has_actionable_linked_issue"], bool)
-                and isinstance(metadata["author_has_triage_permission"], bool)
-                and isinstance(metadata["has_maintainer_activity"], bool)
-                and not (
-                    metadata["has_maintainer_activity"]
-                    and (
-                        metadata["is_already_handled"]
-                        or metadata["author_has_triage_permission"]
-                        or metadata["has_actionable_linked_issue"]
-                    )
-                )
-                and isinstance(self.untrusted_pr["number"], int)
-                and self.untrusted_pr["number"] > 0
-                and isinstance(self.untrusted_pr["title"], str)
-                and isinstance(self.untrusted_pr["body"], str)
-                and SHA_RE.fullmatch(self.untrusted_pr["head_sha"])
-                and isinstance(files, list)
-                and len(changed_paths) == len(files)
-                and all(
-                    isinstance(file, dict)
-                    and isinstance(file.get("path"), str)
-                    and bool(file["path"])
-                    for file in files
-                )
-            )
-        except (KeyError, TypeError, AttributeError) as exc:
-            raise RuntimeError("triage input is incomplete") from exc
-        if not valid:
-            raise RuntimeError("triage input is inconsistent")
+        if self.llm_run_status == "skipped" and codepath:
+            raise ValueError("a skipped LLM run cannot carry codepath owners")
+        concerns = (
+            self.codepath_owner_concerns,
+            self.additional_owner_concerns,
+            self.discarded_additional_owner_concerns,
+            self.uncovered_concerns,
+        )
+        if self.llm_run_status != "succeeded" and any(concerns):
+            raise ValueError("only a succeeded LLM run carries concerns")
+
+    @property
+    def additional_owners(self) -> tuple[str, ...]:
+        return tuple(concern.owner_id for concern in self.additional_owner_concerns)
+
+    @property
+    def bypass_intake_matches(self) -> tuple[str, ...]:
+        """Return the accepted owners whose concern matched bypass intake."""
+
+        return tuple(
+            concern.owner_id
+            for concern in self.additional_owner_concerns
+            if concern.bypass_intake_match is not None
+        )
+
+    @property
+    def has_uncovered_concerns(self) -> bool:
+        return bool(self.uncovered_concerns)
+
+    @property
+    def has_discarded_bypass_intake_match(self) -> bool:
+        """Return whether validation dropped a concern that claimed a bypass.
+
+        The planner then keeps a PR that fails intake open instead of closing
+        it, since a real bypass may have been lost.
+        """
+
+        return any(
+            concern.bypass_intake_match is not None
+            for concern in self.discarded_additional_owner_concerns
+        )
 
     @classmethod
     def create(
         cls,
-        worker_policy: str,
-        ownership: dict[str, Any],
-        pull_request: dict[str, Any],
-    ) -> TriageInput:
-        """Classify collected inputs and preserve immutable routing artifacts."""
+        *,
+        llm_run_status: Literal["skipped", "failed", "succeeded"],
+        codepath_owners: dict[str, Any] | None = None,
+        codepath_owner_concerns: list[CodepathOwnerConcern] | tuple = (),
+        additional_owner_concerns: list[AdditionalOwnerConcern] | tuple = (),
+        discarded_additional_owner_concerns: list[AdditionalOwnerConcern] | tuple = (),
+        uncovered_concerns: list[UncoveredConcern] | tuple = (),
+    ) -> OwnershipResult:
+        """Canonicalize one result built by validation."""
 
-        canonical = _canonicalize_ownership(ownership)
-        trusted_context = {
-            "worker_policy": worker_policy,
-            **canonical,
-            "analysis_metadata": {
-                "target_repository": pull_request["repository"],
-                "target_base_ref": pull_request["base_ref"],
-                "workflow_sha": pull_request["workflow_sha"],
-                "diff_truncated_or_unavailable": pull_request[
-                    "diff_truncated_or_unavailable"
-                ],
-                "is_open_non_draft_pr_against_main": pull_request[
-                    "is_open_non_draft_pr_against_main"
-                ],
-                "is_already_handled": pull_request["is_already_handled"],
-                "has_actionable_linked_issue": pull_request[
-                    "has_actionable_linked_issue"
-                ],
-                "author_has_triage_permission": pull_request[
-                    "author_has_triage_permission"
-                ],
-                "has_maintainer_activity": pull_request["has_maintainer_activity"],
-            },
-        }
-        trusted_pr_fields = {
-            "repository",
-            "base_ref",
-            "workflow_sha",
-            "diff_truncated_or_unavailable",
-            "is_open_non_draft_pr_against_main",
-            "is_already_handled",
-            "has_actionable_linked_issue",
-            "author_has_triage_permission",
-            "has_maintainer_activity",
-        }
+        codepath = codepath_owners or {}
         return cls(
-            trusted_context,
+            llm_run_status,
             {
-                key: value
-                for key, value in pull_request.items()
-                if key not in trusted_pr_fields
+                owner: tuple(sorted(codepath[owner]))
+                for owner in sorted(codepath, key=str.casefold)
             },
+            tuple(codepath_owner_concerns),
+            tuple(sorted(additional_owner_concerns, key=lambda c: c.owner_id)),
+            tuple(discarded_additional_owner_concerns),
+            tuple(uncovered_concerns),
         )
 
+
+# =============================================================================
+# Stage results and GitHub -> planning: the planner input (planner_input.json)
+# plan_actions.py reads all live GitHub state once into a ReviewerSnapshot,
+# bundles it with the stage results, and decides the plan from that alone, so
+# every plan can be replayed from planner_input.json.
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class RoundRobinCursor(_Record):
+    """Record where one owner's reviewer rotation stands.
+
+    prior_pull_request is the latest earlier PR carrying the owner's label, if
+    any; last_assigned is the roster member requested there before that label.
+    """
+
+    prior_pull_request: int | None
+    last_assigned: str | None
+
+    @property
+    def marker_found(self) -> bool:
+        return self.prior_pull_request is not None
+
+
+@dataclass(frozen=True)
+class ReviewerSnapshot(_Record):
+    """Hold every live GitHub read planning made for one PR.
+
+    A None field was not needed or could not be read; errors says which reads
+    failed and why.
+    """
+
+    existing_labels: tuple[str, ...]
+    missing_labels: tuple[str, ...]
+    native_codeowner_requests: tuple[str, ...] | None
+    requested_reviewers: tuple[str, ...] | None
+    submitted_reviewers: tuple[str, ...] | None
+    rosters: dict[str, tuple[str, ...]] | None
+    round_robin: dict[str, RoundRobinCursor] | None
+    errors: dict[str, str]
+
+
+@dataclass(frozen=True)
+class PlannerInput(_Record):
+    """Hold everything the planner reads; plan.json is a function of this."""
+
+    error = ValueError
+
+    intake: IntakeResult
+    ownership: OwnershipResult
+    reviewers: ReviewerSnapshot
+    run_attempt: int
+
+    def __post_init__(self) -> None:
+        # Sanity: the stage results describe one consistent PR.
+        # - The LLM was skipped exactly when intake found the PR inactive.
+        # - Every codepath owner team is in the repository's own org.
+        super().__post_init__()
+        check_stage_results(intake=self.intake, ownership=self.ownership)
+        if self.run_attempt < 1:
+            raise ValueError("planner input has an invalid run attempt")
+
+
+def check_stage_results(*, intake: IntakeResult, ownership: OwnershipResult) -> None:
+    """Reject an ownership result that does not fit its intake result."""
+
+    if intake.facts.is_active == (ownership.llm_run_status == "skipped"):
+        raise ValueError("ownership result does not match the intake decision")
+    target_org = intake.identity.repository.split("/", 1)[0].casefold()
+    if any(
+        owner.startswith("@")
+        and "/" in owner
+        and owner[1:].split("/", 1)[0].casefold() != target_org
+        for owner in ownership.codepath_owners
+    ):
+        raise ValueError("ownership result has a foreign codepath owner team")
+
+
+# =============================================================================
+# Planning -> live apply: the action plan (the analyze job output)
+# plan_actions.py emits an ordered list of typed actions bounded by a context;
+# apply_actions.py executes them without re-deriving anything.
+# =============================================================================
+
+MAX_ACTION_PLAN_BYTES = 16_000
+MAX_REVIEW_REQUESTS = 15
+TRIAGED_LABEL = "triaged"
+BOT_TRIAGED_LABEL = "bot-triaged"
+BOT_TRIAGE_ERROR_LABEL = "bot-triage-error"
+BOT_CLOSED_LABEL = "bot-closed"
+BOT_CLOSED_COMMENT_TEMPLATE = "bot_closed_guidance"
+# Why a reviewer is requested, in the order requests appear in a plan.
+REQUEST_REASONS = ("supporter", "actionable_labeler", "codepath_owner", "owner_roster")
+TRIAGE_DECISIONS = frozenset(
+    {"kept_open", "close", "triage", "incomplete", "routed_untriaged"}
+)
+
+
+class _Action(_Record):
+    """Name one GitHub effect by its kind, which is fixed for each action record."""
+
     @classmethod
-    def from_dict(cls, value: dict[str, Any]) -> TriageInput:
-        """Restore and validate one schema-versioned triage input."""
+    def default_kind(cls) -> str:
+        return cls.__dataclass_fields__["kind"].default
 
-        try:
-            if value["schema_version"] != TRIAGE_INPUT_SCHEMA_VERSION:
-                raise RuntimeError("triage input has an unsupported schema")
-            trusted = value["trusted_context"]
-            metadata = trusted["analysis_metadata"]
-            return cls(
-                {
-                    "worker_policy": trusted["worker_policy"],
-                    **_canonicalize_ownership(
-                        {
-                            "codepath_owners": trusted["codepath_owners"],
-                            "extra_ownership_metadata": trusted[
-                                "extra_ownership_metadata"
-                            ],
-                        }
-                    ),
-                    "analysis_metadata": {
-                        "target_repository": metadata["target_repository"],
-                        "target_base_ref": metadata["target_base_ref"],
-                        "workflow_sha": metadata["workflow_sha"],
-                        "diff_truncated_or_unavailable": metadata[
-                            "diff_truncated_or_unavailable"
-                        ],
-                        "is_open_non_draft_pr_against_main": metadata[
-                            "is_open_non_draft_pr_against_main"
-                        ],
-                        "is_already_handled": metadata["is_already_handled"],
-                        "has_actionable_linked_issue": metadata[
-                            "has_actionable_linked_issue"
-                        ],
-                        "author_has_triage_permission": metadata[
-                            "author_has_triage_permission"
-                        ],
-                        "has_maintainer_activity": metadata["has_maintainer_activity"],
-                    },
-                },
-                value["untrusted_pr"],
-            )
-        except (KeyError, TypeError) as exc:
-            raise RuntimeError("triage input is invalid") from exc
+    def __post_init__(self) -> None:
+        # Sanity: kind is fixed per action type, so decoding is unambiguous.
+        super().__post_init__()
+        if self.kind != self.default_kind():
+            raise RuntimeError(f"{type(self).__name__} has the wrong kind")
 
-    def to_dict(self) -> dict[str, Any]:
-        """Return JSON-compatible input preserving the trust partition."""
+
+@dataclass(frozen=True)
+class RequestReviewers(_Action):
+    """Request reviewers who share one reason; only codepath_owner has teams.
+
+    - supporter: named as a supporter in the PR description and verified.
+    - actionable_labeler: labeled a linked or related issue `actionable`.
+    - codepath_owner: a user or team the codepath rules name directly.
+    - owner_roster: picked from a team owner's roster.
+    """
+
+    users: tuple[str, ...]
+    teams: tuple[str, ...]
+    reason: Literal["supporter", "actionable_labeler", "codepath_owner", "owner_roster"]
+    kind: str = "request_reviewers"
+
+
+@dataclass(frozen=True)
+class AddLabels(_Action):
+    """Add labels to the pull request."""
+
+    labels: tuple[str, ...]
+    kind: str = "add_labels"
+
+
+@dataclass(frozen=True)
+class ClosePullRequest(_Action):
+    """Close the pull request."""
+
+    kind: str = "close"
+
+
+@dataclass(frozen=True)
+class PostComment(_Action):
+    """Post a fixed comment chosen by template name, never free text."""
+
+    template: str
+    kind: str = "comment"
+
+
+Action = RequestReviewers | AddLabels | ClosePullRequest | PostComment
+
+
+CLOSE_ACTIONS = (
+    ClosePullRequest(),
+    AddLabels((BOT_CLOSED_LABEL,)),
+    PostComment(BOT_CLOSED_COMMENT_TEMPLATE),
+)
+
+
+@dataclass(frozen=True)
+class PlanContext(_Record):
+    """Carry the identity, facts, and owners that bound a plan's actions."""
+
+    identity: PullRequestIdentity
+    facts: IntakeFacts
+    run_attempt: int
+    codepath_owners: tuple[str, ...]
+    additional_owners: tuple[str, ...]
+    bypass_intake_matches: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        # Security: the apply job trusts the context to bound the actions.
+        # - No codepath owner team is from another org, so no team outside the
+        #   repository can be requested.
+        # - Every bypass match is an additional owner.
+        # - run_attempt is valid; ActionPlan uses it to forbid closing on a rerun.
+        super().__post_init__()
+        if self.run_attempt < 1:
+            raise RuntimeError("plan context has an invalid run attempt")
+        if not all(CODEPATH_OWNER_RE.fullmatch(o) for o in self.codepath_owners):
+            raise RuntimeError("plan context has an invalid codepath owner")
+        if not all(
+            TEAM_OWNER_ID_RE.fullmatch(owner) for owner in self.additional_owners
+        ):
+            raise RuntimeError("plan context has an invalid additional owner")
+        if not set(self.bypass_intake_matches) <= set(self.additional_owners):
+            raise RuntimeError("plan context bypass intake match is not an owner")
+        target_org = self.identity.repository.split("/", 1)[0].casefold()
+        if any(org.casefold() != target_org for org, _ in self.codepath_teams):
+            raise RuntimeError("plan context has a foreign codepath owner team")
+
+    @property
+    def codepath_teams(self) -> set[tuple[str, str]]:
+        """Return (org, slug) for each codepath owner that is a GitHub team."""
 
         return {
-            "schema_version": TRIAGE_INPUT_SCHEMA_VERSION,
-            "trusted_context": json.loads(json.dumps(self.trusted_context)),
-            "untrusted_pr": json.loads(json.dumps(self.untrusted_pr)),
+            tuple(owner[1:].split("/", 1))
+            for owner in self.codepath_owners
+            if owner.startswith("@") and "/" in owner
         }
 
-    def to_worker_dict(self) -> dict[str, Any]:
-        """Return the compact additive-only model input."""
+    @property
+    def admitted(self) -> bool:
+        """Return whether intake or a bypass intake match admits the PR."""
 
-        value = self.to_dict()
-        del value["schema_version"]
-        trusted = value["trusted_context"]
-        path_indices = {
-            file["path"]: index
-            for index, file in enumerate(value["untrusted_pr"]["files"])
-        }
-        codepath = trusted["codepath_owners"]
-        codepath["matched_path_groups"] = [
-            {
-                "owners": group["owners"],
-                "file_indices": [path_indices[path] for path in group["paths"]],
-            }
-            for group in codepath["matched_path_groups"]
-        ]
-        codepath["paths_without_owners"] = [
-            {
-                "file_index": path_indices[item["path"]],
-                "reason": item["reason"],
-            }
-            for item in codepath["paths_without_owners"]
-        ]
-        metadata = trusted["analysis_metadata"]
-        for field in (
-            "is_open_non_draft_pr_against_main",
-            "is_already_handled",
-            "author_has_triage_permission",
-            "has_actionable_linked_issue",
-            "has_maintainer_activity",
+        return self.facts.passes_intake or bool(self.bypass_intake_matches)
+
+
+@dataclass(frozen=True)
+class ActionPlan(_Record):
+    """Hold the ordered GitHub actions live mode applies after one analysis.
+
+    The context only bounds the actions; apply executes the actions in order
+    without re-deriving them.
+    """
+
+    max_json_bytes = MAX_ACTION_PLAN_BYTES
+
+    context: PlanContext
+    decision: str
+    actions: tuple[Action, ...]
+
+    def __post_init__(self) -> None:
+        # Security: this is the analyze job's output, and the apply job, which
+        # has pull-requests: write, executes it as is. These checks cap what a
+        # faulty or manipulated analysis can do:
+        # - An inactive or handled PR gets no actions.
+        # - A close only happens to an unadmitted PR on the first attempt, and is
+        #   exactly CLOSE_ACTIONS (close, bot-closed, the fixed comment).
+        # - An unadmitted PR is never routed to reviewers.
+        # - Only this bot's own labels can be added: triaged and bot-triaged for
+        #   triage, bot-triage-error for incomplete, and "owner: <id>" for an
+        #   owner the plan names. No other label (e.g. ciflow/*) can be added.
+        # - Every requested user is justified by its request's reason: a verified
+        #   supporter, an actionable labeler, or a user the codepath rules name
+        #   directly. owner_roster users are checked against rosters by apply.
+        #   Nobody is requested twice.
+        # - A native GitHub team (@org/slug) is requested only as a codepath
+        #   owner of the changed files. Team owner IDs, including
+        #   LLM-suggested ones, are requested as roster users, never as teams.
+        #   Each request is capped at MAX_REVIEW_REQUESTS.
+        # The remaining checks (sorted logins, action order) keep the format canonical.
+        super().__post_init__()
+        context = self.context
+        facts = context.facts
+        if self.decision not in TRIAGE_DECISIONS:
+            raise RuntimeError("action plan has an unknown decision")
+        if not facts.is_active and (self.decision != "kept_open" or self.actions):
+            raise RuntimeError("action plan acts on an inactive or handled PR")
+        if self.decision == "close":
+            if context.admitted:
+                raise RuntimeError("action plan closes an admitted PR")
+            if context.run_attempt != 1:
+                raise RuntimeError("action plan closes on a rerun")
+            if self.actions != CLOSE_ACTIONS:
+                raise RuntimeError("action plan close is not the fixed sequence")
+            return
+        if any(isinstance(a, ClosePullRequest | PostComment) for a in self.actions):
+            raise RuntimeError("action plan closes or comments without a close")
+
+        requests = [a for a in self.actions if isinstance(a, RequestReviewers)]
+        label_actions = [a for a in self.actions if isinstance(a, AddLabels)]
+        if self.actions != (*requests, *label_actions) or len(label_actions) > 1:
+            raise RuntimeError("action plan must request reviewers, then add labels")
+        reasons = [request.reason for request in requests]
+        if reasons != sorted(set(reasons), key=REQUEST_REASONS.index):
+            raise RuntimeError(
+                "action plan reviewer requests are repeated or unordered"
+            )
+        if not context.admitted and (
+            self.decision not in {"kept_open", "incomplete"} or requests
         ):
-            del metadata[field]
-        return value
+            raise RuntimeError("action plan routes a PR that was not admitted")
 
-    @property
-    def number(self) -> int:
-        """Return the positive PR number validated when the input was created."""
+        internal_owners = (
+            *context.additional_owners,
+            *(o for o in context.codepath_owners if not o.startswith("@")),
+        )
+        allowed_labels = {owner_label(owner) for owner in internal_owners}
+        if self.decision == "triage":
+            allowed_labels |= {TRIAGED_LABEL, BOT_TRIAGED_LABEL}
+        elif self.decision == "incomplete":
+            allowed_labels.add(BOT_TRIAGE_ERROR_LABEL)
+        for action in label_actions:
+            if not action.labels or not set(action.labels) <= allowed_labels:
+                raise RuntimeError("action plan has a label outside its decision")
 
-        return self.untrusted_pr["number"]
-
-    @property
-    def repository(self) -> str:
-        """Return the target repository bound to the trusted analysis input."""
-
-        return self.trusted_context["analysis_metadata"]["target_repository"]
+        # Each reason's users must come from that reason's own source. Roster
+        # membership for owner_roster is checked by apply, which loads rosters.
+        sources = {
+            "supporter": {login.casefold() for login in facts.supporters},
+            "actionable_labeler": {
+                login.casefold() for login in facts.actionable_labelers
+            },
+            "codepath_owner": {
+                owner[1:].casefold()
+                for owner in context.codepath_owners
+                if owner.startswith("@") and "/" not in owner
+            },
+        }
+        team_slugs = {slug for _, slug in context.codepath_teams}
+        requested: list[str] = []
+        for request in requests:
+            keys = [login.casefold() for login in request.users]
+            requested += keys
+            if (
+                not (request.users or request.teams)
+                or not all(USER_HANDLE_RE.fullmatch(f"@{u}") for u in request.users)
+                or keys != sorted(keys)
+            ):
+                raise RuntimeError("action plan reviewers are not canonical logins")
+            source = sources.get(request.reason)
+            if source is not None and not set(keys) <= source:
+                raise RuntimeError(f"action plan has an unverified {request.reason}")
+            if request.teams and request.reason != "codepath_owner":
+                raise RuntimeError(
+                    "action plan requests a team outside codepath owners"
+                )
+            if not set(request.teams) <= team_slugs:
+                raise RuntimeError(
+                    "action plan requests a team outside codepath owners"
+                )
+            if len(request.users) + len(request.teams) > MAX_REVIEW_REQUESTS:
+                raise RuntimeError("action plan exceeds the review request limit")
+        if len(set(requested)) != len(requested):
+            raise RuntimeError("action plan requests one reviewer twice")
