@@ -490,6 +490,7 @@ class TritonToolchain(Toolchain):
     exprs over the named scalar args."""
 
     kind = "triton"
+    ARCH_ENV_VAR = "TRITON_OVERRIDE_ARCH"
     artifact_exts = (".cubin",)
     # Embedded in the generated .cpp, so nothing links; declared, since None is refused.
     link_exts = ()
@@ -667,6 +668,8 @@ void launch_{prefix}({tparams}, c10::Stream stream) {{
             src,
             target=target,
             options={
+                # Explicit options outrank TRITON_OVERRIDE_ARCH; GPUTarget does not.
+                "arch": f"sm{target.arch}",
                 "num_warps": b.get("num_warps", 4),
                 "num_stages": b.get("num_stages", 3),
             },
