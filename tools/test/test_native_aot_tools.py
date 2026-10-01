@@ -15,7 +15,7 @@ import types
 import unittest
 import unittest.mock as mock
 import zipfile
-from typing import Any, cast
+from typing import Any, cast, NamedTuple
 
 # Ordinary package imports: these modules keep their scope torch-free so the
 # Test tools job, which runs in the linter image, can import them without torch.
@@ -502,6 +502,14 @@ class TestArch(unittest.TestCase):
             # An explicit --arch is the way to say it, for every kind at once.
             self.assertEqual(export._effective_arch("sm_100a"), "sm_100a")
 
+    def test_triton_arch_override_without_explicit_arch_is_refused(self):
+        with (
+            _no_ambient_arch(device="sm_100"),
+            mock.patch.dict(os.environ, {"TRITON_OVERRIDE_ARCH": "sm90"}),
+            self.assertRaisesRegex(RuntimeError, "TRITON_OVERRIDE_ARCH=sm90.*--arch"),
+        ):
+            export._effective_arch(None)
+
     def test_export_prefix_is_arch_qualified(self):
         # Every exported symbol derives from the prefix, so two arches sharing one
         # are duplicate definitions once both link into libtorch_cuda.
@@ -942,6 +950,11 @@ def _fake_triton(**metadata):
         def __getattr__(self, name):
             raise AssertionError(f"export must not reach triton.runtime.{name}")
 
+    class _GPUTarget(NamedTuple):
+        backend: str
+        arch: int
+        warp_size: int
+
     def fake_compile(src, target=None, options=None):
         seen["target"] = target
         seen["options"] = options
@@ -965,11 +978,7 @@ def _fake_triton(**metadata):
     fake_compiler = types.ModuleType("triton.compiler")
     cast(Any, fake_compiler).ASTSource = fake_ast_source
     fake_backends_compiler = types.ModuleType("triton.backends.compiler")
-    cast(Any, fake_backends_compiler).GPUTarget = lambda backend, arch, warp_size: (
-        backend,
-        arch,
-        warp_size,
-    )
+    cast(Any, fake_backends_compiler).GPUTarget = _GPUTarget
     fake_triton = types.ModuleType("triton")
     cast(Any, fake_triton).compile = fake_compile
     cast(Any, fake_triton).compiler = fake_compiler
@@ -1008,12 +1017,24 @@ class TestTritonExport(unittest.TestCase):
             yield d, extra, seen
 
     def test_the_target_comes_from_the_arch_not_from_a_driver(self):
-        with self._exported("sm_100a") as (d, extra, seen):
+        with (
+            mock.patch.dict(os.environ, {"TRITON_OVERRIDE_ARCH": "sm90"}),
+            self._exported("sm_100a") as (d, extra, seen),
+        ):
             self.assertEqual(seen["target"], ("cuda", 100, 32))
+            self.assertEqual(seen["options"].get("arch"), "sm100")
             self.assertEqual(extra["symbol"], "_fake_kernel")
             self.assertEqual((extra["shared"], extra["block_x"]), (256, 8 * 32))
             with open(os.path.join(d, "fake_bmm_f32.cubin"), "rb") as f:
                 self.assertEqual(f.read(), b"\x7fELF-fake")
+
+    def test_hopper_target_overrides_blackwell_environment(self):
+        with (
+            mock.patch.dict(os.environ, {"TRITON_OVERRIDE_ARCH": "sm100"}),
+            self._exported("sm_90a") as (_, _extra, seen),
+        ):
+            self.assertEqual(seen["target"], ("cuda", 90, 32))
+            self.assertEqual(seen["options"].get("arch"), "sm90")
 
     def test_divisibility_hints_leave_the_signature_and_constants_split_out(self):
         with self._exported("sm_90") as (_, _extra, seen):
