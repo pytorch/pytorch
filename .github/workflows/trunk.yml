@@ -174,6 +174,13 @@ jobs:
       docker-image: ${{ needs.linux-jammy-cuda13_2-py3_11-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda13_2-py3_11-gcc11-build.outputs.test-matrix }}
       tests-to-include: ${{ github.event.inputs.tests-to-include || '' }}
+      # inductor-unittest runs these files verbatim for the same main commit.
+      # Excluding them here avoids duplicate execution in the default config.
+      tests-to-exclude: >-
+        inductor/test_torchinductor
+        inductor/test_torchinductor_opinfo
+        inductor/test_aot_inductor
+        inductor/test_cpu_select_algorithm
       python-version: "3.11"
       compiler: gcc11
       cuda-version: "13.2"
