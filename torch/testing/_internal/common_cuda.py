@@ -365,9 +365,10 @@ def evaluate_platform_supports_mx_gemm():
     return False
 
 def evaluate_platform_supports_mxfp8_grouped_gemm():
-    if torch.cuda.is_available() and not torch.version.hip:
+    cuda_version = _get_torch_cuda_version()
+    if cuda_version != (0, 0) and not torch.version.hip:
         built_with_mslk = "USE_MSLK" in torch.__config__.show()
-        return built_with_mslk and IS_SM100
+        return IS_SM100 and (built_with_mslk or cuda_version >= (13, 4))
     return False
 
 def hipsparselt_supported_archs():

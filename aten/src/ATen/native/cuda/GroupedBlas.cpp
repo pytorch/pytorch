@@ -130,6 +130,12 @@ std::optional<CublasLtGroupedScaleSpec> get_cublaslt_grouped_scale_spec(
           at::kFloat,
           "float32",
           "GroupWise"};
+    case ScalingType::BlockWise1x32:
+      return CublasLtGroupedScaleSpec{
+          CublasGroupedScaleLayout::Vec32UE8M0,
+          at::kFloat8_e8m0fnu,
+          "float8_e8m0fnu",
+          "BlockWise1x32"};
     case ScalingType::BlockWise1x32MNK4:
       return CublasLtGroupedScaleSpec{
           CublasGroupedScaleLayout::Vec32MnK4UE8M0,
@@ -187,6 +193,9 @@ std::optional<ScalingType> get_cublaslt_grouped_scaling_type(
       scale.dim() == 1 &&
       scale.numel() == batchCount) {
     return ScalingType::GroupWise;
+  }
+  if (scale.scalar_type() == at::kFloat8_e8m0fnu) {
+    return ScalingType::BlockWise1x32;
   }
   return std::nullopt;
 }
@@ -335,6 +344,7 @@ bool should_use_scaled_cublaslt_grouped_gemm(
     valid_device = dprops->major == 9;
   } else if (*scaling_a == ScalingType::BlockWise1x32MNK4 ||
       *scaling_a == ScalingType::BlockWise1x128MNK4 ||
+      *scaling_a == ScalingType::BlockWise1x32 ||
       *scaling_a == ScalingType::BlockWise1x16) {
     valid_device = dprops->major == 10 || dprops->major == 11;
   } else {
@@ -1102,13 +1112,15 @@ TORCH_IMPL_FUNC(_scaled_grouped_mm_cuda_v2_out)(
           scale_recipe_a_enum[0],
           scale_recipe_b_enum[0],
           batchCount64)) {
-    if (scale_recipe_a_enum[0] == ScalingType::BlockWise1x16) {
+    if (scale_recipe_a_enum[0] == ScalingType::BlockWise1x32 ||
+        scale_recipe_a_enum[0] == ScalingType::BlockWise1x16) {
       TORCH_CHECK_VALUE(swizzle_a_enum.size() == scale_recipe_a_enum.size(),
           "swizzle_a must match the number of scale recipes");
       TORCH_CHECK_VALUE(swizzle_a_enum[0] == SwizzleType::SWIZZLE_32_4_4,
           "scale_a must be swizzled to SWIZZLE_32_4_4 format");
     }
-    if (scale_recipe_b_enum[0] == ScalingType::BlockWise1x16) {
+    if (scale_recipe_b_enum[0] == ScalingType::BlockWise1x32 ||
+        scale_recipe_b_enum[0] == ScalingType::BlockWise1x16) {
       TORCH_CHECK_VALUE(swizzle_b_enum.size() == scale_recipe_b_enum.size(),
           "swizzle_b must match the number of scale recipes");
       TORCH_CHECK_VALUE(swizzle_b_enum[0] == SwizzleType::SWIZZLE_32_4_4,
