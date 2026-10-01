@@ -3304,6 +3304,76 @@ class TestLinalg(TestCase):
             else:
                 torch.autograd.gradcheck(lambda b: torch.cholesky_solve(b, L, upper=False), (b,))
 
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.double, torch.cdouble)
+    @parametrize("upper", [False, True])
+    @parametrize("requires_grad", [(True, False), (False, True), (True, True)])
+    @parametrize("batch_dims", [((), ()), ((2,), ()), ((), (2,))])
+    def test_cholesky_solve_saved_tensors(self, device, dtype, upper, requires_grad, batch_dims):
+        b_batch, factor_batch = batch_dims
+        b = torch.randn(*b_batch, 3, 2, dtype=dtype, device=device, requires_grad=requires_grad[0])
+        raw = torch.randn(*factor_batch, 3, 3, dtype=dtype, device=device, requires_grad=requires_grad[1])
+        factor = (raw.triu() if upper else raw.tril()) + 4 * torch.eye(3, dtype=dtype, device=device)
+        saved_ptrs = []
+
+        def pack(tensor):
+            saved_ptrs.append(tensor.data_ptr())
+            return tensor
+
+        with torch.autograd.graph.saved_tensors_hooks(pack, lambda tensor: tensor):
+            actual = torch.cholesky_solve(b, factor, upper=upper)
+        self.assertNotIn(b.data_ptr(), saved_ptrs)
+        matrix = factor.mH @ factor if upper else factor @ factor.mH
+        expected = torch.linalg.solve(matrix, b)
+        grad = torch.randn_like(actual)
+        inputs = tuple(tensor for tensor in (b, raw) if tensor.requires_grad)
+        self.assertEqual(actual, expected)
+        self.assertEqual(torch.autograd.grad(actual, inputs, grad, retain_graph=True),
+                         torch.autograd.grad(expected, inputs, grad))
+
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.double, torch.cdouble)
+    @parametrize("upper", [False, True])
+    def test_cholesky_solve_releases_constant_rhs(self, device, dtype, upper):
+        b = torch.randn(3, 2, dtype=dtype, device=device)
+        factor = torch.eye(3, dtype=dtype, device=device, requires_grad=True)
+        b_ref = torch._C._WeakTensorRef(b)
+        result = torch.cholesky_solve(b, factor, upper=upper)
+        del b
+        self.assertTrue(b_ref.expired())
+        torch.autograd.grad(result, factor, torch.ones_like(result))
+
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.double, torch.cdouble)
+    @parametrize("upper", [False, True])
+    def test_cholesky_solve_modified_rhs_backward(self, device, dtype, upper):
+        b = torch.randn(3, 2, dtype=dtype, device=device, requires_grad=True)
+        factor = torch.eye(3, dtype=dtype, device=device, requires_grad=True)
+        result = torch.cholesky_solve(b, factor, upper=upper)
+        grad = torch.randn_like(result)
+        expected = torch.autograd.grad(result, (b, factor), grad, retain_graph=True)
+        with torch.no_grad():
+            b.add_(1)
+        self.assertEqual(torch.autograd.grad(result, (b, factor), grad), expected)
+
+    @skipCUDAIfNoCusolver
+    @skipCPUIfNoLapack
+    @dtypes(torch.double, torch.cdouble)
+    @parametrize("upper", [False, True])
+    def test_cholesky_solve_gradgrad(self, device, dtype, upper):
+        b = torch.randn(2, 1, dtype=dtype, device=device, requires_grad=True)
+        raw = (0.1 * torch.randn(2, 2, dtype=dtype, device=device)).requires_grad_()
+
+        def solve(b, raw):
+            factor = (raw.triu() if upper else raw.tril()) + 2 * torch.eye(2, dtype=dtype, device=device)
+            return torch.cholesky_solve(b, factor, upper=upper)
+
+        self.assertTrue(torch.autograd.gradcheck(solve, (b, raw)))
+        self.assertTrue(torch.autograd.gradgradcheck(solve, (b, raw)))
+
     @skipCUDAIfNoMagmaAndNoLinalgsolver
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
