@@ -1,12 +1,13 @@
 """Annotate c10d collectives with their process group.
 
 In eager mode Kineto copies the ``record_param_comms`` metadata of a collective
-onto the kernels it launched. A replayed graph has no CPU op to copy from, and
+onto the kernels it launched. A replayed CUDA graph has no CPU op to copy from, and
 Cuspy does not see ``record_param_comms`` at all, so in both cases the NCCL kernels
-carry no process group. ``torch.cuda.graph(..., enable_annotations=True)`` installs
-these hooks for the length of the capture, tagging the collective kernels through
+carry no process group. Every process group gets gated c10d hooks when it is
+created. ``torch.cuda.graph(..., enable_annotations=True)`` enables them for the
+length of the capture, tagging the collective kernels through
 :func:`torch.cuda.graph_annotations.mark_kernels`; a Cuspy profiling session
-installs them while it records, tagging eager kernels through its observer.
+enables them while it records, tagging eager kernels through its observer.
 
 Collectives issued inside ``_coalescing_manager`` or a batched ``batch_isend_irecv``
 are not annotated: their kernels launch when the group ends, outside any hook.
@@ -15,31 +16,35 @@ Collectives on CPU tensors are skipped, since they launch no kernels.
 
 from __future__ import annotations
 
+import contextlib
 import functools
-import itertools
 import logging
 import threading
+import weakref
 from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import HookOpName, PostHookArgs, PreHookArgs
-from torch.cuda._graph_annotations import mark_kernels
+from torch._C._distributed_c10d import (
+    _disable_gated_hooks,
+    _enable_gated_hooks,
+    HookOpName,
+    PostHookArgs,
+    PreHookArgs,
+)
 
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from contextlib import AbstractContextManager
 
-    _Annotate = Callable[[dict[str, Any]], AbstractContextManager[None]]
-
 
 logger = logging.getLogger(__name__)
 
 # c10d runs hooks in ascending id order. Mirrored ids open these scopes after and
 # close them before those of any hook registered with a smaller id.
-_HOOK_ID_BASE = 1 << 62
-_hook_offsets = itertools.count()
+_PRE_HOOK_ID = 1 << 62
+_POST_HOOK_ID = -_PRE_HOOK_ID
 
 # Names the NCCL backend passes to record_param_comms.
 _COLLECTIVE_NAMES = {
@@ -152,117 +157,104 @@ def _launches_kernels(args: PreHookArgs) -> bool:
 
 
 def _mark_kernels(metadata: dict[str, Any]) -> AbstractContextManager[None]:
+    # The hooks fire on every thread, but only the capturing one may enter the
+    # module-global annotation stack.
+    if not torch.cuda.is_current_stream_capturing():
+        return contextlib.nullcontext()
+    from torch.cuda._graph_annotations import mark_kernels
+
     # Backward attribution would tag whatever autograd node launched the
     # collective, not the collective itself.
     return mark_kernels(metadata, backward=False)
 
 
 class _GroupHooks:
-    def __init__(
-        self, group: dist.ProcessGroup, annotate: _Annotate, *, eager: bool
-    ) -> None:
-        self._group = group
-        self._annotate = annotate
-        self._eager = eager
-        self._fields = _GroupFields(group)
-        offset = next(_hook_offsets)
-        self._pre_id = _HOOK_ID_BASE + offset
-        self._post_id = -_HOOK_ID_BASE - offset
-        self._lock = threading.Lock()
-        self._closed = False
-        # op_id -> (thread that entered the scope, scope)
-        self._scopes: dict[int, tuple[int, AbstractContextManager[None]]] = {}
-        group.register_pre_hook(self._pre_id, self._pre)
-        try:
-            group.register_post_hook(self._post_id, self._post)
-        except BaseException:
-            group.unregister_pre_hook(self._pre_id)
-            raise
+    def __init__(self, group: dist.ProcessGroup) -> None:
+        # The group owns the hooks, so a strong reference would keep it alive.
+        self._group = weakref.ref(group)
+        self._fields: _GroupFields | None = None
+        self._scopes: dict[int, contextlib.ExitStack] = {}
 
     # A raising hook fails the collective, so annotation errors are only logged.
     def _pre(self, args: PreHookArgs) -> None:
-        # The hooks fire on every thread: without eager, skip collectives other
-        # threads issue during a capture, or they would enter the capture's
-        # module-global annotation stack.
-        if not _launches_kernels(args) or (
-            not self._eager and not torch.cuda.is_current_stream_capturing()
-        ):
+        annotators = _annotators
+        group = self._group()
+        if not annotators or group is None or not _launches_kernels(args):
             return
+        scopes = contextlib.ExitStack()
         try:
-            scope = self._annotate(collective_metadata(self._group, args, self._fields))
-            scope.__enter__()
+            if self._fields is None:
+                self._fields = _GroupFields(group)
+            metadata = collective_metadata(group, args, self._fields)
+            for annotate in annotators:
+                scopes.enter_context(annotate(metadata))
         except Exception:
             logger.exception("Failed to annotate %s", args.name)
+            self._exit(scopes)
             return
-        with self._lock:
-            closed = self._closed
-            if not closed:
-                self._scopes[args.op_id] = (threading.get_ident(), scope)
-        if closed:
-            # Fired from a hook snapshot taken before close(); the post hook may
-            # already be gone.
-            self._exit(scope)
+        self._scopes[args.op_id] = scopes
 
     def _post(self, args: PostHookArgs) -> None:
-        with self._lock:
-            entry = self._scopes.pop(args.op_id, None)
-            unregister = self._closed and not self._scopes
-        if entry is not None:
-            self._exit(entry[1])
-        if unregister:
-            self._group.unregister_post_hook(self._post_id)
+        # c10d fires the post hook whenever the pre hook fired, even if the
+        # backend raised or the gate closed in between.
+        scopes = self._scopes.pop(args.op_id, None)
+        if scopes is not None:
+            self._exit(scopes)
 
     @staticmethod
-    def _exit(scope: AbstractContextManager[None]) -> None:
+    def _exit(scopes: contextlib.ExitStack) -> None:
         try:
-            scope.__exit__(None, None, None)
+            scopes.close()
         except Exception:
             logger.exception("Failed to close collective annotation")
 
-    def close(self) -> None:
-        """Stops annotating new collectives. Scopes this thread opened (left
-        over from a backend that raised) are closed now; a collective still
-        between its hooks on another thread closes its own scope, then the post
-        hook unregisters."""
-        self._group.unregister_pre_hook(self._pre_id)
-        tid = threading.get_ident()
-        with self._lock:
-            self._closed = True
-            mine = [op for op, (owner, _) in self._scopes.items() if owner == tid]
-            stale = [self._scopes.pop(op)[1] for op in mine]
-            unregister = not self._scopes
-        for scope in reversed(stale):
-            self._exit(scope)
-        if unregister:
-            self._group.unregister_post_hook(self._post_id)
+
+def register_hooks(group: dist.ProcessGroup) -> None:
+    """Registers the gated annotation hooks on a new process group."""
+    hooks = _GroupHooks(group)
+    group.register_pre_hook(_PRE_HOOK_ID, hooks._pre, gated=True)
+    group.register_post_hook(_POST_HOOK_ID, hooks._post, gated=True)
+
+
+# Annotators of the open CollectiveAnnotations, each with its number of instances.
+# _annotators is the immutable snapshot the hooks read.
+_open: dict[Callable[[dict[str, Any]], AbstractContextManager[None]], int] = {}
+_open_lock = threading.Lock()
+_annotators: tuple[Callable[[dict[str, Any]], AbstractContextManager[None]], ...] = ()
 
 
 class CollectiveAnnotations:
-    """Tags collectives on every process group that exists when it is created,
-    until :meth:`close`. Groups created afterwards are not hooked.
+    """Tags the collectives of every process group until :meth:`close`.
 
     ``annotate`` maps a collective's metadata to the scope its kernels launch in;
-    it defaults to :func:`~torch.cuda.graph_annotations.mark_kernels`. Unless
-    ``eager``, only collectives issued from a capturing stream are tagged.
+    it defaults to :func:`~torch.cuda.graph_annotations.mark_kernels` for
+    collectives issued from a capturing stream, and a no-op otherwise. Each open
+    annotator is entered once per collective, however many instances use it.
     """
 
     def __init__(
-        self, annotate: _Annotate = _mark_kernels, *, eager: bool = False
+        self,
+        annotate: Callable[
+            [dict[str, Any]], AbstractContextManager[None]
+        ] = _mark_kernels,
     ) -> None:
-        self._hooks: list[_GroupHooks] = []
-        from torch.distributed.distributed_c10d import _world
-
-        try:
-            for group in list(_world.pg_map):
-                self._hooks.append(_GroupHooks(group, annotate, eager=eager))
-        except BaseException:
-            self.close()
-            raise
+        global _annotators
+        self._annotate = annotate
+        with _open_lock:
+            _open[annotate] = _open.get(annotate, 0) + 1
+            _annotators = tuple(_open)
+        _enable_gated_hooks()
+        self._closed = False
 
     def close(self) -> None:
         """Never raises: ``torch.cuda.graph`` calls it before ending the capture."""
-        while self._hooks:
-            try:
-                self._hooks.pop().close()
-            except Exception:
-                logger.exception("Failed to remove collective annotation hooks")
+        global _annotators
+        if self._closed:
+            return
+        self._closed = True
+        _disable_gated_hooks()
+        with _open_lock:
+            _open[self._annotate] -= 1
+            if not _open[self._annotate]:
+                del _open[self._annotate]
+            _annotators = tuple(_open)

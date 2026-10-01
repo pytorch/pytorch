@@ -6,7 +6,6 @@
 #include <atomic>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -1122,9 +1121,15 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // Hook API. Abort hooks forward to the default backend; pre/post collective
   // hooks are registered on the process group and fire around every collective
   // issued through it (see firePreHook / firePostHook). Hooks are keyed by an
-  // opaque hook_id so they can be individually unregistered. Hooks may be
-  // (un)registered while other threads issue collectives: a collective fires
-  // the hooks registered when it reaches each hook point. See Hooks.hpp.
+  // opaque hook_id so they can be individually unregistered. Registration is
+  // expected to happen at setup time, not concurrently with collectives. See
+  // Hooks.hpp.
+  //
+  // Gated pre/post hooks fire only while gated hooks are enabled process-wide
+  // (enableGatedHooks), and otherwise cost an atomic load per collective. They
+  // suit a consumer that is needed only for some windows of a run, e.g. while a
+  // profiler records, and so stays registered rather than (un)registering
+  // mid-run.
   virtual bool supportsAbortHooks() const {
     return getDefaultBackend()->supportsAbortHooks();
   }
@@ -1153,24 +1158,48 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual void registerPreHook(int64_t hook_id, PreHook hook) {
-    updateHooks(preHooks_, [&](PreHookMap& hooks) {
-      hooks[hook_id] = std::move(hook);
-    });
+    preHooks_[hook_id] = {std::move(hook), /*gated=*/false};
+    updateHookFlags();
   }
 
   virtual void unregisterPreHook(int64_t hook_id) {
-    updateHooks(preHooks_, [&](PreHookMap& hooks) { hooks.erase(hook_id); });
+    preHooks_.erase(hook_id);
+    updateHookFlags();
   }
 
   virtual void registerPostHook(int64_t hook_id, PostHook hook) {
-    updateHooks(postHooks_, [&](PostHookMap& hooks) {
-      hooks[hook_id] = std::move(hook);
-    });
+    postHooks_[hook_id] = {std::move(hook), /*gated=*/false};
+    updateHookFlags();
   }
 
   virtual void unregisterPostHook(int64_t hook_id) {
-    updateHooks(postHooks_, [&](PostHookMap& hooks) { hooks.erase(hook_id); });
+    postHooks_.erase(hook_id);
+    updateHookFlags();
   }
+
+  // Unregistered with unregisterPreHook / unregisterPostHook.
+  void registerGatedPreHook(int64_t hook_id, PreHook hook) {
+    preHooks_[hook_id] = {std::move(hook), /*gated=*/true};
+    updateHookFlags();
+  }
+
+  void registerGatedPostHook(int64_t hook_id, PostHook hook) {
+    postHooks_[hook_id] = {std::move(hook), /*gated=*/true};
+    updateHookFlags();
+  }
+
+  // Returned by firePreHook and passed to the matching firePostHook, so the
+  // post-hooks of an op fire the gated hooks iff its pre-hooks did.
+  struct HookOp {
+    int64_t id = 0;
+    bool gated = false;
+  };
+
+  // Gated hooks fire while enableGatedHooks() calls outnumber
+  // disableGatedHooks() calls.
+  static void enableGatedHooks();
+  static void disableGatedHooks();
+  static bool gatedHooksEnabled();
 
   // This creates a new subgroup using the specified ranks.
   // The current rank must be included in the list of new_ranks.
@@ -1245,26 +1274,39 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // Hooks.hpp. Ordered, so hooks fire in hook_id order: a consumer that has to
   // observe another hook's state (or be observed by it) picks its id instead of
   // depending on an unspecified traversal.
-  //
-  // Copy-on-write: collectives fire hooks with the GIL released, so a
-  // (un)registration from Python can run mid-iteration. Firing iterates an
-  // immutable snapshot, which also keeps a hook alive until its call returns.
-  using PreHookMap = std::map<int64_t, PreHook>;
-  using PostHookMap = std::map<int64_t, PostHook>;
-  // hooksMutex_ guards only the pointers and is never held while copying a
-  // hook, which can take the GIL. Copies are serialized by hooksWriteMutex_.
-  std::mutex hooksMutex_;
-  std::mutex hooksWriteMutex_;
-  std::shared_ptr<const PreHookMap> preHooks_ =
-      std::make_shared<const PreHookMap>();
-  std::shared_ptr<const PostHookMap> postHooks_ =
-      std::make_shared<const PostHookMap>();
-  // Lets the no-hook path skip hooksMutex_.
-  std::atomic<bool> hasPreOrPostHooks_{false};
-  std::atomic<bool> hasPostHooks_{false};
+  template <typename Hook>
+  struct HookEntry {
+    Hook hook;
+    bool gated = false;
+  };
+  std::map<int64_t, HookEntry<PreHook>> preHooks_;
+  std::map<int64_t, HookEntry<PostHook>> postHooks_;
+  bool hasGatedHooks_ = false;
+  bool hasUngatedHooks_ = false;
   // Monotonic id correlating a pre-hook call with its matching post-hook call.
-  // Starts at 1: firePreHook returns 0 when no hooks are registered.
+  // Starts at 1: HookOp{} (id 0) means no hook fired.
   std::atomic<int64_t> hookOpIdCounter_{1};
+
+  void updateHookFlags() {
+    hasGatedHooks_ = false;
+    hasUngatedHooks_ = false;
+    auto note = [this](bool gated) {
+      (gated ? hasGatedHooks_ : hasUngatedHooks_) = true;
+    };
+    for (const auto& entry : preHooks_) {
+      note(entry.second.gated);
+    }
+    for (const auto& entry : postHooks_) {
+      note(entry.second.gated);
+    }
+  }
+
+  // Whether a collective issued now fires any hook, and if so whether the
+  // gated ones fire too.
+  bool hooksActive(bool& gated) const {
+    gated = hasGatedHooks_ && gatedHooksEnabled();
+    return gated || hasUngatedHooks_;
+  }
 
   static std::vector<at::Tensor> flattenTensorLists(
       const std::vector<std::vector<at::Tensor>>& tensorLists) {
@@ -1275,135 +1317,118 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return flat;
   }
 
-  template <typename Map, typename Update>
-  void updateHooks(std::shared_ptr<const Map>& hooks, Update update) {
-    std::lock_guard<std::mutex> write_lock(hooksWriteMutex_);
-    auto updated = std::make_shared<Map>(*snapshotHooks(hooks));
-    update(*updated);
-    std::shared_ptr<const Map> old;
-    {
-      std::lock_guard<std::mutex> lock(hooksMutex_);
-      old = std::exchange(hooks, std::move(updated));
-      hasPostHooks_ = !postHooks_->empty();
-      hasPreOrPostHooks_ = !preHooks_->empty() || hasPostHooks_;
-    }
-    // `old` may hold the last reference to a removed Python hook; release it
-    // outside hooksMutex_.
-  }
-
-  template <typename Map>
-  std::shared_ptr<const Map> snapshotHooks(
-      const std::shared_ptr<const Map>& hooks) {
-    std::lock_guard<std::mutex> lock(hooksMutex_);
-    return hooks;
-  }
-
-  int64_t firePreHookImpl(
+  HookOp firePreHookImpl(
       HookOpName name,
       bool async_op,
       int64_t root,
+      bool gated,
       std::vector<at::Tensor> input_tensors,
       std::vector<at::Tensor> output_tensors) {
-    int64_t op_id = hookOpIdCounter_++;
-    auto hooks = snapshotHooks(preHooks_);
-    if (!hooks->empty()) {
+    HookOp op{hookOpIdCounter_++, gated};
+    if (!preHooks_.empty()) {
       PreHookArgs args{
           name,
           async_op,
           std::move(input_tensors),
           std::move(output_tensors),
           root,
-          op_id};
-      for (const auto& entry : *hooks) {
-        entry.second(args);
+          op.id};
+      for (auto& entry : preHooks_) {
+        if (gated || !entry.second.gated) {
+          entry.second.hook(args);
+        }
       }
     }
-    return op_id;
+    return op;
   }
 
  public:
-  // Fire registered pre-hooks for a collective and return the op_id assigned to
-  // it (0 when no hooks are registered). The tensor lists are only copied /
-  // flattened into the hook args when a pre-hook is registered, so the common
-  // no-hook path adds no work. Overloaded for the various collective tensor
-  // shapes (flat, list-of-lists, single tensor, none). Invoked from the
-  // dispatcher kernels in Ops.cpp; see firePostHook for the matching post-hook.
-  int64_t firePreHook(
+  // Fire registered pre-hooks for a collective and return the op assigned to
+  // it (id 0 when no hook fires). The tensor lists are only copied / flattened
+  // into the hook args when a hook fires, so the common no-hook path adds no
+  // work. Overloaded for the various collective tensor shapes (flat,
+  // list-of-lists, single tensor, none). Invoked from the dispatcher kernels in
+  // Ops.cpp; see firePostHook for the matching post-hook.
+  HookOp firePreHook(
       HookOpName name,
       bool async_op,
       int64_t root,
       const std::vector<at::Tensor>& input_tensors,
       const std::vector<at::Tensor>& output_tensors = {}) {
-    if (!hasPreOrPostHooks_) {
-      return 0;
+    bool gated = false;
+    if (!hooksActive(gated)) {
+      return {};
     }
-    return firePreHookImpl(name, async_op, root, input_tensors, output_tensors);
+    return firePreHookImpl(
+        name, async_op, root, gated, input_tensors, output_tensors);
   }
 
-  int64_t firePreHook(
+  HookOp firePreHook(
       HookOpName name,
       bool async_op,
       int64_t root,
       const std::vector<at::Tensor>& input_tensors,
       const std::vector<std::vector<at::Tensor>>& output_tensor_lists) {
-    if (!hasPreOrPostHooks_) {
-      return 0;
+    bool gated = false;
+    if (!hooksActive(gated)) {
+      return {};
     }
     return firePreHookImpl(
         name,
         async_op,
         root,
+        gated,
         input_tensors,
         flattenTensorLists(output_tensor_lists));
   }
 
-  int64_t firePreHook(
+  HookOp firePreHook(
       HookOpName name,
       bool async_op,
       int64_t root,
       const std::vector<std::vector<at::Tensor>>& input_tensor_lists,
       const std::vector<at::Tensor>& output_tensors) {
-    if (!hasPreOrPostHooks_) {
-      return 0;
+    bool gated = false;
+    if (!hooksActive(gated)) {
+      return {};
     }
     return firePreHookImpl(
         name,
         async_op,
         root,
+        gated,
         flattenTensorLists(input_tensor_lists),
         output_tensors);
   }
 
-  int64_t firePreHook(
+  HookOp firePreHook(
       HookOpName name,
       bool async_op,
       int64_t root,
       const at::Tensor& input_tensor,
       const at::Tensor& output_tensor) {
-    if (!hasPreOrPostHooks_) {
-      return 0;
+    bool gated = false;
+    if (!hooksActive(gated)) {
+      return {};
     }
     return firePreHookImpl(
-        name, async_op, root, {input_tensor}, {output_tensor});
+        name, async_op, root, gated, {input_tensor}, {output_tensor});
   }
 
-  int64_t firePreHook(HookOpName name, bool async_op, int64_t root) {
-    if (!hasPreOrPostHooks_) {
-      return 0;
+  HookOp firePreHook(HookOpName name, bool async_op, int64_t root) {
+    bool gated = false;
+    if (!hooksActive(gated)) {
+      return {};
     }
-    return firePreHookImpl(name, async_op, root, {}, {});
+    return firePreHookImpl(name, async_op, root, gated, {}, {});
   }
 
   // Fires the post-hooks with a null work if destroyed before dismiss(), so
   // hooks still see the end of an op whose backend threw after the pre-hooks.
   class PostHookGuard {
    public:
-    PostHookGuard(
-        ProcessGroup* pg,
-        HookOpName name,
-        bool async_op,
-        int64_t op_id)
-        : pg_(pg), name_(name), async_op_(async_op), op_id_(op_id) {}
+    PostHookGuard(ProcessGroup* pg, HookOpName name, bool async_op, HookOp op)
+        : pg_(pg), name_(name), async_op_(async_op), op_(op) {}
     PostHookGuard(const PostHookGuard&) = delete;
     PostHookGuard& operator=(const PostHookGuard&) = delete;
     PostHookGuard(PostHookGuard&&) = delete;
@@ -1414,7 +1439,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       }
       // Runs during unwinding, so a throwing hook must not escape.
       try {
-        pg_->firePostHook(name_, async_op_, op_id_, {});
+        pg_->firePostHook(name_, async_op_, op_, {});
       } catch (const std::exception& e) {
         LOG(ERROR) << "Post-hook failed after a failed collective: "
                    << e.what();
@@ -1428,27 +1453,28 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     ProcessGroup* pg_;
     HookOpName name_;
     bool async_op_;
-    int64_t op_id_;
+    HookOp op_;
   };
 
-  PostHookGuard postHookGuard(HookOpName name, bool async_op, int64_t op_id) {
-    return PostHookGuard(op_id == 0 ? nullptr : this, name, async_op, op_id);
+  PostHookGuard postHookGuard(HookOpName name, bool async_op, HookOp op) {
+    return PostHookGuard(op.id == 0 ? nullptr : this, name, async_op, op);
   }
 
   // Fire registered post-hooks for a collective, correlated with the matching
-  // pre-hook via op_id.
+  // pre-hook via op.
   void firePostHook(
       HookOpName name,
       bool async_op,
-      int64_t op_id,
+      HookOp op,
       const c10::intrusive_ptr<Work>& work) {
-    if (!hasPostHooks_) {
+    if (op.id == 0) {
       return;
     }
-    auto hooks = snapshotHooks(postHooks_);
-    PostHookArgs args{name, async_op, work, op_id};
-    for (const auto& entry : *hooks) {
-      entry.second(args);
+    PostHookArgs args{name, async_op, work, op.id};
+    for (auto& entry : postHooks_) {
+      if (op.gated || !entry.second.gated) {
+        entry.second.hook(args);
+      }
     }
   }
 };

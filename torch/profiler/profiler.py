@@ -603,12 +603,12 @@ class _KinetoProfile:
                 and torch.distributed.is_available()
                 and torch.distributed.is_initialized()
             ):
-                from torch.distributed._cuda_graph_annotations import (
+                from torch.distributed._collective_annotations import (
                     CollectiveAnnotations,
                 )
 
                 self._cuspy_collective_annotations = CollectiveAnnotations(
-                    self._cuspy_profiler_observer.annotate_collective, eager=True
+                    self._cuspy_profiler_observer.annotate_collective
                 )
 
         if self.profile_memory:
