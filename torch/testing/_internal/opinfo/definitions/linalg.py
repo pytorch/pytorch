@@ -188,6 +188,9 @@ def sample_inputs_householder_product(op_info, device, dtype, requires_grad, **k
     yield SampleInput(make_arg((S, S)), make_arg((S - 2,), low=None, high=None))
     # m = S, n = S -1, k = S - 2
     yield SampleInput(make_arg((S, S - 1)), make_arg((S - 2,), low=None, high=None))
+    if kwargs.get("small_inputs_only", False):
+        return
+    yield SampleInput(make_arg((33, 3)), make_arg((2,)))
 
 
 def sample_inputs_linalg_matrix_power(op_info, device, dtype, requires_grad, **kwargs):
@@ -1169,6 +1172,10 @@ def sample_inputs_linalg_qr_geqrf(
 
     for batch, (m, n) in product(batches, product(ns, ns)):
         shape = batch + (m, n)
+        yield SampleInput(make_arg(*shape))
+    if kwargs.get("small_inputs_only", False):
+        return
+    for shape in ((2, 33, 33), (32, 33)):
         yield SampleInput(make_arg(*shape))
 
 
