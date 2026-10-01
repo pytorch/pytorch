@@ -72,6 +72,24 @@ def _assert_cktile_selected(codes):
         )
 
 
+def _skip_bare_ck_on_gfx1250(test_case, backends):
+    """Skip a CK-only autotune case on gfx1250.
+
+    The classic CK instances are XDL, which gfx1250 largely does not support, so
+    CK rejects them one by one at runtime ("invalid argument for gemm instance
+    DeviceGemmMultiD_Xdl_CShuffle_V3<...>"). A GEMM lowering has no ATen
+    fallback, so every choice ends up scoring +inf and autotune has nothing left
+    to pick. Only the single-token "CK" selection is affected -- anything that
+    also lists ATen still has a viable path, which is why the fallback variants
+    of these same tests pass here.
+    """
+    if backends.upper() != "CK":
+        return
+    runtime_arch = torch.cuda.get_device_properties(0).gcnArchName
+    if "gfx1250" in runtime_arch:
+        test_case.skipTest(f"No viable classic-CK instances on {runtime_arch}")
+
+
 @instantiate_parametrized_tests
 class TestCKBackend(TestCase):
     def setUp(self):
@@ -414,6 +432,7 @@ class TestCKBackend(TestCase):
     )
     @_parametrize_dtype
     def test_max_autotune_addmm(self, max_autotune_gemm_backends, x_shape, dtype):
+        _skip_bare_ck_on_gfx1250(self, max_autotune_gemm_backends)
         m, k, n = 4096, 224, 2048
         alpha, beta = 1.0, 1.0
 
@@ -556,6 +575,7 @@ class TestCKBackend(TestCase):
         name_fn=lambda b: "standalone" if b == "CK" else "fallback",
     )
     def test_max_autotune_conv2d(self, max_autotune_conv_backends):
+        _skip_bare_ck_on_gfx1250(self, max_autotune_conv_backends)
         tensor_options = {"device": "cuda", "dtype": torch.float32}
 
         x = torch.randn(1, 8, 224, 224, **tensor_options)
@@ -603,6 +623,7 @@ class TestCKBackend(TestCase):
         """
         Test gemm-max-autotune torch.bmm with CK backend
         """
+        _skip_bare_ck_on_gfx1250(self, max_autotune_gemm_backends)
 
         def bmm(a, b):
             return torch.bmm(a, b)
