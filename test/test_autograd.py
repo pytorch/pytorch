@@ -57,7 +57,6 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
-    onlyOn,
     skipMeta,
     skipXPUIf,
 )
@@ -15572,11 +15571,9 @@ def _set_device_index(target_device):
         torch.accelerator.set_device_index(orig_device)
 
 
-def _sleep_if_supported(cycles):
+def _sleep_if_accelerator(cycles):
     acc = torch.accelerator.current_accelerator()
-    device_module = torch.get_device_module(acc)
-    if hasattr(device_module, "_sleep"):
-        device_module._sleep(cycles)
+    torch.get_device_module(acc)._sleep(cycles)
 
 
 def _get_device_name(idx):
@@ -15610,12 +15607,12 @@ class _TestAutogradStreamSynchronizationBase(TestCase):
                 )
 
 
-# Although this is written to be generic over all accelerators, non-cuda accelerators
-# are not fully tested since sleep is only supported on cuda.
+# Generic over all accelerators; tests that induce races via _sleep require the
+# accelerator's device module to implement _sleep.
 class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
     hw_classification = HardwareClassification.ACCELERATOR
 
-    # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    # AttributeError: module 'torch.mps' has no attribute '_sleep'
     @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
@@ -15632,7 +15629,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
             @staticmethod
             def backward(ctx, gO):
                 out = gO.clone()
-                _sleep_if_supported(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_accelerator(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 out.add_(1)
                 return out
 
@@ -15679,7 +15676,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
             def backward(ctx, gO):
                 out = gO.to(_get_device_name(0))
                 with _set_device_index(0):
-                    _sleep_if_supported(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                    _sleep_if_accelerator(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 # It's the node's responsibility to sync back to its canonical stream.
                 out.add_(1)
                 ctx.node_stream.wait_stream(torch.accelerator.current_stream(0))
@@ -15747,7 +15744,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
             non_default_ambient_stream=False
         )
 
-    # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    # AttributeError: module 'torch.mps' has no attribute '_sleep'
     @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
@@ -15767,7 +15764,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
             @staticmethod
             def backward(ctx, gO):
                 out = gO.clone()
-                _sleep_if_supported(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_accelerator(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 return out.add_(1)
 
         class Consumer(torch.autograd.Function):
@@ -15810,7 +15807,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
         for _ in range(2):
             test()
 
-    # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    # AttributeError: module 'torch.mps' has no attribute '_sleep'
     @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
@@ -15846,7 +15843,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
             @staticmethod
             def backward(ctx, gO):
                 out = gO.clone()
-                _sleep_if_supported(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_accelerator(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 return out.mul_(2)
 
         class Consumer(torch.autograd.Function):
@@ -15946,7 +15943,9 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
             for keep_grad_acc in (True, False):
                 do_test(suppress_warn=suppress_warn, keep_grad_acc=keep_grad_acc)
 
-    @onlyOn(["cuda", "xpu"])
+    # AttributeError: module 'torch.mps' has no attribute '_sleep'
+    @onlyAccelerator
+    @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     def test_side_stream_backward_overlap(self, device):
         # In case 2/3, we would designate the consumer as the accumulation
@@ -15990,7 +15989,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
                 evt.record()
                 events["side_backward_start"] = evt
 
-                _sleep_if_supported(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
+                _sleep_if_accelerator(NUM_GPU_CYCLES_IN_ONE_SEC // 2)
                 result = gO.clone()
 
                 evt = torch.Event(enable_timing=True)
