@@ -36,6 +36,7 @@ from functorch_additional_op_db import additional_op_db
 
 import functorch
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from functorch import grad, grad_and_value, jacfwd, jvp, vjp, vmap
 from functorch.experimental import chunk_vmap
@@ -4238,6 +4239,75 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         _ = vjp(gy[0])
         result = vmap(vjp)(gy)
         self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
+
+    @parametrize(
+        "op_name",
+        ["native_batch_norm", "native_layer_norm", "native_group_norm", "nn.functional.rms_norm", "nn.functional.instance_norm"],
+        name_fn=lambda op_name: op_name.replace(".", "_"),
+    )
+    @parametrize(
+        "autocast, cast, dtype",
+        [
+            (False, False, None),
+            (False, True, torch.float16),
+            (False, True, torch.bfloat16),
+            (True, False, torch.float16),
+            (True, False, torch.bfloat16),
+            (True, True, torch.float16),
+            (True, True, torch.bfloat16),
+        ],
+        name_fn=lambda autocast, cast, dtype: ("autocast" if autocast else "") + ("_cast" if cast else ""),
+    )
+    def test_norm_backward(self, device, op_name, autocast, cast, dtype):
+        # This test checks that normalization ops backward batching rules work correctly, including
+        # under mixed dtype scenarios (autocast, manual cast).
+
+        # - autocast=True makes the forward pass be run in autocast context (although this does not
+        #   always have an effect, depending on the autocast policy that is per-operation and
+        #   per-device). This also forces the input to be cast to dtype. This is because in an
+        #   autocast context, the previous layer may have returned an output in reduced precision
+        #   because of its own autocast policy.
+        # - cast=True means the floating point tensor params and the input will be cast to dtype
+
+        torch.manual_seed(0)
+        cast_dtype = dtype if cast else None
+        io_dtype = dtype if autocast or cast else None
+
+        def cast_tensor(value, dtype):
+            if isinstance(value, Tensor) and value.is_floating_point():
+                return value.to(dtype)
+            else:
+                return value
+
+        context = (
+            torch.autocast(torch.device(device).type, dtype=dtype)
+            if autocast
+            else contextlib.nullcontext()
+        )
+
+        op_info = next(op for op in op_db if op.name == op_name)
+        samples = op_info.sample_inputs(device, dtype=torch.float32, requires_grad=True)
+        for sample in samples:
+            input = sample.input.to(io_dtype).requires_grad_()
+            args = [cast_tensor(a, cast_dtype) for a in sample.args]
+
+            with context:
+                output = op_info.op(input, *args, **sample.kwargs)
+                if isinstance(output, tuple):
+                    # Some ops, like native_layer_norm, return (output, mean, rstd)
+                    output = output[0]
+
+            extra = [t for t in args if isinstance(t, Tensor) and t.requires_grad]
+            diff_args = [input, *extra]
+            grad_outputs = torch.randn(3, *output.shape, device=device, dtype=io_dtype)
+
+            def backward(grad_out):
+                return torch.autograd.grad(output, diff_args, grad_out, retain_graph=True)
+
+            # fp16/bf16 arithmetic requires a looser tolerance.
+            self.precision = 5e-2
+            self.rel_tol = 5e-2
+            self._vmap_test(backward, (grad_outputs,), check_propagates_grad=False)
 
 
 def discover_variants(opinfo):
