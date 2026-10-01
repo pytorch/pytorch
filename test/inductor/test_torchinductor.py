@@ -1421,10 +1421,12 @@ class skip_if_cpp_wrapper:
 
 
 class skip_if_lite_mode:
-    """For tests whose premise is that a region behaves differently from the
-    graph around it. Under TORCHINDUCTOR_LITE_MODE=1 the whole graph is already
-    all-fallback, so there is no contrast left to observe and the assertions are
-    either vacuous or unsatisfiable."""
+    """For tests whose premise lite mode removes: a region that behaves
+    differently from the graph around it, or code Inductor only produces when it
+    lowers ops itself (generated kernels, graph passes, the out-variant C-shim
+    calls lowerings pick). Under TORCHINDUCTOR_LITE_MODE=1 the whole graph is
+    all-fallback, so the assertions cannot hold. Some skips also mark a known
+    lite-mode gap, e.g. in proxy-executor profiling; the reason names it."""
 
     def __init__(self, reason: str = "") -> None:
         self.reason = reason
@@ -1433,7 +1435,7 @@ class skip_if_lite_mode:
         @functools.wraps(fn)
         def wrapper(test_self):
             if config.fallback_by_default:
-                raise unittest.SkipTest(f"no contrast under lite mode: {self.reason}")
+                raise unittest.SkipTest(f"lite mode: {self.reason}")
             return fn(test_self, *args, **kwargs)
 
         return wrapper

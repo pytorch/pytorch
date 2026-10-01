@@ -32,6 +32,7 @@ try:
         from .test_torchinductor import (
             copy_tests,
             define_custom_op_for_test,
+            skip_if_lite_mode,
             target_assert_alignment_regex,
             TestFailure,
         )
@@ -46,6 +47,7 @@ try:
         from test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
             copy_tests,
             define_custom_op_for_test,
+            skip_if_lite_mode,
             target_assert_alignment_regex,
             TestFailure,
         )
@@ -384,6 +386,7 @@ if IS_FBCODE:
 
 class TestCppWrapperCpuSelection(TestCase):
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
+    @skip_if_lite_mode("no generated kernel assumes alignment")
     def test_fallback_alignment_assert_with_stack_allocation(self):
         def slice2d(x):
             return (3 * x)[..., 1:-15]

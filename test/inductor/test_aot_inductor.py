@@ -1632,6 +1632,7 @@ class AOTInductorTestsTemplate:
         },
         post_grad_fusion_options={},
     )
+    @skip_if_lite_mode("pre-grad passes are disabled")
     def test_simple_split(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -6590,6 +6591,7 @@ class AOTInductorTestsTemplate:
         self.check_model(model, example_inputs, dynamic_shapes=dynamic_shapes)
 
     @unittest.skipIf(config.triton.native_matmul, "matmul is generated")
+    @skip_if_lite_mode("proxy-executor calls are not debug-printed")
     def test_aoti_debug_printer_codegen(self):
         # basic addmm model to test codegen for aoti intermediate debug printer
         class Model(torch.nn.Module):
@@ -6693,6 +6695,8 @@ class AOTInductorTestsTemplate:
             raise unittest.SkipTest(
                 "enable_kernel_profile only supported on linux and win32"
             )
+        if enable_kernel_profile and config.fallback_by_default:
+            raise unittest.SkipTest("lite mode: expects the addmm C-shim call")
 
         M = 8
         N = 6
@@ -6786,6 +6790,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    @skip_if_lite_mode("proxy-executor calls do not record inputs")
     def test_aoti_profiler_input_shapes(self):
         # Verify that kernel profiling records tensor input shapes,
         # scalar args, output handles, and ReinterpretView logical shapes.
@@ -6864,6 +6869,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    @skip_if_lite_mode("the transposes are fallback ops, not views")
     def test_aoti_profiler_multi_output_fallback_input_shapes(self):
         # A tuple-returning fallback (scaled_dot_product_attention) is the
         # representative kernel reaching generate_c_shim_fallback_kernel;
@@ -6913,6 +6919,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    @skip_if_lite_mode("the slices are fallback ops, not views")
     def test_aoti_profiler_tensor_list_input_shapes(self):
         # A tensor-list fallback collapses its whole list into a single codegen
         # arg, so the profiling handles for its ReinterpretView inputs have no
@@ -7002,6 +7009,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    @skip_if_lite_mode("proxy-executor calls do not record inputs")
     def test_kernel_profile_scatter_fallback_arg_order(self):
         # scatter_reduce keeps `dim` between its tensors:
         #   (Tensor self, int dim, Tensor index, Tensor src, str reduce,
@@ -7174,6 +7182,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    @skip_if_lite_mode("proxy-executor calls get no KernelContextGuard")
     def test_kernel_profile_scatter_fallback(self):
         # Scatter fallback kernels use a separate codegen path
         # (_generate_scatter_fallback) that must also be wrapped in
@@ -7350,6 +7359,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    @skip_if_lite_mode("index_put skips IndexPutFallback")
     def test_kernel_profile_index_put_fallback(self):
         # index_put_(Tensor(a!) self, Tensor?[] indices, Tensor values,
         #            bool accumulate). The index list is spread across the
@@ -7387,6 +7397,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    @skip_if_lite_mode("no template kernels are generated")
     def test_kernel_profile_template_kernel(self):
         # A max-autotune GEMM is emitted by codegen_template, which writes its
         # own call line rather than going through the node schedule the
@@ -7439,6 +7450,7 @@ class AOTInductorTestsTemplate:
         sys.platform not in ["linux", "win32"],
         "enable_kernel_profile only supported on linux and win32",
     )
+    @skip_if_lite_mode("no kernels are generated")
     def test_kernel_profile_every_kernel_has_context(self):
         # The point of the guard is that a kernel launch can be attributed, so
         # the property worth asserting is the absence of an exception: every
@@ -7659,6 +7671,7 @@ class AOTInductorTestsTemplate:
                     count,
                 ).run(code)
 
+    @skip_if_lite_mode("no C++ kernels are generated")
     def test_aoti_debug_printer_cpp_kernel(self):
         if self.device != "cpu":
             raise unittest.SkipTest("cpu test case only")
