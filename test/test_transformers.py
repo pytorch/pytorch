@@ -2023,6 +2023,10 @@ class TestSDPAFailureModes(NNTestCase):
         is_rocm = TEST_WITH_ROCM
         if not is_rocm and torch.cuda.get_device_capability(device)[0] < 8:
             self.skipTest("sm80 or newer requires aligned mem efficient attention kernels")
+        # fp32 mem-efficient attention is AOTriton-only. With CK preferred,
+        # dispatch falls back to MATH and the EFFICIENT-only call has no kernel.
+        if is_rocm and torch.backends.cuda.preferred_rocm_fa_library() == torch._C._ROCmFABackend.Ck:
+            self.skipTest("CK does not implement fp32 mem-efficient attention")
 
         B, H, S, D = 6, 4, 64, 64
         # Nonzero values: an all-zero QKV matches every backend even if a
@@ -2041,7 +2045,7 @@ class TestSDPAFailureModes(NNTestCase):
 
         with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
             # ROCm does not apply the CUTLASS sm80 pointer-alignment gate
-            # (check_data_ptr_alignment_mem_efficient is a no-op). AOTriton/CK
+            # (check_data_ptr_alignment_mem_efficient is a no-op). AOTriton
             # mem-efficient attention stays eligible for misaligned QKV.
             expected_backend = (
                 SDPBackend.EFFICIENT_ATTENTION if is_rocm else SDPBackend.MATH
