@@ -32,6 +32,46 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
   return true;
 }
 
+// Returns true only if the strides are contiguous for the sizes, false if they
+// are not or it is data dependent. Does not check numel.
+inline static bool _is_contiguous_or_false(
+    ArrayRef<c10::SymInt> sizes,
+    ArrayRef<c10::SymInt> strides) {
+  // When calculating the expected stride, we can choose to multiply
+  // with max(1, size[d]) or size[d]. Regardless, this is ok for this
+  // function. Why?
+  // (1) If size[d] == 0, then the tensor is contiguous and if
+  //     we return true or false it won't break this function.
+  // (2) If size[d] is not 0, then max(1,size[d]) and size[d] are equal.
+  //     Therefore, if we choose to use max(1, size[d]) or size[d] to
+  //     calculate the expected stride, the result is the same.
+  //
+  // We symbolically check both paths to maximize the cases where this
+  // function returns true. This is because make_contiguous_strides_for adds
+  // the max symbolically, and in some other situations the max might not be
+  // there. And we want to ensure we return true in both cases.
+  c10::SymInt expected_stride = 1;
+  c10::SymInt expected_stride_max = 1;
+  // NB: make sure we do signed arithmetic
+  for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
+    const auto& size_d = sizes[d];
+    if (TORCH_GUARD_OR_FALSE(sym_eq(size_d, 1))) {
+      continue;
+    }
+
+    if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride)) &&
+        TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride_max))) {
+      return false;
+    }
+    // Nested ints don't support max.
+    const bool is_nested_int = size_d.is_heap_allocated() &&
+        size_d.toSymNodeImplUnowned()->is_nested_int();
+    expected_stride_max *= is_nested_int ? size_d : size_d.max(1);
+    expected_stride *= size_d;
+  }
+  return true;
+}
+
 // Return a SymBool with underlying symbolic expression that represents
 // contiguity. Guaranteed not to throw DDE, may returns a symbolic expressions
 // or symbolic True.
@@ -39,47 +79,10 @@ inline static c10::SymBool _compute_contiguous_sym(
     ArrayRef<c10::SymInt> sizes,
     ArrayRef<c10::SymInt> strides,
     const c10::SymInt& numel) {
-  // If this return true, the tensor is contiguous indeed. Otherwise it could be
-  // either.
-  auto is_contiguous_or_false = [&]() {
-    if (TORCH_GUARD_OR_FALSE(sym_eq(numel, 0))) {
-      return true;
-    }
-
-    // When calculating the expected stride, we can choose to multiply
-    // with max(1, size[d]) or size[d]. Regardless, this is ok for this
-    // function. Why?
-    // (1) If size[d] == 0, then the tensor is contiguous and if
-    //     we return true or false it won't break this function.
-    // (2) If size[d] is not 0, then max(1,size[d]) and size[d] are equal.
-    //     Therefore, if we choose to use max(1, size[d]) or size[d] to
-    //     calculate the expected stride, the result is the same.
-    //
-    // We symbolically check both paths to maximize the cases where this
-    // function returns true. This is because make_contiguous_strides_for adds
-    // the max symbolically, and in some other situations the max might not be
-    // there. And we want to ensure we return true in both cases.
-    c10::SymInt expected_stride = 1;
-    c10::SymInt expected_stride_max = 1;
-    // NB: make sure we do signed arithmetic
-    for (int64_t d = int64_t(sizes.size()) - 1; d >= 0; d--) {
-      if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 1))) {
-        continue;
-      }
-
-      if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride)) &&
-          TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected_stride_max))) {
-        return false;
-      }
-      expected_stride_max *= sizes[d].max(1);
-      expected_stride *= sizes[d];
-    }
-    return true;
-  };
-
   // We try to minimize creating large symbolic expressions when not needed to
   // avoid symbolic evaluation perf issues.
-  if (is_contiguous_or_false()) {
+  if (TORCH_GUARD_OR_FALSE(sym_eq(numel, 0)) ||
+      _is_contiguous_or_false(sizes, strides)) {
     return c10::SymBool(true);
   }
 
@@ -129,6 +132,32 @@ bool _compute_channels_last_contiguous_2d(
   }
 }
 
+// When this function return True, result always true. When it return False,
+// result could be False or data dependent.
+inline static bool _is_channels_last_contiguous_2d_or_false(
+    ArrayRef<c10::SymInt> sizes,
+    ArrayRef<c10::SymInt> strides) {
+  if (sizes.size() != 4) {
+    return false;
+  }
+  c10::SymInt expected = 1;
+  for (auto& d : {1, 3, 2, 0}) {
+    const auto& size_d = sizes[d];
+    // Not taking this branch could make this return False instead of True
+    // but not vice-versa. so its ok.
+    if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 1))) {
+      continue;
+    }
+    // Taking this branch could make this return False instead of True
+    // but not vice-versa. so its ok.
+    if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected))) {
+      return false;
+    }
+    expected *= size_d;
+  }
+  return true;
+}
+
 // Return a SymBool with underlying symbolic expression that represents
 // contiguity. Guaranteed not to throw DDE, may returns a symbolic expressions
 // or symbolic True.
@@ -137,30 +166,9 @@ inline static c10::SymBool _compute_channels_last_contiguous_2d_sym(
     ArrayRef<c10::SymInt> strides) {
   switch (sizes.size()) {
     case 4: {
-      // When this function return True, result always true. When it return
-      // False, result could be False or data dependent.
-      auto guard_or_false = [&]() {
-        c10::SymInt expected = 1;
-        for (auto& d : {1, 3, 2, 0}) {
-          const auto& size_d = sizes[d];
-          // Not taking this branch could make this return False instead of True
-          // but not vice-versa. so its ok.
-          if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 1))) {
-            continue;
-          }
-          // Taking this branch could make this return False instead of True
-          // but not vice-versa. so its ok.
-          if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected))) {
-            return false;
-          }
-          expected *= size_d;
-        }
-        return true;
-      };
-
       // We try to minimize creating large symbolic expressions when not needed
       // to avoid symbolic evaluation perf issues.
-      if (guard_or_false()) {
+      if (_is_channels_last_contiguous_2d_or_false(sizes, strides)) {
         return c10::SymBool(true);
       }
 
