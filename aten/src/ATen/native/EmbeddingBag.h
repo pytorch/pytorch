@@ -5,6 +5,7 @@
 
 #ifdef USE_FBGEMM
 #include <fbgemm/FbgemmEmbedding.h>
+#include <fbgemm/Types.h>
 #endif
 
 namespace at::native {
@@ -60,7 +61,7 @@ void make_offset2bag_out(
 
 #ifdef USE_FBGEMM
 
-template<bool has_weight, typename TIndex, typename TData>
+template<bool has_weight, typename TIndex, typename TData, bool is_bf16 = false>
 struct _CallbackAndBlockSize {
     using TCallback = typename fbgemm::EmbeddingSpMDMKernelSignature<TData, TIndex, TIndex, TData>::Type;
 
@@ -68,13 +69,25 @@ struct _CallbackAndBlockSize {
     TCallback callback = nullptr;
 
     static TCallback generateCallback(int64_t block_size) {
-        return fbgemm::GenerateEmbeddingSpMDM<TData, TIndex, TIndex, TData>(
+        if constexpr (std::is_same_v<TData, uint16_t>) {
+            return fbgemm::GenerateEmbeddingSpMDM<TData, TIndex, TIndex, TData>(
+                block_size,
+                has_weight,
+                /* normalize_by_lengths */false,
+                /* prefetch */16,
+                /* is_weight_positional */false,
+                /* use_offsets */true,
+                /* is_bf16_out */is_bf16,
+                /* is_bf16_in */is_bf16);
+        } else {
+            return fbgemm::GenerateEmbeddingSpMDM<TData, TIndex, TIndex, TData>(
                 block_size,
                 has_weight,
                 /* normalize_by_lengths */false,
                 /* prefetch */16,
                 /* is_weight_positional */false,
                 /* use_offsets */true);
+        }
     }
 
     _CallbackAndBlockSize() = default;
@@ -95,31 +108,34 @@ struct _EmbeddingBagKernelCacheImpl : private StorageMixins... {
     {}
 
     // this method is thread safe (call sites may call from different threads)
-    template<bool has_weight, typename TIndex, typename TData>
-    typename _CallbackAndBlockSize<has_weight, TIndex, TData>::TCallback
+    template<bool has_weight, typename TIndex, typename TData, bool is_bf16 = false>
+    typename _CallbackAndBlockSize<has_weight, TIndex, TData, is_bf16>::TCallback
     getCallback(int64_t block_size) const {
         // if the cache doesn't store the kernel for the incoming block size
         // (so it is different from the one stored in corresponding mixin)
         // regenerate the kernel (not writing it into the cache so we avoid locks)
-        if (block_size != _CallbackAndBlockSize<has_weight, TIndex, TData>::blockSize) {
-            return _CallbackAndBlockSize<has_weight, TIndex, TData>::generateCallback(block_size);
+        if (block_size != _CallbackAndBlockSize<has_weight, TIndex, TData, is_bf16>::blockSize) {
+            return _CallbackAndBlockSize<has_weight, TIndex, TData, is_bf16>::generateCallback(block_size);
         }
         // else retrieve the cached kernel from the corresponding mixin
-        return _CallbackAndBlockSize<has_weight, TIndex, TData>::callback;
+        return _CallbackAndBlockSize<has_weight, TIndex, TData, is_bf16>::callback;
     }
 };
 
-// instantiate the cache with the list of storage mixins
-// for each of the 8 _EmbeddingBagKernelCache* usages in the EmbeddingBag.cpp impl file
+// Instantiate the cache with the storage mixins used in EmbeddingBag.cpp.
 using _EmbeddingBagKernelCache = _EmbeddingBagKernelCacheImpl<
     _CallbackAndBlockSize<true, int32_t, float>,
     _CallbackAndBlockSize<false, int32_t, float>,
     _CallbackAndBlockSize<true, int64_t, float>,
     _CallbackAndBlockSize<false, int64_t, float>,
-    _CallbackAndBlockSize<true, int32_t, unsigned short>,
-    _CallbackAndBlockSize<false, int32_t, unsigned short>,
-    _CallbackAndBlockSize<true, int64_t, unsigned short>,
-    _CallbackAndBlockSize<false, int64_t, unsigned short>>;
+    _CallbackAndBlockSize<true, int32_t, fbgemm::float16, false>,
+    _CallbackAndBlockSize<false, int32_t, fbgemm::float16, false>,
+    _CallbackAndBlockSize<true, int64_t, fbgemm::float16, false>,
+    _CallbackAndBlockSize<false, int64_t, fbgemm::float16, false>,
+    _CallbackAndBlockSize<true, int32_t, fbgemm::bfloat16, true>,
+    _CallbackAndBlockSize<false, int32_t, fbgemm::bfloat16, true>,
+    _CallbackAndBlockSize<true, int64_t, fbgemm::bfloat16, true>,
+    _CallbackAndBlockSize<false, int64_t, fbgemm::bfloat16, true>>;
 #else
 struct _EmbeddingBagKernelCache {
     explicit _EmbeddingBagKernelCache(std::optional<int64_t> /* maybe_block_size */) {}
