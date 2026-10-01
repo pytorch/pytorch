@@ -31,7 +31,6 @@ from torch.distributed.tensor._collective_utils import (
     unpad_tensor,
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
-from torch.testing._internal.common_device_type import onlyAccelerator
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     run_tests,
@@ -471,7 +470,6 @@ class DeviceMeshTest(DTensorTestBase):
                 groups, self.device_type, invalid_mesh, mesh_dim_names=("dim0", "dim1")
             )
 
-    @onlyAccelerator
     def test_raises_invalid_device_type(self):
         with self.assertRaisesRegex(
             RuntimeError,
