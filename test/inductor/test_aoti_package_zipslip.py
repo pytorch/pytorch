@@ -6,7 +6,7 @@ from pathlib import Path
 
 import torch
 from torch._inductor.package import load_package
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 MARKER = b"AOTI_ZIPSLIP_CANARY\n"
