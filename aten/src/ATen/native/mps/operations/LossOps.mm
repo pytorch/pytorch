@@ -1316,7 +1316,7 @@ std::string_view get_index_type_str() {
   } else if constexpr (std::is_same_v<index_t, int64_t>) {
     return "int64_t";
   } else {
-    static_assert(false);
+    static_assert(false && sizeof(index_t), "unsupported index type");
   }
 }
 
