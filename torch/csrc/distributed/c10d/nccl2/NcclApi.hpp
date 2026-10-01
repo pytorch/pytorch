@@ -5,6 +5,7 @@
 #ifdef USE_C10D_NCCL
 
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -47,15 +48,10 @@ namespace c10d::nccl2 {
 
 struct MaterializedCollectiveConfig {
   const void* data = nullptr;
-  // Keep native storage alive through group completion and nonblocking polling.
-  c10::IValue owner;
+  // Keeps the native config and its strings alive while NCCL uses them.
+  std::shared_ptr<const void> owner;
 };
 
-using collective_config_converter_t =
-    MaterializedCollectiveConfig (*)(const c10::IValue&);
-
-TORCH_API collective_config_converter_t& get_collective_config_converter();
-// May call Python; invoke before taking locks or opening an NCCL group.
 TORCH_API MaterializedCollectiveConfig
 materializeCollConfig(const OptionalCollectiveConfig& config);
 

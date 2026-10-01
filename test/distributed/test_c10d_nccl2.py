@@ -10,7 +10,6 @@ import pickle
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import unittest
 import weakref
@@ -45,7 +44,7 @@ from torch.testing._internal.common_utils import (
 
 
 try:
-    from nccl.core import NCCLCollConfig, NCCLConfig, VendorOption
+    from nccl.core import NCCLCollConfig
 
     HAS_NCCL_COLL_CONFIG = True
 except ImportError:
@@ -385,32 +384,12 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
         ],
     )
     @parametrize("async_op", [False, True])
-    def test_collectives(self, op, async_op) -> None:
-        config = NCCLCollConfig(
-            min_ctas=1,
-            max_ctas=2,
-            vendor_options=(VendorOption(vendor_id=1, option_id=1, str_value="test"),),
-        )
+    @parametrize("config_kind", ["object", "dict"])
+    def test_collectives(self, op, async_op, config_kind) -> None:
+        config = NCCLCollConfig(min_ctas=1, max_ctas=2, cta_policy=0)
+        if config_kind == "dict":
+            config = {"min_ctas": 1, "max_ctas": 2, "user_profiler_tag": 3}
         self._collective(op, config, async_op)
-
-    @requires_nccl()
-    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
-    @skip_if_lt_x_gpu(2)
-    @parametrize("op", ["all_gather", "reduce_scatter"])
-    def test_grouped_conversion(self, op) -> None:
-        config = NCCLCollConfig()
-        with mock.patch.object(
-            config, "_to_lowpp", side_effect=[config._to_lowpp(), RuntimeError("twice")]
-        ) as convert:
-            self._collective(op, config)
-        self.assertEqual(convert.call_count, 1)
-
-        with mock.patch.object(
-            config, "_to_lowpp", side_effect=RuntimeError("convert")
-        ):
-            with self.assertRaisesRegex(RuntimeError, "convert"):
-                self._collective(op, config)
-        self._collective(op, NCCLCollConfig())
 
     @requires_nccl()
     @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
@@ -424,7 +403,7 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
             "reduce_scatter_single_coalesced",
         ],
     )
-    def test_coalesced_conversion(self, op) -> None:
+    def test_coalesced(self, op) -> None:
         inputs = [
             torch.full((n,), float(self.rank + 1), device=self.device) for n in (4, 8)
         ]
@@ -446,11 +425,8 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
                 for tensor in inputs
             ]
             args = (outputs, inputs, opts)
-        config = NCCLCollConfig(min_ctas=1, max_ctas=2)
-        opts.config = config
-        with mock.patch.object(config, "_to_lowpp", wraps=config._to_lowpp) as convert:
-            getattr(self.pg, op)(*args).wait()
-        self.assertEqual(convert.call_count, 1)
+        opts.config = NCCLCollConfig(min_ctas=1, max_ctas=2)
+        getattr(self.pg, op)(*args).wait()
         for output, tensor in zip(outputs, inputs):
             if op in ("allreduce_coalesced", "reduce_scatter_single_coalesced"):
                 expected = torch.full_like(tensor, size * (size + 1) / 2)
@@ -463,17 +439,19 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
     @requires_nccl()
     @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
     @skip_if_lt_x_gpu(2)
-    @parametrize("wrong_type", ["object", "communicator_config", "native_result"])
-    def test_invalid_config_type(self, wrong_type) -> None:
-        if wrong_type == "native_result":
-            config = NCCLCollConfig()
-            with mock.patch.object(config, "_to_lowpp", return_value=object()):
-                with self.assertRaisesRegex(TypeError, "CollConfig"):
-                    self._collective("all_reduce", config)
-        else:
-            config = object() if wrong_type == "object" else NCCLConfig()
-            with self.assertRaisesRegex(TypeError, "NCCLCollConfig"):
-                self._collective("all_reduce", config)
+    @parametrize(
+        "config, error",
+        [
+            ({"unknown": 1}, "Unknown NCCL collective config key"),
+            ({"max_ctas": "2"}, "'max_ctas' must be an int"),
+            ({"max_ctas": 2**31}, "'max_ctas' is out of range"),
+            ({"alg_selection": 1}, "'alg_selection' must be a str"),
+            ({"vendor_options": ({"vendor_id": 1},)}, "vendor_options"),
+        ],
+    )
+    def test_invalid_config(self, config, error) -> None:
+        with self.assertRaisesRegex((TypeError, ValueError, RuntimeError), error):
+            self._collective("all_reduce", config)
         self._collective("all_reduce", NCCLCollConfig())
 
     @requires_nccl()
@@ -488,51 +466,6 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
         finally:
             group.abort()
             dist.destroy_process_group(group)
-
-    @requires_nccl()
-    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
-    @skip_if_lt_x_gpu(2)
-    def test_vendor_options_validation(self) -> None:
-        from nccl.core.typing import NcclInvalid
-
-        config = NCCLCollConfig()
-        option = VendorOption(vendor_id=1, option_id=1, int_value=1)
-        config.vendor_options = (option, option)
-        with self.assertRaisesRegex(NcclInvalid, "Duplicate vendor option"):
-            self._collective("all_reduce", config)
-        self._collective("all_reduce", NCCLCollConfig())
-
-    @requires_nccl()
-    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
-    @skip_if_lt_x_gpu(2)
-    def test_config_lifetime(self) -> None:
-        import nccl.core.communicator as nccl_core
-
-        refs = []
-        released_on = []
-        materialize = nccl_core._materialize_coll_config
-
-        class Owner:
-            def __del__(self):
-                released_on.append(threading.get_ident())
-
-        def track(config):
-            lowpp, owners = materialize(config)
-            owner = Owner()
-            refs.append(weakref.ref(owner))
-            owners.append(owner)
-            return lowpp, owners
-
-        tensor = torch.ones(1024, device=self.device)
-        dist.all_reduce(tensor)
-        with mock.patch.object(
-            nccl_core, "_materialize_coll_config", side_effect=track
-        ):
-            self._collective("all_reduce", NCCLCollConfig(alg_selection="ring"))
-            self._collective("all_gather", NCCLCollConfig())
-        self.assertEqual(len(refs), 2)
-        self.assertTrue(all(ref() is None for ref in refs))
-        self.assertEqual(released_on, [threading.get_ident()] * len(refs))
 
     @requires_nccl()
     @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")

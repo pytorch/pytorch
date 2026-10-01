@@ -6,14 +6,42 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NcclApi.hpp>
+#include <limits>
+#include <memory>
+#include <string>
 #include <string_view>
 
 namespace c10d::nccl2 {
 
-collective_config_converter_t& get_collective_config_converter() {
-  static collective_config_converter_t converter = nullptr;
-  return converter;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 31, 0) && !defined(USE_ROCM)
+namespace {
+
+struct NativeCollConfig {
+  ncclCollConfig_t config = NCCL_COLLCONFIG_INITIALIZER;
+  std::string algSelection;
+};
+
+int toConfigInt(const std::string& key, const c10::IValue& value) {
+  TORCH_CHECK_TYPE(
+      value.isInt() || value.isBool(),
+      "Collective config '",
+      key,
+      "' must be an int, got ",
+      value.tagKind());
+  auto i =
+      value.isBool() ? static_cast<int64_t>(value.toBool()) : value.toInt();
+  TORCH_CHECK_VALUE(
+      i >= std::numeric_limits<int>::min() &&
+          i <= std::numeric_limits<int>::max(),
+      "Collective config '",
+      key,
+      "' is out of range: ",
+      i);
+  return static_cast<int>(i);
 }
+
+} // namespace
+#endif
 
 MaterializedCollectiveConfig materializeCollConfig(
     const OptionalCollectiveConfig& config) {
@@ -24,11 +52,47 @@ MaterializedCollectiveConfig materializeCollConfig(
   TORCH_CHECK(
       false, "Per-collective NCCL configuration requires NCCL 2.31 or later");
 #else
-  auto converter = get_collective_config_converter();
-  TORCH_CHECK(
-      converter != nullptr,
-      "Per-collective configuration requires the Python bindings");
-  return converter(config.value());
+  auto native = std::make_shared<NativeCollConfig>();
+  auto& c = native->config;
+  for (const auto& item : *config) {
+    const auto& key = item.key();
+    const auto& value = item.value();
+    if (value.isNone()) {
+      continue;
+    }
+    if (key == "min_ctas") {
+      c.minCTAs = toConfigInt(key, value);
+    } else if (key == "max_ctas") {
+      c.maxCTAs = toConfigInt(key, value);
+    } else if (key == "nvls_ctas") {
+      c.nvlsCTAs = toConfigInt(key, value);
+    } else if (key == "cga_cluster_size") {
+      c.cgaClusterSize = toConfigInt(key, value);
+    } else if (key == "force_alg_selection") {
+      c.forceAlgSelection = toConfigInt(key, value);
+    } else if (key == "cta_policy") {
+      c.CTAPolicy = toConfigInt(key, value);
+    } else if (key == "user_profiler_tag") {
+      TORCH_CHECK_TYPE(
+          value.isInt() && value.toInt() >= 0,
+          "Collective config 'user_profiler_tag' must be a non-negative int");
+      c.userProfilerTag = static_cast<uint64_t>(value.toInt());
+    } else if (key == "alg_selection") {
+      TORCH_CHECK_TYPE(
+          value.isString(), "Collective config 'alg_selection' must be a str");
+      native->algSelection = value.toStringRef();
+      c.algSelection = native->algSelection.c_str();
+    } else if (key == "vendor_options") {
+      TORCH_CHECK(
+          (value.isTuple() && value.toTupleRef().elements().empty()) ||
+              (value.isList() && value.toListRef().empty()),
+          "NCCL collective config vendor_options are not supported");
+    } else {
+      TORCH_CHECK_VALUE(false, "Unknown NCCL collective config key: ", key);
+    }
+  }
+  const void* data = &native->config;
+  return {data, std::move(native)};
 #endif
 }
 

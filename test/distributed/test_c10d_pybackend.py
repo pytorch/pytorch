@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: distributed"]
 
-import gc
 import inspect
 import os
 import weakref
@@ -373,7 +372,7 @@ class TestPyBackend(TestCase):
     def test_collective_config(self, name, async_op, config_kind) -> None:
         backend = RecordingBackend(0, 1, "custom-config-backend")
         group = create_process_group(backend)
-        config = object() if config_kind == "object" else None
+        config = {"value": 1} if config_kind == "dict" else None
         args, kwargs = _collective_inputs(name)
         if config_kind != "omitted":
             kwargs["config"] = config
@@ -382,7 +381,7 @@ class TestPyBackend(TestCase):
             [call[0] for call in backend.calls], [_CONFIG_COLLECTIVES[name]]
         )
         opts = backend.calls[0][-1]
-        self.assertIs(opts.config, config)
+        self.assertEqual(opts.config, config)
         self.assertEqual(opts.asyncOp, async_op)
         if "op" in kwargs:
             self.assertEqual(opts.reduceOp, kwargs["op"])
@@ -404,7 +403,7 @@ class TestPyBackend(TestCase):
         backend = RecordingBackend(0, 1)
         group = create_process_group(backend)
         tensor = torch.ones(2)
-        config = "custom-config" if config_kind == "value" else None
+        config = {"value": "custom"} if config_kind == "value" else None
         kwargs = {} if config_kind == "omitted" else {"config": config}
         torch.ops.c10d.allreduce_(
             [tensor],
@@ -420,11 +419,11 @@ class TestPyBackend(TestCase):
     def test_collective_config_backend_owned_validation(self) -> None:
         # Direct backend calls own config validation; Python only forwards it.
         backend = RecordingBackend(0, 1, "custom-backend")
-        config = object()
+        config = {"value": 1}
         args, kwargs = _collective_inputs("gather_single")
         dist.gather_single(*args, group=backend, config=config, **kwargs)
         self.assertEqual([call[0] for call in backend.calls], ["gather_single"])
-        self.assertIs(backend.calls[0][-1].config, config)
+        self.assertEqual(backend.calls[0][-1].config, config)
 
     def test_collective_config_selected_backend(self) -> None:
         cpu_backend = RecordingBackend(0, 1)
@@ -434,9 +433,9 @@ class TestPyBackend(TestCase):
             torch.device("cuda"), dist.ProcessGroup.BackendType.NCCL, cuda_backend
         )
         group._set_default_backend(dist.ProcessGroup.BackendType.NCCL)
-        config = object()
+        config = {"value": 1}
         dist.all_reduce(torch.ones(2), group=group, config=config)
-        self.assertIs(cpu_backend.calls[0][-1].config, config)
+        self.assertEqual(cpu_backend.calls[0][-1].config, config)
         self.assertEqual(cuda_backend.calls, [])
 
     @parametrize("name", _CONFIG_COLLECTIVES)
@@ -480,23 +479,25 @@ class TestPyBackend(TestCase):
             "AllToAllOptions",
         ],
     )
-    def test_collective_config_lifetime(self, options) -> None:
+    def test_collective_config_conversion(self, options) -> None:
         class Config:
-            pass
+            def __init__(self) -> None:
+                self.max_ctas = 4
+                self.alg_selection = "ring"
+                self.vendor_options = ()
 
         opts = getattr(torch._C._distributed_c10d, options)()
         self.assertIsNone(opts.config)
-        config = Config()
-        ref = weakref.ref(config)
-        opts.config = config
-        self.assertIs(opts.config, config)
-        del config
-        gc.collect()
-        self.assertIsNotNone(ref())
+        opts.config = Config()
+        self.assertEqual(
+            opts.config, {"max_ctas": 4, "alg_selection": "ring", "vendor_options": ()}
+        )
+        opts.config = {"min_ctas": None}
+        self.assertEqual(opts.config, {"min_ctas": None})
         opts.config = None
-        gc.collect()
         self.assertIsNone(opts.config)
-        self.assertIsNone(ref())
+        with self.assertRaises(AttributeError):
+            opts.config = object()
 
     @parametrize("name", ["all_reduce", "all_gather_single", "reduce_scatter_single"])
     @parametrize("device", [None, torch.device("cpu")])
@@ -504,7 +505,7 @@ class TestPyBackend(TestCase):
         backend = RecordingBackend(0, 1, "custom-config-backend")
         group = create_process_group(backend)
         args, kwargs = _collective_inputs(name)
-        config = object()
+        config = {"value": 1}
         with _coalescing_manager(group, device):
             getattr(dist, name)(*args, group=group, config=config, **kwargs)
         self.assertNotIn(group, _world.pg_coalesce_state)
@@ -512,27 +513,27 @@ class TestPyBackend(TestCase):
             [call[0] for call in backend.calls],
             [_CONFIG_COLLECTIVES[name] + "_coalesced"],
         )
-        self.assertIs(backend.calls[0][-1].config, config)
+        self.assertEqual(backend.calls[0][-1].config, config)
 
     def test_collective_config_coalescing_mismatch(self) -> None:
         group = create_process_group(RecordingBackend(0, 1, "custom-config-backend"))
         with self.assertRaisesRegex(RuntimeError, "same config"):
             with _coalescing_manager(group):
                 dist.all_reduce(torch.ones(2), group=group)
-                dist.all_reduce(torch.ones(2), group=group, config=object())
+                dist.all_reduce(torch.ones(2), group=group, config={"value": 1})
 
     def test_uncaptured_config_in_coalescing_scope(self) -> None:
         backend = RecordingBackend(0, 1, "custom-config-backend")
         group = create_process_group(backend)
         other_backend = RecordingBackend(0, 1, "custom-config-backend")
         other = create_process_group(other_backend)
-        config = object()
+        config = {"value": 1}
         with _coalescing_manager(group):
             dist.all_reduce(torch.ones(2), group=other, config=config)
             dist.broadcast(torch.ones(2), group_src=0, group=group, config=config)
         self.assertEqual([call[0] for call in backend.calls], ["broadcast"])
-        self.assertIs(backend.calls[0][-1].config, config)
-        self.assertIs(other_backend.calls[0][-1].config, config)
+        self.assertEqual(backend.calls[0][-1].config, config)
+        self.assertEqual(other_backend.calls[0][-1].config, config)
         self.assertNotIn(group, _world.pg_coalesce_state)
 
     def test_attr_overrides(self) -> None:
