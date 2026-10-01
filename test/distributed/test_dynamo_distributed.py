@@ -661,7 +661,7 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
 
 # These tests aren't really distributed, but need multiple GPUs to run
 class TestMultiGPU(torch._inductor.test_case.TestCase):
-    @unittest.skipIf(not TEST_MULTIACCELERATOR, "Requires multiple gpus")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_cuda__exchange_device(self):
         device_mod = torch.get_device_module(device_type)
 
@@ -685,7 +685,7 @@ class TestMultiGPU(torch._inductor.test_case.TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(torch.accelerator.current_device_index(), initial_dev)
 
-    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple gpus")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_device_guard(self):
         current_device = torch.accelerator.current_device_index()
 
@@ -702,7 +702,7 @@ class TestMultiGPU(torch._inductor.test_case.TestCase):
         self.assertEqual(device_guard.prev_idx, 0)
         self.assertEqual(device_guard.idx, 1)
 
-    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple GPU")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_new_event_api(self) -> None:
         from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
         from torch._dynamo.variables.streams import new_event
@@ -729,7 +729,7 @@ class TestMultiGPU(torch._inductor.test_case.TestCase):
 
         fn(torch.ones(2, 2, device=f"{device_type}:0"))
 
-    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple GPU")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_get_current_stream_return_no_index(self):
         def fn(x, s0, s1):
             with s1:
@@ -745,7 +745,7 @@ class TestMultiGPU(torch._inductor.test_case.TestCase):
         s_exp = fn(*inp)
         self.assertEqual(s_act, s_exp)
 
-    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple GPU")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_get_current_stream_return_different_device(self):
         def fn(x, s0, s1):
             with s1:
@@ -763,7 +763,7 @@ class TestMultiGPU(torch._inductor.test_case.TestCase):
         s_exp = fn(*inp)
         self.assertEqual(s_act, s_exp)
 
-    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple GPU")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_gpu_current_device(self):
         def fn(x):
             y = torch.empty(
@@ -785,7 +785,7 @@ class TestMultiGPU(torch._inductor.test_case.TestCase):
                 self.assertEqual(opt_fn(x), fn(x))
                 self.assertEqual(counter.frame_count, 2)
 
-    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple GPU")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_symint_as_device_kwarg_multi_gpu(self):
         def fn(rank):
             # -2 to make device id smaller for easier testing on CI
@@ -820,7 +820,7 @@ class TestMultiGPU(torch._inductor.test_case.TestCase):
     @torch._inductor.config.patch("fx_graph_cache", True)
     @torch._inductor.config.patch("fx_graph_remote_cache", False)
     @torch._functorch.config.patch({"enable_autograd_cache": True})
-    @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one GPU detected")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "only one accelerator detected")
     def test_constant_tensor_device_guards(self):
         """
         Usually, when there are example inputs, the device index of the inputs
@@ -851,7 +851,7 @@ class TestMultiGPU(torch._inductor.test_case.TestCase):
 
 
 class TestMultiGPUDevice(torch._inductor.test_case.TestCase):
-    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple GPU")
+    @unittest.skipIf(not TEST_MULTIACCELERATOR, "need multiple accelerators")
     def test_gpu_set_device(self, device):
         def fn():
             a = torch.ones(2, device=device)
