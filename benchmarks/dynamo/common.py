@@ -377,6 +377,8 @@ def output_json(filename, headers, row):
     }
     if current_settings:
         extra_info.update(current_settings)
+        if current_settings.get("hf_inference_mode") == "prefill":
+            extra_info["batch_size"] = current_batch_size
 
     mapping_headers = {headers[i]: v for i, v in enumerate(row)}
     with open(f"{os.path.splitext(filename)[0]}.json", "a") as f:

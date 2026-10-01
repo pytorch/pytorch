@@ -101,8 +101,10 @@ workload; generation retains its existing `1 x 1000` inputs.
 
 CSV `abs_latency` and `eager_prefill_latency` are milliseconds for all
 `--iterations-per-run` requests; `input_tokens_per_second` includes all batch
-elements. Prefill uses separate default output names; use separate files for
-different input dimensions.
+elements. JSON records the prompt length and effective batch size. Prefill uses
+separate default output names; use separate files for different input dimensions.
+The A100, H100, and B200 workflows accept a `prefill` dispatch input to add
+inference benchmarks with CUDA graphs disabled and enabled.
 
 As an example, the commands to run first line of the dashboard (performance only) would be:
 ```

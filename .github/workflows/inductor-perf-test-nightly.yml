@@ -52,6 +52,11 @@ on:
         required: false
         type: boolean
         default: false
+      prefill:
+        description: Run Hugging Face prefill benchmarks on CUDA? Requires inference.
+        required: false
+        type: boolean
+        default: false
       benchmark_configs:
         description: The list of configs used the benchmark
         required: false
@@ -174,7 +179,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: ${{ needs.build.outputs.build-environment }}
-      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-prefill-${{ inputs.prefill }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 720
