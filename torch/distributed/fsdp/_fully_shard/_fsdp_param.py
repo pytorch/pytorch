@@ -29,6 +29,7 @@ from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
+    _validate_block_shard_placements,
     BlockShard,
     Placement,
 )
@@ -283,14 +284,14 @@ class FSDPParam:
         # DTensor with the BlockShard placement.
         self._block_shard: BlockShard | None = None
         if isinstance(fsdp_placement, BlockShard):
-            if isinstance(param, DTensor) or not isinstance(
-                self.mesh_info, FSDPMeshInfo
-            ):
+            if not isinstance(self.mesh_info, FSDPMeshInfo):
                 raise NotImplementedError(
-                    "BlockShard is only supported for plain tensor parameters with "
-                    f"FSDP or HSDP, got {type(param)} with {type(self.mesh_info)}"
+                    f"BlockShard requires FSDP or HSDP, got {type(self.mesh_info)}"
                 )
-            fsdp_placement._split_dim(param.shape)
+            local_shape = (
+                param._local_tensor.shape if isinstance(param, DTensor) else param.shape
+            )
+            fsdp_placement._split_dim(local_shape)
             self._block_shard = fsdp_placement
             fsdp_placement = Shard(0)
         if fsdp_placement is None:
@@ -323,6 +324,13 @@ class FSDPParam:
         self.is_dtensor = isinstance(param, DTensor)
         self._orig_param_uid = _get_orig_param_uid(param)
         param_data = self._init_sharding_spec(param, fsdp_placement, shard_dim)
+        if self._block_shard is not None:
+            # e.g. EP Shard(0) on the experts dim and FSDP BlockShard on the
+            # merged rows of the local experts.
+            spec = self._sharding_spec
+            _validate_block_shard_placements(
+                spec.placements, spec.shape, spec.mesh.shape
+            )
         if not param_data.is_contiguous():
             raise AssertionError(
                 f"Expected contiguous tensor, got {param_data.shape=} {param_data.stride()=}"
@@ -628,6 +636,11 @@ class FSDPParam:
         dp_shard_indices = [
             spmd_mesh.mesh_dim_names.index(n) for n in dp_dim_names.shard_names
         ]
+        if self._block_shard is not None and len(dp_shard_indices) != 1:
+            raise NotImplementedError(
+                "BlockShard requires exactly one DP shard mesh dim, got "
+                f"{dp_dim_names.shard_names}"
+            )
 
         orig_placements = self._unsharded_dtensor_spec.placements
         for idx in dp_shard_indices:
@@ -664,9 +677,15 @@ class FSDPParam:
                 p = orig_placements[j]
                 if isinstance(p, (Shard, _StridedShard)) and p.dim == shard_dim:
                     sf *= spmd_mesh.size(j)
-            new_placements[dp_idx] = (
-                _StridedShard(shard_dim, split_factor=sf) if sf > 1 else fsdp_placement
-            )
+            if self._block_shard is not None:
+                # BlockShard applies after the Shard(0) mesh dims by definition.
+                new_placements[dp_idx] = self._block_shard
+            else:
+                new_placements[dp_idx] = (
+                    _StridedShard(shard_dim, split_factor=sf)
+                    if sf > 1
+                    else fsdp_placement
+                )
 
         self._spmd_mesh = spmd_mesh
         self._spmd_placements: tuple[Placement, ...] = tuple(new_placements)
@@ -758,12 +777,15 @@ class FSDPParam:
                 f"or 4 (HSDP+EP+TP) but got {self._spmd_mesh.ndim}."
             )
         if isinstance(self.mesh_info, FSDPMeshInfo):
+            if self._block_shard is not None:
+                # BlockShard applies after the TP/EP Shard(0) by definition.
+                dp_shard_placement: Placement = self._block_shard
+            elif split_factor > 1:
+                dp_shard_placement = _StridedShard(shard_dim, split_factor=split_factor)
+            else:
+                dp_shard_placement = fsdp_placement
             dp_shard_tp_placement = (
-                (
-                    _StridedShard(shard_dim, split_factor=split_factor)
-                    if split_factor > 1
-                    else fsdp_placement
-                ),
+                dp_shard_placement,
                 *self._unsharded_dtensor_spec.placements,
             )
         else:  # DDP
@@ -815,7 +837,9 @@ class FSDPParam:
             raise AssertionError("Expected post_forward_mesh_info to not be None")
         param_data = param._local_tensor if isinstance(param, DTensor) else param
         if self._block_shard is not None:
-            param_data = param_data.view(self._block_shard._merged_shape(param.shape))
+            param_data = param_data.view(
+                self._block_shard._merged_shape(param_data.shape)
+            )
         if isinstance(mesh_info, FSDPMeshInfo):
             chunks = _chunk_with_empty(param_data, mesh_info.shard_mesh_size, dim=0)
             self.sharded_post_forward_size = _get_dim_chunked_size(

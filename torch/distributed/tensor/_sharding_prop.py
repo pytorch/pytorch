@@ -38,10 +38,11 @@ from torch.distributed.tensor._utils import (
     try_find_mesh_from_args,
 )
 from torch.distributed.tensor.placement_types import (
+    _BlockShardLayout,
     _is_block_shard,
     _StridedShard,
     _validate_block_shard_placements,
-    BlockShard,
+    Placement,
     Replicate,
     Shard,
 )
@@ -426,31 +427,77 @@ def _has_block_shard(op_schema: OpSchema) -> bool:
     )
 
 
-def _to_merged_spec(spec: DTensorSpec, merged_shape: torch.Size) -> DTensorSpec:
+def _to_merged_spec(
+    spec: DTensorSpec, merged_shape: torch.Size, layout: _BlockShardLayout | None
+) -> DTensorSpec:
+    """Rewrite ``spec`` onto the merged view; ``layout`` is set for BlockShard specs.
+
+    BlockShard applies after the Shard(0) mesh dim, so when that mesh dim comes
+    later in the mesh it is ``_StridedShard(0, split_factor)`` on the merged
+    view, as FSDP2 lays out Shard(0) after expert parallelism.
+    """
     if spec.tensor_meta is None:
         raise AssertionError(f"Expected tensor_meta for {spec}")
-    placements = tuple(Shard(0) if _is_block_shard(p) else p for p in spec.placements)
+    placements = list(spec.placements)
+    if layout is not None:
+        e = layout.shard0_mesh_dim
+        placements[layout.mesh_dim] = (
+            _StridedShard(0, split_factor=spec.mesh.size(e))
+            if e is not None and e > layout.mesh_dim
+            else Shard(0)
+        )
     stride = torch._prims_common.make_contiguous_strides_for(merged_shape)
     meta = TensorMeta(merged_shape, stride, spec.tensor_meta.dtype)
-    return DTensorSpec(spec.mesh, placements, tensor_meta=meta)
+    return DTensorSpec(spec.mesh, tuple(placements), tensor_meta=meta)
 
 
 def _from_merged_spec(
-    spec: DTensorSpec, shape: tuple[int, ...], block_shard: BlockShard, k: int
+    spec: DTensorSpec, shape: tuple[int, ...], layout: _BlockShardLayout, k: int
 ) -> DTensorSpec:
+    """Map a spec on the merged view back to ``shape``; inverse of _to_merged_spec."""
     if spec.tensor_meta is None:
         raise AssertionError(f"Expected tensor_meta for {spec}")
-    placements: list = []
-    for p in spec.placements:
+    mesh = spec.mesh
+    b = layout.mesh_dim
+    placements: list[Placement] = list(spec.placements)
+    dim0_dims = [
+        i
+        for i, p in enumerate(placements)
+        if isinstance(p, Shard | _StridedShard) and p.dim == 0
+    ]
+    if b in dim0_dims:
+        others = [i for i in dim0_dims if i != b]
+        if len(others) > 1:
+            raise _BlockShardUntranslatable
+        e = others[0] if others else None
+        expected = (
+            _StridedShard(0, split_factor=mesh.size(e))
+            if e is not None and e > b
+            else Shard(0)
+        )
+        if placements[b] != expected or (
+            e is not None and type(placements[e]) is not Shard
+        ):
+            raise _BlockShardUntranslatable
+        placements[b] = layout.placement
+        dim0_dims = others
+    for i in dim0_dims:
+        # Shard(0) of the merged rows is Shard(0) of shape[0] only when its
+        # chunks end on whole slices of shape[1:k].
+        if type(placements[i]) is not Shard or shape[0] % mesh.size(i) != 0:
+            raise _BlockShardUntranslatable
+    for i, p in enumerate(placements):
         if isinstance(p, _StridedShard):
             raise _BlockShardUntranslatable
-        if isinstance(p, Shard):
-            placements.append(block_shard if p.dim == 0 else Shard(p.dim + k - 1))
-        else:
-            placements.append(p)
+        if type(p) is Shard and p.dim > 0:
+            placements[i] = Shard(p.dim + k - 1)
+    try:
+        _validate_block_shard_placements(placements, shape, mesh.shape)
+    except NotImplementedError as e:
+        raise _BlockShardUntranslatable from e
     stride = torch._prims_common.make_contiguous_strides_for(shape)
     meta = TensorMeta(torch.Size(shape), stride, spec.tensor_meta.dtype)
-    return DTensorSpec(spec.mesh, tuple(placements), tensor_meta=meta)
+    return DTensorSpec(mesh, tuple(placements), tensor_meta=meta)
 
 
 class ShardingPropagator:
@@ -1173,10 +1220,20 @@ class ShardingPropagator:
         input_spec = op_schema.args_schema[0]
         if not isinstance(input_spec, DTensorSpec):
             return None
-        block_shard = next(p for p in input_spec.placements if _is_block_shard(p))
-        _validate_block_shard_placements(input_spec.placements, input_spec.shape)
+        layout = _validate_block_shard_placements(
+            input_spec.placements, input_spec.shape, input_spec.mesh.shape
+        )
+        if layout is None:
+            raise AssertionError(f"Expected a BlockShard layout in {input_spec}")
+        block_shard = layout.placement
         out_meta = self._propagate_tensor_meta_non_cached(op_schema)
         if not isinstance(out_meta, TensorMeta):
+            return None
+        if (
+            layout.shard0_mesh_dim is not None
+            and out_meta.shape[0] != input_spec.shape[0]
+        ):
+            # The Shard(0) mesh dim needs dim 0 to stay as is.
             return None
         # A view keeps the row-major element order, so each rank's contiguous
         # element range carries over as long as the block still ends on a dim
@@ -1191,7 +1248,7 @@ class ShardingPropagator:
             ),
             None,
         )
-        if k is None:
+        if k is None or (k == 1 and layout.shard0_mesh_dim is not None):
             return None
         out_placement = Shard(0) if k == 1 else block_shard
         placements = tuple(
@@ -1219,20 +1276,16 @@ class ShardingPropagator:
                 raise _BlockShardUntranslatable
 
         # Group operands that interact: list index for foreach ops, else one group.
-        groups: dict[int | None, tuple[tuple[int, ...], BlockShard, int]] = {}
+        groups: dict[int | None, tuple[tuple[int, ...], _BlockShardLayout, int]] = {}
 
         def collect(arg: object, group: int | None) -> None:
             if isinstance(arg, DTensorSpec):
-                block_shard = next(
-                    (p for p in arg.placements if isinstance(p, BlockShard)), None
+                layout = _validate_block_shard_placements(
+                    arg.placements, arg.shape, arg.mesh.shape
                 )
-                if block_shard is not None:
-                    _validate_block_shard_placements(arg.placements, arg.shape)
-                    entry = (
-                        tuple(arg.shape),
-                        block_shard,
-                        block_shard._split_dim(arg.shape),
-                    )
+                if layout is not None:
+                    k = layout.placement._split_dim(layout.block_shape)
+                    entry = (tuple(arg.shape), layout, k)
                     if groups.setdefault(group, entry) != entry:
                         raise _BlockShardUntranslatable
             elif isinstance(arg, (list, tuple)):
@@ -1246,17 +1299,17 @@ class ShardingPropagator:
                         # A non-list tensor would broadcast into BlockShard elements.
                         raise _BlockShardUntranslatable
                     return arg
-                shape, block_shard, k = groups[group]
-                merged = block_shard._merged_shape(shape)
+                shape, layout, k = groups[group]
+                merged = torch.Size((math.prod(shape[:k]), *shape[k:]))
                 if any(_is_block_shard(p) for p in arg.placements):
-                    return _to_merged_spec(arg, merged)
+                    return _to_merged_spec(arg, merged, layout)
                 if arg.ndim <= len(shape) - k:
                     # Broadcasts over trailing dims only, which the view preserves.
                     return arg
                 if tuple(arg.shape) == shape and all(
                     p.is_replicate() or p.is_partial() for p in arg.placements
                 ):
-                    return _to_merged_spec(arg, merged)
+                    return _to_merged_spec(arg, merged, None)
                 raise _BlockShardUntranslatable
             if isinstance(arg, (list, tuple)):
                 return type(arg)(
@@ -1271,8 +1324,8 @@ class ShardingPropagator:
                     raise _BlockShardUntranslatable
                 if group not in groups or arg.shape == original.shape:
                     return arg
-                shape, block_shard, k = groups[group]
-                return _from_merged_spec(arg, shape, block_shard, k)
+                shape, layout, k = groups[group]
+                return _from_merged_spec(arg, shape, layout, k)
             if isinstance(arg, (list, tuple)):
                 return type(arg)(
                     from_merged(a, o, i if foreach else group)
@@ -1284,10 +1337,10 @@ class ShardingPropagator:
             if isinstance(spec, DTensorSpec):
                 if group not in groups or spec.ndim == 0:
                     return spec
-                shape, block_shard, k = groups[group]
-                if spec.shape != block_shard._merged_shape(shape):
+                shape, layout, k = groups[group]
+                if spec.shape != (math.prod(shape[:k]), *shape[k:]):
                     raise _BlockShardUntranslatable
-                return _from_merged_spec(spec, shape, block_shard, k)
+                return _from_merged_spec(spec, shape, layout, k)
             if isinstance(spec, (list, tuple)):
                 return type(spec)(
                     output_from_merged(s, i if foreach else group)

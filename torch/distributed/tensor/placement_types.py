@@ -6,7 +6,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Any, cast, TypeGuard, TypeVar
+from typing import Any, cast, NamedTuple, TypeGuard, TypeVar
 
 import torch
 import torch._C
@@ -2176,8 +2176,14 @@ class BlockShard(Placement):
         block_repeats (Sequence[int], optional): consecutive repeats of each
             ``block_numels`` entry, each >= 1. ``None`` means all ones.
 
-    .. warning:: ``BlockShard`` is experimental and subject to change. It can
-        only be combined with ``Replicate`` or ``Partial`` on other mesh dims.
+    On other mesh dims, ``BlockShard`` can be combined with ``Replicate``,
+    ``Partial``, and ``Shard(0)`` on at most one mesh dim, which must evenly
+    divide ``shape[0]``. ``BlockShard`` then applies to the local tensor left by
+    that ``Shard(0)``, whatever the mesh dim order: for example, expert
+    parallelism on the experts dim followed by FSDP on the merged rows of each
+    rank's local experts.
+
+    .. warning:: ``BlockShard`` is experimental and subject to change.
     """
 
     block_numels: tuple[int, ...]
@@ -2350,29 +2356,87 @@ def _is_block_shard(p: object) -> TypeGuard[BlockShard]:
     return isinstance(p, BlockShard)
 
 
+class _BlockShardLayout(NamedTuple):
+    """Where a supported BlockShard layout sits on the mesh.
+
+    ``block_shape`` is the shape BlockShard applies to: the tensor shape after
+    the ``Shard(0)`` mesh dim (e.g. expert parallelism) if there is one.
+    """
+
+    mesh_dim: int
+    placement: "BlockShard"
+    shard0_mesh_dim: int | None
+    block_shape: tuple[int, ...]
+
+
 def _validate_block_shard_placements(
-    placements: Sequence[Placement], shape: Sequence[int]
-) -> None:
+    placements: Sequence[Placement],
+    shape: Sequence[int],
+    mesh_shape: Sequence[int],
+) -> _BlockShardLayout | None:
     """Check the currently supported ``BlockShard`` layouts.
 
-    At most one mesh dim may use ``BlockShard``, and every other mesh dim must be
-    ``Replicate`` or ``Partial``. The ``BlockShard`` pattern must be supported
-    for ``shape``.
+    At most one mesh dim may use ``BlockShard``. Every other mesh dim must be
+    ``Replicate``, ``Partial``, or (on at most one mesh dim) ``Shard(0)`` that
+    evenly divides ``shape[0]``. ``BlockShard`` applies to the local tensor left
+    by that ``Shard(0)``, whatever the mesh dim order: expert parallelism on the
+    experts dim, then FSDP on the merged rows of the local experts.
     """
-    block_shards = [p for p in placements if isinstance(p, BlockShard)]
-    if not block_shards:
-        return
-    if len(block_shards) > 1:
+    block_shard_dims = [
+        i for i, p in enumerate(placements) if isinstance(p, BlockShard)
+    ]
+    if not block_shard_dims:
+        return None
+    if len(block_shard_dims) > 1:
         raise NotImplementedError(
             f"BlockShard on more than one mesh dim is not supported: {tuple(placements)}"
         )
-    for p in placements:
-        if not isinstance(p, BlockShard) and not (p.is_replicate() or p.is_partial()):
+    shard0_dims = []
+    for i, p in enumerate(placements):
+        if type(p) is Shard and p.dim == 0:
+            shard0_dims.append(i)
+        elif not isinstance(p, BlockShard) and not (p.is_replicate() or p.is_partial()):
             raise NotImplementedError(
-                "BlockShard can only be combined with Replicate or Partial on other "
-                f"mesh dims, got {tuple(placements)}"
+                "BlockShard can only be combined with Replicate, Partial, or Shard(0) "
+                f"on other mesh dims, got {tuple(placements)}"
             )
-    block_shards[0]._split_dim(shape)
+    if len(shard0_dims) > 1:
+        raise NotImplementedError(
+            f"BlockShard supports Shard(0) on at most one other mesh dim: {tuple(placements)}"
+        )
+    block_shape = tuple(shape)
+    shard0_mesh_dim = shard0_dims[0] if shard0_dims else None
+    if shard0_mesh_dim is not None:
+        num_chunks = mesh_shape[shard0_mesh_dim]
+        if shape[0] % num_chunks != 0:
+            raise NotImplementedError(
+                f"BlockShard with Shard(0) requires shape[0] ({shape[0]}) to be "
+                f"divisible by the Shard(0) mesh dim size ({num_chunks})"
+            )
+        block_shape = (shape[0] // num_chunks, *shape[1:])
+    placement = cast(BlockShard, placements[block_shard_dims[0]])
+    placement._split_dim(block_shape)
+    return _BlockShardLayout(
+        block_shard_dims[0], placement, shard0_mesh_dim, block_shape
+    )
+
+
+def _block_shard_local_boxes(
+    layout: _BlockShardLayout,
+    mesh_shape: Sequence[int],
+    coordinate: Sequence[int],
+) -> list[tuple[tuple[int, ...], tuple[int, ...], int, int]]:
+    """Global boxes owned by ``coordinate``, as in ``BlockShard._local_boxes``."""
+    boxes = layout.placement._local_boxes(
+        layout.block_shape, mesh_shape[layout.mesh_dim], coordinate[layout.mesh_dim]
+    )
+    if layout.shard0_mesh_dim is None:
+        return boxes
+    row_offset = coordinate[layout.shard0_mesh_dim] * layout.block_shape[0]
+    return [
+        ((offset[0] + row_offset, *offset[1:]), size, start, stop)
+        for offset, size, start, stop in boxes
+    ]
 
 
 def _register_placements_as_opaque():
