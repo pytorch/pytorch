@@ -406,15 +406,28 @@ def _load_global_deps() -> None:
     # Determine the file extension based on the platform
     lib_ext = ".dylib" if platform.system() == "Darwin" else ".so"
     lib_name = f"libtorch_global_deps{lib_ext}"
-    # get_file_path follows the compiled extension, which under a redirect-mode
-    # editable install lives beside the installed distribution, not __file__.
-    global_deps_lib_path = get_file_path("torch", "lib", lib_name)
+    here = os.path.abspath(__file__)
+    global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
+
+    # In scikit-build-core editable installs with redirect mode, native libs are
+    # installed to the dist package location rather than relative to __file__.
     if not os.path.exists(global_deps_lib_path):
-        # Handing a missing path to CDLL would surface as an unrelated dlopen
-        # failure through the CUDA-dependency retry below.
-        raise OSError(
-            f"{global_deps_lib_path} is missing; torch is not fully installed"
-        )
+        try:
+            from importlib.metadata import distribution
+
+            installed = distribution("torch").locate_file(
+                os.path.join("torch", "lib", lib_name)
+            )
+            # The importlib metadata SimplePath protocol was missing the exists
+            # method in older versions; however, the actual Path implementation
+            # has it and newer versions of importlib metadata have added it to
+            # the protocol, making the following ignore unnecessary from
+            # importlib_metadata 7.0.1 and Python 3.13 onwards.
+            # pyrefly: ignore[missing-attribute]
+            if installed.exists():
+                global_deps_lib_path = str(installed)
+        except Exception:
+            pass
 
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
@@ -2051,6 +2064,12 @@ def set_float32_matmul_precision(precision: str) -> None:
         is set then the float32 datatype is used for internal computations, equivalent
         to setting `torch.backends.cuda.matmul.allow_tf32 = False`.
 
+    .. note::
+
+        The implementation of "high" and "medium" precision in AMD Instinct MI300 series
+        devices uses 10 mantissa bits but always rounds down instead of rounding to nearest,
+        reducing accuracy slightly and introducing a downward bias. See :ref:`tf32_on_mi300`.
+
     Args:
         precision(str): can be set to "highest" (default), "high", or "medium" (see above).
 
@@ -3310,6 +3329,11 @@ def compile(
             backend = _TorchCompileAOTInductorWrapper(mode, options, dynamic, name)
         else:
             backend = _TorchCompileInductorWrapper(mode, options, dynamic, name)
+        # Start the one-time source hashing for Inductor's cache keys now, so
+        # it overlaps with whatever runs before the first compile.
+        from torch._inductor.codecache import prefetch_cache_keys
+
+        prefetch_cache_keys()
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic, name)
 

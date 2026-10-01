@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import ast
 import contextlib
 import json
 import logging
@@ -7,18 +8,24 @@ import re
 import sys
 import tempfile
 import unittest
+from concurrent.futures.process import BrokenProcessPool
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import torch
 import torch._inductor
 from torch._dynamo.utils import counters
+from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
+from torch._inductor.codecache import LambdaFuture
 from torch._inductor.codegen.simd import NodeInfo
 from torch._inductor.codegen.triton_combo_kernel import (
     _default_custom_combo_kernel_horizontal_partition,
     _log_partition_separation_once,
     LARGE_NUMELS,
 )
+from torch._inductor.compile_worker.subproc_pool import SubprocException
+from torch._inductor.scheduler import _is_loop_carried_compile_error, Scheduler
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import clear_caches, fresh_cache, run_and_get_code
 from torch._inductor.virtualized import V
@@ -30,9 +37,15 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
     skipIfXpu,
+    subtest,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU_AND_TRITON
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU_AND_TRITON,
+    HAS_TRITON,
+)
 from torch.testing._internal.triton_utils import (
     requires_cuda_and_triton,
     requires_gpu_and_triton,
@@ -85,6 +98,182 @@ def _make_node_info(x_hint, rnumel=1, is_reduction=False):
         features=_Features(is_reduction),
         is_persistent_reduction=False,
     )
+
+
+class _StubComboNode:
+    def get_device(self):
+        return torch.device("cpu")
+
+    def get_nodes(self):
+        return [self]
+
+
+class _RaisingFuture:
+    def __init__(self, exc):
+        self.exc = exc
+
+    def result(self):
+        raise self.exc
+
+
+class _StubComboScheduler:
+    """Just enough Scheduler to drive speedup_by_combo_kernel.
+
+    ``future=None`` is the no-pool path. The real benchmark_codegened_module scores
+    a failed in-process compile as inf and only raises under
+    disallow_failing_autotune_kernels_TESTING_ONLY.
+    """
+
+    def __init__(self, future=None, ms=1.0, benchmark_exc=None):
+        self.future = future
+        self.ms = ms
+        self.benchmark_exc = benchmark_exc
+        self.combo_benchmarked = False
+
+    def compile_kernel(self, nodes, hint_override=None, skip_if_perf_cached=False):
+        return self.future, object()
+
+    def _any_atomic_add(self, node_list):
+        return False
+
+    def benchmark_codegened_module(self, module, device):
+        if self.benchmark_exc is not None:
+            raise self.benchmark_exc
+        return self.ms, "kernel_path"
+
+    def benchmark_combo_kernel(self, nodes, node_benchmark_results):
+        self.combo_benchmarked = True
+        return 1.0, 0.0, []
+
+
+class _RecordingFuture:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def result(self):
+        self.calls.append("await")
+
+
+class _RecordingScheduler:
+    """Records the order speedup_by_combo_kernel drives compile vs benchmark."""
+
+    def __init__(self):
+        self.calls = []
+
+    def compile_kernel(self, nodes, hint_override=None, skip_if_perf_cached=False):
+        self.calls.append("compile")
+        return _RecordingFuture(self.calls), object()
+
+    def _any_atomic_add(self, node_list):
+        return False
+
+    def benchmark_codegened_module(self, module, device):
+        self.calls.append("benchmark")
+        return 1.0, "kernel_path"
+
+    def benchmark_combo_kernel(self, nodes, node_benchmark_results):
+        self.calls.append("combo")
+        return 1.0, 0.0, []
+
+
+def _compilation_error(message):
+    from triton.compiler.errors import CompilationError
+
+    return CompilationError(None, ast.AST(), message)
+
+
+_LOOP_CARRIED = "Loop-carried variable acc has initial type fp32 but is re-assigned"
+_OUT_OF_RESOURCES = "out of resource: shared memory"
+
+
+@unittest.skipUnless(HAS_TRITON, "needs triton for CompilationError")
+@instantiate_parametrized_tests
+class ComboKernelBenchmarkCompileErrorTests(TestCase):
+    """A compile-pool failure must not decide anything: the in-process benchmark
+    does, so the verdict is the same whether or not the pool is in use."""
+
+    def _speedup(self, scheduler):
+        nodes = [_StubComboNode(), _StubComboNode()]
+        with torch._inductor.config.patch(benchmark_combo_kernel=True):
+            return Scheduler.speedup_by_combo_kernel(scheduler, nodes)
+
+    @parametrize(
+        "pool_error",
+        [
+            subtest(SubprocException(_LOOP_CARRIED, "triton_"), name="loop_carried"),
+            subtest(SubprocException(_OUT_OF_RESOURCES, "triton_"), name="unrelated"),
+            subtest(BrokenProcessPool(), name="broken_pool"),
+        ],
+    )
+    def test_pool_failure_defers_to_in_process_benchmark(self, pool_error):
+        future = _RaisingFuture(pool_error)
+        self.assertFalse(self._speedup(_StubComboScheduler(future, ms=float("inf"))))
+
+        scheduler = _StubComboScheduler(future, ms=1.0)
+        self.assertTrue(self._speedup(scheduler))
+        self.assertTrue(scheduler.combo_benchmarked)
+
+    def test_in_process_loop_carried_error_allows_combo(self):
+        scheduler = _StubComboScheduler(benchmark_exc=_compilation_error(_LOOP_CARRIED))
+        self.assertTrue(self._speedup(scheduler))
+        self.assertFalse(scheduler.combo_benchmarked)
+
+    def test_in_process_unrelated_compilation_error_propagates(self):
+        from triton.compiler.errors import CompilationError
+
+        exc = _compilation_error(_OUT_OF_RESOURCES)
+        with self.assertRaises(CompilationError):
+            self._speedup(_StubComboScheduler(benchmark_exc=exc))
+
+    def test_loop_carried_error_is_recognized_on_both_sides_of_the_pool(self):
+        loop_carried = _is_loop_carried_compile_error
+        self.assertTrue(loop_carried(_compilation_error(_LOOP_CARRIED)))
+        self.assertTrue(loop_carried(SubprocException(_LOOP_CARRIED, "triton_")))
+        self.assertFalse(loop_carried(SubprocException(_OUT_OF_RESOURCES, "triton_")))
+        # The message alone must not be enough to swallow an unrelated failure.
+        self.assertFalse(loop_carried(ValueError(_LOOP_CARRIED)))
+
+    def test_every_subkernel_compiles_before_any_benchmark_blocks(self):
+        # Awaiting a subkernel before the rest are submitted serializes the group
+        # behind Triton's GIL-bound frontend.
+        scheduler = _RecordingScheduler()
+        nodes = [_StubComboNode() for _ in range(3)]
+        with torch._inductor.config.patch(benchmark_combo_kernel=True):
+            Scheduler.speedup_by_combo_kernel(scheduler, nodes)
+
+        self.assertEqual(
+            scheduler.calls,
+            ["compile"] * 3 + ["await", "benchmark"] * 3 + ["combo"],
+        )
+
+    def test_cached_benchmark_skips_pool_compilation(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            module = SimpleNamespace(
+                __file__=str(Path(temp_dir) / "cached.py"), triton_=object()
+            )
+            (Path(temp_dir) / "cached.kernel_perf").write_text("1.0")
+            scheduler = SimpleNamespace(
+                generate_kernel_code_from_nodes=lambda *args, **kwargs: "source"
+            )
+            future = LambdaFuture(lambda: None)
+            with (
+                patch(
+                    "torch._inductor.scheduler.PyCodeCache.load", return_value=module
+                ),
+                patch.object(AsyncCompile, "use_process_pool", return_value=True),
+                patch.object(AsyncCompile, "triton", return_value=future) as submit,
+            ):
+                self.assertEqual(
+                    Scheduler.compile_kernel(scheduler, [], skip_if_perf_cached=True),
+                    (None, module),
+                )
+                submit.assert_not_called()
+
+                # Other compile_kernel callers still submit even if a timing exists.
+                self.assertEqual(
+                    Scheduler.compile_kernel(scheduler, []), (future, module)
+                )
+                submit.assert_called_once()
 
 
 class ComboKernelPartitionLoggingTests(TestCase):
@@ -721,6 +910,81 @@ class ComboKernelTests(TestCase):
             ).check_not("combo_grid_meta").run(code[0])
 
     @requires_gpu_and_triton
+    def test_combo_benchmark_submits_subkernels_to_pool(self):
+        # Compiling candidate subkernels inline serializes the group behind Triton's
+        # GIL-bound frontend.
+        submitted_while_benchmarking = []
+        benchmarking = False
+        original_triton = AsyncCompile.triton
+        original_speedup = Scheduler.speedup_by_combo_kernel
+
+        def triton_spy(self_, kernel_name, source_code, device_str="cuda"):
+            if benchmarking:
+                submitted_while_benchmarking.append(kernel_name)
+            return original_triton(self_, kernel_name, source_code, device_str)
+
+        def speedup_spy(self_, nodes):
+            nonlocal benchmarking
+            benchmarking = True
+            try:
+                return original_speedup(self_, nodes)
+            finally:
+                benchmarking = False
+
+        def fn(a, b):
+            return torch.add(a, 1), torch.add(b, 1)
+
+        inps = [
+            torch.rand(8192, 8192, device=GPU_TYPE),
+            torch.rand(100, 100, device=GPU_TYPE),
+        ]
+        with (
+            torch._inductor.config.patch(
+                benchmark_combo_kernel=True, compile_threads=8
+            ),
+            patch.object(AsyncCompile, "triton", triton_spy),
+            patch.object(Scheduler, "speedup_by_combo_kernel", speedup_spy),
+            fresh_cache(),
+        ):
+            # Drop any pool sized by an earlier test, and don't leak this one.
+            shutdown_compile_workers()
+            self.addCleanup(shutdown_compile_workers)
+            if not AsyncCompile.wait_process_pool_ready():
+                self.skipTest("Inductor compile worker pool unavailable")
+            torch.compile(fn)(*inps)
+
+        self.assertTrue(submitted_while_benchmarking)
+
+    @requires_gpu_and_triton
+    def test_combo_benchmark_survives_pool_failure(self):
+        original_compile_kernel = Scheduler.compile_kernel
+        compiled = []
+
+        def compile_kernel_with_failing_pool(
+            self_, nodes, hint_override=None, skip_if_perf_cached=False
+        ):
+            _, mod = original_compile_kernel(
+                self_, nodes, hint_override, skip_if_perf_cached
+            )
+            compiled.append(mod)
+            return _RaisingFuture(SubprocException("worker died", "triton_")), mod
+
+        def fn(a, b):
+            return torch.add(a, 1), torch.add(b, 1)
+
+        inps = [
+            torch.rand(8192, 8192, device=GPU_TYPE),
+            torch.rand(100, 100, device=GPU_TYPE),
+        ]
+        with (
+            torch._inductor.config.patch(benchmark_combo_kernel=True),
+            patch.object(Scheduler, "compile_kernel", compile_kernel_with_failing_pool),
+            fresh_cache(),
+        ):
+            self.assertEqual(torch.compile(fn)(*inps), fn(*inps))
+        self.assertTrue(compiled)
+
+    @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_poi(self):
         def fn(a, b):
             o1 = a * 2.0
@@ -864,6 +1128,7 @@ class ComboKernelTests(TestCase):
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
+    @fresh_cache()
     def test_combo_kernel_per_config_subkernel_block_size(self):
         from torch.profiler import ProfilerActivity
 
@@ -1088,6 +1353,7 @@ class ComboKernelTests(TestCase):
     @skipIfXpu(msg="Profiler JSON traceEvents is not supported on XPU")
     @requires_gpu_and_triton
     @unittest.skipIf(not SM90OrLater, "Avoid oom on CI")
+    @fresh_cache()
     def test_combo_kernel_yz_overflow(self):
         from torch.profiler import ProfilerActivity
 
@@ -2198,6 +2464,118 @@ class ComboKernelCompileTimeAutotuneTests(TestCase):
         self.assertEqual(counters["inductor"]["combo_subkernel_autotune_fallback"], 0)
         if mode == "cdt":
             self.assertGreater(counters["inductor"]["coordesc_tuning_bench"], 0)
+
+    @requires_gpu_and_triton
+    @parametrize("per_kernel_alloc", [False, True])
+    def test_concat_autotune_preserves_output_aliasing(self, per_kernel_alloc):
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        autotune_calls = []
+        original_generate_and_run = PythonWrapperCodegen.generate_and_run_autotune_block
+
+        def capture_autotune_calls(wrapper):
+            autotune_calls.append(wrapper.kernel_autotune_calls.getvalue())
+            return original_generate_and_run(wrapper)
+
+        def fn(*args):
+            return torch.cat(args, dim=1)
+
+        inputs = tuple(torch.randn(8, 4, device=GPU_TYPE) for _ in range(12))
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "aot_inductor.autotune_per_kernel_alloc": per_kernel_alloc,
+                    "force_disable_caches": True,
+                    "triton.autotune_at_compile_time": True,
+                }
+            ),
+            patch.object(
+                PythonWrapperCodegen,
+                "generate_and_run_autotune_block",
+                capture_autotune_calls,
+            ),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(*inputs)
+
+        self.assertEqual(actual, fn(*inputs))
+        self.assertEqual(len(autotune_calls), 1)
+        call_code = autotune_calls[0]
+        concat_storages = re.findall(
+            r"(_autotune_storage_\d+) = "
+            r"generate_example_value\(\(384,\), \(1,\)",
+            call_code,
+        )
+        self.assertEqual(len(concat_storages), 1)
+        concat_storage = concat_storages[0]
+        self.assertEqual(call_code.count(f"torch.as_strided({concat_storage}"), 12)
+        FileCheck().check(
+            f"torch.as_strided({concat_storage}, (8, 4), (48, 1), 0)"
+        ).check(f"torch.as_strided({concat_storage}, (8, 4), (48, 1), 44)").check_regex(
+            rf"del .*{concat_storage}"
+        ).run(call_code)
+
+    @requires_gpu_and_triton
+    def test_concat_autotune_bounds_backing_memory(self):
+        from torch._inductor.codegen.wrapper import PythonWrapperCodegen
+
+        device_module = getattr(torch, torch.device(GPU_TYPE).type)
+        original_generate_and_run = PythonWrapperCodegen.generate_and_run_autotune_block
+        peak_autotune_bytes = []
+
+        def measure_autotune_block(wrapper):
+            device_module.synchronize()
+            device_module.reset_peak_memory_stats()
+            baseline = device_module.memory_allocated()
+            try:
+                return original_generate_and_run(wrapper)
+            finally:
+                device_module.synchronize()
+                peak_autotune_bytes.append(
+                    device_module.max_memory_allocated() - baseline
+                )
+
+        num_inputs = 64
+        rows, cols = 512, 64
+
+        def fn(*args):
+            return torch.cat(args, dim=1)
+
+        inputs = tuple(
+            torch.randn(rows, cols, device=GPU_TYPE) for _ in range(num_inputs)
+        )
+        with (
+            fresh_cache(),
+            torch._inductor.config.patch(
+                {
+                    "force_disable_caches": True,
+                    "triton.autotune_at_compile_time": True,
+                }
+            ),
+            patch.object(
+                PythonWrapperCodegen,
+                "generate_and_run_autotune_block",
+                measure_autotune_block,
+            ),
+        ):
+            actual = torch.compile(fn, fullgraph=True)(*inputs)
+
+        self.assertEqual(actual, fn(*inputs))
+        self.assertTrue(peak_autotune_bytes)
+        element_size = torch.empty((), dtype=torch.float32).element_size()
+        concat_storage_bytes = rows * cols * num_inputs * element_size
+        # The concat output slices share a single backing allocation. Without
+        # sharing, each of the num_inputs slice views allocates storage spanning
+        # the whole concat output, so peak usage would grow ~num_inputs x. Allow
+        # up to 5x one backing buffer for the source example inputs and scratch,
+        # which stays far below the num_inputs x regression.
+        self.assertLess(
+            max(peak_autotune_bytes),
+            5 * concat_storage_bytes,
+            f"autotune block peaked at {max(peak_autotune_bytes)} bytes; expected "
+            f"the concat output slices to share one ~{concat_storage_bytes}-byte "
+            "buffer",
+        )
 
     @requires_gpu_and_triton
     def test_compile_time_autotune_caching(self):
