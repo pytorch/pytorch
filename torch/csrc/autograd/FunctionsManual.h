@@ -820,7 +820,6 @@ Tensor fft_c2r_backward(
 Tensor constant_pad_nd_backward(const Tensor& grad, c10::SymIntArrayRef pad);
 std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& grad_x,
-    const Tensor& self,
     const Tensor& input2,
     const Tensor& result,
     const bool upper,
