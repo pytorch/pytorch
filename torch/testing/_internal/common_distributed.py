@@ -612,6 +612,140 @@ def requires_multicast_support():
     )
 
 
+def captured_signal_pad_order(
+    stream: torch.cuda.Stream,
+    launches_a: list[Callable[[], object]],
+    launches_b: list[Callable[[], object]],
+) -> tuple[bool, bool]:
+    r"""Report the orderings the launches insert, read from a CUDA graph that
+    is captured but never replayed::
+
+        stream: fork -> [launches_a] -> marker
+                  \-> side: [launches_b]
+
+    Returns ``(after_a, after_marker)``: whether the first of ``launches_b``
+    depends on the last of ``launches_a``, and on the marker. The fork comes
+    first, so any such dependency was inserted by the launches. Launches take
+    no arguments and must be warmed up on ``stream``. Requires cuda.bindings."""
+    from cuda.bindings import runtime as rt
+
+    from torch.cuda._utils import _check_cuda_bindings as check
+
+    def tail(s: torch.cuda.Stream) -> int:
+        # The captured node the next launch on s will depend on.
+        info = rt.cudaStreamGetCaptureInfo(s.cuda_stream)
+        _, _, _, deps, _, n = check(info)
+        if n != 1:
+            raise AssertionError(f"expected one node at the capture tail, got {n}")
+        return int(deps[0])
+
+    side = torch.cuda.Stream(device=stream.device)
+    marker = torch.zeros(1, device=stream.device)
+    graph = torch.cuda.CUDAGraph(keep_graph=True)
+    with torch.cuda.graph(graph, stream=stream):
+        side.wait_stream(stream)
+        for launch in launches_a:
+            launch()
+        a_last = tail(stream)
+        marker.add_(1)
+        marker_node = tail(stream)
+        with torch.cuda.stream(side):
+            launches_b[0]()
+            b_first = tail(side)
+            for launch in launches_b[1:]:
+                launch()
+        stream.wait_stream(side)
+
+    raw = graph.raw_cuda_graph()
+    # cuda-bindings 13 returns edge data as a fourth value.
+    num_edges = check(rt.cudaGraphGetEdges(raw, numEdges=0))[3]
+    srcs, dsts, _, _ = check(rt.cudaGraphGetEdges(raw, numEdges=num_edges))
+    preds: dict[int, list[int]] = {}
+    for src, dst in zip(srcs, dsts, strict=True):
+        preds.setdefault(int(dst), []).append(int(src))
+    # Reachability rather than a search for event nodes: a captured
+    # dependency may be lowered to a plain edge.
+    ancestors: set[int] = set()
+    stack = [b_first]
+    while stack:
+        for node in preds.get(stack.pop(), ()):
+            if node not in ancestors:
+                ancestors.add(node)
+                stack.append(node)
+    return a_last in ancestors, marker_node in ancestors
+
+
+def gated_signal_pad_order(
+    launches_a: list[Callable[[], object]],
+    launches_b: list[Callable[[], object]],
+    expect_ordered: bool,
+    between: Callable[[], object] | None = None,
+) -> tuple[bool, bool]:
+    """The eager counterpart of ``captured_signal_pad_order``::
+
+        stream_a: gate 0 -> [launches_a] -> gate 1
+        stream_b: [launches_b]
+
+    Gates are cuStreamWaitValue32 waits on device flags. Returns
+    ``(while_gated, after_open)``: whether ``launches_b`` finished while gate 0
+    was closed, and once it opened with gate 1 still closed. The wait that
+    ``expect_ordered`` says should stay blocked gives up after 1 s, the others
+    after 60 s: a broken guard passes only if ``launches_b`` take over a
+    second, a correct one fails only if they take over a minute. Launches must
+    be warmed up: loading a kernel lazily waits for the whole device, which
+    stays busy while a stream is gated. ``between``, if given, runs after
+    ``launches_a`` are issued and before ``launches_b``. Requires
+    cuda.bindings."""
+    from cuda.bindings import driver as drv
+
+    from torch.cuda._utils import _check_cuda_bindings_driver as check
+
+    gates = torch.zeros(2, dtype=torch.int32, device="cuda")
+    stream_a, stream_b, opener = (torch.cuda.Stream() for _ in range(3))
+    # Pool streams do not wait for the current stream, where gates is zeroed.
+    for s in (stream_a, opener):
+        s.wait_stream(torch.cuda.current_stream())
+    geq = drv.CUstreamWaitValue_flags.CU_STREAM_WAIT_VALUE_GEQ
+
+    def gate(i: int) -> None:
+        ptr = gates[i].data_ptr()
+        check(drv.cuStreamWaitValue32(stream_a.cuda_stream, ptr, 1, geq))
+
+    def open_gate(i: int) -> None:
+        ptr = gates[i].data_ptr()
+        check(drv.cuStreamWriteValue32(opener.cuda_stream, ptr, 1, 0))
+
+    def finishes(event: torch.cuda.Event, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        while not event.query():
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(0.01)
+        return True
+
+    b_done = torch.cuda.Event()
+    try:
+        with torch.cuda.stream(stream_a):
+            gate(0)
+            for launch in launches_a:
+                launch()
+            gate(1)
+        if between is not None:
+            between()
+        with torch.cuda.stream(stream_b):
+            for launch in launches_b:
+                launch()
+            b_done.record()
+        while_gated = finishes(b_done, 1.0 if expect_ordered else 60.0)
+        open_gate(0)
+        after_open = finishes(b_done, 60.0)
+    finally:
+        open_gate(0)
+        open_gate(1)
+        torch.cuda.synchronize()
+    return while_gated, after_open
+
+
 def evaluate_platform_supports_symm_mem():
     if TEST_CUDA:
         if TEST_WITH_ROCM:
