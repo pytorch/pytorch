@@ -1068,6 +1068,7 @@ function MiniMap(mini_svg, plot, data, left_pad, width, height = 70) {
       mini_points.push([i, m]);
     }
   }
+  mini_points.push([max_at_time.length, max_at_time.at(-1) ?? 0]);
 
   let points = mini_points.map(([t, o]) => `${minixscale(t)}, ${yscale(o)}`);
   points = points.join(' ');
@@ -1142,6 +1143,11 @@ function create_trace_view(
   dst.selectAll('div').remove();
 
   max_entries = Math.min(max_entries, data.elements_length);
+  if (data.history_error) {
+    dst.append('div').text(
+      `Final snapshot only - recorded history cannot be reconciled. ${data.history_error}`,
+    );
+  }
   if (include_private_inactive) {
     dst.append('div')
       .attr('style', 'padding: 4px 8px; background: #fff3cd; border: 1px solid #ffc107; font-size: 13px; margin-bottom: 4px;')
