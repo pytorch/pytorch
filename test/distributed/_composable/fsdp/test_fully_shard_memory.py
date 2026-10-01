@@ -5,6 +5,7 @@ import functools
 import gc
 import math
 import unittest
+import weakref
 from unittest import mock
 
 import torch
@@ -325,6 +326,40 @@ class TestFullyShardMemory(FSDPTest):
         gc.collect()
         mem_mb = self._get_curr_active_memory_mb()
         self.assertEqual(mem_mb, base_mem_mb)
+
+    @skip_if_lt_x_gpu(2)
+    def test_unsharded_grads_freed_after_copy_in(self):
+        from torch.distributed.fsdp._fully_shard import _fsdp_collectives
+
+        model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 32)).to(device_type)
+        fully_shard(model)
+        copy_in = _fsdp_collectives.foreach_reduce_scatter_copy_in
+        cast_and_view = _fsdp_collectives._cast_and_view_sharded_grads
+        grad_refs: list[weakref.ref] = []
+        num_alive_grads: list[int] = []
+
+        def recording_copy_in(grads, *args):
+            grad_refs[:] = [weakref.ref(grad) for grad in grads]
+            copy_in(grads, *args)
+
+        def counting_cast_and_view(*args):
+            num_alive_grads.append(sum(ref() is not None for ref in grad_refs))
+            return cast_and_view(*args)
+
+        with (
+            mock.patch.object(
+                _fsdp_collectives, "foreach_reduce_scatter_copy_in", recording_copy_in
+            ),
+            mock.patch.object(
+                _fsdp_collectives,
+                "_cast_and_view_sharded_grads",
+                counting_cast_and_view,
+            ),
+        ):
+            model(torch.randn(4, 16, device=device_type)).sum().backward()
+        # Clearing foreach_reduce's list after the copy-in must free the
+        # unsharded gradients before the reduce allocates its outputs
+        self.assertEqual(num_alive_grads, [0])
 
     def _get_peak_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()

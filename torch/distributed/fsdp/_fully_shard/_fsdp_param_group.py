@@ -716,15 +716,9 @@ class FSDPParamGroup:
                 self._validate_unused_param_grad_dtypes()
                 # Save the autograd-computed gradients before resharding to only
                 # access the unsharded parameters when their data is present
-                fsdp_params_with_grad: list[FSDPParam] = []
-                unsharded_grads: list[torch.Tensor] = []
-                for index in self._reduce_scatter_param_indices:
-                    fsdp_param = self.fsdp_params[index]
-                    if (grad := self._get_unsharded_grad_to_reduce(fsdp_param)) is None:
-                        continue
-                    fsdp_params_with_grad.append(fsdp_param)
-                    unsharded_grads.append(grad)
-                    fsdp_param.unsharded_param.grad = None
+                fsdp_params_with_grad, unsharded_grads = (
+                    self._take_unsharded_grads_to_reduce()
+                )
                 self._set_unsharded_grad_dtypes(defer_upcast=False)
                 if self.reshard_after_backward:
                     self.reshard()
@@ -973,6 +967,21 @@ class FSDPParamGroup:
             # fp32 partial down to bf16.
             dtypes.add(self._partial_reduce_output.dtype)
         return functools.reduce(torch.promote_types, dtypes)
+
+    def _take_unsharded_grads_to_reduce(
+        self,
+    ) -> tuple[list[FSDPParam], list[torch.Tensor]]:
+        """Returns the gradients to reduce, clearing them from the unsharded parameters."""
+        fsdp_params_with_grad: list[FSDPParam] = []
+        unsharded_grads: list[torch.Tensor] = []
+        for index in self._reduce_scatter_param_indices:
+            fsdp_param = self.fsdp_params[index]
+            if (grad := self._get_unsharded_grad_to_reduce(fsdp_param)) is None:
+                continue
+            fsdp_params_with_grad.append(fsdp_param)
+            unsharded_grads.append(grad)
+            fsdp_param.unsharded_param.grad = None
+        return fsdp_params_with_grad, unsharded_grads
 
     def _get_unsharded_grad_to_reduce(self, param: FSDPParam) -> torch.Tensor | None:
         """Returns the unsharded gradient to reduce-scatter, or ``None`` to skip."""
