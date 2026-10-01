@@ -363,12 +363,12 @@ def neutralize(text: str, cap: int = MAX_SUMMARY) -> str:
     bracket, so they cannot reconstitute the ``\\/\\/host`` case that strip
     exists for.
 
-    NOT DONE HERE, and it is a real gap: markdown STRUCTURE the attacker writes
-    is not escaped, so a summary can still forge a heading, a table, a
-    horizontal rule or a fenced block. Nothing renders these strings today — the
-    row carries no findings and Dr.CI rendering is unbuilt — so this is latent.
-    It has to be closed in the same change that starts rendering, and the right
-    escaping depends on that renderer.
+    NOT DONE HERE: markdown STRUCTURE the attacker writes is not escaped, so a
+    summary can still forge a heading, a table, a horizontal rule or a fenced
+    block. The renderer has to contain it. Dr.CI does, by putting the summary
+    and findings inside a code fence longer than any backtick run they hold
+    (pytorch/test-infra torchci/lib/prReview/prReviewRender.ts). Any new
+    surface that renders these strings needs its own containment.
     """
     text = "".join(c for c in text[:cap] if _ALLOWED_CHARS.match(c))
     text = text.replace("\\", "")

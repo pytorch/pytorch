@@ -33,7 +33,8 @@ The row is deliberately keyed and versioned for reuse: the interim GitHub
 Actions harness and the credential-less sandbox that replaces it write the SAME
 shape, distinguished by ``harness``, so the two eras stay comparable. ``extra``
 is the escape hatch for anything we learn we need later without re-cutting the
-table.
+table. Its one key today is ``findings``: the sanitized findings of a succeeded
+review as a JSON array, which Dr.CI renders under the verdict.
 """
 
 from __future__ import annotations
@@ -44,6 +45,8 @@ import os
 import re
 import sys
 from pathlib import Path
+
+from extract_verdict import MAX_FINDINGS, MAX_LINE, MAX_MESSAGE, MAX_PATH, SEVERITIES
 
 
 SCHEMA_VERSION = 1
@@ -56,6 +59,13 @@ SCHEMA_VERSION = 1
 # worth less than the two lines it costs to bound. Out-of-charset or over-length
 # becomes empty rather than failing: telemetry never breaks a review.
 _MODEL_CHARS = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+# What extract_verdict.py lets a published string contain. verdict.json reaches
+# this job as an artifact of the job that read untrusted PR code, so its
+# findings are re-checked here rather than trusted to have come through
+# extract_verdict.py.
+_PUBLISHED_CHARS = re.compile(r"[\x09\x0a\x20-\x7e]*")
+_FINDING_KEYS = ("path", "line", "severity", "message")
 
 # Terminal statuses. Anything not in this set is a bug in the caller.
 TERMINAL = {
@@ -97,6 +107,45 @@ def safe_model(value: object) -> str:
     # `.match` accepted "claude\n" and a 128-char name plus one at 129.
     text = value if isinstance(value, str) else ""
     return text if _MODEL_CHARS.fullmatch(text) else ""
+
+
+def _published_text(value: object, cap: int) -> bool:
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= cap
+        and _PUBLISHED_CHARS.fullmatch(value) is not None
+    )
+
+
+def published_findings(verdict: dict) -> list[dict]:
+    """The findings Dr.CI may render, in extract_verdict.py's output shape.
+
+    A finding that does not match that shape is dropped, not repaired, and the
+    list is capped at the sanitizer's own bound.
+    """
+    raw = verdict.get("findings")
+    if not isinstance(raw, list):
+        return []
+    kept: list[dict] = []
+    for item in raw:
+        if len(kept) >= MAX_FINDINGS:
+            break
+        if not isinstance(item, dict) or set(item) != set(_FINDING_KEYS):
+            continue
+        line = item["line"]
+        if (
+            not _published_text(item["path"], MAX_PATH)
+            or "\n" in item["path"]
+            or not _published_text(item["message"], MAX_MESSAGE)
+            or not isinstance(item["severity"], str)
+            or item["severity"] not in SEVERITIES
+            or not isinstance(line, int)
+            or isinstance(line, bool)
+            or not 0 < line <= MAX_LINE
+        ):
+            continue
+        kept.append({key: item[key] for key in _FINDING_KEYS})
+    return kept
 
 
 def base_row(phase: str) -> dict:
@@ -211,6 +260,7 @@ def main() -> int:
     args = ap.parse_args()
 
     row = base_row(args.phase)
+    findings: list[dict] = []
 
     if args.phase == "started":
         row["status"] = "started"
@@ -230,12 +280,21 @@ def main() -> int:
         row["verdict"] = verdict.get("verdict") if status == "succeeded" else None
         row["summary"] = verdict.get("summary", "") if status == "succeeded" else ""
         row["findings_count"] = len(verdict.get("findings") or [])
+        if status == "succeeded":
+            try:
+                findings = published_findings(verdict)
+            except Exception as exc:  # noqa: BLE001 - telemetry never breaks a review
+                print(f"warning: findings not recorded: {exc!r}", file=sys.stderr)
         row["findings_dropped"] = as_int(str(verdict.get("findings_dropped", 0)))
         row["failure_detail"] = verdict.get("failure_detail", "")
         row["reasoning_uri"] = env("REASONING_URI")
         row.update(usage_metrics(args.usage_file))
 
     row["extra"] = {}
+    if findings:
+        row["extra"]["findings"] = json.dumps(
+            findings, ensure_ascii=True, separators=(",", ":")
+        )
 
     Path(args.out).write_text(json.dumps(row, ensure_ascii=True) + "\n")
     print(
