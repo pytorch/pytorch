@@ -278,6 +278,9 @@ void chunk_cat_mixed_dtype_cuda(
       std::any_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
         return t.scalar_type() != tensors[0].scalar_type();
       });
+  // TODO: Also cast fp16 inputs into an fp32 out here, uniform groups included.
+  // fp16 + fp32 groups take the composite's copies, and uniform fp16 takes
+  // _chunk_cat's copy per input; only bf16 compute is a known use case so far.
   const bool use_fused_kernel =
       mixed_dtypes && dim == 0 && num_chunks >= 1 && out.is_contiguous() &&
       std::all_of(tensors.begin(), tensors.end(), [&](const at::Tensor& t) {
