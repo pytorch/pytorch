@@ -722,9 +722,6 @@ class LocalDTensorContinuousTestBase(DTensorContinuousTestBase):
     def is_local_tensor_enabled(self) -> bool:
         return True
 
-    def _handle_test_skip(self, msg: str) -> None:
-        self.skipTest(msg)
-
     def _get_local_tensor_mode(self):
         return LocalTensorMode(frozenset(range(self.world_size)))
 
@@ -1107,9 +1104,6 @@ class LocalDTensorOpTestBase(DTensorOpTestBase):
     def is_local_tensor_enabled(self) -> bool:
         return True
 
-    def _handle_test_skip(self, msg: str) -> None:
-        self.skipTest(msg)
-
     def _get_local_tensor_mode(self):
         return LocalTensorMode(frozenset(range(self.world_size)))
 
@@ -1168,9 +1162,6 @@ class LocalDTensorTestBase(DTensorTestBase):
     @property
     def is_local_tensor_enabled(self) -> bool:
         return True
-
-    def _handle_test_skip(self, msg: str) -> None:
-        self.skipTest(msg)
 
     def _get_local_tensor_mode(self):
         return LocalTensorMode(frozenset(range(self.world_size)))
