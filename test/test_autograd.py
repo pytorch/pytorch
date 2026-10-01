@@ -13444,7 +13444,7 @@ class TestAutogradDeviceType(TestCase):
                     actual_tangent, expected_tangent.masked_fill(expanded_mask, 0)
                 )
                 backward = torch.ops.aten._masked_softmax_backward(
-                    tangent, actual, expanded_mask, dim
+                    tangent.contiguous(), actual, expanded_mask, dim
                 )
                 self.assertEqual(actual_tangent, backward)
 
