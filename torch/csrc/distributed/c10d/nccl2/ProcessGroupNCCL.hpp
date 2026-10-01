@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -598,6 +599,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void checkInitialized() const;
   void checkAndAbortIfTimedOutOrError();
   void checkWorkQueue();
+  void drainRetiredGraphWork();
   std::pair<std::chrono::milliseconds, std::chrono::milliseconds>
   applyEphemeralTimeout(std::chrono::milliseconds timeout);
   void releaseEphemeralTimeout(std::chrono::milliseconds timeout);
@@ -726,6 +728,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       unsigned long long,
       std::vector<std::shared_ptr<WorkNCCL::State>>>
       graph_capture_work_refs_;
+  std::list<std::vector<std::shared_ptr<WorkNCCL::State>>>
+      retired_graph_work_refs_;
   std::mutex graph_capture_work_mutex_;
 
   struct GraphCleanupData {

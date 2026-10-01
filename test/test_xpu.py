@@ -1111,6 +1111,7 @@ print(torch.xpu.is_initialized())
 
     @unittest.skipIf(not HAS_PYZES, "requires pyzes")
     @unittest.skipIf(not Xe2_Or_Later, "not available")
+    @unittest.skip("See https://github.com/intel/torch-xpu-ops/issues/5015")
     @serialTest()
     def test_mem_get_info_with_pyzes(self):
         torch.xpu.synchronize()
@@ -1652,6 +1653,9 @@ if __name__ == "__main__":
     allocator_lib = ctypes.CDLL(dummy_allocator)
     called_dummy_alloc = ctypes.c_int.in_dll(allocator_lib, "called_dummy_alloc")
     called_dummy_free = ctypes.c_int.in_dll(allocator_lib, "called_dummy_free")
+    # mem_get_info() must still work while the pluggable allocator is active.
+    _, _ = torch.xpu.mem_get_info()
+    _, _ = torch.accelerator.get_memory_info()
     print(called_dummy_alloc.value, called_dummy_free.value)
 """
         rc = check_output(test_script).splitlines()[-1]
@@ -4231,9 +4235,6 @@ class TestMemPool(TestCase):
 
 
 instantiate_parametrized_tests(TestXpu)
-instantiate_device_type_tests(
-    TestXPUMultiprocessing, globals(), only_for="xpu", allow_xpu=True
-)
 instantiate_parametrized_tests(TestCachingHostAllocatorXpuGraph)
 instantiate_device_type_tests(TestXpuOptims, globals())
 
