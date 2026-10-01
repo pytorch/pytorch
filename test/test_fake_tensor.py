@@ -240,6 +240,29 @@ class FakeTensorTest(TestCase):
                     *cuda_args, [2, 2], layout=torch.sparse_csr
                 )
 
+    @parametrize("device", ["cpu", "meta"])
+    @parametrize("shape", [(), (3,), (0,), (2, 0)])
+    def test_one_hot_invalid_num_classes(self, device, shape):
+        empty = 0 in shape
+        invalid_classes = (-2, -1, 0) if empty else (-2, 0)
+        error = (
+            "Can not infer total number of classes from empty tensor"
+            if empty
+            else "Class values must be smaller than num_classes"
+        )
+        from torch._decomp.decompositions import one_hot
+
+        with FakeTensorMode():
+            x = torch.zeros(shape, dtype=torch.long, device=device)
+            for fn in (torch.nn.functional.one_hot, one_hot):
+                for num_classes in invalid_classes:
+                    with self.subTest(fn=fn, num_classes=num_classes):
+                        with self.assertRaisesRegex(RuntimeError, error):
+                            fn(x, num_classes)
+                result = fn(x, 4)
+                self.assertEqual(result.shape, (*shape, 4))
+                self.assertEqual(result.dtype, torch.long)
+
     def test_nansum_nanmean_empty_dim(self):
         # nansum/nanmean reduce over all dimensions when dim=() or dim=[] is
         # passed, matching eager. The meta kernel used to preserve the input
