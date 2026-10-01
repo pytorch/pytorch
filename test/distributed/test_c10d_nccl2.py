@@ -17,6 +17,7 @@ from datetime import timedelta
 from unittest import mock
 
 import torch
+import torch.cuda._gpu_trace as gpu_trace
 import torch.distributed as dist
 from torch._C._distributed_c10d import (
     AllgatherOptions,
@@ -25,6 +26,7 @@ from torch._C._distributed_c10d import (
     ReconfigureOptions,
     ReduceScatterOptions,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
@@ -49,6 +51,90 @@ try:
     HAS_NCCL_COLL_CONFIG = True
 except ImportError:
     HAS_NCCL_COLL_CONFIG = False
+
+
+class ProcessGroupNCCL2GraphCleanupTest(MultiProcessTestCase):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    @parametrize("cache_enabled,num_collectives", [(True, 512), (False, 1)])
+    def test_graph_cleanup(self, device, cache_enabled, num_collectives) -> None:
+        device = torch.device(torch.device(device).type, self.rank)
+        torch.cuda.set_device(device)
+        env = {
+            "TORCH_NCCL_CUDA_EVENT_CACHE": str(int(cache_enabled)),
+            "TORCH_NCCL_ENABLE_TIMING": "1",
+            "TORCH_NCCL_BLOCKING_WAIT": "0",
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "3",
+        }
+        with mock.patch.dict(os.environ, env):
+            dist.init_process_group(
+                "nccl2",
+                init_method=f"file://{self.file_name}",
+                rank=self.rank,
+                world_size=self.world_size,
+            )
+            try:
+                stream = torch.cuda.Stream(device=device)
+                stream.wait_stream(torch.cuda.current_stream(device))
+                with torch.cuda.stream(stream):
+                    for _ in range(3):
+                        warmup = torch.ones(4, device=device)
+                        dist.all_reduce(warmup)
+                torch.cuda.synchronize(device)
+
+                recorded_events = set()
+                deleted_events = set()
+                torch._C._activate_gpu_trace()
+                gpu_trace.register_callback_for_event_record(
+                    lambda event, stream: recorded_events.add(event)
+                )
+                gpu_trace.register_callback_for_event_deletion(deleted_events.add)
+
+                for explicit_reset in (True, False):
+                    tensor = torch.ones(num_collectives, 4, device=device)
+                    inputs = list(tensor.unbind())
+                    stream.wait_stream(torch.cuda.current_stream(device))
+                    recorded_events.clear()
+                    graph = torch.cuda.CUDAGraph()
+                    with torch.cuda.graph(graph, stream=stream):
+                        for input_tensor in inputs:
+                            dist.all_reduce(input_tensor)
+                    captured_events = recorded_events.copy()
+                    graph.replay()
+                    torch.cuda.synchronize(device)
+                    self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
+                    deleted_events.clear()
+                    if explicit_reset:
+                        graph.reset()
+                    del graph
+
+                    # Each work has two events; the default cache holds 1000.
+                    min_deleted = 2 * num_collectives - 1000 if cache_enabled else 2
+                    deadline = time.monotonic() + 30
+                    while len(captured_events & deleted_events) < min_deleted:
+                        if time.monotonic() >= deadline:
+                            self.fail("Captured CUDA events were not destroyed")
+                        time.sleep(0.05)
+
+                tensor = torch.ones(4, device=device)
+                dist.all_reduce(tensor)
+                self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+            finally:
+                dist.destroy_process_group()
+
+
+instantiate_device_type_tests(
+    ProcessGroupNCCL2GraphCleanupTest, globals(), only_for="cuda"
+)
 
 
 class ProcessGroupNCCL2Test(MultiProcContinuousTest):
@@ -314,6 +400,39 @@ class ProcessGroupNCCLLegacyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
         return "nccl-legacy"
 
 
+class ProcessGroupNCCL2DictConfigTest(_ProcessGroupNCCL2OptionsTest):
+    """Dict configs, which do not need nccl4py."""
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        # Makes NCCL read configs at group end.
+        os.environ["NCCL_ENQUEUE_REARCH_ENABLE"] = "1"
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_requires_nccl_2_31(self) -> None:
+        if torch.version.hip is None and torch.cuda.nccl.version() >= (2, 31, 0):
+            self.skipTest("NCCL 2.31+ supports collective configs")
+        tensor = torch.ones(4, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "requires NCCL 2.31 or later"):
+            dist.all_reduce(tensor, config={"max_ctas": 2})
+        # Empty configs use the plain API.
+        dist.all_reduce(tensor, config={"max_ctas": None, "vendor_options": ()})
+        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    def test_time_estimate_config(self) -> None:
+        process_group = dist.distributed_c10d._get_default_group()
+        tensor = torch.ones(1024, device=self.device)
+        with dist._time_estimator(group=process_group, device=self.device) as context:
+            dist.all_reduce(tensor, config={"max_ctas": 2, "alg_selection": "ring"})
+        self.assertIsNotNone(context.estimated_time)
+        self.assertGreater(context.estimated_time, 0)
+
+
 @instantiate_parametrized_tests
 @unittest.skipUnless(
     HAS_NCCL_COLL_CONFIG and not torch.version.hip, "requires nccl4py 0.5+ and CUDA"
@@ -440,17 +559,23 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
     @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
     @skip_if_lt_x_gpu(2)
     @parametrize(
-        "config, error",
+        "config, exc, error",
         [
-            ({"unknown": 1}, "Unknown NCCL collective config key"),
-            ({"max_ctas": "2"}, "'max_ctas' must be an int"),
-            ({"max_ctas": 2**31}, "'max_ctas' is out of range"),
-            ({"alg_selection": 1}, "'alg_selection' must be a str"),
-            ({"vendor_options": ({"vendor_id": 1},)}, "vendor_options"),
+            ({"unknown": 1}, ValueError, "Unknown NCCL collective config key"),
+            ({"max_ctas": "2"}, TypeError, "'max_ctas' must be an int"),
+            ({"max_ctas": 2**31}, ValueError, "'max_ctas' is out of range"),
+            ({"alg_selection": 1}, TypeError, "'alg_selection' must be a str"),
+            ({"user_profiler_tag": -1}, TypeError, "must be a non-negative int"),
+            ({"user_profiler_tag": True}, TypeError, "must be a non-negative int"),
+            (
+                {"vendor_options": ({"vendor_id": 1},)},
+                RuntimeError,
+                "vendor_options are not supported",
+            ),
         ],
     )
-    def test_invalid_config(self, config, error) -> None:
-        with self.assertRaisesRegex((TypeError, ValueError, RuntimeError), error):
+    def test_invalid_config(self, config, exc, error) -> None:
+        with self.assertRaisesRegex(exc, error):
             self._collective("all_reduce", config)
         self._collective("all_reduce", NCCLCollConfig())
 
@@ -461,7 +586,7 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
         group = dist.new_group(pg_options=self.opts(), device_id=self.device)
         try:
             config = NCCLCollConfig(alg_selection="invalid_algorithm")
-            with self.assertRaisesRegex(RuntimeError, "NCCL"):
+            with self.assertRaisesRegex(RuntimeError, "NCCL (AllReduce|error)"):
                 self._collective("all_reduce", config, group=group)
         finally:
             group.abort()
@@ -491,7 +616,9 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
             )
         self._collective("all_reduce", NCCLCollConfig())
 
+    @requires_nccl()
     @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
     @parametrize("name", ["all_reduce", "all_gather_single", "reduce_scatter_single"])
     @parametrize("native_batch", [False, True])
     def test_coalescing_config(self, name, native_batch) -> None:
@@ -510,9 +637,23 @@ class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
         }[name]
         args = (tensor,) if name == "all_reduce" else (output, tensor)
         with dist._coalescing_manager(device=self.device if native_batch else None):
-            getattr(dist, name)(*args, config=NCCLCollConfig())
+            getattr(dist, name)(*args, config=NCCLCollConfig(max_ctas=2))
         torch.cuda.synchronize(self.device)
         self.assertEqual(output, expected)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    def test_coalescing_equal_configs(self) -> None:
+        # Equal but distinct config instances coalesce into one batch.
+        size = self.world_size
+        tensors = [torch.ones(n, device=self.device) for n in (2, 4, 8)]
+        with dist._coalescing_manager(device=self.device):
+            for tensor in tensors:
+                dist.all_reduce(tensor, config=NCCLCollConfig(max_ctas=2))
+        torch.cuda.synchronize(self.device)
+        for tensor in tensors:
+            self.assertEqual(tensor, torch.full_like(tensor, size))
 
     @classmethod
     def opts(cls, high_priority_stream=False):

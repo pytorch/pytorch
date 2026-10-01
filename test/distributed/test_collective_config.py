@@ -7,7 +7,7 @@ from test_c10d_pybackend import create_process_group, RecordingBackend
 
 import torch
 import torch.distributed as dist
-import torch.distributed._functional_collectives
+import torch.distributed._functional_collectives as funcol
 from torch._C._distributed_c10d import (
     _register_process_group,
     _unregister_process_group,
@@ -281,6 +281,130 @@ class FunctionalCollectiveConfigTest(TestCase):
             self.assertEqual(
                 [call[-1].config for call in backend.calls], [config, config]
             )
+
+    def test_config_value_key(self):
+        from torch._inductor.utils import collective_config_value_key
+
+        keys = [
+            collective_config_value_key(config)
+            for config in (
+                None,
+                {"max_ctas": 1},
+                {"max_ctas": True},
+                {"max_ctas": 1.0},
+                {"vendor_options": [1]},
+                {"vendor_options": (1,)},
+            )
+        ]
+        self.assertEqual(len(set(keys)), len(keys))
+        self.assertEqual(
+            collective_config_value_key({"a": 1, "b": {"c": [2]}}),
+            collective_config_value_key({"b": {"c": [2]}, "a": 1}),
+        )
+
+    def test_nested_config_dict(self):
+        from torch.distributed._collective_config import _collective_config_dict
+
+        config = {"a": {"b": [1, (2.0, True)]}, "c": (), "d": []}
+        self.assertEqual(
+            _collective_config_dict(config), {"a": {"b": [1, (2.0, True)]}}
+        )
+
+    def test_recompile_on_config_change(self):
+        from torch._dynamo.testing import CompileCounter
+
+        with self._backend() as (backend, group):
+            counter = CompileCounter()
+
+            @torch.compile(backend=counter, fullgraph=True)
+            def fn(x, config):
+                return funcol.all_reduce(x, "sum", group, config=config)
+
+            configs = [{"max_ctas": 1}, {"max_ctas": 2}, {"max_ctas": 2}]
+            for config in configs:
+                fn(torch.ones(4), config)
+            self.assertEqual(counter.frame_count, 2)
+            self.assertEqual([call[-1].config for call in backend.calls], configs)
+
+    def test_bucket_keys(self):
+        from torch._inductor.fx_passes import bucketing
+
+        c10d = torch.ops._c10d_functional
+        cases = (
+            (bucketing._ar_group_key, c10d.all_reduce.default, ("sum",)),
+            (bucketing._ag_group_key, c10d.all_gather_into_tensor.default, (1,)),
+            (
+                bucketing._ag_group_key_multidtype,
+                c10d.all_gather_into_tensor.default,
+                (1,),
+            ),
+            (
+                bucketing._rs_group_key,
+                c10d.reduce_scatter_tensor.default,
+                ("sum", 1),
+            ),
+        )
+        with self._backend() as (backend, group):
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            for key, op, args in cases:
+                keys = set()
+                for config in (None, {"max_ctas": 1}, {"max_ctas": True}):
+                    node = graph.call_function(op, (x, *args, group.group_name, config))
+                    node.meta["val"] = torch.empty(4)
+                    keys.add(key(node))
+                self.assertEqual(len(keys), 3)
+
+    def test_decomp_skips_config(self):
+        from torch._inductor.fx_passes.decomp_comms import find_all_gather_ancestor
+
+        c10d = torch.ops._c10d_functional
+        for config in (None, {"max_ctas": 1}):
+            graph = torch.fx.Graph()
+            x = graph.placeholder("x")
+            ag = graph.call_function(
+                c10d.all_gather_into_tensor.default, (x, 2, "group", config)
+            )
+            wait = graph.call_function(c10d.wait_tensor.default, (ag,))
+            info = find_all_gather_ancestor(wait)
+            if config is None:
+                self.assertIs(info.ag_node, ag)
+            else:
+                self.assertIsNone(info)
+
+
+class LocalTensorCollectiveConfigTest(TestCase):
+    world_size = 2
+
+    def setUp(self):
+        super().setUp()
+        dist.init_process_group("fake", rank=0, world_size=self.world_size)
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def test_config(self):
+        from torch.distributed._local_tensor import LocalTensor, LocalTensorMode
+
+        config = {"max_ctas": 1}
+        group_name = dist.group.WORLD.group_name
+        c10d = torch.ops._c10d_functional
+        with LocalTensorMode(self.world_size):
+            x = LocalTensor({rank: torch.full((2,), float(rank)) for rank in range(2)})
+            results = [
+                c10d.all_reduce(x, "sum", group_name, config),
+                c10d.all_gather_into_tensor(x, 2, group_name, config),
+                c10d.reduce_scatter_tensor(x, "sum", 2, group_name, config),
+                c10d.all_to_all_single(x, [1, 1], [1, 1], group_name, config),
+            ]
+            results = [c10d.wait_tensor(result) for result in results]
+            y = x.clone()
+            dist.all_reduce(y, config=config)
+        expected = [[1.0, 1.0], [0.0, 0.0, 1.0, 1.0], [1.0], [0.0, 1.0]]
+        for result, values in zip(results, expected):
+            self.assertEqual(result._local_tensors[0], torch.tensor(values))
+        self.assertEqual(y._local_tensors[1], torch.ones(2))
 
 
 if __name__ == "__main__":

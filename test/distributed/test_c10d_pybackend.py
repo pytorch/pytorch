@@ -2,6 +2,7 @@
 
 import inspect
 import os
+import types
 import weakref
 from datetime import timedelta
 
@@ -368,14 +369,18 @@ def create_process_group(backend):
 class TestPyBackend(TestCase):
     @parametrize("name", _CONFIG_COLLECTIVES)
     @parametrize("async_op", [False, True])
-    @parametrize("config_kind", ["omitted", "none", "object"])
+    @parametrize("config_kind", ["omitted", "none", "dict", "object"])
     def test_collective_config(self, name, async_op, config_kind) -> None:
         backend = RecordingBackend(0, 1, "custom-config-backend")
         group = create_process_group(backend)
-        config = {"value": 1} if config_kind == "dict" else None
+        config = None if config_kind in ("omitted", "none") else {"value": 1}
         args, kwargs = _collective_inputs(name)
-        if config_kind != "omitted":
-            kwargs["config"] = config
+        if config_kind == "none":
+            kwargs["config"] = None
+        elif config_kind == "dict":
+            kwargs["config"] = {"value": 1}
+        elif config_kind == "object":
+            kwargs["config"] = types.SimpleNamespace(value=1)
         result = getattr(dist, name)(*args, group=group, async_op=async_op, **kwargs)
         self.assertEqual(
             [call[0] for call in backend.calls], [_CONFIG_COLLECTIVES[name]]
@@ -496,7 +501,7 @@ class TestPyBackend(TestCase):
         self.assertEqual(opts.config, {"min_ctas": None})
         opts.config = None
         self.assertIsNone(opts.config)
-        with self.assertRaises(AttributeError):
+        with self.assertRaisesRegex(TypeError, "dict or an object with __dict__"):
             opts.config = object()
 
     @parametrize("name", ["all_reduce", "all_gather_single", "reduce_scatter_single"])

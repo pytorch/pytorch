@@ -221,15 +221,18 @@ class NcclApi {
       cudaStream_t stream,
       const MaterializedCollectiveConfig& config = {}) = 0;
 
+  // Not pure so existing NcclApi implementations keep compiling.
   [[nodiscard]] virtual ncclResult_t gather(
-      const void* sendbuff,
-      void* recvbuff,
-      size_t count,
-      ncclDataType_t datatype,
-      int root,
-      ncclComm_t comm,
-      cudaStream_t stream,
-      const MaterializedCollectiveConfig& config = {}) = 0;
+      const void* /*sendbuff*/,
+      void* /*recvbuff*/,
+      size_t /*count*/,
+      ncclDataType_t /*datatype*/,
+      int /*root*/,
+      ncclComm_t /*comm*/,
+      cudaStream_t /*stream*/,
+      const MaterializedCollectiveConfig& /*config*/ = {}) {
+    return ncclInvalidUsage;
+  }
 
   // Group operations
   [[nodiscard]] virtual ncclResult_t groupStart() = 0;

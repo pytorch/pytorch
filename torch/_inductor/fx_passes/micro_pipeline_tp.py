@@ -555,7 +555,12 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
                         group_name=match.kwargs["group_name"],
                     )
                 )
-    return list(reversed(reduce_scatters))
+    # symm_mem fused ops can't carry a collective config.
+    return [
+        rs
+        for rs in reversed(reduce_scatters)
+        if get_collective_config(rs.reduce_scatter_node) is None
+    ]
 
 
 @dataclass

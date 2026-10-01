@@ -774,7 +774,7 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
         grad_output.contiguous(),
         grad_reduce_op,
         group_name,
-        config=getattr(ctx, "config", None),
+        config=ctx.config,
     )
 
     output = wait_tensor(output)
@@ -793,7 +793,7 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
                 mask.to(torch.float32),
                 "sum",
                 group_name,
-                config=getattr(ctx, "config", None),
+                config=ctx.config,
             )
         )
         scaled = (output / tie_count).to(output.dtype)
@@ -849,7 +849,7 @@ def all_gather_into_tensor_backward(ctx, grad_output: torch.Tensor):
         "sum",
         group_size,
         group_name,
-        config=getattr(ctx, "config", None),
+        config=ctx.config,
     )
     return (wait_tensor(output),) + (None,) * (ctx.num_inputs - 1)
 
@@ -907,7 +907,7 @@ def reduce_scatter_tensor_backward(ctx, grad_output: torch.Tensor):
         grad_output.contiguous(),
         group_size,
         group_name,
-        config=getattr(ctx, "config", None),
+        config=ctx.config,
     )
     return (wait_tensor(output),) + (None,) * (ctx.num_inputs - 1)
 
@@ -960,7 +960,7 @@ def all_to_all_single_backward(ctx, grad_output: torch.Tensor):
         input_split_sizes,  # Reversed
         output_split_sizes,  # Reversed
         group_name,
-        config=getattr(ctx, "config", None),
+        config=ctx.config,
     )
     return (wait_tensor(output),) + (None,) * (ctx.num_inputs - 1)
 
@@ -1034,7 +1034,7 @@ def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
         [grad_output.contiguous() for grad_output in grad_outputs],
         grad_reduce_op,
         group_name,
-        config=getattr(ctx, "config", None),
+        config=ctx.config,
     )
     grad_inputs = wait_tensors(grad_inputs)
 
@@ -1058,7 +1058,7 @@ def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
                 [mask.to(torch.float32) for mask in masks],
                 "sum",
                 group_name,
-                config=getattr(ctx, "config", None),
+                config=ctx.config,
             )
         )
         grad_inputs = [
@@ -1117,7 +1117,7 @@ def all_gather_into_tensor_coalesced_backward(ctx, grad_outputs: list[torch.Tens
         "sum",
         group_size,
         group_name,
-        config=getattr(ctx, "config", None),
+        config=ctx.config,
     )
     return (wait_tensors(grad_inputs),) + (None,) * (ctx.num_inputs - 1)
 
@@ -1175,7 +1175,7 @@ def reduce_scatter_tensor_coalesced_backward(ctx, grad_outputs: list[torch.Tenso
         [grad_output.contiguous() for grad_output in grad_outputs],
         group_size,
         group_name,
-        config=getattr(ctx, "config", None),
+        config=ctx.config,
     )
     return (wait_tensors(grad_inputs),) + (None,) * (ctx.num_inputs - 1)
 

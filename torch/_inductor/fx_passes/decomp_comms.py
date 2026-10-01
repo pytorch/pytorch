@@ -13,7 +13,7 @@ Gated by config.aten_distributed_optimizations.allow_comms_decompositions.
 import logging
 import operator
 from collections import defaultdict
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import torch
 import torch.fx as fx
@@ -108,7 +108,6 @@ def gram_source(gram_node: fx.Node) -> fx.Node:
 class AllGatherInfo(NamedTuple):
     shard: fx.Node
     group_name: str
-    config: dict[str, Any] | None
     ag_node: fx.Node
     wait_node: fx.Node
     # Full gathered tensor consumed downstream: an identity/trim slice
@@ -141,6 +140,8 @@ def find_all_gather_ancestor(
         if (
             not isinstance(ag_node, fx.Node)
             or ag_node.target is not c10d.all_gather_into_tensor.default
+            # Configs are specific to the all_gather.
+            or get_collective_config(ag_node) is not None
         ):
             continue
         # all_gather_into_tensor(shard, world_size, group_name)
@@ -158,7 +159,6 @@ def find_all_gather_ancestor(
         return AllGatherInfo(
             shard=shard,
             group_name=group_name,
-            config=get_collective_config(ag_node),
             ag_node=ag_node,
             wait_node=n,
             entry_node=entry_node,
@@ -320,13 +320,11 @@ def _gram_shape_is_decomposable(gram_node: fx.Node, gathered_rows: int) -> bool:
     )
 
 
-def _insert_all_reduce_wait(
-    graph: fx.Graph, node: fx.Node, group_name: str, config: dict[str, Any] | None
-) -> fx.Node:
+def _insert_all_reduce_wait(graph: fx.Graph, node: fx.Node, group_name: str) -> fx.Node:
     """Insert all_reduce(sum) + wait_tensor after node, rewire users."""
     with graph.inserting_before(node.next):
         ar = graph.call_function(
-            c10d.all_reduce.default, args=(node, "sum", group_name, config)
+            c10d.all_reduce.default, args=(node, "sum", group_name)
         )
         wait_ar = graph.call_function(c10d.wait_tensor.default, args=(ar,))
     for user in list(node.users):
@@ -515,7 +513,7 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
         info.entry_node.replace_all_uses_with(replacement)
 
         for mm_node in gram_mms:
-            _insert_all_reduce_wait(graph, mm_node, info.group_name, info.config)
+            _insert_all_reduce_wait(graph, mm_node, info.group_name)
 
         # Correct reductions over the sharded dim
         for node in list(chain):
@@ -527,7 +525,7 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
                     sq = graph.call_function(aten.pow.Tensor_Scalar, args=(node, 2.0))
                     ar = graph.call_function(
                         c10d.all_reduce.default,
-                        args=(sq, "sum", info.group_name, info.config),
+                        args=(sq, "sum", info.group_name),
                     )
                     wait_ar = graph.call_function(c10d.wait_tensor.default, args=(ar,))
                     corrected = graph.call_function(
@@ -537,7 +535,7 @@ def decomp_gram_matrix_all_gather(gm: fx.GraphModule) -> fx.GraphModule:
                     if user is not sq:
                         user.replace_input_with(node, corrected)
             elif _is_reduction(node):
-                _insert_all_reduce_wait(graph, node, info.group_name, info.config)
+                _insert_all_reduce_wait(graph, node, info.group_name)
 
         # Result is already shard-sized, bypass split+getitem
         pre_split = split_node.args[0]
