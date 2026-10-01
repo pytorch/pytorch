@@ -661,7 +661,6 @@ class TritonTemplateKernel(TritonKernel):
         self.input_nodes = input_nodes
         self.output_node = output_node
         self.named_input_nodes = {}  # type: ignore[var-annotated]
-        self._named_input_indices: dict[str, int] = {}
         self.defines = defines
         self.kernel_name = kernel_name
         self.use_jit = use_jit
@@ -710,7 +709,8 @@ class TritonTemplateKernel(TritonKernel):
         # Inputs that are allowed to use producer fusion, separated by codegen destination.
         self.load_input_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
         self.store_output_fusion_allowed_inputs: OrderedSet[str] = OrderedSet()
-        # Track which occurrences are covered before exposing physical buffer names.
+        # Track producer-fusion-supported input indices before duplicate
+        # arguments are deduplicated.
         self._producer_fusion_allowed_input_indices: OrderedSet[int] = OrderedSet()
 
         # Inputs whose producers are actually fused, separated by destination.
@@ -771,15 +771,12 @@ class TritonTemplateKernel(TritonKernel):
         return f"_tmp_var{next(self.tmp_var_ctr)}"
 
     def _finalize_fusion_allowed_inputs(self) -> None:
-        supported_indices = self._producer_fusion_allowed_input_indices
-        allowed_names = (
-            self.load_input_fusion_allowed_inputs
-            | self.store_output_fusion_allowed_inputs
-        )
+        # Remove a producer-fusible buffer if it also appears at an unsupported
+        # template input position.
         unsupported_names = OrderedSet(
             input_node.get_name()
             for index, input_node in enumerate(self.input_nodes)
-            if input_node.get_name() in allowed_names and index not in supported_indices
+            if index not in self._producer_fusion_allowed_input_indices
         )
         self.load_input_fusion_allowed_inputs -= unsupported_names
         self.store_output_fusion_allowed_inputs -= unsupported_names
@@ -803,6 +800,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.args.workspace_args,
                 self.load_input_fusion_allowed_inputs,
                 self.store_output_fusion_allowed_inputs,
+                # Record occurrence-only changes for generated-code cache replay.
                 self._producer_fusion_allowed_input_indices,
                 self.frozen_layouts_cnt,
             ]
@@ -1119,25 +1117,20 @@ class TritonTemplateKernel(TritonKernel):
             # get args in correct order
             self.args.input(input_node.get_name())
 
-        for named_index, (name, input_node) in enumerate(
-            zip(argnames, named_args), start=self.prefix_args
-        ):
+        for name, input_node in zip(argnames, named_args):
             arg_name = f"arg_{name}"
             self.named_input_nodes[name] = input_node
-            self._named_input_indices[name] = named_index
             if self._is_input_arg_omitted(input_node.get_name()):
                 continue
 
             self.args.input_buffers[input_node.get_name()] = arg_name
 
         # The args may be duplicated, so renaming must be after args are de-duplicated.
-        for name in argnames:
+        for named_index, name in enumerate(argnames, start=self.prefix_args):
             input_node = self.named_input_nodes[name]
             if self.prologue_loads_all_named_inputs:
                 self.load_input_fusion_allowed_inputs.add(input_node.get_name())
-                self._producer_fusion_allowed_input_indices.add(
-                    self._named_input_indices[name]
-                )
+                self._producer_fusion_allowed_input_indices.add(named_index)
             if self._is_input_arg_omitted(input_node.get_name()):
                 continue
 
@@ -1406,9 +1399,10 @@ class TritonTemplateKernel(TritonKernel):
         input_node = self.named_input_nodes[input_name]
         if not self.prologue_loads_all_named_inputs:
             self.load_input_fusion_allowed_inputs.add(input_node.get_name())
-            self._producer_fusion_allowed_input_indices.add(
-                self._named_input_indices[input_name]
+            named_input_index = self.prefix_args + list(self.named_input_nodes).index(
+                input_name
             )
+            self._producer_fusion_allowed_input_indices.add(named_input_index)
 
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
