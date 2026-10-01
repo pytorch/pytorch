@@ -284,8 +284,8 @@ class TestEmbeddedCoverage(TestCase):
             self.assertFalse(coverage.is_available(device))
             self.assertTrue(coverage.is_available(device))
             self.assertFalse(coverage.is_available(device))
-            get_capability.assert_has_calls([mock.call(0), mock.call(1)])
-            self.assertEqual(get_capability.call_count, 2)
+            queried_devices = [call.args[0] for call in get_capability.call_args_list]
+            self.assertEqual(queried_devices, [0, 1])
 
     def test_availability_retries_failed_device_query(self):
         coverage = aot_manifest._Coverage("bmm", lambda *args: {}, [])
