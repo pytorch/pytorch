@@ -610,12 +610,10 @@ class ConstDictVariable(VariableTracker):
         if not self.is_mutable():
             return None
         check_positional(tx, "pop", len(args), 1, 2)
-        missing = object()
-        if isinstance(self, DunderDictVariable) and args[0] not in self:
-            value = missing
-        else:
-            value = self.items.pop(HashableTracker(args[0]), missing)
-        if value is missing:
+        value = None
+        if not (isinstance(self, DunderDictVariable) and args[0] not in self):
+            value = self.items.pop(HashableTracker(args[0]), None)
+        if value is None:
             # missing item, return the default value. Install no DICT_CONTAINS guard.
             self.install_dict_contains_guard(tx, args)
             if len(args) == 1:
