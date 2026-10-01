@@ -13,8 +13,9 @@ from ..exc import TYPE_CHECKING, unimplemented
 from ..graph_bytecode_inputs import (
     CURRENT_STREAM_INDEX,
     get_external_object_by_index,
+    mark_current_stream_used,
+    register_current_stream,
     register_graph_created_object,
-    register_user_object,
     reset_user_object_tracking,
 )
 from ..source import CurrentStreamSource
@@ -290,16 +291,11 @@ class SymbolicStreamState:
             # fresh at tracing start).  The inductor wrapper updates this
             # entry at runtime so cudagraph capture uses the capture stream
             # instead of this stale trace-time stream.
-            index = register_user_object(stream, source)
-            if index != CURRENT_STREAM_INDEX:
-                raise AssertionError(
-                    f"Current stream must be registered at index {CURRENT_STREAM_INDEX}, "
-                    f"got {index}"
-                )
+            register_current_stream(stream, source)
             stream_var = LazyVariableTracker.create(stream, source=source)
             # Set user_object_index as an instance attribute so accessing it
             # does NOT trigger LazyVariableTracker realization.
-            stream_var.user_object_index = index  # type: ignore[union-attr]
+            stream_var.user_object_index = CURRENT_STREAM_INDEX  # type: ignore[union-attr]
             cur_stack = [stream_var]  # type: ignore[list-item]
 
         self.cur_stream_stack: collections.deque[StreamVariable] = collections.deque(
@@ -313,6 +309,7 @@ class SymbolicStreamState:
         self.cur_stream_stack.pop()
 
     def cur_stream(self, device: torch.device | None = None) -> "StreamVariable":
+        mark_current_stream_used()
         if device is not None:
             for stream in reversed(self.cur_stream_stack):
                 if stream.device == device:
