@@ -2,6 +2,7 @@
 # flake8: noqa: E731, C405, F811, C418, C417
 import cmath
 import collections
+import copy
 import collections.abc
 import contextlib
 import enum
@@ -7525,6 +7526,36 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_copy_copy_builtin_containers(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            xs = [x, x + 1]
+            mapping = {"x": x}
+            values = {1, 2}
+            xs_copy = copy.copy(xs)
+            mapping_copy = copy.copy(mapping)
+            values_copy = copy.copy(values)
+            xs_copy.append(x + 2)
+            mapping_copy["y"] = x + 3
+            values_copy.add(3)
+            return (
+                xs,
+                xs_copy,
+                mapping,
+                mapping_copy,
+                values,
+                values_copy,
+            )
+
+        x = torch.tensor(2)
+        got = fn(x)
+        self.assertEqual(got[0], [x, x + 1])
+        self.assertEqual(got[1], [x, x + 1, x + 2])
+        self.assertEqual(got[2], {"x": x})
+        self.assertEqual(got[3], {"x": x, "y": x + 3})
+        self.assertEqual(got[4], {1, 2})
+        self.assertEqual(got[5], {1, 2, 3})
 
     def test_functional_compile(self):
         def get_torch_functional_functions():
