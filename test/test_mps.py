@@ -1843,6 +1843,21 @@ class TestMPS(TestCaseMPS):
         tol = 1e-2 if dtype == torch.float16 else None
         self.assertEqual(output_cpu, output_mps[batch_idx], atol=tol, rtol=tol)
 
+    @xfailIf(MACOS_VERSION < 15.0)
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    def test_large_bmm_noncontiguous(self, dtype):
+        # https://github.com/pytorch/pytorch/issues/197636
+        # Output exceeds 2**32 elements and batch2 is a transposed non-contiguous view
+        B, M, N = 11, 20064, 128
+        batch1 = torch.randn(B, M, N, dtype=dtype, device='mps')
+        batch2 = torch.randn(B, M, N, dtype=dtype, device='mps').transpose(1, 2)
+        output_mps = torch.bmm(batch1, batch2)
+
+        batch_idx = torch.randint(1, B, size=()).item()
+        output_cpu = torch.mm(batch1[batch_idx].cpu(), batch2[batch_idx].cpu())
+        tol = 1e-2 if dtype == torch.float16 else None
+        self.assertEqual(output_cpu, output_mps[batch_idx], atol=tol, rtol=tol)
+
     @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_take_along_dim(self, dtype):
         x = torch.tensor([[-5.], [0.], [5.]], dtype=dtype)
