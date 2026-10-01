@@ -361,6 +361,34 @@ instantiate_device_type_tests(
 class TestRefs(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.complex64, torch.complex128)
+    @parametrize("mean_kind", ("scalar", "real", "complex"))
+    @parametrize("imaginary_std", (0, 1))
+    @parametrize("use_kwargs", (False, True))
+    def test_normal_rejects_complex_std(
+        self, device, dtype, mean_kind, imaginary_std, use_kwargs
+    ):
+        std = torch.full((3,), 1 + imaginary_std * 1j, device=device, dtype=dtype)
+        mean = 0.0
+        if mean_kind != "scalar":
+            mean = torch.zeros(
+                3, device=device,
+                dtype=dtype if mean_kind == "complex" else torch.float32,
+            )
+        with self.assertRaisesRegex(
+            RuntimeError, "normal expects standard deviation to be non-complex"
+        ):
+            if use_kwargs:
+                refs.normal(mean=mean, std=std)
+            else:
+                refs.normal(mean, std)
+
+    @dtypes(torch.complex64, torch.complex128)
+    def test_normal_complex_mean_real_std(self, device, dtype):
+        mean = torch.full((3,), 1 + 2j, device=device, dtype=dtype)
+        std = torch.zeros_like(mean.real)
+        self.assertEqual(refs.normal(mean, std), mean)
+
     @dtypes(torch.float32)
     def test_constant_pad_nd_memory_format(self, device, dtype):
         # Test memory format is preserved in unambiguous cases
