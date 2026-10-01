@@ -21,7 +21,6 @@ from torch._inductor.comm_analysis import (
 )
 from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._inductor.runtime.runtime_utils import dynamo_timed
-from torch._inductor.utils import has_collective_config
 from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.traceback import NodeSource, NodeSourceAction
@@ -431,8 +430,6 @@ def bucket_reduce_scatter(
 
 
 def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:  # type: ignore[arg-type]
-    if has_collective_config(node):
-        return False
     return node.op == "call_function" and (
         node.target == torch.ops._c10d_functional.all_gather_into_tensor.default
         or node.target == torch.ops._c10d_functional.all_gather_into_tensor_out.default
@@ -440,8 +437,6 @@ def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:  # type: ignore[arg-
 
 
 def is_reduce_scatter_tensor(node: torch.fx.Node) -> bool:
-    if has_collective_config(node):
-        return False
     return (
         node.op == "call_function"
         and node.target is torch.ops._c10d_functional.reduce_scatter_tensor.default
@@ -499,8 +494,6 @@ def deduplicate_wait_tensors(
 
 
 def is_all_reduce_tensor(node: torch.fx.Node) -> bool:
-    if has_collective_config(node):
-        return False
     return (
         node.op == "call_function"
         and node.target is torch.ops._c10d_functional.all_reduce.default
@@ -508,8 +501,6 @@ def is_all_reduce_tensor(node: torch.fx.Node) -> bool:
 
 
 def is_all_to_all_tensor(node: torch.fx.Node) -> bool:
-    if has_collective_config(node):
-        return False
     return (
         node.op == "call_function"
         and node.target is torch.ops._c10d_functional.all_to_all_single.default

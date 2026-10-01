@@ -355,14 +355,6 @@ class RecordingBackend(C10DBackend):
         self.shut_down = True
 
 
-class ConfigRecordingBackend(RecordingBackend):
-    """Existing collective methods consume opts.config."""
-
-    @property
-    def supports_collective_config(self):
-        return True
-
-
 def create_process_group(backend):
     group = dist.ProcessGroup(dist.HashStore(), backend.rank(), backend.size())
     group._register_backend(
@@ -380,7 +372,7 @@ class TestPyBackend(TestCase):
     @parametrize("async_op", [False, True])
     @parametrize("config_kind", ["omitted", "none", "object"])
     def test_collective_config(self, name, async_op, config_kind) -> None:
-        backend = ConfigRecordingBackend(0, 1, "custom-config-backend")
+        backend = RecordingBackend(0, 1, "custom-config-backend")
         group = create_process_group(backend)
         config = object() if config_kind == "object" else None
         args, kwargs = _collective_inputs(name)
@@ -410,7 +402,7 @@ class TestPyBackend(TestCase):
 
     @parametrize("config_kind", ["omitted", "none", "value"])
     def test_raw_optional_config(self, config_kind) -> None:
-        backend = ConfigRecordingBackend(0, 1)
+        backend = RecordingBackend(0, 1)
         group = create_process_group(backend)
         tensor = torch.ones(2)
         config = "custom-config" if config_kind == "value" else None
@@ -435,31 +427,17 @@ class TestPyBackend(TestCase):
         self.assertEqual([call[0] for call in backend.calls], ["gather_single"])
         self.assertIs(backend.calls[0][-1].config, config)
 
-    @parametrize("name", _CONFIG_COLLECTIVES)
-    @parametrize("backend_name", ["python-backend", "nccl2"])
-    def test_collective_config_unsupported_backend(self, name, backend_name) -> None:
-        backend = RecordingBackend(0, 1, backend_name)
-        group = create_process_group(backend)
-        args, kwargs = _collective_inputs(name)
-        with self.assertRaisesRegex(
-            RuntimeError, "does not support per-collective configuration"
-        ):
-            getattr(dist, name)(*args, group=group, config=object(), **kwargs)
-        self.assertEqual(backend.calls, [])
-
     def test_collective_config_selected_backend(self) -> None:
         cpu_backend = RecordingBackend(0, 1)
-        cuda_backend = ConfigRecordingBackend(0, 1, "custom-config-backend")
+        cuda_backend = RecordingBackend(0, 1, "custom-config-backend")
         group = create_process_group(cpu_backend)
         group._register_backend(
             torch.device("cuda"), dist.ProcessGroup.BackendType.NCCL, cuda_backend
         )
         group._set_default_backend(dist.ProcessGroup.BackendType.NCCL)
-        with self.assertRaisesRegex(
-            RuntimeError, "does not support per-collective configuration"
-        ):
-            dist.all_reduce(torch.ones(2), group=group, config=object())
-        self.assertEqual(cpu_backend.calls, [])
+        config = object()
+        dist.all_reduce(torch.ones(2), group=group, config=config)
+        self.assertIs(cpu_backend.calls[0][-1].config, config)
         self.assertEqual(cuda_backend.calls, [])
 
     @parametrize("name", _CONFIG_COLLECTIVES)
@@ -525,7 +503,7 @@ class TestPyBackend(TestCase):
     @parametrize("device", [None, torch.device("cpu")])
     @parametrize("pending", [False, True])
     def test_collective_config_coalescing(self, name, device, pending) -> None:
-        backend = ConfigRecordingBackend(0, 1, "custom-config-backend")
+        backend = RecordingBackend(0, 1, "custom-config-backend")
         group = create_process_group(backend)
         args, kwargs = _collective_inputs(name)
         collective = getattr(dist, name)
@@ -557,9 +535,9 @@ class TestPyBackend(TestCase):
                 _CollOp(dist.all_reduce, tensor, config=config)
 
     def test_uncaptured_config_in_coalescing_scope(self) -> None:
-        backend = ConfigRecordingBackend(0, 1, "custom-config-backend")
+        backend = RecordingBackend(0, 1, "custom-config-backend")
         group = create_process_group(backend)
-        other_backend = ConfigRecordingBackend(0, 1, "custom-config-backend")
+        other_backend = RecordingBackend(0, 1, "custom-config-backend")
         other = create_process_group(other_backend)
         config = object()
         with _coalescing_manager(group):
@@ -571,7 +549,7 @@ class TestPyBackend(TestCase):
         self.assertNotIn(group, _world.pg_coalesce_state)
 
     def test_collective_config_time_estimator_cleanup(self) -> None:
-        backend = ConfigRecordingBackend(0, 1, "custom-config-backend")
+        backend = RecordingBackend(0, 1, "custom-config-backend")
         group = create_process_group(backend)
         tensor = torch.zeros(2)
         with self.assertRaisesRegex(RuntimeError, "body failed"):

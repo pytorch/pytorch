@@ -7,7 +7,6 @@ from math import prod
 from typing import Any, cast
 
 import torch
-from torch._inductor.utils import has_collective_config
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config, inductor_prims
@@ -238,7 +237,6 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
         if not (
             isinstance(ag_node, torch.fx.Node)
             and ag_node.target is c10d.all_gather_into_tensor.default
-            and not has_collective_config(ag_node)
         ):
             return None
         group_name = ag_node.kwargs.get("group_name")
@@ -279,8 +277,6 @@ def find_all_gather_patterns(graph: torch.fx.Graph):
                 if not isinstance(match, Match):
                     raise AssertionError(f"expected a Match, got {type(match)}")
                 ag_node = match.nodes[ag_node_idx]
-                if has_collective_config(ag_node):
-                    continue
                 if ag_node.target != c10d.all_gather_into_tensor.default:
                     raise AssertionError(
                         "expected ag_node target to be "
@@ -433,7 +429,6 @@ def find_reduce_scatter_patterns(graph: torch.fx.Graph):
         if not (
             isinstance(reduce_scatter_node, torch.fx.Node)
             and reduce_scatter_node.target is c10d.reduce_scatter_tensor.default
-            and not has_collective_config(reduce_scatter_node)
         ):
             return None
         cat_node = reduce_scatter_node.args[0]

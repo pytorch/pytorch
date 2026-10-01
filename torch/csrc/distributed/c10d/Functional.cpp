@@ -78,8 +78,7 @@ at::Tensor& all_reduce_(
 at::Tensor all_reduce(
     const at::Tensor& input,
     c10::intrusive_ptr<c10d::ReduceOp> reduce_op,
-    c10::intrusive_ptr<c10d::ProcessGroup> group,
-    const OptionalCollectiveConfig& config) {
+    c10::intrusive_ptr<c10d::ProcessGroup> group) {
   if (input.is_complex()) {
     TORCH_CHECK(
         *reduce_op == c10d::ReduceOp::SUM ||
@@ -90,16 +89,7 @@ at::Tensor all_reduce(
   }
   auto input_real = input.is_complex() ? at::view_as_real(input) : input;
   auto output = input_real.clone(at::MemoryFormat::Contiguous);
-  auto output_ret = output;
-  if (config.has_value()) {
-    AllreduceOptions opts;
-    opts.reduceOp = *reduce_op;
-    opts.config = config;
-    std::vector<at::Tensor> tensors{output};
-    group->allreduce(tensors, opts)->wait();
-  } else {
-    output_ret = all_reduce_(output, std::move(reduce_op), std::move(group));
-  }
+  auto output_ret = all_reduce_(output, std::move(reduce_op), std::move(group));
   return input.is_complex() ? at::view_as_complex(output_ret) : output_ret;
 }
 
@@ -188,19 +178,7 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
 at::Tensor all_gather_into_tensor(
     const at::Tensor& input,
     int64_t group_size,
-    c10::intrusive_ptr<c10d::ProcessGroup> group,
-    const OptionalCollectiveConfig& config) {
-  if (config.has_value()) {
-    TORCH_CHECK(group_size > 0, "group_size must be positive");
-    auto real_input = input.is_complex() ? at::view_as_real(input) : input;
-    auto contiguous = real_input.contiguous();
-    auto output = allocate_all_gather_output(contiguous, group_size);
-    AllgatherOptions opts;
-    opts.config = config;
-    group->all_gather_single(output, contiguous, opts)->wait();
-    return input.is_complex() ? at::view_as_complex(output) : output;
-  }
-
+    c10::intrusive_ptr<c10d::ProcessGroup> group) {
   auto real_input = input.is_complex() ? at::view_as_real(input) : input;
   std::vector<at::Tensor> inputs{real_input};
   auto output =
@@ -312,28 +290,7 @@ at::Tensor reduce_scatter_tensor(
     const at::Tensor& input,
     std::string reduce_op,
     int64_t group_size,
-    c10::intrusive_ptr<c10d::ProcessGroup> group,
-    const OptionalCollectiveConfig& config) {
-  if (config.has_value()) {
-    TORCH_CHECK(group_size > 0, "group_size must be positive");
-    TORCH_CHECK(
-        input.dim() > 0 && input.size(0) % group_size == 0,
-        "reduce_scatter input must have a first dimension divisible by group_size");
-    auto op = to_reduce_op(reduce_op);
-    TORCH_CHECK(
-        !input.is_complex() || *op == ReduceOp::SUM || *op == ReduceOp::AVG ||
-            *op == ReduceOp::PREMUL_SUM,
-        "reduce_scatter: reduce_op does not support complex tensors");
-    auto real_input = input.is_complex() ? at::view_as_real(input) : input;
-    auto contiguous = real_input.contiguous();
-    auto output = allocate_reduce_scatter_output(contiguous, group_size);
-    ReduceScatterOptions opts;
-    opts.reduceOp = *op;
-    opts.config = config;
-    group->reduce_scatter_single(output, contiguous, opts)->wait();
-    return input.is_complex() ? at::view_as_complex(output) : output;
-  }
-
+    c10::intrusive_ptr<c10d::ProcessGroup> group) {
   if (input.is_complex()) {
     auto real_input = at::view_as_real(input);
     std::vector<at::Tensor> inputs{std::move(real_input)};
@@ -397,8 +354,7 @@ at::Tensor all_to_all_single(
     const at::Tensor& input,
     c10::SymIntArrayRef _output_split_sizes,
     c10::SymIntArrayRef _input_split_sizes,
-    const c10::intrusive_ptr<ProcessGroup>& group,
-    const OptionalCollectiveConfig& config) {
+    c10::intrusive_ptr<ProcessGroup> group) {
   std::vector<int64_t> output_split_sizes;
   std::vector<int64_t> input_split_sizes;
   output_split_sizes.reserve(_output_split_sizes.size());
@@ -416,30 +372,13 @@ at::Tensor all_to_all_single(
       output_split_sizes.begin(), output_split_sizes.end(), int64_t(0));
   auto output = contig_input.new_empty(output_sizes);
 
-  AllToAllOptions opts;
-  opts.config = config;
-  if (config.has_value() && input_split_sizes == output_split_sizes &&
-      input_split_sizes.size() == static_cast<size_t>(group->getSize()) &&
-      output_sizes[0] == input.size(0) && !input_split_sizes.empty() &&
-      std::all_of(
-          input_split_sizes.begin(),
-          input_split_sizes.end(),
-          [&](int64_t size) { return size == input_split_sizes.front(); })) {
-    input_split_sizes.clear();
-    output_split_sizes.clear();
-  }
   auto work = group->all_to_all_single(
       output,
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
       const_cast<at::Tensor&>(contig_input),
       output_split_sizes,
-      input_split_sizes,
-      opts);
-  if (config.has_value()) {
-    work->wait();
-  } else {
-    c10d::register_work(output, work);
-  }
+      input_split_sizes);
+  c10d::register_work(output, work);
   return output;
 }
 
@@ -612,33 +551,28 @@ at::Tensor all_to_all_single_dispatch(
     const at::Tensor& input,
     c10::SymIntArrayRef output_split_sizes,
     c10::SymIntArrayRef input_split_sizes,
-    const c10::IValue& group_name,
-    const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
+    const c10::IValue& group_name) {
   return c10d::all_to_all_single(
       input,
       output_split_sizes,
       input_split_sizes,
-      get_process_group(group_name, "all_to_all_single"),
-      config ? std::make_optional(c10::IValue(*config)) : std::nullopt);
+      get_process_group(group_name, "all_to_all_single"));
 }
 
 } // namespace
 
 TORCH_LIBRARY(_c10d_functional, m) {
   m.def(
-      "all_reduce(Tensor input, Any reduce_op, Any group_name, Dict(str, Any)? config=None) -> Tensor",
+      "all_reduce(Tensor input, Any reduce_op, Any group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           [](const at::Tensor& input,
              const c10::IValue& reduce_op,
-             const c10::IValue& group,
-             const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
+             const c10::IValue& group) {
             return c10d::all_reduce(
                 input,
                 get_reduce_op(reduce_op, "all_reduce"),
-                get_process_group(group, "all_reduce"),
-                config ? std::make_optional(c10::IValue(*config))
-                       : std::nullopt);
+                get_process_group(group, "all_reduce"));
           }),
       {at::Tag::pt2_compliant_tag});
 
@@ -703,19 +637,16 @@ TORCH_LIBRARY(_c10d_functional, m) {
        at::Tag::out});
 
   m.def(
-      "all_gather_into_tensor(Tensor input, int group_size, Any group_name, Dict(str, Any)? config=None) -> Tensor",
+      "all_gather_into_tensor(Tensor input, int group_size, Any group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           [](const at::Tensor& input,
              int64_t group_size,
-             const c10::IValue& group,
-             const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
+             const c10::IValue& group) {
             return c10d::all_gather_into_tensor(
                 input,
                 group_size,
-                get_process_group(group, "all_gather_into_tensor"),
-                config ? std::make_optional(c10::IValue(*config))
-                       : std::nullopt);
+                get_process_group(group, "all_gather_into_tensor"));
           }),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
@@ -734,21 +665,18 @@ TORCH_LIBRARY(_c10d_functional, m) {
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
-      "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, Any group_name, Dict(str, Any)? config=None) -> Tensor",
+      "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, Any group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           [](const at::Tensor& input,
              std::string reduce_op,
              int64_t group_size,
-             const c10::IValue& group,
-             const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
+             const c10::IValue& group) {
             return c10d::reduce_scatter_tensor(
                 input,
                 std::move(reduce_op),
                 group_size,
-                get_process_group(group, "reduce_scatter_tensor"),
-                config ? std::make_optional(c10::IValue(*config))
-                       : std::nullopt);
+                get_process_group(group, "reduce_scatter_tensor"));
           }),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
@@ -793,7 +721,7 @@ TORCH_LIBRARY(_c10d_functional, m) {
       "Tensor input, "
       "SymInt[] output_split_sizes, "
       "SymInt[] input_split_sizes, "
-      "Any group_name, Dict(str, Any)? config=None) -> Tensor",
+      "Any group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           all_to_all_single_dispatch),
@@ -1020,17 +948,7 @@ TORCH_LIBRARY(_c10d_functional_autograd, m) {
       "Any group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
-          [](const at::Tensor& input,
-             c10::SymIntArrayRef output_split_sizes,
-             c10::SymIntArrayRef input_split_sizes,
-             const c10::IValue& group) {
-            return all_to_all_single_dispatch(
-                input,
-                output_split_sizes,
-                input_split_sizes,
-                group,
-                std::nullopt);
-          }),
+          all_to_all_single_dispatch),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
   m.def(
       "reduce_scatter_tensor("

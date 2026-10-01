@@ -1,6 +1,4 @@
-from collections.abc import Callable
 from enum import Enum
-from typing import Any
 
 import torch
 
@@ -34,7 +32,6 @@ class EffectHolder:
 
     def _set_default_effect(self) -> None:
         self._effect: EffectType | None = None
-        self.predicate: Callable[[tuple[Any, ...], dict[str, Any]], bool] | None = None
 
         # If the op contains a ScriptObject input, we want to mark it as having effects
         namespace, opname = torch._library.utils.parse_namespace(self.qualname)
@@ -72,19 +69,13 @@ class EffectHolder:
     def effect(self, _):
         raise RuntimeError("Unable to directly set kernel.")
 
-    def register(
-        self,
-        effect: EffectType | None,
-        *,
-        predicate: Callable[[tuple[Any, ...], dict[str, Any]], bool] | None = None,
-    ) -> RegistrationHandle:
+    def register(self, effect: EffectType | None) -> RegistrationHandle:
         """Register an effect
 
         Returns a RegistrationHandle that one can use to de-register this
         effect.
         """
         self._effect = effect
-        self.predicate = predicate
 
         def deregister_effect():
             self._set_default_effect()

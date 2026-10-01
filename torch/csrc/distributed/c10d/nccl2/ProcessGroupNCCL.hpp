@@ -142,10 +142,6 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   }
   c10::intrusive_ptr<::c10d::Backend::Options> getBackendOptions() override;
 
-  bool supports_collective_config() const override {
-    return true;
-  }
-
   c10::intrusive_ptr<::c10d::Work> broadcast(
       std::vector<at::Tensor>& tensors,
       const ::c10d::BroadcastOptions& opts =

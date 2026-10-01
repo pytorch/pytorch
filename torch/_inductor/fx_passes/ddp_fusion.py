@@ -12,7 +12,6 @@ from typing import Any, cast
 import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters
-from torch._inductor.utils import has_collective_config
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils._ordered_set import OrderedSet
@@ -82,9 +81,6 @@ def get_comm_block(comm_node: fx.Node) -> CommBlock | None:
         The CommBlock that encapsulates the related nodes (e.g., wait_node) of
         the given comm_node.
     """
-    if has_collective_config(comm_node):
-        return None
-
     node_list = []
     wait_nodes = []
     inputs, _ = tree_flatten((comm_node.args, comm_node.kwargs))

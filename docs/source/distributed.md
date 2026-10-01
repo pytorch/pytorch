@@ -234,14 +234,8 @@ on every participating rank; mismatches can hang. Configurations within an NCCL
 group must agree on `cga_cluster_size`. Passing `None` preserves existing behavior
 and does not require nccl4py.
 
-Unsupported backends or operations, uneven splits, coalescing capture, and NCCL2
-time estimation reject configurations. External NCCL group scopes are unsupported.
-
-Supported synchronous calls can use `torch.compile` and `torch.export` through
-the Python collective APIs. Configuration values are captured as graph constants;
-changing them recompiles. Raw-pointer options cannot be traced. Configured
-compiled calls complete on the calling stream, without communication/computation
-overlap.
+Backends handle `config` through their collective options. NCCL2 rejects unsupported
+operations, uneven splits, coalescing capture, and time estimation. External NCCL group scopes are unsupported.
 
 (distributed-basics)=
 

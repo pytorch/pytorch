@@ -4105,25 +4105,6 @@ def is_output_of_multi_outputs_template(
     )
 
 
-def has_collective_config(node: torch.fx.Node) -> bool:
-    """Whether a functional collective has a non-default configuration."""
-    target = node.target
-    if (
-        not isinstance(target, torch._ops.OpOverload)
-        or target.namespace != "_c10d_functional"
-    ):
-        return False
-    for index, arg in enumerate(target._schema.arguments):
-        if arg.name == "config":
-            value = (
-                node.args[index]
-                if index < len(node.args)
-                else node.kwargs.get("config")
-            )
-            return value is not None
-    return False
-
-
 def is_collective(
     node: Node | Operation | None,
     op: torch._ops.OperatorBase | None = None,

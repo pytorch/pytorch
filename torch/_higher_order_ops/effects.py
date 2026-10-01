@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from collections.abc import Callable
 from typing import Any, cast, Union
 
 import torch
@@ -47,25 +46,17 @@ def _get_op_qualname(op: _op_identifier) -> str:
 
 
 def _register_effectful_op(
-    op: _op_identifier,
-    effect: EffectType | None,
-    *,
-    predicate: Callable[[tuple[Any, ...], dict[str, Any]], bool] | None = None,
+    op: _op_identifier, effect: EffectType | None
 ) -> RegistrationHandle:
-    # Predicates inspect only non-tensor arguments. Queries without arguments
-    # conservatively report the registered effect (e.g. checkpoint policies).
     qualname = _get_op_qualname(op)
     entry = torch._library.simple_registry.singleton.find(qualname)
-    handle = entry.effect.register(effect, predicate=predicate)
+    handle = entry.effect.register(effect)
     return handle
 
 
-def _get_effect(op: _op_identifier, args=None, kwargs=None) -> _EffectType | None:
+def _get_effect(op: _op_identifier) -> _EffectType | None:
     qualname = _get_op_qualname(op)
     entry = torch._library.simple_registry.singleton.find(qualname)
-    if args is not None and entry.effect.predicate is not None:
-        if not entry.effect.predicate(args, kwargs or {}):
-            return None
     return entry.effect.effect
 
 
@@ -132,10 +123,10 @@ def has_aliasing(op: OpType):
     return False
 
 
-def has_effects(op, args=None, kwargs=None) -> bool:
+def has_effects(op) -> bool:
     return (
         isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
-        and _get_effect(op, args, kwargs) is not None
+        and _get_effect(op) is not None
         and not has_aliasing(op)
     )
 
@@ -265,7 +256,7 @@ def handle_effects(
     # Get a token. We can't do `tokens.get(op, torch.tensor([]))` because
     # this will create an empty tensor during proxy mode tracing if the token
     # doesn't exist. But the tokens should always exist during proxy mode tracing.
-    key = _get_effect(op, args, kwargs)
+    key = _get_effect(op)
     if key is None:
         raise AssertionError(f"effect key must not be None for op {op}")
     if key not in tokens:

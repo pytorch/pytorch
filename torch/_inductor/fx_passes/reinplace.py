@@ -23,7 +23,6 @@ from torch._inductor.fx_utils import get_node_storage, is_node_realized
 from torch._inductor.lowering import (
     inplaceable_foreach_ops as inplaceable_foreach_ops_lowerings,
 )
-from torch._inductor.utils import has_collective_config
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
@@ -429,9 +428,7 @@ try:
     c10d_functional = torch.ops._c10d_functional
     inplaceable_collective_ops: dict[Callable[..., Any], InplaceableOp] = {
         c10d_functional.all_reduce.default: InplaceableOp(
-            c10d_functional.all_reduce_.default,
-            0,
-            extra_check=lambda node: not has_collective_config(node),
+            c10d_functional.all_reduce_.default, 0
         ),
         c10d_functional.all_reduce_coalesced.default: InplaceableOp(
             c10d_functional.all_reduce_coalesced_.default, 0
