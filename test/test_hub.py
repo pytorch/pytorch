@@ -8,6 +8,7 @@ import warnings
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlparse, urlunparse
 
 import torch
 import torch.hub as hub
@@ -337,7 +338,7 @@ class TestHub(TestCase):
             outside = os.path.join(tmpdir, "escaped.pth")
             with patch.object(hub, "download_url_to_file", side_effect=fake_download):
                 loaded = hub.load_state_dict_from_url(
-                    "https://example.invalid/checkpoint.pth",
+                    TORCHHUB_EXAMPLE_RELEASE_URL,
                     model_dir=model_dir,
                     file_name="../escaped.pth",
                     progress=False,
@@ -350,7 +351,7 @@ class TestHub(TestCase):
             absolute_name = os.path.join(tmpdir, "abs_escaped.pth")
             with patch.object(hub, "download_url_to_file", side_effect=fake_download):
                 loaded = hub.load_state_dict_from_url(
-                    "https://example.invalid/checkpoint.pth",
+                    TORCHHUB_EXAMPLE_RELEASE_URL,
                     model_dir=model_dir,
                     file_name=absolute_name,
                     progress=False,
@@ -364,7 +365,7 @@ class TestHub(TestCase):
             cached_name = "plain_name.pth"
             shutil.copy(payload, os.path.join(model_dir, cached_name))
             loaded = hub.load_state_dict_from_url(
-                "https://example.invalid/unused.pth",
+                TORCHHUB_EXAMPLE_RELEASE_URL,
                 model_dir=model_dir,
                 file_name=cached_name,
                 progress=False,
@@ -372,12 +373,16 @@ class TestHub(TestCase):
             )
             self.assertEqual(loaded["w"], torch.tensor([1.0]))
 
+            # file_name is omitted, so the cache name is the URL path's last component.
+            dotdot_url = urlunparse(
+                urlparse(TORCHHUB_EXAMPLE_RELEASE_URL)._replace(path="/..")
+            )
             with patch.object(
                 hub, "download_url_to_file", side_effect=fake_download
             ) as mocked:
                 with self.assertRaisesRegex(ValueError, "Invalid checkpoint file name"):
                     hub.load_state_dict_from_url(
-                        "https://example.invalid/checkpoint.pth",
+                        TORCHHUB_EXAMPLE_RELEASE_URL,
                         model_dir=model_dir,
                         file_name="..",
                         progress=False,
@@ -385,7 +390,7 @@ class TestHub(TestCase):
                     )
                 with self.assertRaisesRegex(ValueError, "Invalid checkpoint file name"):
                     hub.load_state_dict_from_url(
-                        "https://example.invalid/..",
+                        dotdot_url,
                         model_dir=model_dir,
                         progress=False,
                         weights_only=True,
