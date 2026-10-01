@@ -44,21 +44,21 @@ def select_blockscaled_tma_plan(
     do_dim_m = quant_orientation != "dim_k"
     scale_group_size = 32
 
-    nrb_k = ncb_k = None
+    s_num_row_blk_k = s_num_col_blk_k = None
     if do_dim_k:
-        nrb_k = _ceil_div(M, 128)
-        ncb_k = _ceil_div(K // scale_group_size, 4)
+        s_num_row_blk_k = _ceil_div(M, 128)
+        s_num_col_blk_k = _ceil_div(K // scale_group_size, 4)
 
-    nrb_m = ncb_m = None
+    s_num_row_blk_m = s_num_col_blk_m = None
     if do_dim_m:
-        nrb_m = _ceil_div(K, 128)
-        ncb_m = _ceil_div(M // scale_group_size, 4)
+        s_num_row_blk_m = _ceil_div(K, 128)
+        s_num_col_blk_m = _ceil_div(M // scale_group_size, 4)
 
     if quant_orientation == "dim_k":
-        if nrb_k is None:
-            raise AssertionError(f"expected nrb_k, got {nrb_k}")
-        if ncb_k is None:
-            raise AssertionError(f"expected ncb_k, got {ncb_k}")
+        if s_num_row_blk_k is None:
+            raise AssertionError(f"expected s_num_row_blk_k, got {s_num_row_blk_k}")
+        if s_num_col_blk_k is None:
+            raise AssertionError(f"expected s_num_col_blk_k, got {s_num_col_blk_k}")
         # First choose the original adaptive K width. For small problems that would use K=64,
         # rotate the same-size 128x64 tile to 32x128: it keeps 128 one-group threads but gives TMA
         # contiguous rows and exposes more M-parallel CTAs.
@@ -89,14 +89,18 @@ def select_blockscaled_tma_plan(
             1
             if input_dtype == torch.float32
             or (is_square_scaling and M * K <= 4096 * 4096)
-            else next(c for c in (16, 8, 4, 2, 1) if c <= ncb_k and grid_k % c == 0)
+            else next(
+                c for c in (16, 8, 4, 2, 1) if c <= s_num_col_blk_k and grid_k % c == 0
+            )
         )
-        needs_boundary_masking = M != nrb_k * 128 or K != ncb_k * 128
+        needs_boundary_masking = (
+            M != s_num_row_blk_k * 128 or K != s_num_col_blk_k * 128
+        )
     elif quant_orientation == "dim_m":
-        if nrb_m is None:
-            raise AssertionError(f"expected nrb_m, got {nrb_m}")
-        if ncb_m is None:
-            raise AssertionError(f"expected ncb_m, got {ncb_m}")
+        if s_num_row_blk_m is None:
+            raise AssertionError(f"expected s_num_row_blk_m, got {s_num_row_blk_m}")
+        if s_num_col_blk_m is None:
+            raise AssertionError(f"expected s_num_col_blk_m, got {s_num_col_blk_m}")
         tile_m_size, tile_k_size = (
             _DIM_M_KM_SMALL_TILE_32_128
             if M * K <= 2048 * 2048
@@ -106,7 +110,7 @@ def select_blockscaled_tma_plan(
                 else _DIM_M_LARGE_TILE_64_256
             )
         )
-        padded_M = ncb_m * 128
+        padded_M = s_num_col_blk_m * 128
         padded_K = _ceil_div(K, tile_k_size) * tile_k_size
         grid_m = padded_M // tile_m_size
         grid_k = padded_K // tile_k_size
@@ -117,17 +121,19 @@ def select_blockscaled_tma_plan(
         )
         needs_boundary_masking = M != padded_M or K != padded_K
     else:
-        if nrb_m is None:
-            raise AssertionError(f"expected nrb_m, got {nrb_m}")
-        if ncb_m is None:
-            raise AssertionError(f"expected ncb_m, got {ncb_m}")
+        if s_num_row_blk_m is None:
+            raise AssertionError(f"expected s_num_row_blk_m, got {s_num_row_blk_m}")
+        if s_num_col_blk_m is None:
+            raise AssertionError(f"expected s_num_col_blk_m, got {s_num_col_blk_m}")
         tile_m_size, tile_k_size = (
             _DIM_M_KM_SMALL_TILE_32_128
             if M * K <= 2048 * 2048
             else _DIM_KM_LARGE_TILE_64_128
         )
         cluster_k = 1
-        needs_boundary_masking = M != ncb_m * 128 or K != nrb_m * 128
+        needs_boundary_masking = (
+            M != s_num_col_blk_m * 128 or K != s_num_row_blk_m * 128
+        )
 
     grid_k = _ceil_div(K, tile_k_size)
     grid_m = _ceil_div(M, 128) * (128 // tile_m_size)
