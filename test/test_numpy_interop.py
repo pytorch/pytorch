@@ -586,13 +586,21 @@ class TestNumPyInterop(TestCase):
                 return super().__torch_function__(func, types, args, kwargs)
 
         x = torch.tensor([-2, 3]).as_subclass(SubTensor)
+        for copy in (None, False, True):
+            calls.clear()
+            y = x.__array__(copy=copy)
+            copy_kwargs = next(
+                kwargs for func, kwargs in calls if func is torch.Tensor.__array__
+            )
+            self.assertIs(copy_kwargs["copy"], copy)
+            self.assertEqual(np.shares_memory(y, x.numpy()), copy is not True)
+            self.assertEqual(y, x.numpy())
+
+        # NumPy may make the copy itself instead of forwarding copy=True.
         y = np.array(x, copy=True)
-        copy_kwargs = next(
-            kwargs for func, kwargs in calls if func is torch.Tensor.__array__
-        )
-        numpy2 = np.lib.NumpyVersion(np.__version__) >= "2.0.0"
-        self.assertIs(copy_kwargs["copy"], True if numpy2 else None)
         self.assertFalse(np.shares_memory(y, x.numpy()))
+        self.assertEqual(y, x.numpy())
+        numpy2 = np.lib.NumpyVersion(np.__version__) >= "2.0.0"
         calls.clear()
         absolute = np.abs(x)
         reduced = np.add.reduce(x)
