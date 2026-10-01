@@ -1491,6 +1491,10 @@ def remove_noop_ops(graph: torch.fx.Graph):
     inputs = OrderedSet[torch.fx.Node]()
     input_storages = OrderedSet[int | None]()
     output_storages = OrderedSet[int | None]()
+    partitioner_tags = [node.meta.get("partitioner_tag") for node in graph.nodes]
+    is_joint_graph = "is_forward" in partitioner_tags and (
+        "is_backward" in partitioner_tags or "must_be_in_backward" in partitioner_tags
+    )
 
     for node in graph.find_nodes(op="placeholder"):
         inputs.add(node)
@@ -1507,6 +1511,25 @@ def remove_noop_ops(graph: torch.fx.Graph):
         if isinstance(out, torch.fx.Node):
             output_storages.add(get_node_storage(out))
 
+    # Storages mutated in this graph. At this point the graph is functional except for
+    # the input mutations AOT emits (copy_, plus set_ / resize_storage_bytes_ for FSDP).
+    # A non-view noop (aten.copy / aten.clone) of a mutated storage must stay a real copy,
+    # otherwise its users can observe the mutated value instead of the snapshot, e.g.
+    #   dst[0:, :] = src[0:, :]; src.add_(1)
+    # became `copy_(src, add); copy_(dst, src)` and copied the *updated* src into dst.
+    # Views and chained noops resolve to the same storage, and this does not depend on
+    # node order, so it also holds for the joint graph.
+    mutation_targets = (
+        aten.copy_.default,
+        aten.set_.source_Tensor,
+        torch.ops.inductor.resize_storage_bytes_.default,
+    )
+    mutated_storages = OrderedSet(
+        get_node_storage(n.args[0])
+        for target in mutation_targets
+        for n in graph.find_nodes(op="call_function", target=target)
+    )
+
     for node in graph.nodes:
         if node.target in noop_registry:
             cond, src_index = noop_registry[node.target]
@@ -1515,6 +1538,15 @@ def remove_noop_ops(graph: torch.fx.Graph):
             else:
                 src = src_index(node)
             if not isinstance(src, torch.fx.Node):
+                continue
+
+            # AOTAutograd inserts this clone so backward can save the value before
+            # the runtime epilogue mutates the input.
+            if (
+                is_joint_graph
+                and node.target is aten.clone.default
+                and src.meta.get("aot_runtime_epilogue_input_mutation", False)
+            ):
                 continue
 
             if node.target is torch.ops.aten.copy.default:
@@ -1546,6 +1578,10 @@ def remove_noop_ops(graph: torch.fx.Graph):
                 and node in output_node.args
                 and (src in inputs or src in output_node.args)
             ):
+                continue
+
+            # Keep a real copy of a storage that is mutated in this graph.
+            if not node_is_view and src_storage in mutated_storages:
                 continue
 
             is_valid, args, kwargs = get_fake_args_kwargs(node)
@@ -2274,6 +2310,81 @@ def _fuse_addcdiv_to_fma(match: Match, inp, t1, t2, value) -> None:
 
     counters["inductor"]["addcdiv_fma_fused"] += 1
     match.replace_by_example(repl, [inp, t1, t2, value])
+
+
+def _is_var_std_reduction_dedup_enabled(match: Match) -> bool:
+    return config.var_std_reduction_dedup
+
+
+def register_var_std_reduction_dedup_pattern():
+    """
+    Merge var and std reductions that have the same dimensions and correction.
+    """
+    _var_std_inp = KeywordArg("inp")
+    _var_std_dims = KeywordArg("dims")
+    var_reduc = CallFunction(
+        aten.var.correction,
+        _var_std_inp,
+        _var_std_dims,
+        correction=KeywordArg("var_correction"),
+        keepdim=KeywordArg("keepdim"),
+    )
+    # _users=1 (default) means this won't match std_mean/var_mean decompositions
+    # where the convert feeds both a var and a mean.
+    std_reduc = CallFunction(
+        aten.var.correction,
+        CallFunction(
+            prims.convert_element_type.default, _var_std_inp, KeywordArg("cvt_dtype")
+        ),
+        _var_std_dims,
+        correction=KeywordArg("cvt_correction"),
+        keepdim=KeywordArg("cvt_keepdim"),
+    )
+
+    @register_graph_pattern(
+        MultiOutputPattern([var_reduc, std_reduc]),
+        # pyrefly: ignore [bad-argument-type]
+        pass_dict=pass_patterns[2],
+        extra_check=_is_var_std_reduction_dedup_enabled,
+    )
+    def merge_std_var(
+        match,
+        inp,
+        dims,
+        var_correction,
+        cvt_correction,
+        cvt_dtype,
+        keepdim,
+        cvt_keepdim,
+    ):
+        for correction in (var_correction, cvt_correction):
+            if isinstance(correction, torch.fx.Node):
+                return
+            if isinstance(correction, torch.SymInt | torch.SymFloat):
+                return
+        var_c = 1.0 if var_correction is None else float(var_correction)
+        cvt_c = 1.0 if cvt_correction is None else float(cvt_correction)
+        if var_c != cvt_c:
+            return
+        if keepdim != cvt_keepdim:
+            return
+
+        var_node, std_node = match.output_nodes()
+        var_dtype = var_node.meta["val"].dtype
+
+        def replacement(inp):
+            cvt_inp = prims.convert_element_type.default(inp, cvt_dtype)
+            var_result = aten.var.correction(
+                cvt_inp, dims, correction=cvt_correction, keepdim=keepdim
+            )
+            var_casted = prims.convert_element_type.default(var_result, var_dtype)
+            return (var_casted, var_result)
+
+        counters["inductor"]["var_std_reduction_dedup"] += 1
+        match.replace_by_example(replacement, [inp])
+
+
+register_var_std_reduction_dedup_pattern()
 
 
 def register_partial_reduction_pattern():
