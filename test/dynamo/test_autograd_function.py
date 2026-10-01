@@ -625,6 +625,54 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), x + 1)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_apply_reference_does_not_recompile(self):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(x):
+            f = MyFn.apply
+            return f(x)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(2)
+
+        self.assertEqual(opt_fn(x), x * 2)
+        self.assertEqual(opt_fn(x), x * 2)
+
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_backward_reference_still_uses_staticmethod_path(self):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+        def fn(ctx, g):
+            f = MyFn.backward
+            return f(ctx, g)
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="eager")
+
+        class FakeCtx:
+            pass
+
+        ctx = FakeCtx()
+        g = torch.randn(2)
+        result = compiled_fn(ctx, g)
+
+        self.assertEqual(result, g * 2)
+
     def test_missing_attribute_graph_breaks(self):
         class Function(torch.autograd.Function):
             pass

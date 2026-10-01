@@ -29,8 +29,8 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, subtest, skipIfTorchDynamo,
      skipIfRocmArch, skipIfRocmVersionInRange, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest, skipIfRocm,
-     runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA,
-     skipIfNoNvmath)
+     MI200_ARCH, NAVI_ARCH, TEST_CUDA,
+     skipIfNoNvmath, _restore_fp32_precision, _snapshot_fp32_precision)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, onlyCPU, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIf,
@@ -42,11 +42,12 @@ from torch.testing._internal.common_dtype import (
     all_types, all_types_and_complex_and, floating_and_complex_types, integral_types,
     floating_and_complex_types_and, floating_types_and, complex_types,
 )
-from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, CDNA5OrLater, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, _get_magma_version, \
-    _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, blas_library_context, ROCM_VERSION
+from torch.testing._internal.common_cuda import BF16X9_SUPPORTED, CDNA2OrLater, CDNA5OrLater, IS_SM90, SM80OrLater, SM90OrLater, tf32_enabled, tf32_on_and_off, \
+    _get_magma_version, _get_torch_cuda_version, TEST_MULTIGPU, PLATFORM_SUPPORTS_FP8, PLATFORM_SUPPORTS_MX_GEMM, blas_library_context, ROCM_VERSION
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel, \
     _group_quantize_tensor_symmetric
 from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
+from torch.testing._internal.common_profiler import initialize_kineto_with_cuda
 from torch.distributions.binomial import Binomial
 import torch.backends.opt_einsum as opt_einsum
 import operator
@@ -57,6 +58,7 @@ from torch.testing._internal.common_utils import (
 )
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+, XPU and CPU devices"
+mx_msg = "MX gemm is only supported on CUDA capability 10.0+ and gfx950/gfx1250"
 
 # Protects against includes accidentally setting the default dtype
 if torch.get_default_dtype() is not torch.float32:
@@ -64,6 +66,9 @@ if torch.get_default_dtype() is not torch.float32:
 
 if TEST_SCIPY:
     import scipy
+
+def setUpModule():
+    initialize_kineto_with_cuda()
 
 def blaslt_supported_device():
     if torch.cuda.is_available():
@@ -124,19 +129,100 @@ def get_tunableop_untuned_filename():
     untuned_filename = f"{untuned_filename_base}{ordinal}.csv"
     return untuned_filename
 
+def parse_tunable_log(log):
+    # Parse the PYTORCH_TUNABLEOP_VERBOSE=3 output into a per-op dict keyed by
+    # (op_signature, param_signature). Each entry records how many candidates
+    # were considered, which ones were tried, their timings, and the winner.
+    tuned = {}
+    current_key = None
+
+    finding_re = re.compile(
+        r"finding fastest for ([^(]+)\(([^)]+)\) out of (\d+) candidates"
+    )
+    tuning_re = re.compile(
+        r"tuning using .* instance id=\d+, ([^(]+)\(([^)]+)\) (.+)$"
+    )
+    timing_re = re.compile(
+        r"found (?:better|slower) instance id=\d+\. ([0-9.e+-]+)ms\. (.+?) min "
+    )
+    fastest_re = re.compile(r"found fastest for ([^(]+)\(([^)]+)\) (.+)$")
+
+    for line in log.splitlines():
+        finding_match = finding_re.search(line)
+        if finding_match:
+            current_key = (finding_match.group(1), finding_match.group(2))
+            tuned[current_key] = {
+                "candidate_count": int(finding_match.group(3)),
+                "tried": set(),
+                "timings": {},
+                "winner": None,
+            }
+            continue
+
+        tuning_match = tuning_re.search(line)
+        if tuning_match:
+            key = (tuning_match.group(1), tuning_match.group(2))
+            tuned.setdefault(
+                key,
+                {
+                    "candidate_count": 0,
+                    "tried": set(),
+                    "timings": {},
+                    "winner": None,
+                },
+            )["tried"].add(tuning_match.group(3))
+            continue
+
+        timing_match = timing_re.search(line)
+        if timing_match and current_key is not None:
+            tuned[current_key]["timings"][timing_match.group(2)] = float(
+                timing_match.group(1)
+            )
+            continue
+
+        fastest_match = fastest_re.search(line)
+        if fastest_match:
+            key = (fastest_match.group(1), fastest_match.group(2))
+            tuned.setdefault(
+                key,
+                {
+                    "candidate_count": 0,
+                    "tried": set(),
+                    "timings": {},
+                    "winner": None,
+                },
+            )["winner"] = fastest_match.group(3)
+
+    return tuned
+
 
 class TestLinalg(TestCase):
+    def test_parse_cuda_scaled_gemm_options_preserves_input_dtype_order(self):
+        tokens = ["nt", "16", "32", "64", "ld", "64", "16", "16", "a", "Float8", "e5m2", "b", "Float8", "e4m3fn", "c", "BFloat16", "as", "Float", "bs", "Float", "ast", "0", "bst", "0", "dscale", "0", "fast", "0", "bias", "None"]
+        dtype_dict = {
+            "BFloat16": torch.bfloat16,
+            "Float": torch.float32,
+            "Float8_e4m3fn": torch.float8_e4m3fn,
+            "Float8_e5m2": torch.float8_e5m2,
+        }
+
+        options = torch.cuda.tunable._parse_cuda_scaled_gemm_options(
+            tokens, dtype_dict
+        )
+
+        self.assertEqual(options.dtypeA, torch.float8_e4m3fn)
+        self.assertEqual(options.dtypeB, torch.float8_e5m2)
+
     def setUp(self):
         super().setUp()
-        # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
-        # writing allow_tf32 back can't always reproduce the original
-        # fp32_precision value (e.g. the "none" default).
-        self._prev_cuda_matmul_fp32 = torch.backends.cuda.matmul.fp32_precision
+        # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
+        # backend-specific fp32_precision, so snapshot and restore all of it.
+        self._prev_fp32_state = _snapshot_fp32_precision()
         if torch.cuda.is_available():
             torch.backends.cuda.matmul.allow_tf32 = False
 
     def tearDown(self):
-        torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
+        _restore_fp32_precision(self._prev_fp32_state)
         super().tearDown()
 
     def _get_other_device(self, dtype=None):
@@ -2927,8 +3013,8 @@ class TestLinalg(TestCase):
     def test_svd_lowrank(self, device, dtype):
         from torch.testing._internal.common_utils import random_lowrank_matrix, random_sparse_matrix
 
-        if torch.version.hip and isRocmArchAnyOf(MI200_ARCH) and dtype is torch.complex128:
-            self.skipTest("Currently failing on rocm mi200")
+        if torch.version.hip and torch.device(device).type == "cuda" and dtype is torch.complex128:
+            self.skipTest("linalg.svd of the projected complex128 matrix fails to converge on ROCm")
 
         def run_subtest(actual_rank, matrix_size, batches, device, svd_lowrank, **options):
             density = options.pop('density', 1)
@@ -5861,13 +5947,14 @@ class TestLinalg(TestCase):
                 with self.assertRaisesRegex(RuntimeError, 'LU without pivoting is not implemented on the CPU'):
                     f(torch.empty(1, 2, 2), pivot=False)
 
-    @skipIfRocm
     @slowTest
+    @skipIfRocm
     @onlyCUDA
     @skipCUDAIfNoCusolver
     @setLinalgBackendsToDefaultFinally
+    @parametrize("pivot", [True, False])
     @dtypes(*floating_and_complex_types())
-    def test_linalg_batched_lu_stability_large_inputs(self, device, dtype):
+    def test_linalg_batched_lu_stability_large_inputs(self, device, dtype, pivot):
         # Check whether LU factorization is stable.
         # We use the criterion from Netlib/MAGMA:
         # scaled_residul < K, where
@@ -5882,7 +5969,7 @@ class TestLinalg(TestCase):
 
         # low batch regime shapes
         bsl = (4, 8)
-        nsl = (259, 1027, 2033)
+        nsl = (259, 513, 1027)
 
         # high batch regime shapes
         bsh = (150, 550)
@@ -5890,17 +5977,55 @@ class TestLinalg(TestCase):
 
         shapes = itertools.chain(itertools.product(bsl, nsl), itertools.product(bsh, nsh))
 
-        make_well_conditioned = partial(make_fullrank_matrices_with_distinct_singular_values, device=device, dtype=dtype)
-        make_ill_conditioned = partial(torch.randn, device=device, dtype=dtype)
+        def make_well_conditioned_system(*shape):
+            t = torch.randn(*shape, device=device, dtype=dtype)
+            u, _ = torch.linalg.qr(t)
+            v, _ = torch.linalg.qr(t.mT)
+            s = torch.rand(*shape[:-2], min(shape[-1], shape[-2]), device=device, dtype=dtype).real.add_(0.5)
+            return (u * s.unsqueeze(-2)) @ v.mH
+
+        if pivot:
+            make_well_conditioned = make_well_conditioned_system
+            make_ill_conditioned = partial(torch.randn, device=device, dtype=dtype)
+        else:
+            def make_diagonally_dominant(t):
+                # This bounds the growth factor by 2
+                t_diag = t.diagonal(dim1=-2, dim2=-1).zero_()
+                col_abs_sum = t.abs().sum(-2)
+                t_diag.copy_(col_abs_sum)
+                return t
+
+            def make_well_conditioned(*shape):
+                # Inspired by the tests in the HPL-AI benchmark, see
+                # https://eprints.maths.manchester.ac.uk/2797/1/fahi20a.pdf, formula (2.2),
+                # although we use dominance by cols.
+                # Paragraph 2.1 of the aforementioned reference states these matrices
+                # are extremely well conditioned, with inf-norm about 4 for large n.
+                # Diagonal dominance limits the growth factor to be no larger than 2,
+                # so that nopiv Gaussian elimination becomes stable.
+                shift = 0.5 + 0.5j if dtype.is_complex else 0.5
+                t = torch.rand(*shape, device=device, dtype=dtype).sub_(shift)
+                return make_diagonally_dominant(t)
+
+            def make_ill_conditioned(*shape):
+                t = make_well_conditioned(*shape)
+                t[..., :, :2].zero_()
+                # This makes the input ill-conditioned (the condition number is at least 1e8),
+                # but the growth factor is still limited by 2 (diagonal dominance), so
+                # nopiv Gaussian elimination should be stable.
+                t[..., 0, 0] = 1
+                t[..., 1, 1] = 1e-8
+                return t
+
         make_input_methods = (make_well_conditioned, make_ill_conditioned)
         matrix_norm = partial(torch.linalg.norm, dim=(-2, -1))
 
         torch.backends.cuda.preferred_linalg_library("cusolver")
         for (b, n), make_input in product(shapes, make_input_methods):
             A = make_input(b, n, n)
-            P, L, U = torch.linalg.lu(A)
+            P, L, U = torch.linalg.lu(A, pivot=pivot)
             A, P, L, U = (t.to(compute_dtype) for t in (A, P, L, U))
-            residual = P @ L @ U - A
+            residual = P @ L @ U - A if pivot else L @ U - A
 
             # Netlib uses 1-norm, MAGMA uses Frobenius
             for norm in (partial(matrix_norm, ord=1), partial(matrix_norm, ord='fro')):
@@ -7086,6 +7211,31 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         # Checking out variant
         torch._int_mm(a_int8, b_int8, out=c_int32_result)
         self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
+
+    @onlyCPU
+    @parametrize("k", [16, 32])
+    @parametrize("n", [16, 32])
+    @parametrize("x_dtype", [torch.int8, torch.uint8])
+    def test__int_mm_cpu_size1_dim_stride(self, device, k, n, x_dtype):
+        # https://github.com/pytorch/pytorch/issues/195066
+        def genf(rows, cols, dtype):
+            info = torch.iinfo(dtype)
+            return torch.randint(
+                info.min, info.max, (rows, cols), dtype=dtype, device=device
+            )
+
+        def check(a, b):
+            ref = torch.mm(a.float(), b.float())
+            self.assertEqual(torch._int_mm(a, b).float(), ref)
+            out = a.new_full((a.size(0), b.size(1)), 42, dtype=torch.int32)
+            torch._int_mm(a, b, out=out)
+            self.assertEqual(out.float(), ref)
+
+        a, b = genf(1, k, x_dtype), genf(k, n, torch.int8)
+        for a_stride in ((0, 1), (1, 1)):
+            check(a.as_strided((1, k), a_stride), b)
+        # with a size-1 contraction dim it is the other stride that is arbitrary
+        check(genf(n, 1, x_dtype).as_strided((n, 1), (1, 0)), genf(1, n, torch.int8))
 
     @onlyCPU
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
@@ -9662,6 +9812,31 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             self.assertEqual(out_accelerator.cpu(), out_cpu)
 
 
+class TestLinalgSVD(TestCase):
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @skipIfRocm
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfMPS(torch.float32, torch.complex64)
+    def test_svd_ill_conditioned(self, device, dtype):
+        # Small columns must still undergo Jacobi rotations: skipping them at
+        # an absolute epsilon cutoff breaks orthogonality and inflates sigma.
+        q = torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q
+        v = torch.linalg.qr(torch.randn(16, 32, 32, dtype=dtype)).Q
+        A = (q * torch.logspace(-5, 0, 32, dtype=q.real.dtype)) @ v.mH
+        cpu_s = torch.linalg.svdvals(A)
+        U, S, Vh = (t.cpu() for t in torch.linalg.svd(A.to(device), full_matrices=False))
+        eye = torch.eye(32, dtype=dtype).expand(16, 32, 32)
+        self.assertEqual(U.mH @ U, eye, atol=1e-4, rtol=1e-4)
+        self.assertEqual(Vh @ Vh.mH, eye, atol=1e-4, rtol=1e-4)
+        self.assertEqual((U * S.unsqueeze(-2)) @ Vh, A, atol=1e-4, rtol=1e-4)
+        self.assertEqual(S, cpu_s, atol=1e-5, rtol=1e-4)
+        self.assertEqual(
+            (S > 1e-4 * S[..., :1]).sum(-1),
+            (cpu_s > 1e-4 * cpu_s[..., :1]).sum(-1),
+        )
+
+
 class TestLinalgCudaOnly(TestCase):
     """CUDA/ROCm-specific linalg tests (TunableOp, backend library selection)."""
 
@@ -9669,14 +9844,13 @@ class TestLinalgCudaOnly(TestCase):
         super().setUp()
         if not torch.cuda.is_available():
             self.skipTest("CUDA required")
-        # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
-        # writing allow_tf32 back can't always reproduce the original
-        # fp32_precision value (e.g. the "none" default).
-        self._prev_cuda_matmul_fp32 = torch.backends.cuda.matmul.fp32_precision
+        # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
+        # backend-specific fp32_precision, so snapshot and restore all of it.
+        self._prev_fp32_state = _snapshot_fp32_precision()
         torch.backends.cuda.matmul.allow_tf32 = False
 
     def tearDown(self):
-        torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
+        _restore_fp32_precision(self._prev_fp32_state)
         super().tearDown()
 
     def check_single_matmul(self, x, y):
@@ -10070,10 +10244,12 @@ class TestLinalgCudaOnly(TestCase):
             ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
-    @skipCUDAIfNotRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @dtypes(e4m3_type, e5m2_type)
     def test_scaled_gemm_offline_tunableop(self, device, dtype):
+        if not TEST_WITH_ROCM and dtype is e5m2_type:
+            raise unittest.SkipTest("CUDA does not support e5m2 x e5m2 scaled GEMM")
+
         import os
         # This test is the offline version of test_scaled_gemm_tunableop
 
@@ -10149,7 +10325,7 @@ class TestLinalgCudaOnly(TestCase):
 
             # Rowwise case will have an extra solution
             if dtype is e4m3_type:  # rowwise
-                count = 7
+                count = 7 if TEST_WITH_ROCM or IS_SM90 else 6
             else:
                 count = 6
             self.assertEqual(total_num_results, count)
@@ -10446,69 +10622,6 @@ class TestLinalgCudaOnly(TestCase):
     def test_cublaslt_candidate_tunableop(self, device, dtype):
         if not torch.cuda.is_bf16_supported():
             raise unittest.SkipTest("bfloat16 not supported on this CUDA device")
-
-        def parse_tunable_log(log):
-            tuned = {}
-            current_key = None
-
-            finding_re = re.compile(
-                r"finding fastest for ([^(]+)\(([^)]+)\) out of (\d+) candidates"
-            )
-            tuning_re = re.compile(
-                r"tuning using .* instance id=\d+, ([^(]+)\(([^)]+)\) (.+)$"
-            )
-            timing_re = re.compile(
-                r"found (?:better|slower) instance id=\d+\. ([0-9.e+-]+)ms\. (.+?) min "
-            )
-            fastest_re = re.compile(r"found fastest for ([^(]+)\(([^)]+)\) (.+)$")
-
-            for line in log.splitlines():
-                finding_match = finding_re.search(line)
-                if finding_match:
-                    current_key = (finding_match.group(1), finding_match.group(2))
-                    tuned[current_key] = {
-                        "candidate_count": int(finding_match.group(3)),
-                        "tried": set(),
-                        "timings": {},
-                        "winner": None,
-                    }
-                    continue
-
-                tuning_match = tuning_re.search(line)
-                if tuning_match:
-                    key = (tuning_match.group(1), tuning_match.group(2))
-                    tuned.setdefault(
-                        key,
-                        {
-                            "candidate_count": 0,
-                            "tried": set(),
-                            "timings": {},
-                            "winner": None,
-                        },
-                    )["tried"].add(tuning_match.group(3))
-                    continue
-
-                timing_match = timing_re.search(line)
-                if timing_match and current_key is not None:
-                    tuned[current_key]["timings"][timing_match.group(2)] = float(
-                        timing_match.group(1)
-                    )
-                    continue
-
-                fastest_match = fastest_re.search(line)
-                if fastest_match:
-                    key = (fastest_match.group(1), fastest_match.group(2))
-                    tuned.setdefault(
-                        key,
-                        {
-                            "candidate_count": 0,
-                            "tried": set(),
-                            "timings": {},
-                            "winner": None,
-                        },
-                    )["winner"] = fastest_match.group(3)
-
-            return tuned
 
         import os
         import shutil
@@ -10821,7 +10934,6 @@ class TestLinalgCudaOnly(TestCase):
             ok = self._compare_untuned_tuned_entries()
             self.assertTrue(ok)
 
-    @skipCUDAIfNotRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @dtypes(e4m3_type, e5m2_type)
     def test_scaled_gemm_tunableop(self, device, dtype):
@@ -10835,6 +10947,8 @@ class TestLinalgCudaOnly(TestCase):
         #
         # Refer to test/test_matmul_cuda for support combinations that are
         # tested by PyTorch
+        if not TEST_WITH_ROCM and dtype is e5m2_type:
+            raise unittest.SkipTest("CUDA does not support e5m2 x e5m2 scaled GEMM")
         with self._tunableop_ctx():
             # set these to single iterations to keep it short but still exercise the code
             torch.cuda.tunable.set_rotating_buffer_size(0)
@@ -10889,7 +11003,7 @@ class TestLinalgCudaOnly(TestCase):
 
             # Rowwise case will have an extra solution
             if dtype is e4m3_type:  # rowwise
-                count = 7
+                count = 7 if TEST_WITH_ROCM or IS_SM90 else 6
             else:
                 count = 6
             self.assertEqual((total_num_results - ref_num_results), count)
@@ -10924,7 +11038,129 @@ class TestLinalgCudaOnly(TestCase):
                     find_tunableop_result(results, op_signature, params_signature)
                 )
 
-    @runOnRocmArch(MI300_ARCH)
+    @skipIfRocm
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_msg)
+    def test_scaled_gemm_blockwise_tunableop(self, device):
+        # Exercise the block-scaled scaled GEMM recipes (MXFP8 and NVFP4)
+        # through TunableOp. Both recipes dispatch to _scaled_gemm, which
+        # routes to the ScaledGemm TunableOp when tuning is enabled. We parse
+        # the verbose tuning log to confirm that non-Default candidates are
+        # actually tried and timed, and that the fastest candidate wins.
+        import os
+        import shutil
+        import subprocess
+        import sys
+        import tempfile
+        import textwrap
+
+        # Create the results file in the parent so we can always clean it up,
+        # even if the subprocess is killed before its own teardown runs.
+        results_dir = tempfile.mkdtemp(prefix="tunableop_scaled_gemm_blockwise_")
+        results_filename = os.path.join(results_dir, "results.csv")
+
+        script = textwrap.dedent(
+            """
+            import torch
+            from torch.testing._internal.common_device_type import e4m3_type
+            from torch.testing._internal.common_quantized import (
+                _bfloat16_to_float4_e2m1fn_x2, ceil_div, to_blocked,
+            )
+
+            results_filename = {results_filename!r}
+            device = {device!r}
+            m, n, k = 128, 64, 128
+
+            def mxfp8_gemm():
+                block = 32
+                matA = torch.ones((m, k), dtype=torch.bfloat16, device=device).to(e4m3_type)
+                matB = torch.ones((n, k), dtype=torch.bfloat16, device=device).to(e4m3_type)
+                scaleA = to_blocked(torch.ones((m, ceil_div(k, block)), dtype=torch.float8_e8m0fnu, device=device))
+                scaleB = to_blocked(torch.ones((n, ceil_div(k, block)), dtype=torch.float8_e8m0fnu, device=device))
+                torch.nn.functional.scaled_mm(
+                    matA, matB.t(),
+                    scale_a=scaleA, scale_recipe_a=torch.nn.functional.ScalingType.BlockWise1x32,
+                    scale_b=scaleB, scale_recipe_b=torch.nn.functional.ScalingType.BlockWise1x32,
+                    swizzle_a=torch.nn.functional.SwizzleType.SWIZZLE_32_4_4,
+                    swizzle_b=torch.nn.functional.SwizzleType.SWIZZLE_32_4_4,
+                    output_dtype=torch.bfloat16,
+                )
+
+            def nvfp4_gemm():
+                block = 16
+                # fp4 packs two elements per byte, so the k dimension is halved on-device.
+                matA = _bfloat16_to_float4_e2m1fn_x2(torch.ones((m, k), dtype=torch.bfloat16, device=device))
+                matB = _bfloat16_to_float4_e2m1fn_x2(torch.ones((n, k), dtype=torch.bfloat16, device=device))
+                scaleA = to_blocked(torch.ones((m, ceil_div(k, block)), dtype=e4m3_type, device=device))
+                scaleB = to_blocked(torch.ones((n, ceil_div(k, block)), dtype=e4m3_type, device=device))
+                global_scale = torch.ones((), dtype=torch.float32, device=device)
+                swizzle = [torch.nn.functional.SwizzleType.SWIZZLE_32_4_4, torch.nn.functional.SwizzleType.NO_SWIZZLE]
+                recipe = [torch.nn.functional.ScalingType.BlockWise1x16, torch.nn.functional.ScalingType.TensorWise]
+                torch.nn.functional.scaled_mm(
+                    matA, matB.t(),
+                    scale_a=[scaleA, global_scale], scale_recipe_a=recipe,
+                    scale_b=[scaleB, global_scale], scale_recipe_b=recipe,
+                    swizzle_a=swizzle, swizzle_b=swizzle,
+                    output_dtype=torch.bfloat16,
+                )
+
+            gemms = [mxfp8_gemm, nvfp4_gemm]
+            try:
+                torch.cuda.tunable.enable(False)
+                torch.cuda.tunable.record_untuned_enable(False)
+                torch.cuda.tunable.tuning_enable(True)
+                torch.cuda.tunable.set_max_tuning_duration(1)
+                torch.cuda.tunable.set_max_tuning_iterations(3)
+                torch.cuda.tunable.set_cublaslt_requested_algo_count(8)
+                torch.cuda.tunable.set_rotating_buffer_size(0)
+                torch.cuda.tunable.set_numerical_check_tolerances(False)
+                torch.cuda.tunable.set_filename(results_filename, False)
+                torch.cuda.tunable.enable(True)
+
+                for gemm in gemms:
+                    gemm()
+            finally:
+                torch.cuda.tunable.enable(False)
+            """
+        ).format(results_filename=results_filename, device=device)
+
+        env = os.environ.copy()
+        env["PYTORCH_TUNABLEOP_VERBOSE"] = "3"
+        env["PYTORCH_TUNABLEOP_VERBOSE_FILENAME"] = "out"
+        try:
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=os.path.dirname(__file__),
+                check=True,
+            )
+        finally:
+            shutil.rmtree(results_dir, ignore_errors=True)
+
+        tuned = parse_tunable_log(result.stdout)
+        self.assertGreater(len(tuned), 0, result.stdout)
+        self.assertTrue(
+            any(key[0].startswith("ScaledGemmTunableOp") for key in tuned), tuned
+        )
+        self.assertTrue(
+            any(
+                info["candidate_count"] > 1
+                and any(c.startswith("Gemm_Cublaslt_") for c in info["tried"])
+                and len(info["timings"]) > 1
+                for info in tuned.values()
+            ),
+            (tuned, result.stdout),
+        )
+
+        for key, info in tuned.items():
+            if not info["timings"]:
+                continue
+            self.assertIn(info["winner"], info["timings"], (key, info, result.stdout))
+            winner_time = info["timings"][info["winner"]]
+            fastest_time = min(info["timings"].values())
+            self.assertEqual(winner_time, fastest_time, (key, info))
+
     @dtypes(torch.float)
     def test_tf32_tunableop(self, device, dtype):
         with tf32_enabled():
@@ -10978,7 +11214,6 @@ class TestLinalgCudaOnly(TestCase):
                                                      'nn_37_37_37_ld_37_37_37')
                 self.assertTrue(found_result is not None)
 
-    @runOnRocmArch(MI300_ARCH)
     @dtypes(torch.float)
     def test_tf32_offline_tunableop(self, device, dtype):
         # This test is the offline version of test_tf32_tunableop
@@ -11445,7 +11680,6 @@ class TestLinalgCudaOnly(TestCase):
                                 if l and not l.startswith('Validator')]
                 self.assertGreater(len(result_lines), 0)
 
-    @skipCUDAIfNotRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @dtypes(e4m3_type)
     def test_rowwise_scaled_gemm_numerics_tunableop(self, device, dtype):
@@ -11562,8 +11796,6 @@ class TestLinalgCudaOnly(TestCase):
     @tf32_on_and_off(0.05)
     @reduced_f32_on_and_off(0.05)
     def test_addmm_relu_tunableop(self, device, dtype):
-        if torch.version.hip and isRocmArchAnyOf(MI350_ARCH) and dtype is torch.double:
-            self.skipTest("Currently failing on rocm mi350, hipblaslt mem fault")
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
             torch.cuda.tunable.set_max_tuning_iterations(1)
@@ -11647,14 +11879,13 @@ class TestLinalgCudaOnly(TestCase):
 class TestGroupedMM(TestCase):
     def setUp(self):
         super().setUp()
-        # Snapshot fp32_precision (not allow_tf32) so the round-trip is exact:
-        # writing allow_tf32 back can't always reproduce the original
-        # fp32_precision value (e.g. the "none" default).
-        self._prev_cuda_matmul_fp32 = torch.backends.cuda.matmul.fp32_precision
+        # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
+        # backend-specific fp32_precision, so snapshot and restore all of it.
+        self._prev_fp32_state = _snapshot_fp32_precision()
         torch.backends.cuda.matmul.allow_tf32 = False
 
     def tearDown(self):
-        torch.backends.cuda.matmul.fp32_precision = self._prev_cuda_matmul_fp32
+        _restore_fp32_precision(self._prev_fp32_state)
         super().tearDown()
 
     def _make_grouped_mm_matrix(self, shape, row_major, device, dtype, strided=False):
@@ -11707,6 +11938,13 @@ class TestGroupedMM(TestCase):
         subtest(((64, 64), (4, 32, 64), [16, 32, 48, 64], True), name="2d_3d_regular"),
         subtest(((64, 64), (4, 32, 64), [32, 32, 48, 64], False), name="2d_3d_zero_size"),
         subtest(((48, 19), (4, 67, 19), [17, 30, 38, 48], True), name="2d_3d_ragged"),
+        subtest(((1, 19), (4, 67, 19), [0, 0, 1, 1], True), name="2d_3d_gemv"),
+        subtest(
+            ((8, 535), (16, 67, 535), [0, 1, 1, 2, 3, 3, 4, 5, 5, 5, 6, 6, 7, 7, 8, 8], True),
+            name="2d_3d_sparse_decode", decorators=[toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-5)})]),
+        subtest(((8, 32), (8, 17, 32), [0, 8, 8, 8, 8, 8, 8, 8], True), name="2d_3d_skewed_decode"),
+        subtest(((8, 19), (8, 67, 19), [0, 2, 2, 3, 3, 3, 3, 3], True), name="2d_3d_decode_unused_rows"),
+        subtest(((32, 64), (32, 32, 64), [0] * 24 + [0, 0, 8, 12, 12, 16, 24, 32], True), name="2d_3d_batched_decode"),
         subtest(((4, 16, 64), (4, 32, 64), None, True), name="3d_3d"),
         subtest(((4, 16, 64), (128, 64), [32, 64, 96, 128], True), name="3d_2d_regular"),
         subtest(((4, 16, 64), (128, 64), [64, 64, 96, 128], False), name="3d_2d_zero_size"),
@@ -11752,21 +11990,26 @@ class TestGroupedMM(TestCase):
     @skipCUDAIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @serialTest()
     @largeTensorTest("6GB")
-    @largeMPSBufferTest((2**31 + 8) * torch.float16.itemsize)
-    @dtypes(torch.float16)
+    @largeMPSBufferTest((2**31 + 64) * torch.bfloat16.itemsize)
+    @dtypes(torch.bfloat16)
     def test_grouped_mm_u64_indexing(self, device, dtype):
         # Exercises MPS's combined extent/stride guard and 64-bit indexing. Strides fit int32,
         # but accessed offsets exceed it; the size-one stride test never accesses distant storage.
         stride = 2**30
-        storage = torch.empty(2 * stride + 8, device=device, dtype=dtype)
+        storage = torch.empty(2 * stride + 64, device=device, dtype=dtype)
         for row in range(3):
-            storage[row * stride:row * stride + 8].normal_()
+            storage[row * stride:row * stride + 64].normal_()
         a = self._make_grouped_mm_matrix((1, 3), False, device, dtype)
         b = storage.as_strided((8, 3), (1, stride))
         offs = torch.tensor([1, 3], device=device, dtype=torch.int32)
         self.grouped_mm_helper(a, b, offs, backward=False)
+        a = self._make_grouped_mm_matrix((2, 8), True, device, dtype)
+        b = storage.as_strided((2, 8, 8), (2 * stride, 8, 1))
+        offs = torch.tensor([1, 2], device=device, dtype=torch.int32)
+        self.grouped_mm_helper(a, b, offs, backward=False)
 
 instantiate_device_type_tests(TestLinalg, globals())
+instantiate_device_type_tests(TestLinalgSVD, globals(), allow_mps=True)
 instantiate_device_type_tests(TestLinalgCudaOnly, globals(), only_for=("cuda"))
 instantiate_device_type_tests(TestGroupedMM, globals(), allow_mps=True)
 
