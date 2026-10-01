@@ -47,15 +47,25 @@ def _read_cubin_snapshot(cubin_path: str) -> bytes | None:
 def _is_invalid_kernel_image_error(error: RuntimeError) -> bool:
     message = str(error).lower()
     invalid_markers = (
-        "invalid image|invalid kernel image|invalid device function|"
-        "a ptx jit compilation failed|kernel image is invalid|kernel image is empty|"
-        "no kernel image is available|named symbol not found|"
-        "cuda driver error: 98|cuda driver error: 200|cuda driver error: 209|"
-        "cuda driver error: 218|cuda driver error: 500|"
-        "l0 runtime error: 70000004|l0 runtime error: 78000008|"
-        "l0 runtime error: 7800000f|l0 runtime error: 78000011"
+        "invalid image",
+        "invalid kernel image",
+        "invalid device function",
+        "a ptx jit compilation failed",
+        "kernel image is invalid",
+        "kernel image is empty",
+        "no kernel image is available",
+        "named symbol not found",
+        "cuda driver error: 98",
+        "cuda driver error: 200",
+        "cuda driver error: 209",
+        "cuda driver error: 218",
+        "cuda driver error: 500",
+        "l0 runtime error: 70000004",
+        "l0 runtime error: 78000008",
+        "l0 runtime error: 7800000f",
+        "l0 runtime error: 78000011",
     )
-    return any(marker in message for marker in invalid_markers.split("|"))
+    return any(marker in message for marker in invalid_markers)
 
 
 def _raise_kernel_load_error(
