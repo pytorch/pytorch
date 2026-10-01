@@ -3,8 +3,7 @@
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import (
-    _disable_gated_hooks,
-    _enable_gated_hooks,
+    _set_gated_hooks_enabled,
     HookOpName,
 )
 from torch.distributed.distributed_c10d import _get_default_group
@@ -158,14 +157,11 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         try:
             dist.all_reduce(torch.ones(2))
             self.assertEqual(calls, [])
-            _enable_gated_hooks()
-            _enable_gated_hooks()
-            _disable_gated_hooks()
+            self.assertFalse(_set_gated_hooks_enabled(True))
             try:
-                # Enables nest.
                 dist.all_reduce(torch.ones(2))
             finally:
-                _disable_gated_hooks()
+                self.assertTrue(_set_gated_hooks_enabled(False))
             self.assertEqual(calls, ["pre", "post"])
             calls.clear()
             dist.all_reduce(torch.ones(2))
@@ -173,8 +169,6 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         finally:
             pg.unregister_post_hook(0)
             pg.unregister_pre_hook(0)
-        with self.assertRaisesRegex(RuntimeError, "without enableGatedHooks"):
-            _disable_gated_hooks()
 
         dist.barrier()
 
@@ -182,9 +176,11 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         pg = _get_default_group()
         posts: list[int] = []
         # Disabling between the pre and post hooks doesn't drop the post hook.
-        pg.register_pre_hook(0, lambda args: _disable_gated_hooks(), gated=True)
+        pg.register_pre_hook(
+            0, lambda args: _set_gated_hooks_enabled(False), gated=True
+        )
         pg.register_post_hook(0, lambda args: posts.append(args.op_id), gated=True)
-        _enable_gated_hooks()
+        _set_gated_hooks_enabled(True)
         try:
             dist.all_reduce(torch.ones(2))
         finally:

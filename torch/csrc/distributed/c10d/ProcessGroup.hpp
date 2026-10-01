@@ -1125,10 +1125,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // Hooks.hpp.
   //
   // Gated pre/post hooks fire only while gated hooks are enabled process-wide
-  // (enableGatedHooks), and otherwise cost an atomic load per collective. They
-  // suit a consumer that is needed only for some windows of a run, e.g. while a
-  // profiler records, and so stays registered rather than (un)registering
-  // mid-run.
+  // (setGatedHooksEnabled), and otherwise cost an atomic load per collective.
+  // They suit a consumer that is needed only for some windows of a run, e.g.
+  // while a profiler records, and so stays registered rather than
+  // (un)registering mid-run.
   virtual bool supportsAbortHooks() const {
     return getDefaultBackend()->supportsAbortHooks();
   }
@@ -1194,10 +1194,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     bool gated = false;
   };
 
-  // Gated hooks fire while enableGatedHooks() calls outnumber
-  // disableGatedHooks() calls.
-  static void enableGatedHooks();
-  static void disableGatedHooks();
+  // Returns the previous value, for the caller to restore.
+  static bool setGatedHooksEnabled(bool enabled);
   static bool gatedHooksEnabled();
 
   // This creates a new subgroup using the specified ranks.
