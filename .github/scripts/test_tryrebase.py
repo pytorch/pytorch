@@ -368,7 +368,7 @@ class TestRebase(TestCase):
                 self.assertEqual(maintainer_approved_sha(pr, 1), expected)
         self.assertIsNone(maintainer_approved_sha(pr, None))
         mocked_fetch_perm.assert_called_with(
-            "https://api.github.com/repos/pytorch/pytorch/collaborators/maintainer/permission"
+            "https://api.github.com/repos/pytorch/pytorch/collaborators/maintainer/permission"  # @lint-ignore
         )
         mocked_runs.assert_called_with(pr, "sha")
 
