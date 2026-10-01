@@ -728,6 +728,7 @@ class AOTInductorTestsTemplate:
                 w = torch.transpose(self.w_pre, 0, 1).relu() + self.b
                 return torch.matmul(x, w)
 
+        model = Model(self.device)
         example_inputs = (torch.randn(4, 4, device=self.device),)
         with config.patch(
             {
@@ -735,7 +736,17 @@ class AOTInductorTestsTemplate:
                 "aot_inductor.use_runtime_constant_folding": True,
             }
         ):
-            self.check_model(Model(self.device), example_inputs)
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            self.check_model(model, example_inputs)
+        # Only ops without a C shim use the proxy executor, so check the const
+        # graph still makes a proxy call, and that the main graph's calls don't
+        # reuse its index.
+        call0 = "aoti_torch_proxy_executor_call_function(proxy_executor, 0,"
+        FileCheck().check("::_const_run_impl(").check(call0).check(
+            "::run_impl("
+        ).check_not(call0).run(code)
 
     def test_const_graph_no_autotune_at_compile_time(self):
         class Model(torch.nn.Module):
