@@ -419,13 +419,24 @@ static void initialize_nvshmem_with_store(
 
   is_initialized = true;
 
-  // NVSHMEM's IBRC transport registers an atexit handler during
-  // nvshmemx_init_attr that dlclose()s libmlx5 at process exit. Its proxy
-  // progress thread may still be polling inside libmlx5 (mlx5_poll_cq_v1) at
-  // that point, which segfaults. nvshmem_finalize() stops the progress thread
-  // and tears down transports. atexit is LIFO and we register after
-  // nvshmemx_init_attr, so this runs before the transport's dlclose handler.
-  std::atexit([]() { nvshmem_finalize(); });
+  // IBRC's atexit handler dlclose()s libmlx5 while its proxy progress thread
+  // may still be polling inside it, which segfaults. nvshmem_finalize() stops
+  // that thread; atexit is LIFO, so registering here runs it before IBRC's.
+  //
+  // finalize() resolves its state from the current CUDA device and aborts if
+  // that is not the device NVSHMEM was initialized on, so restore it first.
+  // Its device barrier also aborts on a sticky error (e.g. a device-side
+  // assert); skip finalization there rather than turning an already-failing
+  // exit into an NVSHMEM abort.
+  static int nvshmem_device_idx = device_idx;
+  std::atexit([]() {
+    if (cudaSetDevice(nvshmem_device_idx) != cudaSuccess ||
+        cudaDeviceSynchronize() != cudaSuccess) {
+      (void)cudaGetLastError();
+      return;
+    }
+    nvshmem_finalize();
+  });
 
   // Print version
 #if !defined(USE_ROCM)
