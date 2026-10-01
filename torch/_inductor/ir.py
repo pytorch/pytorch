@@ -4240,6 +4240,9 @@ class ReinterpretView(BaseView):
     def get_name(self) -> str:
         return self.data.get_name()
 
+    def get_read_names(self) -> OrderedSet[str]:
+        return OrderedSet([self.get_name()])
+
     def get_device(self) -> torch.device | None:
         return self.layout.device
 
