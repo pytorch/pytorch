@@ -10,7 +10,13 @@ from unittest import mock
 
 import torch
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TEST_CUTEDSL, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TEST_CUTEDSL,
+    TestCase,
+)
 
 
 if not TEST_CUTEDSL:
@@ -27,6 +33,14 @@ from torch._native.ops.reductions import kernel_rowtile as rt, traits as T
 @unittest.skipUnless(TEST_CUDA, "CUDA required")
 @unittest.skipUnless(SM90OrLater, "Hopper+ required")
 class TestKernelRowTile(TestCase):
+    @parametrize("shape", ((2**31, 1), (1, 2**31)))
+    def test_shape_must_fit_int32(self, shape):
+        x = mock.Mock(shape=shape, is_cuda=True)
+        x.dim.return_value = 2
+        x.stride.return_value = 1
+        with self.assertRaisesRegex(AssertionError, "M and N < 2\\^31"):
+            rt.reduce_row_tile(mock.sentinel.trait, "int32_shape", x, [torch.float32])
+
     def test_reduce_row_tile(self):
         x = torch.randn(128, 512, device="cuda")
         (out,) = rt.reduce_row_tile(
@@ -429,6 +443,9 @@ class TestKernelRowTile(TestCase):
             trait, "nw2", x, [torch.float32], threads_per_row=64, threads_per_block=64
         )
         self.assertEqual(got, torch.full((8,), 384.0, device="cuda"))
+
+
+instantiate_parametrized_tests(TestKernelRowTile)
 
 
 if __name__ == "__main__":
