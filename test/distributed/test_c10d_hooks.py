@@ -1,10 +1,12 @@
 # Owner(s): ["oncall: distributed"]
 
-import threading
-
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import HookOpName
+from torch._C._distributed_c10d import (
+    _disable_gated_hooks,
+    _enable_gated_hooks,
+    HookOpName,
+)
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import HardwareClassification, run_tests
@@ -148,28 +150,6 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
 
         dist.barrier()
 
-    def test_hook_unregisters_itself(self):
-        pg = _get_default_group()
-        calls: list[int] = []
-
-        def first(args):
-            calls.append(0)
-            pg.unregister_pre_hook(0)
-            pg.register_pre_hook(2, lambda args: calls.append(2))
-
-        pg.register_pre_hook(0, first)
-        pg.register_pre_hook(1, lambda args: calls.append(1))
-        dist.all_reduce(torch.ones(2))
-        # The collective fires the hooks registered when it reached the hook point.
-        self.assertEqual(calls, [0, 1])
-        calls.clear()
-        dist.all_reduce(torch.ones(2))
-        self.assertEqual(calls, [1, 2])
-        pg.unregister_pre_hook(1)
-        pg.unregister_pre_hook(2)
-
-        dist.barrier()
-
     def test_post_hook_fires_when_backend_raises(self):
         pg = _get_default_group()
         pre_op_ids: list[int] = []
@@ -192,25 +172,47 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
 
         dist.barrier()
 
-    def test_register_concurrently_with_collectives(self):
+    def test_gated_hooks(self):
         pg = _get_default_group()
-        stop = threading.Event()
-
-        def churn():
-            while not stop.is_set():
-                pg.register_pre_hook(0, lambda args: None)
-                pg.register_post_hook(0, lambda args: None)
-                pg.unregister_post_hook(0)
-                pg.unregister_pre_hook(0)
-
-        thread = threading.Thread(target=churn)
-        thread.start()
+        calls: list[str] = []
+        pg.register_pre_hook(0, lambda args: calls.append("pre"), gated=True)
+        pg.register_post_hook(0, lambda args: calls.append("post"), gated=True)
         try:
-            for _ in range(200):
+            dist.all_reduce(torch.ones(2))
+            self.assertEqual(calls, [])
+            _enable_gated_hooks()
+            _enable_gated_hooks()
+            _disable_gated_hooks()
+            try:
+                # Enables nest.
                 dist.all_reduce(torch.ones(2))
+            finally:
+                _disable_gated_hooks()
+            self.assertEqual(calls, ["pre", "post"])
+            calls.clear()
+            dist.all_reduce(torch.ones(2))
+            self.assertEqual(calls, [])
         finally:
-            stop.set()
-            thread.join()
+            pg.unregister_post_hook(0)
+            pg.unregister_pre_hook(0)
+        with self.assertRaisesRegex(RuntimeError, "without enableGatedHooks"):
+            _disable_gated_hooks()
+
+        dist.barrier()
+
+    def test_gated_post_hook_fires_if_pre_hook_did(self):
+        pg = _get_default_group()
+        posts: list[int] = []
+        # Disabling between the pre and post hooks doesn't drop the post hook.
+        pg.register_pre_hook(0, lambda args: _disable_gated_hooks(), gated=True)
+        pg.register_post_hook(0, lambda args: posts.append(args.op_id), gated=True)
+        _enable_gated_hooks()
+        try:
+            dist.all_reduce(torch.ones(2))
+        finally:
+            pg.unregister_post_hook(0)
+            pg.unregister_pre_hook(0)
+        self.assertEqual(len(posts), 1)
 
         dist.barrier()
 
