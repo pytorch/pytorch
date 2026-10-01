@@ -26,6 +26,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     TestCase,
@@ -2079,13 +2080,6 @@ class TestManualOverlapSchedulingUnit(TestCase):
                 node.op == "call_function" and node.target == torch.ops.aten.neg.default
             ):
                 node.meta["manual_scope"] = "other"
-        final_all_reduce = list(
-            traced.graph.find_nodes(
-                op="call_function",
-                target=torch.ops._c10d_functional.all_reduce.default,
-            )
-        )[-1]
-        final_all_reduce.meta["custom"] = {"expected_final": True}
 
         def module_stack(node):
             scope = node.meta.get("manual_scope")
@@ -2122,21 +2116,21 @@ class TestManualOverlapSchedulingUnit(TestCase):
             2,
         )
 
-        output = next(node for node in graph.nodes if node.op == "output")
-        final_waits = [
+        from torch._inductor.fx_passes.utils import BitsetAncestors
+
+        rs0, rs1 = graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
+        )
+        rs_wait0 = next(
             node
             for node in graph.find_nodes(
                 op="call_function",
                 target=torch.ops._c10d_functional.wait_tensor.default,
             )
-            if node.meta.get("custom", {}).get("expected_final")
-        ]
-        from torch._inductor.fx_passes.utils import BitsetAncestors
-
-        self.assertEqual(len(final_waits), 1)
-        self.assertTrue(
-            BitsetAncestors(list(graph.nodes)).is_ancestor(final_waits[0], output)
+            if node.args[0] is rs0
         )
+        self.assertTrue(BitsetAncestors(list(graph.nodes)).is_ancestor(rs_wait0, rs1))
 
     def test_manual_bucketing_still_fuses_independent_hsdp_chains(self):
         graph = self._run_reordered_hsdp_manual_bucketing(dependent=False)
@@ -2206,7 +2200,6 @@ class TestManualOverlapSchedulingUnit(TestCase):
         from torch._inductor.fx_passes.overlap_manual_scheduling import (
             _BucketPlanReachability,
         )
-        from torch._inductor.fx_passes.utils import BitsetAncestors
 
         graph = fx.Graph()
         root = graph.placeholder("root")
@@ -2236,23 +2229,22 @@ class TestManualOverlapSchedulingUnit(TestCase):
             start_c1,
             target,
         ]
-        reachability = _BucketPlanReachability(
-            BitsetAncestors(graph_nodes), graph_nodes, endpoints
-        )
+        reachability = _BucketPlanReachability(graph_nodes, endpoints)
         reachability.merge_starts([start_a0, start_a1])
         reachability.merge_starts([start_b0, start_b1])
 
         target_idx = reachability.endpoint_to_idx[target]
-        ancestors = reachability._get_ancestor_bits(target_idx)
+        ancestors = reachability.ancestor_bits(target_idx)
         self.assertTrue(ancestors & (1 << reachability.endpoint_to_idx[predecessor_a]))
         self.assertTrue(ancestors & (1 << reachability.endpoint_to_idx[predecessor_b]))
         self.assertFalse(ancestors & (1 << reachability.endpoint_to_idx[predecessor_c]))
 
         reachability.merge_starts([start_c0, start_c1])
-        ancestors = reachability._get_ancestor_bits(target_idx)
+        ancestors = reachability.ancestor_bits(target_idx)
         self.assertTrue(ancestors & (1 << reachability.endpoint_to_idx[predecessor_c]))
 
-    def test_manual_bucket_plan_accounts_for_earlier_group_rewrite(self):
+    @parametrize("same_scope", [False, True])
+    def test_manual_bucket_plan_accounts_for_earlier_group_rewrite(self, same_scope):
         from torch._inductor.fx_passes.overlap_manual_scheduling import (
             ManualOverlapPreservingBucketer,
         )
@@ -2297,20 +2289,25 @@ class TestManualOverlapSchedulingUnit(TestCase):
                 target=torch.ops._c10d_functional.reduce_scatter_tensor.default,
             )
         )
-        bucketer.manual_bucket_collectives(
+        groups = [
             [
                 node
                 for collective in all_reduces
                 for node in (collective, collective_info[collective].wait_node)
-            ]
-        )
-        bucketer.manual_bucket_collectives(
+            ],
             [
                 node
                 for collective in reduce_scatters
                 for node in (collective, collective_info[collective].wait_node)
-            ]
-        )
+            ],
+        ]
+        if same_scope:
+            bucketer.manual_bucket_collectives(
+                [node for group in groups for node in group]
+            )
+        else:
+            for group in groups:
+                bucketer.manual_bucket_collectives(group)
         traced.graph.lint()
 
         # The all-reduces are initially independent and fuse first. Their fused
@@ -2549,6 +2546,9 @@ class TestManualOverlapSchedulingUnit(TestCase):
             },
         )
         self.assertEqual(list(graph.nodes), repaired_order)
+
+
+instantiate_parametrized_tests(TestManualOverlapSchedulingUnit)
 
 
 @requires_accelerator_dist_backend()

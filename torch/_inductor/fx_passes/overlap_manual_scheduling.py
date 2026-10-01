@@ -37,8 +37,6 @@ from .graph_view import get_subgraph_by_path, GraphView, make_graph_view
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from torch._inductor.fx_passes.utils import BitsetAncestors
-
 import logging
 
 
@@ -46,48 +44,28 @@ logger = logging.getLogger(__name__)
 
 
 class _BucketPlanReachability:
-    """Track reachability between collective endpoints while planning buckets.
+    """Track full-graph reachability between collective starts and waits.
 
-    Manual bucket scopes select which collectives may be fused, but dependency
-    paths between those collectives may leave and later re-enter a scope. This
-    class projects the scheduler's full dependency graph onto collective starts
-    and waits in one forward pass. Reachability queries then operate on compact
-    endpoint bitsets instead of scanning either the scope or the full FX graph.
-
-    Planning a bucket also changes the dependencies seen by later buckets. A
-    fused start consumes the union of its members' inputs, so every predecessor
-    of any member becomes a predecessor of every descendant of any member.
-    ``merge_starts`` records that contraction as a pair of endpoint bitsets.
-    Each endpoint lazily replays contractions added since its previous query;
-    replaying them in planning order maintains the exact transitive closure.
-
-    The tracker is initialized once from the unmodified graph and persists for
-    the complete bucketing plan. Therefore graph-sized work is performed once,
-    while graph mutations are modeled using only collective endpoint bitsets.
+    Planned bucket merges are replayed lazily so later plans observe the
+    dependencies they introduce without rescanning the FX graph.
     """
 
     def __init__(
         self,
-        node_ancestors: BitsetAncestors,
         graph_nodes: list[fx.Node],
         endpoints: list[fx.Node],
     ) -> None:
         self.endpoint_to_idx = {node: i for i, node in enumerate(endpoints)}
         self.endpoint_ancestors = [0] * len(endpoints)
 
-        # Project the scheduler's full dependency graph onto collective starts
-        # and waits in one pass, including its extra dependency edges.
+        # Project the full FX graph onto collective starts and waits in one pass.
         node_to_idx = {node: i for i, node in enumerate(graph_nodes)}
         # Record which endpoints can reach a given node idx.
         reachable_endpoints = [0] * len(graph_nodes)
         for node_idx, node in enumerate(graph_nodes):
             ancestors = 0
-            inputs = (
-                *node.all_input_nodes,
-                *node_ancestors.extra_inputs.get(node, ()),
-            )
             # All reachable endpoints to a node input transitively apply to this node.
-            for input_node in inputs:
+            for input_node in node.all_input_nodes:
                 ancestors |= reachable_endpoints[node_to_idx[input_node]]
             endpoint_idx = self.endpoint_to_idx.get(node)
             if endpoint_idx is not None:
@@ -98,7 +76,7 @@ class _BucketPlanReachability:
         self.merges: list[tuple[int, int]] = []
         self.applied_merges = [0] * len(endpoints)
 
-    def _get_ancestor_bits(self, node_idx: int) -> int:
+    def ancestor_bits(self, node_idx: int) -> int:
         """Apply planned merges lazily and return this endpoint's ancestors.
 
         ``applied_merges[node_idx]`` is a cursor into ``merges``. For each
@@ -132,7 +110,7 @@ class _BucketPlanReachability:
 
         indices = [self.endpoint_to_idx[node] for node in nodes]
         member_bits = sum(1 << idx for idx in indices)
-        member_ancestors = [self._get_ancestor_bits(idx) for idx in indices]
+        member_ancestors = [self.ancestor_bits(idx) for idx in indices]
         for idx, ancestors in zip(indices, member_ancestors):
             if ancestors & (member_bits ^ (1 << idx)):
                 raise AssertionError("cannot merge dependent collective starts")
@@ -279,8 +257,8 @@ def _move_overlap_nodes(
 class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
     """Bucket selected all-gathers, reduce-scatters, and all-reduces.
 
-    The caller-provided nodes determine which collectives are candidates for
-    each manual bucket scope.
+    ``manual_bucket_collectives`` performs the bucketing, with caller-provided
+    nodes defining the candidate boundary for each manual scope.
     """
 
     def __init__(
@@ -303,9 +281,7 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
             ),
             key=lambda node: self.node_idx[node],
         )
-        self._bucket_plan_reachability = _BucketPlanReachability(
-            self.node_ancestors, graph_nodes, endpoints
-        )
+        self._bucket_plan_reachability = _BucketPlanReachability(graph_nodes, endpoints)
 
     def _bucket_group(
         self, coll_nodes: list[fx.Node]
@@ -395,9 +371,7 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         return replacements, replaced_users
 
     def _split_independent_collectives(
-        self,
-        coll_nodes: OrderedSet[fx.Node],
-        scope_nodes: list[fx.Node],
+        self, coll_nodes: OrderedSet[fx.Node], scope_nodes: list[fx.Node]
     ) -> list[list[fx.Node]]:
         """Partition same-key collectives so no bucket contains a collective that
         depends on another member's result.
@@ -413,14 +387,7 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         Each collective is placed in the bucket equal to the longest chain of
         same-key collectives ending at it (its Mirsky level). Collectives at the
         same level are mutually independent, so grouping by level gives the
-        minimum number of dependency-free buckets. Once reachability applies
-        any prior planned merges, intersecting each start's ancestor bitset
-        with the candidate waits takes O(len(candidates) + number of
-        dependency edges) Python operations. The stable topological traversal
-        additionally costs O((len(candidates) + number of dependency edges) *
-        log(len(candidates))). A candidate may first replay each bucket merge
-        planned since its previous query; this is O(number of prior merges) in
-        the worst case but never traverses the FX graph.
+        minimum number of dependency-free buckets.
 
         ``scope_nodes`` preserves the method's override contract. The base
         implementation intentionally uses the full-graph reachability index,
@@ -439,7 +406,7 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
         for descendant in candidates:
             descendant_idx = reachability.endpoint_to_idx[descendant]
             ancestor_bits = (
-                reachability._get_ancestor_bits(descendant_idx) & candidate_wait_bits
+                reachability.ancestor_bits(descendant_idx) & candidate_wait_bits
             )
             while ancestor_bits:
                 ancestor_bit = ancestor_bits & -ancestor_bits
