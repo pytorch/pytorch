@@ -38,6 +38,30 @@ struct CUDACachingHostAllocatorImpl
  private:
   ska::flat_hash_map<void*, bool> use_host_register;
 
+  std::optional<std::string> numa_placement_untrustworthy_reason()
+      const override {
+    // One process-wide slab, carved by whoever touched it first, so a block
+    // handed to a node-1 thread may well be backed by node-0 pages.
+    if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+            pinned_reserve_segment_size_mb() != 0) {
+      return "cannot be combined with pinned_reserve_segment_size_mb: the "
+             "reserve segment is a single process-wide allocation, so blocks "
+             "carved from it do not belong to the node that requests them";
+    }
+    // The parallel pre-fault path touches pages from a shared thread pool that
+    // is not bound to the requesting node, so first-touch decides placement
+    // arbitrarily.  One thread means the caller does the touching.
+    if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+            pinned_use_cuda_host_register() &&
+        c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
+                pinned_num_register_threads() != 1) {
+      return "requires pinned_num_register_threads:1 when "
+             "pinned_use_cuda_host_register is on: the parallel pre-fault path "
+             "touches pages from a shared, unbound thread pool";
+    }
+    return std::nullopt;
+  }
+
   void allocate_host_memory(size_t size, void** ptr) override {
     // try allocating from reserve segment first before calling into expensive APIs
     if (get_reserve_segment().initialized()) {

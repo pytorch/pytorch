@@ -1,6 +1,7 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
+#include <c10/util/numa.h>
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -26,6 +27,7 @@ std::unordered_set<std::string>& AcceleratorAllocatorConfig::getMutableKeys() {
       "roundup_power2_divisions",
       "expandable_segments",
       "pinned_use_background_threads",
+      "pinned_numa_aware",
       "pinned_max_round_threshold_mb",
       "pinned_max_cached_size_mb"};
   return keys;
@@ -244,6 +246,33 @@ size_t AcceleratorAllocatorConfig::parsePinnedUseBackgroundThreads(
   return i;
 }
 
+size_t AcceleratorAllocatorConfig::parsePinnedNumaAware(
+    const ConfigTokenizer& tokenizer,
+    size_t i) {
+  tokenizer.checkToken(++i, ":");
+  bool requested = tokenizer.toBool(++i);
+  // Fail loudly rather than silently behaving like a single node: a build
+  // without libnuma cannot tell which node a thread is on, so every block
+  // would land in one pool and the setting would look enabled while doing
+  // nothing.
+  TORCH_CHECK(
+      !requested || IsNUMAAvailable(),
+      "pinned_numa_aware was requested but this build has no usable NUMA "
+      "support (built without libnuma, or numa_available() failed).");
+
+  int latched = pinned_numa_aware_latch().load(std::memory_order_acquire);
+  TORCH_CHECK(
+      latched < 0 || latched == static_cast<int>(requested),
+      "pinned_numa_aware cannot be changed after the pinned host allocator has "
+      "served its first request (it was ",
+      latched == 1 ? "enabled" : "disabled",
+      " at that point).");
+
+  pinned_numa_aware_ = requested;
+
+  return i;
+}
+
 size_t AcceleratorAllocatorConfig::parsePinnedMaxRoundThreshold(
     const ConfigTokenizer& tokenizer,
     size_t i) {
@@ -305,6 +334,8 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
       i = parseExpandableSegments(tokenizer, i);
     } else if (key == "pinned_use_background_threads") {
       i = parsePinnedUseBackgroundThreads(tokenizer, i);
+    } else if (key == "pinned_numa_aware") {
+      i = parsePinnedNumaAware(tokenizer, i);
     } else if (key == "pinned_max_round_threshold_mb") {
       i = parsePinnedMaxRoundThreshold(tokenizer, i);
       max_round_threshold_set = true;

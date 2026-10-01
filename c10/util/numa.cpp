@@ -17,7 +17,11 @@ namespace c10 {
 
 #ifdef C10_ENABLE_NUMA
 bool IsNUMAEnabled() {
-  return FLAGS_caffe2_cpu_numa_enabled && numa_available() >= 0;
+  return FLAGS_caffe2_cpu_numa_enabled && IsNUMAAvailable();
+}
+
+bool IsNUMAAvailable() {
+  return numa_available() >= 0;
 }
 
 void NUMABind(int numa_node_id) {
@@ -41,7 +45,7 @@ void NUMABind(int numa_node_id) {
 }
 
 int GetNUMANode(const void* ptr) {
-  if (!IsNUMAEnabled()) {
+  if (!IsNUMAAvailable()) {
     return -1;
   }
   AT_ASSERT(ptr);
@@ -61,11 +65,25 @@ int GetNUMANode(const void* ptr) {
 }
 
 int GetNumNUMANodes() {
-  if (!IsNUMAEnabled()) {
+  if (!IsNUMAAvailable()) {
     return -1;
   }
 
   return numa_num_configured_nodes();
+}
+
+int GetNUMANodeIdUpperBound() {
+  if (!IsNUMAAvailable()) {
+    return -1;
+  }
+
+  // Deliberately the highest node id plus one, not numa_num_configured_nodes().
+  // Node ids can be sparse -- a machine with nodes 0 and 2 and nothing at 1
+  // reports two configured nodes but hands out id 2 -- so sizing anything
+  // indexed by node id off the count silently drops the top nodes.  Also
+  // deliberately not numa_num_task_nodes(): a cpuset may be widened later, and
+  // an id outside the array is worse than an unused entry.
+  return numa_max_node() + 1;
 }
 
 void NUMAMove(void* ptr, size_t size, int numa_node_id) {
@@ -98,8 +116,19 @@ void NUMAMove(void* ptr, size_t size, int numa_node_id) {
       "Could not move memory to a NUMA node");
 }
 
-int GetCurrentNUMANode() {
+int GetCurrentNUMANodeIfEnabled() {
+  // Short-circuit before touching libnuma.  alloc_cpu() evaluates this as an
+  // argument to NUMAMove(), so relaxing it would add numa_available(),
+  // sched_getcpu() and numa_node_of_cpu() to every pageable CPU allocation
+  // even though NUMAMove() then returns immediately.
   if (!IsNUMAEnabled()) {
+    return -1;
+  }
+  return GetCurrentNUMANode();
+}
+
+int GetCurrentNUMANode() {
+  if (!IsNUMAAvailable()) {
     return -1;
   }
 
@@ -113,6 +142,14 @@ bool IsNUMAEnabled() {
   return false;
 }
 
+bool IsNUMAAvailable() {
+  return false;
+}
+
+int GetCurrentNUMANodeIfEnabled() {
+  return -1;
+}
+
 void NUMABind(int /*numa_node_id*/) {}
 
 int GetNUMANode(const void* /*ptr*/) {
@@ -120,6 +157,10 @@ int GetNUMANode(const void* /*ptr*/) {
 }
 
 int GetNumNUMANodes() {
+  return -1;
+}
+
+int GetNUMANodeIdUpperBound() {
   return -1;
 }
 
