@@ -5042,18 +5042,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if not self._enable_pdl_codegen():
             return
         current_node = V.kernel.current_node
-        prev_node = (
-            V.graph.scheduler.previous_node if V.graph.scheduler is not None else None
+        prev_nodes = (
+            V.graph.scheduler.previous_nodes if V.graph.scheduler is not None else None
         )
 
         def matching_dep(dep):
-            if prev_node is None:
-                raise AssertionError("prev_node must not be None")
+            if prev_nodes is None:
+                raise AssertionError("prev_nodes must not be None")
             if current_node is None:
                 raise AssertionError("current_node must not be None")
-            prev_deps = prev_node.read_writes.writes
+            prev_deps = [w for n in prev_nodes for w in n.read_writes.writes]
             if consider_reads:
-                prev_deps = itertools.chain(prev_deps, prev_node.read_writes.reads)
+                prev_deps += [r for n in prev_nodes for r in n.read_writes.reads]
             return any(
                 dep == current_node.mutation_renames.get(w.name, w.name)
                 for w in prev_deps
@@ -5061,7 +5061,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         if not dependencies:
             raise AssertionError("dependencies must not be empty")
-        need_wait = prev_node is None or any(matching_dep(d) for d in dependencies)
+        need_wait = prev_nodes is None or any(matching_dep(d) for d in dependencies)
         if not need_wait:
             return
         # hoist before the loop
@@ -5102,6 +5102,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 previous_launch = len(new_lines)
             new_lines.append(l)
         code._lines = new_lines
+        self._pdl_has_wait = has_wait
 
     def _load_index_split_basis(
         self, index: sympy.Expr, tree: IterationRangesRoot
@@ -8412,6 +8413,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             triton_meta=self.triton_meta,
             inductor_meta=self.inductor_meta,
         )
+        if self._pdl_has_wait:
+            # all earlier kernels finish before this one triggers its dependents
+            V.graph.scheduler.previous_nodes = []
 
         if deallocate_ws:
             self.deallocate_workspaces()
