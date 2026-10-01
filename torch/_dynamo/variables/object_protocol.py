@@ -10,6 +10,7 @@ etc.) live in their respective VT files.
 import abc
 import collections
 import enum
+import inspect
 import operator
 import sys
 import types
@@ -97,9 +98,9 @@ def vt_identity_compare(
     # behaves the same way: `obj.m is obj.m` is False in CPython. So is a device
     # read off a tensor: `x.device is x.device` is False there too.
     from .dicts import ConstDictVariable
+    from .exception import ExceptionVariable, TracebackVariable
     from .functions import UserMethodVariable
     from .lists import ListVariable
-    from .misc import ExceptionVariable, TracebackVariable
     from .sets import (
         DictKeySetVariable,
         FrozensetVariable,
@@ -474,7 +475,12 @@ def generic_repr(
             if obj_type in sentinel:
                 return ConstantVariable.create(sentinel[obj_type])
             return ConstantVariable.create(obj.repr_recursive_sentinel())
-        _repr_running.add(obj_id)
+        # UserList/UserDict.__repr__ is `repr(self.data)`; PyObject_Repr does not
+        # register it, so the inner list/dict catches the cycle.
+        repr_fn = inspect.getattr_static(obj_type, "__repr__")
+        user_reprs = (collections.UserList.__repr__, collections.UserDict.__repr__)
+        if repr_fn not in user_reprs:
+            _repr_running.add(obj_id)
         try:
             result = obj.tp_repr_impl(tx)
         finally:
@@ -1267,6 +1273,14 @@ def binary_op1(
     # "different VT subclasses sharing a python_type", so we drop the type
     # equality check.
     if v_slot is w_slot:
+        # UDOVs with inheritance may not have the same slot even when the if above is True:
+        #    class Derived(set):
+        #        ...
+        #    class Custom(set):
+        #        def __ror__(self, other):
+        #            return "reversed"
+        # Both Derived and Custom have the same slot but the former inherits it from set
+        # TODO(dynamo-team): This is a known bug in the codebase
         w_slot = None
 
     if v_slot is not None:

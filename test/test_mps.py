@@ -26,7 +26,7 @@ from torch.nn import Buffer, Parameter
 from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
+    (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_APPLE_M1, IS_CI,
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier
 from torch.testing import make_tensor
@@ -930,6 +930,336 @@ class TestMPS(TestCaseMPS):
         q = mps_hist / mps_hist.sum()
         kl_div = F.kl_div(q.log(), p, reduction='sum').item()
         self.assertLess(kl_div, 0.03)
+
+    def test_stream(self):
+        self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
+
+        with torch.mps.stream(None):
+            self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
+
+        s1 = torch.mps.Stream()
+        s2 = torch.mps.Stream()
+        self.assertNotEqual(s1, torch.mps.default_stream())
+        self.assertNotEqual(s2, torch.mps.default_stream())
+        self.assertNotEqual(s1, s2)
+
+        # Check that the stream is reset correctly if an exception is raised
+        # within another stream's context.
+        # Note: Use a custom exception type so that any unexpected errors inside
+        # the `try` block pass through to fail the test
+        class MyException(Exception):
+            pass
+
+        try:
+            with torch.mps.stream(s1):
+                self.assertEqual(torch.mps.current_stream(), s1)
+                raise MyException
+
+        except MyException:
+            self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
+
+        # Check that the stream is reset correctly with nested contexts
+        with torch.mps.stream(s1):
+            self.assertEqual(torch.mps.current_stream(), s1)
+            with torch.mps.stream(s2):
+                self.assertEqual(torch.mps.current_stream(), s2)
+
+            self.assertEqual(torch.mps.current_stream(), s1)
+
+        self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
+
+        def concurrent_sine_loop(a1, a2, s1=None, s2=None, n=100):
+            r1 = a1
+            r2 = a2
+
+            for _ in range(n):
+                with torch.mps.stream(s1):
+                    r1 = torch.sin(r1)
+                with torch.mps.stream(s2):
+                    r2 = torch.sin(r2)
+
+            return r1, r2
+
+        # Check that two separate workloads run on separate streams gives the
+        # same result as running them on one stream.
+        try:
+            a1 = torch.randn(100, device='mps')
+            a2 = torch.randn(100, device='mps')
+            torch.mps.synchronize()
+
+            r1, r2 = concurrent_sine_loop(a1, a2, s1, s2)
+            s1.synchronize()
+            s2.synchronize()
+
+            r1_check, r2_check = concurrent_sine_loop(a1, a2, s1=None, s2=None)
+            torch.mps.synchronize()
+
+            self.assertEqual(r1, r1_check)
+            self.assertEqual(r2, r2_check)
+
+        finally:
+            torch.mps.synchronize()
+            s1.synchronize()
+            s2.synchronize()
+            torch.mps.empty_cache()
+
+        self.assertEqual(torch.mps.current_stream(), torch.mps.default_stream())
+
+    def _get_stream_by_name(self, stream):
+        if stream == "default":
+            return torch.mps.default_stream()
+        elif stream == "pool":
+            return torch.mps.Stream()
+        else:
+            raise NotImplementedError(f"stream '{stream}' not recognized")
+
+    # Tests that a non-blocking pinned-CPU to MPS copy issued on a custom stream
+    # produces correct result
+    @parametrize("stream", ["default", "pool"])
+    def test_stream_pinned_cpu_to_mps(self, stream):
+        s = self._get_stream_by_name(stream)
+        mismatches = 0
+        for i in range(100):
+            a_cpu = torch.full((1_000_000,), float(i), pin_memory=True)
+            with torch.mps.stream(s):
+                a_mps = a_cpu.to("mps", non_blocking=True)
+            del a_cpu
+            s.synchronize()
+            if not torch.equal(a_mps.cpu(), torch.full((1_000_000,), float(i))):
+                mismatches += 1
+        self.assertEqual(mismatches, 0)
+
+    # Tests that scalar buffer free waits on the correct stream
+    @parametrize("stream", ["default", "pool"])
+    def test_stream_scalar_buffer(self, stream):
+        s = self._get_stream_by_name(stream)
+        a = torch.zeros(1_000_000, device="mps")
+        b = torch.ones(1_000_000, device="mps")
+        torch.mps.synchronize()
+        mismatches = 0
+        for i in range(10):
+            with torch.mps.stream(s):
+                # `alpha=float` forces an MPSScalar buffer
+                out = torch.add(a, b, alpha=2.0)
+            s.synchronize()
+            if not torch.equal(out.cpu(), torch.full((1_000_000,), 2.0)):
+                mismatches += 1
+        self.assertEqual(mismatches, 0)
+
+    # Tests that `torch.mps.empty_cache` empties unused buffers on any stream
+    @parametrize("stream", ["default", "pool"])
+    @serialTest()
+    def test_stream_empty_cache(self, stream):
+        s = self._get_stream_by_name(stream)
+
+        def gen_tensor(s):
+            with torch.mps.stream(s):
+                return torch.randn(20_000_000, device="mps")
+
+        # Warmup to put the allocator in a relatively steady state
+        t = gen_tensor(s)
+        t_byte_size = t.numel() * t.element_size()
+        del t
+
+        torch.mps.synchronize()
+        gc.collect()
+        torch.mps.empty_cache()
+        before = torch.mps.driver_allocated_memory()
+
+        tensors = []
+
+        for i in range(10):
+            tensors.append(gen_tensor(s))
+
+        del tensors
+
+        torch.mps.synchronize()
+        gc.collect()
+        torch.mps.empty_cache()
+        after = torch.mps.driver_allocated_memory()
+        # `driver_allocated_memory` includes MPS/MPSGraph framework-internal
+        # allocations, not just PyTorch's tensors, and it can
+        # nondeterministically drift by a small amount. Allow some slack rather
+        # than requiring exact equality, but require that the difference in
+        # allocated memory is significantly less than one of the tensors we've
+        # created.
+        self.assertLess(abs(after - before), int(0.1 * t_byte_size))
+
+    # Tests that torch.accelerator.synchronize() drains every MPS stream
+    @parametrize("stream", ["default", "pool"])
+    def test_stream_accelerator_synchronize(self, stream):
+        s = self._get_stream_by_name(stream)
+        mismatches = 0
+        for i in range(20):
+            with torch.mps.stream(s):
+                out = torch.full((1_000_000,), float(i), device="mps") * 2
+            torch.accelerator.synchronize()
+            if not torch.equal(out.cpu(), torch.full((1_000_000,), float(i) * 2)):
+                mismatches += 1
+        self.assertEqual(mismatches, 0)
+
+    # Tests that autograd's backward pass respects the current stream when
+    # `Tensor.backward` is called
+    @parametrize("stream", ["default", "pool"])
+    def test_stream_backward(self, stream):
+        s = self._get_stream_by_name(stream)
+        observed = []
+
+        class RecordStreamFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                observed.append(torch.mps.current_stream())
+                return grad_output
+
+        x = torch.randn(10, device="mps", requires_grad=True)
+        torch.mps.synchronize()
+        with torch.mps.stream(s):
+            y = RecordStreamFn.apply(x)
+            y.sum().backward()
+
+        s.synchronize()
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(
+            observed[0].stream_id,
+            s.stream_id,
+            f"backward ran with stream_id={observed[0].stream_id} but it "
+            f"should have been stream_id={s.stream_id}",
+        )
+
+    # Tests that a `torch.Event` records against the stream it's given
+    @parametrize("stream", ["default", "pool"])
+    def test_stream_event_record(self, stream):
+        s = self._get_stream_by_name(stream)
+        numel = 4_000_000
+        mismatches = 0
+        for i in range(20):
+            e = torch.Event("mps")
+            with torch.mps.stream(s):
+                x = torch.full((numel,), float(i), device="mps") * 2
+            e.record(s)
+            e.synchronize()
+            if not torch.equal(x.cpu(), torch.full((numel,), float(i) * 2)):
+                mismatches += 1
+        self.assertEqual(mismatches, 0)
+
+    # Tests that `torch.Event.wait` makes the given stream wait,
+    # independent of whichever stream recorded the event.
+    @parametrize("stream1", ["default", "pool"])
+    @parametrize("stream2", ["default", "pool"])
+    def test_stream_event_wait(self, stream1, stream2):
+        producer = self._get_stream_by_name(stream1)
+        consumer = self._get_stream_by_name(stream2)
+        numel = 4_000_000
+        mismatches = 0
+        for i in range(20):
+            with torch.mps.stream(producer):
+                x = torch.full((numel,), float(i), device="mps") * 2
+            e = torch.Event("mps")
+            e.record(producer)
+            with torch.mps.stream(consumer):
+                e.wait(consumer)
+                y = x.clone()
+            consumer.synchronize()
+            if not torch.equal(y.cpu(), torch.full((numel,), float(i) * 2)):
+                mismatches += 1
+        self.assertEqual(mismatches, 0)
+
+    # Tests that re-recording an event on another stream doesn't release a
+    # wait on the previous, still-pending record.
+    def test_stream_event_rerecord_other_stream(self):
+        producer = torch.mps.Stream()
+        consumer = torch.mps.Stream()
+        other = torch.mps.Stream()
+        numel = 4_000_000
+        mismatches = 0
+        e = torch.Event("mps")
+        for i in range(20):
+            with torch.mps.stream(producer):
+                x = torch.full((numel,), float(i), device="mps") * 2
+            e.record(producer)
+            e.wait(consumer)
+            e.record(other)
+            with torch.mps.stream(consumer):
+                y = x.clone()
+            consumer.synchronize()
+            if not torch.equal(y.cpu(), torch.full((numel,), float(i) * 2)):
+                mismatches += 1
+        self.assertEqual(mismatches, 0)
+
+    # Tests that a cross-stream event wait doesn't commit the recording stream's
+    # command buffer outside of its queue, which races with another thread
+    # encoding work on the recording stream.
+    def test_stream_event_wait_while_producer_encodes(self):
+        producer = torch.mps.Stream()
+        consumer = torch.mps.Stream()
+        numel = 200_000
+        num_ops = 10
+        num_iters = 10
+        results = []
+
+        def worker():
+            with torch.mps.stream(producer):
+                for i in range(num_iters):
+                    x = torch.full((numel,), float(i), device="mps")
+                    for _ in range(num_ops):
+                        x = x + 1
+                    producer.synchronize()
+                    results.append(torch.equal(x.cpu(), torch.full((numel,), float(i + num_ops))))
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        e = torch.Event("mps")
+        while thread.is_alive():
+            e.record(producer)
+            e.wait(consumer)
+        thread.join()
+        consumer.synchronize()
+        self.assertEqual(results, [True] * num_iters)
+
+    # Tests that autograd's gradient accumulation is correct when a tensor is
+    # used by forward ops on two different streams, and backward() is called
+    # on a third stream.
+    @parametrize("stream1", ["default", "pool"])
+    @parametrize("stream2", ["default", "pool"])
+    @parametrize("stream3", ["default", "pool"])
+    def test_stream_backward_multi_producer(self, stream1, stream2, stream3):
+        s1 = self._get_stream_by_name(stream1)
+        s2 = self._get_stream_by_name(stream2)
+        s3 = self._get_stream_by_name(stream3)
+        scales = [float(p + 2) for p in range(8)]
+        x = torch.full((1_000_000,), 1.0, device="mps", requires_grad=True)
+        torch.mps.synchronize()
+        num_loops = 20
+        for _ in range(num_loops):
+            ys = []
+            for p, scale in enumerate(scales):
+                with torch.mps.stream(s1 if p % 2 == 0 else s2):
+                    ys.append((x * scale).sum())
+            s1.synchronize()
+            s2.synchronize()
+            with torch.mps.stream(s3):
+                torch.stack(ys).sum().backward()
+            s3.synchronize()
+        expected = sum(scales) * num_loops
+        self.assertEqual(x.grad.cpu(), torch.full_like(x, expected))
+
+    # Tests that the `torch.accelerator` stream API corresponds correctly to
+    # the `torch.mps` stream API
+    def test_stream_accelerator_current_stream(self):
+        try:
+            s = torch.mps.Stream()
+            torch.accelerator.set_stream(s)
+            self.assertEqual(torch.accelerator.current_stream().stream_id, s.stream_id)
+            self.assertEqual(torch.mps.current_stream().stream_id, s.stream_id)
+
+            with torch.mps.stream(torch.mps.default_stream()):
+                self.assertEqual(torch.accelerator.current_stream().stream_id, 0)
+        finally:
+            torch.accelerator.set_stream(torch.mps.default_stream())
 
     def test_stream_base(self):
         s1 = torch._C._MPSStreamBase()
@@ -1844,7 +2174,7 @@ class TestMPS(TestCaseMPS):
         tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
         self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
 
-    @xfailIf(MACOS_VERSION < 15.0)
+    @xfailIf(MACOS_VERSION < 15.0 or IS_APPLE_M1)
     @parametrize("dtype", [torch.float16, torch.bfloat16])
     def test_large_bmm(self, dtype):
         B, M, N = 11, 20064, 128
@@ -2754,7 +3084,7 @@ class TestMPS(TestCaseMPS):
         # Compare against CPU using a copy of the model
         import copy
         y_cpu = copy.deepcopy(model).cpu()(x.detach().cpu())
-        self.assertEqual(y_cpu, y_mps.cpu(), atol=1e-3, rtol=1e-3)
+        self.assertEqual(y_cpu, y_mps.cpu())
         y_mps.sum().backward()
         self.assertIsNotNone(x.grad)
 
@@ -3886,6 +4216,20 @@ class TestMPS(TestCaseMPS):
         helper((2, 3), 0.2)
         helper((100, 300), 1.0)
         helper((100, 300), 0.2)
+
+    # An `out=` wider than the common dtype must not widen the computation:
+    # CPU computes at the common dtype and casts the result on store
+    @parametrize("op_name", ["addcmul", "addcdiv"])
+    @parametrize("out_dtype", [torch.float16, torch.float32])
+    def test_addc_ops_out_dtype(self, op_name, out_dtype):
+        op = getattr(torch, op_name)
+        cpu_args = [torch.randn(4, 5, dtype=torch.float16).clamp_min(0.5) for _ in range(3)]
+        mps_args = [t.to("mps") for t in cpu_args]
+        cpu_out = torch.empty(4, 5, dtype=out_dtype)
+        out = torch.empty(4, 5, dtype=out_dtype, device="mps")
+        op(*cpu_args, value=2.5, out=cpu_out)
+        op(*mps_args, value=2.5, out=out)
+        self.assertEqual(out, cpu_out)
 
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
     def test_lerp_scalar_weight_dtype(self, dtype):
@@ -5658,6 +6002,100 @@ class TestMPS(TestCaseMPS):
             error_type = TypeError if dtype == torch.float8_e4m3fn else RuntimeError
             self.assertRaises(error_type, lambda: loss(a_mps, a_mps))
             self.assertRaises(RuntimeError, lambda: loss(a_cpu, a_cpu))
+
+    # MPSGraph refuses to mix element types across an operand pair and aborts the process rather
+    # than raising, so a mixed-dtype input/target used to crash. OpInfo cannot reach this: every
+    # sample_inputs_loss operand is built from a single dtype.
+    MIXED_DTYPES = [(torch.float32, torch.float16), (torch.float16, torch.float32),
+                    (torch.float32, torch.bfloat16), (torch.bfloat16, torch.float32),
+                    (torch.float16, torch.bfloat16), (torch.bfloat16, torch.float16)]
+
+    @parametrize("dtypes", MIXED_DTYPES)
+    @parametrize("reduction", ["mean", "sum", "none"])
+    def test_loss_mixed_dtype(self, dtypes, reduction):
+        in_dtype, target_dtype = dtypes
+        for fn in (F.mse_loss, F.smooth_l1_loss, F.huber_loss, F.l1_loss):
+            cpu_x = torch.tensor([0.5, 2.0, -3.0, 1.25], dtype=in_dtype)
+            cpu_t = torch.tensor([1.0, 1.0, 1.0, 1.0], dtype=target_dtype)
+            res = fn(cpu_x.to("mps"), cpu_t.to("mps"), reduction=reduction)
+            ref = fn(cpu_x, cpu_t, reduction=reduction)
+            self.assertEqual(res.dtype, ref.dtype, f"{fn.__name__} result dtype")
+            self.assertEqual(res, ref, f"{fn.__name__} with {in_dtype}/{target_dtype}")
+
+    @parametrize("dtypes", MIXED_DTYPES)
+    @parametrize("reduction", ["mean", "sum", "none"])
+    def test_loss_mixed_dtype_backward(self, dtypes, reduction):
+        # huber is excluded: its backward builds a plain TensorIterator, so mismatched operands
+        # are rejected rather than promoted (see test_huber_loss_backward_mixed_dtype_errors).
+        in_dtype, target_dtype = dtypes
+        for fn in (F.mse_loss, F.smooth_l1_loss, F.l1_loss):
+            def grad_of(device):
+                x = torch.tensor([0.5, 2.0, -3.0, 1.25], dtype=in_dtype, device=device, requires_grad=True)
+                t = torch.tensor([1.0, 1.0, 1.0, 1.0], dtype=target_dtype, device=device)
+                out = fn(x, t, reduction=reduction)
+                out.backward(torch.ones_like(out))
+                return x.grad
+            self.assertEqual(grad_of("mps"), grad_of("cpu"), f"{fn.__name__} grad")
+
+    @parametrize("dtypes", MIXED_DTYPES)
+    def test_addr_mixed_dtype(self, dtypes):
+        # addr also took its result dtype from `self` instead of the promoted type
+        self_dtype, vec_dtype = dtypes
+        cpu_self = torch.tensor([[1.0, 1.0], [1.0, 1.0]], dtype=self_dtype)
+        cpu_v1 = torch.tensor([1.0, 2.0], dtype=vec_dtype)
+        cpu_v2 = torch.tensor([3.0, 4.0], dtype=vec_dtype)
+        for beta, alpha in ((1, 1), (0.6, 0.2), (0, 1)):
+            res = torch.addr(cpu_self.to("mps"), cpu_v1.to("mps"), cpu_v2.to("mps"), beta=beta, alpha=alpha)
+            ref = torch.addr(cpu_self, cpu_v1, cpu_v2, beta=beta, alpha=alpha)
+            self.assertEqual(res.dtype, ref.dtype)
+            self.assertEqual(res, ref)
+
+    def test_huber_loss_backward_mixed_dtype_errors(self):
+        x = torch.tensor([0.5, 2.0], device="mps")
+        t = torch.tensor([1.0, 1.0], dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(RuntimeError, "expected all tensors to have the same dtype"):
+            torch.ops.aten.huber_loss_backward(torch.ones_like(x), x, t, 1, 1.0)
+
+    @parametrize("in_dtype", [torch.float16, torch.bfloat16])
+    def test_batch_norm_mixed_dtype_backward(self, in_dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/154887
+        # test_nn covers the forward; this checks eval-mode gradients against CPU, since grad_weight is
+        # computed at the parameter dtype rather than the input dtype
+        cpu_x = torch.rand((2, 3, 4), dtype=in_dtype)
+        cpu_p = [torch.rand((3,)) for _ in range(4)]
+        cpu_p[1] += 1  # running_var must be positive
+
+        def run(device):
+            x = cpu_x.to(device).clone().requires_grad_()
+            mean, var, weight, bias = (t.to(device).clone().requires_grad_(i > 1) for i, t in enumerate(cpu_p))
+            F.batch_norm(x, mean, var, weight=weight, bias=bias).sum().backward()
+            return x.grad, weight.grad, bias.grad
+
+        self.assertEqual(run("mps"), run("cpu"))
+
+        # Without weight, only the stats dtype distinguishes these two backward graphs
+        for stats_dtype in (torch.float32, in_dtype):
+            grads = []
+            for device in ("mps", "cpu"):
+                x = cpu_x.to(device).clone().requires_grad_()
+                F.batch_norm(x, cpu_p[0].to(device, stats_dtype), cpu_p[1].to(device, stats_dtype)).sum().backward()
+                grads.append(x.grad)
+            self.assertEqual(*grads)
+
+        # training-mode backward with float32 save_mean/save_invstd
+        args = (cpu_x, cpu_x, cpu_p[2], None, None, cpu_p[0], cpu_p[1], True, 1e-5, [True] * 3)
+        mps_args = (a.to("mps") if isinstance(a, torch.Tensor) else a for a in args)
+        res = torch.ops.aten.native_batch_norm_backward(*mps_args)
+        self.assertEqual(res, torch.ops.aten.native_batch_norm_backward(*args))
+
+    def test_addbmm_mixed_dtype_errors(self):
+        # addbmm has no promotion on any backend, so it must raise rather than abort
+        m = torch.ones(2, 2, device="mps")
+        b = torch.ones(1, 2, 2, dtype=torch.float16, device="mps")
+        with self.assertRaisesRegex(RuntimeError, "must have the same dtype|Input dtypes must be the same"):
+            torch.addbmm(m, b, b)
+        with self.assertRaisesRegex(RuntimeError, "must have the same dtype|Input dtypes must be the same"):
+            torch.addbmm(m, torch.ones(1, 2, 2, device="mps"), b)
 
     # Binary Cross Enropy
     def test_bce_loss_simple(self):
@@ -8999,6 +9437,9 @@ class TestMPS(TestCaseMPS):
         helper(6)
         helper(3)
         helper(8)
+        # both sides of the n <= 4 register-kernel cutoff
+        helper(4)
+        helper(5)
         helper(1025, atol=1e-4)
 
     # Test tril
@@ -10829,8 +11270,8 @@ class TestInnerContiguous(TestCaseMPS):
             self.assertEqual(dev[offset:].clone().cpu(), full[offset:])
 
 
+@serialTest()
 class TestLargeTensors(TestCaseMPS):
-    @serialTest()
     def test_64bit_binops(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
             raise unittest.SkipTest("Needs at least 16Gb of RAM")
@@ -10842,7 +11283,6 @@ class TestLargeTensors(TestCaseMPS):
         rc_slice_cpu = (a.cpu() + b.cpu()[slice_idx:]).sin()
         self.assertEqual(rc_slice, rc_slice_cpu)
 
-    @serialTest()
     def test_64bit_index_select(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
             raise unittest.SkipTest("Needs at least 16Gb of RAM")
@@ -10860,7 +11300,6 @@ class TestLargeTensors(TestCaseMPS):
         torch.mps.empty_cache()
 
     @largeTensorTest("16GB", device="mps")
-    @serialTest()
     @parametrize("C,O", [(65536, 8), (8, 65536)])  # input-plane / output-plane overflow
     def test_conv3d_int32_overflow(self, C, O):
         x = torch.randn(1, C, 1, 182, 181, dtype=torch.float16, device='mps')
@@ -10874,7 +11313,6 @@ class TestLargeTensors(TestCaseMPS):
         torch.mps.empty_cache()
 
     @largeTensorTest("16GB", device="mps")
-    @serialTest()
     def test_conv3d_tile_count_int32_overflow(self):
         output_channels = torch.iinfo(torch.int32).max - 1
         # Stride 2 bypasses the pointwise matmul path while keeping the output
@@ -10888,7 +11326,6 @@ class TestLargeTensors(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
-    @serialTest()
     def test_64bit_index_copy(self):
         if torch.mps.recommended_max_memory() < 16_000_000_000:
             raise unittest.SkipTest("Needs at least 16Gb of RAM")
@@ -10904,7 +11341,6 @@ class TestLargeTensors(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
-    @serialTest()
     @parametrize("dtype", [torch.int8, torch.bool])
     @parametrize("noncontiguous", [False, True])
     @largeTensorTest("8GB", device="mps")
@@ -10929,7 +11365,6 @@ class TestLargeTensors(TestCaseMPS):
         gc.collect()
         torch.mps.empty_cache()
 
-    @serialTest()
     def test_rand_4b(self):
         # Used to crash with NDArray dimension length > INT_MAX on MPSGraph;
         # the Metal-kernel path decomposes via `iter.with_32bit_indexing()`.
@@ -10965,7 +11400,24 @@ class TestLargeTensors(TestCaseMPS):
         self.assertGreater(tail.unique().numel(), 50)
         del x
 
-    @serialTest()
+    def test_64bit_range_factories(self):
+        # https://github.com/pytorch/pytorch/issues/198473: elements past 2^32 were left unwritten
+        if torch.mps.recommended_max_memory() < 8_000_000_000:
+            raise unittest.SkipTest("Needs at least 8Gb of RAM")
+        n = (1 << 32) + (1 << 20)
+        idx = torch.tensor([0, 1 << 20, 1 << 31, (1 << 32) - 1, 1 << 32, n - 1], device='mps')
+        x = torch.arange(n, dtype=torch.uint8, device='mps')
+        self.assertEqual(x[idx], idx.to(torch.uint8))
+        del x
+        m = n // 4
+        out = torch.empty(m, 4, dtype=torch.uint8, device='mps').t()
+        torch.arange(n, out=out)
+        self.assertEqual(out[idx // m, idx % m], idx.to(torch.uint8))
+        del out
+        x = torch.linspace(0, 255, n, dtype=torch.uint8, device='mps')
+        self.assertEqual(x[idx], (idx * 255 // (n - 1)).to(torch.uint8), atol=1, rtol=0)
+        del x
+
     def test_64bit_strided_unary(self):
         # https://github.com/pytorch/pytorch/issues/183419: slice's byte-stride
         # extent > INT32_MAX forces TensorIterator to split the iter
@@ -16552,7 +17004,6 @@ class TestConsistency(TestCaseMPS):
         for mps_sample in op.sample_inputs(
                 device,
                 dtype,
-                requires_grad=(op.supports_autograd and (dtype.is_floating_point or dtype.is_complex)),
                 include_conjugated_inputs=include_conjugated_inputs,
                 set_seed=True):
 

@@ -59,6 +59,7 @@ from .utils import (
 )
 from .variables import (
     BuiltinVariable,
+    ByteArrayBuiltinVariable,
     DictBuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
@@ -4138,6 +4139,7 @@ Main entry point for looking up the trace rule (the Dynamo variable) for a given
 """
 
 BUILTIN_CALLABLES = {
+    bytearray: ByteArrayBuiltinVariable,
     dict: DictBuiltinVariable,
     getattr: GetAttrBuiltinVariable,
     hasattr: HasAttrBuiltinVariable,

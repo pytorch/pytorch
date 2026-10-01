@@ -624,6 +624,43 @@ class TestC10dTorchCommsNewGroupHelper(TestCase):
                 )
         return captured
 
+    def test_import_torchcomms_keeps_patched_new_comm(self):
+        # ROCm resolves nccl to rccl and that calls _import_torchcomms while
+        # new_comm is patched. The loader must not replace the patch.
+        sentinel = object()
+        fake = object()
+        saved = (
+            c10d._torchcomms_loaded,
+            c10d.new_comm,
+            c10d._BackendWrapper,
+            c10d._TorchCommsFlightRecorderHook,
+        )
+        try:
+            c10d._torchcomms_loaded = {
+                "is_backend_built": lambda backend: False,
+                "is_backend_registered": lambda backend: False,
+                "BackendWrapper": sentinel,
+                "new_comm": sentinel,
+                "FlightRecorderHook": sentinel,
+            }
+            c10d.new_comm = fake
+            c10d._BackendWrapper = None
+            c10d._TorchCommsFlightRecorderHook = None
+            c10d._import_torchcomms()
+            self.assertIs(c10d.new_comm, fake)
+            self.assertIs(c10d._BackendWrapper, sentinel)
+
+            c10d.new_comm = None
+            c10d._import_torchcomms()
+            self.assertIs(c10d.new_comm, sentinel)
+        finally:
+            (
+                c10d._torchcomms_loaded,
+                c10d.new_comm,
+                c10d._BackendWrapper,
+                c10d._TorchCommsFlightRecorderHook,
+            ) = saved
+
     def test_new_comm_gets_indexed_device_id(self):
         # A subgroup's group-local rank differs from the rank's physical device,
         # so new_comm must receive device_id (WITH index), not a device-type-only

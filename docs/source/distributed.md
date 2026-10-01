@@ -2249,3 +2249,91 @@ This module is experimental and subject to change.
 ```{eval-rst}
 .. py:module:: torch.distributed.checkpoint.state_dict
 ```
+
+```{eval-rst}
+
+One-sided tensor transports (experimental)
+--------------------------------------------------
+
+``torch.distributed._transport`` moves registered tensor byte ranges between
+independently managed workers. It does not require a process group, global rank
+assignment, or matching receives.
+
+An endpoint connects to one peer. Exchange ``bind()`` bytes and remote memory
+descriptors through a trusted application control plane. Exchange descriptors only with authorized peers. A write copies from a local view to the remote base; a read
+copies from the remote base to a writable local view. Offsets and lengths are bytes;
+shape and dtype agreement is the application's responsibility.
+
+Synchronous reads/writes return zero; ``async_op=True`` returns
+:class:`torch.distributed.Work`. Successful completion means the transfer completed,
+not that the remote application consumed or acknowledged the data. Asyncio callers
+can use ``read_async``, ``write_async``, or ``wait_all``. Registration remains valid
+until unregistration or close, and tensors must not be resized or have their storage replaced.
+
+CUDA stream semantics, graph capture, tracing, batching, remote slicing, and
+rank-based bootstrap helpers are outside this initial API. Rank-to-endpoint
+lookup belongs in a separate control-plane adapter. Descriptor classes define explicit ``serialize()``/``deserialize()`` methods.
+The built-in backends declare their fields in a versioned JSON envelope; binary
+metadata is base64-encoded. Unknown fields, versions, backends, and invalid field
+types are rejected. Tensor contents and native handles are never serialized.
+
+.. autofunction:: torch.distributed._transport.new_transport
+.. autoclass:: torch.distributed._transport.Transport
+   :members:
+.. autoclass:: torch.distributed._transport.Memory
+   :members:
+.. autoclass:: torch.distributed._transport.MemoryView
+   :members:
+.. autoclass:: torch.distributed._transport.MutableMemoryView
+.. autoclass:: torch.distributed._transport.RemoteBuffer
+.. autofunction:: torch.distributed._transport.wait_all
+.. autofunction:: torch.distributed._transport.available_transports
+.. autofunction:: torch.distributed._transport.register_transport
+
+NIXL backend
+~~~~~~~~~~~~
+
+The initial backend is NIXL, installed separately with ``pip install nixl``.
+Its default UCX plugin supports CPU and CUDA memory, subject to the installed
+NIXL/UCX build and hardware.
+
+``unregister_memory(memory)`` deregisters a local allocation without closing the
+transport. Wait for local transfers first and coordinate with peers to stop remote
+access; the backend cannot detect incoming DMA. All handles sharing a registration,
+including previously created views and exported descriptors, become invalid.
+Register again and exchange fresh descriptors before resuming transfers.
+
+NIXL transfers return Work objects that retain their request handles until
+completion. ``wait_all``, ``read_async``, and ``write_async`` await Work futures.
+The NIXL adapter resolves those futures by checking native transfer status.
+Each live transfer owns a distinct request handle.
+Independent requests may overlap; explicitly wait before issuing dependent or
+overlapping reads/writes. Completion ordering is not implicit.
+
+NIXL's default wait timeout is 30 seconds. ``timeout`` is in seconds; ``None``
+selects the backend default and zero polls without waiting. ``Work.wait`` instead
+takes a ``datetime.timedelta``; its zero default selects the transfer's timeout.
+Timeout and asyncio cancellation stop waiting, not DMA. The transport retains
+pending requests and buffers, even if the caller drops its Work. Wait again or
+successfully close before reusing buffers. Coordinate with peers before closing
+exposed memory; close only drains locally submitted operations.
+
+``NIXLTransport.close_async`` awaits pending transfers before native cleanup.
+A timed-out or cancelled close rejects new work and retains resources; retry
+close to finish cleanup. Registrations keep the transport alive even after its last outgoing transfer,
+because peers may still access exposed memory. Forgotten registrations may retain
+resources indefinitely:
+call ``unregister_memory`` or ``close`` after coordinating with peers.
+Checking ``is_completed`` also releases completed requests.
+For pending NIXL work, ``get_future`` requires a running asyncio loop; the loop
+must remain running to drive that future. Completed work needs no event loop.
+
+Native metadata, registration, request submission, status checks, and cleanup
+calls execute synchronously on the calling thread. Their timeouts bound lock
+acquisition and transfer completion waits, not execution inside NIXL. Python
+cannot interrupt a blocked native call, even when it releases the GIL.
+
+.. autoclass:: torch.distributed._transport.nixl.NIXLTransport
+   :members: close_async
+
+```

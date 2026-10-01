@@ -351,34 +351,34 @@ function install_spmd_types() {
 
 function install_flash_attn_cute() {
   echo "Installing FlashAttention 4 from PyPI..."
-  local flash_attn_package=flash-attn-4==4.0.0b17
+  local flash_attn_package=flash-attn-4==4.0.0b31
   if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
-    flash_attn_package="flash-attn-4[cu13]==4.0.0b17"
+    flash_attn_package="flash-attn-4[cu13]==4.0.0b31"
   fi
-  # QuACK 0.6.4 pins the CuTeDSL version accepted by torch._native.
+  # FA4 and QuACK support the CuTeDSL version accepted by torch._native.
   pip_install \
     "$flash_attn_package" \
-    quack-kernels==0.6.4 \
-    apache-tvm-ffi==0.1.11
+    quack-kernels==0.6.5 \
+    apache-tvm-ffi==0.1.12
   echo "FlashAttention 4 installation complete."
 }
 
 function install_cutlass_dsl() {
-  local cutlass_dsl_package=nvidia-cutlass-dsl==4.6.2
+  local cutlass_dsl_package=nvidia-cutlass-dsl==4.8.0
   if [[
     "${DESIRED_CUDA:-}" == cu13* ||
     "${DESIRED_CUDA:-}" == 13.* ||
     "${CUDA_VERSION:-}" == 13.* ||
     "${BUILD_ENVIRONMENT:-}" == *cuda13*
   ]]; then
-    cutlass_dsl_package="nvidia-cutlass-dsl[cu13]==4.6.2"
+    cutlass_dsl_package="nvidia-cutlass-dsl[cu13]==4.8.0"
   fi
 
   echo "Installing NVIDIA CUTLASS DSL from PyPI..."
   # Pin to a version accepted by torch._native's cutedsl version gate
   # (_CUTEDSL_REQUIRED_VERSIONS); apache-tvm-ffi is a required runtime dep of
   # the CuTeDSL op overrides but is not pulled in by nvidia-cutlass-dsl.
-  pip_install "$cutlass_dsl_package" apache-tvm-ffi==0.1.11
+  pip_install "$cutlass_dsl_package" apache-tvm-ffi==0.1.12
   echo "NVIDIA CUTLASS DSL installation complete."
 }
 
@@ -414,7 +414,7 @@ function install_cutlass_operators() {
   # Skip [torch] extra so pip does not pull PyPI torch over the CI build.
   # Pin 0.2.0: Operator.get_workspace_size returns AllocationRequirement
   # (size_bytes) and CompiledArtifact requires compiled_for.
-  pip_install nvidia-cutlass-operators==0.2.0
+  pip_install nvidia-cutlass-operators==0.3.0
 
   echo "CUTLASS Operators installation complete."
 }

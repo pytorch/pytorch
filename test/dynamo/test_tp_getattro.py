@@ -1942,6 +1942,67 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, backend="eager", fullgraph=True)()
 
+    def test_builtin_type_and_func_getattr_missing_attr(self):
+        # Issue #198197: getattr on builtin types and functions must raise
+        # observed AttributeError when the attribute is missing.
+        missing_attr = "__nonexistent__"
+        pos_type_attr = "from_bytes"
+        pos_func_attr = "__name__"
+
+        def try_getattr(obj, name):
+            try:
+                getattr(obj, name)
+                return "present"
+            except AttributeError:
+                return "missing"
+
+        def try_load_attr_int():
+            try:
+                return int.__nonexistent__
+            except AttributeError:
+                return "missing"
+
+        def try_load_attr_len():
+            try:
+                return len.__nonexistent__
+            except AttributeError:
+                return "missing"
+
+        def fn(x):
+            results = [
+                # Builtin types missing attributes
+                try_getattr(int, missing_attr),
+                try_getattr(str, missing_attr),
+                try_getattr(list, missing_attr),
+                try_getattr(dict, missing_attr),
+                try_getattr(type, missing_attr),
+                try_getattr(object, missing_attr),
+                try_getattr(float, missing_attr),
+                try_getattr(bool, missing_attr),
+                try_getattr(tuple, missing_attr),
+                try_getattr(set, missing_attr),
+                # Builtin functions missing attributes
+                try_getattr(len, missing_attr),
+                try_getattr(abs, missing_attr),
+                try_getattr(print, missing_attr),
+                # Direct LOAD_ATTR
+                try_load_attr_int(),
+                try_load_attr_len(),
+                # hasattr check
+                "present" if hasattr(int, missing_attr) else "missing",
+                "present" if hasattr(len, missing_attr) else "missing",
+                # Positive check on existing attributes
+                getattr(int, pos_type_attr) is not None,
+                getattr(len, pos_func_attr),
+            ]
+            return results
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        expected = fn(x)
+        actual = compiled_fn(x)
+        self.assertEqual(actual, expected)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

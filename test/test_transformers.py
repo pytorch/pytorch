@@ -67,6 +67,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_CK_SDPA,
+    PLATFORM_FUSED_ATTENTION_SUPPORTS_HDIM512,
     tf32_off,
     tf32_on_and_off,
     tf32_enabled,
@@ -5025,6 +5026,7 @@ class TestSDPAAccelerator(NNTestCase):
         max_diff = (out - out_contig).abs().mean()
         self.assertTrue(max_diff.item() < 1e-7)
 
+    @unittest.skipIf(not PLATFORM_FUSED_ATTENTION_SUPPORTS_HDIM512, "hdim=512 fused attention is unsupported.")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     def test_mem_eff_attention_single_query_tail_mask(self, device):
         seq_len, num_heads, head_dim = 289, 16, 512
@@ -5041,6 +5043,8 @@ class TestSDPAAccelerator(NNTestCase):
 
         self.assertEqual(actual, expected, atol=2e-2, rtol=2e-2)
 
+    @unittest.skipIf(not PLATFORM_FUSED_ATTENTION_SUPPORTS_HDIM512, "hdim=512 fused attention is unsupported.")
+    @unittest.skipIf(not SM80OrLater, "bfloat16 requires SM80 or later")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @unittest.skipIf(not SM80OrLater, "bfloat16 requires SM80 or later")
     @parametrize("kv_len,num_heads,is_causal", [(289, 40, False), (400, 16, True)])
