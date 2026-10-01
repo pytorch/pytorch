@@ -1,10 +1,12 @@
-"""Annotate c10d collectives captured into a CUDA graph with their process group.
+"""Annotate c10d collectives with their process group.
 
 In eager mode Kineto copies the ``record_param_comms`` metadata of a collective
-onto the kernels it launched. A replayed graph has no CPU op to copy from, so its
-NCCL kernels carry no process group. ``torch.cuda.graph(..., enable_annotations=True)``
-installs these hooks for the length of the capture, so the collective kernels are
-tagged through :func:`torch.cuda.graph_annotations.mark_kernels` with the same fields.
+onto the kernels it launched. A replayed graph has no CPU op to copy from, and
+Cuspy does not see ``record_param_comms`` at all, so in both cases the NCCL kernels
+carry no process group. ``torch.cuda.graph(..., enable_annotations=True)`` installs
+these hooks for the length of the capture, tagging the collective kernels through
+:func:`torch.cuda.graph_annotations.mark_kernels`; a Cuspy profiling session
+installs them while it runs, tagging eager kernels through its observer.
 """
 
 from __future__ import annotations
@@ -18,7 +20,10 @@ from torch.cuda._graph_annotations import mark_kernels
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from contextlib import AbstractContextManager
+
+    _Annotate = Callable[[dict[str, Any]], AbstractContextManager[None]]
 
 
 # c10d runs hooks in ascending id order. Mirrored ids open these scopes after and
@@ -88,9 +93,16 @@ def collective_metadata(group: dist.ProcessGroup, args: PreHookArgs) -> dict[str
     return metadata
 
 
+def _mark_kernels(metadata: dict[str, Any]) -> AbstractContextManager[None]:
+    # Backward attribution would tag whatever autograd node launched the
+    # collective, not the collective itself.
+    return mark_kernels(metadata, backward=False)
+
+
 class _GroupHooks:
-    def __init__(self, group: dist.ProcessGroup) -> None:
+    def __init__(self, group: dist.ProcessGroup, annotate: _Annotate) -> None:
         self._group = group
+        self._annotate = annotate
         offset = next(_hook_offsets)
         self._pre_id = _HOOK_ID_BASE + offset
         self._post_id = -_HOOK_ID_BASE - offset
@@ -103,9 +115,7 @@ class _GroupHooks:
             raise
 
     def _pre(self, args: PreHookArgs) -> None:
-        # Backward attribution would tag whatever autograd node launched the
-        # collective, not the collective itself.
-        scope = mark_kernels(collective_metadata(self._group, args), backward=False)
+        scope = self._annotate(collective_metadata(self._group, args))
         scope.__enter__()
         self._scopes[args.op_id] = scope
 
@@ -124,15 +134,19 @@ class _GroupHooks:
 
 class CollectiveAnnotations:
     """Tags collectives on every process group that exists when it is created,
-    until :meth:`close`. Groups created afterwards are not hooked."""
+    until :meth:`close`. Groups created afterwards are not hooked.
 
-    def __init__(self) -> None:
+    ``annotate`` maps a collective's metadata to the scope its kernels launch in;
+    it defaults to :func:`~torch.cuda.graph_annotations.mark_kernels`.
+    """
+
+    def __init__(self, annotate: _Annotate = _mark_kernels) -> None:
         self._hooks: list[_GroupHooks] = []
         from torch.distributed.distributed_c10d import _world
 
         try:
             for group in list(_world.pg_map):
-                self._hooks.append(_GroupHooks(group))
+                self._hooks.append(_GroupHooks(group, annotate))
         except BaseException:
             self.close()
             raise

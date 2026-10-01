@@ -1,12 +1,24 @@
 # Owner(s): ["oncall: distributed"]
 
+import gzip
+import json
+import os
 from unittest import mock
 
 import torch
 import torch.distributed as dist
 from torch.distributed._cuda_graph_annotations import CollectiveAnnotations
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.testing._internal.common_cuda import TEST_CUDA_GRAPH_TOOLS_ID
+from torch.profiler import (
+    CuspyConfig,
+    profile,
+    ProfilerActivity,
+    ProfilerActivityConfig,
+)
+from torch.testing._internal.common_cuda import (
+    TEST_CUDA_GRAPH_TOOLS_ID,
+    TEST_CUPTI_V13_3,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     skip_if_lt_x_gpu,
@@ -15,6 +27,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
     skipIfRocm,
+    TemporaryFileName,
 )
 
 
@@ -95,6 +108,20 @@ class TestCollectiveMetadata(MultiProcContinuousTest):
         self.assertNotIn("Seq", send)
         self.assertNotIn("Seq", recv)
 
+    def test_custom_annotate(self):
+        recorded = []
+
+        def annotate(metadata):
+            recorded.append(metadata["Collective name"])
+            return mock.MagicMock()
+
+        annotations = CollectiveAnnotations(annotate)
+        try:
+            dist.all_reduce(torch.ones(1))
+        finally:
+            annotations.close()
+        self.assertEqual(recorded, ["allreduce"])
+
     def test_close_unregisters_hooks(self):
         with mock.patch(
             "torch.distributed._cuda_graph_annotations.mark_kernels"
@@ -168,6 +195,69 @@ class TestCollectiveGraphAnnotations(MultiProcContinuousTest):
         self.assertEqual(
             self._record_during_capture(annotation_config={"collectives": False}), []
         )
+
+
+class TestCollectiveCuspyAnnotations(MultiProcContinuousTest):
+    world_size = 2
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl"
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    def _profile_all_reduce(self, **cuspy_kwargs):
+        torch.cuda.set_device(self.device)
+        x = torch.ones(1024, device=self.device)
+        dist.all_reduce(x)
+        torch.cuda.synchronize()
+        cuda_config = ProfilerActivityConfig(
+            profiler_configs=[CuspyConfig(**cuspy_kwargs)]
+        )
+        with TemporaryFileName(mode="w+") as trace_path:
+            with profile(
+                activities=[ProfilerActivity.CPU, {ProfilerActivity.CUDA: cuda_config}]
+            ) as prof:
+                dist.all_reduce(x)
+                torch.cuda.synchronize()
+            prof.export_chrome_trace(trace_path)
+            gz_path = trace_path + ".gz"
+            if os.path.exists(gz_path):
+                with gzip.open(gz_path, "rt") as f:
+                    events = json.load(f)["traceEvents"]
+            else:
+                with open(trace_path) as f:
+                    events = json.load(f)["traceEvents"]
+        return [
+            e
+            for e in events
+            if e.get("cat") == "kernel" and "nccl" in e.get("name", "").lower()
+        ]
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_eager_collective_is_annotated(self):
+        if not TEST_CUPTI_V13_3:
+            self.skipTest("requires libcupti >= 13.3")
+        pg = _get_default_group()
+        kernels = self._profile_all_reduce()
+        self.assertTrue(kernels, "no NCCL kernel in the trace")
+        for kernel in kernels:
+            self.assertEqual(kernel["args"]["Collective name"], "allreduce")
+            self.assertEqual(kernel["args"]["Process Group Name"], pg.group_name)
+            self.assertEqual(kernel["args"]["In msg nelems"], 1024)
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_opt_out(self):
+        if not TEST_CUPTI_V13_3:
+            self.skipTest("requires libcupti >= 13.3")
+        kernels = self._profile_all_reduce(annotate_collectives=False)
+        self.assertTrue(kernels, "no NCCL kernel in the trace")
+        for kernel in kernels:
+            self.assertNotIn("Collective name", kernel["args"])
 
 
 if __name__ == "__main__":
