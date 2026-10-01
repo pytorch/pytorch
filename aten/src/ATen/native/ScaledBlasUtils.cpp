@@ -246,6 +246,29 @@ bool check_mxfp4_recipe(
   return true;
 }
 
+bool is_mnk4_input_type(c10::ScalarType type) {
+  return type == ScalarType::Float8_e4m3fn ||
+      type == ScalarType::Float8_e5m2;
+}
+
+bool check_mnk4_recipe(
+    ScalingType expected_recipe,
+    c10::ScalarType type_a,
+    std::vector<ScalingType>& recipe_a,
+    ArrayRef<Tensor>& scales_a,
+    c10::ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    ArrayRef<Tensor>& scales_b) {
+  if (!is_mnk4_input_type(type_a) || !is_mnk4_input_type(type_b)) {
+    return false;
+  }
+  if (scales_a.size() != 1 || recipe_a.size() != 1 || scales_b.size() != 1 || recipe_b.size() != 1) {
+    return false;
+  }
+  return recipe_a[0] == expected_recipe && scales_a[0].scalar_type() == ScalarType::Int &&
+      recipe_b[0] == expected_recipe && scales_b[0].scalar_type() == ScalarType::Int;
+}
+
 namespace {
 
 bool is_fp8_or_fp4_type(ScalarType dtype) {
@@ -369,6 +392,10 @@ void validate_scaled_mm_v2_inputs(
   const bool is_nv_1x16 = is_single_recipe(
       recipe_a, recipe_b, ScalingType::BlockWise1x16, ScalingType::BlockWise1x16);
   const bool is_nv_2lvl = is_two_level_nvfp4(recipe_a, recipe_b);
+  const bool is_mnk4_1x32 = is_single_recipe(
+      recipe_a, recipe_b, ScalingType::BlockWise1x32MNK4, ScalingType::BlockWise1x32MNK4);
+  const bool is_mnk4_1x128 = is_single_recipe(
+      recipe_a, recipe_b, ScalingType::BlockWise1x128MNK4, ScalingType::BlockWise1x128MNK4);
   // BlockWise1x128/128x128 combinations (DeepSeek-style) are deliberately
   // not validated here: they require SM90 and fail with NotImplementedError
   // from the kernel on other archs, which tests rely on.
@@ -494,6 +521,22 @@ void validate_scaled_mm_v2_inputs(
             scale_b[1].scalar_type() == ScalarType::Float,
         "For Blockwise scaling scale_b should have ", expected_b_elems,
         " elements, got: ", scale_b[0].sym_numel());
+  } else if (is_mnk4_1x32 || is_mnk4_1x128) {
+    const auto packed_k = is_mnk4_1x32 ? 128 : 512;
+    const auto expected_a_elems = sym_round_up(M, 4) * sym_ceil_div(K_unpacked, packed_k);
+    const auto expected_b_elems = sym_round_up(N, 4) * sym_ceil_div(K_unpacked, packed_k);
+    TORCH_CHECK_VALUE(
+        scale_a.size() == 1 && scale_a[0].sym_numel() == expected_a_elems &&
+            scale_a[0].scalar_type() == ScalarType::Int && scale_a[0].is_contiguous(),
+        "For packed MNxK4 scaling scale_a should be a contiguous int32 tensor with ",
+        expected_a_elems, " elements, got ",
+        scale_a.empty() ? c10::SymInt(0) : scale_a[0].sym_numel());
+    TORCH_CHECK_VALUE(
+        scale_b.size() == 1 && scale_b[0].sym_numel() == expected_b_elems &&
+            scale_b[0].scalar_type() == ScalarType::Int && scale_b[0].is_contiguous(),
+        "For packed MNxK4 scaling scale_b should be a contiguous int32 tensor with ",
+        expected_b_elems, " elements, got ",
+        scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel());
   } else if (!is_deepseek) {
     // Match the kernel's `find_scaled_gemm_impl` fall-through so unrecognized
     // recipe combinations fail at trace time rather than at kernel dispatch.

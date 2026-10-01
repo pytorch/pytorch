@@ -130,6 +130,12 @@ std::optional<CublasLtGroupedScaleSpec> get_cublaslt_grouped_scale_spec(
           at::kFloat,
           "float32",
           "GroupWise"};
+    case ScalingType::BlockWise1x32MNK4:
+      return CublasLtGroupedScaleSpec{
+          CublasGroupedScaleLayout::Vec32MnK4UE8M0,
+          at::kInt,
+          "int32",
+          "BlockWise1x32MNK4"};
     case ScalingType::BlockWise1x16:
       return CublasLtGroupedScaleSpec{
           CublasGroupedScaleLayout::Vec16UE4M3,
@@ -142,6 +148,12 @@ std::optional<CublasLtGroupedScaleSpec> get_cublaslt_grouped_scale_spec(
           at::kFloat,
           "float32",
           "BlockWise1x128"};
+    case ScalingType::BlockWise1x128MNK4:
+      return CublasLtGroupedScaleSpec{
+          CublasGroupedScaleLayout::Vec128MnK4UE8M0,
+          at::kInt,
+          "int32",
+          "BlockWise1x128MNK4"};
     case ScalingType::BlockWise128x128:
       return CublasLtGroupedScaleSpec{
           CublasGroupedScaleLayout::Block128x128F32,
@@ -321,7 +333,9 @@ bool should_use_scaled_cublaslt_grouped_gemm(
   const auto dprops = at::cuda::getCurrentDeviceProperties();
   if (uses_hopper_block) {
     valid_device = dprops->major == 9;
-  } else if (*scaling_a == ScalingType::BlockWise1x16) {
+  } else if (*scaling_a == ScalingType::BlockWise1x32MNK4 ||
+      *scaling_a == ScalingType::BlockWise1x128MNK4 ||
+      *scaling_a == ScalingType::BlockWise1x16) {
     valid_device = dprops->major == 10 || dprops->major == 11;
   } else {
     valid_device = dprops->major >= 9 && dprops->major <= 11;

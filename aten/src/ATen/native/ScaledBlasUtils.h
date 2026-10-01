@@ -28,6 +28,8 @@ enum class ScaledGemmImplementation {
   NVFP4_NVFP4 = 7,
   NVFP4_NVFP4_SINGLE_SCALE = 8,
   MXFP4_MXFP4 = 9,
+  MNK4_1x32 = 10,
+  MNK4_1x128 = 11,
 };
 
 /**
@@ -175,6 +177,19 @@ bool check_mxfp8_recipe(
  */
 TORCH_API
 bool check_mxfp4_recipe(
+    c10::ScalarType type_a,
+    std::vector<ScalingType>& recipe_a,
+    ArrayRef<Tensor>& scales_a,
+    c10::ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    ArrayRef<Tensor>& scales_b);
+
+TORCH_API
+bool is_mnk4_input_type(c10::ScalarType type);
+
+TORCH_API
+bool check_mnk4_recipe(
+    ScalingType expected_recipe,
     c10::ScalarType type_a,
     std::vector<ScalingType>& recipe_a,
     ArrayRef<Tensor>& scales_a,
