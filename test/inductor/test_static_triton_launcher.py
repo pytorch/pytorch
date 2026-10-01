@@ -781,6 +781,46 @@ def kernel_many_args(out_tensor, {decl}):
         self.assertIsNone(owner_ref())
         self.assertEqual(unloaded_modules, [0xC0FFEE])
 
+    @skipIfXpu(msg="Tests CUDA graph capture")
+    def test_finalize_during_cuda_graph_capture_defers_unload(self):
+        """
+        Finalizing static kernels while a CUDA graph is being captured must not
+        unload their modules then: cuModuleUnload fails during capture and
+        invalidates it. The modules are unloaded once the capture ends.
+        """
+
+        @triton.jit
+        def add_value(ptr, VALUE: tl.constexpr):
+            tl.store(ptr, tl.load(ptr) + VALUE)
+
+        buf = torch.zeros(1, device=GPU_TYPE)
+        launchers = [
+            self._make_launcher(add_value[(1,)](buf, VALUE=value)) for value in (1, 2)
+        ]
+        modules = [launcher.module for launcher in launchers]
+        real_unload = launchers[0].C_impl._unload_kernel
+        unloaded = []
+
+        def unload(mod):
+            unloaded.append(mod)
+            real_unload(mod)
+
+        for launcher in launchers:
+            launcher.C_impl = SimpleNamespace(_unload_kernel=unload)
+        del launcher
+
+        x = torch.zeros(8, device=GPU_TYPE)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, capture_error_mode="thread_local"):
+            launchers.clear()
+            unloaded_during_capture = list(unloaded)
+            y = x + 1
+        graph.replay()
+
+        self.assertEqual(y, x + 1)
+        self.assertEqual(unloaded_during_capture, [])
+        self.assertEqual(sorted(unloaded), sorted(modules))
+
 
 @requires_gpu_and_triton
 @torch._inductor.config.patch(
