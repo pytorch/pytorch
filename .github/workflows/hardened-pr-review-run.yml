@@ -738,6 +738,12 @@ jobs:
           PR_REVIEW_FILES_FILE: /tmp/pr-files.txt
           PR_REVIEW_SCRIPTS_DIR: ${{ github.workspace }}/trusted/scripts/pr_review
           PR_REVIEW_HOOK_LOG: ${{ runner.temp }}/pr-review-hooks.log
+          # Sub-agents run on the review model, even when a spawn asks for
+          # another: without FORCE an explicit `model: haiku` wins over
+          # CLAUDE_CODE_SUBAGENT_MODEL (checked on Claude Code 2.1.280). One
+          # model also keeps emit_row.py's single `model` column true.
+          CLAUDE_CODE_SUBAGENT_MODEL: ${{ env.REVIEW_MODEL }}
+          CLAUDE_CODE_SUBAGENT_MODEL_FORCE: "1"
         uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507 # Claude Code 2.1.280
         with:
           use_bedrock: "true"
@@ -797,6 +803,15 @@ jobs:
           # `pr-review/**` does not match `pr-review-readiness/`; both are
           # needed.
           #
+          # `Agent` lets the review spawn pr-review's sub-agents (fan-out and
+          # per-finding fact-checks). They share this session's permission
+          # rules and hooks. Checked locally on Claude Code 2.1.280 with the same
+          # flag shapes: the deny list removed Bash from a sub-agent's tools, a
+          # deny rule refused its Read, it got the same Read outcomes as the
+          # main session, and restrict-write.sh's hook fired on its Write. That
+          # hook refuses every sub-agent write, so only the reviewer writes the
+          # verdict.
+          #
           # `--setting-sources user`, and the value is load-bearing in BOTH
           # directions. It must not be empty: the action's parser treats a flag
           # whose next token is falsy as a boolean and records `null`, and its
@@ -816,8 +831,8 @@ jobs:
           # `pr/` needs none: it sits under the action's cwd.
           claude_args: |
             --model ${{ env.REVIEW_MODEL }}
-            --allowedTools "Read(/${{ github.workspace }}/pr/**),Grep(/${{ github.workspace }}/pr/**),Glob(/${{ github.workspace }}/pr/**),Read(/${{ github.workspace }}/trusted/.claude/skills/pr-review-readiness/**),Read(/${{ github.workspace }}/trusted/.claude/skills/pr-review/**),Read(//tmp/pr-diff.txt),Read(//tmp/pr-files.txt),Read(/${{ runner.temp }}/pr-review-findings.json),Write"
-            --disallowedTools "Bash,Edit,NotebookEdit,WebFetch,WebSearch,Task"
+            --allowedTools "Read(/${{ github.workspace }}/pr/**),Grep(/${{ github.workspace }}/pr/**),Glob(/${{ github.workspace }}/pr/**),Read(/${{ github.workspace }}/trusted/.claude/skills/pr-review-readiness/**),Read(/${{ github.workspace }}/trusted/.claude/skills/pr-review/**),Read(//tmp/pr-diff.txt),Read(//tmp/pr-files.txt),Read(/${{ runner.temp }}/pr-review-findings.json),Write,Agent"
+            --disallowedTools "Bash,Edit,NotebookEdit,WebFetch,WebSearch"
             --setting-sources user
             --add-dir ${{ runner.temp }}
             --strict-mcp-config

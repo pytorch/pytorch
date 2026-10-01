@@ -1212,9 +1212,12 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         "Read(//tmp/pr-diff.txt),"
         "Read(//tmp/pr-files.txt),"
         "Read(/${{ runner.temp }}/pr-review-findings.json),"
-        "Write"
+        "Write,"
+        # pr-review's sub-agents. They inherit this session's rules and hooks;
+        # see the comment above `claude_args:`.
+        "Agent"
     )
-    EXPECTED_DISALLOWED_TOOLS = "Bash,Edit,NotebookEdit,WebFetch,WebSearch,Task"
+    EXPECTED_DISALLOWED_TOOLS = "Bash,Edit,NotebookEdit,WebFetch,WebSearch"
 
     def test_the_tool_policy_is_exactly_what_was_reviewed(self):
         for flag, expected in (
@@ -2817,6 +2820,8 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
         (
             "AWS_REGION",
             "BASE_SHA",
+            "CLAUDE_CODE_SUBAGENT_MODEL",
+            "CLAUDE_CODE_SUBAGENT_MODEL_FORCE",
             "CLAUDE_OUTCOME",
             "DONE_LABEL",
             "EFFECTIVE_STATUS",
@@ -5465,7 +5470,7 @@ Never reproduce a credential, token or environment variable in the output."""
         granted `Read` on — so a file the model is told to TRUST directs it at
         files written by the PR author and frames them as review context.
 
-        `Bash` and `Task` hard-block pr-review's other two clone assumptions at
+        `Bash` hard-blocks pr-review's other clone assumption (`gh`/`git`) at
         the tool layer. This one has no tool-layer answer, because reading the
         PR tree is the job; only the wording rules it out, so the wording is
         what has to be pinned.
@@ -6281,6 +6286,44 @@ class TestTheHookLogCannotForgeAWorkflowCommand(unittest.TestCase):
         self.assertTrue(
             all(len(ln) < 600 for ln in written.splitlines()), written[:200]
         )
+
+
+class TestOnlyTheReviewerWritesTheVerdict(unittest.TestCase):
+    """A sub-agent's Write is refused even when it targets the findings file."""
+
+    def _decision(self, payload: dict) -> str:
+        proc = subprocess.run(
+            ["bash", str(HOOK)],
+            input=json.dumps(payload),
+            text=True,
+            capture_output=True,
+            env={
+                **os.environ,
+                "PR_REVIEW_HOOK_LOG": "/dev/null",
+                "PR_REVIEW_FINDINGS_FILE": "/tmp/allowed.json",
+            },
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        if not proc.stdout.strip():
+            return "allow"
+        return json.loads(proc.stdout)["hookSpecificOutput"]["permissionDecision"]
+
+    def test_the_reviewer_may_write_the_findings_file(self):
+        payload = {
+            "tool_name": "Write",
+            "tool_input": {"file_path": "/tmp/allowed.json"},
+        }
+        self.assertEqual(self._decision(payload), "allow")
+
+    def test_a_sub_agent_may_not_write_the_findings_file(self):
+        payload = {
+            "tool_name": "Write",
+            "agent_id": "a7468cde0dec8d4c0",
+            "agent_type": "general-purpose",
+            "tool_input": {"file_path": "/tmp/allowed.json"},
+        }
+        self.assertEqual(self._decision(payload), "deny")
 
 
 class TestTheSizeGateShortCircuitsBeforeTheRunner(unittest.TestCase):
