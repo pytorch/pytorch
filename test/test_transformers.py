@@ -2025,7 +2025,9 @@ class TestSDPAFailureModes(NNTestCase):
             self.skipTest("sm80 or newer requires aligned mem efficient attention kernels")
 
         B, H, S, D = 6, 4, 64, 64
-        storage = torch.zeros(B * H * S * D + 4, dtype=torch.float32, device=device)
+        # Nonzero values: an all-zero QKV matches every backend even if a
+        # kernel reads the misaligned pointers incorrectly.
+        storage = torch.randn(B * H * S * D + 4, dtype=torch.float32, device=device)
         q = storage[1:1 + B * H * S * D].view(B, H, S, D)
         k = storage[2:2 + B * H * S * D].view(B, H, S, D)
         v = storage[3:3 + B * H * S * D].view(B, H, S, D)
