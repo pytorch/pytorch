@@ -1007,6 +1007,39 @@ function test_ghost_blocks_private_pool() {
   assertEqual(envs_false.length, 0, 'no pool envelopes when include_private_inactive=false');
 }
 
+function test_initial_pool_summary_follows_envelope() {
+  console.log('test_initial_pool_summary_follows_envelope');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 2048, frames: [], stream: 0, pool_id: [0, 0] },
+      { action: 'free_completed', addr: 0x1000, size: 2048, frames: [], stream: 0 },
+    ],
+    segments: [
+      { device: 0, address: 0x10000, total_size: 8192, segment_pool_id: [1, 1],
+        stream: 0, blocks: [
+          { address: 0x10000, requested_size: 1024, state: 'active_allocated', frames: [] },
+          { address: 0x10400, requested_size: 256, state: 'active_allocated', frames: [] },
+        ] },
+      { device: 0, address: 0x20000, total_size: 4096, segment_pool_id: [1, 2],
+        stream: 0, blocks: [
+          { address: 0x20000, requested_size: 512, state: 'active_allocated', frames: [] },
+        ] },
+    ],
+  });
+
+  for (const detail of [1, 2]) {
+    const result = process_alloc_data(snapshot, 0, false, detail, true);
+    const envelope = result.allocations_over_time.find(d => d.elem === 'pool:1,1,s0');
+    const drawn = detail === 1 ? 0 : 1024;
+    const summary = result.allocations_over_time.find(
+      d => d.opacity === 0.3 && d.size[0] === 1280 - drawn);
+    assertEqual(envelope.offsets[0], 4096, 'lower pool reservation moves the upper envelope');
+    assertEqual(summary.offsets[0], envelope.offsets[0] + drawn, 'summary follows its own envelope');
+    assert(summary.offsets[0] + summary.size[0] <= envelope.offsets[0] + envelope.size[0],
+      'summary remains inside the pool reservation');
+  }
+}
+
 function test_ghost_stripe_offset_with_multiple_pools() {
   console.log('test_ghost_stripe_offset_with_multiple_pools');
   // When multiple private pools have initially_allocated blocks, pool envelopes
@@ -1691,6 +1724,7 @@ test_ghost_blocks_not_created_for_traced_addrs();
 test_ghost_blocks_default_pool_collected();
 test_ghost_blocks_not_in_segment_mode();
 test_ghost_blocks_private_pool();
+test_initial_pool_summary_follows_envelope();
 test_ghost_stripe_offset_with_multiple_pools();
 test_full_snapshot_private_pools();
 test_full_snapshot_no_private_pools();

@@ -888,7 +888,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
         shift_above_pool_no_anim(pk, delta);
       }
     }
-    // Fix up pool stripe offsets again after reserved-based envelope growth
+    // Fix up pool stripe and summary offsets after reserved-based envelope growth.
     for (const pk in pools) {
       const p = pools[pk];
       if (!p.envelope_data) continue;
@@ -898,6 +898,9 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
         for (let i = 0; i < s.offsets.length; i++) {
           s.offsets[i] = env_offset + block.inner_offset;
         }
+      }
+      if (p.summarized_data) {
+        p.summarized_data.offsets.fill(env_offset + p.drawn_active);
       }
     }
   }
