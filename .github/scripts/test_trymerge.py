@@ -164,6 +164,7 @@ def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
             self.comment_id = 12345  # Set to non-zero value
             self.reason = "this is for testing"
             self.ignore_current = False
+            self.rebased = False
             self.check_mergeability = False
 
     return Object()
@@ -195,6 +196,7 @@ def mock_merge(
     timeout_minutes: int = 400,
     stale_pr_days: int = 3,
     ignore_current: bool = False,
+    rebased: bool = False,
 ) -> None:
     pass
 
@@ -794,6 +796,7 @@ class TestTryMerge(TestCase):
             dry_run=mock.ANY,
             skip_mandatory_checks=True,
             ignore_current=False,
+            rebased=False,
         )
 
     @mock.patch("trymerge.gh_get_pr_info", return_value=mock_gh_get_info())
@@ -809,6 +812,7 @@ class TestTryMerge(TestCase):
             dry_run=mock.ANY,
             skip_mandatory_checks=False,
             ignore_current=False,
+            rebased=False,
         )
 
     @mock.patch("trymerge.read_merge_rules", side_effect=mocked_read_merge_rules)
@@ -1978,7 +1982,12 @@ class TestDockerCiGates(TestCase):
         mock_get_ghstack_prs.assert_called_once_with(repo, top_pr, open_only=False)
         mock_check_docker_builds_ready.assert_called_once_with(lower_pr)
         top_pr.merge_changes_locally.assert_called_once_with(
-            repo, False, 1, ghstack_prs=ghstack_prs, ignore_current_checks=None
+            repo,
+            False,
+            1,
+            ghstack_prs=ghstack_prs,
+            ignore_current_checks=None,
+            rebased=False,
         )
 
 
@@ -3003,6 +3012,54 @@ class TestAdvisorNotRelated(TestCase):
         # The AI category is dropped from the fallback; FLAKY still applies.
         self.assertIsNone(classified["job"].classification)
         self.assertEqual(classified["flaky job"].classification, "FLAKY")
+
+
+class TestMergebotRebase(TestCase):
+    def _pr(self) -> Any:
+        pr = mock.MagicMock(spec=GitHubPR)
+        pr.org, pr.project, pr.pr_num = "pytorch", "pytorch", 1
+        pr.last_commit_sha.return_value = "head"
+        pr.is_mergebot_rebase_of.side_effect = (
+            lambda sha: GitHubPR.is_mergebot_rebase_of(pr, sha)
+        )
+        return pr
+
+    def _patch_push(self, actor: str | None, before: str, after: str) -> Any:
+        push = {
+            "actor": actor and {"login": actor},
+            "beforeCommit": {"oid": before},
+            "afterCommit": {"oid": after},
+        }
+        nodes = [push] if actor else []
+        rc = {
+            "data": {"repository": {"pullRequest": {"timelineItems": {"nodes": nodes}}}}
+        }
+        return mock.patch("trymerge.gh_graphql", return_value=rc)
+
+    def test_is_mergebot_rebase_of(self) -> None:
+        for actor, before, after, expected in [
+            ("pytorchmergebot", "orig", "head", True),
+            ("someone", "orig", "head", False),
+            ("pytorchmergebot", "other", "head", False),
+            ("pytorchmergebot", "orig", "other", False),
+            (None, "orig", "head", False),
+        ]:
+            with self._patch_push(actor, before, after):
+                self.assertEqual(self._pr().is_mergebot_rebase_of("orig"), expected)
+
+    def test_merge_changes_locally_accepts_mergebot_rebase(self) -> None:
+        pr = self._pr()
+        pr.get_commit_sha_at_comment.return_value = "orig"
+        pr.is_ghstack_pr.return_value = False
+        pr.gen_commit_message.return_value = "msg"
+        repo = mock.MagicMock(spec=GitRepo)
+        repo.fetch.side_effect = RuntimeError("stop after check")
+        with self._patch_push("pytorchmergebot", "orig", "head"):
+            with self.assertRaisesRegex(RuntimeError, "re-issue the merge command"):
+                GitHubPR.merge_changes_locally(pr, repo, comment_id=1)
+            with self.assertRaisesRegex(RuntimeError, "stop after check"):
+                GitHubPR.merge_changes_locally(pr, repo, comment_id=1, rebased=True)
+        repo.fetch.assert_called_once_with("head", "__pull-request-1__init__")
 
 
 if __name__ == "__main__":
