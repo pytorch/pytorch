@@ -1170,14 +1170,14 @@ Example:
       },
       py::arg("group_name"));
 
+  module.def(
+      "_set_gated_hooks_enabled",
+      &::c10d::ProcessGroup::setGatedHooksEnabled,
+      py::arg("enabled"),
+      R"(Enable or disable the gated pre/post hooks of every process group.
+Returns the previous value, for the caller to restore.)");
+
   // Remove all process groups from the native registry
-  module.def(
-      "_enable_gated_hooks",
-      &::c10d::ProcessGroup::enableGatedHooks,
-      R"(Enable the gated pre/post hooks of every process group, until a
-matching ``_disable_gated_hooks``. Calls nest.)");
-  module.def(
-      "_disable_gated_hooks", &::c10d::ProcessGroup::disableGatedHooks);
   module.def("_unregister_all_process_groups", []() {
     return ::c10d::unregister_all_process_groups();
   });
@@ -3101,7 +3101,7 @@ Arguments:
               py::arg("gated") = false,
               R"(Register a pre-hook, called before each collective is issued.
 A gated hook is called only while gated hooks are enabled, see
-``_enable_gated_hooks``.)")
+``_set_gated_hooks_enabled``.)")
           .def(
               "unregister_pre_hook",
               &::c10d::ProcessGroup::unregisterPreHook,

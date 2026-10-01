@@ -39,23 +39,16 @@ c10::intrusive_ptr<Backend::Options> cloneOptions(
   return copy;
 }
 
-std::atomic<int64_t> gatedHookEnables{0};
+std::atomic<bool> gatedHooksEnabled_{false};
 
 } // namespace
 
-void ProcessGroup::enableGatedHooks() {
-  gatedHookEnables.fetch_add(1, std::memory_order_relaxed);
-}
-
-void ProcessGroup::disableGatedHooks() {
-  if (gatedHookEnables.fetch_sub(1, std::memory_order_relaxed) <= 0) {
-    gatedHookEnables.fetch_add(1, std::memory_order_relaxed);
-    TORCH_CHECK(false, "disableGatedHooks() without enableGatedHooks()");
-  }
+bool ProcessGroup::setGatedHooksEnabled(bool enabled) {
+  return gatedHooksEnabled_.exchange(enabled, std::memory_order_relaxed);
 }
 
 bool ProcessGroup::gatedHooksEnabled() {
-  return gatedHookEnables.load(std::memory_order_relaxed) > 0;
+  return gatedHooksEnabled_.load(std::memory_order_relaxed);
 }
 
 std::string opTypeToString(OpType opType) {
