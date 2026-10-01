@@ -152,13 +152,6 @@ DDP_RANK_DEVICES = ["cuda", "xpu"]
 HAS_ACCELERATOR = TEST_CUDA or TEST_HPU or TEST_XPU
 
 
-def _run_with_nested_graph_breaks(
-    fn: Callable[..., Any], *args: Any, **kwargs: Any
-) -> Any:
-    with torch._dynamo.config.patch(nested_graph_breaks=True):
-        return fn(*args, **kwargs)
-
-
 class TestSkip(NamedTuple):
     exit_code: int
     message: str
@@ -1018,11 +1011,10 @@ class MultiProcessTestCase(TestCase):
 
     def _start_processes(self, proc) -> None:
         self.processes = []
-        worker_target = partial(_run_with_nested_graph_breaks, self.__class__._run)
         for rank in range(int(self.world_size)):
             parent_conn, child_conn = torch.multiprocessing.Pipe()
             process = proc(
-                target=worker_target,
+                target=self.__class__._run,
                 name="process " + str(rank),
                 args=(
                     rank,
@@ -1474,12 +1466,8 @@ def spawn_threads_and_init_comms(
                     c10d.destroy_process_group()
 
         threads = []
-        worker_target = partial(_run_with_nested_graph_breaks, worker)
         for rank in range(world_size):
-            t = threading.Thread(
-                target=worker_target,
-                args=(rank, world, global_store),
-            )
+            t = threading.Thread(target=worker, args=(rank, world, global_store))
             t.start()
             threads.append(t)
 
@@ -1591,11 +1579,9 @@ class MultiThreadedTestCase(TestCase):
         if not world_is_valid():
             raise RuntimeError("Invalid world")
 
-        worker_target = partial(_run_with_nested_graph_breaks, self.__class__._run)
         for rank in range(self.world_size):
             t = threading.Thread(
-                target=worker_target,
-                args=(test_name, rank, self.world_size),
+                target=self.__class__._run, args=(test_name, rank, self.world_size)
             )
             t.start()
             self.threads.append(t)
@@ -2072,12 +2058,11 @@ class MultiProcContinuousTest(TestCase):
             # The start method has already been set
             pass
 
-        worker_target = partial(_run_with_nested_graph_breaks, cls._worker_loop)
         for rank in range(int(world_size)):
             task_queue = torch.multiprocessing.Queue()
             completion_queue = torch.multiprocessing.Queue()
             process = torch.multiprocessing.Process(
-                target=worker_target,
+                target=cls._worker_loop,
                 name="process " + str(rank),
                 daemon=True,  # so that child processes will exit if parent decides to terminate
                 args=(rank, world_size, cls.rdvz_file, task_queue, completion_queue),
