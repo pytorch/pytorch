@@ -437,7 +437,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
   for (const e of snapshot.device_traces[device]) {
     switch (e.action) {
       case alloc:
-        elements.push(e);
+        elements.push({...e, annotations: [...(e.annotations ?? [])]});
         addr_to_alloc[e.addr] = elements.length - 1;
         actions.push(elements.length - 1);
         break;
@@ -459,7 +459,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
           // Unmatched free: alloc happened before recording (or was evicted
           // from the ring buffer). Create a new element from the free event;
           // its stack trace will show the free site, not the alloc site.
-          elements.push(e);
+          elements.push({...e, annotations: [...(e.annotations ?? [])]});
           initially_allocated.push(elements.length - 1);
           actions.push(elements.length - 1);
         }

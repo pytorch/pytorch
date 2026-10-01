@@ -277,6 +277,34 @@ function test_summarized_only_allocation() {
   assertEqual(summary.size.join(','), '512,512', 'summary retains its size to the end');
 }
 
+function test_annotations_do_not_accumulate_on_rerender() {
+  console.log('test_annotations_do_not_accumulate_on_rerender');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 512, frames: [], stream: 0,
+        pool_id: [1, 1], annotations: ['existing'] },
+      { action: 'annotate', addr: 0x1000, user_metadata: 'first allocation' },
+      { action: 'free_completed', addr: 0x1000, size: 512, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1000, size: 1024, frames: [], stream: 0, pool_id: [1, 1] },
+      { action: 'annotate', addr: 0x1000, user_metadata: 'second allocation' },
+      { action: 'annotate', addr: 0x1000, user_metadata: 'second allocation' },
+      { action: 'free_completed', addr: 0x3000, size: 256, frames: [], stream: 0 },
+    ],
+  });
+  const original = JSON.stringify(snapshot);
+
+  for (const include_private of [false, true, false]) {
+    const result = process_alloc_data(snapshot, 0, false, 15000, include_private);
+    const first = result.context_for_id(0);
+    const second = result.context_for_id(1);
+    assertContains(first, 'Annotations:\n  existing\n  first allocation', 'existing annotations are preserved');
+    assertEqual((first.match(/first allocation/g) || []).length, 1, 'annotation is added once per render');
+    assertEqual((second.match(/second allocation/g) || []).length, 2, 'distinct identical annotations are preserved');
+    assert(!second.includes('first allocation'), 'annotations do not follow reused addresses');
+    assertEqual(JSON.stringify(snapshot), original, 'processing leaves the input snapshot unchanged');
+  }
+}
+
 function test_mixed_pool_and_nonpool() {
   console.log('test_mixed_pool_and_nonpool');
   // Mix of pool and non-pool allocations
@@ -1632,6 +1660,7 @@ test_non_pool_free_without_alloc();
 test_peak_independent_of_detail();
 test_global_summary_coordinates();
 test_summarized_only_allocation();
+test_annotations_do_not_accumulate_on_rerender();
 test_mixed_pool_and_nonpool();
 test_include_private_inactive_false_ignores_pools();
 test_formatSize_bytes();
