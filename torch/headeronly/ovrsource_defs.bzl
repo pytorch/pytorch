@@ -52,6 +52,7 @@ def define_ovrsource_targets():
         ("#cmakedefine C10_USE_NUMA", ""),
         ("#cmakedefine C10_USE_MSVC_STATIC_RUNTIME", ""),
         ("#cmakedefine C10_USE_ROCM_KERNEL_ASSERT", ""),
+        ("#cmakedefine C10_USE_ABSL_LOG", ""),
     ]
 
     mobile_c10_cmake_defines = [
