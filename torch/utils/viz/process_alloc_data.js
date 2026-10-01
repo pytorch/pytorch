@@ -34,9 +34,9 @@
 //
 //   "segment_unmap"  - Physical pages unmapped from an expandable segment via cuMemUnmap.
 //                      Virtual address range retained, physical memory returned to OS.
-//                      Only with expandable segments. Causes "pool_id unknown" for any
-//                      trace events whose addresses fall in the unmapped range, since
-//                      the segment no longer exists at snapshot time.
+//                      For legacy trace events without pool_id, addresses in the
+//                      unmapped range have unknown pool ownership because the segment
+//                      no longer exists at snapshot time.
 //                      Recorded in unmap_block() (CUDACachingAllocator.cpp:3790).
 //
 //   "snapshot"       - A call to torch.cuda.memory._snapshot(). Timestamp marker to
@@ -59,8 +59,9 @@
 //       alloc/free switch, but when include_private_inactive=true, segment events for
 //       private pools are captured separately (pool_segment_events) and used to drive
 //       pool envelope sizing based on reserved memory rather than active allocations.
-//     - The segments snapshot is used to resolve pool_id via find_pool_id() and to
-//       compute initial reserved memory per pool for envelope sizing.
+//     - The segments snapshot is used to resolve pool_id via find_pool_id() for
+//       legacy trace events and to compute initial reserved memory per pool for
+//       envelope sizing.
 //
 //   Segment-level view ("Active Cached Segment Timeline"):
 //     - process_alloc_data is called with plot_segments=true.
@@ -360,7 +361,7 @@ function format_frames(frames) {
  * @param {Object} snapshot - Memory snapshot from torch.cuda.memory._snapshot().
  * @param {Object[]} snapshot.segments - Current allocator segment state.
  * @param {Object[][]} snapshot.device_traces - Per-device arrays of trace events.
- *   Each event has {action, addr, size, frames, stream, segment_pool_id?, ...}.
+ *   Each event has {action, addr, size, frames, stream, pool_id?, ...}.
  * @param {string[]} snapshot.categories - Category names for color-coding.
  * @param {number} device - Device index into snapshot.device_traces.
  * @param {boolean} plot_segments - If true, plot segment-level (cudaMalloc)
@@ -471,7 +472,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     if (include_private_inactive &&
         (e.action === 'segment_alloc' || e.action === 'segment_free' ||
          e.action === 'segment_map' || e.action === 'segment_unmap')) {
-      const pid = find_pool_id(e.addr);
+      const pid = e.pool_id ?? e.segment_pool_id ?? find_pool_id(e.addr);
       if (isPrivatePoolId(pid)) {
         const is_add = e.action === 'segment_alloc' || e.action === 'segment_map';
         pool_segment_events.push({
@@ -522,10 +523,10 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries, includ
     }
   }
 
-  // Resolve pool IDs for trace elements by looking up which segment they fall in
+  // Resolve pool IDs from trace events, with address lookup for legacy snapshots.
   for (const elem of elements) {
     if (!elem.segment_pool_id) {
-      elem.segment_pool_id = find_pool_id(elem.addr);
+      elem.segment_pool_id = elem.pool_id ?? find_pool_id(elem.addr);
     }
   }
 
