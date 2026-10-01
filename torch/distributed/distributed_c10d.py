@@ -4018,8 +4018,7 @@ def broadcast(
         group_src (int): Source rank on ``group``.  Must specify one of ``group_src``
             and ``src`` but not both.
         config (object, optional): Backend-specific per-collective configuration.
-            NCCL2 accepts ``nccl.core.NCCLCollConfig``. See
-            :ref:`nccl-collective-config` for supported operations and restrictions.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4050,8 +4049,7 @@ def broadcast(
     opts.rootRank = group_src
     opts.rootTensor = 0
     opts.asyncOp = async_op
-    if config is not None:
-        opts.config = config
+    opts.config = config
     sm90_or_more = not (
         tensor.is_cuda and torch.cuda.get_device_capability(tensor.device)[0] >= 9
     )
@@ -4119,8 +4117,7 @@ def all_reduce(
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
         config (object, optional): Backend-specific per-collective configuration.
-            NCCL2 accepts ``nccl.core.NCCLCollConfig``. See
-            :ref:`nccl-collective-config` for supported operations and restrictions.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4182,8 +4179,7 @@ def all_reduce(
     opts = AllreduceOptions()
     opts.reduceOp = op
     opts.asyncOp = async_op
-    if config is not None:
-        opts.config = config
+    opts.config = config
     if group is None:
         group = _get_default_group()
 
@@ -4251,8 +4247,7 @@ def all_reduce_coalesced(
             the default process group will be used.
         async_op (Optional[bool]): Whether this op should be an async op.
         config (object, optional): Backend-specific per-collective configuration.
-            NCCL2 accepts ``nccl.core.NCCLCollConfig``. See
-            :ref:`nccl-collective-config` for supported operations and restrictions.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4287,8 +4282,7 @@ def all_reduce_coalesced(
     opts = AllreduceCoalescedOptions()
     opts.reduceOp = op
     opts.asyncOp = async_op
-    if config is not None:
-        opts.config = config
+    opts.config = config
     group = group or _get_default_group()
     work = group.allreduce_coalesced(tensors, opts)
 
@@ -4330,8 +4324,7 @@ def reduce(
         group_dst (int): Destination rank on ``group``.  Must specify one of ``group_dst``
             and ``dst`` but not both.
         config (object, optional): Backend-specific per-collective configuration.
-            NCCL2 accepts ``nccl.core.NCCLCollConfig``. See
-            :ref:`nccl-collective-config` for supported operations and restrictions.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -4363,8 +4356,7 @@ def reduce(
     opts.reduceOp = op
     opts.rootRank = group_dst
     opts.asyncOp = async_op
-    if config is not None:
-        opts.config = config
+    opts.config = config
     work = group.reduce([tensor], opts)
     if async_op:
         return work
@@ -5284,8 +5276,7 @@ def all_gather(
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
         config (object, optional): Backend-specific per-collective configuration.
-            NCCL2 accepts ``nccl.core.NCCLCollConfig``. See
-            :ref:`nccl-collective-config` for supported operations and restrictions.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -5361,8 +5352,7 @@ def all_gather(
     group = group or _get_default_group()
     opts = AllgatherOptions()
     opts.asyncOp = async_op
-    if config is not None:
-        opts.config = config
+    opts.config = config
     work = group.allgather(  # pyrefly: ignore[missing-attribute]
         [tensor_list], [tensor], opts
     )
@@ -5407,8 +5397,7 @@ def all_gather_single(
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op
         config (object, optional): Backend-specific per-collective configuration.
-            NCCL2 accepts ``nccl.core.NCCLCollConfig``. See
-            :ref:`nccl-collective-config` for supported operations and restrictions.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -5472,8 +5461,7 @@ def all_gather_single(
 
     opts = AllgatherOptions()
     opts.asyncOp = async_op
-    if config is not None:
-        opts.config = config
+    opts.config = config
 
     group = group or _get_default_group()
 
@@ -5589,8 +5577,7 @@ def all_gather_coalesced(
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
         config (object, optional): Backend-specific per-collective configuration.
-            NCCL2 accepts ``nccl.core.NCCLCollConfig``. See
-            :ref:`nccl-collective-config` for supported operations and restrictions.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -5667,8 +5654,7 @@ def all_gather_coalesced(
     group = group or _get_default_group()
     opts = AllgatherOptions()
     opts.asyncOp = async_op
-    if config is not None:
-        opts.config = config
+    opts.config = config
     work = group.allgather_coalesced(output_tensor_lists, input_tensor_list, opts)
 
     if async_op:
@@ -5842,8 +5828,7 @@ def gather_single(
         group_dst (int, optional): Destination rank on ``group``. Invalid to
             specify both ``dst`` and ``group_dst``
         config (object, optional): Backend-specific per-collective configuration.
-            NCCL2 accepts ``nccl.core.NCCLCollConfig``. See
-            :ref:`nccl-collective-config` for supported operations and restrictions.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -5902,8 +5887,7 @@ def gather_single(
     opts = GatherOptions()
     opts.rootRank = group_dst
     opts.asyncOp = async_op
-    if config is not None:
-        opts.config = config
+    opts.config = config
     work = group.gather_single(output_tensor, tensor, opts)
 
     if async_op:
@@ -6110,8 +6094,7 @@ def reduce_scatter(
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
         config (object, optional): Backend-specific per-collective configuration.
-            NCCL2 accepts ``nccl.core.NCCLCollConfig``. See
-            :ref:`nccl-collective-config` for supported operations and restrictions.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -6141,8 +6124,7 @@ def reduce_scatter(
     opts = ReduceScatterOptions()
     opts.reduceOp = op
     opts.asyncOp = async_op
-    if config is not None:
-        opts.config = config
+    opts.config = config
 
     group = group or _get_default_group()
     work = group.reduce_scatter([output], [input_list], opts)
@@ -6209,8 +6191,7 @@ def reduce_scatter_single(
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
         config (object, optional): Backend-specific per-collective configuration.
-            NCCL2 accepts ``nccl.core.NCCLCollConfig``. See
-            :ref:`nccl-collective-config` for supported operations and restrictions.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -6270,8 +6251,7 @@ def reduce_scatter_single(
     opts = ReduceScatterOptions()
     opts.reduceOp = op
     opts.asyncOp = async_op
-    if config is not None:
-        opts.config = config
+    opts.config = config
 
     group = group or _get_default_group()
 
@@ -6386,8 +6366,7 @@ def all_to_all_single(
             the default process group will be used.
         async_op (bool, optional): Whether this op should be an async op.
         config (object, optional): Backend-specific per-collective configuration.
-            NCCL2 accepts ``nccl.core.NCCLCollConfig``. See
-            :ref:`nccl-collective-config` for supported operations and restrictions.
+            Supported types and operations depend on the backend.
 
     Returns:
         Async work handle, if async_op is set to True.
@@ -6486,8 +6465,7 @@ def all_to_all_single(
     _check_single_tensor(output, "output")
     _check_single_tensor(input, "input")
     _ensure_all_tensors_same_dtype(output, input)
-    if config is not None:
-        opts.config = config
+    opts.config = config
 
     if input.is_complex():
         input = torch.view_as_real(input)
