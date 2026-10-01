@@ -18,6 +18,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 
 import torch
+from torch._inductor import config
 from torch._inductor.kernel.gemm_epilogue_codegen import get_cutedsl_epilogue_schema
 from torch.utils._ordered_set import OrderedSet
 
@@ -25,6 +26,7 @@ from torch.utils._ordered_set import OrderedSet
 log = logging.getLogger(__name__)
 
 DENSE_EFC_TILE_NS = (64, 128, 160, 192, 224, 256)
+_SCALED_PREFETCH_MODE = "autotune"
 
 
 @functools.cache
@@ -343,11 +345,21 @@ def _blockscaled_provider_classes() -> list[Any]:
 
 
 @functools.cache
-def _blockscaled_operators() -> tuple:
-    """Generate the architecture-neutral block-scaled operator pool."""
+def _blockscaled_operators(prefetch_mode: str, use_pdl: bool) -> tuple:
+    """Generate a block-scaled operator pool for one generation policy."""
     ops: list[Any] = []
     for cls in _blockscaled_provider_classes():
-        ops.extend(cls.generate_operators(lambda md: True, args=None))
+        generate_for_policy = getattr(cls, "generate_operators_for_policy", None)
+        if generate_for_policy is not None:
+            ops.extend(
+                generate_for_policy(
+                    lambda md: True,
+                    prefetch_mode=prefetch_mode,
+                    use_pdl=use_pdl,
+                )
+            )
+        else:
+            ops.extend(cls.generate_operators(lambda md: True, args=None))
     return tuple(ops)
 
 
@@ -390,7 +402,9 @@ def _scaled_metadata_type_signature(metadata: Any) -> tuple:
 
 
 @functools.cache
-def _blockscaled_manifest(cc: int, type_signature: tuple):
+def _blockscaled_manifest(
+    cc: int, type_signature: tuple, prefetch_mode: str, use_pdl: bool
+):
     """Build a block-scaled manifest for one operand type recipe.
 
     The provider set is generated without a concrete target to preserve its
@@ -403,14 +417,21 @@ def _blockscaled_manifest(cc: int, type_signature: tuple):
     manifest.add_operators(
         [
             op
-            for op in _blockscaled_operators()
+            for op in _blockscaled_operators(prefetch_mode, use_pdl)
             if _scaled_metadata_type_signature(op.metadata) == type_signature
         ]
     )
     return manifest
 
 
-def _scaled_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
+def _scaled_candidates(
+    args: Any,
+    cc: int,
+    efc_only: bool,
+    *,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
+) -> list[Any]:
     """Compatible operators for a scaled GEMM via direct block-scaled enumeration.
 
     get_operators(args=...) derives operand configs from the args and
@@ -424,7 +445,16 @@ def _scaled_candidates(args: Any, cc: int, efc_only: bool) -> list[Any]:
         VendoredDenseBlockScaledGemmKernel,
     )
 
-    manifest = _blockscaled_manifest(cc, _scaled_operand_type_signature(args))
+    if prefetch_mode is None:
+        prefetch_mode = _SCALED_PREFETCH_MODE
+    if use_pdl is None:
+        use_pdl = config.nvgemm_pdl == "1"
+    manifest = _blockscaled_manifest(
+        cc,
+        _scaled_operand_type_signature(args),
+        prefetch_mode,
+        use_pdl,
+    )
     if manifest.operators:
         out = manifest.filter_operators(
             args=args,
@@ -470,11 +500,26 @@ def partition_compatible_kernels(
       - "scaled"   scaled GEMM: direct block-scaled sub-provider enumeration
       - "manifest" fallback (e.g. grouped GEMM): full-manifest scan
     `efc_only` restricts to epilogue-fusion-capable kernels (the addmm/bias
-    path). Results are memoized per (shape, cc, num_buckets, efc_only, source).
+    path). Results are memoized per shape and selection policy. Scaled GEMM
+    entries also include the generation policy because it changes the operator
+    pool.
     """
     sig = _partition_sig(args)
+    generation_policy = (
+        (_SCALED_PREFETCH_MODE, config.nvgemm_pdl == "1")
+        if candidate_source == "scaled"
+        else None
+    )
     cache_key = (
-        (sig, cc, num_buckets, efc_only, candidate_source, classifier_key)
+        (
+            sig,
+            cc,
+            num_buckets,
+            efc_only,
+            candidate_source,
+            classifier_key,
+            generation_policy,
+        )
         if sig is not None and classifier_key is not None
         else None
     )
@@ -486,7 +531,12 @@ def partition_compatible_kernels(
     if candidate_source == "args":
         candidates = _args_query_candidates(args, cc, efc_only)
     elif candidate_source == "scaled":
-        candidates = _scaled_candidates(args, cc, efc_only)
+        candidates = _scaled_candidates(
+            args,
+            cc,
+            efc_only,
+            prefetch_mode=_SCALED_PREFETCH_MODE,
+        )
     elif candidate_source == "manifest":
         candidates = _manifest_candidates(args, cc, efc_only)
     else:
@@ -537,7 +587,15 @@ def get_kernel_by_name(kernel_name: str) -> Any:
     return kernel
 
 
-def get_kernel_by_name_via_args(kernel_name: str, args: Any, cc: int) -> Any:
+def get_kernel_by_name_via_args(
+    kernel_name: str,
+    args: Any,
+    cc: int,
+    *,
+    prefetch_mode: str | None = None,
+    use_pdl: bool | None = None,
+    kernel_output_dtype: torch.dtype | str | None = None,
+) -> Any:
     """Fast single-kernel lookup via an args-filtered get_operators query.
 
     Passing concrete `args` (a cutlass RuntimeArguments) plus the device target
@@ -551,13 +609,32 @@ def get_kernel_by_name_via_args(kernel_name: str, args: Any, cc: int) -> Any:
     _ops_by_name, so the ~50ms cost is paid once per distinct operator (not once
     per lookup) and is amortized across all configs and shapes a persistent
     worker handles. Returns None if no operator matches the name (caller then
-    falls back to the full manifest).
+    falls back to the full manifest). ``kernel_output_dtype`` preserves the
+    base GEMM output type when a scheduler-fused epilogue changes the final
+    output tensor's dtype.
     """
     import cutlass.operators
 
     cached = _ops_by_name.get(kernel_name)
     if cached is not None:
         return cached
+
+    query_out = args.out
+    if isinstance(kernel_output_dtype, str):
+        kernel_output_dtype = getattr(torch, kernel_output_dtype)
+    if kernel_output_dtype is not None and query_out.dtype != kernel_output_dtype:
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        # A scheduler-fused epilogue may change D's dtype. Candidate generation
+        # selected the base GEMM using its original output dtype, so recover
+        # that metadata without allocating device memory.
+        with FakeTensorMode():
+            query_out = torch.empty_strided(
+                tuple(query_out.shape),
+                tuple(query_out.stride),
+                dtype=kernel_output_dtype,
+                device="cuda",
+            )
 
     query_args = args
     if "VendoredDenseGemmEFCOperator" in kernel_name:
@@ -566,7 +643,7 @@ def get_kernel_by_name_via_args(kernel_name: str, args: Any, cc: int) -> Any:
         query_args = GemmArguments(
             args.A,
             args.B,
-            args.out,
+            query_out,
             accumulator_type=args.accumulator_type,
         )
     ops = _replace_dense_efc_with_vendored(
@@ -578,17 +655,23 @@ def get_kernel_by_name_via_args(kernel_name: str, args: Any, cc: int) -> Any:
         _ops_by_name.setdefault(op.metadata.operator_name, op)
     if (
         kernel_name not in _ops_by_name
-        and "VendoredDenseBlockScaledGemmEFC" in kernel_name
+        and "VendoredDenseBlockScaledGemm" in kernel_name
     ):
         from cutlass.operators.arguments import GemmArguments
 
         base_args = GemmArguments(
             args.A,
             args.B,
-            args.out,
+            query_out,
             accumulator_type=args.accumulator_type,
         )
-        scaled_ops = _scaled_candidates(base_args, cc, efc_only=False)
+        scaled_ops = _scaled_candidates(
+            base_args,
+            cc,
+            efc_only=False,
+            prefetch_mode=prefetch_mode,
+            use_pdl=use_pdl,
+        )
         log.debug(
             "Scaled by-name fallback found %d candidates for %s",
             len(scaled_ops),
