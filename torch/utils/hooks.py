@@ -171,7 +171,9 @@ class BackwardHook:
         if len(new_tensors) == 0:
             raise RuntimeError("Cannot set Module backward hook for a Module with no input Tensors.")
 
-        grad_fns = [t.grad_fn for t in new_tensors if t.grad_fn is not None and t.grad_fn.name() == "BackwardHookFunctionBackward"]
+        # torch.func transforms add prefixes/suffixes to the function name, e.g.
+        # BackwardHookFunctionGeneratedBackward or VmappedBackwardHookFunctionBackward.
+        grad_fns = [t.grad_fn for t in new_tensors if t.grad_fn is not None and "BackwardHookFunction" in t.grad_fn.name()]
         if len(grad_fns) == 0:
             raise RuntimeError("Error while setting up backward hooks. Please open "
                                "an issue with a code sample to reproduce this.")

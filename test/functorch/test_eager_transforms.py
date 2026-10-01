@@ -1310,6 +1310,129 @@ class TestGradTransform(TestCase):
 
 @markDynamoStrictTest
 class TestAutogradFunction(TestCase):
+    @parametrize(
+        "transform_name",
+        [
+            "grad",
+            "jacrev",
+            "jacfwd",
+            "jvp",
+            "vmap_grad",
+            "hessian",
+            "jacrev_jacrev",
+            "vmap_jacrev_jacrev",
+        ],
+    )
+    @parametrize("requires_grad", [False, True])
+    def test_module_full_backward_hook(self, device, transform_name, requires_grad):
+        class Module(nn.Module):
+            def forward(self, x, ignored, indices):
+                # Include aliases, duplicate outputs, and non-differentiable outputs.
+                return x.square(), x.sin(), x, x, indices, ignored
+
+        module = Module()
+        calls = []
+
+        def hook(mod, grad_input, grad_output):
+            self.assertIs(mod, module)
+            self.assertEqual(len(grad_input), 3)
+            self.assertIsNone(grad_input[1])
+            self.assertEqual(len(grad_output), 6)
+            self.assertIsNone(grad_output[4])
+            self.assertIsNone(grad_output[5])
+            calls.append(True)
+
+        module.register_full_backward_hook(hook)
+        indices = torch.tensor([0, 1], device=device)
+
+        def fn(x):
+            outputs = module(x, "ignored", indices)
+            self.assertEqual(outputs[4], indices)
+            self.assertFalse(outputs[4].requires_grad)
+            self.assertEqual(outputs[5], "ignored")
+            return sum(output.sum() for output in outputs[:4])
+
+        def reference(x):
+            return (x.square() + x.sin() + 2 * x).sum()
+
+        x = torch.randn(2, 3, device=device, requires_grad=requires_grad).t()
+        if transform_name == "jvp":
+            tangent = torch.randn_like(x)
+            actual = torch.func.jvp(fn, (x,), (tangent,))
+            expected = torch.func.jvp(reference, (x,), (tangent,))
+        else:
+            if transform_name in ("vmap_grad", "vmap_jacrev_jacrev"):
+                x = x.unsqueeze(0).expand(3, *x.shape)
+            if transform_name == "vmap_grad":
+
+                def transform(f):
+                    return torch.func.vmap(torch.func.grad(f))
+
+            elif transform_name in ("jacrev_jacrev", "vmap_jacrev_jacrev"):
+
+                def transform(f):
+                    transformed = torch.func.jacrev(torch.func.jacrev(f))
+                    if transform_name == "vmap_jacrev_jacrev":
+                        transformed = torch.func.vmap(transformed)
+                    return transformed
+
+            else:
+                transform = getattr(torch.func, transform_name)
+            actual = transform(fn)(x)
+            expected = transform(reference)(x)
+        self.assertEqual(actual, expected)
+        # Forward-mode differentiation must not invoke reverse-mode hooks.
+        self.assertEqual(len(calls), 0 if transform_name in ("jvp", "jacfwd") else 1)
+
+    @parametrize("transform_name", ["grad", "jacrev", "vmap_grad", "hessian"])
+    @parametrize("hook_kind", ["backward", "pre", "both"])
+    def test_module_full_backward_hook_modifies_grad(
+        self, device, transform_name, hook_kind
+    ):
+        class Module(nn.Module):
+            def forward(self, x, ignored):
+                return x.square(), x.sin()
+
+        module = Module()
+        calls = []
+
+        def pre_hook(mod, grad_output):
+            calls.append("pre")
+            return tuple(g * 3 for g in grad_output)
+
+        def hook(mod, grad_input, grad_output):
+            calls.append("backward")
+            self.assertIsNone(grad_input[1])
+            return grad_input[0] * 2, None
+
+        scale = 1
+        expected_calls = []
+        if hook_kind in ("pre", "both"):
+            module.register_full_backward_pre_hook(pre_hook)
+            scale *= 3
+            expected_calls.append("pre")
+        if hook_kind in ("backward", "both"):
+            module.register_full_backward_hook(hook)
+            scale *= 2
+            expected_calls.append("backward")
+
+        def fn(x):
+            square, sine = module(x, "ignored")
+            return (square + sine).sum()
+
+        x = torch.randn(2, device=device)
+        if transform_name == "vmap_grad":
+            x = x.repeat(3, 1)
+            actual = torch.func.vmap(torch.func.grad(fn))(x)
+        else:
+            actual = getattr(torch.func, transform_name)(fn)(x)
+        if transform_name == "hessian":
+            expected = torch.diag(scale * (2 - x.sin()))
+        else:
+            expected = scale * (2 * x + x.cos())
+        self.assertEqual(actual, expected)
+        self.assertEqual(calls, expected_calls)
+
     @skipIfTorchDynamo("internal API test")
     def test_unwrap_dead_wrappers(self, device):
         ft = torch._C._functorch
