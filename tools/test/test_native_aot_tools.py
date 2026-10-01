@@ -1921,7 +1921,7 @@ class TestSourceClosureAndRuntimes(unittest.TestCase):
         # The DSL's version is in no file the closure hashes, so an upgraded wheel
         # changes nothing on disk. Patched rather than read: with no wheels installed
         # the live call is all-"absent" and takes the ignorance arm instead.
-        current = {"nvidia-cutlass-dsl": "4.6.2", "apache-tvm-ffi": "0.1.11"}
+        current = {"nvidia-cutlass-dsl": "4.8.0", "apache-tvm-ffi": "0.1.12"}
         with mock.patch.object(export, "runtime_versions", lambda kind: current):
             self.assertTrue(
                 export.runtimes_current({"kind": "cutedsl", "runtimes": current})
@@ -3066,7 +3066,7 @@ class TestShouldRun(unittest.TestCase):
         self.assertFalse(self._run(self.CUDA, {"TORCH_CUDA_ARCH_LIST": "7.5;8.0"}))
 
     def test_multi_exportable_arch_runs(self):
-        # The real list: .ci/manywheel builds x86_64 CUDA 13.x with these, and they
+        # The real list: .ci/wheel/linux builds x86_64 CUDA 13.x with these, and they
         # resolve to two capabilities, so every release wheel takes this path.
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
@@ -4383,7 +4383,7 @@ class TestCiAndCMakeWiring(unittest.TestCase):
     def test_manywheel_installs_the_raw_wheel_before_stage_two(self):
         # The kernel builders import the installed torch, so the raw wheel goes first --
         # inside the cuda guard, or a cpu container installs it for nothing.
-        text = self._read(".ci/manywheel/build.sh")
+        text = self._read(".ci/wheel/linux/build.sh")
         marker = "fi  # GPU_ARCH_TYPE == cuda*"
         self.assertIn(marker, text)
         block = text.partition(marker)[0]
@@ -4403,8 +4403,17 @@ class TestCiAndCMakeWiring(unittest.TestCase):
         block = block[: block.index("\n}\n") + 3]
         self.assertNotIn("return 0", block)
         self.assertNotIn("Skipping CUTLASS DSL install", block)
-        self.assertIn("nvidia-cutlass-dsl[cu13]==4.6.2", block)
-        self.assertIn("apache-tvm-ffi==0.1.11", block)
+        self.assertIn("nvidia-cutlass-dsl[cu13]==4.8.0", block)
+        self.assertIn("apache-tvm-ffi==0.1.12", block)
+
+    def test_flash_attn_cute_uses_compatible_dependencies(self):
+        text = self._read(".ci/pytorch/common_utils.sh")
+        block = text[text.index("function install_flash_attn_cute()") :]
+        block = block[: block.index("\n}\n") + 3]
+        self.assertIn("flash-attn-4==4.0.0b31", block)
+        self.assertIn("flash-attn-4[cu13]==4.0.0b31", block)
+        self.assertIn("quack-kernels==0.6.5", block)
+        self.assertIn("apache-tvm-ffi==0.1.12", block)
 
     def test_the_verdict_word_the_shells_compare_is_the_one_stage_two_prints(self):
         # Both shells install the DSL wheels only when stage 2 says RUN, comparing with
@@ -4416,14 +4425,14 @@ class TestCiAndCMakeWiring(unittest.TestCase):
             build_stage2.main(["--print-verdict"])
         word = printed.getvalue().strip()
         self.assertTrue(word, "--print-verdict printed nothing")
-        for rel in (".ci/pytorch/build.sh", ".ci/manywheel/build.sh"):
+        for rel in (".ci/pytorch/build.sh", ".ci/wheel/linux/build.sh"):
             with self.subTest(rel=rel):
                 self.assertIn(f'--print-verdict)" == "{word}"', self._read(rel))
 
     def test_the_wheel_is_patched_before_it_is_repaired(self):
         # repair_wheel.py produces the PUBLISHED artifact, so stage 2 patches the raw
         # wheel first: reversed, every release wheel ships kernel-free and green.
-        sh = self._read(".ci/manywheel/build.sh")
+        sh = self._read(".ci/wheel/linux/build.sh")
         self.assertLess(
             sh.index("build_stage2.py --wheel"),
             sh.index("repair_wheel.py"),
@@ -4443,7 +4452,7 @@ class TestCiAndCMakeWiring(unittest.TestCase):
         self.assertIn("--print-verdict", block[guard_at:])
         self.assertIn(
             'if [[ "${GPU_ARCH_TYPE}" == cuda* ]]; then',
-            self._read(".ci/manywheel/build.sh"),
+            self._read(".ci/wheel/linux/build.sh"),
         )
 
     def test_both_shells_count_wheels_with_nullglob(self):
@@ -4451,7 +4460,7 @@ class TestCiAndCMakeWiring(unittest.TestCase):
         # message said "found 1" for an EMPTY directory.
         for rel, pattern in (
             (".ci/pytorch/build.sh", "naot_wheels=(dist/*.whl)"),
-            (".ci/manywheel/build.sh", 'naot_wheels=("${RAW_WHEEL_DIR}"/*.whl)'),
+            (".ci/wheel/linux/build.sh", 'naot_wheels=("${RAW_WHEEL_DIR}"/*.whl)'),
         ):
             with self.subTest(rel=rel):
                 text = self._read(rel)

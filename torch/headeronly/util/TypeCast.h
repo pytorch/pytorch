@@ -1,7 +1,6 @@
 #pragma once
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/BFloat16.h>
-#include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/Float8_e4m3fn.h>
 #include <torch/headeronly/util/Float8_e4m3fnuz.h>
 #include <torch/headeronly/util/Float8_e5m2.h>
@@ -11,7 +10,10 @@
 #include <torch/headeronly/util/complex.h>
 #include <torch/headeronly/util/overflows.h>
 
+#include <sstream>
+#include <stdexcept>
 #include <type_traits>
+#include <utility>
 
 C10_CLANG_DIAGNOSTIC_PUSH()
 #if C10_CLANG_HAS_WARNING("-Wimplicit-float-conversion")
@@ -21,12 +23,13 @@ C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-float-conversion")
 C10_CLANG_DIAGNOSTIC_IGNORE("-Wimplicit-int-float-conversion")
 #endif
 
-HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
+namespace c10 {
 
 template <typename dest_t, typename src_t>
 struct needs_real {
   constexpr static bool value =
-      (is_complex<src_t>::value && !is_complex<dest_t>::value);
+      (torch::headeronly::is_complex<src_t>::value &&
+       !torch::headeronly::is_complex<dest_t>::value);
 };
 
 template <bool, typename src_t>
@@ -74,7 +77,7 @@ struct static_cast_with_inter_type {
     auto r = maybe_real<real, src_t>::apply(src);
     if constexpr (
         std::is_integral_v<dest_t> && !std::is_integral_v<decltype(r)>) {
-      return torch::headeronly::unchecked_cast_to_int<dest_t>(r);
+      return unchecked_cast_to_int<dest_t>(r);
     } else {
       return static_cast<dest_t>(r);
     }
@@ -102,173 +105,220 @@ struct static_cast_with_inter_type<uint8_t, src_t> {
     if constexpr (std::is_integral_v<decltype(r)>) {
       return static_cast<uint8_t>(static_cast<int64_t>(r));
     } else {
-      return static_cast<uint8_t>(
-          torch::headeronly::unchecked_cast_to_int<int64_t>(r));
+      return static_cast<uint8_t>(unchecked_cast_to_int<int64_t>(r));
     }
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<Half>, BFloat16> {
-  C10_HOST_DEVICE static inline complex<Half> apply(BFloat16 src) {
-    return static_cast<complex<Half>>(complex<float>{src});
+struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::BFloat16> {
+  C10_HOST_DEVICE static inline c10::complex<c10::Half> apply(
+      c10::BFloat16 src) {
+    return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<Half>, Float8_e5m2> {
-  C10_HOST_DEVICE static inline complex<Half> apply(Float8_e5m2 src) {
-    return static_cast<complex<Half>>(complex<float>{src});
+struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e5m2> {
+  C10_HOST_DEVICE static inline c10::complex<c10::Half> apply(
+      c10::Float8_e5m2 src) {
+    return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<Half>, Float8_e5m2fnuz> {
-  C10_HOST_DEVICE static inline complex<Half> apply(Float8_e5m2fnuz src) {
-    return static_cast<complex<Half>>(complex<float>{src});
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e5m2fnuz> {
+  C10_HOST_DEVICE static inline c10::complex<c10::Half> apply(
+      c10::Float8_e5m2fnuz src) {
+    return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<Half>, Float8_e4m3fn> {
-  C10_HOST_DEVICE static inline complex<Half> apply(Float8_e4m3fn src) {
-    return static_cast<complex<Half>>(complex<float>{src});
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e4m3fn> {
+  C10_HOST_DEVICE static inline c10::complex<c10::Half> apply(
+      c10::Float8_e4m3fn src) {
+    return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<Half>, Float8_e4m3fnuz> {
-  C10_HOST_DEVICE static inline complex<Half> apply(Float8_e4m3fnuz src) {
-    return static_cast<complex<Half>>(complex<float>{src});
-  }
-};
-
-// TODO(#146647): Can we make all these template specialization happen
-// based off our apply macros?
-template <>
-struct static_cast_with_inter_type<complex<Half>, Float8_e8m0fnu> {
-  C10_HOST_DEVICE static inline complex<Half> apply(Float8_e8m0fnu src) {
-    return static_cast<complex<Half>>(complex<float>{src});
-  }
-};
-
-template <>
-struct static_cast_with_inter_type<complex<Half>, Half> {
-  C10_HOST_DEVICE static inline complex<Half> apply(Half src) {
-    return static_cast<complex<Half>>(complex<float>{src});
-  }
-};
-
-template <>
-struct static_cast_with_inter_type<complex<Half>, complex<double>> {
-  C10_HOST_DEVICE static inline complex<Half> apply(complex<double> src) {
-    return static_cast<complex<Half>>(static_cast<complex<float>>(src));
-  }
-};
-
-template <>
-struct static_cast_with_inter_type<complex<BFloat16>, Float8_e5m2> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(Float8_e5m2 src) {
-    return static_cast<complex<BFloat16>>(complex<float>{src});
-  }
-};
-
-template <>
-struct static_cast_with_inter_type<complex<BFloat16>, Float8_e5m2fnuz> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(Float8_e5m2fnuz src) {
-    return static_cast<complex<BFloat16>>(complex<float>{src});
-  }
-};
-
-template <>
-struct static_cast_with_inter_type<complex<BFloat16>, Float8_e4m3fn> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(Float8_e4m3fn src) {
-    return static_cast<complex<BFloat16>>(complex<float>{src});
-  }
-};
-
-template <>
-struct static_cast_with_inter_type<complex<BFloat16>, Float8_e4m3fnuz> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(Float8_e4m3fnuz src) {
-    return static_cast<complex<BFloat16>>(complex<float>{src});
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e4m3fnuz> {
+  C10_HOST_DEVICE static inline c10::complex<c10::Half> apply(
+      c10::Float8_e4m3fnuz src) {
+    return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
   }
 };
 
 // TODO(#146647): Can we make all these template specialization happen
 // based off our apply macros?
 template <>
-struct static_cast_with_inter_type<complex<BFloat16>, Float8_e8m0fnu> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(Float8_e8m0fnu src) {
-    return static_cast<complex<BFloat16>>(complex<float>{src});
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e8m0fnu> {
+  C10_HOST_DEVICE static inline c10::complex<c10::Half> apply(
+      c10::Float8_e8m0fnu src) {
+    return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<BFloat16>, Half> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(Half src) {
-    return static_cast<complex<BFloat16>>(static_cast<complex<float>>(src));
+struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Half> {
+  C10_HOST_DEVICE static inline c10::complex<c10::Half> apply(c10::Half src) {
+    return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<BFloat16>, complex<double>> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(complex<double> src) {
-    return static_cast<complex<BFloat16>>(static_cast<complex<float>>(src));
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::complex<double>> {
+  C10_HOST_DEVICE static inline c10::complex<c10::Half> apply(
+      c10::complex<double> src) {
+    return static_cast<c10::complex<c10::Half>>(
+        static_cast<c10::complex<float>>(src));
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<BFloat16>, complex<Half>> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(complex<Half> src) {
-    return static_cast<complex<BFloat16>>(static_cast<complex<float>>(src));
+struct static_cast_with_inter_type<
+    c10::complex<c10::BFloat16>,
+    c10::Float8_e5m2> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::BFloat16>
+  apply(c10::Float8_e5m2 src) {
+    return static_cast<c10::complex<c10::BFloat16>>(c10::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<Half>, complex<BFloat16>> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<Half> apply(
-      complex<BFloat16> src) {
-    return static_cast<complex<Half>>(static_cast<complex<float>>(src));
+struct static_cast_with_inter_type<
+    c10::complex<c10::BFloat16>,
+    c10::Float8_e5m2fnuz> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::BFloat16>
+  apply(c10::Float8_e5m2fnuz src) {
+    return static_cast<c10::complex<c10::BFloat16>>(c10::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<Half, complex<BFloat16>> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline Half apply(
-      complex<BFloat16> src) {
-    return static_cast<Half>(static_cast<float>(src.real()));
+struct static_cast_with_inter_type<
+    c10::complex<c10::BFloat16>,
+    c10::Float8_e4m3fn> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::BFloat16>
+  apply(c10::Float8_e4m3fn src) {
+    return static_cast<c10::complex<c10::BFloat16>>(c10::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<BFloat16, complex<Half>> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline BFloat16 apply(
-      complex<Half> src) {
-    return static_cast<BFloat16>(static_cast<float>(src.real()));
+struct static_cast_with_inter_type<
+    c10::complex<c10::BFloat16>,
+    c10::Float8_e4m3fnuz> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::BFloat16>
+  apply(c10::Float8_e4m3fnuz src) {
+    return static_cast<c10::complex<c10::BFloat16>>(c10::complex<float>{src});
+  }
+};
+
+// TODO(#146647): Can we make all these template specialization happen
+// based off our apply macros?
+template <>
+struct static_cast_with_inter_type<
+    c10::complex<c10::BFloat16>,
+    c10::Float8_e8m0fnu> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::BFloat16>
+  apply(c10::Float8_e8m0fnu src) {
+    return static_cast<c10::complex<c10::BFloat16>>(c10::complex<float>{src});
   }
 };
 
 template <>
-struct static_cast_with_inter_type<BFloat16, complex<BFloat16>> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline BFloat16 apply(
-      complex<BFloat16> src) {
+struct static_cast_with_inter_type<c10::complex<c10::BFloat16>, c10::Half> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::BFloat16>
+  apply(c10::Half src) {
+    return static_cast<c10::complex<c10::BFloat16>>(
+        static_cast<c10::complex<float>>(src));
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<
+    c10::complex<c10::BFloat16>,
+    c10::complex<double>> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::BFloat16>
+  apply(c10::complex<double> src) {
+    return static_cast<c10::complex<c10::BFloat16>>(
+        static_cast<c10::complex<float>>(src));
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<
+    c10::complex<c10::BFloat16>,
+    c10::complex<c10::Half>> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::BFloat16>
+  apply(c10::complex<c10::Half> src) {
+    return static_cast<c10::complex<c10::BFloat16>>(
+        static_cast<c10::complex<float>>(src));
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::complex<c10::BFloat16>> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::Half>
+  apply(c10::complex<c10::BFloat16> src) {
+    return static_cast<c10::complex<c10::Half>>(
+        static_cast<c10::complex<float>>(src));
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<c10::Half, c10::complex<c10::BFloat16>> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::Half apply(
+      c10::complex<c10::BFloat16> src) {
+    return static_cast<c10::Half>(static_cast<float>(src.real()));
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<c10::BFloat16, c10::complex<c10::Half>> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::BFloat16 apply(
+      c10::complex<c10::Half> src) {
+    return static_cast<c10::BFloat16>(static_cast<float>(src.real()));
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<c10::BFloat16, c10::complex<c10::BFloat16>> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::BFloat16 apply(
+      c10::complex<c10::BFloat16> src) {
     return src.real();
   }
 };
 
 template <>
-struct static_cast_with_inter_type<complex<BFloat16>, BFloat16> {
-  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline complex<BFloat16>
-  apply(BFloat16 src) {
-    return complex<BFloat16>{src, 0};
+struct static_cast_with_inter_type<c10::complex<c10::BFloat16>, c10::BFloat16> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::BFloat16>
+  apply(c10::BFloat16 src) {
+    return c10::complex<c10::BFloat16>{src, 0};
   }
 };
 
@@ -279,7 +329,7 @@ C10_HOST_DEVICE To convert(From f) {
 
 // Define with C10_NOINLINE to prevent code-size bloat.
 [[noreturn]] C10_NOINLINE inline void report_overflow(const char* name) {
-  std::ostringstream oss;
+  std::ostringstream oss{};
   oss << "value cannot be converted to type " << name << " without overflow";
   // @allow-raw-throw: plain message required; STD_TORCH_CHECK adds prefix
   throw std::runtime_error(
@@ -299,7 +349,7 @@ To checked_convert(From f, const char* name) {
 // wraparound (via overflows() with its default strict_unsigned=false). Retained
 // only to preserve the historical behavior of the few call sites that relied on
 // the wrap. DO NOT use in new code: use c10::safe_conv (strict integer
-// narrowing, c10/util/safe_conv.h) or checked_convert (general, above).
+// narrowing, c10/util/safe_conv.h) or c10::checked_convert (general, above).
 template <typename To, typename From>
 To unsafe_wrapping_convert(From f, const char* name) {
   // Converting to bool can't overflow so we exclude this case from checking.
@@ -309,6 +359,20 @@ To unsafe_wrapping_convert(From f, const char* name) {
   return convert<To, From>(f);
 }
 
+} // namespace c10
+
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
+using c10::checked_convert;
+using c10::convert;
+using c10::maybe_bool;
+using c10::maybe_real;
+using c10::needs_real;
+using c10::report_overflow;
+using c10::static_cast_with_inter_type;
+using c10::unchecked_cast_to_int;
+using c10::unsafe_wrapping_convert;
 HIDDEN_NAMESPACE_END(torch, headeronly)
 
 C10_CLANG_DIAGNOSTIC_POP()
+
+// Trigger tests for D25440771. TODO: Remove this line any time you want.
