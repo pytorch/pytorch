@@ -54,7 +54,7 @@ from ...scheduler import (
 from ...virtualized import V
 from ..common import BackendFeature, IndentedBuffer
 from ..cutlass.python_evt import CutlassEVTCodegen
-from ..wrapper import codegen_reinterpret_view_helper
+from ..wrapper import codegen_reinterpret_view_layout_match
 from .epilogue_lowering import NVGemmEpilogueCapture, NVGemmEpilogueLowering
 from .nv_universal_gemm import GemmVariant, NVUniversalGemmCaller
 
@@ -122,21 +122,12 @@ def _nvgemm_benchmark_tensor_specs(
             if isinstance(storage_node, MutableBox):
                 storage_node = storage_node.data
             elif isinstance(storage_node, ReinterpretView):
-                base_size, base_stride, base_offset, _, collapsible = (
-                    codegen_reinterpret_view_helper(storage_node.data)
+                same_layout, _ = codegen_reinterpret_view_layout_match(
+                    storage_node.data,
+                    storage_node.layout.size,
+                    storage_node.layout.stride,
+                    storage_node.layout.offset,
                 )
-                if collapsible and storage_node.layout.offset == base_offset:
-                    same_layout = (
-                        storage_node.layout.size == base_size
-                        and storage_node.layout.stride == base_stride
-                    )
-                else:
-                    data_layout = storage_node.data.get_layout()
-                    same_layout = (
-                        storage_node.layout.size == data_layout.size
-                        and storage_node.layout.stride == data_layout.stride
-                        and storage_node.layout.offset == data_layout.offset
-                    )
                 if not same_layout:
                     view_byte_offset += (
                         cast(
