@@ -9710,9 +9710,10 @@ class Scheduler:
             for mutating_node, weak_dep in node_with_mutations.iter_pruned_weak_deps():
                 reading_node = next(
                     (
-                        node
+                        leaf
                         for node in candidate_nodes
-                        if weak_dep.name in node.get_buffer_names()
+                        for leaf in node.get_nodes()
+                        if weak_dep.name in leaf.get_buffer_names()
                     ),
                     None,
                 )
