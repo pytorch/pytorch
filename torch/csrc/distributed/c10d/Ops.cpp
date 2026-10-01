@@ -154,8 +154,6 @@ IMPL_RECV_ANY_SOURCE(PrivateUse1)
       bool asyncOp,                                             \
       int64_t timeout,                                          \
       OptionalCollectiveConfig config) {                        \
-    process_group->getBackend(c10::DeviceType::DEV)             \
-        ->check_collective_config(config);                      \
     auto tensor_vec = tensors.vec();                            \
     auto hook_op_id = process_group->firePreHook(               \
         HookOpName::REDUCE, asyncOp, root_rank, tensor_vec);    \
@@ -188,8 +186,6 @@ IMPL_REDUCE(PrivateUse1)
           bool asyncOp,                                                   \
           int64_t timeout,                                                \
           OptionalCollectiveConfig config) {                              \
-    process_group->getBackend(c10::DeviceType::DEV)                       \
-        ->check_collective_config(config);                                \
     auto tensor_vec = tensors.vec();                                      \
     auto hook_op_id = process_group->firePreHook(                         \
         HookOpName::BROADCAST, asyncOp, root_rank, tensor_vec);           \
@@ -225,8 +221,6 @@ IMPL_BROADCAST(PrivateUse1)
           bool asyncOp,                                                    \
           int64_t timeout,                                                 \
           OptionalCollectiveConfig config) {                               \
-    process_group->getBackend(c10::DeviceType::DEV)                        \
-        ->check_collective_config(config);                                 \
     auto tensor_vec = tensors.vec();                                       \
     auto hook_op_id = process_group->firePreHook(                          \
         HookOpName::ALLREDUCE, asyncOp, -1, tensor_vec);                   \
@@ -256,8 +250,6 @@ IMPL_ALLREDUCE(PrivateUse1)
       bool asyncOp,                                                  \
       int64_t timeout,                                               \
       OptionalCollectiveConfig config) {                             \
-    process_group->getBackend(c10::DeviceType::DEV)                  \
-        ->check_collective_config(config);                           \
     auto tensor_vec = tensors.vec();                                 \
     AllreduceCoalescedOptions opts = AllreduceCoalescedOptions{};    \
     opts.reduceOp = *reduce_op.get();                                \
@@ -288,8 +280,6 @@ IMPL_ALLREDUCE_COALESCED(PrivateUse1)
           bool asyncOp,                                                        \
           int64_t timeout,                                                     \
           OptionalCollectiveConfig config) {                                   \
-    process_group->getBackend(c10::DeviceType::DEV)                            \
-        ->check_collective_config(config);                                     \
     auto input_tensors_vec = input_tensors.vec();                              \
     auto hook_op_id = process_group->firePreHook(                              \
         HookOpName::ALLGATHER,                                                 \
@@ -326,8 +316,6 @@ IMPL_ALLGATHER(PrivateUse1)
       bool asyncOp,                                                            \
       int64_t timeout,                                                         \
       OptionalCollectiveConfig config) {                                       \
-    process_group->getBackend(c10::DeviceType::DEV)                            \
-        ->check_collective_config(config);                                     \
     auto hook_op_id = process_group->firePreHook(                              \
         HookOpName::ALLGATHER_BASE, asyncOp, -1, input_tensor, output_tensor); \
     auto work = process_group->getBackend(c10::DeviceType::DEV)                \
@@ -355,8 +343,6 @@ IMPL__ALLGATHER_BASE(PrivateUse1)
       const c10::intrusive_ptr<ProcessGroup>& process_group,               \
       bool asyncOp,                                                        \
       OptionalCollectiveConfig config) {                                   \
-    process_group->getBackend(c10::DeviceType::DEV)                        \
-        ->check_collective_config(config);                                 \
     auto input_list_vec = input_list.vec();                                \
     auto opts = AllgatherOptions{};                                        \
     opts.asyncOp = asyncOp;                                                \
@@ -389,8 +375,6 @@ IMPL_ALLGATHER_COALESCED(PrivateUse1)
       const c10::intrusive_ptr<ProcessGroup>& process_group,            \
       bool asyncOp,                                                     \
       OptionalCollectiveConfig config) {                                \
-    process_group->getBackend(c10::DeviceType::DEV)                     \
-        ->check_collective_config(config);                              \
     auto output_vec = outputs.vec();                                    \
     auto input_vec = inputs.vec();                                      \
     auto opts = AllgatherOptions{};                                     \
@@ -427,8 +411,6 @@ IMPL_ALLGATHER_INTO_TENSOR_COALESCED(PrivateUse1)
           bool asyncOp,                                                    \
           int64_t timeout,                                                 \
           OptionalCollectiveConfig config) {                               \
-    process_group->getBackend(c10::DeviceType::DEV)                        \
-        ->check_collective_config(config);                                 \
     auto output_tensors_vec = output_tensors.vec();                        \
     auto hook_op_id = process_group->firePreHook(                          \
         HookOpName::REDUCE_SCATTER,                                        \
@@ -465,8 +447,6 @@ IMPL_REDUCE_SCATTER(PrivateUse1)
       bool asyncOp,                                                            \
       int64_t timeout,                                                         \
       OptionalCollectiveConfig config) {                                       \
-    process_group->getBackend(c10::DeviceType::DEV)                            \
-        ->check_collective_config(config);                                     \
     auto hook_op_id = process_group->firePreHook(                              \
         HookOpName::REDUCE_SCATTER_BASE,                                       \
         asyncOp,                                                               \
@@ -501,8 +481,6 @@ IMPL__REDUCE_SCATTER_BASE(PrivateUse1)
       bool asyncOp,                                                     \
       int64_t timeout,                                                  \
       OptionalCollectiveConfig config) {                                \
-    process_group->getBackend(c10::DeviceType::DEV)                     \
-        ->check_collective_config(config);                              \
     auto output_vec = outputs.vec();                                    \
     auto input_vec = inputs.vec();                                      \
     auto hook_op_id = process_group->firePreHook(                       \
@@ -541,8 +519,6 @@ IMPL_REDUCE_SCATTER_TENSOR_COALESCED(PrivateUse1)
       bool asyncOp,                                                        \
       int64_t timeout,                                                     \
       OptionalCollectiveConfig config) {                                   \
-    process_group->getBackend(c10::DeviceType::DEV)                        \
-        ->check_collective_config(config);                                 \
     auto input_tensors_vec = input_tensors.vec();                          \
     auto hook_op_id = process_group->firePreHook(                          \
         HookOpName::GATHER,                                                \
@@ -578,8 +554,6 @@ IMPL_GATHER(PrivateUse1)
       bool asyncOp,                                                           \
       int64_t timeout,                                                        \
       OptionalCollectiveConfig config) {                                      \
-    process_group->getBackend(c10::DeviceType::DEV)                           \
-        ->check_collective_config(config);                                    \
     auto hook_op_id = process_group->firePreHook(                             \
         HookOpName::GATHER, asyncOp, root_rank, input_tensor, output_tensor); \
     auto work = process_group->getBackend(c10::DeviceType::DEV)               \
@@ -643,8 +617,6 @@ IMPL_SCATTER(PrivateUse1)
           bool asyncOp,                                                   \
           int64_t timeout,                                                \
           OptionalCollectiveConfig config) {                              \
-    process_group->getBackend(c10::DeviceType::DEV)                       \
-        ->check_collective_config(config);                                \
     auto output_tensors_vec = output_tensors.vec();                       \
     auto input_tensors_vec = input_tensors.vec();                         \
     auto hook_op_id = process_group->firePreHook(                         \
@@ -681,8 +653,6 @@ IMPL_ALLTOALL(PrivateUse1)
       bool asyncOp,                                             \
       int64_t timeout,                                          \
       OptionalCollectiveConfig config) {                        \
-    process_group->getBackend(c10::DeviceType::DEV)             \
-        ->check_collective_config(config);                      \
     auto hook_op_id = process_group->firePreHook(               \
         HookOpName::ALLTOALL_BASE, asyncOp, -1, input, output); \
     auto work = process_group->getBackend(c10::DeviceType::DEV) \
@@ -755,8 +725,6 @@ allreduce_sparse_cuda_(
     bool asyncOp,
     int64_t timeout,
     OptionalCollectiveConfig config) {
-  process_group->getBackend(c10::DeviceType::CUDA)
-      ->check_collective_config(config);
   auto tensor_vec = tensors.vec();
   auto hook_op_id = process_group->firePreHook(
       HookOpName::ALLREDUCE, asyncOp, -1, tensor_vec);

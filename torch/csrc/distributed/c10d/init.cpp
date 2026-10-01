@@ -79,17 +79,6 @@
 
 namespace {
 
-// Direct Backend bindings bypass ProcessGroup dispatch validation.
-template <typename Return, typename... Args>
-auto checkedBackendCollective(Return (::c10d::Backend::*method)(Args...)) {
-  return [method](::c10d::Backend& backend, Args... args) -> Return {
-    const auto& opts =
-        std::get<sizeof...(Args) - 1>(std::forward_as_tuple(args...));
-    backend.check_collective_config(opts.config);
-    return (backend.*method)(std::forward<Args>(args)...);
-  };
-}
-
 #ifdef USE_C10D_NCCL
 
 bool acquire_gil() {
@@ -3260,10 +3249,6 @@ Arguments:
               &::c10d::Backend::setUsePgForSymmMemRendezvous,
               py::arg("value"))
           .def_property_readonly(
-              "supports_collective_config",
-              &::c10d::Backend::supports_collective_config,
-              "Whether the backend consumes or rejects config on its collective methods.")
-          .def_property_readonly(
               "supports_splitting",
               &::c10d::Backend::supportsSplitting,
               "(test whether the backend supports splitting)")
@@ -3359,7 +3344,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               "(test whether the backend supports completion hooks)")
           .def(
               "broadcast",
-              checkedBackendCollective(&::c10d::Backend::broadcast),
+              &::c10d::Backend::broadcast,
               py::arg("tensors"),
               py::arg("opts") = ::c10d::BroadcastOptions(),
               py::call_guard<py::gil_scoped_release>())
@@ -3381,7 +3366,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               py::call_guard<py::gil_scoped_release>())
           .def(
               "allreduce",
-              checkedBackendCollective(&::c10d::Backend::allreduce),
+              &::c10d::Backend::allreduce,
               py::arg("tensors"),
               py::arg("opts") = ::c10d::AllreduceOptions(),
               py::call_guard<py::gil_scoped_release>())
@@ -3418,13 +3403,13 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               py::call_guard<py::gil_scoped_release>())
           .def(
               "allreduce_coalesced",
-              checkedBackendCollective(&::c10d::Backend::allreduce_coalesced),
+              &::c10d::Backend::allreduce_coalesced,
               py::arg("tensors"),
               py::arg("opts") = ::c10d::AllreduceCoalescedOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "reduce",
-              checkedBackendCollective(&::c10d::Backend::reduce),
+              &::c10d::Backend::reduce,
               py::arg("tensors"),
               py::arg("opts") = ::c10d::ReduceOptions(),
               py::call_guard<py::gil_scoped_release>())
@@ -3449,14 +3434,14 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               py::call_guard<py::gil_scoped_release>())
           .def(
               "allgather",
-              checkedBackendCollective(&::c10d::Backend::allgather),
+              &::c10d::Backend::allgather,
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "all_gather_single",
-              checkedBackendCollective(&::c10d::Backend::all_gather_single),
+              &::c10d::Backend::all_gather_single,
               py::arg("output"),
               py::arg("input"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
@@ -3466,7 +3451,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
           // deprecated C++ method.
           .def(
               "_allgather_base",
-              checkedBackendCollective(&::c10d::Backend::all_gather_single),
+              &::c10d::Backend::all_gather_single,
               py::arg("output"),
               py::arg("input"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
@@ -3489,14 +3474,14 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               py::call_guard<py::gil_scoped_release>())
           .def(
               "allgather_coalesced",
-              checkedBackendCollective(&::c10d::Backend::allgather_coalesced),
+              &::c10d::Backend::allgather_coalesced,
               py::arg("output_lists"),
               py::arg("input_list"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "gather",
-              checkedBackendCollective(&::c10d::Backend::gather),
+              &::c10d::Backend::gather,
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::GatherOptions(),
@@ -3525,7 +3510,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               py::call_guard<py::gil_scoped_release>())
           .def(
               "gather_single",
-              checkedBackendCollective(&::c10d::Backend::gather_single),
+              &::c10d::Backend::gather_single,
               py::arg("output"),
               py::arg("input"),
               py::arg("opts") = ::c10d::GatherOptions(),
@@ -3535,7 +3520,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
           // deprecated C++ method.
           .def(
               "gather_into_tensor",
-              checkedBackendCollective(&::c10d::Backend::gather_single),
+              &::c10d::Backend::gather_single,
               py::arg("output"),
               py::arg("input"),
               py::arg("opts") = ::c10d::GatherOptions(),
@@ -3571,7 +3556,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               py::call_guard<py::gil_scoped_release>())
           .def(
               "reduce_scatter",
-              checkedBackendCollective(&::c10d::Backend::reduce_scatter),
+              &::c10d::Backend::reduce_scatter,
               py::arg("output_tensors"),
               py::arg("input_tensors"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
@@ -3597,7 +3582,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               py::call_guard<py::gil_scoped_release>())
           .def(
               "reduce_scatter_single",
-              checkedBackendCollective(&::c10d::Backend::reduce_scatter_single),
+              &::c10d::Backend::reduce_scatter_single,
               py::arg("outputTensor"),
               py::arg("inputTensor"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
@@ -3607,14 +3592,14 @@ Unsupported backends ignore this call. This API is experimental and subject to c
           // the deprecated C++ method.
           .def(
               "_reduce_scatter_base",
-              checkedBackendCollective(&::c10d::Backend::reduce_scatter_single),
+              &::c10d::Backend::reduce_scatter_single,
               py::arg("outputTensor"),
               py::arg("inputTensor"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "all_to_all_single",
-              checkedBackendCollective(&::c10d::Backend::all_to_all_single),
+              &::c10d::Backend::all_to_all_single,
               py::arg("output_tensor"),
               py::arg("input_tensor"),
               py::arg("output_split_sizes"),
@@ -3626,7 +3611,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
           // deprecated C++ method.
           .def(
               "alltoall_base",
-              checkedBackendCollective(&::c10d::Backend::all_to_all_single),
+              &::c10d::Backend::all_to_all_single,
               py::arg("output_tensor"),
               py::arg("input_tensor"),
               py::arg("output_split_sizes"),
@@ -3654,7 +3639,7 @@ Unsupported backends ignore this call. This API is experimental and subject to c
               py::call_guard<py::gil_scoped_release>())
           .def(
               "alltoall",
-              checkedBackendCollective(&::c10d::Backend::alltoall),
+              &::c10d::Backend::alltoall,
               py::arg("output_tensor"),
               py::arg("input_tensor"),
               py::arg("opts") = ::c10d::AllToAllOptions(),
@@ -3754,22 +3739,20 @@ Unsupported backends ignore this call. This API is experimental and subject to c
             )")
           .def(
               "allreduce_sparse",
-              checkedBackendCollective(&::c10d::Backend::allreduce_sparse),
+              &::c10d::Backend::allreduce_sparse,
               py::arg("tensors"),
               py::arg("opts") = ::c10d::AllreduceOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "all_gather_single_coalesced",
-              checkedBackendCollective(
-                  &::c10d::Backend::all_gather_single_coalesced),
+              &::c10d::Backend::all_gather_single_coalesced,
               py::arg("outputs"),
               py::arg("inputs"),
               py::arg("opts") = ::c10d::AllgatherOptions(),
               py::call_guard<py::gil_scoped_release>())
           .def(
               "reduce_scatter_single_coalesced",
-              checkedBackendCollective(
-                  &::c10d::Backend::reduce_scatter_single_coalesced),
+              &::c10d::Backend::reduce_scatter_single_coalesced,
               py::arg("outputs"),
               py::arg("inputs"),
               py::arg("opts") = ::c10d::ReduceScatterOptions(),
