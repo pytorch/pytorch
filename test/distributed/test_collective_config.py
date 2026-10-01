@@ -28,6 +28,10 @@ class FunctionalCollectiveConfigTest(TestCase):
             "all_gather_into_tensor",
             "reduce_scatter_tensor",
             "all_to_all_single",
+            "all_reduce_coalesced",
+            "all_reduce_coalesced_",
+            "all_gather_into_tensor_coalesced",
+            "reduce_scatter_tensor_coalesced",
         ):
             op = getattr(torch.ops._c10d_functional, name).default
             argument = op._schema.arguments[-1]
@@ -248,6 +252,41 @@ class FunctionalCollectiveConfigTest(TestCase):
             self.assertEqual(
                 tensor.grad, torch.full((4,), 3.0 if name == "all_reduce" else 1.0)
             )
+            self.assertEqual(
+                [call[-1].config for call in backend.calls], [config, config]
+            )
+
+    @parametrize("frontend", ["eager", "aot_eager", "inductor"])
+    @parametrize(
+        "name",
+        [
+            "all_reduce_coalesced",
+            "all_gather_into_tensor_coalesced",
+            "reduce_scatter_tensor_coalesced",
+        ],
+    )
+    def test_coalesced_config(self, frontend, name):
+        with self._backend() as (backend, group):
+            tensors = [torch.ones(4, requires_grad=True) for _ in range(2)]
+            config = {"min_ctas": 2}
+            group_name = group.group_name
+
+            op = getattr(torch.ops._c10d_functional, name)
+            args = {
+                "all_reduce_coalesced": ("sum",),
+                "all_gather_into_tensor_coalesced": (1,),
+                "reduce_scatter_tensor_coalesced": ("sum", 1),
+            }[name]
+
+            def fn(tensors):
+                return op(tensors, *args, group_name, config)
+
+            fn = fn if frontend == "eager" else torch.compile(fn, backend=frontend)
+            results = fn(tensors)
+            sum(result.sum() for result in results).backward()
+            expected = 4.0 if name == "all_reduce_coalesced" else 1.0
+            for tensor in tensors:
+                self.assertEqual(tensor.grad, torch.full((4,), expected))
             self.assertEqual(
                 [call[-1].config for call in backend.calls], [config, config]
             )

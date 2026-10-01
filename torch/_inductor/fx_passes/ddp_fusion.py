@@ -12,7 +12,7 @@ from typing import Any, cast
 import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters
-from torch._inductor.utils import collective_config_key, get_collective_config
+from torch._inductor.utils import collective_config_key
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils._ordered_set import OrderedSet
@@ -411,10 +411,6 @@ def _fuse_allreduce(
             last_input_node = input_node
             last_input_index = index
 
-    # all_reduce_coalesced does not take a per-collective config.
-    use_concat = (
-        use_concat or get_collective_config(comm_blocks[-1].comm_node) is not None
-    )
     if use_concat:
         fused_comm_block = _fuse_allreduce_by_concat(
             graph, last_input_node, all_input_nodes, comm_blocks[-1]

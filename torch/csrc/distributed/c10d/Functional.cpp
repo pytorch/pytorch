@@ -128,9 +128,11 @@ std::vector<at::Tensor> all_reduce_coalesced_(
     std::vector<at::Tensor> inputs,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     c10::intrusive_ptr<c10d::ReduceOp> reduce_op,
-    c10::intrusive_ptr<c10d::ProcessGroup> group) {
+    c10::intrusive_ptr<c10d::ProcessGroup> group,
+    const OptionalCollectiveConfig& config) {
   c10d::AllreduceCoalescedOptions opts;
   opts.reduceOp = *reduce_op;
+  opts.config = config;
 
   auto work = group->allreduce_coalesced(inputs, opts);
   for (const auto& tensor : inputs) {
@@ -152,13 +154,15 @@ std::vector<at::Tensor> all_reduce_coalesced(
 std::vector<at::Tensor> all_reduce_coalesced(
     std::vector<at::Tensor> inputs,
     c10::intrusive_ptr<c10d::ReduceOp> reduce_op,
-    c10::intrusive_ptr<c10d::ProcessGroup> group) {
+    c10::intrusive_ptr<c10d::ProcessGroup> group,
+    const OptionalCollectiveConfig& config) {
   std::vector<at::Tensor> outputs;
   outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
     outputs.push_back(tensor.clone(at::MemoryFormat::Contiguous));
   }
-  return all_reduce_coalesced_(outputs, std::move(reduce_op), std::move(group));
+  return all_reduce_coalesced_(
+      outputs, std::move(reduce_op), std::move(group), config);
 }
 
 std::vector<at::Tensor> all_gather_into_tensor_coalesced(
@@ -617,30 +621,36 @@ TORCH_LIBRARY(_c10d_functional, m) {
       {at::Tag::pt2_compliant_tag});
 
   m.def(
-      "all_reduce_coalesced(Tensor[] inputs, Any reduce_op, Any group_name) -> Tensor[]",
+      "all_reduce_coalesced(Tensor[] inputs, Any reduce_op, Any group_name, Dict(str, Any)? config=None) -> Tensor[]",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           [](std::vector<at::Tensor> inputs,
              const c10::IValue& reduce_op,
-             const c10::IValue& group) {
+             const c10::IValue& group,
+             const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
             return c10d::all_reduce_coalesced(
                 inputs,
                 get_reduce_op(reduce_op, "all_reduce_coalesced"),
-                get_process_group(group, "all_reduce_coalesced"));
+                get_process_group(group, "all_reduce_coalesced"),
+                config ? std::make_optional(c10::IValue(*config))
+                       : std::nullopt);
           }),
       {at::Tag::pt2_compliant_tag});
 
   m.def(
-      "all_reduce_coalesced_(Tensor[](a!) inputs, Any reduce_op, Any group_name) -> Tensor[](a!)",
+      "all_reduce_coalesced_(Tensor[](a!) inputs, Any reduce_op, Any group_name, Dict(str, Any)? config=None) -> Tensor[](a!)",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           [](std::vector<at::Tensor> inputs,
              const c10::IValue& reduce_op,
-             const c10::IValue& group) {
+             const c10::IValue& group,
+             const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
             return c10d::all_reduce_coalesced_(
                 inputs,
                 get_reduce_op(reduce_op, "all_reduce_coalesced_"),
-                get_process_group(group, "all_reduce_coalesced_"));
+                get_process_group(group, "all_reduce_coalesced_"),
+                config ? std::make_optional(c10::IValue(*config))
+                       : std::nullopt);
           }),
       {at::Tag::pt2_compliant_tag});
 
@@ -683,16 +693,19 @@ TORCH_LIBRARY(_c10d_functional, m) {
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
-      "all_gather_into_tensor_coalesced(Tensor[] inputs, int group_size, Any group_name) -> Tensor[]",
+      "all_gather_into_tensor_coalesced(Tensor[] inputs, int group_size, Any group_name, Dict(str, Any)? config=None) -> Tensor[]",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           [](std::vector<at::Tensor> inputs,
              int64_t group_size,
-             const c10::IValue& group) {
+             const c10::IValue& group,
+             const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
             return c10d::all_gather_into_tensor_coalesced(
                 inputs,
                 group_size,
-                get_process_group(group, "all_gather_into_tensor_coalesced"));
+                get_process_group(group, "all_gather_into_tensor_coalesced"),
+                config ? std::make_optional(c10::IValue(*config))
+                       : std::nullopt);
           }),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
@@ -736,18 +749,21 @@ TORCH_LIBRARY(_c10d_functional, m) {
        at::Tag::out});
 
   m.def(
-      "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduce_op, int group_size, Any group_name) -> Tensor[]",
+      "reduce_scatter_tensor_coalesced(Tensor[] inputs, str reduce_op, int group_size, Any group_name, Dict(str, Any)? config=None) -> Tensor[]",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           [](std::vector<at::Tensor> inputs,
              std::string reduce_op,
              int64_t group_size,
-             const c10::IValue& group) {
+             const c10::IValue& group,
+             const std::optional<c10::Dict<std::string, c10::IValue>>& config) {
             return c10d::reduce_scatter_tensor_coalesced(
                 inputs,
                 std::move(reduce_op),
                 group_size,
-                get_process_group(group, "reduce_scatter_tensor_coalesced"));
+                get_process_group(group, "reduce_scatter_tensor_coalesced"),
+                config ? std::make_optional(c10::IValue(*config))
+                       : std::nullopt);
           }),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 

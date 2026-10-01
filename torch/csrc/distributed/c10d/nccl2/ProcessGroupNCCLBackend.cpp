@@ -770,7 +770,8 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::gather_single(
       static_cast<int>(opts.rootRank),
       opts.asyncOp,
       operationTimeout(opts.timeout),
-      /*contiguous_output=*/true,
+      // ncclGather needs NCCL 2.28.3; only require it when a config is set.
+      /*contiguous_output=*/opts.config.has_value(),
       config);
   work->setOutputs(std::vector<at::Tensor>{outputBuffer});
   return work;

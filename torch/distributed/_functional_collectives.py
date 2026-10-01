@@ -426,6 +426,8 @@ def all_reduce_coalesced(
     reduceOp: str | dist.ReduceOp,
     group: RANK_TYPES,
     tag: str = "",
+    *,
+    config=None,
 ) -> list[torch.Tensor]:
     """
     Reduces a list of tensors across all machines in such a way that all get
@@ -454,12 +456,13 @@ def all_reduce_coalesced(
         self,
         reduce_op,
         _group_or_group_name(group),
+        config=None if config is None else _serialize_nccl_config(config),
     )
     return _maybe_wrap_tensors(tensor_list)
 
 
 def all_gather_single_coalesced(
-    self: list[torch.Tensor], group: RANK_TYPES, tag: str = ""
+    self: list[torch.Tensor], group: RANK_TYPES, tag: str = "", *, config=None
 ) -> list[torch.Tensor]:
     """
     Gather a list of tensors across from all machines.
@@ -483,6 +486,7 @@ def all_gather_single_coalesced(
         self,
         group_size,
         _group_or_group_name(group),
+        config=None if config is None else _serialize_nccl_config(config),
     )
     return _maybe_wrap_tensors(tensor_list)
 
@@ -493,6 +497,8 @@ def reduce_scatter_single_coalesced(
     scatter_dim: list[int],
     group: RANK_TYPES,
     tag: str = "",
+    *,
+    config=None,
 ) -> list[torch.Tensor]:
     """
     Reduces a list of tensors across all machines in such a way that all get
@@ -530,6 +536,7 @@ def reduce_scatter_single_coalesced(
         reduceOp.lower(),
         group_size,
         _group_or_group_name(group),
+        config=None if config is None else _serialize_nccl_config(config),
     )
 
     return _maybe_wrap_tensors(tensor_list)
@@ -1027,6 +1034,7 @@ def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
         [grad_output.contiguous() for grad_output in grad_outputs],
         grad_reduce_op,
         group_name,
+        config=getattr(ctx, "config", None),
     )
     grad_inputs = wait_tensors(grad_inputs)
 
@@ -1050,13 +1058,14 @@ def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
                 [mask.to(torch.float32) for mask in masks],
                 "sum",
                 group_name,
+                config=getattr(ctx, "config", None),
             )
         )
         grad_inputs = [
             torch.ops.aten.where.ScalarOther(mask, (g / count).to(g.dtype), 0)
             for g, mask, count in zip(grad_inputs, masks, tie_counts)
         ]
-    return (grad_inputs, None, None)
+    return (grad_inputs,) + (None,) * (ctx.num_inputs - 1)
 
 
 def all_reduce_coalesced_setup_context(ctx, inputs, output):
@@ -1068,7 +1077,9 @@ def all_reduce_coalesced_setup_context(ctx, inputs, output):
         inputs: Tuple of (tensor_list, reduce_op, group_name)
         output: Output from forward pass
     """
-    tensor_list, reduce_op, group_name = inputs
+    tensor_list, reduce_op, group_name, *config_args = inputs
+    ctx.config = config_args[0] if config_args else None
+    ctx.num_inputs = len(inputs)
     ctx.group_name = group_name
     ctx.reduce_op = reduce_op.lower() if isinstance(reduce_op, str) else reduce_op
     if _is_min_max(ctx.reduce_op):
@@ -1106,8 +1117,9 @@ def all_gather_into_tensor_coalesced_backward(ctx, grad_outputs: list[torch.Tens
         "sum",
         group_size,
         group_name,
+        config=getattr(ctx, "config", None),
     )
-    return (wait_tensors(grad_inputs), None, None)
+    return (wait_tensors(grad_inputs),) + (None,) * (ctx.num_inputs - 1)
 
 
 def all_gather_into_tensor_coalesced_setup_context(ctx, inputs, output):
@@ -1119,7 +1131,9 @@ def all_gather_into_tensor_coalesced_setup_context(ctx, inputs, output):
         inputs: Tuple of (tensor_list, group_size, group_name)
         output: Output from forward pass
     """
-    tensor_list, group_size, group_name = inputs
+    tensor_list, group_size, group_name, *config_args = inputs
+    ctx.config = config_args[0] if config_args else None
+    ctx.num_inputs = len(inputs)
     ctx.group_name = group_name
     ctx.group_size = group_size
 
@@ -1161,8 +1175,9 @@ def reduce_scatter_tensor_coalesced_backward(ctx, grad_outputs: list[torch.Tenso
         [grad_output.contiguous() for grad_output in grad_outputs],
         group_size,
         group_name,
+        config=getattr(ctx, "config", None),
     )
-    return (wait_tensors(grad_inputs), None, None, None)
+    return (wait_tensors(grad_inputs),) + (None,) * (ctx.num_inputs - 1)
 
 
 def reduce_scatter_tensor_coalesced_setup_context(ctx, inputs, output):
@@ -1174,7 +1189,9 @@ def reduce_scatter_tensor_coalesced_setup_context(ctx, inputs, output):
         inputs: Tuple of (tensor_list, reduce_op, group_size, group_name)
         output: Output from forward pass
     """
-    tensor_list, reduce_op, group_size, group_name = inputs
+    tensor_list, reduce_op, group_size, group_name, *config_args = inputs
+    ctx.config = config_args[0] if config_args else None
+    ctx.num_inputs = len(inputs)
     ctx.group_name = group_name
     ctx.group_size = group_size
     ctx.reduce_op = reduce_op.lower()
@@ -1727,7 +1744,9 @@ def _all_gather_into_tensor_native_meta(input, group_size, group_name, config=No
     return _make_all_gather_out_tensor(input, group_size)
 
 
-def _all_gather_into_tensor_coalesced_native_meta(inputs, group_size, group_name):
+def _all_gather_into_tensor_coalesced_native_meta(
+    inputs, group_size, group_name, config=None
+):
     return [
         _all_gather_into_tensor_native_meta(input, group_size, group_name)
         for input in inputs
@@ -1751,7 +1770,7 @@ def _reduce_scatter_tensor_out_native_meta(
 
 
 def _reduce_scatter_tensor_coalesced_native_meta(
-    inputs, reduce_op, group_size, group_name
+    inputs, reduce_op, group_size, group_name, config=None
 ):
     return [
         _reduce_scatter_tensor_native_meta(inp, reduce_op, group_size, group_name)

@@ -291,23 +291,25 @@ def register_comm_lowerings():
         return inp  # type: ignore[return-value]
 
     @register_comm_lowering(c10d.all_reduce_coalesced)
-    def _all_reduce_coalesced(inputs, reduce_op, group_name):
+    def _all_reduce_coalesced(inputs, reduce_op, group_name, config=None):
         inputs = [clone(inp) for inp in inputs]
         ir._CollectiveKernel.create_inplace(
             c10d.all_reduce_coalesced_.default,
             inputs,
             reduce_op,
             group_name,
+            *_config_args(config),
         )
         return inputs
 
     @register_comm_lowering(c10d.all_reduce_coalesced_)
-    def _all_reduce_coalesced_(inputs, reduce_op, group_name):
+    def _all_reduce_coalesced_(inputs, reduce_op, group_name, config=None):
         ir._CollectiveKernel.create_inplace(
             c10d.all_reduce_coalesced_.default,
             inputs,
             reduce_op,
             group_name,
+            *_config_args(config),
         )
         return inputs
 
@@ -322,7 +324,7 @@ def register_comm_lowerings():
         )
 
     @register_comm_lowering(c10d.all_gather_into_tensor_coalesced)
-    def _all_gather_into_tensor_coalesced(inputs, group_size, group_name):
+    def _all_gather_into_tensor_coalesced(inputs, group_size, group_name, config=None):
         return pytree.tree_map(
             ir.TensorBox.create,
             ir._CollectiveKernel.create_out_of_place(
@@ -330,6 +332,7 @@ def register_comm_lowerings():
                 inputs,
                 group_size,
                 group_name,
+                *_config_args(config),
             ),
         )
 
@@ -369,7 +372,9 @@ def register_comm_lowerings():
         return out
 
     @register_comm_lowering(c10d.reduce_scatter_tensor_coalesced)
-    def _reduce_scatter_tensor_coalesced(inputs, reduce_op, group_size, group_name):
+    def _reduce_scatter_tensor_coalesced(
+        inputs, reduce_op, group_size, group_name, config=None
+    ):
         return pytree.tree_map(
             ir.TensorBox.create,
             ir._CollectiveKernel.create_out_of_place(
@@ -378,6 +383,7 @@ def register_comm_lowerings():
                 reduce_op,
                 group_size,
                 group_name,
+                *_config_args(config),
             ),
         )
 

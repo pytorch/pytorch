@@ -1168,6 +1168,7 @@ def reduce_scatter_merge_fn_coalesced(
     reduce_op: str,
     reduce_dtype: torch.dtype,
     device: torch.device,
+    config: dict[str, Any] | None = None,
 ) -> list[torch.Tensor]:
     """Bucketed RS via NCCL's coalesced API (ncclGroupStart/End).
 
@@ -1178,7 +1179,7 @@ def reduce_scatter_merge_fn_coalesced(
     new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
 
     rs_outs = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
-        rs_ins_flat, reduce_op, group_size, group_name
+        rs_ins_flat, reduce_op, group_size, group_name, **_config_kwargs(config)
     )
     rs_outs = [torch.ops.c10d_functional.wait_tensor(o) for o in rs_outs]
     return [o.reshape(s) for o, s in zip(rs_outs, new_out_sizes)]
@@ -1845,9 +1846,10 @@ def merge_reduce_scatter_bucket(
 
     # Choose merge function based on mode
     rs_merge_fn = functools.partial(reduce_scatter_merge_fn_to_trace, config=config)
-    # The coalesced backend API does not take a per-collective config.
-    if mode == "coalesced" and config is None:
-        rs_merge_fn = reduce_scatter_merge_fn_coalesced
+    if mode == "coalesced":
+        rs_merge_fn = functools.partial(
+            reduce_scatter_merge_fn_coalesced, config=config
+        )
     elif mode and "custom_ops" in mode:
         rs_merge_fn = functools.partial(
             reduce_scatter_merge_fn_to_trace_custom_ops,

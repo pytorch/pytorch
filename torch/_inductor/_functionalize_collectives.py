@@ -76,6 +76,11 @@ def _emit_collective_chain(
         for index, argument in enumerate(before.target._schema.arguments):
             if argument.name == "config" and index < len(before.args):
                 config = before.args[index]
+        # c10d ops take the raw NCCLCollConfig; functional ops take its dict form.
+        if config is not None and not isinstance(config, dict):
+            from torch.distributed._collective_config import _serialize_nccl_config
+
+            config = _serialize_nccl_config(config)
         kwargs: dict[str, Any] = {"config": config} if config is not None else {}
         ar = gm.graph.call_function(
             functional_target, (input_t, *extra_args, pg_arg), kwargs
