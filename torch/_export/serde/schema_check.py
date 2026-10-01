@@ -446,7 +446,7 @@ inline void parseEnum(std::string_view s, {name}::Tag& t) {{
                     f"      return out;\n"
                     f"    }})"
                 )
-            if cpp_type == "int64_t" and fields[variant_name]["type"] in cpp_enum_defs:
+            if fields[variant_name]["type"] in cpp_enum_names:
                 return (
                     f"{prop}, [](const {name}& u) {{"
                     f" return static_cast<int64_t>({getter}); }})"
@@ -460,6 +460,11 @@ inline void parseEnum(std::string_view s, {name}::Tag& t) {{
 
         def _union_value_case(variant_name: str, cpp_type: str) -> str:
             tag = f"{name}::Tag::{variant_name.upper()}"
+            if fields[variant_name]["type"] in cpp_enum_names:
+                return (
+                    f"      case {tag}: return"
+                    f" py::cast(static_cast<int64_t>(u.get_{variant_name}()));"
+                )
             if cpp_type == "F64":
                 return (
                     f"      case {tag}: return py::cast(u.get_{variant_name}().get());"
@@ -519,6 +524,12 @@ union {name} {{
             continue
 
         defs[name] = value
+
+    # Membership in cpp_enum_defs depends on traversal order (enums register as
+    # they are visited), so classes handled before their enums would miss it.
+    cpp_enum_names = {
+        n for n, v in defs.items() if isinstance(v, type) and issubclass(v, IntEnum)
+    }
 
     class_ordering = {}
     for name, value in defs.items():

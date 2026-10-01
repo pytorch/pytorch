@@ -361,9 +361,9 @@ inline void registerSerializationBindings(py::module_& m) {
       case Argument::Tag::AS_STRINGS: return py::cast(u.get_as_strings());
       case Argument::Tag::AS_SYM_INT: return py::cast(u.get_as_sym_int());
       case Argument::Tag::AS_SYM_INTS: return py::cast(u.get_as_sym_ints());
-      case Argument::Tag::AS_SCALAR_TYPE: return py::cast(u.get_as_scalar_type());
-      case Argument::Tag::AS_MEMORY_FORMAT: return py::cast(u.get_as_memory_format());
-      case Argument::Tag::AS_LAYOUT: return py::cast(u.get_as_layout());
+      case Argument::Tag::AS_SCALAR_TYPE: return py::cast(static_cast<int64_t>(u.get_as_scalar_type()));
+      case Argument::Tag::AS_MEMORY_FORMAT: return py::cast(static_cast<int64_t>(u.get_as_memory_format()));
+      case Argument::Tag::AS_LAYOUT: return py::cast(static_cast<int64_t>(u.get_as_layout()));
       case Argument::Tag::AS_DEVICE: return py::cast(u.get_as_device());
       case Argument::Tag::AS_BOOL: return py::cast(u.get_as_bool());
       case Argument::Tag::AS_BOOLS: return py::cast(u.get_as_bools());
@@ -401,9 +401,9 @@ inline void registerSerializationBindings(py::module_& m) {
     .def_property_readonly("as_strings", &Argument::get_as_strings)
     .def_property_readonly("as_sym_int", &Argument::get_as_sym_int)
     .def_property_readonly("as_sym_ints", &Argument::get_as_sym_ints)
-    .def_property_readonly("as_scalar_type", &Argument::get_as_scalar_type)
-    .def_property_readonly("as_memory_format", &Argument::get_as_memory_format)
-    .def_property_readonly("as_layout", &Argument::get_as_layout)
+    .def_property_readonly("as_scalar_type", [](const Argument& u) { return static_cast<int64_t>(u.get_as_scalar_type()); })
+    .def_property_readonly("as_memory_format", [](const Argument& u) { return static_cast<int64_t>(u.get_as_memory_format()); })
+    .def_property_readonly("as_layout", [](const Argument& u) { return static_cast<int64_t>(u.get_as_layout()); })
     .def_property_readonly("as_device", &Argument::get_as_device)
     .def_property_readonly("as_bool", &Argument::get_as_bool)
     .def_property_readonly("as_bools", &Argument::get_as_bools)
