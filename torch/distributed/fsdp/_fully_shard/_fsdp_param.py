@@ -27,7 +27,11 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor.placement_types import _StridedShard, Placement
+from torch.distributed.tensor.placement_types import (
+    _StridedShard,
+    BlockShard,
+    Placement,
+)
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
@@ -274,6 +278,21 @@ class FSDPParam:
             raise NotImplementedError(
                 f"FSDP does not support non-contiguous parameters yet: {param.shape=} {param.stride()=}"
             )
+        # BlockShard is Shard(0) on the merged view (prod(shape[:k]), *shape[k:]):
+        # shard and communicate on dim 0 of that view, and only wrap the sharded
+        # DTensor with the BlockShard placement.
+        self._block_shard: BlockShard | None = None
+        if isinstance(fsdp_placement, BlockShard):
+            if isinstance(param, DTensor) or not isinstance(
+                self.mesh_info, FSDPMeshInfo
+            ):
+                raise NotImplementedError(
+                    "BlockShard is only supported for plain tensor parameters with "
+                    f"FSDP or HSDP, got {type(param)} with {type(self.mesh_info)}"
+                )
+            fsdp_placement._split_dim(param.shape)
+            self._block_shard = fsdp_placement
+            fsdp_placement = Shard(0)
         if fsdp_placement is None:
             fsdp_placement = Shard(0)
         elif fsdp_placement.dim < 0:
@@ -295,6 +314,8 @@ class FSDPParam:
             and bool(spmd_local_type := spmd.get_local_type(param))
             and not isinstance(param, DTensor)
         )
+        if self.is_spmd_types and self._block_shard is not None:
+            raise NotImplementedError("BlockShard does not support spmd_types params")
         if self.is_spmd_types:
             param = self._resolve_spmd_types_for_storage(
                 param, get_partition_spec(param), spmd_local_type, self.mesh_info
@@ -329,10 +350,15 @@ class FSDPParam:
                 f"FSDP does not support uneven sharding on dim {shard_dim}: "
                 f"{param_data.size()} (world size: {shard_world_size})"
             )
-        chunks = _chunk_with_empty(param_data, shard_world_size, dim=shard_dim)
+        chunk_data = (
+            param_data.view(self._block_shard._merged_shape(param_data.shape))
+            if self._block_shard is not None
+            else param_data
+        )
+        chunks = _chunk_with_empty(chunk_data, shard_world_size, dim=shard_dim)
         sharded_param = chunks[shard_rank]
         self.sharded_size = _get_dim_chunked_size(
-            sharded_param, param_data.size(), dim=shard_dim
+            sharded_param, chunk_data.size(), dim=shard_dim
         )
         self.contiguous_sharded_stride = make_contiguous_strides_for(self.sharded_size)
         padded_sharded_size = chunks[0].size()  # 0th always padded
@@ -355,6 +381,12 @@ class FSDPParam:
         if not sharded_param.is_contiguous():
             raise AssertionError(
                 f"Expected contiguous tensor with {self.fsdp_placement=}"
+            )
+        if self._block_shard is not None and hasattr(
+            sharded_param, "fsdp_pre_all_gather"
+        ):
+            raise NotImplementedError(
+                "BlockShard does not support tensor subclasses with FSDP extensions"
             )
         self.sharded_param = nn.Parameter(
             self.to_sharded_dtensor(sharded_param),
@@ -763,10 +795,11 @@ class FSDPParam:
     ) -> torch.Tensor:
         """Plain tensor path: param is not a DTensor."""
         self._spmd_mesh = self.mesh_info.mesh
+        dtensor_placement = self._block_shard or fsdp_placement
         if isinstance(self.mesh_info, HSDPMeshInfo):
-            self._spmd_placements = (Replicate(), fsdp_placement)
+            self._spmd_placements = (Replicate(), dtensor_placement)
         elif isinstance(self.mesh_info, FSDPMeshInfo):
-            self._spmd_placements = (fsdp_placement,)
+            self._spmd_placements = (dtensor_placement,)
         elif isinstance(self.mesh_info, DDPMeshInfo):
             self._spmd_placements = (Replicate(),)
         self._sharding_spec = DTensorSpec(
@@ -781,6 +814,8 @@ class FSDPParam:
         if mesh_info is None:
             raise AssertionError("Expected post_forward_mesh_info to not be None")
         param_data = param._local_tensor if isinstance(param, DTensor) else param
+        if self._block_shard is not None:
+            param_data = param_data.view(self._block_shard._merged_shape(param.shape))
         if isinstance(mesh_info, FSDPMeshInfo):
             chunks = _chunk_with_empty(param_data, mesh_info.shard_mesh_size, dim=0)
             self.sharded_post_forward_size = _get_dim_chunked_size(
@@ -1052,7 +1087,7 @@ class FSDPParam:
         # placement once we support TP.
         post_forward_sharding_spec = DTensorSpec(
             self.post_forward_mesh_info.mesh,
-            (Replicate(), Shard(0)),
+            (Replicate(), self._block_shard or Shard(0)),
             tensor_meta=self._sharding_spec.tensor_meta,
         )
         return _from_local_no_grad(tensor, post_forward_sharding_spec)
