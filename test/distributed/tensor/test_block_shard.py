@@ -199,5 +199,128 @@ class BlockShardDTensorTest(DTensorContinuousTestBase):
             distribute_tensor(x, mesh, [BlockShard((3,))])
 
 
+class BlockShardPropagationTest(DTensorContinuousTestBase):
+    world_size = 4
+
+    def _distribute(self, shape, placements):
+        mesh = self.build_device_mesh()
+        x = torch.randn(shape, device=self.device_type)
+        return x, distribute_tensor(x, mesh, placements)
+
+    def test_compile_and_copy(self):
+        x, dx = self._distribute((3, 4, 6), [BlockShard((6,))])
+
+        def fn(t):
+            return (t * 2 + 1).sum()
+
+        out = torch.compile(fn, backend="aot_eager", fullgraph=True)(dx)
+        self.assertEqual(out.full_tensor(), fn(x))
+        for copied in (copy.deepcopy(dx), pickle.loads(pickle.dumps(dx))):
+            self.assertEqual(copied.placements, dx.placements)
+            self.assertEqual(copied.to_local(), dx.to_local())
+
+    def test_pointwise_keeps_block_shard(self):
+        mesh = self.build_device_mesh()
+        for shape in SHAPES:
+            p = BlockShard((shape[2],))
+            x, dx = self._distribute(shape, [p])
+            y, dy = self._distribute(shape, [p])
+            comm_mode = CommDebugMode()
+            with comm_mode:
+                out = dx * 2 + dy
+                out.add_(dy, alpha=0.5)
+                zeros = torch.zeros_like(dx)
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(out.placements, (p,))
+            self.assertEqual(out.full_tensor(), x * 2 + y * 1.5)
+            self.assertEqual(zeros.placements, (p,))
+            self.assertEqual(zeros.to_local().shape, dx.to_local().shape)
+
+            # Same-shape Replicate operands are chunked locally; trailing-dim
+            # broadcasts pass through unchanged.
+            rep = distribute_tensor(y, mesh, [Replicate()])
+            bias = distribute_tensor(y[0, 0], mesh, [Replicate()])
+            with comm_mode:
+                mixed = dx + rep + bias
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(mixed.placements, (p,))
+            self.assertEqual(mixed.full_tensor(), x + y + y[0, 0])
+
+    def test_foreach_and_reductions(self):
+        for shape in SHAPES:
+            p = BlockShard((shape[2],))
+            x, dx = self._distribute(shape, [p])
+            y, dy = self._distribute(shape, [p])
+            norms = torch._foreach_norm([dx, dy])
+            self.assertEqual(norms[0].full_tensor(), x.norm())
+            self.assertEqual(norms[1].full_tensor(), y.norm())
+            self.assertEqual(torch.linalg.vector_norm(dx).full_tensor(), x.norm())
+            self.assertEqual(dx.sum().full_tensor(), x.sum())
+            dz = dx.clone()
+            torch._foreach_mul_([dz], 3.0)
+            self.assertEqual(dz.placements, (p,))
+            self.assertEqual(dz.full_tensor(), 3 * x)
+
+    def test_unsupported_ops_redistribute_to_replicate(self):
+        for shape in SHAPES:
+            p = BlockShard((shape[2],))
+            x, dx = self._distribute(shape, [p])
+            self.assertEqual(dx.sum(dim=0).full_tensor(), x.sum(0))
+            self.assertEqual(dx.transpose(0, 1).full_tensor(), x.transpose(0, 1))
+            self.assertEqual(
+                torch.linalg.vector_norm(dx, dim=2).full_tensor(),
+                torch.linalg.vector_norm(x, dim=2),
+            )
+
+    def test_views(self):
+        E, O, I = 3, 4, 6
+        p = BlockShard((I,))
+        x, dx = self._distribute((E, O, I), [p])
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            flat = dx.view(E * O, I)
+            split = dx.reshape(E, O, 2, 3)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+        self.assertEqual(flat.placements, (Shard(0),))
+        self.assertEqual(flat.to_local(), dx.to_local())
+        self.assertEqual(flat.full_tensor(), x.view(E * O, I))
+        self.assertEqual(split.placements, (p,))
+        self.assertEqual(split.full_tensor(), x.reshape(E, O, 2, 3))
+        # The block no longer ends on a dim boundary: redistributes.
+        self.assertEqual(dx.view(E, O * I).full_tensor(), x.view(E, O * I))
+
+    def test_optimizer_and_grad_clipping(self):
+        mesh = self.build_device_mesh()
+        torch.manual_seed(0)
+        shapes_and_placements = [
+            ((3, 4, 6), [BlockShard((6,))]),
+            ((2, 3, 2), [BlockShard((2,))]),
+            ((8, 5), [Shard(0)]),
+        ]
+        ref_params = [
+            torch.nn.Parameter(torch.randn(shape, device=self.device_type))
+            for shape, _ in shapes_and_placements
+        ]
+        params = [
+            torch.nn.Parameter(distribute_tensor(p.detach().clone(), mesh, plc))
+            for p, (_, plc) in zip(ref_params, shapes_and_placements)
+        ]
+        ref_opt = torch.optim.AdamW(ref_params, lr=1e-2, foreach=True)
+        opt = torch.optim.AdamW(params, lr=1e-2, foreach=True)
+        for _ in range(3):
+            for ref, param, (_, plc) in zip(ref_params, params, shapes_and_placements):
+                grad = torch.randn_like(ref)
+                ref.grad = grad
+                param.grad = distribute_tensor(grad, mesh, plc)
+            ref_norm = torch.nn.utils.clip_grad_norm_(ref_params, max_norm=1.0)
+            norm = torch.nn.utils.clip_grad_norm_(params, max_norm=1.0)
+            self.assertEqual(norm.full_tensor(), ref_norm)
+            ref_opt.step()
+            opt.step()
+            for ref, param, (_, plc) in zip(ref_params, params, shapes_and_placements):
+                self.assertEqual(param.placements, tuple(plc))
+                self.assertEqual(param.full_tensor(), ref)
+
+
 if __name__ == "__main__":
     run_tests()
