@@ -12661,13 +12661,14 @@ class TestLinalgMPS(TestCaseMPS):
 
     @parametrize("n", [5, 32, 600])
     @parametrize("left", [True, False])
+    @parametrize("b_row_major", [True, False])
     @dtypes(torch.float32, torch.complex64)
-    def test_linalg_solve_triangular_out_layouts(self, device, dtype, n, left):
+    def test_linalg_solve_triangular_out_layouts(self, device, dtype, n, left, b_row_major):
         # n covers the substitution kernel, the small-matrix kernel and the blocked solve
         A = torch.randn(2, n, n, dtype=dtype) / n ** 0.5 + 2 * torch.eye(n)
         L = A.tril()
-        B = torch.randn(2, n, 32, dtype=dtype)
-        B = B if left else B.mT
+        B = torch.randn(2, n, 32, dtype=dtype) if left else torch.randn(2, 32, n, dtype=dtype)
+        B = B if b_row_major else B.mT.contiguous().mT
         expected = torch.linalg.solve_triangular(L, B, upper=False, left=left)
         shape = B.shape
         outs = {

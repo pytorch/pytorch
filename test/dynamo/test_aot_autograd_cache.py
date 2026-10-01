@@ -3388,6 +3388,108 @@ class AOTAutogradCacheTests(CacheKeyEquivalenceMixin, InductorTestCase):
             )
         compile_fx.compile_fx(gm, [[fake_x, fake_y]])
 
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_autocast_no_dtype_in_graph_cache_hit(self):
+        """
+        torch.autocast(device) with no dtype inside the compiled function traces
+        _enter_autocast(device, None, ...), which picks up the ambient autocast
+        dtype at runtime. It must cache, and must not be reused under a
+        different ambient dtype. See #191106.
+        """
+
+        def fn(x):
+            with torch.autocast("cpu"):
+                return (x @ x).relu()
+
+        x = torch.randn(8, 8)
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        out = compiled_fn(x)
+        self.assertEqual(out.dtype, torch.bfloat16)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(compiled_fn(x), out)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+        orig_dtype = torch.get_autocast_dtype("cpu")
+        torch.set_autocast_dtype("cpu", torch.float16)
+        try:
+            self._clear_dynamo_and_codecache()
+            out = compiled_fn(x)
+        finally:
+            torch.set_autocast_dtype("cpu", orig_dtype)
+        self.assertEqual(out.dtype, torch.float16)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_inference_mode_in_graph_cache_hit(self):
+        """
+        torch.inference_mode inside the compiled function traces
+        _enter_inference_mode/_exit_inference_mode nodes, which must not bypass
+        AOTAutogradCache. See #191106.
+        """
+
+        def fn(x):
+            with torch.inference_mode():
+                return (x @ x).relu().sum()
+
+        x = torch.randn(8, 8)
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # First call misses and saves (no bypass).
+        self.assertEqual(compiled_fn(x), fn(x))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+        # Second call hits after clearing in-memory state.
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(compiled_fn(x), fn(x))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_refs_tensor_in_graph_cache_hit(self):
+        """
+        torch.tensor(data) with a data-dependent scalar traces a raw
+        torch._refs.tensor node, which must not bypass AOTAutogradCache. See
+        #191106.
+        """
+
+        def fn(x):
+            return torch.tensor([x.sum().item(), 2.0, 3.0])
+
+        x = torch.randn(8)
+        compiled_fn = torch.compile(fn, backend="inductor")
+
+        # First call misses and saves (no bypass).
+        self.assertEqual(compiled_fn(x), fn(x))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+        # Second call hits after clearing in-memory state.
+        self._clear_dynamo_and_codecache()
+        self.assertEqual(compiled_fn(x), fn(x))
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
     @unittest.skipIf(not HAS_GPU, "requires accelerator")
     @functorch_config.patch({"enable_autograd_cache": True})
     @inductor_config.patch("fx_graph_cache", True)
@@ -3943,6 +4045,59 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
             self.assertRaises(
                 BypassAOTAutogradCache, lambda: self.gen_cache_key(fn, config)
             )
+
+    def test_autocast_no_dtype_in_graph_keys_ambient_dtype(self):
+        # torch.autocast(device) with no dtype traces _enter_autocast(device,
+        # None, ...), which picks up the ambient autocast dtype at runtime, so
+        # that dtype must be in the key even though autocast is disabled when
+        # the key is computed. See #191106.
+        def fn(x):
+            with torch.autocast("cpu"):
+                return (x @ x).relu().sum()
+
+        config = self.default_config()
+        inputs = [torch.randn(4, 4)]
+        key1 = self.gen_cache_key(fn, config, inputs=inputs)
+        self.assertEqual(key1, self.gen_cache_key(fn, config, inputs=inputs))
+        orig_dtype = torch.get_autocast_dtype("cpu")
+        torch.set_autocast_dtype("cpu", torch.float16)
+        try:
+            key2 = self.gen_cache_key(fn, config, inputs=inputs)
+        finally:
+            torch.set_autocast_dtype("cpu", orig_dtype)
+        self.assertNotEqual(key1, key2)
+
+    def test_inference_mode_in_graph_is_cacheable(self):
+        # torch.inference_mode used *inside* a compiled region traces
+        # _enter_inference_mode/_exit_inference_mode nodes into the graph. Same
+        # bug class as autocast (see #191106): behavior is fully determined by
+        # the enabled arg, which is hashed into the cache key.
+        def fn(x):
+            with torch.inference_mode():
+                return (x @ x).relu().sum()
+
+        _, gm, _ = self._get_dynamo_output(fn, torch.randn(4, 4))
+        targets = {n.target for n in gm.graph.nodes}
+        self.assertIn(torch.autograd.grad_mode._enter_inference_mode, targets)
+        config = self.default_config()
+        # Should not raise BypassAOTAutogradCache
+        self.gen_cache_key(fn, config, inputs=[torch.randn(4, 4)])
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_refs_tensor_in_graph_is_cacheable(self):
+        # torch.tensor(data) with a data-dependent scalar in `data` traces a raw
+        # torch._refs.tensor node instead of decomposing (see
+        # torch/_dynamo/variables/torch.py). Its behavior is fully determined by
+        # its args (the data list, whose scalars are graph nodes/constants), so
+        # it must be cacheable. See #191106.
+        def fn(x):
+            return torch.tensor([x.sum().item(), 2.0, 3.0])
+
+        _, gm, _ = self._get_dynamo_output(fn, torch.randn(4))
+        self.assertIn(torch._refs.tensor, {n.target for n in gm.graph.nodes})
+        config = self.default_config()
+        # Should not raise BypassAOTAutogradCache
+        self.gen_cache_key(fn, config, inputs=[torch.randn(4)])
 
     @torch._inductor.config.patch({"freezing": True})
     def test_freezing(self):
