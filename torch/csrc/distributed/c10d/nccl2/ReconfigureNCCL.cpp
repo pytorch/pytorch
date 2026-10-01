@@ -180,12 +180,16 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     std::memcpy(&uniqueId, vec.data(), sizeof(ncclUniqueId));
   }
 
-  // Tear down the previous communicator generation: revoke in-flight work,
-  // stop the watchdog, drain the work queue, and abort the comm. Port of the
+  // Tear down the previous communicator generation: stop the watchdog, revoke
+  // in-flight work, drain the work queue, and abort the comm. Port of the
   // pre-reconfigure cleanup in torchcomms' TorchCommNCCL::reconfigure.
   if (init_state_ == InitializationState::INITIALIZED) {
+    // The watchdog revokes without reconfigure_mutex_, so stop it first to
+    // avoid a concurrent second commRevoke on the same communicator.
+    stopWatchdog();
+
     auto workStatus = workq_.garbageCollect();
-    if (nccl_comm_ &&
+    if (nccl_comm_ && !revoked_.exchange(true) &&
         (workStatus == WorkNCCL::WorkStatus::NOT_STARTED ||
          workStatus == WorkNCCL::WorkStatus::INPROGRESS)) {
       NCCL_CHECK_IGNORE(
@@ -196,16 +200,6 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
 
     detachMemoryHook();
     retireComm();
-
-    if (timeout_thread_.joinable()) {
-      shutdown_ = true;
-      {
-        std::lock_guard<std::mutex> lock(timeout_mutex_);
-        timeout_cv_.notify_all();
-      }
-      timeout_thread_.join();
-    }
-
     workq_.finalize();
 
     if (nccl_comm_) {
