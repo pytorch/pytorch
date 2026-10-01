@@ -17,6 +17,7 @@ from .traits import WARP
 _compile = _L.compile_kernel
 _stream = _L.stream
 _CACHE = {}
+_INT32_LIMIT = 1 << 31
 
 
 # First matching B200 threads-per-row anchor wins; small rows pack without cross-warp merge.
@@ -99,6 +100,8 @@ def reduce_row_tile(
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
     M, N = x.shape
+    if M >= _INT32_LIMIT or N >= _INT32_LIMIT:
+        raise AssertionError(f"row reduction needs M and N < 2^31, got M={M}, N={N}")
     cfg = row_config(N, x.element_size() * 8)
     # Scalar rows use 16 to hide narrow-load latency; vectorized rows use 4, at or near
     # the measured optimum across 4/8/16/32.
