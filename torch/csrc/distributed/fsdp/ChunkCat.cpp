@@ -39,6 +39,13 @@ void chunk_cat_mixed_dtype(
     at::_chunk_cat_out(out, tensors, dim, num_chunks);
     return;
   }
+  // _chunk_cat takes one input dtype, so this holds a cast copy of every
+  // mismatched input until it returns. CUDA bf16 + fp32, the common case, takes
+  // the fused kernel in ChunkCat.cu instead, so only other devices and dtype
+  // pairs pay for the copies.
+  // TODO: Above a size threshold, copy each input into its slice of out, which
+  // casts without a copy. Small inputs keep this path, since per-input copies
+  // cost a launch each.
   std::vector<at::Tensor> inputs;
   inputs.reserve(tensors.size());
   for (const auto& tensor : tensors) {
