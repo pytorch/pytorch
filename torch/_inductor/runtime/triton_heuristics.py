@@ -3162,12 +3162,9 @@ class StaticTritonCompileResult(CompileResult[_T]):
 
     def cubin_path(self) -> str:
         """Return the canonical cache path for this result's GPU binary."""
-        device_type = (
-            "hip" if torch.version.hip else self.compile_meta.get("device_type", "cuda")
-        )
         device, kernel_hash, binary_filename = self.bundled_artifact_identity()
         return os.path.join(
-            triton_cache_dir(_resolve_load_device(device, device_type)),
+            triton_cache_dir(device),
             kernel_hash,
             binary_filename,
         )

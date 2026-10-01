@@ -1211,6 +1211,29 @@ class TestFxGraphCache(TestCase):
         self.assertIs(loaded_autotuner, static_autotuner.kernel)
         self.assertEqual(graph.current_callable([x.clone()])[0], expected)
 
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @requires_cuda_and_triton
+    @torch.compiler.config.patch(compile_on_one_rank=True)
+    @config.patch(STATIC_TRITON_BUNDLE_NO_RAW_CONFIG)
+    def test_device_agnostic_local_binary_path_without_triton_cache_env(self):
+        original_cache = os.environ.pop("TRITON_CACHE_DIR", None)
+        try:
+            _, _, _, _, autotuner = self.compile_unary_static_graph(torch.sin)
+            result = autotuner.kernel.compile_results[0]
+            self.assertIsNone(result.compile_meta.get("device"))
+            os.environ.pop("TRITON_CACHE_DIR", None)
+            device, kernel_hash, filename = result.bundled_artifact_identity()
+            self.assertIsNone(device)
+            expected_path = os.path.join(
+                triton_cache_dir(device), kernel_hash, filename
+            )
+            self.assertTrue(os.path.isfile(expected_path))
+            self.assertEqual(result.cubin_path(), expected_path)
+        finally:
+            os.environ.pop("TRITON_CACHE_DIR", None)
+            if original_cache is not None:
+                os.environ["TRITON_CACHE_DIR"] = original_cache
+
     @requires_cuda_and_triton
     @config.patch(STATIC_TRITON_BUNDLE_CONFIG)
     def test_bundle_and_cache_without_cubin_falls_back_to_jit(self):
