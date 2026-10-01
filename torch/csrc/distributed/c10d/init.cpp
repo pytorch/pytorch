@@ -179,6 +179,10 @@ void setCollectiveConfig(Options& options, const py::object& config) {
     return;
   }
   // Generic Python configs are passed as their attribute dictionaries.
+  TORCH_CHECK_TYPE(
+      py::isinstance<py::dict>(config) || py::hasattr(config, "__dict__"),
+      "Collective config must be a dict or an object with __dict__, got ",
+      std::string(py::str(py::type::of(config).attr("__name__"))));
   auto values =
       py::isinstance<py::dict>(config) ? config : config.attr("__dict__");
   static const auto type =
