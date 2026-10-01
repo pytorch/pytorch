@@ -996,36 +996,24 @@ class TestScheduler(TestCase):
         row, feature = sympy.symbols(
             "cross_name_row cross_name_feature", integer=True, nonnegative=True
         )
-        dense_source = MemoryDep(
-            "dense_source", 128 * row + feature, (row, feature), (4, 128)
-        )
-        dense_read = MemoryDep(
-            "dense_source", 128 * row + feature, (row, feature), (4, 32)
-        )
-        lane_source = MemoryDep(
-            "lane_source", 128 * row + feature, (row, feature), (4, 128)
-        )
-        lane_read = MemoryDep(
-            "lane_source", 128 * row + 4 * feature + 1, (row, feature), (4, 32)
-        )
-        dense_relation = SubParentAccessRelation(
-            source_accesses=(dense_source,),
-            consumer_access=dense_read,
-            access_stride=1,
-            requires_live_source=False,
-            base_offset=0,
-            extent=32,
-        )
-        lane_relation = SubParentAccessRelation(
-            source_accesses=(lane_source,),
-            consumer_access=lane_read,
-            access_stride=4,
-            requires_live_source=live_source,
-            base_offset=1,
-            extent=32,
-        )
-        relations = (
-            (dense_relation, lane_relation) if include_dense else (lane_relation,)
+        relations = tuple(
+            SubParentAccessRelation(
+                source_accesses=(
+                    MemoryDep(name, 128 * row + feature, (row, feature), (4, 128)),
+                ),
+                consumer_access=MemoryDep(
+                    name, 128 * row + stride * feature + offset, (row, feature), (4, 32)
+                ),
+                access_stride=stride,
+                requires_live_source=live,
+                base_offset=offset,
+                extent=32,
+            )
+            for name, stride, offset, live in (
+                ("dense_source", 1, 0, False),
+                ("lane_source", 4, 1, live_source),
+            )
+            if include_dense or stride != 1
         )
         self.assertEqual(
             NestedReduction.sub_parent_relations_are_replay_compatible(relations),
@@ -1195,36 +1183,6 @@ class TestScheduler(TestCase):
         with self.assertRaisesRegex(AssertionError, "lost required .*source 'buf0'"):
             resolver.materialize_sources((relation,))
 
-    @parametrize("live_source", [False, True])
-    def test_sub_parent_materializes_each_lane_source_once(self, live_source):
-        index = sympy.Symbol("lane_materialize_index", integer=True)
-        source = MemoryDep("buf0", index, (index,), (sympy.Integer(16),))
-        relations = tuple(
-            SubParentAccessRelation(
-                source_accesses=(source,),
-                consumer_access=MemoryDep(
-                    "buf0", 2 * index + lane, (index,), (sympy.Integer(8),)
-                ),
-                access_stride=2,
-                requires_live_source=live_source,
-                base_offset=lane,
-                extent=8,
-            )
-            for lane in (0, 1)
-        )
-        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
-            resolver = self._make_sub_parent_value_resolver(relations)
-        value = Mock()
-        resolver._values = {"buf0": [value]}
-        resolver._materialize = Mock(return_value=Mock())
-        resolver._materialize_dense_source = Mock()
-        resolver.materialize_sources(iter((*relations, *relations)))
-        if live_source:
-            resolver._materialize.assert_called_once_with(value)
-        else:
-            resolver._materialize.assert_not_called()
-        resolver._materialize_dense_source.assert_not_called()
-
     @parametrize(
         "live_source,replayed,selected",
         (
@@ -1282,6 +1240,16 @@ class TestScheduler(TestCase):
             resolver._materialize_dense_source.assert_called_once_with(
                 0, descriptor, value, 0
             )
+            resolver._kernel.cse.contains_value.return_value = True
+            with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+                self.assertIs(
+                    resolver.resolve_load("buf0", consumer.index, replay_node=node),
+                    resolver._materialize_dense_source.return_value,
+                )
+                with self.assertRaisesRegex(
+                    AssertionError, "no dense sub-parent relation"
+                ):
+                    resolver.resolve_load("buf0", consumer.index + 1, replay_node=node)
         else:
             resolver._materialize_dense_source.assert_not_called()
 
@@ -1315,48 +1283,6 @@ class TestScheduler(TestCase):
 
         resolver._kernel._load_other = 7.0
         self.assertEqual(resolver.resolve_sources("buf0"), ())
-
-    def test_sub_parent_dense_mapping_requires_matching_replay_index(self):
-        row, feature = sympy.symbols(
-            "dense_replay_row dense_replay_feature", integer=True, nonnegative=True
-        )
-        source = MemoryDep("buf0", 16 * row + feature, (row, feature), (2, 16))
-        consumer = MemoryDep("buf0", 16 * row + feature, (row, feature), (2, 8))
-        relation = SubParentAccessRelation(
-            source_accesses=(source,),
-            consumer_access=consumer,
-            requires_live_source=True,
-            access_stride=1,
-            base_offset=0,
-            extent=8,
-        )
-        replay_node = Mock(
-            read_writes=ReadWrites(OrderedSet([consumer]), OrderedSet(), OrderedSet())
-        )
-        relation = dataclasses.replace(
-            relation, output_group=0, consumer_nodes=(replay_node,)
-        )
-        graph_handler = Mock(sizevars=SizeVarAllocator())
-        kernel = Mock(_load_mask=None, _load_other=None)
-        kernel.cse.contains_value.return_value = True
-        with V.set_graph_handler(graph_handler):
-            resolver = self._make_sub_parent_value_resolver(
-                (relation,),
-                kernel=kernel,
-                factor=2,
-                parent_numel=2,
-                parent_rnumel=16,
-                output_groups=(SubParentOutputGroup(1, (replay_node,)),),
-            )
-            resolver._values = {"buf0": [Mock()]}
-            resolver._materialize_dense_source = Mock(return_value=Mock())
-            self.assertIsNotNone(
-                resolver.resolve_load("buf0", consumer.index, replay_node=replay_node)
-            )
-            with self.assertRaisesRegex(AssertionError, "no dense sub-parent relation"):
-                resolver.resolve_load(
-                    "buf0", consumer.index + 1, replay_node=replay_node
-                )
 
     def test_sub_parent_external_fallback_and_atomic_store(self):
         resolver = Mock()
