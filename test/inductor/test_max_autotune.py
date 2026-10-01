@@ -5318,6 +5318,56 @@ class TestPrologueFusion(TestCase):
             .run(code[0])
         )
 
+    @fresh_cache()
+    @mock.patch("torch._inductor.select_algorithm.TritonTemplate.test_cache", new=True)
+    @config.patch(enable_caching_generated_triton_templates=True)
+    @config.patch(
+        {
+            "benchmark_epilogue_fusion": True,
+            "max_epilogue_benchmarked_choices": 3,
+        }
+    )
+    def test_addmm_shared_nonfusible_prefix_and_input_prologue(self):
+        from torch._inductor.select_algorithm import TritonTemplateKernel
+
+        M = K = N = 64
+        saw_shared_input = False
+        original_def_kernel = TritonTemplateKernel.def_kernel
+
+        @functools.wraps(original_def_kernel)
+        def disable_prefix_fusion(kernel, *argnames):
+            nonlocal saw_shared_input
+            if (
+                kernel.prefix_inputs_fusion_indices
+                and argnames
+                and kernel.input_nodes[0].get_name()
+                == kernel.input_nodes[kernel.prefix_args].get_name()
+            ):
+                saw_shared_input = True
+                kernel.prefix_inputs_fusion_indices = ()
+            return original_def_kernel(kernel, *argnames)
+
+        def foo(x, b):
+            computed = x * 2.0
+            return torch.addmm(computed, computed, b)
+
+        x = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+
+        with (
+            mock.patch.object(
+                TritonTemplateKernel,
+                "def_kernel",
+                disable_prefix_fusion,
+            ),
+            self.force_template_fusion_benchmark(),
+        ):
+            out, code = run_and_get_code(torch.compile(foo), x, b)
+
+        self.assertTrue(saw_shared_input)
+        self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
+
     @parametrize(
         "prologue_fusion,epilogue_fusion",
         ((True, False), (False, True)),

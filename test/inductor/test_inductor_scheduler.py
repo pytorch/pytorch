@@ -5,7 +5,6 @@ from unittest import skipIf
 from unittest.mock import Mock, patch, PropertyMock
 
 import sympy
-
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.ir as ir

@@ -5696,10 +5696,11 @@ def _producer_fusion_enabled_inputs(
 ) -> OrderedSet[str]:
     """Template inputs a producer may fuse into under the current fusion flags.
 
-    The template's load_input/store_output_fusion_allowed_inputs describe what the
-    template supports. prologue_fusion/allow_prologue_fusion gate load_input
-    placements and epilogue_fusion/allow_epilogue_fusion gate store_output
-    placements. An input that needs both placements requires both flags.
+    The template's load_input_fusion_allowed_inputs and
+    store_output_fusion_allowed_inputs describe what the template supports.
+    prologue_fusion/allow_prologue_fusion gate producer fusion into load_input().
+    epilogue_fusion/allow_epilogue_fusion gate both producer fusion of
+    store_output() inputs and downstream consumer fusion from template outputs.
     """
     template = template_node.get_template_node()
     if template is None:
