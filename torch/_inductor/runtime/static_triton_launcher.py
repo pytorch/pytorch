@@ -326,22 +326,28 @@ class StaticallyLaunchedTritonKernel:
             raise AssertionError("cubin_path must not be None before load_kernel")
         return self._load_kernel_from_path(self.cubin_path, device)
 
+    def _loaded_kernel_parts(self, loaded_kernel):
+        return loaded_kernel
+
     def load_kernel(self, device: int) -> None:
         with self._load_lock:
             if self.device_agnostic:
                 if device in self.functions:
                     return
-                loaded_kernel = self._load_kernel_for_device(device)
-                (module, function, self.n_regs, self.n_spills) = loaded_kernel
-                self.modules[device] = module
+                module, function, self.n_regs, self.n_spills = (
+                    self._loaded_kernel_parts(self._load_kernel_for_device(device))
+                )
+                if module is not None:
+                    self.modules[device] = module
                 self.functions[device] = function
                 return
 
             if self.function is not None:
                 return
 
-            loaded_kernel = self._load_kernel_for_device(device)
-            (self.module, self.function, self.n_regs, self.n_spills) = loaded_kernel
+            self.module, self.function, self.n_regs, self.n_spills = (
+                self._loaded_kernel_parts(self._load_kernel_for_device(device))
+            )
             # Don't need the cubin path anymore now that we've loaded
             self.cubin_path = None
             self.cubin_raw = None
@@ -643,27 +649,10 @@ class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
         self.cubin_raw = kernel.asm.get("zebin", None)
         super().__init__(kernel)
 
-    def load_kernel(self, device: int) -> None:
+    def _loaded_kernel_parts(self, loaded_kernel):
         # The XPU static launcher returns a PyCapsule for the loaded SYCL kernel,
         # not a separate module/function pair like the CUDA/HIP launcher.
-        with self._load_lock:
-            if self.device_agnostic:
-                if device in self.functions:
-                    return
-                loaded_kernel = self._load_kernel_for_device(device)
-                (function, self.n_regs, self.n_spills) = loaded_kernel
-                # XPU has no separate module handle (only the function capsule).
-                self.functions[device] = function
-                return
-
-            if self.function is not None:
-                return
-
-            loaded_kernel = self._load_kernel_for_device(device)
-            (self.function, self.n_regs, self.n_spills) = loaded_kernel
-            self.module = None
-            self.cubin_path = None
-            self.cubin_raw = None
+        return (None, *loaded_kernel)
 
     def _current_device(self) -> int:
         import torch
