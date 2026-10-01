@@ -84,7 +84,6 @@ torch.utils.data <data>
 torch.utils.deterministic <deterministic>
 torch.utils.jit <jit_utils>
 torch.utils.dlpack <dlpack>
-torch.utils.mobile_optimizer <mobile_optimizer>
 torch.utils.model_zoo <model_zoo>
 torch.utils.tensorboard <tensorboard>
 torch.utils.module_tracker <module_tracker>
