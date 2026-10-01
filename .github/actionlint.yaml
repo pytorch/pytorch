@@ -68,6 +68,8 @@ self-hosted-runner:
     - linux.rocm.gpu.mi300.1
     - linux.rocm.gpu.mi300.4
     # gfx950 runners
+    - linux.rocm.gpu.gfx950.1
+    # MI350 DPX runners
     - linux.rocm.gpu.mi350.dpx.1
     - linux.rocm.gpu.mi350.dpx.2
     - linux.rocm.gpu.mi350.dpx.4
