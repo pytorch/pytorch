@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from dataclasses import dataclass
 from typing import Any, cast, Literal, NamedTuple, TYPE_CHECKING
 from typing_extensions import TypeVarTuple, Unpack
 
@@ -76,6 +77,7 @@ class FSDPCommContext:
     """This has the communication state shared across FSDP states/parameter groups."""
 
     all_gather_state: AllGatherState | None = None
+    active_gradient_reduction: _GradientReductionState | None = None
 
     def lazy_init(self, device: torch.device):
         self.device_handle = _get_device_handle(device.type)
@@ -175,14 +177,22 @@ class AllGatherState(NamedTuple):
 class ReduceScatterState(NamedTuple):
     reduce_scatter_input: torch.Tensor
     event: torch.Event | None  # reduce-scatter event
+    allocation_stream: torch.Stream  # Owns the input allocation
+    param_group: FSDPParamGroup  # Identifies the owning FSDP root
+
+
+@dataclass
+class _GradientReductionState:
+    owner: object
 
 
 class AllReduceState(NamedTuple):
-    # Holding all_reduce_input (the reduce-dtype AR buffer) keeps the
-    # caching allocator from reusing the block across layers. This is a
-    # structural invariant, not bookkeeping: without it, the next layer's
-    # RS can reuse the same physical block before this layer's AR finishes
-    # under slow AR, causing gradient aliasing. See PR #140044, PR #180900.
+    # Holding all_reduce_input (the reduce-dtype AR buffer, or the RS output
+    # passed to the all-reduce hook) keeps the caching allocator from reusing
+    # the block across layers. This is a structural invariant, not
+    # bookkeeping: without it, the next layer's RS can reuse the same
+    # physical block before this layer's AR or hook finishes under slow AR,
+    # causing gradient aliasing. See PR #140044, PR #180900.
     all_reduce_input: torch.Tensor
     event: torch.Event | None  # all-reduce event
 
@@ -302,12 +312,14 @@ class FSDPParamGroup:
         # Only for HSDP, if accumulating gradients without all-reduce, save the
         # partial reduce output (only reduce-scattered but not all-reduced)
         self._partial_reduce_output: torch.Tensor | None = None
+        # Whether post-backward work remains for this group.
+        self._post_backward_pending: bool = False
         # Holds the reduce-dtype AR buffer + completion event across
-        # layers in HSDP+AR with reduce_dtype != orig_dtype (e.g., bf16
-        # reduce + fp32 params). Structural invariant: the live Python
-        # ref keeps the buffer off the caching allocator's free list,
-        # preventing the next layer's RS from reusing the same physical
-        # block while this layer's AR is still in flight. See
+        # layers in HSDP+AR or with an all-reduce hook, with reduce_dtype !=
+        # orig_dtype (e.g., bf16 reduce + fp32 params). Structural invariant:
+        # the live Python ref keeps the buffer off the caching allocator's
+        # free list, preventing the next layer's RS from reusing the same
+        # physical block while this layer's AR or hook is still in flight. See
         # AllReduceState docstring and regression test PR #180900.
         self._all_reduce_state: AllReduceState | None = None
 
@@ -583,6 +595,7 @@ class FSDPParamGroup:
             )
             self._reshard_after_forward_event = None
         self._partial_reduce_output = None
+        self._post_backward_pending = False
         self._post_forward_indices.clear()
         self._training_state = TrainingState.IDLE
         self._to_sharded()
@@ -665,11 +678,13 @@ class FSDPParamGroup:
                     fsdp_param.accumulate_unsharded_grad_if_needed()
             with record_function(self._with_fqn("FSDP::post_backward_reshard")):
                 if not self.reduce_grads:
+                    self._post_backward_pending = True
                     if self.reshard_after_backward:
                         self.reshard()
                     for fsdp_param in self.fsdp_params:
                         fsdp_param.to_accumulated_grad_if_needed()
                     return
+                self._post_backward_pending = False
                 # Save the autograd-computed gradients before resharding to only
                 # access the unsharded parameters when their data is present
                 fsdp_params_with_grad: list[FSDPParam] = []
@@ -718,7 +733,14 @@ class FSDPParamGroup:
                     while len(states) >= max_input_buffers:
                         oldest = states.pop(0)
                         if oldest.event is not None:
-                            self.device_handle.current_stream().wait_event(oldest.event)
+                            # The allocation stream waits before the input storage
+                            # is released. The current stream also waits, when
+                            # different, so the next allocation cannot exceed the
+                            # global buffer cap.
+                            oldest.allocation_stream.wait_event(oldest.event)
+                            current_stream = self.device_handle.current_stream()
+                            if current_stream != oldest.allocation_stream:
+                                current_stream.wait_event(oldest.event)
                         del oldest
             if len(fsdp_params_with_grad) == 0:
                 return
@@ -780,7 +802,12 @@ class FSDPParamGroup:
                     self._post_reduce_event
                 )
                 self.comm_ctx.reduce_scatter_states.append(
-                    ReduceScatterState(reduce_scatter_input, reduce_scatter_event)
+                    ReduceScatterState(
+                        reduce_scatter_input,
+                        reduce_scatter_event,
+                        self.device_handle.current_stream(),
+                        self,
+                    )
                 )
                 if is_partial_group_backward:
                     # Serialize the default stream on this invocation's
@@ -828,9 +855,6 @@ class FSDPParamGroup:
                     )
 
     def finalize_backward(self):
-        for event in self.comm_ctx._last_post_reduce_events.values():
-            self.device_handle.current_stream().wait_event(event)
-        self.comm_ctx._last_post_reduce_events = dict()
         self._post_reduce_event = None
         self._all_reduce_state = None
         for fsdp_param in self.fsdp_params:

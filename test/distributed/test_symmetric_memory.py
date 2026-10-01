@@ -5,7 +5,10 @@ import json
 import os
 import random
 import re
+import subprocess
+import sys
 import tempfile
+import textwrap
 from contextlib import contextmanager, nullcontext
 from unittest import skipIf, skipUnless
 
@@ -36,7 +39,10 @@ from torch.distributed._symmetric_memory._nccl import (
 )
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
 from torch.testing._internal.common_cuda import SM100OrLater, SM89OrLater, SM90OrLater
-from torch.testing._internal.common_device_type import e4m3_type
+from torch.testing._internal.common_device_type import (
+    e4m3_type,
+    instantiate_device_type_tests,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
@@ -722,6 +728,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # Hangs at 4 ranks on gfx950 CI distributed runners (file timeout / SIGINT,
+    # no JUnit row). Same P2P/symm_mem family as the AsyncTPTest MI350 skip;
+    # not a min-gpus filter bug. Skipped until the runner P2P path is fixed.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_subgroup(self) -> None:
         self._init_process()
@@ -987,6 +997,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             t.fill_(self.rank + 10.0)
 
         torch.cuda.synchronize()
+        # The fill follows the last barrier, so nothing orders a peer's fill
+        # against this rank's read below. Local synchronize only covers this
+        # device.
+        dist.barrier()
         buf = hdl.get_buffer(peer, (64,), torch.float32)
         expected = torch.full((64,), peer + 10.0, device="cuda")
         self.assertEqual(buf, expected)
@@ -1029,6 +1043,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             t.fill_(self.rank + 100.0)
 
         torch.cuda.synchronize()
+        # wait_signal only shows that prev_peer sent its signal, which precedes
+        # its fill, so nothing orders that fill against this rank's read below.
+        # Local synchronize only covers this device.
+        dist.barrier()
         buf = hdl.get_buffer(prev_peer, (64,), torch.float32)
         expected = torch.full((64,), prev_peer + 100.0, device="cuda")
         self.assertEqual(buf, expected)
@@ -2349,6 +2367,10 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # Hangs at 4 ranks on gfx950 CI distributed runners (recorded fail ~1201s).
+    # Same P2P/symm_mem family as the AsyncTPTest MI350 skip; not a min-gpus
+    # filter bug. Skipped until the runner P2P path is fixed.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_reduce_scatter(self) -> None:
         self._init_process()
@@ -3031,6 +3053,99 @@ class LoweringTest(MultiProcContinuousTest):
         random.seed(1234)
         id_large = alloc_id(8)
         self.assertNotEqual(id_small, id_large)
+
+
+@skipIf(not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch")
+class SymmMemCleanupTest(TestCase):
+    def _run_cleanup(self, device, backend, body):
+        if backend == "NCCL" and (
+            not dist.is_nccl_available() or torch.cuda.nccl.version() < (2, 27, 0)
+        ):
+            self.skipTest("NCCL symmetric memory requires NCCL >= 2.27")
+        if backend == "NVSHMEM" and not symm_mem.is_nvshmem_available():
+            self.skipTest("NVSHMEM is not available")
+        script = f"""
+import torch
+import torch.distributed as dist
+from torch._C._distributed_c10d import _SymmetricMemory
+from torch.testing._internal.common_utils import TestCase
+
+test = TestCase()
+device = torch.device({device!r})
+torch.cuda.set_device(device)
+if {backend!r} == "NVSHMEM":
+    dist.init_process_group("gloo", store=dist.HashStore(), rank=0, world_size=1)
+tensor = _SymmetricMemory.empty_strided_p2p((1024,), (1,), torch.float32, device)
+"""
+        env = {**os.environ, "TORCH_SYMMMEM": backend, "CUDA_LAUNCH_BLOCKING": "0"}
+        result = subprocess.run(
+            [sys.executable, "-c", script + textwrap.dedent(body)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        return result
+
+    @parametrize("backend", ["CUDA", "NCCL", "NVSHMEM"])
+    def test_free_waits_for_pending_work(self, device, backend):
+        self._run_cleanup(
+            device,
+            backend,
+            """
+            tensor.fill_(1)
+            output = torch.empty_like(tensor)
+            torch.add(tensor, 1, out=output)
+            torch.cuda.synchronize(device)
+            stream = torch.cuda.Stream(device=device)
+            with torch.cuda.stream(stream):
+                torch.cuda._sleep(500_000_000)
+                torch.add(tensor, 1, out=output)
+            other_device = (device.index + 1) % torch.cuda.device_count()
+            torch.cuda.set_device(other_device)
+            del tensor
+            test.assertEqual(torch.cuda.current_device(), other_device)
+            stream.synchronize()
+            test.assertEqual(output, torch.full_like(output, 2))
+            """,
+        )
+
+    @skipIf(TEST_WITH_ROCM, "device-side assertions are not enabled in all ROCm builds")
+    @parametrize("backend", ["CUDA", "NCCL", "NVSHMEM"])
+    @parametrize("observed", [False, True])
+    def test_free_after_device_assert(self, device, backend, observed):
+        result = self._run_cleanup(
+            device,
+            backend,
+            f"""
+            handle = None
+            # NVSHMEM rendezvous requires more than one rank.
+            if {backend!r} != "NVSHMEM":
+                dist.init_process_group(
+                    "nccl" if {backend!r} == "NCCL" else "gloo",
+                    store=dist.HashStore(), rank=0, world_size=1,
+                    device_id=device if {backend!r} == "NCCL" else None,
+                )
+                handle = _SymmetricMemory.rendezvous(tensor, "0")
+            condition = torch.ones((), device=device, dtype=torch.bool)
+            torch._assert_async(condition)
+            condition.zero_()
+            torch.cuda.synchronize(device)
+            torch.cuda._sleep(500_000_000)
+            torch._assert_async(condition)
+            if {observed!r}:
+                with test.assertRaisesRegex(torch.AcceleratorError, "device-side assert"):
+                    torch.cuda.synchronize(device)
+            del tensor, handle
+            print("cleanup completed")
+            """,
+        )
+        self.assertIn("skipping cleanup after CUDA error", result.stderr)
+        self.assertIn("cleanup completed", result.stdout)
+
+
+instantiate_device_type_tests(SymmMemCleanupTest, globals(), only_for="cuda")
 
 
 class SymmMemSingleProcTest(TestCase):

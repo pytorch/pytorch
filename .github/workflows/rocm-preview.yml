@@ -71,7 +71,7 @@ jobs:
       id-token: write
       contents: read
     name: linux-noble-rocm-preview-py3.12-mi350
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-no-dind.yml
     needs:
       - linux-noble-rocm-preview-py3_12-build
       - target-determination

@@ -57,7 +57,7 @@ jobs:
 
   linux-noble-rocm-py3_11-inductor-test:
     name: linux-noble-rocm-py3.11-mi350
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-no-dind.yml
     needs: linux-noble-rocm-py3_11-inductor-build
     with:
       build-environment: ${{ needs.linux-noble-rocm-py3_11-inductor-build.outputs.build-environment }}

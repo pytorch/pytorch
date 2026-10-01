@@ -6,7 +6,6 @@
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
-#include <ATen/FakeTensor.h>
 #include <ATen/InferSize.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -1337,7 +1336,7 @@ static void maybe_copy_fake_tensor_metadata(
   }
   auto fake_device = self.unsafeGetTensorImpl()->fake_device();
   TORCH_INTERNAL_ASSERT(fake_device.has_value());
-  at::set_and_normalize_fake_device(result, *fake_device);
+  result->set_and_normalize_fake_device(*fake_device);
   result->set_fake_tensor_mode(self.unsafeGetTensorImpl()->fake_tensor_mode());
 }
 
@@ -4752,8 +4751,8 @@ at::Tensor as_strided_scatter_symint(
   auto output = clone_preserve_strides(self);
   auto slice =
       output.as_strided_symint(size, stride, std::move(storage_offset));
-  TORCH_CHECK(
-      slice.sym_sizes() == src.sym_sizes(),
+  TORCH_SYM_CHECK(
+      sym_equals(slice.sym_sizes(), src.sym_sizes()),
       "expected src to have a size equal to the slice of self. src size = ",
       src.sym_sizes(),
       ", slice size = ",
