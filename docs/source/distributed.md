@@ -237,6 +237,11 @@ and does not require nccl4py.
 Backends handle `config` through their collective options. NCCL2 rejects unsupported
 operations, uneven splits, coalescing capture, and time estimation. External NCCL group scopes are unsupported.
 
+Supported synchronous calls can use `torch.compile` and `torch.export`.
+Configuration values are graph constants; changing them recompiles. Raw-pointer
+options cannot be traced. Configured compiled calls complete on the calling
+stream, without communication/computation overlap.
+
 (distributed-basics)=
 
 ## Basics

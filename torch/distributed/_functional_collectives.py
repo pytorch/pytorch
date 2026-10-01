@@ -16,6 +16,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
 from . import _functional_collectives_impl as fun_col_impl
+from ._collective_config import _serialize_nccl_config
 
 
 try:
@@ -167,7 +168,12 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
 
 
 def all_reduce(
-    self: torch.Tensor, reduceOp: str | dist.ReduceOp, group: RANK_TYPES, tag: str = ""
+    self: torch.Tensor,
+    reduceOp: str | dist.ReduceOp,
+    group: RANK_TYPES,
+    tag: str = "",
+    *,
+    config=None,
 ):
     """
     Reduces the tensor data across all machines in such a way that all get
@@ -193,7 +199,10 @@ def all_reduce(
     group = _resolve_group(group, tag)
     reduce_op = reduceOp.lower() if isinstance(reduceOp, str) else reduceOp
     tensor = torch.ops._c10d_functional.all_reduce(
-        self, reduce_op, _group_or_group_name(group)
+        self,
+        reduce_op,
+        _group_or_group_name(group),
+        config=None if config is None else _serialize_nccl_config(config),
     )
     return _maybe_wrap_tensor(tensor)
 
@@ -203,6 +212,8 @@ def all_gather_single(
     gather_dim: int,
     group: RANK_TYPES,
     tag: str = "",
+    *,
+    config=None,
 ) -> torch.Tensor:
     """
     Gather tensor data across from all machines and concatenate over ``gather_dim``.
@@ -227,7 +238,10 @@ def all_gather_single(
     if gather_dim < 0:
         gather_dim += self.dim()
     tensor = torch.ops._c10d_functional.all_gather_into_tensor(
-        self, group_size, _group_or_group_name(group)
+        self,
+        group_size,
+        _group_or_group_name(group),
+        config=None if config is None else _serialize_nccl_config(config),
     )
     res = _maybe_wrap_tensor(tensor)
     if gather_dim != 0:
@@ -270,6 +284,8 @@ def reduce_scatter_single(
     scatter_dim: int,
     group: RANK_TYPES,
     tag: str = "",
+    *,
+    config=None,
 ):
     """
     Reduces the tensor data across all machines in such a way that all get
@@ -301,6 +317,7 @@ def reduce_scatter_single(
         reduceOp.lower(),
         group_size,
         _group_or_group_name(group),
+        config=None if config is None else _serialize_nccl_config(config),
     )
     res = _maybe_wrap_tensor(tensor)
     return res
@@ -339,6 +356,8 @@ def all_gather_tensor(
     gather_dim: int,
     group: RANK_TYPES,
     tag: str = "",
+    *,
+    config=None,
 ) -> torch.Tensor:
     if not torch.compiler.is_compiling():
         warnings.warn(
@@ -347,7 +366,7 @@ def all_gather_tensor(
             FutureWarning,
             stacklevel=2,
         )
-    return all_gather_single(self, gather_dim, group, tag)
+    return all_gather_single(self, gather_dim, group, tag, config=config)
 
 
 def all_gather_tensor_autograd(
@@ -372,6 +391,8 @@ def reduce_scatter_tensor(
     scatter_dim: int,
     group: RANK_TYPES,
     tag: str = "",
+    *,
+    config=None,
 ):
     if not torch.compiler.is_compiling():
         warnings.warn(
@@ -380,7 +401,7 @@ def reduce_scatter_tensor(
             FutureWarning,
             stacklevel=2,
         )
-    return reduce_scatter_single(self, reduceOp, scatter_dim, group, tag)
+    return reduce_scatter_single(self, reduceOp, scatter_dim, group, tag, config=config)
 
 
 def reduce_scatter_tensor_autograd(
@@ -571,6 +592,8 @@ def all_to_all_single(
     input_split_sizes: list[int] | None,
     group: RANK_TYPES,
     tag: str = "",
+    *,
+    config=None,
 ) -> torch.Tensor:
     """
     Each process splits input tensor and then scatters the split list
@@ -609,11 +632,12 @@ def all_to_all_single(
             )
         output_split_sizes = [self.shape[0] // group_size] * group_size
         input_split_sizes = output_split_sizes
-    tensor = torch.ops._c10d_functional.all_to_all_single(  # type: ignore[attr-defined]
+    tensor = torch.ops._c10d_functional.all_to_all_single(
         self,
         output_split_sizes,
         input_split_sizes,
         _group_or_group_name(group),
+        config=None if config is None else _serialize_nccl_config(config),
     )
     return _maybe_wrap_tensor(tensor)
 
@@ -740,7 +764,10 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
         )
     grad_reduce_op = "sum" if _is_min_max(reduce_op) else reduce_op
     output = torch.ops._c10d_functional.all_reduce(
-        grad_output.contiguous(), grad_reduce_op, group_name
+        grad_output.contiguous(),
+        grad_reduce_op,
+        group_name,
+        config=getattr(ctx, "config", None),
     )
 
     output = wait_tensor(output)
@@ -756,12 +783,15 @@ def all_reduce_backward(ctx, grad_output: torch.Tensor):
         mask = _min_max_extremum_mask(fwd_input, fwd_output)
         tie_count = wait_tensor(
             torch.ops._c10d_functional.all_reduce(
-                mask.to(torch.float32), "sum", group_name
+                mask.to(torch.float32),
+                "sum",
+                group_name,
+                config=getattr(ctx, "config", None),
             )
         )
         scaled = (output / tie_count).to(output.dtype)
         output = torch.ops.aten.where.ScalarOther(mask, scaled, 0)
-    return output, None, None
+    return (output,) + (None,) * (ctx.num_inputs - 1)
 
 
 def all_reduce_setup_context(ctx, inputs, output):
@@ -772,7 +802,9 @@ def all_reduce_setup_context(ctx, inputs, output):
         inputs: Tuple of (input, reduce_op, group_name)
         output: Output from forward pass
     """
-    input, reduce_op, group_name = inputs
+    input, reduce_op, group_name, *config_args = inputs
+    ctx.config = config_args[0] if config_args else None
+    ctx.num_inputs = len(inputs)
     ctx.group_name = group_name
     ctx.reduce_op = reduce_op.lower() if isinstance(reduce_op, str) else reduce_op
     if _is_min_max(ctx.reduce_op):
@@ -810,8 +842,9 @@ def all_gather_into_tensor_backward(ctx, grad_output: torch.Tensor):
         "sum",
         group_size,
         group_name,
+        config=getattr(ctx, "config", None),
     )
-    return wait_tensor(output), None, None
+    return (wait_tensor(output),) + (None,) * (ctx.num_inputs - 1)
 
 
 def all_gather_into_tensor_setup_context(ctx, inputs, output):
@@ -823,7 +856,9 @@ def all_gather_into_tensor_setup_context(ctx, inputs, output):
         inputs: Tuple of (input, group_size, group_name)
         output: Output from forward pass
     """
-    input, group_size, group_name = inputs
+    input, group_size, group_name, *config_args = inputs
+    ctx.config = config_args[0] if config_args else None
+    ctx.num_inputs = len(inputs)
     ctx.group_name = group_name
     ctx.group_size = group_size
 
@@ -865,8 +900,9 @@ def reduce_scatter_tensor_backward(ctx, grad_output: torch.Tensor):
         grad_output.contiguous(),
         group_size,
         group_name,
+        config=getattr(ctx, "config", None),
     )
-    return wait_tensor(output), None, None, None
+    return (wait_tensor(output),) + (None,) * (ctx.num_inputs - 1)
 
 
 def reduce_scatter_tensor_setup_context(ctx, inputs, output):
@@ -878,7 +914,9 @@ def reduce_scatter_tensor_setup_context(ctx, inputs, output):
         inputs: Tuple of (input, reduce_op, group_size, group_name)
         output: Output from forward pass
     """
-    input, reduce_op, group_size, group_name = inputs
+    input, reduce_op, group_size, group_name, *config_args = inputs
+    ctx.config = config_args[0] if config_args else None
+    ctx.num_inputs = len(inputs)
     ctx.group_name = group_name
     ctx.group_size = group_size
     ctx.reduce_op = reduce_op.lower()
@@ -915,8 +953,9 @@ def all_to_all_single_backward(ctx, grad_output: torch.Tensor):
         input_split_sizes,  # Reversed
         output_split_sizes,  # Reversed
         group_name,
+        config=getattr(ctx, "config", None),
     )
-    return wait_tensor(output), None, None, None
+    return (wait_tensor(output),) + (None,) * (ctx.num_inputs - 1)
 
 
 def all_to_all_single_setup_context(ctx, inputs, output):
@@ -928,7 +967,9 @@ def all_to_all_single_setup_context(ctx, inputs, output):
         inputs: Tuple of (input, output_split_sizes, input_split_sizes, group_name)
         output: Output from forward pass
     """
-    input, output_split_sizes, input_split_sizes, group_name = inputs
+    input, output_split_sizes, input_split_sizes, group_name, *config_args = inputs
+    ctx.config = config_args[0] if config_args else None
+    ctx.num_inputs = len(inputs)
     ctx.group_name = group_name
     ctx.output_split_sizes = output_split_sizes
     ctx.input_split_sizes = input_split_sizes
@@ -1680,7 +1721,7 @@ def _all_gather_into_tensor_out_native_meta(input, group_size, group_name, *, ou
     return _make_all_gather_out_tensor(input, group_size)
 
 
-def _all_gather_into_tensor_native_meta(input, group_size, group_name):
+def _all_gather_into_tensor_native_meta(input, group_size, group_name, config=None):
     return _make_all_gather_out_tensor(input, group_size)
 
 
@@ -1691,7 +1732,9 @@ def _all_gather_into_tensor_coalesced_native_meta(inputs, group_size, group_name
     ]
 
 
-def _reduce_scatter_tensor_native_meta(inp, reduce_op, group_size, group_name):
+def _reduce_scatter_tensor_native_meta(
+    inp, reduce_op, group_size, group_name, config=None
+):
     shape = list(inp.size())
     shape[0] //= group_size
     return inp.new_empty(shape)
@@ -1759,6 +1802,32 @@ lib_impl_autograd.impl(
     "reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta"
 )
 lib_impl_autograd.impl("all_to_all_single", _all_to_all_single_meta, "Meta")
+
+
+# Configured collectives must survive DCE and retain enqueue order. Leave
+# ordinary collectives on their existing optimization path.
+from torch._higher_order_ops.effects import _register_effectful_op
+
+
+def _has_functional_config(args, kwargs):
+    return kwargs.get("config") is not None or bool(args and isinstance(args[-1], dict))
+
+
+_config_effect_handles = []
+for _name in (
+    "all_reduce",
+    "all_gather_into_tensor",
+    "reduce_scatter_tensor",
+    "all_to_all_single",
+):
+    _op = getattr(torch.ops._c10d_functional, _name).default
+    _config_effect_handles.append(
+        _register_effectful_op(
+            _op, torch.library.EffectType.ORDERED, predicate=_has_functional_config
+        )
+    )
+    torch.fx.node.has_side_effect(_op)
+
 
 # Mark these ops as side effectful so that DCE does not remove communication
 # whose result tensors are ignored by user code.
@@ -1833,6 +1902,8 @@ def all_gather_tensor_inplace(
     async_op: bool = False,
     tag: str = "",
     gather_dim: int = 0,
+    *,
+    config=None,
 ):
     if async_op:
         _raise_async_op_remap_error()
@@ -1841,7 +1912,9 @@ def all_gather_tensor_inplace(
     if group is None:
         raise AssertionError("group cannot be None")
 
-    return output_tensor.copy_(all_gather_single(input_tensor, gather_dim, group, tag))
+    return output_tensor.copy_(
+        all_gather_single(input_tensor, gather_dim, group, tag, config=config)
+    )
 
 
 def reduce_scatter_tensor_inplace(
@@ -1852,6 +1925,8 @@ def reduce_scatter_tensor_inplace(
     async_op: bool = False,
     scatter_dim: int = 0,
     tag: str = "",
+    *,
+    config=None,
 ):
     if async_op:
         _raise_async_op_remap_error()
@@ -1860,7 +1935,9 @@ def reduce_scatter_tensor_inplace(
     if group is None:
         raise AssertionError("group cannot be None")
 
-    return output.copy_(reduce_scatter_single(input, op, scatter_dim, group, tag))
+    return output.copy_(
+        reduce_scatter_single(input, op, scatter_dim, group, tag, config=config)
+    )
 
 
 REDUCE_OP_TO_STR = {
@@ -1881,6 +1958,8 @@ def all_reduce_inplace(
     group=None,
     async_op: bool = False,
     tag: str = "",
+    *,
+    config=None,
 ):
     if async_op:
         _raise_async_op_remap_error()
@@ -1889,7 +1968,7 @@ def all_reduce_inplace(
     if group is None:
         raise AssertionError("group cannot be None")
 
-    return tensor.copy_(all_reduce(tensor, op, group, tag))
+    return tensor.copy_(all_reduce(tensor, op, group, tag, config=config))
 
 
 def all_to_all_inplace(
@@ -1900,9 +1979,18 @@ def all_to_all_inplace(
     group=None,
     async_op=False,
     tag: str = "",
+    *,
+    config=None,
 ):
     if async_op:
         _raise_async_op_remap_error()
+
+    if config is not None and (
+        output_split_sizes is not None or input_split_sizes is not None
+    ):
+        raise RuntimeError(
+            "Per-collective NCCL configuration requires equal all_to_all split sizes"
+        )
 
     group = group or dist.group.WORLD
     if group is None:
@@ -1910,11 +1998,7 @@ def all_to_all_inplace(
 
     return output.copy_(
         all_to_all_single(
-            input,
-            output_split_sizes,
-            input_split_sizes,
-            group,
-            tag,
+            input, output_split_sizes, input_split_sizes, group, tag, config=config
         )
     )
 
@@ -1925,6 +2009,8 @@ def all_gather_inplace(
     group=None,
     async_op=False,
     tag: str = "",
+    *,
+    config=None,
 ):
     if async_op:
         _raise_async_op_remap_error()
@@ -1935,7 +2021,7 @@ def all_gather_inplace(
     if group is None:
         raise AssertionError("group cannot be None")
 
-    output = all_gather_single(tensor, 0, group, tag)
+    output = all_gather_single(tensor, 0, group, tag, config=config)
 
     # Use aten.slice instead of aten.split because the latter causes
     # tensor.shape(0) to be unnecessarily baked in when it's a SymInt.
@@ -1961,6 +2047,8 @@ def reduce_scatter_inplace(
     group: dist.ProcessGroup | None = None,
     async_op: bool = False,
     tag: str = "",
+    *,
+    config=None,
 ):
     if async_op:
         _raise_async_op_remap_error()
@@ -1975,9 +2063,13 @@ def reduce_scatter_inplace(
 
     if output.dim() == 0:
         # scalars have no dim to scatter along; stack into 1-D then reshape back
-        result = reduce_scatter_single(torch.stack(input_list), op, 0, group, tag)
+        result = reduce_scatter_single(
+            torch.stack(input_list), op, 0, group, tag, config=config
+        )
         return output.copy_(result.reshape(output.shape))
-    return output.copy_(reduce_scatter_single(torch.cat(input_list), op, 0, group, tag))
+    return output.copy_(
+        reduce_scatter_single(torch.cat(input_list), op, 0, group, tag, config=config)
+    )
 
 
 def isend_inplace(
