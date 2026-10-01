@@ -272,6 +272,14 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
                 if self._device_handle is None:
                     raise AssertionError
                 self._device_handle.set_rng_state(state.state)
+                # Random ops on CPU local tensors (e.g. FSDP2 CPU offload) draw
+                # from the CPU generator, which has no Philox offset to shift.
+                # Seed it from this shard's Philox position instead, so shards
+                # differ, replicas match, and each op draws fresh values as the
+                # offset advances. fork_rng restores the CPU state afterwards.
+                torch.default_generator.manual_seed(
+                    int(state.seed.item()) ^ int(state.offset.item())
+                )
                 try:
                     yield  # execute the region code
                 finally:
