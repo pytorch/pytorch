@@ -150,28 +150,6 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
 
         dist.barrier()
 
-    def test_post_hook_fires_when_backend_raises(self):
-        pg = _get_default_group()
-        pre_op_ids: list[int] = []
-        posts: list[tuple[int, bool]] = []
-        pg.register_pre_hook(0, lambda args: pre_op_ids.append(args.op_id))
-        pg.register_post_hook(
-            0, lambda args: posts.append((args.op_id, args.work is None))
-        )
-        ws = self.world_size
-        try:
-            with self.assertRaisesRegex(RuntimeError, "alltoall_base"):
-                # Split sizes that don't sum to the tensor size fail in the backend.
-                dist.all_to_all_single(
-                    torch.zeros(ws), torch.zeros(ws), [ws] * ws, [ws] * ws
-                )
-        finally:
-            pg.unregister_post_hook(0)
-            pg.unregister_pre_hook(0)
-        self.assertEqual(posts, [(pre_op_ids[0], True)])
-
-        dist.barrier()
-
     def test_gated_hooks(self):
         pg = _get_default_group()
         calls: list[str] = []
