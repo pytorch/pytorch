@@ -13,8 +13,10 @@ import operator
 import textwrap
 from collections import Counter
 from typing import Any, cast, Generic, NamedTuple, TYPE_CHECKING
+from typing_extensions import TypeVar
 
 import sympy
+
 import torch
 import torch._logging
 import torch.utils._pytree as pytree
@@ -30,7 +32,6 @@ from torch.utils._sympy.symbol import (
     symbol_is_type,
     SymT,
 )
-from typing_extensions import TypeVar
 
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler

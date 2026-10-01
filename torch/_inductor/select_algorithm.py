@@ -662,7 +662,9 @@ class TritonTemplateKernel(TritonKernel):
 
         # input buffers which we are allowed to prologue fuse into
         self.prologue_supported_inputs: OrderedSet[str] = OrderedSet()
-        self._prologue_supported_input_indices: OrderedSet[int] = OrderedSet()
+        # Track prologue-fusion-supported input indices before duplicate
+        # arguments are deduplicated.
+        self._prologue_fusion_supported_input_indices: OrderedSet[int] = OrderedSet()
 
         # input buffers which we are fusing into
         self.prologue_fused_inputs: OrderedSet[str] = OrderedSet()
@@ -721,10 +723,12 @@ class TritonTemplateKernel(TritonKernel):
         return f"_tmp_var{next(self.tmp_var_ctr)}"
 
     def _finalize_prologue_supported_inputs(self) -> None:
+        # Remove a prologue-fusible buffer if it also appears at an unsupported
+        # template input position.
         self.prologue_supported_inputs -= OrderedSet(
             input_node.get_name()
             for index, input_node in enumerate(self.input_nodes)
-            if index not in self._prologue_supported_input_indices
+            if index not in self._prologue_fusion_supported_input_indices
         )
 
     def input_dependent_preserved_state(self) -> str:
@@ -736,7 +740,8 @@ class TritonTemplateKernel(TritonKernel):
                 self.args.sizevars,
                 self.args.workspace_args,
                 self.prologue_supported_inputs,
-                self._prologue_supported_input_indices,
+                # Record occurrence-only changes for generated-code cache replay.
+                self._prologue_fusion_supported_input_indices,
                 self.frozen_layouts_cnt,
             ]
         )
@@ -1060,7 +1065,7 @@ class TritonTemplateKernel(TritonKernel):
             input_node = self.named_input_nodes[name]
             if self.prologue_loads_all_inputs:
                 self.prologue_supported_inputs.add(input_node.get_name())
-                self._prologue_supported_input_indices.add(named_index)
+                self._prologue_fusion_supported_input_indices.add(named_index)
             if input_node.get_name() in V.graph.removed_buffers:
                 continue
             if input_node.get_name() in self.prologue_fused_inputs:
@@ -1336,7 +1341,7 @@ class TritonTemplateKernel(TritonKernel):
             named_input_index = self.prefix_args + list(self.named_input_nodes).index(
                 input_name
             )
-            self._prologue_supported_input_indices.add(named_input_index)
+            self._prologue_fusion_supported_input_indices.add(named_input_index)
 
         tilings = (sympy_product(input_node.get_size()), sympy.Integer(1))
         groups = {
