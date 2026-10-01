@@ -17,7 +17,7 @@ from torch._dynamo.graph_bytecode_inputs import reset_user_object_tracking
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import serialTest, skipIfRocmVersionLessThan
+from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -110,10 +110,6 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
     return (mul_2, mul_2, mul_1, mul_1, mul, mul)""".replace("GPU_TYPE", GPU_TYPE),
         )
 
-    # ROCr writes its blit kernel's code with the CPU but never invalidates the
-    # GPU instruction cache, so the first dispatch can run stale instructions and
-    # fault, hanging the process. Fixed in https://github.com/ROCm/rocm-systems/pull/12209
-    @skipIfRocmVersionLessThan((10, 2))
     def test_inductor_offload(self):
         torch._dynamo.reset()
 
