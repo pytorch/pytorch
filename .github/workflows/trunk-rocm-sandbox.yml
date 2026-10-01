@@ -75,7 +75,7 @@ jobs:
 
   linux-noble-rocm-py3_11-test:
     name: linux-noble-rocm-py3.11-mi350
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-no-dind.yml
     needs:
       - linux-noble-rocm-py3_11-build
       - target-determination
