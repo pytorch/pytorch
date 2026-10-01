@@ -3121,6 +3121,9 @@ def _new_process_group_helper(
         # ProcessGroup instance
         if isinstance(backend_class, ProcessGroup):
             pg = backend_class  # type: ignore[assignment]
+            # The returned group need not have per-device backends to eagerly
+            # connect (e.g. a Python ProcessGroup subclass).
+            device_id = None
             break
 
         # Process group wrapper initialization for supported PGs when TORCH_DISTRIBUTED_DEBUG is set
