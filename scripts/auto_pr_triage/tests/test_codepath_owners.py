@@ -9,41 +9,32 @@ import unittest
 from pathlib import Path
 
 from codepath_owners import (
-    build_codepath_owners,
     build_llm_artifact,
-    load_codepath_owners,
     matches,
-    MAX_CODEPATH_OWNERS_BYTES,
     parse_rules,
+    resolve_for_llm,
     resolve_paths,
     resolve_rule,
 )
-from ownership import owner_label
-from prepare_llm_input import fetch_pull_request_files
+from identifiers import owner_label
+from trusted_config import (
+    CODEPATH_OWNERS_PATH,
+    load_codepath_owners,
+    MAX_CODEPATH_OWNERS_BYTES,
+)
 
 
 COMMIT_SHA = "a" * 40
 
 
-class PagingGitHub:
-    def __init__(self, pages: list[list[dict[str, object]]]) -> None:
-        self.pages = pages
-        self.calls: list[str] = []
-
-    def json(self, endpoint: str) -> object:
-        self.calls.append(endpoint)
-        page = int(endpoint.rsplit("=", 1)[1])
-        return self.pages[page - 1]
-
-
 class PatternTest(unittest.TestCase):
     def assert_matches(
-        self, pattern: str, matching: list[str], rejected: list[str]
+        self, *, pattern: str, matching: list[str], rejected: list[str]
     ) -> None:
         for path in matching:
-            self.assertTrue(matches(pattern, path), (pattern, path))
+            self.assertTrue(matches(pattern=pattern, path=path), (pattern, path))
         for path in rejected:
-            self.assertFalse(matches(pattern, path), (pattern, path))
+            self.assertFalse(matches(pattern=pattern, path=path), (pattern, path))
 
     def test_literal_directory_and_wildcard_patterns(self) -> None:
         cases = [
@@ -107,33 +98,35 @@ class PatternTest(unittest.TestCase):
         ]
         for pattern, matching, rejected in cases:
             with self.subTest(pattern=pattern):
-                self.assert_matches(pattern, matching, rejected)
+                self.assert_matches(
+                    pattern=pattern, matching=matching, rejected=rejected
+                )
 
     def test_escaping_and_literal_brackets(self) -> None:
-        self.assert_matches("f\\*o", ["f*o"], ["foo"])
-        self.assert_matches("f\\?o", ["f?o"], ["foo"])
+        self.assert_matches(pattern="f\\*o", matching=["f*o"], rejected=["foo"])
+        self.assert_matches(pattern="f\\?o", matching=["f?o"], rejected=["foo"])
         self.assert_matches(
-            "/apps/[param]/file.ts",
-            ["apps/[param]/file.ts"],
-            ["apps/param/file.ts", "apps/other/file.ts"],
+            pattern="/apps/[param]/file.ts",
+            matching=["apps/[param]/file.ts"],
+            rejected=["apps/param/file.ts", "apps/other/file.ts"],
         )
-        self.assertTrue(matches("/foo", "foo/bar\nbaz"))
-        self.assertFalse(matches("foo", "foo/bar\nbaz"))
-        self.assertFalse(matches("/f*", "foo/bar\nbaz"))
-        self.assertFalse(matches("**", "a\nb"))
-        self.assertFalse(matches("foo/**", "foo/a\nb"))
+        self.assertTrue(matches(pattern="/foo", path="foo/bar\nbaz"))
+        self.assertFalse(matches(pattern="foo", path="foo/bar\nbaz"))
+        self.assertFalse(matches(pattern="/f*", path="foo/bar\nbaz"))
+        self.assertFalse(matches(pattern="**", path="a\nb"))
+        self.assertFalse(matches(pattern="foo/**", path="foo/a\nb"))
 
     def test_invalid_and_empty_patterns(self) -> None:
         with self.assertRaises(ValueError):
-            matches("foo/***/bar", "foo/x/bar")
-        self.assertFalse(matches("/", "foo"))
+            matches(pattern="foo/***/bar", path="foo/x/bar")
+        self.assertFalse(matches(pattern="/", path="foo"))
 
 
 class ResolutionTest(unittest.TestCase):
     def test_parser_preserves_comments_and_skips_invalid_rules(self) -> None:
         diagnostics: list[dict[str, object]] = []
         rules = parse_rules(
-            r"""# broad owner
+            contents=r"""# broad owner
 * @org/all # inline comment
 
 # path with a space
@@ -141,8 +134,8 @@ foo\ bar @person
 bad invalid.owner
 private/ # deliberately unowned
 """,
-            "2" * 40,
-            diagnostics,
+            blob_sha="2" * 40,
+            diagnostics=diagnostics,
         )
         self.assertEqual([rule["line"] for rule in rules], [2, 5, 7])
         self.assertEqual(rules[0]["comment"], "inline comment")
@@ -151,25 +144,33 @@ private/ # deliberately unowned
         self.assertEqual(rules[2]["rule_id"], f"{'2' * 40}:L7")
         self.assertEqual([item["line"] for item in diagnostics], [6])
         with self.assertRaises(ValueError):
-            parse_rules("bad invalid.owner\n", strict=True)
+            parse_rules(contents="bad invalid.owner\n", strict=True)
 
     def test_last_match_wins_including_ownerless_override(self) -> None:
-        rules = parse_rules("* @all\n/docs/ @docs\n/docs/private/\n")
-        self.assertEqual(resolve_rule("new/file.txt", rules)["owners"], ["@all"])
-        self.assertEqual(resolve_rule("docs/new.txt", rules)["owners"], ["@docs"])
-        self.assertEqual(resolve_rule("docs/private/new.txt", rules)["owners"], [])
+        rules = parse_rules(contents="* @all\n/docs/ @docs\n/docs/private/\n")
+        self.assertEqual(
+            resolve_rule(path="new/file.txt", rules=rules)["owners"], ["@all"]
+        )
+        self.assertEqual(
+            resolve_rule(path="docs/new.txt", rules=rules)["owners"], ["@docs"]
+        )
+        self.assertEqual(
+            resolve_rule(path="docs/private/new.txt", rules=rules)["owners"], []
+        )
 
     def test_compact_artifact_is_an_exact_ordered_partition(self) -> None:
-        rules = parse_rules("* @all\n/docs/ @docs @org/writers\n/docs/private/\n")
+        rules = parse_rules(
+            contents="* @all\n/docs/ @docs @org/writers\n/docs/private/\n"
+        )
         resolutions = resolve_paths(
-            [
+            paths=[
                 "src/a.py",
                 "docs/a.rst",
                 "docs/b.rst",
                 "docs/private/key.txt",
                 "src/a.py",
             ],
-            rules,
+            rules=rules,
         )
         artifact = build_llm_artifact(resolutions)
         self.assertEqual(artifact["owners"], ["@all", "@docs", "@org/writers"])
@@ -183,31 +184,27 @@ private/ # deliberately unowned
                 },
             ],
         )
-        self.assertEqual(
-            artifact["paths_without_owners"],
-            [{"path": "docs/private/key.txt", "reason": "ownerless_override"}],
-        )
+        self.assertEqual(artifact["paths_without_owners"], ["docs/private/key.txt"])
 
-    def test_no_match_is_distinct_from_ownerless_override(self) -> None:
-        rules = parse_rules("/private/\n")
-        artifact = build_llm_artifact(resolve_paths(["private/a", "outside/a"], rules))
-        self.assertEqual(
-            artifact["paths_without_owners"],
-            [
-                {"path": "private/a", "reason": "ownerless_override"},
-                {"path": "outside/a", "reason": "no_matching_rule"},
-            ],
+    def test_no_match_and_ownerless_override_are_both_unowned(self) -> None:
+        rules = parse_rules(contents="/private/\n")
+        artifact = build_llm_artifact(
+            resolve_paths(paths=["private/a", "outside/a"], rules=rules)
         )
+        self.assertEqual(artifact["paths_without_owners"], ["private/a", "outside/a"])
 
 
 class PolicyLoadingTest(unittest.TestCase):
     def load(self, content: bytes) -> dict[str, object]:
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        path = Path(directory.name) / ".github/auto-pr-triage/codepath_owners.txt"
+        root = Path(directory.name)
+        path = root / CODEPATH_OWNERS_PATH
         path.parent.mkdir(parents=True)
         path.write_bytes(content)
-        return load_codepath_owners(path, "pytorch/pytorch", COMMIT_SHA)
+        return load_codepath_owners(
+            repository_root=root, repo="pytorch/pytorch", ref=COMMIT_SHA
+        )
 
     def test_loads_single_policy_file_with_content_provenance(self) -> None:
         content = b"* @root-owner\n"
@@ -224,14 +221,16 @@ class PolicyLoadingTest(unittest.TestCase):
         )
         self.assertEqual(snapshot["rules"][0]["owners"], ["@root-owner"])
 
-    def test_shadow_policy_matches_native_codeowners(self) -> None:
-        repository_root = Path(__file__).resolve().parents[2]
+    def test_codepath_policy_matches_native_codeowners(self) -> None:
+        repository_root = Path(__file__).resolve().parents[3]
         native = (repository_root / "CODEOWNERS").read_bytes()
-        shadow_path = repository_root / ".github/auto-pr-triage/codepath_owners.txt"
-        shadow = shadow_path.read_bytes()
+        policy_path = repository_root / ".github/auto-pr-triage/codepath_owners.txt"
+        policy = policy_path.read_bytes()
 
-        self.assertEqual(shadow, native)
-        snapshot = load_codepath_owners(shadow_path, "pytorch/ciforge", COMMIT_SHA)
+        self.assertEqual(policy, native)
+        snapshot = load_codepath_owners(
+            repository_root=repository_root, repo="pytorch/ciforge", ref=COMMIT_SHA
+        )
         rules = snapshot["rules"]
         self.assertTrue(rules)
         self.assertTrue(
@@ -244,8 +243,7 @@ class PolicyLoadingTest(unittest.TestCase):
 
     def test_normalizes_and_deduplicates_github_handle_casing(self) -> None:
         snapshot = self.load(
-            b"/one/ @Chillee @chillee @PyTorch/Core @pytorch/core\n"
-            b"/two/ @CHILLEE @PYTORCH/CORE\n"
+            b"/one/ @Chillee @chillee @PyTorch/Core @pytorch/core\n/two/ @CHILLEE @PYTORCH/CORE\n"
         )
 
         self.assertEqual(
@@ -255,7 +253,7 @@ class PolicyLoadingTest(unittest.TestCase):
                 ["@chillee", "@pytorch/core"],
             ],
         )
-        artifact = build_codepath_owners(["one/a.py", "two/b.py"], snapshot)
+        artifact = resolve_for_llm(paths=["one/a.py", "two/b.py"], snapshot=snapshot)
         self.assertEqual(artifact["owners"], ["@chillee", "@pytorch/core"])
         self.assertEqual(
             artifact["matched_path_groups"],
@@ -269,23 +267,18 @@ class PolicyLoadingTest(unittest.TestCase):
 
     def test_builds_exact_dynamic_codepath_owners_contract(self) -> None:
         snapshot = self.load(b"/torch/ @pytorch/core\n")
-        artifact = build_codepath_owners(["torch/a.py", "README.md"], snapshot)
+        artifact = resolve_for_llm(paths=["torch/a.py", "README.md"], snapshot=snapshot)
         self.assertEqual(
             set(artifact),
-            {
-                "source",
-                "owners",
-                "matched_path_groups",
-                "paths_without_owners",
-            },
+            {"owners", "matched_path_groups", "paths_without_owners"},
         )
         self.assertEqual(artifact["owners"], ["@pytorch/core"])
         self.assertNotIn("rules", artifact)
         self.assertNotIn("parse_diagnostics", artifact)
 
-    def test_accepts_internal_owner_ids(self) -> None:
+    def test_accepts_team_owner_ids(self) -> None:
         snapshot = self.load(b"/torch/ compiler\n")
-        artifact = build_codepath_owners(["torch/a.py"], snapshot)
+        artifact = resolve_for_llm(paths=["torch/a.py"], snapshot=snapshot)
 
         self.assertEqual(artifact["owners"], ["compiler"])
         self.assertEqual(
@@ -293,25 +286,29 @@ class PolicyLoadingTest(unittest.TestCase):
             [{"owners": ["compiler"], "paths": ["torch/a.py"]}],
         )
 
-    def test_rejects_mutable_ref_wrong_path_oversize_and_invalid_utf8(self) -> None:
+    def test_rejects_oversize_invalid_utf8_and_symlink(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            path = root / ".github/auto-pr-triage/codepath_owners.txt"
+            path = root / CODEPATH_OWNERS_PATH
             path.parent.mkdir(parents=True)
-            path.write_text("* @owner\n")
-            with self.assertRaisesRegex(ValueError, "immutable commit SHA"):
-                load_codepath_owners(path, "pytorch/pytorch", "main")
-            wrong_path = root / "other/codepath_owners.txt"
-            wrong_path.parent.mkdir()
-            wrong_path.write_text("* @owner\n")
-            with self.assertRaisesRegex(ValueError, "path must name .*codepath_owners"):
-                load_codepath_owners(wrong_path, "pytorch/pytorch", COMMIT_SHA)
-            path.write_bytes(b"x" * MAX_CODEPATH_OWNERS_BYTES)
-            with self.assertRaisesRegex(ValueError, "3 MB limit"):
-                load_codepath_owners(path, "pytorch/pytorch", COMMIT_SHA)
+            path.write_bytes(b"x" * (MAX_CODEPATH_OWNERS_BYTES + 1))
+            with self.assertRaisesRegex(RuntimeError, "size is invalid"):
+                load_codepath_owners(
+                    repository_root=root, repo="pytorch/pytorch", ref=COMMIT_SHA
+                )
             path.write_bytes(b"\xff")
-            with self.assertRaisesRegex(ValueError, "valid UTF-8"):
-                load_codepath_owners(path, "pytorch/pytorch", COMMIT_SHA)
+            with self.assertRaisesRegex(RuntimeError, "not valid UTF-8"):
+                load_codepath_owners(
+                    repository_root=root, repo="pytorch/pytorch", ref=COMMIT_SHA
+                )
+            outside = root / "outside.txt"
+            outside.write_text("* @owner\n")
+            path.unlink()
+            path.symlink_to(outside)
+            with self.assertRaisesRegex(RuntimeError, "config file is unavailable"):
+                load_codepath_owners(
+                    repository_root=root, repo="pytorch/pytorch", ref=COMMIT_SHA
+                )
 
     def test_rejects_foreign_teams_but_preserves_target_org_teams(self) -> None:
         snapshot = self.load(b"* @person @pytorch/compiler\n")
@@ -325,7 +322,7 @@ class PolicyLoadingTest(unittest.TestCase):
 
     def test_email_is_not_a_valid_owner_handle(self) -> None:
         with self.assertRaisesRegex(ValueError, "codepath owner"):
-            parse_rules("* person@example.com\n", strict=True)
+            parse_rules(contents="* person@example.com\n", strict=True)
 
     def test_invalid_github_usernames_are_not_owner_handles(self) -> None:
         for owner in ("@bad_user", "@-bad", "@bad-"):
@@ -333,58 +330,14 @@ class PolicyLoadingTest(unittest.TestCase):
                 self.subTest(owner=owner),
                 self.assertRaisesRegex(ValueError, "codepath owner"),
             ):
-                parse_rules(f"* {owner}\n", strict=True)
+                parse_rules(contents=f"* {owner}\n", strict=True)
 
     def test_policy_loader_rejects_invalid_rules(self) -> None:
         with self.assertRaisesRegex(ValueError, "codepath owner"):
             self.load(b"* invalid.owner\n")
 
 
-class CollectorIntegrationTest(unittest.TestCase):
-    def test_fetches_all_pull_request_file_pages_once(self) -> None:
-        first = [
-            {
-                "filename": f"src/{index}.py",
-                "status": "modified",
-                "additions": 1,
-                "deletions": 0,
-                "patch": "+pass",
-            }
-            for index in range(100)
-        ]
-        second = [
-            {
-                "filename": "README.md",
-                "status": "modified",
-                "additions": 1,
-                "deletions": 0,
-                "patch": "+text",
-            }
-        ]
-        github = PagingGitHub([first, second])
-        files = fetch_pull_request_files(github, "pytorch/ciforge", 123)
-        self.assertEqual(len(files), 101)
-        self.assertEqual(files[-1]["filename"], "README.md")
-        self.assertEqual(
-            github.calls,
-            [
-                "repos/pytorch/ciforge/pulls/123/files?per_page=100&page=1",
-                "repos/pytorch/ciforge/pulls/123/files?per_page=100&page=2",
-            ],
-        )
-
-    def test_file_pagination_bound_fails_closed(self) -> None:
-        pages = [
-            [{"filename": f"file-{page * 100 + index}"} for index in range(100)]
-            for page in range(30)
-        ]
-        with self.assertRaisesRegex(RuntimeError, "3,000 or more"):
-            fetch_pull_request_files(
-                PagingGitHub(pages),
-                "pytorch/ciforge",
-                123,
-            )
-
+class OwnerLabelTest(unittest.TestCase):
     def test_owner_labels_are_derived_and_bounded(self) -> None:
         self.assertEqual(owner_label("compiler"), "owner: compiler")
         for owner_id in ("Compiler", "a" * 44):
@@ -400,7 +353,7 @@ class CommandLineTest(unittest.TestCase):
             result = subprocess.run(
                 [
                     sys.executable,
-                    str(Path(__file__).with_name("codepath_owners.py")),
+                    str(Path(__file__).resolve().parents[1] / "codepath_owners.py"),
                     "--codepath-owners",
                     str(path),
                     "--owners-only",
