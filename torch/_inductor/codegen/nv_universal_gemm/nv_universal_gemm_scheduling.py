@@ -129,6 +129,9 @@ def _nvgemm_benchmark_tensor_specs(
                     * storage_node.get_dtype().itemsize
                 )
                 storage_node = storage_node.data
+                # Wrapper codegen emits only the outer layout in an unnamed chain.
+                while isinstance(storage_node, (MutableBox, ReinterpretView)):
+                    storage_node = storage_node.data
             elif isinstance(storage_node, Buffer):
                 layout = storage_node.get_layout()
                 if not isinstance(layout, NonOwningLayout):
@@ -1351,20 +1354,22 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         symbolic (dynamic shapes), in which case the subprocess will skip
         precompilation and the kernel compiles lazily on first call.
         """
-        if not hasattr(kernel, "_template_input_args"):
-            return None
-
         precompile_shapes = {}
         precompile_strides = {}
         precompile_dtypes = {}
 
         try:
-            for param_name, input_node in kernel._template_input_args:
+            for argument in kernel.ordered_arguments():
+                if argument.kind != "input":
+                    continue
+                input_node = argument.node
+                if input_node is None:
+                    raise AssertionError("expected NVGEMM input argument node")
                 size = input_node.get_size()
-                precompile_shapes[param_name] = [int(s) for s in size]
+                precompile_shapes[argument.name] = [int(s) for s in size]
                 stride = input_node.get_stride()
-                precompile_strides[param_name] = [int(s) for s in stride]
-                precompile_dtypes[param_name] = str(
+                precompile_strides[argument.name] = [int(s) for s in stride]
+                precompile_dtypes[argument.name] = str(
                     input_node.get_dtype()
                 ).removeprefix("torch.")
 

@@ -1110,6 +1110,32 @@ class TestNVUniversalGemmScheduling(TestCase):
                 )
             ),
         )
+        self.unnamed_nested = ir.Buffer(
+            name="unnamed_nested",
+            layout=ir.NonOwningLayout(
+                ir.ReinterpretView(
+                    data=ir.StorageBox(
+                        ir.ReinterpretView(
+                            data=ir.StorageBox(self.shared_storage),
+                            layout=ir.FixedLayout(
+                                torch.device("cuda"),
+                                torch.bfloat16,
+                                [2],
+                                [1],
+                                offset=9,
+                            ),
+                        )
+                    ),
+                    layout=ir.FixedLayout(
+                        torch.device("cuda"),
+                        torch.bfloat16,
+                        [2],
+                        [1],
+                        offset=4,
+                    ),
+                )
+            ),
+        )
         self.out = make_buffer("out", [4, 4], [5, 1])
         self.epilogue_input = ir.ReinterpretView(
             data=self.shared_storage,
@@ -1138,6 +1164,7 @@ class TestNVUniversalGemmScheduling(TestCase):
                     self.bias,
                     self.b,
                     self.nested,
+                    self.unnamed_nested,
                     self.out,
                     self.epilogue_input,
                     self.adjacent_epilogue,
@@ -1161,6 +1188,7 @@ class TestNVUniversalGemmScheduling(TestCase):
                     source=f"def {EPILOGUE_FN_NAME}(accum):\n    return accum",
                     reads=(
                         self.nested.get_name(),
+                        self.unnamed_nested.get_name(),
                         self.epilogue_input.get_name(),
                         self.adjacent_epilogue.get_name(),
                         self.constant_input.get_name(),
@@ -1206,6 +1234,7 @@ class TestNVUniversalGemmScheduling(TestCase):
                 ("in_ptr2", "constant_input", "input"),
                 ("out_ptr0", "out", "output"),
                 ("nested", "nested", "epilogue"),
+                ("unnamed_nested", "unnamed_nested", "epilogue"),
                 ("shared_storage", "shared_storage", "epilogue"),
                 ("adjacent", "adjacent", "epilogue"),
                 ("constant_input", "constant_input", "epilogue"),
@@ -1221,6 +1250,7 @@ class TestNVUniversalGemmScheduling(TestCase):
             "in_ptr2": ((16,), (1,), 1),
             "out_ptr0": ((4, 4), (5, 1), 0),
             "nested": ((2,), (1,), 3),
+            "unnamed_nested": ((2,), (1,), 4),
             "shared_storage": ((2,), (1,), 2),
             "adjacent": ((2,), (1,), 17),
             "constant_input": ((16,), (1,), 1),
@@ -1246,6 +1276,11 @@ class TestNVUniversalGemmScheduling(TestCase):
         )
         self.assertTrue(
             torch._C._is_alias_of(args_by_name["in_ptr1"], args_by_name["nested"])
+        )
+        self.assertTrue(
+            torch._C._is_alias_of(
+                args_by_name["in_ptr1"], args_by_name["unnamed_nested"]
+            )
         )
         self.assertTrue(
             torch._C._is_alias_of(args_by_name["in_ptr1"], args_by_name["adjacent"])

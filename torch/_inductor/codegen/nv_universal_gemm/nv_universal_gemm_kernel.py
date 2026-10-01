@@ -1312,16 +1312,10 @@ class NVUniversalGemmKernel(Kernel):
                     self.epilogue, bias_node.get_name()
                 )
 
-        self._template_input_args: list[tuple[str, Buffer]] = []
-
-        for i, input_node in enumerate(input_nodes):
-            param_name = f"in_ptr{i}"
-            self._template_input_args.append((param_name, input_node))
-
     def ordered_arguments(self) -> tuple[NVGemmKernelArgument, ...]:
         arguments = [
-            NVGemmKernelArgument(name, node.get_name(), node, "input")
-            for name, node in self._template_input_args
+            NVGemmKernelArgument(f"in_ptr{i}", node.get_name(), node, "input")
+            for i, node in enumerate(self.input_nodes)
         ]
         arguments.extend(
             NVGemmKernelArgument(f"out_ptr{i}", name, None, "output")
