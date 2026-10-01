@@ -50,7 +50,12 @@ from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
+from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCUDA,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -370,7 +375,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             group,
             reduce_scatter_stream,
             comm,
-            orig_dtype=orig_params[0].dtype,
             reduce_dtype=reduce_scatter_dtype,
             device=self.device,
             gradient_divide_factor=None,
@@ -403,6 +407,58 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             sharded_grad = fsdp_param.sharded_param.grad
             self.assertIsInstance(sharded_grad, DTensor)
             self.assertEqual(sharded_grad.full_tensor(), reduced_grad)
+
+
+class TestFullyShardChunkCatMixedDtype(TestCase):
+    def test_numerics(self, device):
+        bf16, fp16, fp32 = torch.bfloat16, torch.float16, torch.float32
+        # Dim-0 sizes that need padding, multi-dim, and one large enough to
+        # span several blocks per chunk
+        sizes = [(5, 3), (7,), (2049, 2, 2)]
+        # On CUDA: the fused kernel, then two composite fallbacks
+        for input_dtypes, noncontiguous in (
+            ((bf16, fp32, bf16), False),
+            ((bf16, fp32, bf16), True),
+            ((fp16, fp32, fp16), False),
+        ):
+            tensors = [
+                torch.randn(size, device=device, dtype=dtype)
+                for size, dtype in zip(sizes, input_dtypes)
+            ]
+            if noncontiguous:
+                tensors = [torch.cat([t, t], dim=-1)[..., ::2] for t in tensors]
+                self.assertFalse(tensors[0].is_contiguous())
+            expected = torch._chunk_cat([t.to(fp32) for t in tensors], 0, 4)
+            out = torch.empty_like(expected)
+            version = out._version
+            torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, 4, out=out)
+            self.assertEqual(out, expected, atol=0, rtol=0)
+            # Autograd must see the in-place write to out
+            self.assertGreater(out._version, version)
+
+    @onlyCUDA
+    def test_kernels(self, device):
+        bf16, fp32 = torch.bfloat16, torch.float32
+        tensors = [torch.randn(8, 3, device=device, dtype=d) for d in (bf16, fp32)]
+        out = torch.empty(2, 24, device=device)
+        with profile(activities=[ProfilerActivity.CUDA]) as prof:
+            torch.ops.fsdp.chunk_cat_mixed_dtype(tensors, 0, 2, out=out)
+            torch.cuda.synchronize()
+        kernels = [
+            event.name
+            for event in prof.events()
+            if event.device_type == DeviceType.CUDA
+            and not event.name.startswith("Memcpy")
+        ]
+        # One launch copies the fp32 input and a second casts the bf16 one
+        self.assertEqual(len(kernels), 2, kernels)
+        for kernel in kernels:
+            self.assertIn("chunk_cat_cuda_kernel", kernel)
+
+
+instantiate_device_type_tests(
+    TestFullyShardChunkCatMixedDtype, globals(), only_for=("cpu", "cuda", "xpu")
+)
 
 
 class TestFullyShardCommunication(FSDPTestContinuous):
