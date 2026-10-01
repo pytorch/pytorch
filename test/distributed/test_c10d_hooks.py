@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
+import threading
+
 import torch
 import torch.distributed as dist
 from torch._C._distributed_c10d import HookOpName
@@ -104,6 +106,8 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         # each post correlates with its pre via op_id.
         self.assertEqual(len(pre_ops), len(post_ops))
         self.assertEqual(pre_op_ids, post_op_ids)
+        # firePreHook returns 0 when no hooks are registered.
+        self.assertNotIn(0, pre_op_ids)
 
         # After unregistering, no further hooks fire.
         pg.unregister_pre_hook(0)
@@ -141,6 +145,72 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         graph(torch.ones(2))
         self.assertIn(HookOpName.ALLREDUCE, pre_ops)
         pg.unregister_pre_hook(0)
+
+        dist.barrier()
+
+    def test_hook_unregisters_itself(self):
+        pg = _get_default_group()
+        calls: list[int] = []
+
+        def first(args):
+            calls.append(0)
+            pg.unregister_pre_hook(0)
+            pg.register_pre_hook(2, lambda args: calls.append(2))
+
+        pg.register_pre_hook(0, first)
+        pg.register_pre_hook(1, lambda args: calls.append(1))
+        dist.all_reduce(torch.ones(2))
+        # The collective fires the hooks registered when it reached the hook point.
+        self.assertEqual(calls, [0, 1])
+        calls.clear()
+        dist.all_reduce(torch.ones(2))
+        self.assertEqual(calls, [1, 2])
+        pg.unregister_pre_hook(1)
+        pg.unregister_pre_hook(2)
+
+        dist.barrier()
+
+    def test_post_hook_fires_when_backend_raises(self):
+        pg = _get_default_group()
+        pre_op_ids: list[int] = []
+        posts: list[tuple[int, bool]] = []
+        pg.register_pre_hook(0, lambda args: pre_op_ids.append(args.op_id))
+        pg.register_post_hook(
+            0, lambda args: posts.append((args.op_id, args.work is None))
+        )
+        ws = self.world_size
+        try:
+            with self.assertRaisesRegex(RuntimeError, "alltoall_base"):
+                # Split sizes that don't sum to the tensor size fail in the backend.
+                dist.all_to_all_single(
+                    torch.zeros(ws), torch.zeros(ws), [ws] * ws, [ws] * ws
+                )
+        finally:
+            pg.unregister_post_hook(0)
+            pg.unregister_pre_hook(0)
+        self.assertEqual(posts, [(pre_op_ids[0], True)])
+
+        dist.barrier()
+
+    def test_register_concurrently_with_collectives(self):
+        pg = _get_default_group()
+        stop = threading.Event()
+
+        def churn():
+            while not stop.is_set():
+                pg.register_pre_hook(0, lambda args: None)
+                pg.register_post_hook(0, lambda args: None)
+                pg.unregister_post_hook(0)
+                pg.unregister_pre_hook(0)
+
+        thread = threading.Thread(target=churn)
+        thread.start()
+        try:
+            for _ in range(200):
+                dist.all_reduce(torch.ones(2))
+        finally:
+            stop.set()
+            thread.join()
 
         dist.barrier()
 

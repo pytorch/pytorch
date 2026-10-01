@@ -3080,22 +3080,26 @@ Arguments:
           .def(
               "register_pre_hook",
               &::c10d::ProcessGroup::registerPreHook,
+              py::call_guard<py::gil_scoped_release>(),
               py::arg("hook_id"),
               py::arg("hook"),
               "Register a pre-hook, called before each collective is issued")
           .def(
               "unregister_pre_hook",
               &::c10d::ProcessGroup::unregisterPreHook,
+              py::call_guard<py::gil_scoped_release>(),
               py::arg("hook_id"))
           .def(
               "register_post_hook",
               &::c10d::ProcessGroup::registerPostHook,
+              py::call_guard<py::gil_scoped_release>(),
               py::arg("hook_id"),
               py::arg("hook"),
               "Register a post-hook, called after each collective is issued")
           .def(
               "unregister_post_hook",
               &::c10d::ProcessGroup::unregisterPostHook,
+              py::call_guard<py::gil_scoped_release>(),
               py::arg("hook_id"))
           .def("boxed", [](c10::intrusive_ptr<::c10d::ProcessGroup> self) {
             return torch::jit::toPyObject(c10::IValue(std::move(self)));
