@@ -4583,30 +4583,52 @@ class TestAsArray(TestCase):
         # The storage pointers should not be equal
         self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
 
-    @onlyCPU
-    def test_asarray_from_dlpack_method(self, device):
-        for dtype in (torch.float32, torch.int64, torch.bool):
-            original = make_tensor((5,), dtype=dtype, device=device)
-            wrapper = _DLPackWrapper(original)
+    @skipMeta
+    @unittest.skipIf(sys.version_info < (3, 12), "PEP 688 __buffer__ requires Python 3.12+")
+    @dtypes(torch.float32, torch.int32, torch.bool)
+    def test_asarray_prefers_dlpack_over_buffer(self, device, dtype):
+        # The buffer would only ever yield host memory, so device and alias
+        # prove the DLPack path won.
+        class _DLPackAndBuffer(_DLPackWrapper):
+            def __buffer__(self, flags):
+                return memoryview(self._tensor.cpu().numpy())
 
-            result = torch.asarray(wrapper)
-            self.assertEqual(result.dtype, dtype)
-            self.assertEqual(result, original)
-            # DLPack is zero-copy, so the result aliases the source.
-            self.assertEqual(result.data_ptr(), original.data_ptr())
-            self.assertEqual(
-                torch.asarray(wrapper, copy=False).data_ptr(), original.data_ptr()
-            )
-            # copy=True must produce a fresh allocation.
-            self.assertNotEqual(
-                torch.asarray(wrapper, copy=True).data_ptr(), original.data_ptr()
-            )
+        original = make_tensor((5,), dtype=dtype, device=device)
+        result = torch.asarray(_DLPackAndBuffer(original))
+        self.assertEqual(result.dtype, dtype)
+        self.assertEqual(result.device, original.device)
+        self.assertEqual(result, original)
+        self.assertEqual(result.data_ptr(), original.data_ptr())
+
+    @onlyCPU
+    def test_asarray_dlpack_baseexception_propagates(self, device):
+        class _Interrupting:
+            def __dlpack__(self, *args, **kwargs):
+                raise KeyboardInterrupt
+
+            def __dlpack_device__(self):
+                raise KeyboardInterrupt
+
+        with self.assertRaises(KeyboardInterrupt):
+            torch.asarray(_Interrupting())
+
+    @onlyCPU
+    def test_asarray_dlpack_failure_without_fallback_raises(self, device):
+        # With no buffer or sequence to fall back to, the producer's error is
+        # what the user needs to see.
+        class _NoFallback:
+            def __dlpack__(self, *args, **kwargs):
+                raise RuntimeError("dlpack export failed")
+
+            def __dlpack_device__(self):
+                return torch.zeros(1).__dlpack_device__()
+
+        with self.assertRaisesRegex(RuntimeError, "dlpack export failed"):
+            torch.asarray(_NoFallback())
 
     @onlyCPU
     def test_asarray_dlpack_failure_falls_back(self, device):
-        # If a producer exposes __dlpack__ but its export raises, asarray must
-        # fall back to the buffer/sequence paths instead of propagating the
-        # error (gh-188784 review: MLX/PyArrow-style objects).
+        # PyArrow tables and MLX arrays expose __dlpack__ but can fail to export.
         class _BadDLPackSequence:
             def __init__(self, data):
                 self._data = data
