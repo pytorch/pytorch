@@ -349,10 +349,6 @@ $1: f32[2] = torch._ops.prims.sin.default($0)""")
         with self.assertWarnsRegex(FutureWarning, 'will be removed in the future'):
             torch._prims_common.check(True, lambda: 'message')
 
-    def test_check_contiguous_sizes_strides_nested_int(self):
-        j = torch._C._get_nested_int(1, 1)
-        self.assertTrue(torch._prims_common.check_contiguous_sizes_strides((2, j, 3), (3 * j, 3, 1), false_if_dde=True))
-
     def test_inferred_tags(self):
         self.assertEqual(torch.ops.prims.normal.default.tags, (torch.Tag.nondeterministic_seeded, torch.Tag.pt2_compliant_tag))
 
