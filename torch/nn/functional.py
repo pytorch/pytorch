@@ -7261,8 +7261,11 @@ def quantize_tensor(
 
     Args:
         input (Tensor): Contiguous 2D tensor or a transposed view of one, with
-          dtype ``float16``, ``bfloat16``, or ``float32``. Its data pointer must
-          be 16-byte aligned.
+          shape :math:`(M, K)` and dtype ``float16``, ``bfloat16``, or
+          ``float32``. ``K`` must be divisible by 32. For a transposed view
+          (dim-m), ``M`` must also be divisible by 16; for square-block scaling
+          (dim-k), ``M`` must be divisible by 32. Both dimensions must fit in
+          signed int32, and the data pointer must be 16-byte aligned.
         qdata_dtype (:class:`torch.dtype`): Must be ``torch.float8_e4m3fn``.
         inner_scale_calc (InnerScaleCalc): Must be ``InnerScaleCalc.RCEIL_E8M0``.
         scaling_type (ScalingType): Must be ``ScalingType.BlockWise1x32``.
@@ -7330,9 +7333,10 @@ def quantize_tensor_dual(
     ``nvidia-cutlass-dsl`` and ``apache-tvm-ffi`` packages. Autograd is not supported.
 
     Args:
-        input (Tensor): Contiguous 2D tensor with dtype ``float16``,
-          ``bfloat16``, or ``float32``. Both dimensions must be divisible by 32,
-          and its data pointer must be 16-byte aligned.
+        input (Tensor): Contiguous 2D tensor of shape :math:`(M, K)` with dtype
+          ``float16``, ``bfloat16``, or ``float32``. Both ``M`` and ``K`` must
+          be divisible by 32 and fit in signed int32, and the data pointer must
+          be 16-byte aligned.
         qdata_dtype (:class:`torch.dtype`): Must be ``torch.float8_e4m3fn``.
         inner_scale_calc (InnerScaleCalc): Must be ``InnerScaleCalc.RCEIL_E8M0``.
         scaling_type (ScalingType): Must be ``ScalingType.BlockWise1x32``.

@@ -7492,6 +7492,31 @@ def meta_scaled_mm(
     )
 
 
+def _check_quantize_tensor_recipe(
+    input: torch.Tensor,
+    qdata_dtype: torch.dtype,
+    inner_scale_calc: int,
+    scaling_type: int,
+    op_name: str,
+) -> None:
+    torch._check_value(
+        input.dtype in (torch.float16, torch.bfloat16, torch.float32),
+        lambda: f"{op_name} supports only fp16, bf16, and fp32 input",
+    )
+    torch._check_value(
+        qdata_dtype == torch.float8_e4m3fn,
+        lambda: f"{op_name} supports only float8_e4m3fn qdata",
+    )
+    torch._check_value(
+        inner_scale_calc == 0,
+        lambda: f"{op_name} supports only RCEIL_E8M0 inner scales",
+    )
+    torch._check_value(
+        scaling_type == 3,
+        lambda: f"{op_name} supports only BlockWise1x32 scaling",
+    )
+
+
 @register_meta([aten._quantize_tensor.default])
 def meta_quantize_tensor(
     input: torch.Tensor,
@@ -7512,21 +7537,8 @@ def meta_quantize_tensor(
             input.t().is_contiguous(),
             lambda: "input must be contiguous or a transpose of contiguous",
         )
-    torch._check_value(
-        input.dtype in (torch.float16, torch.bfloat16, torch.float32),
-        lambda: "quantize_tensor supports only fp16, bf16, and fp32 input",
-    )
-    torch._check_value(
-        qdata_dtype == torch.float8_e4m3fn,
-        lambda: "quantize_tensor supports only float8_e4m3fn qdata",
-    )
-    torch._check_value(
-        inner_scale_calc == 0,
-        lambda: "quantize_tensor supports only RCEIL_E8M0 inner scales",
-    )
-    torch._check_value(
-        scaling_type == 3,
-        lambda: "quantize_tensor supports only BlockWise1x32 scaling",
+    _check_quantize_tensor_recipe(
+        input, qdata_dtype, inner_scale_calc, scaling_type, "quantize_tensor"
     )
     torch._check_value(
         swizzle_type in (0, 1),
@@ -7544,8 +7556,6 @@ def meta_quantize_tensor(
         torch._check_value(rows % 16 == 0)
     if scaling_type_square_block_and_expand:
         torch._check_value(rows % 32 == 0)
-    if input.requires_grad and torch.is_grad_enabled():
-        raise RuntimeError("quantize_tensor does not support autograd")
     if input.device.type not in ("cuda", "meta") or (
         input.device.type == "cuda" and torch.version.hip is not None
     ):
@@ -7586,21 +7596,8 @@ def meta_quantize_tensor_dual(
     torch._check_value(
         input.is_contiguous(), lambda: "dual quantization requires contiguous input"
     )
-    torch._check_value(
-        input.dtype in (torch.float16, torch.bfloat16, torch.float32),
-        lambda: "quantize_tensor_dual supports only fp16, bf16, and fp32 input",
-    )
-    torch._check_value(
-        qdata_dtype == torch.float8_e4m3fn,
-        lambda: "quantize_tensor_dual supports only float8_e4m3fn qdata",
-    )
-    torch._check_value(
-        inner_scale_calc == 0,
-        lambda: "quantize_tensor_dual supports only RCEIL_E8M0 inner scales",
-    )
-    torch._check_value(
-        scaling_type == 3,
-        lambda: "quantize_tensor_dual supports only BlockWise1x32 scaling",
+    _check_quantize_tensor_recipe(
+        input, qdata_dtype, inner_scale_calc, scaling_type, "quantize_tensor_dual"
     )
     torch._check_value(
         swizzle_type == 1, lambda: "dual quantization requires SWIZZLE_32_4_4"
@@ -7609,8 +7606,6 @@ def meta_quantize_tensor_dual(
         not scaling_type_square_block_and_expand,
         lambda: "dual quantization does not support 32x32 MXFP8 scaling",
     )
-    if input.requires_grad and torch.is_grad_enabled():
-        raise RuntimeError("quantize_tensor_dual does not support autograd")
     if input.device.type not in ("cuda", "meta") or (
         input.device.type == "cuda" and torch.version.hip is not None
     ):

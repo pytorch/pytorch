@@ -329,6 +329,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         ((0, 32), (32, 0), (0, 0)),
         name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
     )
+    @skipIfNoCuteDSL
     def test_to_mx_rceil_dim_km_empty(self, shape, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
@@ -353,6 +354,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             )
             self.assertEqual(output.numel(), 0)
 
+    @skipIfNoCuteDSL
     def test_quantize_tensor_invalid_configuration(self, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
@@ -393,18 +395,25 @@ class TestMXFP8ReferenceNumerics(TestCase):
         with self.assertRaisesRegex(ValueError, "columns divisible by 32"):
             F.quantize_tensor(data.new_ones(64, 48), **_MXFP8_NO_SWIZZLE_KWARGS)
 
+    @skipIfNoCuteDSL
     def test_quantize_tensor_requires_grad(self, device):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         data = torch.ones(
             (64, 64), dtype=torch.bfloat16, device=device, requires_grad=True
         )
-        with self.assertRaisesRegex(RuntimeError, "does not support autograd"):
-            F.quantize_tensor(data, **_MXFP8_NO_SWIZZLE_KWARGS)
-        if _NVIDIA_SM100_OR_LATER:
-            with torch.no_grad():
-                qdata, scales = F.quantize_tensor(data, **_MXFP8_NO_SWIZZLE_KWARGS)
-            self.assertFalse(qdata.requires_grad)
-            self.assertFalse(scales.requires_grad)
+        qdata, _ = F.quantize_tensor(data, **_MXFP8_NO_SWIZZLE_KWARGS)
+        self.assertTrue(qdata.requires_grad)
+        with self.assertRaisesRegex(
+            RuntimeError, "derivative for aten::_quantize_tensor is not implemented"
+        ):
+            qdata.float().sum().backward()
+        with torch.no_grad():
+            qdata, scales = F.quantize_tensor(data, **_MXFP8_NO_SWIZZLE_KWARGS)
+        self.assertFalse(qdata.requires_grad)
+        self.assertFalse(scales.requires_grad)
 
+    @skipIfNoCuteDSL
     def test_quantize_tensor_dual_invalid_configuration(self, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
@@ -426,7 +435,10 @@ class TestMXFP8ReferenceNumerics(TestCase):
         with self.assertRaisesRegex(ValueError, "float8_e4m3fn"):
             F.quantize_tensor_dual(data, **(kwargs | {"qdata_dtype": torch.float16}))
 
+    @skipIfNoCuteDSL
     def test_quantize_tensor_dual_requires_grad(self, device):
+        if not _NVIDIA_SM100_OR_LATER:
+            self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         data = torch.ones(
             (64, 96), dtype=torch.bfloat16, device=device, requires_grad=True
         )
@@ -434,14 +446,19 @@ class TestMXFP8ReferenceNumerics(TestCase):
             **_MXFP8_KWARGS,
             "swizzle_type": SwizzleType.SWIZZLE_32_4_4,
         }
-        with self.assertRaisesRegex(RuntimeError, "does not support autograd"):
-            F.quantize_tensor_dual(data, **kwargs)
-        if _NVIDIA_SM100_OR_LATER:
-            with torch.no_grad():
-                outputs = F.quantize_tensor_dual(data, **kwargs)
-            for output in outputs:
-                self.assertFalse(output.requires_grad)
+        outputs = F.quantize_tensor_dual(data, **kwargs)
+        self.assertTrue(outputs[0].requires_grad)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "derivative for aten::_quantize_tensor_dual is not implemented",
+        ):
+            outputs[0].float().sum().backward()
+        with torch.no_grad():
+            outputs = F.quantize_tensor_dual(data, **kwargs)
+        for output in outputs:
+            self.assertFalse(output.requires_grad)
 
+    @skipIfNoCuteDSL
     def test_quantize_tensor_dispatch_transposed(self, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
@@ -459,6 +476,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
         self.assertEqual(scales.view(torch.uint8), scales_ref.view(torch.uint8))
 
+    @skipIfNoCuteDSL
     def test_quantize_tensor_dual_dispatch(self, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
@@ -477,6 +495,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             self.assertEqual(got.view(torch.uint8), reference.view(torch.uint8))
 
     @parametrize("transposed,square", ((False, False), (True, False), (False, True)))
+    @skipIfNoCuteDSL
     def test_quantize_tensor_compile(self, transposed, square, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
@@ -496,6 +515,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         for got, reference in zip(actual, expected, strict=True):
             self.assertEqual(got.view(torch.uint8), reference.view(torch.uint8))
 
+    @skipIfNoCuteDSL
     def test_quantize_tensor_scaled_mm(self, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
@@ -519,6 +539,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
             compute_error(mat_a.float() @ mat_b.float(), out.float()).item(), 15.0
         )
 
+    @skipIfNoCuteDSL
     def test_quantize_tensor_dual_compile(self, device):
         if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
@@ -556,6 +577,9 @@ class TestQuantizeTensorMeta(TestCase):
             quantize_fn(input, **(kwargs | {"inner_scale_calc": 1}))
         with self.assertRaisesRegex(ValueError, "2D"):
             quantize_fn(input.flatten(), **kwargs)
+        input.requires_grad_()
+        outputs = quantize_fn(input, **kwargs)
+        self.assertTrue(all(output.requires_grad for output in outputs))
 
     def test_quantize_tensor_argument_names(self):
         self.assertEqual(F.InnerScaleCalc.RCEIL_E8M0.value, 0)
