@@ -4782,10 +4782,8 @@ class CppKernelProxy(CppKernel):
             if tiling_indices:
                 inner_loop_reduction = False
                 outer_loop_level = tiling_indices[0]
-                # 2D tiling: the inner tiled axis is tiling_indices[1], not
-                # necessarily the level right after the outer one; a pointwise
-                # level can sit between them, and looking there instead of at
-                # the real inner tiled axis misreads the reduction layout.
+                # With 2D tiling a pointwise level can sit between the tiled
+                # axes, so the inner tiled axis is not outer_loop_level + 1.
                 inner_loop_level = (
                     tiling_indices[1]
                     if len(tiling_indices) == 2

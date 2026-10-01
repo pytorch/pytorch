@@ -1469,12 +1469,8 @@ class CPUReproTests(TestCase):
     @requires_vectorization
     def test_tile2d_reduction_masked_tail_store(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/196681
-        # A 2D-tiled reduction whose output axis is not a multiple of the
-        # vector width stored the tail block's accumulator at full width,
-        # spilling into the next row (or past the buffer on the last row).
-        # The main/tail suffix split misread the reduction layout whenever a
-        # pointwise level sat between the two tiled axes. 66 leaves a tail at
-        # every power-of-two vector width >= 2.
+        # The output-axis tail (66 at width 4) must be stored masked; a
+        # pointwise level between the tiled axes used to misread the layout.
         def fn(x):
             v = (x * 0.5) * (torch.erf(x * 0.7071067811865476) + 1)
             a = v.permute(3, 2, 1, 0)
@@ -1482,8 +1478,21 @@ class CPUReproTests(TestCase):
             q = F.pad(v, (0, 0, 0, 0, 0, 58), value=0.5)
             return torch.matmul(q, p)
 
+        torch.manual_seed(0)
         x = torch.randn(1, 8, 66, 66).contiguous(memory_format=torch.channels_last)
-        self.common(fn, (x,))
+        for tail_vec in (True, False):
+            with config.patch({"cpp.enable_loop_tail_vec": tail_vec}):
+                opt_fn = torch.compile(fn)
+                actual, code = run_and_get_cpp_code(opt_fn, x)
+                self.assertEqual(actual, fn(x))
+                if tail_vec:
+                    FileCheck().check(
+                        "tmp_acc0_vec.store(out_ptr0 + static_cast<int64_t>(x0 + 66LL*x1), static_cast<int64_t>(2LL))"  # noqa: B950
+                    ).run(code)
+                else:
+                    FileCheck().check(
+                        "out_ptr0[static_cast<int64_t>(x0_tail + 66LL*x1)] = tmp_acc0_arr[x0_tail - static_cast<int64_t>(64LL)];"  # noqa: B950
+                    ).run(code)
 
     @requires_vectorization
     def test_max_parallel_depth_sub_vector_width_loop(self):
