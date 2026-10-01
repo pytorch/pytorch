@@ -490,6 +490,38 @@ class TestLibtorchAgnostic(TestCase):
 
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 15)
+    def test_pyobject_tensor_subclass(self, device):
+        import libtorch_agn_2_14
+        import libtorch_agn_2_15
+
+        class TensorSubclass(torch.Tensor):
+            pass
+
+        x = torch.randn(2, 3, device=device).as_subclass(TensorSubclass)
+        self.assertTrue(libtorch_agn_2_15._interop.is_tensor(x))
+        y = libtorch_agn_2_14._interop.pyobject_roundtrip(x)
+        self.assertEqual(y, x)
+        self.assertEqual(y.data_ptr(), x.data_ptr())
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 15)
+    def test_pyobject_spoofed_tensor_class(self, device):
+        import libtorch_agn_2_14
+        import libtorch_agn_2_15
+
+        class PretendTensor:
+            @property
+            def __class__(self):
+                return torch.Tensor
+
+        obj = PretendTensor()
+        self.assertIsInstance(obj, torch.Tensor)
+        self.assertFalse(libtorch_agn_2_15._interop.is_tensor(obj))
+        with self.assertRaisesRegex(RuntimeError, "expected torch.Tensor"):
+            libtorch_agn_2_14._interop.pyobject_roundtrip(obj)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 15)
     @parametrize(
         "dtype",
         [
@@ -542,11 +574,27 @@ class TestLibtorchAgnostic(TestCase):
 
     @onlyCPU
     @skipIfTorchVersionLessThan(2, 15)
+    def test_pyobject_unsupported_dtype_raises(self, device):
+        import libtorch_agn_2_15 as libtorch_agnostic
+
+        with self.assertRaisesRegex(RuntimeError, "Not yet supported ScalarType"):
+            libtorch_agnostic._interop.dtype_roundtrip(torch.qint8)
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 15)
     def test_pyobject_non_device_raises(self, device):
         import libtorch_agn_2_15 as libtorch_agnostic
 
         with self.assertRaisesRegex(RuntimeError, "expected torch.device"):
             libtorch_agnostic._interop.device_roundtrip("not a device")
+
+    @onlyCPU
+    @skipIfTorchVersionLessThan(2, 15)
+    def test_pyobject_unsupported_device_raises(self, device):
+        import libtorch_agn_2_15 as libtorch_agnostic
+
+        with self.assertRaisesRegex(RuntimeError, "Not yet supported DeviceType"):
+            libtorch_agnostic._interop.device_roundtrip(torch.device("xla"))
 
     # TODO: Debug this:
     # torch._dynamo.exc.TorchRuntimeError: Dynamo failed to run FX node with fake tensors:
