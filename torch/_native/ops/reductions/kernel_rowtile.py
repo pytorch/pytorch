@@ -20,6 +20,7 @@ from .traits import WARP
 _compile = _L.compile_kernel
 _stream = _L.stream
 _CACHE = {}
+_INT32_LIMIT = 1 << 31
 
 
 # First matching B200 threads-per-row anchor wins; small rows pack without cross-warp merge.
@@ -381,8 +382,9 @@ def _launch_itree(
     nouts: int = 1,
     dsts: Sequence[torch.dtype] = (),
     align: int = 0,
+    compact: bool = True,
 ) -> None:
-    """Launch one stage, keying the baked alignment to prevent overstating later pointers."""
+    """Launch one stage, keying the input layout and baked alignment."""
     op = tile.TileReduce(
         trait,
         dt,
@@ -415,7 +417,7 @@ def _launch_itree(
         )
 
     # Destination types are baked, so include them to prevent a wrong cached plan.
-    key = (tag, trait_key, dt, tuple(dsts), align) + op.cache_sig
+    key = (tag, trait_key, dt, tuple(dsts), align, compact) + op.cache_sig
     build = lambda: _compile(op, *_args(fakes))  # noqa: E731
     cached_plan(_CACHE, key, build, op=f"aten::{trait_key}")(*_args(operands))
 
@@ -439,13 +441,25 @@ def _run_itree(
 
     dt = torch2cute[x.dtype]
     # Storage offsets may underalign; declare and key the supported width.
-    natural = tile.align_bytes(N, x.element_size())
+    itemsize = x.element_size()
+    natural = tile.align_bytes(N, itemsize)
     align = _L.supported_alignment(x, natural)
+    compact = x.stride(0) == N
+    if not compact:
+        align = min(align, math.gcd(x.stride(0) * itemsize, natural))
     if align < natural and itree.stage_e:
         # Misaligned cp.async fails IR verification; unstaged preserves the same bits.
-        itree = cast(_ItreePlan, itree_plan(N, M, x.element_size(), stage=False))
+        itree = cast(_ItreePlan, itree_plan(N, M, itemsize, stage=False))
     # N is baked into the DAG, so the row extent is static and only M rides in dynamically.
-    fake_in = _L.fake_compact(dt, (_L.sym(), N), stride_order=(1, 0), align=align)
+    if compact:
+        fake_in = _L.fake_compact(dt, (_L.sym(), N), stride_order=(1, 0), align=align)
+    else:
+        fake_in = cute.runtime.make_fake_tensor(
+            dt,
+            (_L.sym(), N),
+            (cute.sym_int64(divisibility=align // itemsize), 1),
+            assumed_align=align,
+        )
     fake_1d = lambda t: _L.fake_compact(  # noqa: E731
         torch2cute[t.dtype], (_L.sym(),)
     )
@@ -463,6 +477,7 @@ def _run_itree(
             nouts,
             tuple(o.dtype for o in outs),
             align,
+            compact,
         )
         return tuple(outs)
     # Split writes one field-typed partial per (row, batch), then folds them linearly.
@@ -483,6 +498,7 @@ def _run_itree(
         nouts,
         tuple(p.dtype for p in parts),
         align,
+        compact,
     )
     outs = results()
     _launch_itree(
@@ -533,6 +549,8 @@ def reduce_row_tile(
     if x.dim() != 2 or not x.is_cuda or x.stride(-1) != 1:
         raise AssertionError(f"want 2D contiguous-last-dim CUDA, got {tuple(x.shape)}")
     M, N = x.shape
+    if M >= _INT32_LIMIT or N >= _INT32_LIMIT:
+        raise AssertionError(f"row reduction needs M and N < 2^31, got M={M}, N={N}")
     # leaf/combine serves every trait and N. The opt-in gate leaves partial stages and
     # explicit launch shapes on the default order; explicit requests raise below.
     if order not in (None, "linear", "inner_tree"):

@@ -256,6 +256,8 @@ class TestSumCuteDSLOverride(TestCase):
         self.assertFalse(impl._cond(x, [1], dtype=torch.float64))
         # Non-contiguous reduced dim.
         self.assertFalse(impl._cond(x[:, ::2], [1]))
+        # Broadcast outer rows remain on ATen.
+        self.assertFalse(impl._cond(x[:1].expand_as(x), [1]))
         # Integer / complex dtypes fall through to aten.
         self.assertFalse(
             impl._cond(torch.ones(17, 8192, device="cuda", dtype=torch.int64), [1])
@@ -288,6 +290,28 @@ class TestSumCuteDSLOverride(TestCase):
         x = base[::2, :]
         result = x.sum(dim=1)
         self.assertEqual(result, torch.full((128,), 32, device="cuda", dtype=x.dtype))
+
+    @parametrize("op", ("sum", "prod"))
+    @parametrize("layout", ("aligned_gap", "misaligned_gap"))
+    def test_noncompact_outer_stride_uses_shared_kernel(self, op, layout):
+        m, n = 17, 1024
+        values = (
+            self._make_order_sensitive_input(m, n, torch.float32)
+            if op == "sum"
+            else self._make_prod_input(m, n, torch.float32)
+        )
+        pad = 4 if layout == "aligned_gap" else 1
+        x = torch.empty(m, n + pad, device="cuda")[:, :n]
+        x.copy_(values)
+        want = torch.empty(m, device="cuda")
+        into = ref.inner_tree_sum_into if op == "sum" else ref.inner_tree_prod_into
+        into(want, x)
+        with mock.patch.object(
+            rt, "reduce_row_itree", wraps=rt.reduce_row_itree
+        ) as run:
+            got = getattr(x, op)(dim=1)
+        self.assertEqual(run.call_count, 1)
+        self.assertEqual(got.view(torch.int32), want.view(torch.int32))
 
     def test_looped_kernel_partial_last_block(self):
         x = torch.ones(129, 256, device="cuda", dtype=torch.float32)

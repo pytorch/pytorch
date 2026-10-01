@@ -17,9 +17,8 @@ def _acc(dtype: torch.dtype) -> Any:
 
 
 def _layout_ok(out: torch.Tensor, src: torch.Tensor) -> bool:
-    # Require compact input and unit-stride output; otherwise use the same-bit reference.
-    # Misalignment selects a bit-neutral unstaged plan rather than falling back.
-    return src.stride(0) == src.shape[1] and out.stride(0) == 1
+    # Broadcast rows favor the reference; other input row strides are dynamic.
+    return src.stride(0) != 0 and out.stride(0) == 1
 
 
 def sum_into(out: torch.Tensor, src: torch.Tensor) -> None:
