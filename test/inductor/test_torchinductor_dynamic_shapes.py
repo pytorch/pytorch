@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     MI350_ARCH,
     parametrize,
     serialTest,
+    skipIfRocm,
     skipIfRocmArch,
     TEST_CUDA_MEM_LEAK_CHECK,
     TEST_WITH_ASAN,
@@ -61,7 +62,6 @@ importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
-    "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # A symbolic rnumel defeats should_use_persistent_reduction for BOTH halves
     # of the model, so the parent stops emitting triton_per_ and the
     # persistent-vs-looped contrast the test asserts no longer exists.
@@ -1448,6 +1448,7 @@ class TestInductorDynamic(DynamicShapesTestCase):
         # N + 1 for automatic dynamic float arguments
         self.assertEqual(cnt.frame_count, 4)
 
+    @skipIfRocm(msg="sort kernel exceeds the inductor compile-worker timeout")
     def test_sort_dynamic_shape_with_check(self, device):
         if torch.device(device).type != GPU_TYPE:
 

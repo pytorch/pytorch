@@ -15,6 +15,7 @@ inline void arange_check_bounds(
   double dend = end.to<double>();
   double dstep = step.to<double>();
 
+  TORCH_CHECK(std::isfinite(dstep), "step must be finite but got ", dstep);
   TORCH_CHECK(dstep > 0 || dstep < 0, "step must be nonzero");
   TORCH_CHECK(
       std::isfinite(dstart) && std::isfinite(dend),
