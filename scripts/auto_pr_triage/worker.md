@@ -27,7 +27,7 @@ If trusted inputs are absent or inconsistent, return no additional owners.
 ## Trusted context
 
 trusted_context.codepath_owners is the exact, controller-resolved ownership
-result from `codepath_owners.txt`:
+result from the repository's `CODEOWNERS` file:
 
 - owners are immutable. Never remove, replace, reject, rank, or
   reproduce them.
@@ -36,8 +36,7 @@ result from `codepath_owners.txt`:
 - files_without_owners lists indices into untrusted_context.files of changed
   files that have no codepath owner.
 
-Codepath owners may be GitHub handles beginning with `@` or unprefixed internal
-owner IDs.
+Codepath owners are GitHub user or team handles beginning with `@`.
 
 trusted_context.extra_ownership_metadata contains the complete set of internal
 owner IDs that may be suggested in addition to the codepath owners. Each entry's
@@ -45,8 +44,8 @@ description is the sole source of semantic ownership claims. An entry may also
 have bypass_intake_criteria: that team's own description of the PRs it wants to review
 even when the PR does not otherwise qualify for routing.
 
-The worker does not receive owner rosters, owner labels, round-robin assignments,
-pending or submitted reviewers, actionable-issue state, or author permission.
+The worker does not receive owner rosters, reviewer picks, pending or submitted
+reviewers, actionable-issue state, or author permission.
 None of these is semantic ownership evidence.
 
 ## Additive analysis
@@ -134,7 +133,7 @@ concern's patches are materially incomplete or the evidence is insufficient to
 determine whether the owner is warranted. The controller discards only
 low-confidence additional owners and those whose files have truncated or
 unavailable patches; the others are kept. Low confidence does not alter the
-codepath owners, and a discarded bypass claim never closes a PR.
+codepath owners, and a discarded bypass claim never counts against a PR.
 
 ## Required output
 

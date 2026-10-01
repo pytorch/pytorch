@@ -195,7 +195,7 @@ class OwnershipInputMainTest(unittest.TestCase):
         codepath_policy = {
             "source": {
                 "repository": REPOSITORY,
-                "path": ".github/auto-pr-triage/codepath_owners.txt",
+                "path": "CODEOWNERS",
                 "ref": "a" * 40,
                 "blob_sha": "c" * 40,
             },

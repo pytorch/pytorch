@@ -147,6 +147,8 @@ def build_llm_input(
     )
     sources = [codepath_policy["source"], extra_metadata["source"]]
     print(f"Auto PR Triage ownership sources: {json.dumps(sources, sort_keys=True)}")
+    for diagnostic in codepath_policy["parse_diagnostics"]:
+        print(f"Skipped CODEOWNERS line {diagnostic['line']}: {diagnostic['error']}")
     ownership = {
         "codepath_owners": resolve_for_llm(
             paths=[item.path for item in llm_files], snapshot=codepath_policy

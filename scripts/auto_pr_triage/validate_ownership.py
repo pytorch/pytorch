@@ -126,9 +126,6 @@ def validate_result(*, llm_input: LLMInput, result: LLMResult) -> list[str]:
         errors.append(
             f"extra ownership metadata contains unknown owners: {unknown_owners}"
         )
-    codepath_team_owner_ids = {
-        owner for owner in trusted.codepath_owners.owners if not owner.startswith("@")
-    }
     unconfigured_bypass = sorted(
         suggestion.owner_id
         for suggestion in suggestions
@@ -137,9 +134,6 @@ def validate_result(*, llm_input: LLMInput, result: LLMResult) -> list[str]:
     )
     if unconfigured_bypass:
         errors.append(f"bypass claimed without criteria: {unconfigured_bypass}")
-    repeated_owners = sorted(set(suggested_owners) & codepath_team_owner_ids)
-    if repeated_owners:
-        errors.append(f"additional owners repeat codepath owners: {repeated_owners}")
     reported_paths = {p for suggestion in suggestions for p in suggestion.concern.files}
     unknown_paths = sorted(reported_paths - changed_paths)
     if unknown_paths:

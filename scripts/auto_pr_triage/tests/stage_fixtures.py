@@ -11,10 +11,10 @@ from schemas import (
     AdditionalOwnerConcern,
     AddLabels,
     ChangedFile,
-    CLOSE_ACTIONS,
     IntakeFacts,
     IntakeResult,
     LLMInput,
+    MISSING_ACTIONABLE_ISSUE_ACTIONS,
     OwnershipResult,
     PlanContext,
     PullRequestIdentity,
@@ -49,7 +49,7 @@ def ownership_config(
     codepath = {
         "source": {
             "repository": repository,
-            "path": ".github/auto-pr-triage/codepath_owners.txt",
+            "path": "CODEOWNERS",
             "ref": "a" * 40,
             "blob_sha": "c" * 40,
         },
@@ -312,9 +312,8 @@ def make_ownership_result(
 def make_action_plan(facts: IntakeFacts, **overrides: Any) -> ActionPlan:
     """Build a plan from context fields and planner-style effect fields.
 
-    supporter_reviewers, codepath_reviewers, codepath_teams, roster_reviewers,
-    and labels become actions in the planner's order; pass actions= to supply
-    the action list directly.
+    supporter_reviewers, roster_reviewers, and labels become actions in the
+    planner's order; pass actions= to supply the action list directly.
     """
 
     values = {
@@ -324,10 +323,8 @@ def make_action_plan(facts: IntakeFacts, **overrides: Any) -> ActionPlan:
         "bypass_intake_matches": (),
         "decision": "triage",
         "supporter_reviewers": (),
-        "codepath_reviewers": (),
-        "codepath_teams": (),
         "roster_reviewers": (),
-        "labels": ("triaged", "bot-triaged", "owner: autograd"),
+        "labels": ("triaged", "bot-triaged"),
     }
     identity = overrides.pop("identity", pr_identity())
     values.update(overrides)
@@ -341,19 +338,16 @@ def make_action_plan(facts: IntakeFacts, **overrides: Any) -> ActionPlan:
     )
     if "actions" in values:
         actions = values["actions"]
-    elif values["decision"] == "close":
-        actions = CLOSE_ACTIONS
+    elif values["decision"] == "missing_actionable_issue":
+        actions = MISSING_ACTIONABLE_ISSUE_ACTIONS
     else:
         actions = []
         if values["supporter_reviewers"]:
             supporters = values["supporter_reviewers"]
-            actions.append(RequestReviewers(supporters, (), "supporter"))
-        if values["codepath_reviewers"] or values["codepath_teams"]:
-            users, teams = values["codepath_reviewers"], values["codepath_teams"]
-            actions.append(RequestReviewers(users, teams, "codepath_owner"))
+            actions.append(RequestReviewers(supporters, "supporter"))
         if values["roster_reviewers"]:
             roster = values["roster_reviewers"]
-            actions.append(RequestReviewers(roster, (), "owner_roster"))
+            actions.append(RequestReviewers(roster, "owner_roster"))
         if values["labels"]:
             actions.append(AddLabels(values["labels"]))
     return ActionPlan(context, values["decision"], tuple(actions))

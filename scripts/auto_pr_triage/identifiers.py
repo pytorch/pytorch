@@ -12,16 +12,5 @@ OWNER_HANDLE_PATTERN = rf"(?:@{ACCOUNT_PATTERN}|@{ACCOUNT_PATTERN}/{TEAM_SLUG_PA
 TEAM_OWNER_ID_PATTERN = r"[a-z][a-z0-9_-]{0,63}"
 USER_HANDLE_RE = re.compile(rf"@{ACCOUNT_PATTERN}")
 TEAM_OWNER_ID_RE = re.compile(TEAM_OWNER_ID_PATTERN)
-CODEPATH_OWNER_RE = re.compile(rf"(?:{OWNER_HANDLE_PATTERN}|{TEAM_OWNER_ID_PATTERN})")
-OWNER_LABEL_PREFIX = "owner: "
-
-
-def owner_label(owner_id: str) -> str:
-    """Return the deterministic routing label for one team owner ID."""
-
-    if not TEAM_OWNER_ID_RE.fullmatch(owner_id):
-        raise ValueError("team owner ID is invalid")
-    label = f"{OWNER_LABEL_PREFIX}{owner_id}"
-    if len(label) > 50:
-        raise ValueError("owner label exceeds GitHub's length limit")
-    return label
+# Codepath owners come from CODEOWNERS, which names only GitHub users and teams.
+CODEPATH_OWNER_RE = re.compile(OWNER_HANDLE_PATTERN)
