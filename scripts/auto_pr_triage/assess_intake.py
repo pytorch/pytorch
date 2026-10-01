@@ -53,7 +53,6 @@ HANDLED_LABELS = frozenset(
         "triaged",
         "bot-triaged",
         "bot-triage-error",
-        "bot-closed",
     }
 )
 # GitHub does not link references inside comments or code.

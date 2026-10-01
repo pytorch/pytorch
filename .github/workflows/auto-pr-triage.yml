@@ -1,7 +1,7 @@
 name: Auto PR Triage
 
 # Intentional one-pass execution: analyze reads each PR, triage signal, and
-# reviewer/rotation state once and plans the exact effects. Live apply executes
+# reviewer state once and plans the exact effects. Live apply executes
 # that plan. Separate calls can observe different moments, later changes are
 # ignored for this run, and stale effects are bounded and recoverable.
 

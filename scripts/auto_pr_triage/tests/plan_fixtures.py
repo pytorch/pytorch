@@ -12,7 +12,7 @@ from typing import Any
 from unittest import mock
 from urllib.parse import unquote
 
-from apply_actions import apply_action_plan, ApplyOutcome, BOT_CLOSED_COMMENT
+from apply_actions import apply_action_plan, ApplyOutcome
 from plan_actions import build_action_plan, gather_planner_input, log_plan
 from schemas import (
     ActionPlan,
@@ -180,17 +180,11 @@ def plan_and_apply(*, args: argparse.Namespace, github: FakeGitHub) -> ApplyOutc
 
 
 @contextlib.contextmanager
-def configured(
-    *,
-    team_members: dict[str, Any] | None = None,
-    native_codeowners_requests: bool = True,
-) -> Iterator[None]:
+def configured(*, team_members: dict[str, Any] | None = None) -> Iterator[None]:
     members = team_members or ownership_config()["team_members"]
-    flag = "plan_actions.NATIVE_CODEOWNERS_REQUESTS_CODEPATH_OWNERS"
     with (
         mock.patch("plan_actions.load_team_members", return_value=members),
         mock.patch("apply_actions.load_team_members", return_value=members),
-        mock.patch(flag, native_codeowners_requests),
     ):
         yield
 
@@ -201,7 +195,6 @@ def scenario_args(
     codepath_owners: tuple[str, ...] | None = None,
     additional_owners: tuple[str, ...] = (),
     llm_run_status: str = "succeeded",
-    native_codeowners_requests: bool = True,
     run_attempt: int = 1,
     github_step_summary: Path | None = None,
     additional_owner_concerns: tuple[AdditionalOwnerConcern, ...] | None = None,
@@ -216,12 +209,6 @@ def scenario_args(
 ) -> argparse.Namespace:
     if codepath_owners is None:
         codepath_owners = ("@codepath-owner",)
-    if native_codeowners_requests and github.native_codeowners is None:
-        github.native_codeowners = [
-            owner
-            for owner in codepath_owners
-            if owner.startswith("@") and owner.casefold() != "@external-author"
-        ]
     return run_args(
         run_attempt=run_attempt,
         github_step_summary=github_step_summary,
@@ -243,38 +230,22 @@ def scenario_args(
 
 
 def run_apply(
-    github: FakeGitHub,
-    *,
-    team_members: dict[str, Any] | None = None,
-    native_codeowners_requests: bool = True,
-    **scenario: Any,
+    github: FakeGitHub, *, team_members: dict[str, Any] | None = None, **scenario: Any
 ) -> ApplyOutcome:
-    args = scenario_args(
-        github, native_codeowners_requests=native_codeowners_requests, **scenario
-    )
-    with configured(
-        team_members=team_members, native_codeowners_requests=native_codeowners_requests
-    ):
+    args = scenario_args(github, **scenario)
+    with configured(team_members=team_members):
         return plan_and_apply(args=args, github=github)
 
 
 def run_plan(
-    github: FakeGitHub,
-    *,
-    team_members: dict[str, Any] | None = None,
-    native_codeowners_requests: bool = True,
-    **scenario: Any,
+    github: FakeGitHub, *, team_members: dict[str, Any] | None = None, **scenario: Any
 ) -> ActionPlan:
-    args = scenario_args(
-        github, native_codeowners_requests=native_codeowners_requests, **scenario
-    )
-    with configured(
-        team_members=team_members, native_codeowners_requests=native_codeowners_requests
-    ):
+    args = scenario_args(github, **scenario)
+    with configured(team_members=team_members):
         return plan_pr(args=args, github=github)
 
 
-def close_args(run_attempt: int = 1) -> argparse.Namespace:
+def unadmitted_args(run_attempt: int = 1) -> argparse.Namespace:
     return run_args(
         run_attempt=run_attempt,
         stage_results=stage_results(
@@ -283,15 +254,14 @@ def close_args(run_attempt: int = 1) -> argparse.Namespace:
     )
 
 
-def run_close(github: FakeGitHub, *, run_attempt: int = 1) -> ApplyOutcome:
-    return plan_and_apply(args=close_args(run_attempt), github=github)
+def run_unadmitted(github: FakeGitHub, *, run_attempt: int = 1) -> ApplyOutcome:
+    return plan_and_apply(args=unadmitted_args(run_attempt), github=github)
 
 
 def run_without_owners(
     github: FakeGitHub,
     *,
     llm_run_status: str = "succeeded",
-    native_codeowners_requests: bool = True,
     has_uncovered_concerns: bool = False,
 ) -> ApplyOutcome:
     args = run_args(
@@ -301,7 +271,7 @@ def run_without_owners(
             has_uncovered_concerns=has_uncovered_concerns,
         ),
     )
-    with configured(native_codeowners_requests=native_codeowners_requests):
+    with configured():
         return plan_and_apply(args=args, github=github)
 
 
@@ -324,10 +294,6 @@ class FakeGitHub:
         author_has_triage_permission: bool = False,
         permission_error: Exception | None = None,
         unavailable_labels: list[str] | None = None,
-        native_codeowners: list[str] | None = None,
-        codeowner_error: Exception | None = None,
-        round_robin_events: list[dict[str, Any]] | None = None,
-        round_robin_timelines: dict[int, list[dict[str, Any]]] | None = None,
     ) -> None:
         self.pr = {
             "number": 123,
@@ -354,10 +320,6 @@ class FakeGitHub:
         self.author_has_triage_permission = author_has_triage_permission
         self.permission_error = permission_error
         self.unavailable_labels = set(unavailable_labels or [])
-        self.native_codeowners = native_codeowners
-        self.codeowner_error = codeowner_error
-        self.round_robin_events = round_robin_events or []
-        self.round_robin_timelines = round_robin_timelines or {}
         self.review_checks = 0
         self.actionable_checks = 0
         self.permission_checks = 0
@@ -377,32 +339,14 @@ class FakeGitHub:
             self.pr_fetches += 1
             self.live_reads.append("pr")
             return copy.deepcopy(self.pr)
-        if endpoint == "repos/pytorch/ciforge/pulls/123" and method == "PATCH":
-            if payload != {"state": "closed"}:
-                raise AssertionError("unexpected close payload")
-            self.pr["state"] = "closed"
-            return copy.deepcopy(self.pr)
         if endpoint.startswith("repos/pytorch/ciforge/labels/") and method == "GET":
             label = unquote(endpoint.rsplit("/", 1)[-1])
             return {} if label in self.unavailable_labels else {"name": label}
-        if endpoint.startswith("repos/pytorch/ciforge/issues/events?"):
-            return copy.deepcopy(self.round_robin_events)
-        if (
-            endpoint.startswith("repos/pytorch/ciforge/issues/")
-            and "/timeline?" in endpoint
-        ):
-            number = int(endpoint.split("/issues/", 1)[1].split("/", 1)[0])
-            return copy.deepcopy(self.round_robin_timelines.get(number, []))
         if endpoint == "repos/pytorch/ciforge/pulls/123/requested_reviewers":
             if method == "POST":
-                if (
-                    not isinstance(payload, dict)
-                    or not payload
-                    or not set(payload) <= {"reviewers", "team_reviewers"}
-                ):
+                if not isinstance(payload, dict) or set(payload) != {"reviewers"}:
                     raise AssertionError("unexpected reviewer payload")
-                self.requested_users.update(payload.get("reviewers", []))
-                self.requested_teams.update(payload.get("team_reviewers", []))
+                self.requested_users.update(payload["reviewers"])
             else:
                 self.live_reads.append("requested")
             return {
@@ -419,10 +363,6 @@ class FakeGitHub:
                 {"name": name} for name in payload["labels"] if name not in existing
             )
             return copy.deepcopy(self.pr["labels"])
-        if endpoint == "repos/pytorch/ciforge/issues/123/comments" and method == "POST":
-            if payload != {"body": BOT_CLOSED_COMMENT}:
-                raise AssertionError("unexpected comment payload")
-            return {"id": 1, "body": BOT_CLOSED_COMMENT}
         if endpoint.endswith("/collaborators/external-author/permission"):
             self.permission_checks += 1
             self.live_reads.append("permission")
@@ -444,36 +384,6 @@ class FakeGitHub:
     def graphql(self, *, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         if variables["number"] != 123:
             raise AssertionError("unexpected pull request number")
-        if "reviewRequests" in query:
-            self.live_reads.append("native_codeowners")
-            if self.codeowner_error is not None:
-                raise self.codeowner_error
-            nodes = []
-            for owner in self.native_codeowners or []:
-                if "/" in owner:
-                    reviewer = {
-                        "__typename": "Team",
-                        "slug": owner.split("/", 1)[1],
-                    }
-                else:
-                    reviewer = {
-                        "__typename": "User",
-                        "login": owner.removeprefix("@"),
-                    }
-                nodes.append({"asCodeOwner": True, "requestedReviewer": reviewer})
-            return {
-                "repository": {
-                    "pullRequest": {
-                        "reviewRequests": {
-                            "nodes": nodes,
-                            "pageInfo": {
-                                "endCursor": None,
-                                "hasNextPage": False,
-                            },
-                        }
-                    }
-                }
-            }
         if "closingIssuesReferences" in query:
             self.actionable_checks += 1
             self.live_reads.append("actionable")

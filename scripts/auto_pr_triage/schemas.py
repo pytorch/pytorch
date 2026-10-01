@@ -22,7 +22,7 @@ from typing import (
     TYPE_CHECKING,
 )
 
-from identifiers import CODEPATH_OWNER_RE, owner_label, TEAM_OWNER_ID_RE, USER_HANDLE_RE
+from identifiers import CODEPATH_OWNER_RE, TEAM_OWNER_ID_RE, USER_HANDLE_RE
 
 
 if TYPE_CHECKING:
@@ -493,9 +493,6 @@ class TrustedContext(_Record):
         metadata = self.extra_ownership_metadata
         if not metadata or not all(TEAM_OWNER_ID_RE.fullmatch(o) for o in metadata):
             raise RuntimeError("extra ownership metadata owners are invalid")
-        internal = {o for o in self.codepath_owners.owners if not o.startswith("@")}
-        if not internal <= set(metadata):
-            raise RuntimeError("team owner ID absent from extra ownership metadata")
 
     @property
     def teams_with_intake_bypass(self) -> frozenset[str]:
@@ -752,8 +749,6 @@ class OwnershipResult(_Record):
             additional
         ):
             raise ValueError("ownership result additional owners are not canonical")
-        if set(additional) & set(codepath):
-            raise ValueError("ownership result repeats a codepath owner")
         if any(c.confidence == "low" for c in self.additional_owner_concerns):
             raise ValueError("ownership result accepted a low-confidence owner")
 
@@ -835,22 +830,6 @@ class OwnershipResult(_Record):
 
 
 @dataclass(frozen=True)
-class RoundRobinCursor(_Record):
-    """Record where one owner's reviewer rotation stands.
-
-    prior_pull_request is the latest earlier PR carrying the owner's label, if
-    any; last_assigned is the roster member requested there before that label.
-    """
-
-    prior_pull_request: int | None
-    last_assigned: str | None
-
-    @property
-    def marker_found(self) -> bool:
-        return self.prior_pull_request is not None
-
-
-@dataclass(frozen=True)
 class ReviewerSnapshot(_Record):
     """Hold every live GitHub read planning made for one PR.
 
@@ -860,11 +839,9 @@ class ReviewerSnapshot(_Record):
 
     existing_labels: tuple[str, ...]
     missing_labels: tuple[str, ...]
-    native_codeowner_requests: tuple[str, ...] | None
     requested_reviewers: tuple[str, ...] | None
     submitted_reviewers: tuple[str, ...] | None
     rosters: dict[str, tuple[str, ...]] | None
-    round_robin: dict[str, RoundRobinCursor] | None
     errors: dict[str, str]
 
 
@@ -894,14 +871,6 @@ def check_stage_results(*, intake: IntakeResult, ownership: OwnershipResult) -> 
 
     if intake.facts.is_active == (ownership.llm_run_status == "skipped"):
         raise ValueError("ownership result does not match the intake decision")
-    target_org = intake.identity.repository.split("/", 1)[0].casefold()
-    if any(
-        owner.startswith("@")
-        and "/" in owner
-        and owner[1:].split("/", 1)[0].casefold() != target_org
-        for owner in ownership.codepath_owners
-    ):
-        raise ValueError("ownership result has a foreign codepath owner team")
 
 
 # =============================================================================
@@ -915,12 +884,23 @@ MAX_REVIEW_REQUESTS = 15
 TRIAGED_LABEL = "triaged"
 BOT_TRIAGED_LABEL = "bot-triaged"
 BOT_TRIAGE_ERROR_LABEL = "bot-triage-error"
-BOT_CLOSED_LABEL = "bot-closed"
-BOT_CLOSED_COMMENT_TEMPLATE = "bot_closed_guidance"
+MISSING_ACTIONABLE_ISSUE_LABEL = "missing actionable issue"
+# The only labels a plan may add, by decision; missing_actionable_issue plans
+# must instead be exactly MISSING_ACTIONABLE_ISSUE_ACTIONS.
+DECISION_LABELS = {
+    "triage": frozenset({TRIAGED_LABEL, BOT_TRIAGED_LABEL}),
+    "incomplete": frozenset({BOT_TRIAGE_ERROR_LABEL}),
+}
 # Why a reviewer is requested, in the order requests appear in a plan.
-REQUEST_REASONS = ("supporter", "actionable_labeler", "codepath_owner", "owner_roster")
+REQUEST_REASONS = ("supporter", "actionable_labeler", "owner_roster")
 TRIAGE_DECISIONS = frozenset(
-    {"kept_open", "close", "triage", "incomplete", "routed_untriaged"}
+    {
+        "kept_open",
+        "missing_actionable_issue",
+        "triage",
+        "incomplete",
+        "routed_untriaged",
+    }
 )
 
 
@@ -940,17 +920,18 @@ class _Action(_Record):
 
 @dataclass(frozen=True)
 class RequestReviewers(_Action):
-    """Request reviewers who share one reason; only codepath_owner has teams.
+    """Request users who share one reason.
 
     - supporter: named as a supporter in the PR description and verified.
     - actionable_labeler: labeled a linked or related issue `actionable`.
-    - codepath_owner: a user or team the codepath rules name directly.
     - owner_roster: picked from a team owner's roster.
+
+    Codepath owners are never requested here: GitHub requests them through
+    CODEOWNERS.
     """
 
     users: tuple[str, ...]
-    teams: tuple[str, ...]
-    reason: Literal["supporter", "actionable_labeler", "codepath_owner", "owner_roster"]
+    reason: Literal["supporter", "actionable_labeler", "owner_roster"]
     kind: str = "request_reviewers"
 
 
@@ -962,29 +943,15 @@ class AddLabels(_Action):
     kind: str = "add_labels"
 
 
-@dataclass(frozen=True)
-class ClosePullRequest(_Action):
-    """Close the pull request."""
-
-    kind: str = "close"
+Action = RequestReviewers | AddLabels
 
 
-@dataclass(frozen=True)
-class PostComment(_Action):
-    """Post a fixed comment chosen by template name, never free text."""
-
-    template: str
-    kind: str = "comment"
-
-
-Action = RequestReviewers | AddLabels | ClosePullRequest | PostComment
-
-
-CLOSE_ACTIONS = (
-    ClosePullRequest(),
-    AddLabels((BOT_CLOSED_LABEL,)),
-    PostComment(BOT_CLOSED_COMMENT_TEMPLATE),
+MISSING_ACTIONABLE_ISSUE_LABELS = (
+    TRIAGED_LABEL,
+    BOT_TRIAGED_LABEL,
+    MISSING_ACTIONABLE_ISSUE_LABEL,
 )
+MISSING_ACTIONABLE_ISSUE_ACTIONS = (AddLabels(MISSING_ACTIONABLE_ISSUE_LABELS),)
 
 
 @dataclass(frozen=True)
@@ -1000,10 +967,9 @@ class PlanContext(_Record):
 
     def __post_init__(self) -> None:
         # Security: the apply job trusts the context to bound the actions.
-        # - No codepath owner team is from another org, so no team outside the
-        #   repository can be requested.
         # - Every bypass match is an additional owner.
-        # - run_attempt is valid; ActionPlan uses it to forbid closing on a rerun.
+        # - run_attempt is valid; ActionPlan uses it to forbid marking a PR as
+        #   missing an actionable issue on a rerun.
         super().__post_init__()
         if self.run_attempt < 1:
             raise RuntimeError("plan context has an invalid run attempt")
@@ -1015,19 +981,6 @@ class PlanContext(_Record):
             raise RuntimeError("plan context has an invalid additional owner")
         if not set(self.bypass_intake_matches) <= set(self.additional_owners):
             raise RuntimeError("plan context bypass intake match is not an owner")
-        target_org = self.identity.repository.split("/", 1)[0].casefold()
-        if any(org.casefold() != target_org for org, _ in self.codepath_teams):
-            raise RuntimeError("plan context has a foreign codepath owner team")
-
-    @property
-    def codepath_teams(self) -> set[tuple[str, str]]:
-        """Return (org, slug) for each codepath owner that is a GitHub team."""
-
-        return {
-            tuple(owner[1:].split("/", 1))
-            for owner in self.codepath_owners
-            if owner.startswith("@") and "/" in owner
-        }
 
     @property
     def admitted(self) -> bool:
@@ -1055,20 +1008,19 @@ class ActionPlan(_Record):
         # has pull-requests: write, executes it as is. These checks cap what a
         # faulty or manipulated analysis can do:
         # - An inactive or handled PR gets no actions.
-        # - A close only happens to an unadmitted PR on the first attempt, and is
-        #   exactly CLOSE_ACTIONS (close, bot-closed, the fixed comment).
+        # - Only an unadmitted PR on the first attempt can be marked as missing
+        #   an actionable issue, and only with exactly
+        #   MISSING_ACTIONABLE_ISSUE_ACTIONS (triaged, bot-triaged, missing
+        #   actionable issue).
         # - An unadmitted PR is never routed to reviewers.
-        # - Only this bot's own labels can be added: triaged and bot-triaged for
-        #   triage, bot-triage-error for incomplete, and "owner: <id>" for an
-        #   owner the plan names. No other label (e.g. ciflow/*) can be added.
+        # - Only this bot's own labels can be added: those above, triaged and
+        #   bot-triaged for triage, and bot-triage-error for incomplete. No other
+        #   label (e.g. ciflow/*) can be added.
+        # - Nothing can close a PR or post a comment: there is no action for it.
         # - Every requested user is justified by its request's reason: a verified
-        #   supporter, an actionable labeler, or a user the codepath rules name
-        #   directly. owner_roster users are checked against rosters by apply.
-        #   Nobody is requested twice.
-        # - A native GitHub team (@org/slug) is requested only as a codepath
-        #   owner of the changed files. Team owner IDs, including
-        #   LLM-suggested ones, are requested as roster users, never as teams.
-        #   Each request is capped at MAX_REVIEW_REQUESTS.
+        #   supporter or an actionable labeler. owner_roster users are checked
+        #   against rosters by apply. Nobody is requested twice, no team is ever
+        #   requested, and each request is capped at MAX_REVIEW_REQUESTS.
         # The remaining checks (sorted logins, action order) keep the format canonical.
         super().__post_init__()
         context = self.context
@@ -1077,16 +1029,14 @@ class ActionPlan(_Record):
             raise RuntimeError("action plan has an unknown decision")
         if not facts.is_active and (self.decision != "kept_open" or self.actions):
             raise RuntimeError("action plan acts on an inactive or handled PR")
-        if self.decision == "close":
+        if self.decision == "missing_actionable_issue":
             if context.admitted:
-                raise RuntimeError("action plan closes an admitted PR")
+                raise RuntimeError("action plan marks an admitted PR")
             if context.run_attempt != 1:
-                raise RuntimeError("action plan closes on a rerun")
-            if self.actions != CLOSE_ACTIONS:
-                raise RuntimeError("action plan close is not the fixed sequence")
+                raise RuntimeError("action plan marks a PR on a rerun")
+            if self.actions != MISSING_ACTIONABLE_ISSUE_ACTIONS:
+                raise RuntimeError("action plan labels are not the fixed set")
             return
-        if any(isinstance(a, ClosePullRequest | PostComment) for a in self.actions):
-            raise RuntimeError("action plan closes or comments without a close")
 
         requests = [a for a in self.actions if isinstance(a, RequestReviewers)]
         label_actions = [a for a in self.actions if isinstance(a, AddLabels)]
@@ -1102,15 +1052,7 @@ class ActionPlan(_Record):
         ):
             raise RuntimeError("action plan routes a PR that was not admitted")
 
-        internal_owners = (
-            *context.additional_owners,
-            *(o for o in context.codepath_owners if not o.startswith("@")),
-        )
-        allowed_labels = {owner_label(owner) for owner in internal_owners}
-        if self.decision == "triage":
-            allowed_labels |= {TRIAGED_LABEL, BOT_TRIAGED_LABEL}
-        elif self.decision == "incomplete":
-            allowed_labels.add(BOT_TRIAGE_ERROR_LABEL)
+        allowed_labels = DECISION_LABELS.get(self.decision, frozenset())
         for action in label_actions:
             if not action.labels or not set(action.labels) <= allowed_labels:
                 raise RuntimeError("action plan has a label outside its decision")
@@ -1122,19 +1064,13 @@ class ActionPlan(_Record):
             "actionable_labeler": {
                 login.casefold() for login in facts.actionable_labelers
             },
-            "codepath_owner": {
-                owner[1:].casefold()
-                for owner in context.codepath_owners
-                if owner.startswith("@") and "/" not in owner
-            },
         }
-        team_slugs = {slug for _, slug in context.codepath_teams}
         requested: list[str] = []
         for request in requests:
             keys = [login.casefold() for login in request.users]
             requested += keys
             if (
-                not (request.users or request.teams)
+                not request.users
                 or not all(USER_HANDLE_RE.fullmatch(f"@{u}") for u in request.users)
                 or keys != sorted(keys)
             ):
@@ -1142,15 +1078,7 @@ class ActionPlan(_Record):
             source = sources.get(request.reason)
             if source is not None and not set(keys) <= source:
                 raise RuntimeError(f"action plan has an unverified {request.reason}")
-            if request.teams and request.reason != "codepath_owner":
-                raise RuntimeError(
-                    "action plan requests a team outside codepath owners"
-                )
-            if not set(request.teams) <= team_slugs:
-                raise RuntimeError(
-                    "action plan requests a team outside codepath owners"
-                )
-            if len(request.users) + len(request.teams) > MAX_REVIEW_REQUESTS:
+            if len(request.users) > MAX_REVIEW_REQUESTS:
                 raise RuntimeError("action plan exceeds the review request limit")
         if len(set(requested)) != len(requested):
             raise RuntimeError("action plan requests one reviewer twice")
