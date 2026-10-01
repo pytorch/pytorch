@@ -16,7 +16,6 @@
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
-#include <torch/csrc/distributed/c10d/hooks/HealthCheck.hpp>
 
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/WindowNCCL.hpp>
@@ -238,7 +237,6 @@ void ProcessGroupNCCL::eagerConnectSingleDevice(at::Device device) {
 }
 
 void ProcessGroupNCCL::runAbortHooks() {
-  ::c10d::HealthCheck::get()->setUnhealthy(std::string(kBackendName));
   // Snapshot rather than hold the lock across the hooks: a hook may
   // unregister itself, and the FlightRecorder hook blocks other threads for the
   // length of its dump, which must not also block an unrelated unregister.
