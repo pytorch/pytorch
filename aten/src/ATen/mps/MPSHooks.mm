@@ -75,10 +75,7 @@ Generator MPSHooks::getNewGenerator([[maybe_unused]] DeviceIndex device_index) c
 // queue, so it has to take the queue itself: synchronize() ends and releases
 // the encoder, which races whichever thread is mid-encode.
 void MPSHooks::deviceSynchronize() const {
-  auto stream = at::mps::getDefaultMPSStream();
-  dispatch_sync_with_rethrow(stream->queue(), ^() {
-    stream->synchronize(SyncType::COMMIT_AND_WAIT);
-  });
+  at::mps::synchronizeAllMPSStreams(SyncType::COMMIT_AND_WAIT);
 }
 
 // torch::mps::commit() and get_command_buffer() are encoding-time calls: per
@@ -87,13 +84,13 @@ void MPSHooks::deviceSynchronize() const {
 // rather than leave it to the docs -- dispatching here would trap on re-entry,
 // and running off-queue would race whoever owns the encoder.
 void MPSHooks::commitStream() const {
-  auto stream = at::mps::getDefaultMPSStream();
+  auto stream = at::mps::getCurrentMPSStream();
   dispatch_assert_queue(stream->queue());
   stream->synchronize(SyncType::COMMIT);
 }
 
 void* MPSHooks::getCommandBuffer() const {
-  auto stream = at::mps::getDefaultMPSStream();
+  auto stream = at::mps::getCurrentMPSStream();
   dispatch_assert_queue(stream->queue());
   // Release pending computeCommandEncoder, as extensions is likely to allocate new one
   stream->endKernelCoalescing();
@@ -101,7 +98,7 @@ void* MPSHooks::getCommandBuffer() const {
 }
 
 void* MPSHooks::getDispatchQueue() const {
-  return at::mps::getDefaultMPSStream()->queue();
+  return at::mps::getCurrentMPSStream()->queue();
 }
 
 void MPSHooks::emptyCache() const {
