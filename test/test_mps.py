@@ -12659,6 +12659,33 @@ class TestLinalgMPS(TestCaseMPS):
         self.assertEqual(Vh @ Vh.mH, eye.expand(16, k, k), atol=1e-4, rtol=1e-4)
         self.assertEqual(((U * S.unsqueeze(-2)) @ Vh).cpu(), A, atol=1e-4, rtol=1e-4)
 
+    @parametrize("n", [5, 32, 600])
+    @parametrize("left", [True, False])
+    @parametrize("b_row_major", [True, False])
+    @dtypes(torch.float32, torch.complex64)
+    def test_linalg_solve_triangular_out_layouts(self, device, dtype, n, left, b_row_major):
+        # n covers the substitution kernel, the small-matrix kernel and the blocked solve
+        A = torch.randn(2, n, n, dtype=dtype) / n ** 0.5 + 2 * torch.eye(n)
+        L = A.tril()
+        B = torch.randn(2, n, 32, dtype=dtype) if left else torch.randn(2, 32, n, dtype=dtype)
+        B = B if b_row_major else B.mT.contiguous().mT
+        expected = torch.linalg.solve_triangular(L, B, upper=False, left=left)
+        shape = B.shape
+        outs = {
+            "row_major": torch.empty(shape, dtype=dtype, device=device),
+            "column_major": torch.empty(shape[:-2] + shape[:-3:-1], dtype=dtype, device=device).mT,
+            "strided": torch.empty(shape[:-1] + (2 * shape[-1],), dtype=dtype, device=device)[..., ::2],
+        }
+        if dtype.is_complex:
+            outs["conj"] = torch.empty(shape, dtype=dtype, device=device).conj()
+        for name, out in outs.items():
+            result = torch.linalg.solve_triangular(L.to(device), B.to(device), upper=False, left=left, out=out)
+            self.assertIs(result, out)
+            self.assertEqual(out.cpu(), expected, atol=1e-4, rtol=1e-4, msg=name)
+            chol_out = out if left else out.mT
+            torch.cholesky_solve(B.to(device) if left else B.mT.to(device), L.to(device), out=chol_out)
+            self.assertEqual(chol_out.cpu(), torch.cholesky_solve(B if left else B.mT, L), atol=1e-3, rtol=1e-3, msg=name)
+
     def test_linalg_svd_large_batch_conj(self, device="mps"):
         # Regression test for https://github.com/pytorch/pytorch/issues/196113:
         # for m<n the native SVD runs the kernel on A.mH(); .contiguous() leaves
