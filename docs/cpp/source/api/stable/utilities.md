@@ -161,7 +161,7 @@ auto layout = torch::headeronly::Layout::Strided;
 
 ### Accumulate Types
 
-`acc_type<T, is_cuda>` and `acc_type_device<T, DeviceType>` give the wider type a
+`acc_type<T, is_cuda>` and `acc_type_device<T, DeviceType>` give the dtype a
 reduction over `T` should accumulate into, using the same tables as `at::acc_type`:
 
 ```cpp
