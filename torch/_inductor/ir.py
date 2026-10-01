@@ -5992,10 +5992,10 @@ class FinalizeCodegenResult:
 
 
 class _HasAliasingOrMutation(Protocol):
-    """Minimal view of scheduler.BaseSchedulerNode used by prologue fusion.
+    """Minimal view of scheduler.BaseSchedulerNode used by producer fusion.
 
     ir.py cannot import scheduler (circular), so this documents the single
-    method consumed by has_aliasing_or_mutation_for_prologue_fusion instead
+    method consumed by has_aliasing_or_mutation_for_producer_fusion instead
     of typing the argument as Any.
     """
 
@@ -6060,8 +6060,9 @@ class TemplateBuffer(OperationBuffer):
         self.store_output_fusion_allowed_inputs: OrderedSet[str] = (
             store_output_fusion_allowed_inputs or OrderedSet()
         )
-        # Per-template fusion overrides.  None means fall back to global
-        # config.epilogue_fusion / config.prologue_fusion.
+        # Per-template overrides; None falls back to the corresponding global flag.
+        # Prologue controls load-input producer fusion. Epilogue controls both
+        # downstream consumer fusion and store-output producer fusion.
         self.allow_epilogue_fusion: bool | None = None
         self.allow_prologue_fusion: bool | None = None
 
@@ -6162,14 +6163,14 @@ class TemplateBuffer(OperationBuffer):
         """Whether this template produces multiple outputs via MultiOutputLayout."""
         return isinstance(self.layout, MultiOutputLayout)
 
-    def has_aliasing_or_mutation_for_prologue_fusion(
+    def has_aliasing_or_mutation_for_producer_fusion(
         self, scheduler_node: _HasAliasingOrMutation
     ) -> bool:
-        """Return whether this template's aliasing/mutation blocks prologue fusion.
+        """Return whether this template's aliasing/mutation blocks producer fusion.
 
         The default preserves the scheduler's conservative behavior. External
-        template subclasses may override this when they can prove a prologue
-        producer only feeds independent, non-mutated template inputs.
+        template subclasses may override this when they can prove a producer only
+        feeds independent, non-mutated template inputs.
         """
         return scheduler_node.has_aliasing_or_mutation()
 

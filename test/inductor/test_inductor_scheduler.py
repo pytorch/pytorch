@@ -2264,7 +2264,7 @@ class TestScheduler(TestCase):
             template.allow_epilogue_fusion = False
             template.load_input_fusion_allowed_inputs = OrderedSet(["x"])
             template.store_output_fusion_allowed_inputs = OrderedSet()
-            template.has_aliasing_or_mutation_for_prologue_fusion.return_value = (
+            template.has_aliasing_or_mutation_for_producer_fusion.return_value = (
                 hook_blocks
             )
             template_node.get_template_node.return_value = template
@@ -2307,7 +2307,7 @@ class TestScheduler(TestCase):
             with V.set_graph_handler(graph), V.set_choices_handler(choices):
                 result = Scheduler._can_fuse(scheduler, prologue_node, template_node)
 
-            template.has_aliasing_or_mutation_for_prologue_fusion.assert_called_once_with(
+            template.has_aliasing_or_mutation_for_producer_fusion.assert_called_once_with(
                 template_node
             )
             template_node.has_aliasing_or_mutation.assert_not_called()

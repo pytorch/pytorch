@@ -10629,9 +10629,9 @@ class Scheduler:
                 return False
 
             if node1.has_aliasing_or_mutation() or (
-                template.has_aliasing_or_mutation_for_prologue_fusion(node2)
+                template.has_aliasing_or_mutation_for_producer_fusion(node2)
             ):
-                why("template prologue can only fuse functional pointwise nodes")
+                why("template producer fusion can only fuse functional pointwise nodes")
                 return False
 
             prologue_nodes = node1.get_nodes()
