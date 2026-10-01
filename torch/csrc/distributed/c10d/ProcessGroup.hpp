@@ -6,6 +6,7 @@
 #include <atomic>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -14,6 +15,7 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Deprecated.h>
+#include <c10/util/Logging.h>
 
 // *************************************************************************
 // PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
@@ -1120,9 +1122,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // Hook API. Abort hooks forward to the default backend; pre/post collective
   // hooks are registered on the process group and fire around every collective
   // issued through it (see firePreHook / firePostHook). Hooks are keyed by an
-  // opaque hook_id so they can be individually unregistered. Registration is
-  // expected to happen at setup time, not concurrently with collectives. See
-  // Hooks.hpp.
+  // opaque hook_id so they can be individually unregistered. Hooks may be
+  // (un)registered while other threads issue collectives: a collective fires
+  // the hooks registered when it reaches each hook point. See Hooks.hpp.
   virtual bool supportsAbortHooks() const {
     return getDefaultBackend()->supportsAbortHooks();
   }
@@ -1151,19 +1153,23 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   virtual void registerPreHook(int64_t hook_id, PreHook hook) {
-    preHooks_[hook_id] = std::move(hook);
+    updateHooks(preHooks_, [&](PreHookMap& hooks) {
+      hooks[hook_id] = std::move(hook);
+    });
   }
 
   virtual void unregisterPreHook(int64_t hook_id) {
-    preHooks_.erase(hook_id);
+    updateHooks(preHooks_, [&](PreHookMap& hooks) { hooks.erase(hook_id); });
   }
 
   virtual void registerPostHook(int64_t hook_id, PostHook hook) {
-    postHooks_[hook_id] = std::move(hook);
+    updateHooks(postHooks_, [&](PostHookMap& hooks) {
+      hooks[hook_id] = std::move(hook);
+    });
   }
 
   virtual void unregisterPostHook(int64_t hook_id) {
-    postHooks_.erase(hook_id);
+    updateHooks(postHooks_, [&](PostHookMap& hooks) { hooks.erase(hook_id); });
   }
 
   // This creates a new subgroup using the specified ranks.
@@ -1239,10 +1245,26 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // Hooks.hpp. Ordered, so hooks fire in hook_id order: a consumer that has to
   // observe another hook's state (or be observed by it) picks its id instead of
   // depending on an unspecified traversal.
-  std::map<int64_t, PreHook> preHooks_;
-  std::map<int64_t, PostHook> postHooks_;
+  //
+  // Copy-on-write: collectives fire hooks with the GIL released, so a
+  // (un)registration from Python can run mid-iteration. Firing iterates an
+  // immutable snapshot, which also keeps a hook alive until its call returns.
+  using PreHookMap = std::map<int64_t, PreHook>;
+  using PostHookMap = std::map<int64_t, PostHook>;
+  // hooksMutex_ guards only the pointers and is never held while copying a
+  // hook, which can take the GIL. Copies are serialized by hooksWriteMutex_.
+  std::mutex hooksMutex_;
+  std::mutex hooksWriteMutex_;
+  std::shared_ptr<const PreHookMap> preHooks_ =
+      std::make_shared<const PreHookMap>();
+  std::shared_ptr<const PostHookMap> postHooks_ =
+      std::make_shared<const PostHookMap>();
+  // Lets the no-hook path skip hooksMutex_.
+  std::atomic<bool> hasPreOrPostHooks_{false};
+  std::atomic<bool> hasPostHooks_{false};
   // Monotonic id correlating a pre-hook call with its matching post-hook call.
-  std::atomic<int64_t> hookOpIdCounter_{0};
+  // Starts at 1: firePreHook returns 0 when no hooks are registered.
+  std::atomic<int64_t> hookOpIdCounter_{1};
 
   static std::vector<at::Tensor> flattenTensorLists(
       const std::vector<std::vector<at::Tensor>>& tensorLists) {
@@ -1253,6 +1275,29 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     return flat;
   }
 
+  template <typename Map, typename Update>
+  void updateHooks(std::shared_ptr<const Map>& hooks, Update update) {
+    std::lock_guard<std::mutex> write_lock(hooksWriteMutex_);
+    auto updated = std::make_shared<Map>(*snapshotHooks(hooks));
+    update(*updated);
+    std::shared_ptr<const Map> old;
+    {
+      std::lock_guard<std::mutex> lock(hooksMutex_);
+      old = std::exchange(hooks, std::move(updated));
+      hasPostHooks_ = !postHooks_->empty();
+      hasPreOrPostHooks_ = !preHooks_->empty() || hasPostHooks_;
+    }
+    // `old` may hold the last reference to a removed Python hook; release it
+    // outside hooksMutex_.
+  }
+
+  template <typename Map>
+  std::shared_ptr<const Map> snapshotHooks(
+      const std::shared_ptr<const Map>& hooks) {
+    std::lock_guard<std::mutex> lock(hooksMutex_);
+    return hooks;
+  }
+
   int64_t firePreHookImpl(
       HookOpName name,
       bool async_op,
@@ -1260,7 +1305,8 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       std::vector<at::Tensor> input_tensors,
       std::vector<at::Tensor> output_tensors) {
     int64_t op_id = hookOpIdCounter_++;
-    if (!preHooks_.empty()) {
+    auto hooks = snapshotHooks(preHooks_);
+    if (!hooks->empty()) {
       PreHookArgs args{
           name,
           async_op,
@@ -1268,7 +1314,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
           std::move(output_tensors),
           root,
           op_id};
-      for (auto& entry : preHooks_) {
+      for (const auto& entry : *hooks) {
         entry.second(args);
       }
     }
@@ -1288,7 +1334,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       int64_t root,
       const std::vector<at::Tensor>& input_tensors,
       const std::vector<at::Tensor>& output_tensors = {}) {
-    if (preHooks_.empty() && postHooks_.empty()) {
+    if (!hasPreOrPostHooks_) {
       return 0;
     }
     return firePreHookImpl(name, async_op, root, input_tensors, output_tensors);
@@ -1300,7 +1346,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       int64_t root,
       const std::vector<at::Tensor>& input_tensors,
       const std::vector<std::vector<at::Tensor>>& output_tensor_lists) {
-    if (preHooks_.empty() && postHooks_.empty()) {
+    if (!hasPreOrPostHooks_) {
       return 0;
     }
     return firePreHookImpl(
@@ -1317,7 +1363,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       int64_t root,
       const std::vector<std::vector<at::Tensor>>& input_tensor_lists,
       const std::vector<at::Tensor>& output_tensors) {
-    if (preHooks_.empty() && postHooks_.empty()) {
+    if (!hasPreOrPostHooks_) {
       return 0;
     }
     return firePreHookImpl(
@@ -1334,7 +1380,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       int64_t root,
       const at::Tensor& input_tensor,
       const at::Tensor& output_tensor) {
-    if (preHooks_.empty() && postHooks_.empty()) {
+    if (!hasPreOrPostHooks_) {
       return 0;
     }
     return firePreHookImpl(
@@ -1342,10 +1388,51 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   int64_t firePreHook(HookOpName name, bool async_op, int64_t root) {
-    if (preHooks_.empty() && postHooks_.empty()) {
+    if (!hasPreOrPostHooks_) {
       return 0;
     }
     return firePreHookImpl(name, async_op, root, {}, {});
+  }
+
+  // Fires the post-hooks with a null work if destroyed before dismiss(), so
+  // hooks still see the end of an op whose backend threw after the pre-hooks.
+  class PostHookGuard {
+   public:
+    PostHookGuard(
+        ProcessGroup* pg,
+        HookOpName name,
+        bool async_op,
+        int64_t op_id)
+        : pg_(pg), name_(name), async_op_(async_op), op_id_(op_id) {}
+    PostHookGuard(const PostHookGuard&) = delete;
+    PostHookGuard& operator=(const PostHookGuard&) = delete;
+    PostHookGuard(PostHookGuard&&) = delete;
+    PostHookGuard& operator=(PostHookGuard&&) = delete;
+    ~PostHookGuard() {
+      if (pg_ == nullptr) {
+        return;
+      }
+      // Runs during unwinding, so a throwing hook must not escape.
+      try {
+        pg_->firePostHook(name_, async_op_, op_id_, {});
+      } catch (const std::exception& e) {
+        LOG(ERROR) << "Post-hook failed after a failed collective: "
+                   << e.what();
+      }
+    }
+    void dismiss() {
+      pg_ = nullptr;
+    }
+
+   private:
+    ProcessGroup* pg_;
+    HookOpName name_;
+    bool async_op_;
+    int64_t op_id_;
+  };
+
+  PostHookGuard postHookGuard(HookOpName name, bool async_op, int64_t op_id) {
+    return PostHookGuard(op_id == 0 ? nullptr : this, name, async_op, op_id);
   }
 
   // Fire registered post-hooks for a collective, correlated with the matching
@@ -1355,11 +1442,12 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       bool async_op,
       int64_t op_id,
       const c10::intrusive_ptr<Work>& work) {
-    if (postHooks_.empty()) {
+    if (!hasPostHooks_) {
       return;
     }
+    auto hooks = snapshotHooks(postHooks_);
     PostHookArgs args{name, async_op, work, op_id};
-    for (auto& entry : postHooks_) {
+    for (const auto& entry : *hooks) {
       entry.second(args);
     }
   }

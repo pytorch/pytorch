@@ -152,9 +152,11 @@ class CuspyConfig(_ProfilerExtensionConfig):
         enable_event_node_ids (bool, optional): Associate CUDA events with CUDA
             graph event-record nodes.
         annotate_collectives (bool, optional): Tag the kernels of c10d
-            collectives on process groups that exist when the session starts
-            with the ``record_param_comms`` fields Kineto attaches. Pass
-            ``False`` when a wrapper already annotates them.
+            collectives on process groups that exist when recording starts
+            with ``record_param_comms``-style fields. Coalesced and batched p2p
+            collectives are not tagged. Pass ``False`` when a wrapper already
+            annotates them, e.g. with ``add_collective_metadata``: both write
+            the same per-collective fields, so one overwrites the other.
     """
 
     enable_cuda_sync_events: bool = False
@@ -573,19 +575,6 @@ class _KinetoProfile:
             # lives in torch.autograd (not the cuspy package), so record_function never
             # imports the cuspy chain on a non-cuspy run.
             prof._set_active_cuspy_profiler_observer(self._cuspy_profiler_observer)
-            self._close_cuspy_collective_annotations()
-            if (
-                self._cuspy_config.annotate_collectives
-                and torch.distributed.is_available()
-                and torch.distributed.is_initialized()
-            ):
-                from torch.distributed._cuda_graph_annotations import (
-                    CollectiveAnnotations,
-                )
-
-                self._cuspy_collective_annotations = CollectiveAnnotations(
-                    self._cuspy_profiler_observer.annotate_collective
-                )
         self.profiler._prepare_trace()
 
     def _close_cuspy_collective_annotations(self) -> None:
@@ -606,6 +595,21 @@ class _KinetoProfile:
             # Open the trace window here (stamps the start boundary, native clock, no
             # device sync); records before this are excluded from the window.
             self._cuspy_profiler_observer.open_window()
+            # Not at prepare_trace: warmup collectives would pay for annotations
+            # the window drops.
+            self._close_cuspy_collective_annotations()
+            if (
+                self._cuspy_config.annotate_collectives
+                and torch.distributed.is_available()
+                and torch.distributed.is_initialized()
+            ):
+                from torch.distributed._cuda_graph_annotations import (
+                    CollectiveAnnotations,
+                )
+
+                self._cuspy_collective_annotations = CollectiveAnnotations(
+                    self._cuspy_profiler_observer.annotate_collective, eager=True
+                )
 
         if self.profile_memory:
             self.add_metadata_json("profile_memory", "1")

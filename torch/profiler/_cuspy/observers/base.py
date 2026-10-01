@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import json
 import logging
 import threading
 from collections.abc import Callable
@@ -404,7 +405,11 @@ class CuspyObserver:
                 if name is not None:
                     with self._ann_lock:
                         self._ext_names[ext_id] = name
-                cuspy.add_collective_metadata(**metadata)
+                # Keyed by ext_id rather than the current id: if CUPTI rejected the
+                # push, the current id is still the enclosing region's.
+                torch._C._profiler._cuspy.metadata_put_external(
+                    json.dumps(metadata), ext_id
+                )
             yield
         finally:
             if ext_id is not None:
