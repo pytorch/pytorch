@@ -8030,6 +8030,32 @@ class TestNNDeviceType(NNTestCase):
                 ref = torch.layer_norm(x_chunk, [N], gamma, None)
                 self.assertEqual(y[start:start + 8192], ref, atol=1e-5, rtol=1e-5)
 
+    @onlyCUDA
+    @skipCUDAIf(not TEST_WITH_ROCM, "Only ROCm splits large vectorized layer_norm launches")
+    @largeTensorTest("24GB")
+    def test_layer_norm_large_m_vectorized(self, device):
+        # test for https://github.com/pytorch/pytorch/issues/199037
+        # ROCm launches the vectorized kernel for at most (2**32 - 1) // warp_size rows
+        # at a time. Use one more row than that, with N % 4 == 0 and
+        # N * rows_per_launch > 2**32, so the second launch starts past element 2**32.
+        warp_size = torch.cuda.get_device_properties(device).warp_size
+        rows_per_launch = (2**32 - 1) // warp_size
+        M = rows_per_launch + 1
+        N = warp_size + 4
+        x = torch.randn(M, N, dtype=torch.bfloat16, device=device)
+
+        # rms_norm goes through the same launcher.
+        for norm in (
+            lambda t: torch.native_layer_norm(t, [N], None, None, 1e-5),
+            lambda t: torch._fused_rms_norm(t, [N], None, 1e-5),
+        ):
+            outs = norm(x)
+            for start in (0, M - 8):
+                refs = norm(x[start:start + 8])
+                for out, ref in zip(outs, refs):
+                    self.assertEqual(out[start:start + 8], ref)
+            del outs
+
     def test_glu_bfloat16(self, device):
         def test_dtype(fn, input, dtype):
             input = input.detach().clone().to(dtype=dtype).requires_grad_(True)
