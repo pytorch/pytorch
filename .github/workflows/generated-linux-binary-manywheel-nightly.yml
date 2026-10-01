@@ -649,6 +649,99 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
+  manywheel-build-rocm-preview:
+    name: ${{ matrix.build_name }}-build
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    uses: ./.github/workflows/_binary-build-linux.yml
+    needs: [get-label-type, get-docker-tag]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - desired_python: "3.11"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_11-rocmpreview"
+            timeout_minutes: 420
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==10.2.0a20260916"
+          - desired_python: "3.12"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_12-rocmpreview"
+            timeout_minutes: 420
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==10.2.0a20260916"
+          - desired_python: "3.13"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_13-rocmpreview"
+            timeout_minutes: 420
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==10.2.0a20260916"
+          - desired_python: "3.14"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_14-rocmpreview"
+            timeout_minutes: 420
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==10.2.0a20260916"
+          - desired_python: "3.14t"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_14t-rocmpreview"
+            timeout_minutes: 420
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==10.2.0a20260916"
+          - desired_python: "3.15"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_15-rocmpreview"
+            timeout_minutes: 420
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==10.2.0a20260916"
+          - desired_python: "3.15t"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_15t-rocmpreview"
+            timeout_minutes: 420
+            pytorch_extra_install_requirements: "rocm[libraries,device-all]==10.2.0a20260916"
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
+      DOCKER_IMAGE: ${{ matrix.docker_image }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      DOCKER_IMAGE_REGISTRY_HOST: "${{ needs.get-docker-tag.outputs.docker_registry_host }}"
+      DESIRED_PYTHON: ${{ matrix.desired_python }}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runs_on: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/nightly' || startsWith(github.ref, 'refs/heads/release/') || startsWith(github.ref, 'refs/tags/v')) && 'rel-l-x86iavx512-44-340' || 'l-x86iavx512-48-384' }}
+      use_container_directive: true
+      ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: ${{ matrix.pytorch_extra_install_requirements }}
+      timeout-minutes: ${{ matrix.timeout_minutes }}
+      build_name: ${{ matrix.build_name }}
+      build_environment: linux-binary-manywheel
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+
   manywheel-cpu-test:
     name: ${{ matrix.build_name }}-test
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
@@ -1012,6 +1105,78 @@ jobs:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: manywheel
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
+      DOCKER_IMAGE: ${{ matrix.docker_image }}
+      # ROCm test runners have no ECR pull credentials, so ROCm stays on the
+      # Docker Hub image (excluded from the content-addressed ECR path).
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}
+      DESIRED_PYTHON: ${{ matrix.desired_python }}
+      build_name: ${{ matrix.build_name }}
+
+  manywheel-test-rocm-preview:
+    name: ${{ matrix.build_name }}-test
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    needs: [get-label-type, get-docker-tag, manywheel-build-rocm-preview]
+    uses: ./.github/workflows/_binary-test-rocm-linux.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - desired_python: "3.11"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_11-rocmpreview"
+          - desired_python: "3.12"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_12-rocmpreview"
+          - desired_python: "3.13"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_13-rocmpreview"
+          - desired_python: "3.14"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_14-rocmpreview"
+          - desired_python: "3.14t"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_14t-rocmpreview"
+          - desired_python: "3.15"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_15-rocmpreview"
+          - desired_python: "3.15t"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_15t-rocmpreview"
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      INDEX_SUBFOLDER: "rocm-preview"
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       DOCKER_IMAGE: ${{ matrix.docker_image }}
@@ -1441,6 +1606,84 @@ jobs:
       R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
+  manywheel-rocm-preview-upload:
+    name: ${{ matrix.build_name }}-upload
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: [get-docker-tag, manywheel-build-rocm-preview, manywheel-test-rocm-preview]
+    uses: ./.github/workflows/_binary-upload.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - desired_python: "3.11"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_11-rocmpreview"
+          - desired_python: "3.12"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_12-rocmpreview"
+          - desired_python: "3.13"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_13-rocmpreview"
+          - desired_python: "3.14"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_14-rocmpreview"
+          - desired_python: "3.14t"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_14t-rocmpreview"
+          - desired_python: "3.15"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_15-rocmpreview"
+          - desired_python: "3.15t"
+            desired_cuda: "rocmpreview"
+            gpu_arch_version: "preview"
+            gpu_arch_type: "rocm"
+            docker_image: "manylinux2_28-builder"
+            docker_image_tag_prefix: "rocm-preview"
+            build_name: "manywheel-py3_15t-rocmpreview"
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      UPLOAD_SUBFOLDER: "rocm-preview"
+      GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
+      DOCKER_IMAGE: ${{ matrix.docker_image }}
+      DOCKER_IMAGE_TAG_PREFIX: ${{ matrix.docker_image_tag_prefix }}${{ needs.get-docker-tag.outputs.docker_image_suffix }}
+      DESIRED_PYTHON: ${{ matrix.desired_python }}
+      build_name: ${{ matrix.build_name }}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
   manywheel-xpu-upload:
     name: ${{ matrix.build_name }}-upload
     if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
@@ -1663,6 +1906,103 @@ jobs:
       PYTORCH_ROOT: /pytorch
       PACKAGE_TYPE: libtorch
       DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
+      GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
+      LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}
+      LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
+      build_name: ${{ matrix.build_name }}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+  libtorch-extract-rocm-preview:
+    name: ${{ matrix.build_name }}-extract
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    needs: [manywheel-build-rocm-preview]
+    runs-on: "mt-l-x86iavx512-16-128"
+    container:
+      image: pytorch/${{ matrix.container_image }}:${{ matrix.container_image_tag_prefix }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - desired_cuda: "rocmpreview"
+            gpu_arch_type: "rocm"
+            gpu_arch_version: "preview"
+            libtorch_variant: "shared-with-deps"
+            libtorch_config: "release"
+            source_wheel_build_name: "manywheel-py3_11-rocmpreview"
+            build_name: "libtorch-rocmpreview-shared-with-deps-release"
+            container_image: "manylinux2_28-builder"
+            container_image_tag_prefix: "rocm-preview"
+    env:
+      DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      LIBTORCH_VARIANT: ${{ matrix.libtorch_variant }}
+    steps:
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          sparse-checkout: .ci/libtorch/
+          show-progress: false
+      - uses: actions/download-artifact@v4.1.7
+        name: Download Wheel Artifact
+        with:
+          name: ${{ matrix.source_wheel_build_name }}
+          path: "${{ github.workspace }}/wheel_artifact/"
+      - name: Extract libtorch from wheel
+        run: |
+          set -eux
+          # In container jobs the github.workspace context is the host path; the
+          # mount is at $GITHUB_WORKSPACE. Use the env var so run steps and the
+          # translated download/upload action paths resolve to the same dir.
+          mkdir -p "${GITHUB_WORKSPACE}/libtorch_output"
+          python3 .ci/libtorch/extract_libtorch_from_wheel.py \
+            --wheel-dir "${GITHUB_WORKSPACE}/wheel_artifact" \
+            --output-dir "${GITHUB_WORKSPACE}/libtorch_output" \
+            --platform linux \
+            --desired-cuda "$DESIRED_CUDA" \
+            --libtorch-variant "$LIBTORCH_VARIANT"
+      - name: Smoke test extracted libtorch
+        run: |
+          python3 .ci/libtorch/smoke_test_extract_libtorch.py \
+            --output-dir "${GITHUB_WORKSPACE}/libtorch_output"
+      - uses: actions/upload-artifact@v4.4.0
+        if: always()
+        with:
+          name: ${{ matrix.build_name }}
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ github.workspace }}/libtorch_output/"
+
+  libtorch-upload-rocm-preview:
+    name: ${{ matrix.build_name }}-upload
+    if: ${{ !failure() && !cancelled() && github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-extract-rocm-preview
+    uses: ./.github/workflows/_binary-upload.yml
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - desired_cuda: "rocmpreview"
+            gpu_arch_type: "rocm"
+            gpu_arch_version: "preview"
+            libtorch_variant: "shared-with-deps"
+            libtorch_config: "release"
+            build_name: "libtorch-rocmpreview-shared-with-deps-release"
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: libtorch
+      DESIRED_CUDA: ${{ matrix.desired_cuda }}
+      UPLOAD_SUBFOLDER: "rocm-preview"
       GPU_ARCH_VERSION: ${{ matrix.gpu_arch_version }}
       GPU_ARCH_TYPE: ${{ matrix.gpu_arch_type }}
       LIBTORCH_CONFIG: ${{ matrix.libtorch_config }}

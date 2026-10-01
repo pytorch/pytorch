@@ -12,7 +12,7 @@ Usage: repair_wheel.py <input_dir> <output_dir>
 Environment variables:
     DESIRED_CUDA       - cpu, cu126, cu130, xpu, rocm6.4.1, etc.
     GPU_ARCH_TYPE      - cpu, cuda, cuda-aarch64, rocm, xpu
-    GPU_ARCH_VERSION   - 12.6, 13.0, 13.2, 6.4.1, etc. (empty for CPU)
+    GPU_ARCH_VERSION   - 12.6, 13.0, 13.2, 6.4.1, preview, etc. (empty for CPU)
     USE_CUDA           - "0" or "1"
     PYTORCH_ROCM_ARCH  - ;-separated gfx targets (ROCm only)
     ROCM_HOME          - /opt/rocm (ROCm only)
@@ -32,6 +32,12 @@ from build_env_setup import PLATFORM_TAGS
 
 
 PATCHELF = "/usr/local/bin/patchelf"
+
+
+def is_pre_rocm_10(version: str) -> bool:
+    if version == "preview":
+        return False
+    return not version or tuple(map(int, version.split(".")[:2])) < (10, 0)
 
 
 def wheel_platform_tags(wheel_name: str) -> list[str]:
@@ -506,8 +512,7 @@ def main() -> None:
             # directly instead (rocm-systems#6640), so bundle a bare-named
             # copy, reached via $ORIGIN on the RPATHs above, only for older
             # SDKs. The builder image installs numactl-libs for this.
-            ver = gpu_arch_version
-            if not ver or tuple(map(int, ver.split(".")[:2])) < (10, 0):
+            if is_pre_rocm_10(gpu_arch_version):
                 is_ubuntu = "Ubuntu" in Path("/etc/os-release").read_text()
                 libdir = "/usr/lib/x86_64-linux-gnu" if is_ubuntu else "/usr/lib64"
                 libnuma = Path(libdir) / "libnuma.so.1"
