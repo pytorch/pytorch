@@ -1983,6 +1983,10 @@ class VariableBuilder:
             return GetSetDescriptorVariable(value)
         elif isinstance(value, types.MemberDescriptorType):
             return MemberDescriptorVariable(value)
+        elif isinstance(value, types.MethodDescriptorType):
+            return MethodDescriptorVariable(
+                value, UserDefinedClassVariable(value.__objclass__)
+            )
         elif type(value) is property:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = PropertyVariable(value, source=self.source)
