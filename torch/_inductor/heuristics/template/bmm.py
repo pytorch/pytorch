@@ -85,7 +85,7 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
         output_layout = kernel_inputs.output_layout()
         flatten_output = len(output_layout.size) == 2
         rank3_output = len(output_layout.size) == 3
-        can_tma_store = config.triton.enable_template_tma_store and can_use_tma(
+        tma_store = config.triton.enable_template_tma_store and can_use_tma(
             output_layout=output_layout
         )
         descriptor_options = {
@@ -95,13 +95,16 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
             "A_BROADCAST_BATCH": int(mat1.get_stride()[0]) == 0,
             "B_BROADCAST_BATCH": int(mat2.get_stride()[0]) == 0,
             "FLATTEN_OUTPUT": flatten_output,
+            # The grid needs the logical problem, not the flattened output size.
+            "call_sizes": (batch, m, n),
         }
         use_meta_ws = meta_ws_enabled()
         for candidate in self.bmm_configs:
+            # A flattened output has no batch boundary, so an M tail tile would
+            # overwrite the leading rows of the next batch.
+            if flatten_output and m % candidate.block_m != 0:
+                continue
             two_ctas = use_meta_ws and candidate.two_ctas
-            tma_store = can_tma_store and (
-                flatten_output or (two_ctas and rank3_output)
-            )
             if two_ctas and not is_blackwell_bmm_2cta_compatible(
                 output_batch_rows=m,
                 block_m=candidate.block_m,
@@ -123,7 +126,7 @@ class CUDABlackwellBMMTemplateConfigHeuristic(TemplateConfigHeuristics):
                 "DATA_PARTITION_FACTOR": candidate.data_partition_factor,
                 "SEPARATE_EPILOGUE_STORE": candidate.separate_epilogue_store,
                 "TWO_CTAS": two_ctas,
-                "RANK3_TMA_OUTPUT": two_ctas and rank3_output,
+                "RANK3_TMA_OUTPUT": tma_store and rank3_output,
                 "tma_store": tma_store,
                 **descriptor_options,
             }
