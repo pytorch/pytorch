@@ -720,17 +720,21 @@ def run_test(
                 label=test_label,
             )
 
-            # Pytest return code 5 means no test is collected. Exit code 4 is
-            # returned when the binary is not a C++ test executable, but 4 can
-            # also be returned if the file fails before running any tests. All
-            # binary files under build/bin that are not C++ test at the time of
-            # this writing have been excluded and new ones should be added to
-            # the list of exclusions in tools/testing/discover_tests.py
-            # A C++ test that collects nothing is a failure: pytest-cpp skips a
-            # binary whose --help fails, e.g. on a missing shared library, and
-            # under xdist that is reported as 5 rather than 4.
-            if ret_code == 5 and not is_cpp_test:
+            # Pytest return code 5 means no test is collected, which is expected
+            # for a C++ test binary that defines no tests or whose tests are all
+            # deselected. pytest-cpp also collects nothing from a binary whose
+            # --help fails, e.g. on a missing shared library, so check for that.
+            if ret_code == 5:
                 ret_code = 0
+                if is_cpp_test:
+                    probe = subprocess.run(
+                        [argv[0], "--help"], env=env, capture_output=True, text=True
+                    )
+                    if probe.returncode != 0:
+                        print_to_stderr(
+                            f"{argv[0]} --help failed with exit code {probe.returncode}:\n{probe.stderr}"
+                        )
+                        ret_code = 1
 
     if options.pipe_logs and print_log:
         handle_log_file(
@@ -2234,11 +2238,8 @@ def run_tests(
             ):
                 raise RuntimeError(failure.message + keep_going_message)
 
-        # Run tests marked as serial first. pytest-cpp items carry no markers,
-        # so this pass would collect nothing from a C++ test.
+        # Run tests marked as serial first
         for test in selected_tests_parallel:
-            if _is_cpp_test(test.name):
-                continue
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True

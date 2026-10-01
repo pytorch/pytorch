@@ -1700,7 +1700,6 @@ test_libtorch() {
     ln -sf "$TORCH_LIB_DIR"/libnvfuser* "$TORCH_BIN_DIR"
 
     export CPP_TESTS_DIR="${TORCH_BIN_DIR}"
-    export LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}"
 
     if [[ -z "${SHARD}" || "${SHARD}" == "1" ]]; then
       test_libtorch_api
@@ -1811,7 +1810,7 @@ test_libtorch_api() {
   if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* && "${BUILD_ENVIRONMENT}" != *asan* && "${BUILD_ENVIRONMENT}" != *s390x* ]]; then
     # NB: This test is not under TORCH_BIN_DIR but under BUILD_BIN_DIR
     export CPP_TESTS_DIR="${BUILD_BIN_DIR}"
-    python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
+    LD_LIBRARY_PATH="${TORCH_LIB_DIR}:${LD_LIBRARY_PATH}" python test/run_test.py --cpp --verbose -i cpp/static_runtime_test
   fi
 }
 
