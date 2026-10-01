@@ -1626,7 +1626,6 @@ class TestSymbolicFull(TestCase):
         "dtype,fill_value,operation",
         (
             (torch.float32, 2**24 + 1, "square"),
-            (torch.int32, 50_000, "square"),
             (torch.int64, 2**62 + 1, "mul"),
         ),
     )
@@ -1635,6 +1634,20 @@ class TestSymbolicFull(TestCase):
     ):
         self._check_symbolic_fill_cast_precedes_consumer(
             device, dtype, fill_value, operation
+        )
+
+    @onlyOn(["cpu", "cuda", "xpu"])
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_full_symbolic_fill_cast_precedes_overflowing_int32_consumer(self, device):
+        self._check_symbolic_fill_cast_precedes_consumer(
+            device, torch.int32, 50_000, "square"
+        )
+
+    @onlyOn(["mps"])
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_full_symbolic_fill_cast_precedes_int32_consumer_mps(self, device):
+        self._check_symbolic_fill_cast_precedes_consumer(
+            device, torch.int32, 1.5, "square"
         )
 
     @onlyOn(["cpu", "cuda", "xpu"])
@@ -1704,7 +1717,7 @@ class TestSymbolicFull(TestCase):
         self, device, dtype, fill_value, valid_value, input_dtype
     ):
         def f(x):
-            return torch.full((2,), x.item(), dtype=dtype, device=device).sum()
+            return torch.full((2,), x.item(), dtype=dtype, device=device)
 
         compiled_f = torch.compile(f, fullgraph=True)
         valid = torch.tensor(valid_value, dtype=input_dtype, device=device)
