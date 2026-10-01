@@ -161,6 +161,32 @@ Compared to PyTorch FSDP1 (`FullyShardedDataParallel`):
   details.
 
 
+### Custom All-Gather Backends
+
+Use `set_custom_all_gather` to replace an FSDP module's all-gather backend:
+
+```python
+from my_backend import MyAllGather
+from torch.distributed.fsdp import fully_shard
+
+for module in [*model.layers, model]:
+    fully_shard(module)
+    module.set_custom_all_gather(MyAllGather())
+```
+
+For custom all-gather backends, create a separate stateful instance for each
+FSDP parameter group, as shown above. Sharing storage through a backend pool does
+not permit sharing a stateful instance. The stateless default layout has no
+ownership restriction.
+Install the backend before the first unshard. Replacement is rejected while an
+all-gather is pending, while parameters are unsharded, or after they adopt backend-owned output storage;
+those parameters must keep their original storage owner and reuse coordination.
+
+Custom backends may retain registered output storage after reshard. Consult the
+backend's documentation for its memory usage, supported execution modes, and
+compatibility requirements. Backend authoring interfaces remain private and
+experimental; they are not part of the public FSDP API.
+
 ```{eval-rst}
 .. currentmodule:: torch.distributed.fsdp
 ```
