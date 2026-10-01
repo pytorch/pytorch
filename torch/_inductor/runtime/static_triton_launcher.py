@@ -46,33 +46,16 @@ def _read_cubin_snapshot(cubin_path: str) -> bytes | None:
 
 def _is_invalid_kernel_image_error(error: RuntimeError) -> bool:
     message = str(error).lower()
-    return any(
-        marker in message
-        for marker in (
-            "invalid image",
-            "invalid kernel image",
-            "invalid device function",
-            "a ptx jit compilation failed",
-            "kernel image is invalid",
-            "kernel image is empty",
-            "no kernel image is available",
-            "named symbol not found",
-            "cuda driver error: 98",
-            "cuda driver error: 200",
-            "cuda driver error: 209",
-            "cuda driver error: 218",
-            "cuda driver error: 500",
-            "l0 runtime error: 70000004",
-            "l0 runtime error: 78000008",
-            "l0 runtime error: 7800000f",
-            "l0 runtime error: 78000011",
-        )
+    invalid_markers = (
+        "invalid image|invalid kernel image|invalid device function|"
+        "a ptx jit compilation failed|kernel image is invalid|kernel image is empty|"
+        "no kernel image is available|named symbol not found|"
+        "cuda driver error: 98|cuda driver error: 200|cuda driver error: 209|"
+        "cuda driver error: 218|cuda driver error: 500|"
+        "l0 runtime error: 70000004|l0 runtime error: 78000008|"
+        "l0 runtime error: 7800000f|l0 runtime error: 78000011"
     )
-
-
-def _is_missing_kernel_file_error(error: RuntimeError) -> bool:
-    message = str(error).lower()
-    return "file not found" in message or "failed to open kernel image" in message
+    return any(marker in message for marker in invalid_markers.split("|"))
 
 
 def _raise_kernel_load_error(
@@ -80,7 +63,12 @@ def _raise_kernel_load_error(
 ) -> NoReturn:
     if _is_invalid_kernel_image_error(error):
         raise InvalidTritonKernelArtifactError(f"{source} is unusable") from error
-    if missing or _is_missing_kernel_file_error(error):
+    message = str(error).lower()
+    if (
+        missing
+        or "file not found" in message
+        or "failed to open kernel image" in message
+    ):
         raise MissingTritonKernelError(f"{source} is unavailable") from error
     raise error
 
@@ -348,7 +336,6 @@ class StaticallyLaunchedTritonKernel:
             self.module, self.function, self.n_regs, self.n_spills = (
                 self._loaded_kernel_parts(self._load_kernel_for_device(device))
             )
-            # Don't need the cubin path anymore now that we've loaded
             self.cubin_path = None
             self.cubin_raw = None
 
