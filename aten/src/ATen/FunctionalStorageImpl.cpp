@@ -7,6 +7,16 @@
 #include <c10/util/Exception.h>
 #include <vector>
 
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#else
+#include <ATen/ops/arange.h>
+#include <ATen/ops/copy.h>
+#include <ATen/ops/empty_strided.h>
+#include <ATen/ops/index_put.h>
+#include <ATen/ops/view_copy.h>
+#endif
+
 namespace at::functionalization {
 
 // Note [Functionalization: Alias Removal Part 2]
@@ -34,6 +44,49 @@ namespace at::functionalization {
 // t = view2_inverse(a, t, 0)
 // t = view1_inverse(base, t, 0)  # t now represents the updated storage.
 // storage.base_ = t
+//
+// Note [Functionalization: mutations through expand()]
+// The view inverses assume every element of a view is its own memory location. expand() breaks
+// that: several elements of the expanded view alias one element of its input, and expand_inverse
+// can't tell which of the aliases were written. Instead, for the views from the first expand() on,
+// we replay them on a tensor holding each element's position in the expand's input, and scatter
+// the mutated values straight back to those positions.
+static Tensor apply_update_through_expand(
+    const std::vector<std::shared_ptr<ViewMeta>>& view_metas,
+    size_t expand_idx,
+    const std::vector<at::Tensor>& tmp_values,
+    const Tensor& new_val) {
+  const auto& input = tmp_values[expand_idx];
+  bool same_dtype = new_val.scalar_type() == input.scalar_type();
+  for (size_t i = expand_idx + 1; i < tmp_values.size(); ++i) {
+    same_dtype &= tmp_values[i].scalar_type() == input.scalar_type();
+  }
+  TORCH_CHECK(same_dtype, "Functionalization does not support a mutation through a dtype-changing view of an expand()");
+  // We run below functionalization, and some backends (e.g. lazy) have no view ops.
+  auto reshape = [](const Tensor& t, c10::SymIntArrayRef sizes) {
+    return at::view_copy_symint(t.contiguous(), sizes);
+  };
+  auto long_options = input.options().dtype(at::kLong);
+  auto positions = reshape(at::arange(c10::Scalar(input.sym_numel()), long_options), input.sym_sizes());
+  // Lazy tensors are always contiguous, and the lazy backend can't build strided tensors.
+  bool contiguous = input.is_contiguous_or_false();
+  if (!contiguous) {
+    // Give positions the same strides as input so that view() replays exactly as it did on input.
+    positions =
+        at::copy(at::empty_strided_symint(input.sym_sizes(), input.sym_strides(), long_options), positions);
+  }
+  for (size_t i = expand_idx; i < view_metas.size(); ++i) {
+    positions = view_metas[i]->forward(positions);
+  }
+  c10::SymInt numel = positions.sym_numel();
+  c10::List<std::optional<at::Tensor>> indices;
+  indices.push_back(reshape(positions, numel));
+  auto flat = at::index_put(reshape(input, input.sym_numel()), indices, reshape(new_val, numel));
+  auto result = reshape(flat, input.sym_sizes());
+  // Preserve input's strides: views replayed from the updated base must stay valid.
+  return contiguous ? result : at::copy(input, result);
+}
+
 static const Tensor apply_update(const FunctionalStorageImpl::Update& update, const Tensor& base) {
   at::Tensor t = update.new_val;
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(t));
@@ -49,7 +102,15 @@ static const Tensor apply_update(const FunctionalStorageImpl::Update& update, co
     // for those necessary view ops.
     tmp_values.push_back(std::move(next_view));
   }
-  for(int64_t i = static_cast<int64_t>(update.view_metas.size()) - 1; i >= 0; --i) {
+  size_t num_inverted = update.view_metas.size();
+  for (size_t i = 0; i < update.view_metas.size(); ++i) {
+    if (update.view_metas[i]->is_expand) {
+      t = apply_update_through_expand(update.view_metas, i, tmp_values, update.new_val);
+      num_inverted = i;
+      break;
+    }
+  }
+  for(int64_t i = static_cast<int64_t>(num_inverted) - 1; i >= 0; --i) {
     // Each view inverse is implemented in ViewInverses.cpp.
     t = update.view_metas[i]->reverse(tmp_values[i], t);
   }
