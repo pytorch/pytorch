@@ -459,20 +459,17 @@ class TensorVariable(VariableTracker):
         return self_fake._version if self_fake is not None else None
 
     def graph_input_source(self, tx: "InstructionTranslatorBase") -> "Source | None":
-        """The source of the graph input that self is, or None.
-
-        Besides a tensor with a source, this covers the result of an op that
-        returns its input itself (x.contiguous() on a contiguous x,
-        x.to(x.dtype), x.mul_(1), ...): it has no source but is the very same
-        tensor as the input, so a metadata mutation of it mutates the input.
-        """
+        """Source of the graph input this tensor is (possibly a source-less alias like x.contiguous()), else None."""
         if self.source is not None:
             return self.source
         self_fake = self.proxy.node.meta.get("example_value")
         if self_fake is None:
             return None
-        for arg in tx.output.graphargs:
-            if arg.fake_tensor is self_fake:
+        # Use the root tracer: inside a higher-order op, tx.output.graph is the subgraph,
+        # whose placeholders have no grapharg.
+        for node in tx.output.root_tracer.graph.find_nodes(op="placeholder"):
+            arg = node.meta.get("grapharg")
+            if arg is not None and arg.fake_tensor is self_fake:
                 return arg.source
         return None
 
@@ -951,11 +948,8 @@ class TensorVariable(VariableTracker):
                 result.source = AttrSource(self.source, name)
 
         # It's hard to get inplace view (metadata mutation) on graph input work properly across
-        # dynamo/aot/inductor, just fall back. A tensor without a source can still be a
-        # graph input (see graph_input_source); in-place view ops all end with "_".
-        if (self.source is not None or name.endswith("_")) and hasattr(
-            torch.ops.aten, name
-        ):
+        # dynamo/aot/inductor, just fall back.
+        if name.endswith("_") and hasattr(torch.ops.aten, name):
             fn = getattr(torch.ops.aten, name)
             if (
                 hasattr(fn, "overloads")

@@ -3668,59 +3668,42 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(f(y), ReLUSquaredActivation()(y + 0.2) + 1))
 
-    def test_inplace_view_on_noop_alias_of_input(self):
-        # Ops that are no-ops in eager return their input itself: x.contiguous(),
-        # x.to(x.dtype), x.type(x.dtype), and in-place ops such as x.mul_(1). An
-        # in-place view op on that result mutates the input's metadata, so it must
-        # graph break like x.unsqueeze_(...) does, instead of crashing guard
-        # creation with "IndexError: list index out of range" in produce_guards.
-        def f_contiguous(x):
-            v = x.contiguous()
-            v.unsqueeze_(2)
+    @parametrize("alias", ["contiguous", "to_dtype", "to_device", "type", "mul_"])
+    @parametrize("call", ["method", "function"])
+    def test_inplace_view_on_noop_alias_of_input(self, alias, call):
+        # Each alias is x itself, so the in-place view must graph break like x.unsqueeze_(0).
+        make_alias = {
+            "contiguous": lambda x: x.contiguous(),
+            "to_dtype": lambda x: x.to(x.dtype),
+            "to_device": lambda x: x.to(x.device),
+            "type": lambda x: x.type(x.dtype),
+            "mul_": lambda x: x.mul_(1),
+        }[alias]
+
+        def fn(x):
+            v = make_alias(x)
+            if call == "method":
+                v.unsqueeze_(0)
+            else:
+                torch.Tensor.unsqueeze_(v, 0)
             return x
 
-        def f_to(x):
-            v = x.to(x.dtype)
-            v.unsqueeze_(0)
-            return x
+        x = torch.arange(24).reshape(4, 6)
+        # fullgraph first: a failed compile caches nothing, so the next call traces again.
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "inplace view"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x.clone())
+        ref_x, opt_x = x.clone(), x.clone()
+        self.assertEqual(torch.compile(fn, backend="eager")(opt_x), fn(ref_x))
+        self.assertEqual(opt_x.shape, ref_x.shape)
 
-        def f_type(x):
-            v = x.type(x.dtype)
-            v.unsqueeze_(0)
-            return x
-
-        def f_inplace(x):
-            v = x.mul_(1)
-            v.unsqueeze_(0)
-            return x
-
-        def f_function_form(x):
-            v = x.contiguous()
-            torch.Tensor.unsqueeze_(v, 0)
-            return x
-
-        x = torch.arange(24, dtype=torch.int64).reshape(4, 6)
-        for f in (f_contiguous, f_to, f_type, f_inplace, f_function_form):
-            ref_x = x.clone()
-            ref = f(ref_x)
-            torch._dynamo.reset()
-            opt_x = x.clone()
-            res = torch.compile(f, backend="eager")(opt_x)
-            self.assertEqual(ref, res)
-            self.assertEqual(ref_x.shape, opt_x.shape)
-            torch._dynamo.reset()
-            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "inplace view"):
-                torch.compile(f, backend="eager", fullgraph=True)(x.clone())
-
-        def f_clone(x):
-            # A copy is a different tensor: no graph break.
+    def test_inplace_view_on_copy_of_input(self):
+        def fn(x):
             v = x.clone()
             v.unsqueeze_(0)
             return v
 
-        torch._dynamo.reset()
-        res = torch.compile(f_clone, backend="eager", fullgraph=True)(x.clone())
-        self.assertEqual(res, f_clone(x.clone()))
+        x = torch.arange(24).reshape(4, 6)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
 
     def test_inplace_unsqueeze_input(self):
         def backend(gm, example_inputs):
