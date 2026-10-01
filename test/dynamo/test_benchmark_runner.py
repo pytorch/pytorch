@@ -525,7 +525,7 @@ class TestHuggingFacePrefillDevice(HuggingFacePrefillTestCase):
         from torch._dynamo.utils import counters
         from torch._inductor.cudagraph_trees import ExecutionState, get_manager
 
-        model = self._make_model(model_type, device, torch.bfloat16)
+        model = self._make_model(model_type, device)
         inputs = torch.randint(0, 32, (2, 4), device=device)
         skips_before = counters["inductor"]["cudagraph_skips"]
         with (
