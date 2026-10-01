@@ -18,6 +18,7 @@ from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
 )
 from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
     _nvgemm_benchmark_tensor_specs,
+    _nvgemm_precompile_input_metadata,
     _render_nvgemm_benchmark_helpers,
     EPILOGUE_FN_NAME,
     NVGemmGeneratedSource,
@@ -1304,6 +1305,11 @@ class TestNVUniversalGemmScheduling(TestCase):
             )
         )
         self.assertTrue(
+            torch._C._is_alias_of(
+                args_by_name["equal_layout_nested"], args_by_name["shared_storage"]
+            )
+        )
+        self.assertTrue(
             torch._C._is_alias_of(args_by_name["in_ptr1"], args_by_name["adjacent"])
         )
         self.assertEqual(args_by_name["in_ptr1"].data_ptr() % 16, 2)
@@ -1345,6 +1351,24 @@ class TestNVUniversalGemmScheduling(TestCase):
             source = kernel.render()
         self.assertFalse(any(argument.kind == "workspace" for argument in arguments))
         self.assertIn("workspace=None", source)
+
+    def test_precompile_input_metadata_uses_ordered_arguments(self):
+        kernel = self._make_benchmark_kernel()
+        with V.set_graph_handler(self.graph):
+            shapes, strides, dtypes = _nvgemm_precompile_input_metadata(kernel)
+
+        self.assertEqual(
+            shapes,
+            {"in_ptr0": [4, 4], "in_ptr1": [4, 4], "in_ptr2": [16]},
+        )
+        self.assertEqual(
+            strides,
+            {"in_ptr0": [4, 1], "in_ptr1": [1, 4], "in_ptr2": [1]},
+        )
+        self.assertEqual(
+            dtypes,
+            {"in_ptr0": "bfloat16", "in_ptr1": "bfloat16", "in_ptr2": "bfloat16"},
+        )
 
     def test_benchmark_evt_fallback_preserves_stride(self):
         kernel = self._make_benchmark_kernel(is_evt_fallback=True)

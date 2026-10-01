@@ -349,6 +349,24 @@ def _render_nvgemm_benchmark_helpers(
     return generated.source + args_code.getvalue()
 
 
+def _nvgemm_precompile_input_metadata(
+    kernel: NVUniversalGemmKernel,
+) -> tuple[dict[str, list[int]], dict[str, list[int]], dict[str, str]]:
+    shapes = {}
+    strides = {}
+    dtypes = {}
+    for argument in kernel.ordered_arguments():
+        if argument.kind != "input":
+            continue
+        input_node = argument.node
+        if input_node is None:
+            raise AssertionError("expected NVGEMM input argument node")
+        shapes[argument.name] = [int(s) for s in input_node.get_size()]
+        strides[argument.name] = [int(s) for s in input_node.get_stride()]
+        dtypes[argument.name] = str(input_node.get_dtype()).removeprefix("torch.")
+    return shapes, strides, dtypes
+
+
 class NVGemmVerticalFusionDecision(enum.Enum):
     FUSE = enum.auto()
     DEFER = enum.auto()
@@ -1364,24 +1382,10 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         symbolic (dynamic shapes), in which case the subprocess will skip
         precompilation and the kernel compiles lazily on first call.
         """
-        precompile_shapes = {}
-        precompile_strides = {}
-        precompile_dtypes = {}
-
         try:
-            for argument in kernel.ordered_arguments():
-                if argument.kind != "input":
-                    continue
-                input_node = argument.node
-                if input_node is None:
-                    raise AssertionError("expected NVGEMM input argument node")
-                size = input_node.get_size()
-                precompile_shapes[argument.name] = [int(s) for s in size]
-                stride = input_node.get_stride()
-                precompile_strides[argument.name] = [int(s) for s in stride]
-                precompile_dtypes[argument.name] = str(
-                    input_node.get_dtype()
-                ).removeprefix("torch.")
+            precompile_shapes, precompile_strides, precompile_dtypes = (
+                _nvgemm_precompile_input_metadata(kernel)
+            )
 
             out_layout = cast(Layout, ctb.layout)
             precompile_shapes["output"] = [int(s) for s in out_layout.size]
