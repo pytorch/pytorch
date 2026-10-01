@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
+import math
 import threading
 from collections.abc import Callable, Sequence
 from contextlib import nullcontext
@@ -36,7 +37,14 @@ from torch.distributed.tensor._utils import (
     compute_local_stride,
     try_find_mesh_from_args,
 )
-from torch.distributed.tensor.placement_types import _StridedShard, Shard
+from torch.distributed.tensor.placement_types import (
+    _is_block_shard,
+    _StridedShard,
+    _validate_block_shard_placements,
+    BlockShard,
+    Replicate,
+    Shard,
+)
 from torch.utils._pytree import tree_map
 
 
@@ -357,6 +365,92 @@ def _select_min_cost_strategy(
         )
 
     return strategy.strategies[selected_strategy_index]
+
+
+# Ops whose sharding is computed by viewing BlockShard operands as Shard(0) on
+# their merged view (in addition to pointwise-tagged and foreach/fused ops).
+# They have no dim or size arguments, and their outputs either have the input
+# shape or are 0-dim.
+_BLOCK_SHARD_TRANSLATABLE_OPS: set[OpOverload] = {
+    aten.clone.default,
+    aten.copy_.default,
+    aten.detach.default,
+    aten.empty_like.default,
+    aten.fill_.Scalar,
+    aten.fill_.Tensor,
+    aten.full_like.default,
+    aten.ones_like.default,
+    aten.rand_like.default,
+    aten.randn_like.default,
+    aten.zero_.default,
+    aten.zeros_like.default,
+    aten.all.default,
+    aten.any.default,
+    aten.linalg_vector_norm.default,
+    aten.max.default,
+    aten.mean.default,
+    aten.min.default,
+    aten.sum.default,
+}
+
+
+_BLOCK_SHARD_VIEW_OPS: set[OpOverload] = {
+    aten._unsafe_view.default,
+    aten.reshape.default,
+    aten.view.default,
+}
+
+
+class _BlockShardUntranslatable(Exception):
+    pass
+
+
+def _is_foreach_like(op: OpOverload) -> bool:
+    name = op._schema.name
+    return (
+        name.startswith(("aten::_foreach_", "aten::_fused_"))
+        or op is aten._amp_foreach_non_finite_check_and_unscale_.default
+    )
+
+
+def _has_block_shard(op_schema: OpSchema) -> bool:
+    def has(arg: object) -> bool:
+        if isinstance(arg, DTensorSpec):
+            return any(_is_block_shard(p) for p in arg.placements)
+        if isinstance(arg, (list, tuple)):
+            return any(has(a) for a in arg)
+        return False
+
+    return any(
+        has(a) for a in (*op_schema.args_schema, *op_schema.kwargs_schema.values())
+    )
+
+
+def _to_merged_spec(spec: DTensorSpec, merged_shape: torch.Size) -> DTensorSpec:
+    if spec.tensor_meta is None:
+        raise AssertionError(f"Expected tensor_meta for {spec}")
+    placements = tuple(Shard(0) if _is_block_shard(p) else p for p in spec.placements)
+    stride = torch._prims_common.make_contiguous_strides_for(merged_shape)
+    meta = TensorMeta(merged_shape, stride, spec.tensor_meta.dtype)
+    return DTensorSpec(spec.mesh, placements, tensor_meta=meta)
+
+
+def _from_merged_spec(
+    spec: DTensorSpec, shape: tuple[int, ...], block_shard: BlockShard, k: int
+) -> DTensorSpec:
+    if spec.tensor_meta is None:
+        raise AssertionError(f"Expected tensor_meta for {spec}")
+    placements: list = []
+    for p in spec.placements:
+        if isinstance(p, _StridedShard):
+            raise _BlockShardUntranslatable
+        if isinstance(p, Shard):
+            placements.append(block_shard if p.dim == 0 else Shard(p.dim + k - 1))
+        else:
+            placements.append(p)
+    stride = torch._prims_common.make_contiguous_strides_for(shape)
+    meta = TensorMeta(torch.Size(shape), stride, spec.tensor_meta.dtype)
+    return DTensorSpec(spec.mesh, tuple(placements), tensor_meta=meta)
 
 
 class ShardingPropagator:
@@ -745,6 +839,9 @@ class ShardingPropagator:
         if op_schema.op is aten._local_scalar_dense.default:
             return OutputSharding(None, op_schema)
 
+        if _has_block_shard(op_schema):
+            return self._propagate_block_shard(op_schema)
+
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
 
         single_dim_strategy_info = self.op_single_dim_strategy_funcs.get(op_schema.op)
@@ -1045,6 +1142,219 @@ class ShardingPropagator:
             raise NotImplementedError(
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
             ) from decomp_exception
+
+    def _propagate_block_shard(self, op_schema: OpSchema) -> OutputSharding:
+        """Propagate sharding for an op with BlockShard operands.
+
+        BlockShard on ``shape`` is Shard(0) on the merged view
+        ``(prod(shape[:k]), *shape[k:])``. For ops that keep the merged dims
+        together (pointwise, foreach, like-constructors, full reductions), run
+        the regular strategy on the merged view and map the resulting specs
+        back. Every other op redistributes its BlockShard operands to Replicate
+        first.
+        """
+        op = op_schema.op
+        if op in _BLOCK_SHARD_VIEW_OPS:
+            view_sharding = self._propagate_block_shard_view(op_schema)
+            if view_sharding is not None:
+                return view_sharding
+        if (
+            torch.Tag.pointwise in op.tags
+            or _is_foreach_like(op)
+            or op in _BLOCK_SHARD_TRANSLATABLE_OPS
+        ):
+            try:
+                return self._propagate_block_shard_merged(op_schema)
+            except _BlockShardUntranslatable:
+                pass
+        return self._propagate_block_shard_via_replicate(op_schema)
+
+    def _propagate_block_shard_view(self, op_schema: OpSchema) -> OutputSharding | None:
+        input_spec = op_schema.args_schema[0]
+        if not isinstance(input_spec, DTensorSpec):
+            return None
+        block_shard = next(p for p in input_spec.placements if _is_block_shard(p))
+        _validate_block_shard_placements(input_spec.placements, input_spec.shape)
+        out_meta = self._propagate_tensor_meta_non_cached(op_schema)
+        if not isinstance(out_meta, TensorMeta):
+            return None
+        # A view keeps the row-major element order, so each rank's contiguous
+        # element range carries over as long as the block still ends on a dim
+        # boundary of the output shape.
+        (block_numel,) = block_shard.block_numels
+        out_shape = out_meta.shape
+        k = next(
+            (
+                j
+                for j in range(1, len(out_shape) + 1)
+                if math.prod(out_shape[j:]) == block_numel
+            ),
+            None,
+        )
+        if k is None:
+            return None
+        out_placement = Shard(0) if k == 1 else block_shard
+        placements = tuple(
+            out_placement if _is_block_shard(p) else p for p in input_spec.placements
+        )
+        out_spec = DTensorSpec(input_spec.mesh, placements, tensor_meta=out_meta)
+        return OutputSharding(
+            out_spec,
+            redistribute_schema=self._adjust_shape_and_stride_args(
+                out_meta, op_schema, out_spec
+            ),
+            needs_redistribute=True,
+            use_val_from_redistribute_schema=True,
+        )
+
+    def _propagate_block_shard_merged(self, op_schema: OpSchema) -> OutputSharding:
+        op = op_schema.op
+        foreach = _is_foreach_like(op)
+        if op is aten.linalg_vector_norm.default:
+            dim = op_schema.kwargs_schema.get(
+                "dim",
+                op_schema.args_schema[2] if len(op_schema.args_schema) > 2 else None,
+            )
+            if dim is not None:
+                raise _BlockShardUntranslatable
+
+        # Group operands that interact: list index for foreach ops, else one group.
+        groups: dict[int | None, tuple[tuple[int, ...], BlockShard, int]] = {}
+
+        def collect(arg: object, group: int | None) -> None:
+            if isinstance(arg, DTensorSpec):
+                block_shard = next(
+                    (p for p in arg.placements if isinstance(p, BlockShard)), None
+                )
+                if block_shard is not None:
+                    _validate_block_shard_placements(arg.placements, arg.shape)
+                    entry = (
+                        tuple(arg.shape),
+                        block_shard,
+                        block_shard._split_dim(arg.shape),
+                    )
+                    if groups.setdefault(group, entry) != entry:
+                        raise _BlockShardUntranslatable
+            elif isinstance(arg, (list, tuple)):
+                for i, a in enumerate(arg):
+                    collect(a, i if foreach else group)
+
+        def to_merged(arg: object, group: int | None) -> object:
+            if isinstance(arg, DTensorSpec):
+                if group not in groups:
+                    if foreach and group is None and arg.ndim > 0:
+                        # A non-list tensor would broadcast into BlockShard elements.
+                        raise _BlockShardUntranslatable
+                    return arg
+                shape, block_shard, k = groups[group]
+                merged = block_shard._merged_shape(shape)
+                if any(_is_block_shard(p) for p in arg.placements):
+                    return _to_merged_spec(arg, merged)
+                if arg.ndim <= len(shape) - k:
+                    # Broadcasts over trailing dims only, which the view preserves.
+                    return arg
+                if tuple(arg.shape) == shape and all(
+                    p.is_replicate() or p.is_partial() for p in arg.placements
+                ):
+                    return _to_merged_spec(arg, merged)
+                raise _BlockShardUntranslatable
+            if isinstance(arg, (list, tuple)):
+                return type(arg)(
+                    to_merged(a, i if foreach else group) for i, a in enumerate(arg)
+                )
+            return arg
+
+        def from_merged(arg: object, original: object, group: int | None) -> object:
+            # Map a spec in merged coordinates back, for operands we rewrote.
+            if isinstance(arg, DTensorSpec):
+                if original is None or not isinstance(original, DTensorSpec):
+                    raise _BlockShardUntranslatable
+                if group not in groups or arg.shape == original.shape:
+                    return arg
+                shape, block_shard, k = groups[group]
+                return _from_merged_spec(arg, shape, block_shard, k)
+            if isinstance(arg, (list, tuple)):
+                return type(arg)(
+                    from_merged(a, o, i if foreach else group)
+                    for i, (a, o) in enumerate(zip(arg, cast(Sequence, original)))
+                )
+            return arg
+
+        def output_from_merged(spec: object, group: int | None) -> object:
+            if isinstance(spec, DTensorSpec):
+                if group not in groups or spec.ndim == 0:
+                    return spec
+                shape, block_shard, k = groups[group]
+                if spec.shape != block_shard._merged_shape(shape):
+                    raise _BlockShardUntranslatable
+                return _from_merged_spec(spec, shape, block_shard, k)
+            if isinstance(spec, (list, tuple)):
+                return type(spec)(
+                    output_from_merged(s, i if foreach else group)
+                    for i, s in enumerate(spec)
+                )
+            return spec
+
+        all_args = (*op_schema.args_schema, *op_schema.kwargs_schema.values())
+        for arg in all_args:
+            collect(arg, None)
+        merged_schema = OpSchema(
+            op,
+            tuple(to_merged(a, None) for a in op_schema.args_schema),
+            {k: to_merged(v, None) for k, v in op_schema.kwargs_schema.items()},
+            schema_info=op_schema.schema_info,
+        )
+        result = self.propagate_op_sharding_non_cached(merged_schema)
+        if result.use_val_from_redistribute_schema:
+            raise _BlockShardUntranslatable
+
+        redistribute_schema = None
+        if result.redistribute_schema is not None:
+            redist = result.redistribute_schema
+            redistribute_schema = OpSchema(
+                op,
+                tuple(
+                    from_merged(a, o, None)
+                    for a, o in zip(redist.args_schema, op_schema.args_schema)
+                ),
+                {
+                    k: from_merged(v, op_schema.kwargs_schema.get(k), None)
+                    for k, v in redist.kwargs_schema.items()
+                },
+                schema_info=op_schema.schema_info,
+            )
+        return OutputSharding(
+            output_spec=output_from_merged(result.output_spec, None),  # type: ignore[arg-type]
+            redistribute_schema=redistribute_schema,
+            needs_redistribute=result.needs_redistribute,
+        )
+
+    def _propagate_block_shard_via_replicate(
+        self, op_schema: OpSchema
+    ) -> OutputSharding:
+        def to_replicate(arg: object) -> object:
+            if isinstance(arg, DTensorSpec) and any(
+                _is_block_shard(p) for p in arg.placements
+            ):
+                placements = tuple(
+                    Replicate() if _is_block_shard(p) else p for p in arg.placements
+                )
+                return DTensorSpec(arg.mesh, placements, tensor_meta=arg.tensor_meta)
+            if isinstance(arg, (list, tuple)):
+                return type(arg)(to_replicate(a) for a in arg)
+            return arg
+
+        replicated_schema = OpSchema(
+            op_schema.op,
+            tuple(to_replicate(a) for a in op_schema.args_schema),
+            {k: to_replicate(v) for k, v in op_schema.kwargs_schema.items()},
+            schema_info=op_schema.schema_info,
+        )
+        result = self.propagate_op_sharding_non_cached(replicated_schema)
+        if result.redistribute_schema is None:
+            result.redistribute_schema = replicated_schema
+        result.needs_redistribute = True
+        return result
 
     def _adjust_shape_and_stride_args(
         self,
