@@ -249,8 +249,10 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_random_float_draws_inductor(self, dtype):
         # Float draws reach the graph as float64 tensors, so the graph input must
         # be traced as float64 too; otherwise Inductor reads them as float32.
+        # The products stay separate: summed, Inductor rounds once where eager
+        # rounds per op, which costs low-precision dtypes their tolerance.
         def fn(x, rng):
-            return x * rng.random() + x * rng.uniform(0, 1) + x * random.random()
+            return x * rng.random(), x * rng.uniform(0, 1), x * random.random()
 
         x = torch.arange(4.0, dtype=dtype)
         random.seed(0)
