@@ -280,6 +280,7 @@ class TestNativeAotTopK(TestCase):
             self.assertFalse(r["ran_dsl"], f"{case} must not route to AOT")
             self.assertTrue(r["values_ok"], f"values mismatch for {case}")
 
+    @skipIfNoNativeAot("topk")
     @skipIfNoJitTopk
     def test_aot_coverage_is_subset_of_jit_eligibility(self):
         from torch._native import aot_manifest
@@ -454,6 +455,7 @@ class TestNativeAotTopK(TestCase):
         finally:
             torch.use_deterministic_algorithms(prior)
 
+    @skipIfNoNativeAot("topk")
     def test_flags_the_stub_declines_are_uncovered(self):
         # The stub takes only dim=last, largest and sorted; coverage must agree, or such
         # a call declines on both routes and lands on stock aten instead of the JIT one.
@@ -467,6 +469,7 @@ class TestNativeAotTopK(TestCase):
         # dim spelled as the last axis is the covered case, however it is written.
         self.assertTrue(aot_manifest.covers("topk", "CUDA", (x, 64), {"dim": 1}))
 
+    @skipIfNoNativeAot("topk")
     def test_manifest_covers_matches_grid(self):
         # CUDA tensors, because coverage includes the prelude's full-wave M gate, so
         # a CPU probe is always uncovered.
