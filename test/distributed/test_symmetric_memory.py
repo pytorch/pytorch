@@ -10,6 +10,7 @@ import sys
 import tempfile
 import textwrap
 import time
+from collections.abc import Callable
 from contextlib import contextmanager, nullcontext
 from unittest import mock, skipIf, skipUnless
 
@@ -45,7 +46,9 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_distributed import (
+    captured_signal_pad_order,
     core_dumps_disabled,
+    gated_signal_pad_order,
     MultiProcContinuousTest,
     MultiProcessTestCase,
     PLATFORM_SUPPORTS_SYMM_MEM,
@@ -127,6 +130,49 @@ def _graph_path_exists(edges, src, dst):
         seen.add(node)
         stack.extend(successors.get(node, ()))
     return False
+
+
+# Each op touches the signal pad through one guarded call site. The mixed pairs
+# check that call sites in different files share one group's ordering state.
+_PAD_OPS = (
+    "barrier",
+    "put_wait_signal",
+    "one_shot_all_reduce",
+    "two_shot_all_reduce",
+    "reduce_scatter",
+    "multimem_all_reduce",
+    "multimem_one_shot_all_reduce",
+    "multimem_all_gather",
+)
+_PAD_OP_PAIRS = [(op, op) for op in _PAD_OPS] + [
+    ("barrier", "one_shot_all_reduce"),
+    ("one_shot_all_reduce", "put_wait_signal"),
+]
+
+
+def _pad_op_launches(group: dist.ProcessGroup) -> dict[str, list[Callable[[], object]]]:
+    """Launches for each signal-pad op in _PAD_OPS on ``group``, one
+    zero-argument callable per guarded call."""
+    rank, world_size, name = group.rank(), group.size(), group.group_name
+    buf = symm_mem.empty(64 * world_size, device="cuda").zero_()
+    hdl = symm_mem.rendezvous(buf, group=group)
+    small = torch.zeros(64, device="cuda")
+    ops = torch.ops.symm_mem
+    return {
+        "barrier": [lambda: hdl.barrier(channel=0)],
+        "put_wait_signal": [
+            lambda: hdl.put_signal((rank + 1) % world_size, channel=0),
+            lambda: hdl.wait_signal((rank - 1) % world_size, channel=0),
+        ],
+        "one_shot_all_reduce": [lambda: ops.one_shot_all_reduce(buf, "sum", name)],
+        "two_shot_all_reduce": [lambda: ops.two_shot_all_reduce_(buf, "sum", name)],
+        "reduce_scatter": [lambda: ops.reduce_scatter_out(buf, name, False, small)],
+        "multimem_all_reduce": [lambda: ops.multimem_all_reduce_(buf, "sum", name)],
+        "multimem_one_shot_all_reduce": [
+            lambda: ops.multimem_one_shot_all_reduce(buf, "sum", name)
+        ],
+        "multimem_all_gather": [lambda: ops.multimem_all_gather_out(small, name, buf)],
+    }
 
 
 @contextmanager
@@ -1466,6 +1512,142 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(buf, expected)
         pad = hdl.get_signal_pad(self.rank)
         self.assertEqual(pad, torch.zeros_like(pad))
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
+    @requires_cuda_python_bindings
+    @parametrize(
+        "op_a,op_b",
+        _PAD_OP_PAIRS,
+        name_fn=lambda a, b: a if a == b else f"{a}_then_{b}",
+    )
+    @parametrize("same_group", [True, False])
+    def test_stream_serialization_graph_order(
+        self, op_a: str, op_b: str, same_group: bool
+    ) -> None:
+        """For signal-pad ops a then b on one device, GroupStreamGuard promises:
+        (1) on one process group and in one capture context (both eager, or
+        both in one capture), b's pad kernel runs after a's on any streams;
+        (2) b does not wait for work queued behind a; (3) ops of different
+        groups are not ordered. The signal-pad protocol needs (1): two ops on
+        one slot must not run concurrently, or one consumes the other's
+        signal.
+
+        Checked on a captured graph that is never replayed, with op_b on a
+        stream forked before op_a. One op per guarded call site."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+        if "multimem" in op_a + op_b and not _SymmetricMemory.has_multicast_support(
+            DeviceType.CUDA, self.device.index
+        ):
+            self.skipTest("multicast support is not available")
+        if "reduce_scatter" in (op_a, op_b) and self.world_size not in (2, 4, 8):
+            self.skipTest("reduce_scatter_out supports world sizes 2, 4 and 8")
+
+        group_b = (
+            dist.group.WORLD
+            if same_group
+            else dist.new_group(list(range(self.world_size)))
+        )
+        launches_a = _pad_op_launches(dist.group.WORLD)[op_a]
+        launches_b = _pad_op_launches(group_b)[op_b]
+
+        # Run each op once before capture so lazy setup stays out of the graph.
+        main = torch.cuda.Stream()
+        main.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(main):
+            for launch in launches_a + launches_b:
+                launch()
+        torch.cuda.synchronize()
+
+        after_a, after_marker = captured_signal_pad_order(main, launches_a, launches_b)
+        where = "one group" if same_group else "different groups"
+        verb = "is" if after_a else "is not"
+        msg = f"{op_b} {verb} ordered after {op_a} on {where}"
+        self.assertEqual(after_a, same_group, msg)
+        self.assertFalse(
+            after_marker, f"{op_b} waits for work queued on the stream after {op_a}"
+        )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
+    @requires_cuda_python_bindings
+    @parametrize("same_group", [True, False])
+    def test_stream_serialization_eager_order(self, same_group: bool) -> None:
+        """The eager counterpart of test_stream_serialization_graph_order,
+        for barrier: barrier a is held on its stream between two gates while
+        barrier b runs on another stream, on another handle of the same group
+        or of another group. b must stay blocked on the same group, and once
+        the first gate opens it must finish with the second still closed."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        group_b = (
+            dist.group.WORLD
+            if same_group
+            else dist.new_group(list(range(self.world_size)))
+        )
+        hdl_a = symm_mem.rendezvous(symm_mem.empty(64, device="cuda"), dist.group.WORLD)
+        hdl_b = symm_mem.rendezvous(symm_mem.empty(64, device="cuda"), group_b)
+        for hdl in (hdl_a, hdl_b):
+            hdl.barrier(channel=0)
+        torch.cuda.synchronize()
+
+        while_gated, after_open = gated_signal_pad_order(
+            [lambda: hdl_a.barrier(channel=0)],
+            [lambda: hdl_b.barrier(channel=0)],
+            expect_ordered=same_group,
+        )
+        where = "one group" if same_group else "different groups"
+        verb = "finished" if while_gated else "stayed blocked"
+        msg = f"b {verb} while a was gated, on {where}"
+        self.assertEqual(while_gated, not same_group, msg)
+        self.assertTrue(after_open, "b waits for work queued on the stream after a")
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm_ver_lessthan_multiprocess((10, 1))
+    @requires_cuda_python_bindings
+    def test_stream_serialization_eager_order_across_capture(self) -> None:
+        """Eager barrier b must still wait for eager barrier a when a barrier
+        of the same group is captured between them. A raw capture_begin, which
+        unlike torch.cuda.graph does not synchronize the device first, so a is
+        still held when the capture runs."""
+        self._init_process()
+        if symm_mem.get_backend(self.device) != "CUDA":
+            self.skipTest("test applies to the CUDA symm mem backend")
+
+        t = symm_mem.empty(64, device="cuda")
+        hdl = symm_mem.rendezvous(t, dist.group.WORLD)
+        hdl.barrier(channel=0)
+        torch.cuda.synchronize()
+        graph = torch.cuda.CUDAGraph()
+        capture_stream = torch.cuda.Stream()
+
+        def capture_barrier():
+            with torch.cuda.stream(capture_stream):
+                graph.capture_begin(capture_error_mode="thread_local")
+                hdl.barrier(channel=0)
+                graph.capture_end()
+
+        while_gated, after_open = gated_signal_pad_order(
+            [lambda: hdl.barrier(channel=0)],
+            [lambda: hdl.barrier(channel=0)],
+            expect_ordered=True,
+            between=capture_barrier,
+        )
+        self.assertFalse(while_gated, "b finished while a was gated")
+        self.assertTrue(after_open, "b waits for work queued on the stream after a")
 
 
 # We move AsyncTP tests to a separate test suite because 1) Async TP ops are not
