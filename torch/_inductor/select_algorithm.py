@@ -1110,8 +1110,6 @@ class TritonTemplateKernel(TritonKernel):
         # The args may be duplicated, so renaming must be after args are de-duplicated.
         for name in argnames:
             input_node = self.named_input_nodes[name]
-            # When the template uses load_input() for every named input, mark all
-            # named inputs eligible for load-input fusion during def_kernel().
             if self.prologue_loads_all_named_inputs:
                 self.load_input_fusion_allowed_inputs.add(input_node.get_name())
             if self._is_input_arg_omitted(input_node.get_name()):
@@ -1380,7 +1378,6 @@ class TritonTemplateKernel(TritonKernel):
         """
 
         input_node = self.named_input_nodes[input_name]
-        # Otherwise, discover eligibility as each load_input() call is rendered.
         if not self.prologue_loads_all_named_inputs:
             self.load_input_fusion_allowed_inputs.add(input_node.get_name())
 
@@ -2136,22 +2133,16 @@ class TritonTemplateKernel(TritonKernel):
         return node.get_stride()
 
     def _compute_fusion_metadata(
-        self, scheduling, consumer_nodes, producer_nodes, buf_name_to_prologue_group
+        self, scheduling, epilogue_nodes, buf_name_to_prologue_group
     ):
-        """Prepare consumer/producer fusion routing before render().
+        """Route epilogue nodes to store-output subgraphs before render().
 
-        ``producer_nodes`` are upstream of the template. Their code may be emitted
-        in either the template's load-input prologue or store-output epilogue region.
-        ``consumer_nodes`` are downstream of the template and are emitted in its
-        output epilogue.
-
-        Default: all epilogue-region fusions—both store-output producers and
-        downstream consumers—are applied to every store-output subgraph.
+        By default, all epilogue nodes are emitted in every store-output subgraph.
         ExternalTritonTemplateKernel overrides this for per-output routing,
-        retaining consumers that cannot be fused, and producer-source metadata.
+        retaining epilogues that cannot be fused, and prologue-source metadata.
         """
         self._epilogue_nodes_by_subgraph: defaultdict[int, list[Any]] = defaultdict(
-            lambda: consumer_nodes
+            lambda: epilogue_nodes
         )
         self._unfused_epilogues: list[Any] = []
         self._prologue_sources: dict[str, frozenset[str]] = {}
@@ -2161,22 +2152,25 @@ class TritonTemplateKernel(TritonKernel):
         scheduling,
         template_node,
         epilogue_nodes,
-        prologue_nodes,
         buf_name_to_prologue_group,
+        store_output_input_producer_groups,
         prologue_preserves_zero_mask_fn,
         render,
     ) -> str:
         """Generate template source code with fused prologues and epilogues.
 
-        ``prologue_nodes`` are upstream of the template node. Their code may be
-        emitted in either the template's load-input or store-output region.
+        ``epilogue_nodes`` contains the nodes ordered after the template in the
+        fused scheduler group. ``buf_name_to_prologue_group`` contains producer
+        groups emitted in load-input prologues.
+        ``store_output_input_producer_groups`` contains producer groups emitted in
+        store-output epilogues and is copied to kernel state for use during render().
 
         Returns the final source code string.
         """
+        self.store_output_input_producer_groups = store_output_input_producer_groups
         self._compute_fusion_metadata(
             scheduling,
-            consumer_nodes=epilogue_nodes,
-            producer_nodes=prologue_nodes,
+            epilogue_nodes=epilogue_nodes,
             buf_name_to_prologue_group=buf_name_to_prologue_group,
         )
         with self:
@@ -2379,17 +2373,18 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         return self._unfused_epilogues
 
     def _compute_fusion_metadata(
-        self, scheduling, consumer_nodes, producer_nodes, buf_name_to_prologue_group
+        self, scheduling, epilogue_nodes, buf_name_to_prologue_group
     ):
-        """Compute fusion metadata for external backends.
+        """Compute epilogue and load-input prologue metadata for external backends.
 
-        ``producer_nodes`` are upstream of the template. Their code may be emitted
-        in either the template's load-input prologue or store-output epilogue region.
-        ``consumer_nodes`` are downstream of the template and are emitted in its
-        output epilogue.
+        ``epilogue_nodes`` contains the nodes ordered after the template in the
+        fused scheduler group; eligible downstream consumers are selected from it.
+        ``buf_name_to_prologue_group`` maps each load-input
+        buffer to its ordered producer group. Store-output producer groups are
+        stored in ``self.store_output_input_producer_groups`` and do not reach
+        this method.
 
-        Determines eligible consumers/producers, builds epilogue specs,
-        and computes producer sources — all before render().
+        Determines eligible epilogues and computes prologue sources before render().
 
         Hook setup (_setup_epilogue_hook / _setup_prologue_hook) cannot
         happen here because it requires V.kernel context, which is only
@@ -2400,7 +2395,7 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
 
         tb = self._template_buffer
         self._eligible_epilogues = self._find_eligible_epilogues(
-            consumer_nodes, tb.epilogue_fusable_outputs
+            epilogue_nodes, tb.epilogue_fusable_outputs
         )
         self._epilogue_nodes_by_subgraph = defaultdict(
             list,
@@ -2409,7 +2404,7 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         fused_ids = OrderedSet(id(sn) for sn, _, _, _ in self._eligible_epilogues)
         self._unfused_epilogues = [
             n
-            for n in consumer_nodes
+            for n in epilogue_nodes
             if id(n) not in fused_ids and not isinstance(n.node, ir.MultiOutput)
         ]
         self._prologue_sources = {

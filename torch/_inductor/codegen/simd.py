@@ -604,15 +604,18 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         scheduling,
         template_node,
         epilogue_nodes,
-        prologue_nodes,
         buf_name_to_prologue_group,
+        store_output_input_producer_groups,
         prologue_preserves_zero_mask_fn,
         render,
     ) -> str:
         """Generate template source code with fused prologues and epilogues.
 
-        ``prologue_nodes`` are upstream of the template node. Their code may be
-        emitted in either the template's load-input or store-output region.
+        ``epilogue_nodes`` contains the nodes ordered after the template in the
+        fused scheduler group. ``buf_name_to_prologue_group`` contains producer
+        groups emitted in load-input prologues.
+        ``store_output_input_producer_groups`` contains producer groups emitted in
+        store-output epilogues.
 
         Subclasses override this to implement custom code generation.
         The default implementation raises NotImplementedError — the actual
@@ -4489,11 +4492,12 @@ class SIMDScheduling(BaseScheduling):
            or multiply, are generated after epilogue_fn and before the final store.
         """
         buf_name_to_prologue_group = {}
+        store_output_input_producer_groups = {}
         template_reads = template_node.used_buffer_names()
-        prologue_group = []
-        for prologue in prologue_nodes:
-            names = prologue.get_buffer_names()
-            prologue_group.append(prologue)
+        producer_group = []
+        for producer in prologue_nodes:
+            names = producer.get_buffer_names()
+            producer_group.append(producer)
             # Scheduler ordering keeps the nodes for each template input
             # contiguous. Accumulate nodes until one produces a buffer read
             # directly by the template, which completes the producer group.
@@ -4502,19 +4506,17 @@ class SIMDScheduling(BaseScheduling):
                     raise AssertionError(f"expected len(names) == 1, got {len(names)}")
                 input_name = next(iter(names))
                 if input_name in kernel.store_output_fusion_allowed_inputs:
-                    kernel.store_output_input_producer_groups[input_name] = (
-                        prologue_group
-                    )
+                    store_output_input_producer_groups[input_name] = producer_group
                     kernel.store_output_fused_inputs.add(input_name)
                 if input_name in kernel.load_input_fusion_allowed_inputs:
-                    buf_name_to_prologue_group[input_name] = prologue_group
+                    buf_name_to_prologue_group[input_name] = producer_group
                     kernel.load_input_fused_inputs.add(input_name)
-                prologue_group = []
+                producer_group = []
 
-        # all prologue groups should have finalized with use in template
-        if len(prologue_group) != 0:
+        # All producer groups should have finalized with use in the template.
+        if len(producer_group) != 0:
             raise AssertionError(
-                f"expected empty prologue_group, got {len(prologue_group)}"
+                f"expected empty producer_group, got {len(producer_group)}"
             )
 
         # Remove producer-fused inputs from input_buffers so that
@@ -4530,8 +4532,8 @@ class SIMDScheduling(BaseScheduling):
             self,
             template_node,
             epilogue_nodes,
-            prologue_nodes,
             buf_name_to_prologue_group,
+            store_output_input_producer_groups,
             prologue_preserves_zero_mask,
             render,
         )
