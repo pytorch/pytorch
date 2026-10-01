@@ -372,6 +372,7 @@ license-files = [
     "third_party/cpuinfo/deps/clog/LICENSE",
     "third_party/cudnn_frontend/LICENSE-MIT.txt",
     "third_party/cudnn_frontend/LICENSE.txt",
+    "third_party/cudnn_frontend/python/cudnn/moe_ep/_megamoe_backend/cutedsl_src/LICENSE.Apache-2.0",
     "third_party/cutlass/LICENSE.txt",
     "third_party/fbgemm/LICENSE",
     "third_party/fbgemm/external/asmjit/LICENSE.md",

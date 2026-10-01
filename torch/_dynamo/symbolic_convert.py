@@ -103,6 +103,7 @@ from .exc import (
     BackendCompilerFailed,
     collapse_resume_frames,
     format_frame_info,
+    format_user_stack,
     get_stack_above_dynamo,
     raise_observed_exception,
     raise_value_error,
@@ -174,6 +175,7 @@ from .variables.ctx_manager import (
     WithExitFunctionVariable,
 )
 from .variables.dicts import ConstDictVariable
+from .variables.exception import TracebackVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     CO_VARARGS,
@@ -202,7 +204,6 @@ from .variables.misc import (
     CellVariable,
     NullVariable,
     PythonModuleVariable,
-    TracebackVariable,
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
@@ -4416,8 +4417,11 @@ class InstructionTranslatorBase(
             # Convert the attribute to a dictionary before assigning it
             # https://github.com/python/cpython/blob/28fb13cb33d569720938258db68956b5f9c9eb40/Objects/funcobject.c#L574-L594
             items = annotations.items
+            ann_items: dict[VariableTracker, VariableTracker] = dict(
+                zip(items[::2], items[1::2], strict=True)
+            )
             ann = ConstDictVariable(
-                dict(zip(items[::2], items[1::2], strict=True)),
+                ann_items,
                 mutation_type=ValueMutationNew(),
             )
             fn.annotations = ann
@@ -4887,7 +4891,7 @@ class InstructionTranslatorBase(
                 )
             kw_names = kw_names.as_python_constant()
         else:
-            kw_names = self.kw_names.value if self.kw_names else ()
+            kw_names = self.kw_names.as_python_constant() if self.kw_names else ()
 
         if inst.arg is None:
             raise AssertionError("expected inst.arg is not None to be true")
@@ -5224,8 +5228,11 @@ class InstructionTranslatorBase(
             # Convert the attribute to a dictionary before assigning it
             # https://github.com/python/cpython/blob/28fb13cb33d569720938258db68956b5f9c9eb40/Objects/funcobject.c#L574-L594
             items = attr.items
+            ann_items: dict[VariableTracker, VariableTracker] = dict(
+                zip(items[::2], items[1::2], strict=True)
+            )
             ann = ConstDictVariable(
-                dict(zip(items[::2], items[1::2], strict=True)),
+                ann_items,
                 mutation_type=ValueMutationNew(),
             )
             fn.annotations = ann
@@ -5348,10 +5355,8 @@ class InstructionTranslatorBase(
     ) -> str:
         if additional_stack_frames is None:
             additional_stack_frames = []
-        return "".join(
-            traceback.format_list(
-                [self.frame_summary()] + list(reversed(additional_stack_frames))
-            )
+        return format_user_stack(
+            [self.frame_summary()] + list(reversed(additional_stack_frames))
         )
 
     def frame_summary(self) -> traceback.FrameSummary:
@@ -5359,6 +5364,7 @@ class InstructionTranslatorBase(
         # colno/end_colno kwargs were added to FrameSummary in 3.11
         kwargs: dict[str, Any] = {}
         if sys.version_info >= (3, 11) and positions is not None:
+            kwargs["end_lineno"] = positions.end_lineno
             kwargs["colno"] = positions.col_offset
             kwargs["end_colno"] = positions.end_col_offset
         return traceback.FrameSummary(
@@ -5496,13 +5502,11 @@ class InstructionTranslatorBase(
         stack_above_dynamo_formatted = ""
         if config.verbose:
             stack_above_dynamo = get_stack_above_dynamo()
-            stack_above_dynamo_formatted = "".join(
-                traceback.format_list(stack_above_dynamo)
-            )
+            stack_above_dynamo_formatted = format_user_stack(stack_above_dynamo)
         else:
             user_stack = get_stack_above_dynamo() + user_stack  # type: ignore[assignment]
             user_stack = collapse_resume_frames(user_stack)
-        user_stack_formatted = "".join(traceback.format_list(user_stack))
+        user_stack_formatted = format_user_stack(user_stack)
 
         # Add HOP context after the first line of reason if present
         if exc is not None:
