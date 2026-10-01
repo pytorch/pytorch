@@ -382,7 +382,7 @@ class OverlapPreservingBucketer:
             def _bucket_key(node):
                 return get_full_bucket_key(node, self.bucket_mode)
 
-            for start, info in self.collective_info.items():
+            for start in self.collective_info:
                 stats_num_total_collectives_per_key[_bucket_key(start)] += 1
 
             for i, bucket in enumerate(all_buckets):
