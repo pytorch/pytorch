@@ -936,10 +936,13 @@ class TestFP8Matmul(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    def test_float8_scale_result(self, device) -> None:
+    @parametrize("out_dtype", [e4m3_type, e5m2_type])
+    def test_float8_scale_result(self, device, out_dtype) -> None:
         torch.manual_seed(0)
+        # cuBLASLt has no e4m3 x e4m3 -> e5m2 kernel and hipBLASLt has no mixed fp8 inputs.
+        b_dtype = e5m2_type if out_dtype == e5m2_type and torch.version.hip is None else e4m3_type
         a = torch.randint(-1, 2, (32, 16), device=device).float().to(e4m3_type)
-        b = torch.randint(-1, 2, (16, 32), device=device).float().t().contiguous().t().to(e4m3_type)
+        b = torch.randint(-1, 2, (16, 32), device=device).float().t().contiguous().t().to(b_dtype)
         scale = torch.ones((), device=device)
         scale_result = torch.full((), 0.5, device=device)
 
@@ -949,28 +952,39 @@ class TestFP8Matmul(TestCase):
             scale_a=scale,
             scale_b=scale,
             scale_result=scale_result,
-            out_dtype=e4m3_type,
+            out_dtype=out_dtype,
         )
-        expected = (a.float() @ b.float()).mul(scale_result).to(e4m3_type)
+        expected = (a.float() @ b.float()).mul(scale_result).to(out_dtype)
 
         self.assertEqual(actual, expected)
 
-        high_precision = torch._scaled_mm(
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
+    @parametrize("out_dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_float8_scale_result_ignored_for_non_float8_out(self, device, out_dtype) -> None:
+        torch.manual_seed(0)
+        a = torch.randint(-1, 2, (32, 16), device=device).float().to(e4m3_type)
+        b = torch.randint(-1, 2, (16, 32), device=device).float().t().contiguous().t().to(e4m3_type)
+        scale = torch.ones((), device=device)
+        scale_result = torch.full((), 0.5, device=device)
+
+        scaled = torch._scaled_mm(
             a,
             b,
             scale_a=scale,
             scale_b=scale,
             scale_result=scale_result,
-            out_dtype=torch.bfloat16,
+            out_dtype=out_dtype,
         )
         unscaled = torch._scaled_mm(
             a,
             b,
             scale_a=scale,
             scale_b=scale,
-            out_dtype=torch.bfloat16,
+            out_dtype=out_dtype,
         )
-        self.assertEqual(high_precision, unscaled)
+
+        self.assertEqual(scaled, unscaled)
 
 
     @onlyCUDA
