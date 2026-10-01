@@ -2,6 +2,9 @@
 
 import contextlib
 import gc
+import gzip
+import json
+import os
 import weakref
 from unittest import mock
 
@@ -11,11 +14,20 @@ import torch.distributed._collective_annotations as ca
 from torch.distributed._collective_annotations import (
     _format_ranks,
     _GroupHooks,
-    _launches_kernels,
+    _on_cuda,
     CollectiveAnnotations,
 )
 from torch.distributed.distributed_c10d import _get_default_group
-from torch.testing._internal.common_cuda import TEST_CUDA_GRAPH_TOOLS_ID
+from torch.profiler import (
+    CuspyConfig,
+    profile,
+    ProfilerActivity,
+    ProfilerActivityConfig,
+)
+from torch.testing._internal.common_cuda import (
+    TEST_CUDA_GRAPH_TOOLS_ID,
+    TEST_CUPTI_V13_3,
+)
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     skip_if_lt_x_gpu,
@@ -24,6 +36,7 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     run_tests,
     skipIfRocm,
+    TemporaryFileName,
     TestCase,
 )
 
@@ -45,7 +58,7 @@ _MARK_KERNELS = "torch.cuda._graph_annotations.mark_kernels"
 def _as_captured(*, launches=True, capturing=True):
     # Gloo runs collectives on CPU tensors outside a capture, which are skipped.
     with (
-        mock.patch.object(ca, "_launches_kernels", return_value=launches),
+        mock.patch.object(ca, "_on_cuda", return_value=launches),
         mock.patch("torch.cuda.is_current_stream_capturing", return_value=capturing),
     ):
         yield
@@ -136,10 +149,8 @@ class TestCollectiveMetadata(MultiProcContinuousTest):
         )
 
     def test_skips_cpu_tensors(self):
-        self.assertFalse(_launches_kernels(mock.Mock(input_tensors=[torch.ones(1)])))
-        self.assertFalse(
-            _launches_kernels(mock.Mock(input_tensors=[], output_tensors=[]))
-        )
+        self.assertFalse(_on_cuda(mock.Mock(input_tensors=[torch.ones(1)])))
+        self.assertFalse(_on_cuda(mock.Mock(input_tensors=[], output_tensors=[])))
         self.assertEqual(
             self._record(lambda: dist.all_reduce(torch.ones(1)), launches=False), []
         )
@@ -164,20 +175,59 @@ class TestCollectiveMetadata(MultiProcContinuousTest):
         self.assertNotIn("Seq", send)
         self.assertNotIn("Seq", recv)
 
-    def test_annotate_error_does_not_fail_collective(self):
-        with (
-            _as_captured(),
-            mock.patch(
-                _MARK_KERNELS,
-                side_effect=RuntimeError("boom"),
-            ),
-        ):
-            annotations = CollectiveAnnotations()
+    def _annotate(self, annotate, fn, *, capturing=True):
+        with _as_captured(capturing=capturing):
+            annotations = CollectiveAnnotations(annotate)
             try:
-                x = torch.ones(1)
-                dist.all_reduce(x)
+                fn()
             finally:
                 annotations.close()
+
+    def test_custom_annotate(self):
+        recorded = []
+
+        def annotate(metadata):
+            recorded.append(metadata["Collective name"])
+            return mock.MagicMock()
+
+        self._annotate(annotate, lambda: dist.all_reduce(torch.ones(1)))
+        self.assertEqual(recorded, ["allreduce"])
+
+    def test_custom_annotate_outside_capture(self):
+        recorded = []
+
+        def annotate(metadata):
+            recorded.append(metadata["Collective name"])
+            return mock.MagicMock()
+
+        self._annotate(
+            annotate, lambda: dist.all_reduce(torch.ones(1)), capturing=False
+        )
+        self.assertEqual(recorded, ["allreduce"])
+
+    def test_same_annotator_entered_once(self):
+        recorded = []
+
+        def annotate(metadata):
+            recorded.append(metadata["Collective name"])
+            return mock.MagicMock()
+
+        with _as_captured():
+            outer = CollectiveAnnotations(annotate)
+            inner = CollectiveAnnotations(annotate)
+            dist.all_reduce(torch.ones(1))
+            inner.close()
+            dist.all_reduce(torch.ones(1))
+            outer.close()
+            dist.all_reduce(torch.ones(1))
+        self.assertEqual(recorded, ["allreduce", "allreduce"])
+
+    def test_annotate_error_does_not_fail_collective(self):
+        def annotate(metadata):
+            raise RuntimeError("boom")
+
+        x = torch.ones(1)
+        self._annotate(annotate, lambda: dist.all_reduce(x))
         self.assertEqual(x.item(), self.world_size)
 
     def _hooks_with_scope(self, op_id):
@@ -185,14 +235,8 @@ class TestCollectiveMetadata(MultiProcContinuousTest):
         hooks = _GroupHooks(_get_default_group())
         with (
             _as_captured(),
-            mock.patch(
-                "torch.distributed._collective_annotations.collective_metadata",
-                return_value={},
-            ),
-            mock.patch(
-                _MARK_KERNELS,
-                return_value=scope,
-            ),
+            mock.patch.object(ca, "collective_metadata", return_value={}),
+            mock.patch.object(ca, "_annotators", (lambda metadata: scope,)),
         ):
             hooks._pre(mock.Mock(op_id=op_id))
         scope.__enter__.assert_called_once()
@@ -291,8 +335,103 @@ class TestCollectiveGraphAnnotations(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     def test_opt_out(self):
         self.assertEqual(
-            self._record_during_capture(annotation_config={"collectives": False}), []
+            self._record_during_capture(
+                annotation_config={"annotate_collectives": False}
+            ),
+            [],
         )
+
+
+class TestCollectiveCuspyAnnotations(MultiProcContinuousTest):
+    world_size = 2
+
+    @classmethod
+    def backend_str(cls):
+        return "nccl"
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda", self.rank)
+
+    def _profile_all_reduce(self, region=None, **cuspy_kwargs):
+        torch.cuda.set_device(self.device)
+        x = torch.ones(1024, device=self.device)
+        dist.all_reduce(x)
+        torch.cuda.synchronize()
+        cuda_config = ProfilerActivityConfig(
+            profiler_configs=[CuspyConfig(**cuspy_kwargs)]
+        )
+        with TemporaryFileName(mode="w+") as trace_path:
+            with profile(
+                activities=[ProfilerActivity.CPU, {ProfilerActivity.CUDA: cuda_config}]
+            ) as prof:
+                if region is None:
+                    dist.all_reduce(x)
+                else:
+                    with torch.profiler.record_function(region):
+                        dist.all_reduce(x)
+                torch.cuda.synchronize()
+            prof.export_chrome_trace(trace_path)
+            gz_path = trace_path + ".gz"
+            if os.path.exists(gz_path):
+                with gzip.open(gz_path, "rt") as f:
+                    events = json.load(f)["traceEvents"]
+            else:
+                with open(trace_path) as f:
+                    events = json.load(f)["traceEvents"]
+        self._events = events
+        return [
+            e
+            for e in events
+            if e.get("cat") == "kernel" and "nccl" in e.get("name", "").lower()
+        ]
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_eager_collective_is_annotated(self):
+        if not TEST_CUPTI_V13_3:
+            self.skipTest("requires libcupti >= 13.3")
+        pg = _get_default_group()
+        kernels = self._profile_all_reduce()
+        self.assertTrue(kernels, "no NCCL kernel in the trace")
+        for kernel in kernels:
+            self.assertEqual(kernel["args"]["Collective name"], "allreduce")
+            self.assertEqual(kernel["args"]["Process Group Name"], pg.group_name)
+            self.assertEqual(kernel["args"]["In msg nelems"], 1024)
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_keeps_enclosing_region(self):
+        if not TEST_CUPTI_V13_3:
+            self.skipTest("requires libcupti >= 13.3")
+        kernels = self._profile_all_reduce(region="outer_region")
+        self.assertTrue(kernels, "no NCCL kernel in the trace")
+        regions = [
+            e
+            for e in self._events
+            if e.get("cat") == "gpu_user_annotation" and e["name"] == "outer_region"
+        ]
+        for kernel in kernels:
+            self.assertEqual(kernel["args"]["Collective name"], "allreduce")
+            self.assertTrue(
+                any(
+                    r["tid"] == kernel["tid"]
+                    and r["ts"] <= kernel["ts"]
+                    and kernel["ts"] + kernel["dur"] <= r["ts"] + r["dur"]
+                    for r in regions
+                ),
+                f"no outer_region annotation covers {kernel}",
+            )
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
+    def test_opt_out(self):
+        if not TEST_CUPTI_V13_3:
+            self.skipTest("requires libcupti >= 13.3")
+        kernels = self._profile_all_reduce(annotate_collectives=False)
+        self.assertTrue(kernels, "no NCCL kernel in the trace")
+        for kernel in kernels:
+            self.assertNotIn("Collective name", kernel["args"])
 
 
 if __name__ == "__main__":

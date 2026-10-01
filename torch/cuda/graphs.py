@@ -1158,7 +1158,7 @@ _ANNOTATION_CONFIG_KEYS: dict[str, tuple[typing.Any, tuple[typing.Any, ...] | No
     "key_by": ("exec", ("exec", "source", "auto")),
     "record_py_stacks": (False, (False, True)),
     "py_stack_filter_paths": (None, None),
-    "collectives": (True, (False, True)),
+    "annotate_collectives": (True, (False, True)),
 }
 
 
@@ -1257,8 +1257,8 @@ class graph:
             Paths are matched on directory boundaries; relative paths are resolved when
             capture begins. ``None`` uses the defaults; an empty list disables filtering.
             Used only with ``record_py_stacks=True``.
-            ``"collectives"`` (bool, default ``True``) tags the kernels of every c10d
-            collective captured with the fields ``record_param_comms`` gives it in
+            ``"annotate_collectives"`` (bool, default ``True``) tags the kernels of every
+            c10d collective captured with the fields ``record_param_comms`` gives it in
             eager mode (``"Collective name"``, ``"Process Group Name"``, ``"Seq"``,
             ...). Pass ``False`` when a wrapper already annotates its collectives.
         check_input_liveness (bool, optional): If ``True``, tracks external tensor inputs during graph capture and
@@ -1452,7 +1452,7 @@ class graph:
             _set_annotation_backend(backend)
             if (
                 self._enable_annotations
-                and self._annotation_config["collectives"]
+                and self._annotation_config["annotate_collectives"]
                 and torch.distributed.is_available()
                 and torch.distributed.is_initialized()
             ):

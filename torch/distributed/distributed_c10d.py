@@ -8148,9 +8148,11 @@ def _register_pg_in_world(
         _world.pg_to_tag[pg] = pg_tag
 
     # Gated: they cost an atomic load per collective until enabled.
-    from torch.distributed._collective_annotations import register_hooks
+    from torch.distributed import _collective_annotations as ca
 
-    register_hooks(pg)
+    hooks = ca._GroupHooks(pg)
+    pg.register_pre_hook(ca._HOOK_ID, hooks._pre, gated=True)
+    pg.register_post_hook(ca._HOOK_ID, hooks._post, gated=True)
 
 
 @contextlib.contextmanager

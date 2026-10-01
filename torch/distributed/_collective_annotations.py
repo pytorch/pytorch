@@ -1,11 +1,13 @@
 """Annotate c10d collectives with their process group.
 
 In eager mode Kineto copies the ``record_param_comms`` metadata of a collective
-onto the kernels it launched. A replayed CUDA graph has no CPU op to copy from, so
-its NCCL kernels carry no process group. Every process group gets gated c10d hooks
-when it is created; ``torch.cuda.graph(..., enable_annotations=True)`` enables them
-for the length of the capture, tagging the collective kernels through
-:func:`torch.cuda.graph_annotations.mark_kernels` with the same fields.
+onto the kernels it launched. A replayed CUDA graph has no CPU op to copy from, and
+Cuspy does not see ``record_param_comms`` at all, so in both cases the NCCL kernels
+carry no process group. Every process group gets gated c10d hooks when it is
+created. ``torch.cuda.graph(..., enable_annotations=True)`` enables them for the
+length of the capture, tagging the collective kernels through
+:func:`torch.cuda.graph_annotations.mark_kernels`; a Cuspy profiling session
+enables them while it records, tagging eager kernels through its observer.
 
 Collectives issued inside ``_coalescing_manager`` or a batched ``batch_isend_irecv``
 are not annotated: their kernels launch when the group ends, outside any hook.
@@ -32,15 +34,16 @@ from torch._C._distributed_c10d import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from contextlib import AbstractContextManager
+
+    Annotator = Callable[[dict[str, Any]], AbstractContextManager[None]]
 
 
 logger = logging.getLogger(__name__)
 
-# c10d runs hooks in ascending id order. Mirrored ids open these scopes after and
-# close them before those of any hook registered with a smaller id.
-_PRE_HOOK_ID = 1 << 62
-_POST_HOOK_ID = -_PRE_HOOK_ID
+# Registering a hook id replaces its hook, so stay clear of user ids.
+_HOOK_ID = 1 << 62
 
 # Names the NCCL backend passes to record_param_comms.
 _COLLECTIVE_NAMES = {
@@ -68,13 +71,12 @@ _IN_PLACE_OPS = {
     HookOpName.REDUCE,
     HookOpName.ALLREDUCE_COALESCED,
 }
-# record_param_comms truncates "Process Group Ranks" past this many ranks.
-_RANKS_TRUNCATE_LENGTH = 30
 
 
 def _format_ranks(ranks: list[int]) -> str:
-    if len(ranks) > _RANKS_TRUNCATE_LENGTH:
-        head = ", ".join(map(str, ranks[: _RANKS_TRUNCATE_LENGTH - 1]))
+    # record_param_comms truncates past 30 ranks.
+    if len(ranks) > 30:
+        head = ", ".join(map(str, ranks[:29]))
         return f"[{head}, ..., {ranks[-1]}]"
     return f"[{', '.join(map(str, ranks))}]"
 
@@ -147,7 +149,7 @@ def collective_metadata(
     return metadata
 
 
-def _launches_kernels(args: PreHookArgs) -> bool:
+def _on_cuda(args: PreHookArgs) -> bool:
     tensors = args.input_tensors or args.output_tensors
     return bool(tensors) and tensors[0].is_cuda
 
@@ -169,52 +171,68 @@ class _GroupHooks:
         # The group owns the hooks, so a strong reference would keep it alive.
         self._group = weakref.ref(group)
         self._fields: _GroupFields | None = None
-        self._scopes: dict[int, AbstractContextManager[None]] = {}
+        self._scopes: dict[int, contextlib.ExitStack] = {}
 
     # A raising hook fails the collective, so annotation errors are only logged.
     def _pre(self, args: PreHookArgs) -> None:
         group = self._group()
-        if group is None or not _launches_kernels(args):
+        if not _annotators or group is None or not _on_cuda(args):
             return
+        scopes = contextlib.ExitStack()
         try:
             if self._fields is None:
                 self._fields = _GroupFields(group)
-            scope = _mark_kernels(collective_metadata(group, args, self._fields))
-            scope.__enter__()
+            metadata = collective_metadata(group, args, self._fields)
+            # A capture and a profiler can both be open with the same annotator.
+            for annotate in dict.fromkeys(_annotators):
+                scopes.enter_context(annotate(metadata))
         except Exception:
             logger.exception("Failed to annotate %s", args.name)
+            self._exit(scopes)
             return
-        self._scopes[args.op_id] = scope
+        self._scopes[args.op_id] = scopes
 
     def _post(self, args: PostHookArgs) -> None:
         # c10d fires the post hook whenever the pre hook fired, even if the gate
         # closed in between.
-        scope = self._scopes.pop(args.op_id, None)
-        if scope is None:
-            return
+        scopes = self._scopes.pop(args.op_id, None)
+        if scopes is not None:
+            self._exit(scopes)
+
+    @staticmethod
+    def _exit(scopes: contextlib.ExitStack) -> None:
         try:
-            scope.__exit__(None, None, None)
+            scopes.close()
         except Exception:
             logger.exception("Failed to close collective annotation")
 
 
-def register_hooks(group: dist.ProcessGroup) -> None:
-    """Registers the gated annotation hooks on a new process group."""
-    hooks = _GroupHooks(group)
-    group.register_pre_hook(_PRE_HOOK_ID, hooks._pre, gated=True)
-    group.register_post_hook(_POST_HOOK_ID, hooks._post, gated=True)
+# One entry per open CollectiveAnnotations.
+_annotators: list[Annotator] = []
 
 
 class CollectiveAnnotations:
-    """Tags the collectives of every process group until :meth:`close`. Only
-    collectives issued from a capturing stream are tagged."""
+    """Tags the collectives of every process group until :meth:`close`.
 
-    def __init__(self) -> None:
+    ``annotate`` maps a collective's metadata to the scope its kernels launch in;
+    it defaults to :func:`~torch.cuda.graph_annotations.mark_kernels` for
+    collectives issued from a capturing stream, and a no-op otherwise. Each open
+    annotator is entered once per collective, however many instances use it.
+    """
+
+    def __init__(
+        self,
+        annotate: Annotator = _mark_kernels,
+    ) -> None:
+        self._annotate = annotate
+        _annotators.append(annotate)
         _enable_gated_hooks()
         self._closed = False
 
     def close(self) -> None:
         """Never raises: ``torch.cuda.graph`` calls it before ending the capture."""
-        if not self._closed:
-            self._closed = True
-            _disable_gated_hooks()
+        if self._closed:
+            return
+        self._closed = True
+        _disable_gated_hooks()
+        _annotators.remove(self._annotate)
