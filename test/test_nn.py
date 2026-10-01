@@ -48,7 +48,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, onlyAccelerator, \
-    skipCUDAIf, skipCUDAIfNoCudnn, skipMPS, \
+    skipCUDAIf, skipCUDAIfNoCudnn, skipMPS, largeMPSBufferTest, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
     expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
@@ -10470,6 +10470,7 @@ class TestNNDeviceType(NNTestCase):
                      #   large_view.grad.numel()) * sizeof(dtype)
                      32769 * (65536 + 3 * 65536 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
+    @largeMPSBufferTest(lambda self, device, dtype : dtype.itemsize * 32769 * 65536)
     def test_grid_sample_large_index_2d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
         # Try accessing the corners, there should be no segfault
@@ -10518,6 +10519,7 @@ class TestNNDeviceType(NNTestCase):
                      #   large_view.grad.numel()) * sizeof(dtype)
                      2 * 32769 * (32768 + 3 * 32768 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
+    @largeMPSBufferTest(lambda self, device, dtype : dtype.itemsize * 2 * 32769 * 32768)
     def test_grid_sample_large_index_3d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
         # Try accessing the corners, there should be no segfault
