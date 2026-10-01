@@ -1,9 +1,8 @@
 # Owner(s): ["module: linear algebra"]
 
-from functools import cache
-
 import torch
 from torch.nn.functional import SwizzleType
+from torch.testing._internal.common_cuda import SM100OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantized import (
     _f32_to_e8m0_rceil,
@@ -16,6 +15,7 @@ from torch.testing._internal.common_quantized import (
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
+    skipIfNoCuteDSL,
     subtest,
     TestCase,
 )
@@ -56,16 +56,12 @@ def _quantize_mxfp8_tma(
     )
 
 
-@cache
-def _nvidia_sm100_or_newer(device: str) -> bool:
-    if torch.version.hip is not None:
-        return False
-    return torch.cuda.get_device_capability(device) >= (10, 0)
+_NVIDIA_SM100_OR_LATER = torch.version.hip is None and bool(SM100OrLater)
 
 
 _MXFP8_IMPLEMENTATIONS = (
     subtest(_quantize_mxfp8_reference, name="reference"),
-    subtest(_quantize_mxfp8_tma, name="tma"),
+    subtest(_quantize_mxfp8_tma, name="tma", decorators=[skipIfNoCuteDSL]),
 )
 
 
@@ -79,7 +75,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
     @parametrize("quantize_fn", _MXFP8_IMPLEMENTATIONS)
     @parametrize("input_dtype", (torch.float32, torch.bfloat16))
     def test_mxfp8_corner_case_bytes(self, quantize_fn, input_dtype, device):
-        if quantize_fn is _quantize_mxfp8_tma and not _nvidia_sm100_or_newer(device):
+        if quantize_fn is _quantize_mxfp8_tma and not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         # copied from
         # https://github.com/pytorch/ao/blob/3972ed015091f659418dedf12edb980a8ca56b53/test/prototype/mx_formats/test_mx_tensor.py#L264
@@ -108,18 +104,15 @@ class TestMXFP8ReferenceNumerics(TestCase):
         ),
         name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
     )
+    @skipIfNoCuteDSL
     def test_to_mx_rceil_randn_sqnr(self, swizzle_type, input_dtype, shape, device):
-        if not _nvidia_sm100_or_newer(device):
+        if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         swizzled = swizzle_type == SwizzleType.SWIZZLE_32_4_4
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
         qdata_ref, scales_ref = _quantize_mxfp8_reference(
             data_hp, "dim_k", False, swizzled
         )
-        original = data_hp.float()
-        ref_scales = from_blocked(qdata_ref, scales_ref, 32) if swizzled else scales_ref
-        dequantized_ref = from_blocked_format(qdata_ref, ref_scales).float()
-        self.assertGreater(compute_error(original, dequantized_ref).item(), 18.0)
         qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_k", False, swizzled)
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
         if swizzled:
@@ -129,7 +122,7 @@ class TestMXFP8ReferenceNumerics(TestCase):
         else:
             self.assertEqual(scales.view(torch.uint8), scales_ref.view(torch.uint8))
         dequantized = from_blocked_format(qdata, scales).float()
-        sqnr = compute_error(original, dequantized)
+        sqnr = compute_error(data_hp.float(), dequantized)
         self.assertGreater(sqnr.item(), 18.0)
 
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
@@ -138,8 +131,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
         ((32, 16), (64, 128), (160, 144), (2048, 2080)),
         name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
     )
+    @skipIfNoCuteDSL
     def test_to_mx_rceil_dim_m(self, input_dtype, shape, device):
-        if not _nvidia_sm100_or_newer(device):
+        if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
         qdata_ref, scales_ref = _quantize_mxfp8_reference(
@@ -156,10 +150,11 @@ class TestMXFP8ReferenceNumerics(TestCase):
         ((32896, 128), (11008, 384)),
         name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
     )
+    @skipIfNoCuteDSL
     def test_to_mx_rceil_dim_m_large_k_tile_boundary(self, input_dtype, shape, device):
-        if not _nvidia_sm100_or_newer(device):
+        if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp = torch.ones(shape, device=device, dtype=input_dtype)
+        data_hp = torch.randn(*shape, device=device, dtype=input_dtype)
         qdata_ref, scales_ref = _quantize_mxfp8_reference(
             data_hp.t().contiguous(), "dim_k", False, True
         )
@@ -175,8 +170,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
         ((32, 32), (64, 128), (160, 160), (2048, 2080)),
         name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
     )
+    @skipIfNoCuteDSL
     def test_to_mx_rceil_dim_km(self, input_dtype, shape, device):
-        if not _nvidia_sm100_or_newer(device):
+        if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
         qdata_k_ref, scales_k_ref = _quantize_mxfp8_reference(
@@ -201,8 +197,9 @@ class TestMXFP8ReferenceNumerics(TestCase):
         ((32, 32), (64, 128), (160, 160), (2048, 4224)),
         name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
     )
+    @skipIfNoCuteDSL
     def test_to_mx_rceil_dim_k_square(self, input_dtype, shape, device):
-        if not _nvidia_sm100_or_newer(device):
+        if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         data_hp = torch.randn(shape, device=device, dtype=input_dtype)
         qdata_ref, scales_ref = mxfp8_32x32_swizzle_f(data_hp)
@@ -213,20 +210,26 @@ class TestMXFP8ReferenceNumerics(TestCase):
         )
 
     @parametrize("input_dtype", (torch.float32, torch.bfloat16, torch.float16))
+    @skipIfNoCuteDSL
     def test_to_mx_rceil_dim_k_square_nan(self, input_dtype, device):
-        if not _nvidia_sm100_or_newer(device):
+        if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
-        data_hp = torch.ones((32, 32), device=device, dtype=input_dtype)
+        data_hp = torch.randn(64, 64, device=device, dtype=input_dtype)
         data_hp[0, 0] = float("nan")
         qdata_ref, scales_ref = mxfp8_32x32_swizzle_f(data_hp)
-        self.assertTrue(torch.isnan(qdata_ref).all())
-        self.assertEqual(scales_ref.view(torch.uint8)[0], 255)
-
         qdata, scales = _quantize_mxfp8_tma(data_hp, "dim_k", True, True)
         self.assertEqual(qdata.view(torch.uint8), qdata_ref.view(torch.uint8))
         self.assertEqual(
             scales.view(torch.uint8).flatten(), scales_ref.view(torch.uint8)
         )
+        expected_nan = torch.zeros((64, 64), device=device, dtype=torch.bool)
+        expected_nan[:32, :32] = True
+        self.assertEqual(torch.isnan(qdata), expected_nan)
+
+        scale_bytes = from_blocked(qdata, scales.flatten(), 32).view(torch.uint8)
+        expected_nan_scale = torch.zeros((64, 2), device=device, dtype=torch.bool)
+        expected_nan_scale[:32, 0] = True
+        self.assertEqual(scale_bytes == 255, expected_nan_scale)
 
     @parametrize(
         "quant_orientation,is_square_scaling,is_scale_swizzled",
@@ -243,10 +246,11 @@ class TestMXFP8ReferenceNumerics(TestCase):
         ((0, 32), (32, 0), (0, 0)),
         name_fn=lambda shape: f"M{shape[0]}_K{shape[1]}",
     )
+    @skipIfNoCuteDSL
     def test_to_mx_rceil_empty(
         self, quant_orientation, is_square_scaling, is_scale_swizzled, shape, device
     ):
-        if not _nvidia_sm100_or_newer(device):
+        if not _NVIDIA_SM100_OR_LATER:
             self.skipTest("MXFP8 TMA requires NVIDIA SM100 or newer")
         data_hp = torch.empty(shape, dtype=torch.bfloat16, device=device)
         M, K = shape
