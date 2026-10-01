@@ -11,26 +11,13 @@ can be used to visualize the traces in Perfetto/Chrome Trace Viewer.
 Currently, tracing on NVIDIA and AMD GPUs are supported as well as XPU and HPU.
 
 ## Build Notes
-Libkineto is built as part of the regular PyTorch build when `USE_KINETO=1`
-(the default) and linked statically into `libtorch_cpu`. The setup lives in the
-Kineto section of `cmake/Dependencies.cmake`, which:
+Libkineto is built with PyTorch and linked statically into `libtorch_cpu`. It is
+on by default; set `USE_KINETO=0` to turn it off.
 
-- picks `KINETO_BACKEND` from the PyTorch build: `cuda` (CUPTI) when
-  `USE_CUDA=1`, `rocm` (rocprofiler-sdk) when `USE_ROCM=1`, `xpu` when
-  `USE_XPU=1` and `XPU_ENABLE_KINETO` is set, and `cpu` otherwise;
-- supplies fmt, googletest, and nlohmann_json from PyTorch's own `third_party`.
-
-### Running the Tests
-Kineto's C++ unit tests are built when `BUILD_TEST=1` (except for the `xpu`
-backend). The binaries are written to `build/bin/kineto/` and can be run
-directly:
-
-```
-build/bin/kineto/ConfigTest
-```
-
-In CI they are run by `.ci/pytorch/test.sh`, which picks up every binary in
-that directory.
+The backend follows the PyTorch build: CUPTI for CUDA, rocprofiler-sdk for
+ROCm, XPUPTI for XPU (when `XPU_ENABLE_KINETO` is set), and CPU-only otherwise.
+Its dependencies (fmt, googletest, nlohmann_json) come from PyTorch's
+`third_party`. See the Kineto section of `cmake/Dependencies.cmake` for details.
 
 ## How Libkineto works
 
