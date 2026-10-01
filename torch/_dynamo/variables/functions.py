@@ -82,7 +82,6 @@ from ..source import (
     ImportSource,
     is_constant_source,
     is_from_skip_guard_source,
-    SkipGuardSource,
     TypeMROSource,
     TypeSource,
 )
@@ -2061,7 +2060,9 @@ class UserMethodVariable(BaseUserFunctionVariable):
         constant_implicit_args = (
             [
                 self.im_self,
-                *self.im_func._constant_implicit_args(tx, [self.im_self, *args], kwargs),
+                *self.im_func._constant_implicit_args(
+                    tx, [self.im_self, *args], kwargs
+                ),
             ]
             if self.is_constant
             else []
@@ -2310,11 +2311,12 @@ def _check_no_in_graph_default_mutation(
             current = current.base
 
 
-def _self_referential_constant_arg(source: Source, name: str) -> Never:
+def _self_referential_constant_arg(source: Source | None, name: str) -> Never:
+    source_name = source.name if source is not None else "<sourceless argument>"
     unimplemented(
         gb_type="assume_constant_result specialize_args self-referential argument",
-        context=f"function {name}, source {source.name}",
-        explanation=f"Argument `{source.name}` of function {name} marked with "
+        context=f"function {name}, source {source_name}",
+        explanation=f"Argument `{source_name}` of function {name} marked with "
         f"torch._dynamo.assume_constant_result(specialize_args=True) is part of a "
         f"reference cycle, so it cannot be walked to derive value guards.",
         hints=[
@@ -2440,8 +2442,7 @@ def _install_constant_arg_guards(
         # Exact types only (subclass state is invisible to the item walk);
         # TYPE_MATCH forces a recompile when a later call switches types.
         if not (
-            istype(value, (tuple, list, torch.Size))
-            or _is_stateless_namedtuple(value)
+            istype(value, (tuple, list, torch.Size)) or _is_stateless_namedtuple(value)
         ):
             _unguardable_constant_arg(
                 source,
@@ -2488,14 +2489,13 @@ def _install_constant_arg_guards(
         field_names = {f.name for f in dataclasses.fields(value)}
         extra = set(getattr(value, "__dict__", ())) - field_names
         for klass in type(value).__mro__:
-            slots = klass.__dict__.get("__slots__", ())
-            for slot in (slots,) if isinstance(slots, str) else slots:
-                if (
-                    slot not in field_names
-                    and slot not in ("__dict__", "__weakref__")
-                    and hasattr(value, slot)
-                ):
-                    extra.add(slot)
+            extra.update(
+                slot
+                for slot, descriptor in klass.__dict__.items()
+                if isinstance(descriptor, types.MemberDescriptorType)
+                and slot not in field_names
+                and slot not in ("__dict__", "__weakref__")
+            )
         if extra:
             _unguardable_constant_arg(
                 source,
@@ -2504,6 +2504,10 @@ def _install_constant_arg_guards(
                 f"dataclass has non-field attributes {sorted(extra)}",
             )
         install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
+        if hasattr(value, "__dict__"):
+            dict_source = AttrSource(source, "__dict__")
+            install_guard(dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+            tx.output.guard_on_key_order.add(dict_source)
         for field in dataclasses.fields(value):
             if not hasattr(value, field.name):
                 _unguardable_constant_arg(
@@ -2581,9 +2585,9 @@ def invoke_and_store_as_constant(
         source: Source | None = None,
         ancestors: frozenset[int] = frozenset(),
     ) -> Any:
-        # `source` is threaded when recursing into a container whose leaves are
-        # not all python constants; at the top level it is the argument's source.
-        top_level = source is None
+        # Sourced containers derive child sources; new containers retain each
+        # child's own source instead.
+        use_own_source = source is None
         if source is None:
             source = x.source
         if x.is_tensor():
@@ -2607,67 +2611,72 @@ def invoke_and_store_as_constant(
             # specializes it to the traced value and installs a shape-env
             # guard, so a different value recompiles and re-invokes fn.
             return x.evaluate_expr(tx.output)
-        # A sourceless value is built by the traced bytecode itself and a
-        # constant-source one is already baked into the graph: neither can vary
-        # across calls, so no guard is needed (and none can be installed).
-        # Split conditions: pyrefly does not narrow `source` past a compound
-        # `or` whose branch exits via NoReturn inside an except handler.
-        if source is None:
+        # ConstantSource values are already baked into the graph. A new
+        # container has no source, but its children can still vary across calls.
+        if source is not None and is_constant_source(source):
             return convert_guardless(x)
-        if is_constant_source(source):
-            return convert_guardless(x)
-        # The cycle check lives below the sourceless/constant-source branch so
-        # `source` is narrowed; it cannot fire at top level (ancestors is empty).
         if id(x) in ancestors:
             _self_referential_constant_arg(source, name)
         ancestors = ancestors | {id(x)}
-        if top_level:
-            if is_from_skip_guard_source(source):
-                _unguardable_constant_arg_source(source, name)
-            _check_no_in_graph_mutation(x, tx, name, source)
-        if isinstance(x, UserDefinedObjectVariable):
-            value = x.value
-            _install_constant_arg_guards(source, value, name, set(), tx)
-            return value
-        # Fast path: a fully-constant argument (covers wholly-literal containers,
-        # enums, and constant classes) bakes as one value with whole-value guards.
-        try:
-            value = x.as_python_constant()
-        except AsPythonConstantNotImplementedError:
-            pass
-        else:
-            _install_constant_arg_guards(source, value, name, set(), tx)
-            return value
-        # A container whose structure is guardable but whose leaves are not all
-        # python constants (e.g. a nested int promoted to a dynamic SymInt by
-        # automatic dynamic on recompile): walk the tracker and specialize the
-        # dynamic leaves rather than graph-breaking on as_python_constant.
-        # Subclasses fall through to the graph break below: they can carry
-        # state beyond their items (see _install_constant_arg_guards).
+        if source is not None:
+            if use_own_source:
+                if is_from_skip_guard_source(source):
+                    _unguardable_constant_arg_source(source, name)
+                _check_no_in_graph_mutation(x, tx, name, source)
+            if isinstance(x, UserDefinedObjectVariable):
+                value = x.value
+                _install_constant_arg_guards(source, value, name, set(), tx)
+                return value
+            try:
+                value = x.as_python_constant()
+            except AsPythonConstantNotImplementedError:
+                pass
+            else:
+                _install_constant_arg_guards(source, value, name, set(), tx)
+                return value
+        # Walk new containers and sourced containers with symbolic leaves.
         if isinstance(
             x, (variables.ListVariable, variables.TupleVariable)
         ) and x.python_type() in (tuple, list, torch.Size):
-            install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
-            install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
+            if source is not None:
+                install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
+                install_guard(source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             return x.python_type()(
-                convert_specialized(item, GetItemSource(source, i), ancestors)
+                convert_specialized(
+                    item,
+                    GetItemSource(source, i) if source is not None else None,
+                    ancestors,
+                )
                 for i, item in enumerate(x.items)
             )
-        if isinstance(x, variables.ConstDictVariable) and x.python_type() is dict and all(
-            key.vt.is_python_constant()
-            and ConstantVariable.is_literal(key.vt.as_python_constant())
-            for key in x.items
+        if (
+            isinstance(x, variables.ConstDictVariable)
+            and x.python_type() is dict
+            and all(
+                key.vt.is_python_constant()
+                and ConstantVariable.is_literal(key.vt.as_python_constant())
+                for key in x.items
+            )
         ):
-            install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
-            install_guard(source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
-            tx.output.guard_on_key_order.add(source)
+            if source is not None:
+                install_guard(source.make_guard(GuardBuilder.TYPE_MATCH))
+                install_guard(source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+                tx.output.guard_on_key_order.add(source)
             result = {}
             for key, val in x.items.items():
-                py_key = key.vt.as_python_constant()
+                py_key = (
+                    key.vt.as_python_constant()
+                    if source is not None
+                    else convert_specialized(key.vt, ancestors=ancestors)
+                )
                 result[py_key] = convert_specialized(
-                    val, DictGetItemSource(source, py_key), ancestors
+                    val,
+                    DictGetItemSource(source, py_key) if source is not None else None,
+                    ancestors,
                 )
             return result
+        if source is None:
+            return convert_guardless(x)
         unimplemented(
             gb_type="assume_constant_result specialize_args argument conversion failed",
             context=f"function {name}, variable type {type(x).__name__}",
@@ -2688,11 +2697,13 @@ def invoke_and_store_as_constant(
         return convert_plain(x)
 
     for x in implicit_args:
-        if not specialize_args and isinstance(x, variables.NNModuleVariable):
+        if specialize_args:
+            convert_specialized(x)
+        elif isinstance(x, variables.NNModuleVariable):
             if x.source is not None:
                 install_guard(x.source.make_guard(GuardBuilder.ID_MATCH))
-        else:
-            convert(x)
+        elif isinstance(x, UserDefinedObjectVariable):
+            convert_plain(x)
 
     args = [convert(x) for x in args]
     kwargs = {k: convert(v) for k, v in kwargs.items()}

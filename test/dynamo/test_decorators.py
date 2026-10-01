@@ -1940,6 +1940,27 @@ class DecoratorTests(PytreeRegisteringTestCase):
             self.assertEqual(fn(x, sizes, cfg), expected)
         self.assertEqual(cnts.frame_count, 3)
 
+    @parametrize("as_dict", [False, True])
+    @parametrize("diamond", [False, True])
+    def test_assume_constant_result_specialize_args_new_dynamic_container(
+        self, as_dict, diamond
+    ):
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(values):
+            return values[0][0] + values[1][0] if diamond else values[0]
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True, dynamic=True)
+        def fn(x):
+            values = {0: x.shape[0]} if as_dict else [x.shape[0]]
+            return x + select([values, values] if diamond else values)
+
+        for n in (3, 3, 5, 5):
+            x = torch.ones(n)
+            self.assertEqual(fn(x), x + n * (2 if diamond else 1))
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_assume_constant_result_specialize_args_enum(self):
         import enum
 
@@ -2018,29 +2039,83 @@ class DecoratorTests(PytreeRegisteringTestCase):
         with self.assertRaisesRegex(Unsupported, "non-field attributes"):
             fn(torch.ones(4), Params(128))
 
-    def test_assume_constant_result_specialize_args_dataclass_slotted_extra(self):
+    def test_assume_constant_result_specialize_args_dataclass_added_attr(self):
         import dataclasses
 
         @dataclasses.dataclass
         class Params:
-            __slots__ = ("seqlen", "scale")
-            seqlen: int
-
-            def __post_init__(self):
-                self.scale = 2.0
+            scale: float
 
         @torch._dynamo.assume_constant_result(specialize_args=True)
         def select(p):
-            return float(p.scale)
+            return getattr(p, "extra", p.scale)
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x, p):
             return x * select(p)
 
-        # scale lives in __slots__, not __dict__; it must still be detected
-        # as non-field state.
+        x = torch.ones(4)
+        p = Params(2.0)
+        self.assertEqual(fn(x, p), x * 2.0)
+        p.extra = 3.0
         with self.assertRaisesRegex(Unsupported, "non-field attributes"):
-            fn(torch.ones(4), Params(128))
+            fn(x, p)
+
+    def test_assume_constant_result_specialize_args_dataclass_dict_order(self):
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Params:
+            a: float
+            b: float
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(p):
+            return next(iter(vars(p).values()))
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x, p):
+            return x * select(p)
+
+        x = torch.ones(4)
+        p = Params(1.0, 2.0)
+        self.assertEqual(fn(x, p), x)
+        p.__dict__ = {"b": 2.0, "a": 1.0}
+        self.assertEqual(fn(x, p), x * 2.0)
+        self.assertEqual(cnts.frame_count, 2)
+
+    @parametrize("private", [False, True])
+    @parametrize("initialized", [False, True])
+    def test_assume_constant_result_specialize_args_dataclass_slotted_extra(
+        self, private, initialized
+    ):
+        import dataclasses
+
+        class Base:
+            __slots__ = ("__scale",) if private else ("scale",)
+
+        @dataclasses.dataclass
+        class Params(Base):
+            __slots__ = ("seqlen",)
+            seqlen: int
+
+        attr = "_Base__scale" if private else "scale"
+
+        @torch._dynamo.assume_constant_result(specialize_args=True)
+        def select(p):
+            return getattr(p, attr, 1.0)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, p):
+            return x * select(p)
+
+        p = Params(128)
+        if initialized:
+            setattr(p, attr, 2.0)
+        with self.assertRaisesRegex(Unsupported, "non-field attributes"):
+            fn(torch.ones(4), p)
 
     def test_assume_constant_result_specialize_args_dataclass_slots_true(self):
         import dataclasses
@@ -2312,9 +2387,34 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(fn(x), x * 3)
         self.assertEqual(cnts.frame_count, 2)
 
-    @parametrize(
-        "mutation", ["pos_rebind", "kw_rebind", "kw_item", "kw_input"]
-    )
+    @parametrize("kw_only", [False, True])
+    def test_assume_constant_result_composite_default(self, kw_only):
+        default = (torch.tensor(2.0),)
+
+        if kw_only:
+
+            @torch._dynamo.assume_constant_result
+            def select(*, config=default):
+                return config[0].item()
+
+        else:
+
+            @torch._dynamo.assume_constant_result
+            def select(config=default):
+                return config[0].item()
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts, fullgraph=True)
+        def fn(x):
+            return x * select()
+
+        x = torch.ones(4)
+        self.assertEqual(fn(x), x * 2)
+        self.assertEqual(fn(x + 1), (x + 1) * 2)
+        self.assertEqual(cnts.frame_count, 1)
+
+    @parametrize("mutation", ["pos_rebind", "kw_rebind", "kw_item", "kw_input"])
     def test_assume_constant_result_default_mutated_in_graph(self, mutation):
         if mutation == "pos_rebind":
 
@@ -2342,9 +2442,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 defaults["p"] = 3.0
             return x * select()
 
-        with self.assertRaisesRegex(
-            Unsupported, "default argument mutated in graph"
-        ):
+        with self.assertRaisesRegex(Unsupported, "default argument mutated in graph"):
             fn(torch.ones(4), kwdefaults)
 
     def test_assume_constant_result_unrelated_mutation(self):
@@ -2590,15 +2688,19 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(fn(x, P({"b": 2.0, "a": 1.0})), x * 2.0)
         self.assertEqual(cnts.frame_count, 2)
 
-    def test_assume_constant_result_specialize_args_nested_container_mutation(self):
+    @parametrize("wrapped", [False, True])
+    def test_assume_constant_result_specialize_args_nested_container_mutation(
+        self, wrapped
+    ):
         @torch._dynamo.assume_constant_result(specialize_args=True)
         def select(d):
+            d = d[0] if wrapped else d
             return d["scale"] + d.get("extra", 0.0)
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x, d):
             d["inner"]["extra"] = 1.0
-            return x * select(d["inner"])
+            return x * select([d["inner"]] if wrapped else d["inner"])
 
         with self.assertRaisesRegex(Unsupported, "mutated in graph"):
             fn(torch.ones(4), {"inner": {"scale": 2.0}})
@@ -2648,28 +2750,44 @@ class DecoratorTests(PytreeRegisteringTestCase):
         # carry guards but also cannot vary across calls.
         self.assertEqual(fn(torch.ones(4)), torch.ones(4) * 4.0)
 
-    def test_assume_constant_result_specialize_args_skip_guard_source(self):
+    @parametrize("container", ["direct", "list", "dict_key"])
+    def test_assume_constant_result_specialize_args_skip_guard_source(self, container):
+        import inspect
+
         @torch._dynamo.assume_constant_result(specialize_args=True)
-        def select(ann):
-            return 1.0 if ann.get("return") is float else 2.0
+        def select(value):
+            if container == "dict_key":
+                value = next(iter(value))
+            elif container == "list":
+                value = value[0]
+            return float(len(value))
 
         @torch.compile(backend="eager", fullgraph=True)
-        def fn(x, g):
-            return x * select(g.__annotations__)
+        def fn(x, parameter):
+            value = parameter.name
+            if container == "dict_key":
+                value = {value: 1.0}
+            elif container == "list":
+                value = [value]
+            return x * select(value)
 
-        def g(a: int) -> float:
-            return 0.0
-
+        parameter = inspect.Parameter("arg", inspect.Parameter.POSITIONAL_ONLY)
         with self.assertRaisesRegex(Unsupported, "unguardable argument source"):
-            fn(torch.ones(4), g)
+            fn(torch.ones(4), parameter)
 
-    def test_assume_constant_result_specialize_args_self_referential_list(self):
+    @parametrize("sourceless", [False, True])
+    def test_assume_constant_result_specialize_args_self_referential_list(
+        self, sourceless
+    ):
         @torch._dynamo.assume_constant_result(specialize_args=True)
         def select(lst):
             return float(lst[0])
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x, lst):
+            if sourceless:
+                lst = [1.0]
+                lst.append(lst)
             return x * select(lst)
 
         lst = [1.0]
@@ -2677,14 +2795,16 @@ class DecoratorTests(PytreeRegisteringTestCase):
         with self.assertRaisesRegex(Unsupported, "reference cycle"):
             fn(torch.ones(4), lst)
 
-    def test_assume_constant_result_specialize_args_tensor_arg(self):
+    @parametrize("wrapped", [False, True])
+    def test_assume_constant_result_specialize_args_tensor_arg(self, wrapped):
         @torch._dynamo.assume_constant_result(specialize_args=True)
         def select(t):
+            t = t[0] if wrapped else t
             return float(t.sum())
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x, t):
-            return x * select(t)
+            return x * select([t] if wrapped else t)
 
         with self.assertRaisesRegex(Unsupported, "tensor argument"):
             fn(torch.ones(4), torch.ones(4))
