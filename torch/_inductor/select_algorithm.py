@@ -767,6 +767,22 @@ class TritonTemplateKernel(TritonKernel):
     def _gen_tmp_var(self) -> str:
         return f"_tmp_var{next(self.tmp_var_ctr)}"
 
+    def get_load_input_names(self) -> OrderedSet[str]:
+        """Return named-input buffers used to route producers to load_input()."""
+        return OrderedSet(
+            input_node.get_name()
+            for input_node in self.input_nodes[
+                self.prefix_args : len(self.input_nodes) - self.suffix_args
+            ]
+        )
+
+    def get_store_output_input_names(self) -> OrderedSet[str]:
+        """Return prefix-input buffers used to route producers to store_output()."""
+        return OrderedSet(
+            self.input_nodes[index].get_name()
+            for index in self.prefix_inputs_fusion_indices
+        )
+
     def _is_input_fused(self, input_name: str) -> bool:
         return (
             input_name in self.load_input_fused_inputs
@@ -2144,9 +2160,10 @@ class TritonTemplateKernel(TritonKernel):
         ``consumer_nodes`` are downstream of the template and are emitted in its
         output epilogue.
 
-        Default: trivial routing — all consumers broadcast to every subgraph,
-        none unfused, no producer source tracking. Override in subclasses for
-        per-output routing.
+        Default: all epilogue-region fusions—both store-output producers and
+        downstream consumers—are applied to every store-output subgraph.
+        ExternalTritonTemplateKernel overrides this for per-output routing,
+        retaining consumers that cannot be fused, and producer-source metadata.
         """
         self._epilogue_nodes_by_subgraph: defaultdict[int, list[Any]] = defaultdict(
             lambda: consumer_nodes
@@ -2290,6 +2307,8 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
     """
 
     def __init__(self, template_buffer: "ir.TemplateBuffer") -> None:
+        self._template_buffer = template_buffer
+
         class _RealOutputNode:
             def get_size(self) -> list:
                 return list(template_buffer.get_size())
@@ -2300,11 +2319,11 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             def get_name(self) -> str:
                 return template_buffer.get_name()
 
-        # Pass dummy values for TritonTemplateKernel params that are only
-        # relevant for standalone Triton kernel codegen (grid, warps, etc.).
+        # External named inputs are exposed through get_load_input_names(). The
+        # remaining arguments are dummy values used only by standalone Triton codegen.
         super().__init__(
             kernel_name="",
-            input_nodes=tuple(template_buffer._named_inputs.values()),
+            input_nodes=(),
             output_node=_RealOutputNode(),
             defines={},
             num_stages=0,
@@ -2314,7 +2333,6 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             call_sizes=[],
             hint_override=None,
         )
-        self._template_buffer = template_buffer
         # Extra inputs needed by fused ops beyond the template's own I/O
         self._extra_inputs: dict[str, str] = {}
         # Prologue primary source buffers, populated by load_input
@@ -2337,6 +2355,15 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
         # Reference to the scheduler, set by _compute_fusion_metadata;
         # used in call_kernel() to codegen unfused epilogue nodes
         self._scheduling_ref: Any = None
+
+    def get_load_input_names(self) -> OrderedSet[str]:
+        return OrderedSet(
+            input_node.get_name()
+            for input_node in self._template_buffer._named_inputs.values()
+        )
+
+    def get_store_output_input_names(self) -> OrderedSet[str]:
+        return OrderedSet()
 
     def _finalize_partial_render(
         self, partial_code: str | PartialRender
