@@ -3842,7 +3842,9 @@ kernel void svd_jacobi(
         }
         float apq_abs = precise::sqrt(svd_abs2(apq_acc));
         float off = precise::sqrt(app * aqq);
-        if (off < eps || apq_abs <= params.tol * off) {
+        // Test relative column correlation even for small column norms:
+        // an absolute epsilon cutoff leaves small columns non-orthogonal.
+        if (off == 0.0f || apq_abs <= params.tol * off) {
           continue;
         }
         if (simd_lane == 0) {

@@ -33,6 +33,7 @@ from torch.cuda._memory_viz import (
     _profile_to_snapshot,
     profile_plot,
     segment_plot,
+    segments,
     trace_plot,
 )
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
@@ -207,6 +208,170 @@ def _check_allocator_settings_on_tear_down(test_case):
     # baseline. This should be called in the class's `tearDown` method.
     md = torch.cuda.memory._snapshot()["allocator_settings"]
     test_case.assertEqual(md["expandable_segments"], EXPANDABLE_SEGMENTS)
+
+
+@unittest.skipIf(not TEST_WITH_ROCM, "ROCm only")
+class TestAmdSmiImport(TestCase):
+    def _run_amdsmi_import(
+        self,
+        amdsmi_source,
+        *,
+        library_name=None,
+        provide_fallback=False,
+        provide_requested_library=False,
+        provide_loader_library=False,
+        provide_sdk_library=False,
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            package_dir = os.path.join(tmpdir, "amdsmi")
+            os.mkdir(package_dir)
+            with open(
+                os.path.join(package_dir, "__init__.py"), "w", encoding="utf-8"
+            ) as stub:
+                stub.write(amdsmi_source)
+
+            env_updates = {}
+            env_updates["PYTHONPATH"] = os.pathsep.join(
+                path
+                for path in (
+                    tmpdir,
+                    os.path.dirname(os.path.dirname(torch.__file__)),
+                    os.environ.get("PYTHONPATH"),
+                )
+                if path
+            )
+
+            library_source = ""
+            if any(
+                (
+                    provide_fallback,
+                    provide_requested_library,
+                    provide_loader_library,
+                    provide_sdk_library,
+                )
+            ):
+                with open("/proc/self/maps", encoding="utf-8") as maps:
+                    mapped_libc = (
+                        fields[-1]
+                        for line in maps
+                        if (fields := line.split())
+                        and fields[-1].startswith("/")
+                        and os.path.basename(fields[-1]).startswith("libc.so")
+                        and os.path.isfile(fields[-1])
+                    )
+                    library_source = next(mapped_libc)
+
+            if library_name is not None:
+                library_path = os.path.join(package_dir, library_name)
+                env_updates["AMDSMI_TEST_LIBRARY"] = library_path
+                if provide_requested_library:
+                    os.symlink(library_source, library_path)
+            if provide_fallback:
+                rocm_home = os.path.join(tmpdir, "rocm")
+                os.makedirs(os.path.join(rocm_home, "lib"))
+                os.symlink(
+                    library_source, os.path.join(rocm_home, "lib", "libamd_smi.so")
+                )
+                env_updates["ROCM_HOME"] = rocm_home
+            if provide_loader_library:
+                loader_dir = os.path.join(tmpdir, "loader")
+                os.mkdir(loader_dir)
+                os.symlink(library_source, os.path.join(loader_dir, "libamd_smi.so"))
+                env_updates["LD_LIBRARY_PATH"] = loader_dir
+                env_updates["ROCM_HOME"] = ""
+                env_updates["ROCM_PATH"] = ""
+            if provide_sdk_library:
+                sdk_lib_dir = os.path.join(tmpdir, "_rocm_sdk_core", "lib")
+                os.makedirs(sdk_lib_dir)
+                with open(
+                    os.path.join(tmpdir, "_rocm_sdk_core", "__init__.py"),
+                    "w",
+                    encoding="utf-8",
+                ):
+                    pass
+                os.symlink(
+                    library_source,
+                    os.path.join(sdk_lib_dir, "libamd_smi.so.99"),
+                )
+
+            with patch.dict(os.environ, env_updates):
+                return subprocess.run(
+                    [
+                        sys.executable,
+                        "-c",
+                        "import torch; import torch.cuda; "
+                        "print(torch.cuda._HAS_AMDSMI); "
+                        "print(type(torch.cuda._AMDSMI_ERR).__name__); "
+                        "print(torch.cuda._AMDSMI_ERR)",
+                    ],
+                    capture_output=True,
+                    cwd=tmpdir,
+                    text=True,
+                    timeout=90,
+                )
+
+    def test_amdsmi_versioned_library_path_is_preserved(self):
+        proc = self._run_amdsmi_import(
+            """\
+import ctypes
+import os
+
+ctypes.CDLL(os.environ["AMDSMI_TEST_LIBRARY"])
+""",
+            library_name="libamd_smi.so.27",
+            provide_fallback=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.splitlines()[:2], ["False", "OSError"])
+        self.assertIn("libamd_smi.so.27", proc.stdout)
+
+    def test_amdsmi_explicit_unversioned_path_is_redirected(self):
+        proc = self._run_amdsmi_import(
+            """\
+import ctypes
+import os
+from pathlib import Path
+
+library = ctypes.CDLL(Path(os.environ["AMDSMI_TEST_LIBRARY"]))
+if os.fspath(library._name) == os.environ["AMDSMI_TEST_LIBRARY"]:
+    raise RuntimeError("explicit unversioned path was not redirected")
+""",
+            library_name="libamd_smi.so",
+            provide_fallback=True,
+            provide_requested_library=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.splitlines()[:2], ["True", "NoneType"])
+
+    def test_amdsmi_bare_unversioned_path_uses_loader_first(self):
+        proc = self._run_amdsmi_import(
+            """\
+import ctypes
+
+library = ctypes.CDLL("libamd_smi.so")
+if library._name != "libamd_smi.so":
+    raise RuntimeError(f"bare request redirected to {library._name}")
+""",
+            provide_loader_library=True,
+            provide_sdk_library=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.splitlines()[:2], ["True", "NoneType"])
+
+    def test_amdsmi_undefined_symbol_does_not_abort_torch_import(self):
+        proc = self._run_amdsmi_import(
+            'raise AttributeError("libamd_smi.so: undefined symbol: test_symbol")\n'
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.splitlines()[:2], ["False", "AttributeError"])
+        self.assertIn("undefined symbol: test_symbol", proc.stdout)
+
+    def test_amdsmi_unrelated_attribute_error_propagates(self):
+        proc = self._run_amdsmi_import(
+            'raise AttributeError("unexpected amdsmi package failure")\n'
+        )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("unexpected amdsmi package failure", proc.stderr)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
@@ -6815,11 +6980,9 @@ class TestCudaAllocator(TestCase):
                         self.assertEqual(x.untyped_storage().data_ptr(), b["address"])
             self.assertTrue(found_it)
 
-            if not IS_WINDOWS:
-                with tempfile.NamedTemporaryFile() as f:
-                    torch.cuda.memory._save_segment_usage(f.name)
-                    with open(f.name) as f2:
-                        self.assertTrue("test_cuda.py" in f2.read())
+            # Rendering downloads flamegraph.pl; the collapsed stacks it would
+            # render already carry the frames checked here.
+            self.assertIn("test_cuda.py", segments(ss, format_flamegraph=lambda s: s))
             del unused
             del x
             torch._C._cuda_clearCublasWorkspaces()
