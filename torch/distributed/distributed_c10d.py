@@ -8147,6 +8147,11 @@ def _register_pg_in_world(
         _world.tags_to_pg.setdefault(pg_tag, []).append(pg)
         _world.pg_to_tag[pg] = pg_tag
 
+    # Gated: they cost an atomic load per collective until enabled.
+    from torch.distributed._collective_annotations import register_hooks
+
+    register_hooks(pg)
+
 
 @contextlib.contextmanager
 def record_comm(name: str) -> collections.abc.Iterator[None]:
