@@ -6162,12 +6162,6 @@ class TemplateBuffer(OperationBuffer):
         """Whether this template produces multiple outputs via MultiOutputLayout."""
         return isinstance(self.layout, MultiOutputLayout)
 
-    def get_load_input_fusion_allowed_inputs(self) -> OrderedSet[str]:
-        return self.load_input_fusion_allowed_inputs
-
-    def get_store_output_fusion_allowed_inputs(self) -> OrderedSet[str]:
-        return self.store_output_fusion_allowed_inputs
-
     def has_aliasing_or_mutation_for_prologue_fusion(
         self, scheduler_node: _HasAliasingOrMutation
     ) -> bool:
@@ -6527,21 +6521,15 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         render = self.make_kernel_render
         prev_kind = self._render_kind
         prev_caller = self._render_caller
-        prev_load_inputs = self.load_input_fusion_allowed_inputs
-        prev_store_inputs = self.store_output_fusion_allowed_inputs
         self.make_kernel_render = caller.get_make_kernel_render()
         self._render_kind = "nvgemm"
         self._render_caller = caller
-        self.load_input_fusion_allowed_inputs = OrderedSet()
-        self.store_output_fusion_allowed_inputs = OrderedSet()
         try:
             yield
         finally:
             self.make_kernel_render = render
             self._render_kind = prev_kind
             self._render_caller = prev_caller
-            self.load_input_fusion_allowed_inputs = prev_load_inputs
-            self.store_output_fusion_allowed_inputs = prev_store_inputs
 
     def finalize_as_nvgemm_caller(self, caller: ChoiceCaller) -> None:
         from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
@@ -6571,20 +6559,9 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
             self._make_kernel_renders[hint_override] = caller.get_make_kernel_render()
 
         # Set the default to be the one without hint override
-        default_caller = callers[None]
-        if not isinstance(
-            default_caller, torch._inductor.select_algorithm.TritonTemplateCaller
-        ):
-            raise AssertionError(type(default_caller))
         self.make_kernel_render = self._make_kernel_renders[None]
         self._render_kind = "triton"
-        self._render_caller = default_caller
-        self.load_input_fusion_allowed_inputs = (
-            default_caller.load_input_fusion_allowed_inputs
-        )
-        self.store_output_fusion_allowed_inputs = (
-            default_caller.store_output_fusion_allowed_inputs
-        )
+        self._render_caller = callers[None]
 
 
 class CUTLASSTemplateBuffer(TemplateBuffer):
