@@ -656,8 +656,6 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   }
   TensorArg output{output_t, "result", 0};
 
-  // TODO: Remove me when MacOS-14 is no longer supported
-
   if (!is_macos_at_least(MacOSVersion::MACOS_15_1) && !is3DConv) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
     for (auto elem : output_t.sizes()) {
