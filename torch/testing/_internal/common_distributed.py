@@ -224,7 +224,10 @@ def skip_if_no_gpu(func):
 
         return func(*args, **kwargs)
 
-    wrapper._skip_no_accelerator_before_spawn = TEST_SKIPS["no_accelerator"].message
+    # `_skipped_reason` marks skips every rank would hit, so launchers can skip
+    # before spawning ranks. Rank-side checks remain authoritative.
+    if torch.accelerator.current_accelerator(check_available=False) is None:
+        wrapper._skipped_reason = TEST_SKIPS["no_accelerator"].message
     return wrapper
 
 
@@ -242,8 +245,8 @@ def skip_if_small_worldsize(func):
 
         return func(*args, **kwargs)
 
-    # Allow TestDistBackend to skip before launching rank workers.
-    wrapper._skip_small_worldsize_before_spawn = True
+    if os.environ.get("BACKEND") != "mpi" and int(os.environ.get("WORLD_SIZE", 8)) < 8:
+        wrapper._skipped_reason = TEST_SKIPS["small_worldsize"].message
     return wrapper
 
 
@@ -322,10 +325,11 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
-        if not allow_cpu:
-            wrapper._skip_no_accelerator_before_spawn = TEST_SKIPS[
-                f"multi-device-{x}"
-            ].message
+        if (
+            not allow_cpu
+            and torch.accelerator.current_accelerator(check_available=False) is None
+        ):
+            wrapper._skipped_reason = TEST_SKIPS[f"multi-device-{x}"].message
         return wrapper
 
     return decorator
