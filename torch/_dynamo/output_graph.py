@@ -1350,6 +1350,11 @@ class OutputGraph(OutputGraphCommon):
                     self._input_mutation_streams[cur_stream_index] = (
                         TracingContext.extract_stack()
                     )
+                    stream = tx.symbolic_stream_state.cur_stream()
+                    if stream.source:
+                        install_guard(
+                            stream.source.make_guard(GuardBuilder.EQUALS_MATCH)
+                        )
                 self._last_checked_input_versions[input_idx] = cur_version
             input_idx += 1
 

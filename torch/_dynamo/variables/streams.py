@@ -457,9 +457,14 @@ class StreamVariable(StreamContextVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from ..guards import GuardBuilder, install_guard
+
         other_stream = args[0]
         if not isinstance(other_stream, StreamVariable):
             raise AssertionError(f"Expected StreamVariable, got {type(other_stream)}")
+        for stream in (self, other_stream):
+            if stream.source:
+                install_guard(stream.source.make_guard(GuardBuilder.EQUALS_MATCH))
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.wait_stream,
@@ -474,6 +479,10 @@ class StreamVariable(StreamContextVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from ..guards import GuardBuilder, install_guard
+
+        if self.source:
+            install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.synchronize_stream,

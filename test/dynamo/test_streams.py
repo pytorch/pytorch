@@ -3055,6 +3055,43 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(result, torch.ones_like(result))
 
     @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("changed", ("observed", "mutated"))
+    def test_aliased_wait_rechecks_stream_arguments(self, backend, changed) -> None:
+        self.addCleanup(reset_user_object_tracking)
+
+        def fn(x, small, side, alias):
+            with side:
+                x.add_(1)
+            alias.wait_stream(side)
+            return small + 1
+
+        side = torch.cuda.Stream()
+        other = torch.cuda.Stream()
+        matching = torch.cuda.ExternalStream(side.cuda_stream, device=side.device)
+        different = torch.cuda.ExternalStream(other.cuda_stream, device=other.device)
+        small = torch.zeros(8, device="cuda")
+        torch.cuda.synchronize()
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+
+        first = torch.zeros_like(small)
+        result = compiled(first, small, side, matching)
+        torch.cuda.synchronize()
+        self.assertEqual(first, torch.ones_like(first))
+        self.assertEqual(result, torch.ones_like(result))
+
+        mutated, observed = (
+            (side, different) if changed == "observed" else (other, matching)
+        )
+        x = torch.zeros_like(small)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input mutation write-back after a user stream barrier",
+        ):
+            compiled(x, small, mutated, observed)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.zeros_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
     def test_unrelated_stream_join_after_input_mutation(self, backend) -> None:
         def fn(x, small):
             mutated = torch.cuda.Stream()
