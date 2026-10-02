@@ -1704,4 +1704,15 @@ Tensor sub_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& al
       /*is_sub=*/true);
 }
 
+// mul.Tensor meta kernel
+Tensor mul_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
+  if (symbolic) {
+    if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
+      return out;
+    }
+  }
+  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic);
+}
+
 } // namespace at::native
