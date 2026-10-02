@@ -3352,6 +3352,12 @@ Call this whenever a new thread is created in order to propagate values from
   PyObject* has_cuda = Py_False;
 #endif
 
+#ifdef NCCL_EP_REQUIRES_NCCL4PY
+  PyObject* nccl_ep_requires_nccl4py = Py_True;
+#else
+  PyObject* nccl_ep_requires_nccl4py = Py_False;
+#endif
+
 #ifdef USE_MPS
   PyObject* has_mps = Py_True;
 #else
@@ -3365,6 +3371,8 @@ Call this whenever a new thread is created in order to propagate values from
 #endif
 
   ASSERT_TRUE(set_module_attr("_has_cuda", has_cuda));
+  ASSERT_TRUE(
+      set_module_attr("_nccl_ep_requires_nccl4py", nccl_ep_requires_nccl4py));
   ASSERT_TRUE(
       set_module_attr("_has_magma", at::hasMAGMA() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr("_has_mps", has_mps));
