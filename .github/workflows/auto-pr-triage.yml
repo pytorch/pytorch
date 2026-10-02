@@ -21,8 +21,13 @@ env:
   # plans in the read-only analyze job and never runs a job that can write.
   AUTO_PR_TRIAGE_MODE: live
 
+# GitHub evaluates a job name only when the job runs; a skipped job shows the
+# raw text instead. The `${{ '' }}` suffix therefore leaves a running job's
+# name unchanged but makes a skipped job's check differ, so a run skipped for
+# an unrelated label cannot replace the real run's check in the PR's checks.
 jobs:
   analyze:
+    name: analyze${{ '' }}
     if: >-
       github.repository_owner == 'pytorch' &&
       github.event.pull_request.state == 'open' &&
@@ -184,6 +189,7 @@ jobs:
           if-no-files-found: warn
 
   apply:
+    name: apply${{ '' }}
     needs: analyze
     if: >-
       needs.analyze.result == 'success' &&
@@ -219,6 +225,7 @@ jobs:
             --action-plan-json "$ACTION_PLAN_JSON"
 
   record-error:
+    name: record-error${{ '' }}
     needs: [analyze, apply]
     if: >-
       always() &&
