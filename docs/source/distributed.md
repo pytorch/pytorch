@@ -212,6 +212,40 @@ You can tune NCCL communicators even further using `torch.distributed.ProcessGro
 and `torch.distributed.ProcessGroupNCCL.Options`. Learn more about them using `help`
 (e.g. `help(torch.distributed.ProcessGroupNCCL.NCCLConfig)`) in the interpreter.
 
+(nccl-collective-config)=
+
+### Per-collective NCCL configuration
+
+The `nccl2` backend accepts a keyword-only `config` on supported collective
+functions. This requires NCCL 2.31 or later and
+[nccl4py](https://pypi.org/project/nccl4py/) 0.5.0 or later:
+
+```python
+from nccl.core import NCCLCollConfig
+import torch.distributed as dist
+
+dist.init_process_group("nccl2")
+config = NCCLCollConfig(max_ctas=4, alg_selection="ring")
+dist.all_reduce(tensor, config=config)
+```
+
+Supported functions: `broadcast`, `all_reduce`, `all_reduce_coalesced`, `reduce`,
+`all_gather`, `all_gather_single`, `all_gather_into_tensor`,
+`all_gather_coalesced`, `gather_single`, `gather_into_tensor`, `reduce_scatter`,
+`reduce_scatter_single`, `reduce_scatter_tensor` and `all_to_all_single`.
+
+Unset fields inherit NCCL or communicator defaults; a config with no set fields
+is treated as `None`. Config presence and values must be identical on every
+participating rank; mismatches can hang. Configurations within an NCCL group must
+agree on `cga_cluster_size`. Passing `None` preserves existing behavior and does
+not require nccl4py.
+
+Backends receive `config` as its attribute dictionary (`vars(config)`); a plain
+`dict` with the same keys is equivalent. The legacy `nccl`, `gloo` and other
+built-in backends ignore it. NCCL2 rejects vendor options and unsupported
+operations. `all_to_all_single` with a config requires even splits on every
+rank. External NCCL group scopes are unsupported.
+
 (distributed-basics)=
 
 ## Basics

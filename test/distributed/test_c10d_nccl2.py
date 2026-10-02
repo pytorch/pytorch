@@ -19,7 +19,13 @@ from unittest import mock
 import torch
 import torch.cuda._gpu_trace as gpu_trace
 import torch.distributed as dist
-from torch._C._distributed_c10d import ErrorType, ReconfigureOptions
+from torch._C._distributed_c10d import (
+    AllgatherOptions,
+    AllreduceCoalescedOptions,
+    ErrorType,
+    ReconfigureOptions,
+    ReduceScatterOptions,
+)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -29,6 +35,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
     parametrize,
@@ -36,6 +43,14 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TestCase,
 )
+
+
+try:
+    from nccl.core import NCCLCollConfig
+
+    HAS_NCCL_COLL_CONFIG = True
+except ImportError:
+    HAS_NCCL_COLL_CONFIG = False
 
 
 class ProcessGroupNCCL2GraphCleanupTest(MultiProcessTestCase):
@@ -383,6 +398,281 @@ class ProcessGroupNCCLLegacyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
     @classmethod
     def backend_str(cls) -> str:
         return "nccl-legacy"
+
+
+class ProcessGroupNCCL2DictConfigTest(_ProcessGroupNCCL2OptionsTest):
+    """Dict configs, which do not need nccl4py."""
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        # Makes NCCL read configs at group end.
+        os.environ["NCCL_ENQUEUE_REARCH_ENABLE"] = "1"
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_requires_nccl_2_31(self) -> None:
+        if torch.version.hip is None and torch.cuda.nccl.version() >= (2, 31, 0):
+            self.skipTest("NCCL 2.31+ supports collective configs")
+        tensor = torch.ones(4, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "requires NCCL 2.31 or later"):
+            dist.all_reduce(tensor, config={"max_ctas": 2})
+        # Empty configs use the plain API.
+        dist.all_reduce(tensor, config={"max_ctas": None, "vendor_options": ()})
+        self.assertEqual(tensor, torch.full_like(tensor, self.world_size))
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    def test_time_estimate_config(self) -> None:
+        process_group = dist.distributed_c10d._get_default_group()
+        tensor = torch.ones(1024, device=self.device)
+        with dist._time_estimator(group=process_group, device=self.device) as context:
+            dist.all_reduce(tensor, config={"max_ctas": 2, "alg_selection": "ring"})
+        self.assertIsNotNone(context.estimated_time)
+        self.assertGreater(context.estimated_time, 0)
+
+
+@instantiate_parametrized_tests
+@unittest.skipUnless(
+    HAS_NCCL_COLL_CONFIG and not torch.version.hip, "requires nccl4py 0.5+ and CUDA"
+)
+class ProcessGroupNCCL2CollectiveConfigTest(_ProcessGroupNCCL2OptionsTest):
+    def _collective(self, op, config, async_op=True, group=None):
+        size = self.world_size
+        root = size - 1
+        tensor = torch.full((4,), float(self.rank + 1), device=self.device)
+        reduced = torch.full_like(tensor, size * (size + 1) / 2)
+        rows = [torch.full_like(tensor, rank + 1) for rank in range(size)]
+        kwargs = {"config": config, "async_op": async_op, "group": group}
+        output = tensor
+        expected = reduced
+        if op == "broadcast":
+            work = dist.broadcast(tensor, src=root, **kwargs)
+            expected = rows[root]
+        elif op == "all_reduce":
+            work = dist.all_reduce(tensor, **kwargs)
+        elif op == "reduce":
+            work = dist.reduce(tensor, dst=root, **kwargs)
+        elif op == "all_gather":
+            output = [torch.empty_like(tensor) for _ in range(size)]
+            expected = rows
+            work = dist.all_gather(output, tensor, **kwargs)
+        elif op == "all_gather_single":
+            output = torch.empty(size * tensor.numel(), device=self.device)
+            expected = torch.cat(rows)
+            work = dist.all_gather_single(output, tensor, **kwargs)
+        elif op == "reduce_scatter":
+            inputs = [tensor.clone() for _ in range(size)]
+            work = dist.reduce_scatter(output, inputs, **kwargs)
+        elif op == "reduce_scatter_single":
+            work = dist.reduce_scatter_single(output, tensor.repeat(size), **kwargs)
+        elif op == "all_to_all_single":
+            output = torch.empty(size * tensor.numel(), device=self.device)
+            expected = torch.cat(rows)
+            work = dist.all_to_all_single(output, tensor.repeat(size), **kwargs)
+        elif op == "gather_single":
+            output = torch.empty(size * tensor.numel(), device=self.device)
+            expected = torch.cat(rows)
+            work = dist.gather_single(
+                tensor, output if self.rank == root else None, dst=root, **kwargs
+            )
+        else:
+            self.fail(f"Unknown collective: {op}")
+        if work is not None:
+            work.wait()
+        if op in ("reduce", "gather_single") and self.rank != root:
+            return
+        self.assertEqual(output, expected)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "op",
+        [
+            "broadcast",
+            "all_reduce",
+            "reduce",
+            "all_gather",
+            "all_gather_single",
+            "reduce_scatter",
+            "reduce_scatter_single",
+            "all_to_all_single",
+            "gather_single",
+        ],
+    )
+    @parametrize("async_op", [False, True])
+    @parametrize("config_kind", ["object", "dict"])
+    def test_collectives(self, op, async_op, config_kind) -> None:
+        config = NCCLCollConfig(min_ctas=1, max_ctas=2, cta_policy=0)
+        if config_kind == "dict":
+            config = {"min_ctas": 1, "max_ctas": 2, "user_profiler_tag": 3}
+        self._collective(op, config, async_op)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "op",
+        [
+            "allreduce_coalesced",
+            "allgather_coalesced",
+            "all_gather_single_coalesced",
+            "reduce_scatter_single_coalesced",
+        ],
+    )
+    def test_coalesced(self, op) -> None:
+        inputs = [
+            torch.full((n,), float(self.rank + 1), device=self.device) for n in (4, 8)
+        ]
+        size = self.world_size
+        if op == "allreduce_coalesced":
+            opts = AllreduceCoalescedOptions()
+            outputs = inputs
+            args = (inputs, opts)
+        elif op == "reduce_scatter_single_coalesced":
+            opts = ReduceScatterOptions()
+            outputs = [torch.empty_like(tensor) for tensor in inputs]
+            args = (outputs, [tensor.repeat(size) for tensor in inputs], opts)
+        else:
+            opts = AllgatherOptions()
+            outputs = [
+                [torch.empty_like(tensor) for _ in range(size)]
+                if op == "allgather_coalesced"
+                else torch.empty(tensor.numel() * size, device=self.device)
+                for tensor in inputs
+            ]
+            args = (outputs, inputs, opts)
+        opts.config = NCCLCollConfig(min_ctas=1, max_ctas=2)
+        getattr(self.pg, op)(*args).wait()
+        for output, tensor in zip(outputs, inputs):
+            if op in ("allreduce_coalesced", "reduce_scatter_single_coalesced"):
+                expected = torch.full_like(tensor, size * (size + 1) / 2)
+            else:
+                expected = [torch.full_like(tensor, rank + 1) for rank in range(size)]
+                if op != "allgather_coalesced":
+                    expected = torch.cat(expected)
+            self.assertEqual(output, expected)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    @parametrize(
+        "config, exc, error",
+        [
+            ({"unknown": 1}, ValueError, "Unknown NCCL collective config key"),
+            ({"max_ctas": "2"}, TypeError, "'max_ctas' must be an int"),
+            ({"max_ctas": 2**31}, ValueError, "'max_ctas' is out of range"),
+            ({"alg_selection": 1}, TypeError, "'alg_selection' must be a str"),
+            ({"user_profiler_tag": -1}, TypeError, "must be a non-negative int"),
+            ({"user_profiler_tag": True}, TypeError, "must be a non-negative int"),
+            (
+                {"vendor_options": ({"vendor_id": 1},)},
+                RuntimeError,
+                "vendor_options are not supported",
+            ),
+        ],
+    )
+    def test_invalid_config(self, config, exc, error) -> None:
+        with self.assertRaisesRegex(exc, error):
+            self._collective("all_reduce", config)
+        self._collective("all_reduce", NCCLCollConfig())
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    def test_invalid_algorithm(self) -> None:
+        group = dist.new_group(pg_options=self.opts(), device_id=self.device)
+        try:
+            config = NCCLCollConfig(alg_selection="invalid_algorithm")
+            with self.assertRaisesRegex(RuntimeError, "NCCL (AllReduce|error)"):
+                self._collective("all_reduce", config, group=group)
+        finally:
+            group.abort()
+            dist.destroy_process_group(group)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    def test_all_to_all_splits(self) -> None:
+        size = self.world_size
+        tensor = torch.full((size * 2,), float(self.rank), device=self.device)
+        output = torch.empty_like(tensor)
+        splits = [2] * size
+        dist.all_to_all_single(output, tensor, splits, splits, config=NCCLCollConfig())
+        expected = torch.arange(size, device=self.device).repeat_interleave(2)
+        self.assertEqual(output, expected.float())
+
+        splits = [1] * (size - 1) + [size + 1]
+        output = torch.empty(splits[self.rank] * size, device=self.device)
+        with self.assertRaisesRegex(RuntimeError, "equal all_to_all split sizes"):
+            dist.all_to_all_single(
+                output,
+                tensor,
+                [splits[self.rank]] * size,
+                splits,
+                config=NCCLCollConfig(),
+            )
+        self._collective("all_reduce", NCCLCollConfig())
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    @parametrize("name", ["all_reduce", "all_gather_single", "reduce_scatter_single"])
+    @parametrize("native_batch", [False, True])
+    def test_coalescing_config(self, name, native_batch) -> None:
+        size = self.world_size
+        tensor = torch.ones(size * 2, device=self.device)
+        output, expected = {
+            "all_reduce": (tensor, torch.full_like(tensor, size)),
+            "all_gather_single": (
+                torch.empty(size * tensor.numel(), device=self.device),
+                torch.ones(size * tensor.numel(), device=self.device),
+            ),
+            "reduce_scatter_single": (
+                torch.empty(2, device=self.device),
+                torch.full((2,), float(size), device=self.device),
+            ),
+        }[name]
+        args = (tensor,) if name == "all_reduce" else (output, tensor)
+        with dist._coalescing_manager(device=self.device if native_batch else None):
+            getattr(dist, name)(*args, config=NCCLCollConfig(max_ctas=2))
+        torch.cuda.synchronize(self.device)
+        self.assertEqual(output, expected)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 31), "Need NCCL 2.31+ for collective configs")
+    @skip_if_lt_x_gpu(2)
+    def test_coalescing_equal_configs(self) -> None:
+        # Equal but distinct config instances coalesce into one batch.
+        size = self.world_size
+        tensors = [torch.ones(n, device=self.device) for n in (2, 4, 8)]
+        with dist._coalescing_manager(device=self.device):
+            for tensor in tensors:
+                dist.all_reduce(tensor, config=NCCLCollConfig(max_ctas=2))
+        torch.cuda.synchronize(self.device)
+        for tensor in tensors:
+            self.assertEqual(tensor, torch.full_like(tensor, size))
+
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        return dist.ProcessGroupNCCL2.Options()
+
+
+class ProcessGroupNCCL2CollectiveConfigNonblockingTest(
+    ProcessGroupNCCL2CollectiveConfigTest
+):
+    @classmethod
+    def opts(cls, high_priority_stream=False):
+        opts = super().opts(high_priority_stream)
+        opts.config.blocking = 0
+        return opts
+
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        os.environ["NCCL_ENQUEUE_REARCH_ENABLE"] = "1"
+        super()._init_pg(rank, world_size, rdvz_file)
 
 
 class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
