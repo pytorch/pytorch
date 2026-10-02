@@ -9,14 +9,17 @@ on:
   pull_request_target:
     types: [labeled, ready_for_review]
 
+# GitHub keeps one pending run per group, so a burst of label events would let
+# an unrelated label's run replace the pending `open source` run and then skip.
+# Only entry events share the per-PR group.
 concurrency:
-  group: auto-pr-triage-${{ github.event.pull_request.number }}
+  group: auto-pr-triage-${{ github.event.pull_request.number }}-${{ ((github.event.action == 'labeled' && github.event.label.name == 'open source') || github.event.action == 'ready_for_review') && 'entry' || github.run_id }}
   cancel-in-progress: false
 
 env:
   # Change only this value to enable the bounded live mutation path. Shadow
   # plans in the read-only analyze job and never runs a job that can write.
-  AUTO_PR_TRIAGE_MODE: shadow
+  AUTO_PR_TRIAGE_MODE: live
 
 jobs:
   analyze:
