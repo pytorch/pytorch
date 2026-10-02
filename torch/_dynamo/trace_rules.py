@@ -237,6 +237,7 @@ manual_torch_name_rule_map: dict[
     "torch.nn.utils.rnn.pack_padded_sequence": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/162374
     "torch.nn.utils.rnn.pad_packed_sequence": SkipFunctionVariable,
+    "torch.nn.modules.utils.consume_prefix_in_state_dict_if_present": UserFunctionVariable,
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
     "torch.nn.Buffer": TorchInGraphFunctionVariable,
     "torch.backends.cuda.SDPAParams": TorchInGraphFunctionVariable,
@@ -3004,7 +3005,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.nn.modules.utils._ntuple",
         "torch.nn.modules.utils._quadruple",
         "torch.nn.modules.utils._reverse_repeat_tuple",
-        "torch.nn.modules.utils.consume_prefix_in_state_dict_if_present",
         "torch.nn.parameter.is_lazy",
         "torch.norm",
         "torch.quantization.default_eval_fn",
