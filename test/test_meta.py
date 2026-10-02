@@ -16,27 +16,27 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._ops import OpOverload, OpOverloadPacket
 from torch.fx.experimental import _config as exp_config
 from torch.testing import make_tensor
+from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     HardwareClassification,
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
+    TestCase,
     skipIfCrossRef,
     skipIfTorchDynamo,
-    skipIfXpu,
     suppress_warnings,
     TEST_WITH_TORCHDYNAMO,
-    TestCase,
-    unMarkDynamoStrictTest,
+    run_tests,
+    parametrize,
+    instantiate_parametrized_tests,
     xfailIfTorchDynamo,
+    skipIfXpu,
 )
 from torch.testing._internal.common_device_type import (
+    ops,
     instantiate_device_type_tests,
     OpDTypes,
-    ops,
-    skip,
     skipOps,
     xfail,
+    skip,
 )
 from torch.testing._internal.common_dtype import (
     complex_types,
@@ -1196,14 +1196,6 @@ class _TestMetaBase(TestCase):
                     if not inplace and isinstance(expected, torch.Tensor) and op.supports_out:
                         func(*args, **kwargs, out=expected)
 
-    def _assert_fft_meta_stride_matches_eager(self, op, *args):
-        to_meta = MetaConverter()
-        meta_args = tree_map_only(torch.Tensor, to_meta, args)
-        ref_out = op(*args)
-        meta_out = op(*meta_args)
-        self.assertEqual(ref_out.size(), meta_out.size())
-        self.assertEqual(ref_out.stride(), meta_out.stride())
-
 
 @unMarkDynamoStrictTest
 class TestMeta(_TestMetaBase):
@@ -1690,7 +1682,7 @@ class TestMetaCudaRef(_TestMetaBase):
     # opinfo test is using aten.fill_, it's not testing aten.fill
     def test_fill_stride(self, device):
         to_meta = MetaConverter()
-        sample_args = [torch.rand(2, 2, 2, 2, device=device), 1.0]
+        sample_args = [torch.rand(2, 2, 2, 2), 1.0]
 
         for args in get_strided_args(sample_args):
             meta_args = to_meta(args)
@@ -1698,6 +1690,14 @@ class TestMetaCudaRef(_TestMetaBase):
             meta_out = torch.ops.aten.fill(*meta_args)
             self.assertEqual(ref_out.size(), meta_out.size())
             self.assertEqual(ref_out.stride(), meta_out.stride())
+
+    def _assert_fft_meta_stride_matches_eager(self, op, *args):
+        to_meta = MetaConverter()
+        meta_args = tree_map_only(torch.Tensor, to_meta, args)
+        ref_out = op(*args)
+        meta_out = op(*meta_args)
+        self.assertEqual(ref_out.size(), meta_out.size())
+        self.assertEqual(ref_out.stride(), meta_out.stride())
 
     def test_fft_multi_dim_cufft_stride_matches_meta(self, device):
         self._assert_fft_meta_stride_matches_eager(
@@ -1719,6 +1719,10 @@ class TestMetaCudaRef(_TestMetaBase):
 @unMarkDynamoStrictTest
 @instantiate_parametrized_tests
 class TestMetaCore(TestCase):
+    # Device-agnostic meta tests. Tests here may use the CPU eager kernel as the
+    # reference; CPU is treated as the baseline device, not a hardware-specific
+    # accelerator, so a CPU reference does not couple these tests to hardware.
+    # CUDA-referenced tests live in TestMeta instead.
     hw_classification = HardwareClassification.GENERIC
 
     def test_empty_quantized(self):
