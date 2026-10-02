@@ -224,6 +224,10 @@ def skip_if_no_gpu(func):
 
         return func(*args, **kwargs)
 
+    # `_skipped_reason` marks skips every rank would hit, so launchers can skip
+    # before spawning ranks. Rank-side checks remain authoritative.
+    if torch.accelerator.current_accelerator(check_available=False) is None:
+        wrapper._skipped_reason = TEST_SKIPS["no_accelerator"].message
     return wrapper
 
 
@@ -241,6 +245,8 @@ def skip_if_small_worldsize(func):
 
         return func(*args, **kwargs)
 
+    if os.environ.get("BACKEND") != "mpi" and int(os.environ.get("WORLD_SIZE", 8)) < 8:
+        wrapper._skipped_reason = TEST_SKIPS["small_worldsize"].message
     return wrapper
 
 
@@ -326,6 +332,11 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
         # Record the accelerator requirement so the collection-time GPU-count
         # resolver (test/conftest.py) can read it without running the test.
         wrapper._min_gpus_required = x
+        if (
+            not allow_cpu
+            and torch.accelerator.current_accelerator(check_available=False) is None
+        ):
+            wrapper._skipped_reason = TEST_SKIPS[f"multi-device-{x}"].message
         return wrapper
 
     return decorator
@@ -1224,8 +1235,9 @@ class MultiProcessTestCase(TestCase):
                     for p in self.processes:
                         p.terminate()
                     break
-                # Sleep to avoid excessive busy polling.
-                time.sleep(0.1)
+                pending = [p.sentinel for p in self.processes if p.exitcode is None]
+                if pending:
+                    multiprocessing.connection.wait(pending, timeout=0.1)
 
             elapsed_time = time.time() - start_time
             self._check_return_codes(fn, elapsed_time)
