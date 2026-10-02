@@ -1201,7 +1201,6 @@ class TestTorchDeviceType(TestCase):
             _test_in_place_broadcastable(small2, small, large)
 
     @skipXLA
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64))
     def test_deterministic_resize(self, device, dtype):
         test_cases = [
@@ -1468,7 +1467,6 @@ class TestTorchDeviceType(TestCase):
             'upsample_trilinear3d_backward_out_cuda',
             False)
 
-    @skipIfTorchInductor("aot-autograd issue")
     def test_deterministic_max_pool3d(self, device):
         test_cases = [
             # size, kernel_size, stride, padding, dilation, ceil_mode
@@ -1493,7 +1491,6 @@ class TestTorchDeviceType(TestCase):
                         self.assertEqual(grad, input.grad, atol=0, rtol=0)
                     input.grad = None
 
-    @skipIfTorchInductor("aot-autograd issue")
     def test_deterministic_replication_pad2d(self, device):
         test_cases = [
             # size, padding
@@ -1524,7 +1521,6 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(grad, input.grad, atol=0, rtol=0)
                 input.grad = None
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_deterministic_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         grad = None
@@ -1557,7 +1553,6 @@ class TestTorchDeviceType(TestCase):
             'upsample_bicubic2d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_deterministic_interpolate_bicubic(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         output_grad = torch.randn(1, 2, 9, 12, device=device)
@@ -1677,7 +1672,6 @@ class TestTorchDeviceType(TestCase):
             'nll_loss2d_forward_out_cuda_template',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_CTCLoss(self, device):
         module = torch.nn.CTCLoss()
         input = torch.randn(50, 3, 15, device=device, requires_grad=True)
@@ -1706,7 +1700,6 @@ class TestTorchDeviceType(TestCase):
             'embedding_bag_backward_cuda_max',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @onlyAccelerator
     def test_deterministic_cumsum(self, device):
         test_cases = [
@@ -4473,7 +4466,6 @@ class TestTorchDeviceType(TestCase):
     # FIXME: move to test distributions
     @deviceCountAtLeast(2)
     @onlyAccelerator
-    @skipIfTorchInductor("FIXME: error not thrown")
     def test_multinomial_gpu_device_constrain(self, devices):
         x = torch.empty(3, device=devices[0])
         y = torch.empty(3, device=devices[1], dtype=torch.long)
@@ -6265,7 +6257,6 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(torch.ne(a, b).tolist(), [False, False, True])
 
 
-    @skipIfTorchInductor("FIXME")
     def test_hook_remove(self, device):
         # Reference: https://github.com/pytorch/pytorch/issues/58354
         def _test_helper(remove_hook):
@@ -6797,7 +6788,6 @@ class TestTorchCUDA(TestCase):
 
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfRocm
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_grid_sample_2d_cudnn(self, device):
         def fn():
             input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
@@ -6959,7 +6949,6 @@ class TestTorchCUDA(TestCase):
 
     # Test that public functions related to TypedStorage produce a deprecation
     # warning
-    @skipIfTorchInductor("FIXME")
     def test_typed_storage_deprecation_warning(self):
         s1 = torch.cuda.FloatStorage(10)
         funcs = [
@@ -8528,7 +8517,6 @@ class TestTorch(TestCase):
 
     # Test that public functions related to TypedStorage produce a deprecation
     # warning
-    @skipIfTorchInductor("FIXME")
     def test_typed_storage_deprecation_warning(self):
         s0 = torch.FloatStorage(10)
         funcs = [
@@ -11422,7 +11410,6 @@ class TestTorchCPU(TestCase):
     hw_classification = HardwareClassification.CPU
     exact_dtype = True
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @dtypes(*get_all_qint_dtypes())
     def test_nondeterministic_resize_quantized(self, device, dtype):
         a = torch.tensor([-1, 0, 1, 2, 3], dtype=torch.float, device=device)
