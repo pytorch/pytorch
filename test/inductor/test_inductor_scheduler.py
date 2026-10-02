@@ -2259,6 +2259,11 @@ class TestScheduler(TestCase):
                 template_node, choice_a, required_a
             )
         )
+        self.assertTrue(
+            _template_choice_supports_producer_fusion(
+                template_node, choice_ab, required_a
+            )
+        )
         self.assertFalse(
             _template_choice_supports_producer_fusion(
                 template_node, choice_b, required_a
