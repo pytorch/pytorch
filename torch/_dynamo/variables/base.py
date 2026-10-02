@@ -499,6 +499,13 @@ def type_qualified_name(type_: type) -> str:
         return qn
 
 
+def getset_read(
+    accessor: Callable[[Any], VariableTracker],
+) -> Getter:
+    """Getter for a GetSet/Member whose value is an already-built VT."""
+    return lambda self, tx: accessor(self)
+
+
 def getset_build(
     accessor: Callable[[Any], Any],
 ) -> Getter:
@@ -516,6 +523,9 @@ def store_attr_mutation(
     se = tx.output.side_effects
     item = item.realize()
     if not se.is_attribute_mutation(item):
+        # This helper's callers model writable function and descriptor slots.
+        # Their sourced owners must already be tracked; unlike generic Python
+        # setattr, this closed path has no valid sourced-untracked fallback.
         if item.source is not None:
             raise AssertionError(
                 f"{item} has a source but was never registered via "
@@ -1879,7 +1889,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             elif istype(cur, (list, tuple)):
                 children = list(cur)
             elif istype(cur, (dict, collections.OrderedDict)):
+                # Preserve the existing values-first visitation order, then visit
+                # keys, including VariableTrackers wrapped for hashing.
+                # The local import avoids a base.py <-> hashable.py cycle.
+                from .hashable import HashableTracker
+
                 children = list(cur.values())
+                children.extend(
+                    key.vt if isinstance(key, HashableTracker) else key for key in cur
+                )
             else:
                 continue
             worklist.extend(reversed(children))
