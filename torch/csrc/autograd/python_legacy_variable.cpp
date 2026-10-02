@@ -13,7 +13,7 @@ using namespace at;
 namespace torch::autograd {
 
 static PyObject* THPVariable_pynew(
-    PyTypeObject* type,
+    PyTypeObject* /*type*/,
     PyObject* args,
     PyObject* kwds) {
   HANDLE_TH_ERRORS

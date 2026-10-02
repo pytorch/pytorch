@@ -20,7 +20,7 @@ template <typename Ctor>
 TORCH_PYTHON_API PyObject* CppFunction_pynew(
     PyTypeObject* type,
     PyObject* args,
-    PyObject* kwds) {
+    PyObject* /*kwds*/) {
   THPObjectPtr obj(type->tp_alloc(type, 0));
   if (!obj)
     return nullptr;
