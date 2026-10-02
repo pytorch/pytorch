@@ -969,6 +969,53 @@ class TpSetattroTests(TestCase):
 
         self._check(fn, torch.ones(3))
 
+    def test_tensor_data_delete(self):
+        # _set_data reads value.dtype before checking for deletion; eager raises
+        # RuntimeError("Deleting tensor data is not allowed").
+        def fn(x):
+            try:
+                del x.data
+            except RuntimeError as e:
+                return type(e).__name__, x + 1
+            return "no error", x + 1
+
+        self._check(fn, torch.ones(3))
+
+    def test_class_module_doc_write(self):
+        class K:
+            pass
+
+        def fn(x):
+            K.__module__ = "m"
+            K.__doc__ = "d"
+            return K.__module__, K.__doc__, x + 1
+
+        self._check(fn, torch.ones(3))
+
+    def test_bound_method_name_write(self):
+        # method has no __dict__ and no __name__ data descriptor, so eager
+        # raises AttributeError; UserMethodVariable.tp_getset models it writable.
+        def fn(x):
+            obj = _WithMethodDefaults()
+            try:
+                obj.m.__name__ = "zz"
+            except AttributeError as e:
+                return type(e).__name__
+            return "no error"
+
+        self._check(fn, torch.ones(3))
+
+    def test_bound_method_func_defaults_write(self):
+        def fn(x):
+            obj = _WithMethodDefaults()
+            obj.m.__func__.__defaults__ = (7,)
+            return _WithMethodDefaults.m.__defaults__, x + 1
+
+        try:
+            self._check(fn, torch.ones(3))
+        finally:
+            _WithMethodDefaults.m.__defaults__ = (1,)
+
 
 instantiate_parametrized_tests(TpSetattroTests)
 

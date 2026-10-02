@@ -46,6 +46,8 @@ from torch.fx.experimental.symbolic_shapes import (
     GuardOnDataDependentSymNode,
     has_free_symbols,
     is_symbolic,
+    statically_known_true,
+    sym_eq,
     SymTypes,
 )
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -2670,7 +2672,28 @@ class TensorVariable(VariableTracker):
         from .builder import wrap_fx_proxy
         from .builtin import dynamo_disable_grad
 
+        # THPVariable_set_data
+        if value is None:
+            raise_observed_exception(
+                RuntimeError,
+                tx,
+                args=["Deleting tensor data is not allowed. Delete tensor instead!"],
+            )
+
         # [Note: set_data_on_scoped_tensor]
+        if isinstance(value, TensorVariable) and self.requires_grad:
+            obj_fake = get_fake_value(self.as_proxy().node, tx)
+            val_fake = get_fake_value(value.as_proxy().node, tx)
+            if not statically_known_true(sym_eq(obj_fake.shape, val_fake.shape)):
+                unimplemented(
+                    gb_type="setattr() on Tensor.data with different shape",
+                    context=f"setattr({self}, data, {value})",
+                    explanation="Dynamo does not trace shape-changing "
+                    "`.data` mutations on differentiable tensors. "
+                    "AOTAutograd assumes graph input metadata is stable "
+                    "while building the backward graph.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
         if self.source is None:
             unimplemented(
                 gb_type="Failed to mutate tensor data attribute",

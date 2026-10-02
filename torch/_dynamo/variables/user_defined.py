@@ -111,6 +111,7 @@ from .base import (
     AttrMutationKind,
     GetSet,
     getset_load_or_build,
+    getset_set,
     Member,
     Method,
     MutationType,
@@ -194,11 +195,13 @@ if TYPE_CHECKING:
 
 
 _STANDARD_SETATTRS: tuple[Any, ...] = (object.__setattr__, BaseException.__setattr__)
+_STANDARD_DELATTRS: tuple[Any, ...] = (object.__delattr__, BaseException.__delattr__)
 if sys.version_info < (3, 13):
     # Types that name tp_setattro in their static struct get their own
     # __setattr__/__delattr__ wrappers from PyType_Ready before 3.13, even when
     # the slot is PyObject_GenericSetAttr. BaseException above is the same case.
     _STANDARD_SETATTRS += (types.SimpleNamespace.__setattr__,)
+    _STANDARD_DELATTRS += (types.SimpleNamespace.__delattr__,)
 
 
 def is_standard_setattr(val: object) -> bool:
@@ -375,19 +378,25 @@ class UserDefinedClassVariable(UserDefinedVariable):
     tp_getset = {
         "__name__": GetSet(
             getset_load_or_build(lambda vt: vt.value.__name__, "__name__"),
-            lambda vt, tx, value: store_attr_mutation(tx, vt, "__name__", value),
+            getset_set("__name__"),
         ),
         "__qualname__": GetSet(
             getset_load_or_build(lambda vt: vt.value.__qualname__, "__qualname__"),
-            lambda vt, tx, value: store_attr_mutation(tx, vt, "__qualname__", value),
+            getset_set("__qualname__"),
+        ),
+        "__module__": GetSet(
+            getset_load_or_build(lambda vt: vt.value.__module__, "__module__"),
+            getset_set("__module__"),
+        ),
+        "__doc__": GetSet(
+            getset_load_or_build(lambda vt: vt.value.__doc__, "__doc__"),
+            getset_set("__doc__"),
         ),
         # missing:
         # "__bases__": GetSet(...),
         # "__mro__": GetSet(...),
-        # "__module__": GetSet(...),
         # "__abstractmethods__": GetSet(...),
         # "__dict__": GetSet(...),
-        # "__doc__": GetSet(...),
         # "__text_signature__": GetSet(...),
         # "__annotations__": GetSet(...),
         # "__annotate__": GetSet(...),
@@ -3171,7 +3180,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if self._base_vt is not None and method in self._base_methods:
             return self._base_vt.tp_setattro_impl(tx, name, value)
 
-        if getattr(type(self.value), dunder) is getattr(object, dunder):
+        standard = _STANDARD_DELATTRS if value is None else _STANDARD_SETATTRS
+        if getattr(type(self.value), dunder) in standard:
             return super().tp_setattro_impl(tx, name, value)
 
         args_ = [name] if value is None else [name, value]

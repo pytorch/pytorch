@@ -3394,6 +3394,14 @@
   "GB6602": [
     {
       "Gb_type": "setattr() on Tensor.data with different shape",
+      "Context": "setattr({self}, data, {value})",
+      "Explanation": "Dynamo does not trace shape-changing `.data` mutations on differentiable tensors. AOTAutograd assumes graph input metadata is stable while building the backward graph.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "setattr() on Tensor.data with different shape",
       "Context": "setattr({obj}, {name}, {val})",
       "Explanation": "Dynamo does not trace shape-changing `.data` mutations on differentiable tensors. AOTAutograd assumes graph input metadata is stable while building the backward graph.",
       "Hints": [
