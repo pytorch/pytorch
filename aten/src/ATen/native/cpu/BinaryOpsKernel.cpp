@@ -125,6 +125,7 @@ void atan2_kernel(TensorIteratorBase& iter) {
 
 void mul_kernel(TensorIteratorBase& iter) {
   auto dtype = iter.common_dtype();
+  const auto scalar_idx = iter.is_scalar(2) ? 2 : 1;
   if (dtype == ScalarType::Bool) {
     cpu_kernel(iter, [=](bool a, bool b) -> bool { return a && b; });
   } else if (dtype == kComplexHalf) {
@@ -135,11 +136,13 @@ void mul_kernel(TensorIteratorBase& iter) {
           using comp_t = c10::complex<float>;
           return comp_t{a} * comp_t{b};
         });
-  } else if (iter.is_scalar(2) && iter.data_ptr(2) != nullptr && at::isReducedFloatingType(dtype)) {
+  } else if (
+      iter.is_scalar(scalar_idx) && iter.data_ptr(scalar_idx) != nullptr &&
+      at::isReducedFloatingType(dtype)) {
     AT_DISPATCH_REDUCED_FLOATING_TYPES(dtype, "mul_cpu_reduced_float", [&]() {
       using opmath_t = at::opmath_type<scalar_t>;
-      opmath_t b = iter.original_scalar_value<opmath_t>(2);
-      iter.remove_operand(2);
+      opmath_t b = iter.original_scalar_value<opmath_t>(scalar_idx);
+      iter.remove_operand(scalar_idx);
       cpu_kernel_vec(
           iter,
           [=](scalar_t a) __ubsan_ignore_undefined__ -> scalar_t {

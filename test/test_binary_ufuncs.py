@@ -3134,6 +3134,27 @@ class TestBinaryUfuncsDevice(TestCase):
             rtol=0,
         )
 
+    @onlyOn("cpu")
+    @dtypes(torch.bfloat16, torch.float16)
+    @parametrize("scalar", (0.95, 0.999, 1e5))
+    @parametrize("size", (1, 33, 65))
+    @parametrize("stride", (1, 2))
+    def test_mul_reduced_float_scalar_precision(
+        self, device, dtype, scalar, size, stride
+    ):
+        x = torch.arange(13, 13 + size * stride, device=device, dtype=torch.float32)
+        x = (x / 32768).to(dtype)[::stride]
+        expected = (x.float() * scalar).to(dtype)
+        scalar_tensor = torch.tensor(scalar, device=device, dtype=torch.float64)
+        self.assertEqual(torch.mul(x, scalar_tensor), expected, atol=0, rtol=0)
+        self.assertEqual(torch.mul(scalar_tensor, x), expected, atol=0, rtol=0)
+        self.assertEqual(torch.mul(x, scalar), expected, atol=0, rtol=0)
+        out = torch.empty_like(x)
+        torch.mul(scalar_tensor, x, out=out)
+        self.assertEqual(out, expected, atol=0, rtol=0)
+        torch.ops.aten.mul_.Scalar(x, scalar)
+        self.assertEqual(x, expected, atol=0, rtol=0)
+
     @dtypes(torch.half)
     def test_divmul_scalar(self, device, dtype):
         x = torch.tensor(100.0, device=device, dtype=dtype)
@@ -4217,6 +4238,44 @@ class TestBinaryUfuncsDevice(TestCase):
             r"result type ComplexFloat can't be cast to the desired output type Double",
             lambda: torch.add(m1, m1, out=m2),
         )
+
+    @onlyOn("cpu")
+    @dtypes(torch.bfloat16, torch.float16)
+    @parametrize("op", ("add", "sub"))
+    @parametrize("size", (0, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65))
+    @parametrize("stride", (1, 2))
+    @parametrize(
+        "self_value,other_value,alpha",
+        (
+            (0.052978515625, -0.53125, 0.1),
+            (0.40087890625, -0.53466796875, 0.75),
+            (60000.0, -60000.0, 2.0),
+            (1.0, 1e-5, 1e5),
+        ),
+    )
+    def test_add_sub_reduced_float_alpha(
+        self, device, dtype, op, size, stride, self_value, other_value, alpha
+    ):
+        # Exercise scalar loops, vector loops and their tails without rounding alpha
+        # or intermediate products to the output dtype.
+        x = torch.full((size * stride,), self_value, device=device, dtype=dtype)[
+            ::stride
+        ]
+        if op == "sub":
+            other_value = -other_value
+        y = torch.full((size * stride,), other_value, device=device, dtype=dtype)[
+            ::stride
+        ]
+        fn = getattr(torch, op)
+        expected = fn(x.float(), y.float(), alpha=alpha).to(dtype)
+        self.assertEqual(fn(x, y, alpha=alpha), expected, atol=0, rtol=0)
+        scalar = torch.tensor(other_value, device=device, dtype=dtype)
+        self.assertEqual(fn(x, scalar, alpha=alpha), expected, atol=0, rtol=0)
+        out = torch.empty((size * stride,), device=device, dtype=dtype)[::stride]
+        fn(x, y, alpha=alpha, out=out)
+        self.assertEqual(out, expected, atol=0, rtol=0)
+        getattr(x, op + "_")(y, alpha=alpha)
+        self.assertEqual(x, expected, atol=0, rtol=0)
 
     @onlyAccelerator
     def test_addsub_half_tensor(self, device):

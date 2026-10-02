@@ -416,6 +416,8 @@ def compute_ufunc_cpu_dtype_body(
     vec_loop = None
     if UfuncKey.CPUVector in inner_loops:
         vec_loop = inner_loops[UfuncKey.CPUVector]
+    is_reduced_float = dtype in (ScalarType.BFloat16, ScalarType.Half)
+    compute_t = scalar_loop.compute_t
 
     # NB: We DON'T use translate here, because translate is
     # incapable of CSE'ing the scalar accesses in case it is also
@@ -424,15 +426,15 @@ def compute_ufunc_cpu_dtype_body(
     # by the lambda
 
     # Setup scalar in scope
-    body = []
+    body = ["using opmath_t = at::opmath_type<scalar_t>;"] if is_reduced_float else []
     ctx = []
     for b in parent_ctx:
         if isinstance(b.argument, Argument) and b.argument.type != BaseType(
             BaseTy.Scalar
         ):
             continue
-        body.append(f"auto _s_{b.name} = {b.name}.to<scalar_t>();")
-        ctx.append(Expr(f"_s_{b.name}", NamedCType(b.nctype.name, BaseCType(scalar_t))))
+        body.append(f"auto _s_{b.name} = {b.name}.to<{compute_t.cpp_type()}>();")
+        ctx.append(Expr(f"_s_{b.name}", NamedCType(b.nctype.name, compute_t)))
     if vec_loop is not None:
         for b in parent_ctx:
             if isinstance(b.argument, Argument) and b.argument.type != BaseType(
@@ -440,12 +442,12 @@ def compute_ufunc_cpu_dtype_body(
             ):
                 continue
             body.append(
-                f"auto _v_{b.name} = at::vec::Vectorized<scalar_t>(_s_{b.name});"
+                f"auto _v_{b.name} = {vec_loop.compute_t.cpp_type()}(_s_{b.name});"
             )
             ctx.append(
                 Expr(
                     f"_v_{b.name}",
-                    NamedCType(b.nctype.name, VectorizedCType(BaseCType(scalar_t))),
+                    NamedCType(b.nctype.name, vec_loop.compute_t),
                 )
             )
 
@@ -474,26 +476,45 @@ def compute_ufunc_cpu_dtype_body(
                 )
             )
 
-    def with_ctx(b: Sequence[Binding]) -> list[Expr | Binding]:
+    def with_ctx(b: Sequence[Binding | Expr]) -> list[Expr | Binding]:
         r: list[Expr | Binding] = []
         r.extend(ctx)
         r.extend(b)
         return r
 
     body_str = "\n".join(body)
+    scalar_call = scalar_loop.call(with_ctx(scalar_bindings))
     if vec_loop is not None:
+        if is_reduced_float:
+            vec_body = "\n".join(
+                f"auto [{b.name}_0, {b.name}_1] = at::vec::convert_to_float<scalar_t>({b.name});"
+                for b in vec_bindings
+            )
+            vec_calls = []
+            for i in range(2):
+                vec_ctx = [
+                    Expr(
+                        f"{b.name}_{i}",
+                        NamedCType(b.nctype.name, vec_loop.compute_t),
+                    )
+                    for b in vec_bindings
+                ]
+                vec_calls.append(vec_loop.call(with_ctx(vec_ctx)))
+            vec_body += f"\nreturn at::vec::convert_from_float<scalar_t>({', '.join(vec_calls)});"
+        else:
+            vec_body = f"return {vec_loop.call(with_ctx(vec_bindings))};"
         return f"""
 {body_str}
 cpu_kernel_vec(iter,
-  [=]({", ".join(b.decl() for b in scalar_bindings)}) {{ return {scalar_loop.call(with_ctx(scalar_bindings))}; }},
-  [=]({", ".join(b.decl() for b in vec_bindings)}) {{ return {vec_loop.call(with_ctx(vec_bindings))}; }}
+  [=]({", ".join(b.decl() for b in scalar_bindings)}) -> scalar_t {{ return {scalar_call}; }},
+  [=]({", ".join(b.decl() for b in vec_bindings)}) {{ {vec_body} }}
 );
 """
     else:
         return f"""
 {body_str}
 cpu_kernel(iter,
-  [=]({", ".join(b.decl() for b in scalar_bindings)}) {{ return {scalar_loop.call(with_ctx(scalar_bindings))}; }}
+  [=]({", ".join(b.decl() for b in scalar_bindings)}) -> scalar_t {{ return {scalar_call}; }}
 );
 """
 
@@ -517,11 +538,16 @@ def compute_ufunc_cpu_kernel(g: NativeFunctionsGroup) -> str:
         # TODO: don't hardcode ufunc:: namespace here, should be centralized smh
         for lk in lks:
             for dtype in loops[lk].supported_dtypes:
+                scalar_compute_t = BaseCType(
+                    opmath_t
+                    if dtype in (ScalarType.BFloat16, ScalarType.Half)
+                    else scalar_t
+                )
                 compute_t: CType
                 if k is UfuncKey.CPUScalar:
-                    compute_t = BaseCType(scalar_t)
+                    compute_t = scalar_compute_t
                 elif k is UfuncKey.CPUVector:
-                    compute_t = VectorizedCType(BaseCType(scalar_t))
+                    compute_t = VectorizedCType(scalar_compute_t)
                 else:
                     raise AssertionError
                 inner_ufunc_sigs = ufunc_sigs.setdefault(dtype, {})

@@ -21,6 +21,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyAccelerator,
+    onlyOn,
     OpDTypes,
     ops,
     skipXPU,
@@ -1524,6 +1525,48 @@ class TestForeachDevice(TestCase):
                     value=alpha,
                 )
                 self.assertEqual(inputs_copy, expected_addcdiv)
+
+    @onlyOn("cpu")
+    @dtypes(torch.bfloat16, torch.float16)
+    @parametrize("op", ("add", "sub"))
+    @parametrize("stride", (1, 2))
+    def test_add_sub_reduced_float_alpha(self, device, dtype, op, stride):
+        sizes = (0, 1, 15, 16, 17, 31, 32, 33, 63, 64, 65)
+        inputs = [
+            torch.full((n * stride,), 0.052978515625, device=device, dtype=dtype)[
+                ::stride
+            ]
+            for n in sizes
+        ]
+        other_value = -0.53125 if op == "add" else 0.53125
+        others = [
+            torch.full((n * stride,), other_value, device=device, dtype=dtype)[::stride]
+            for n in sizes
+        ]
+        expected = [
+            getattr(torch, op)(x.float(), y.float(), alpha=0.1).to(dtype)
+            for x, y in zip(inputs, others)
+        ]
+        actual = getattr(torch.foreach, op)(inputs, others, alpha=0.1)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        getattr(torch.foreach, op + "_")(inputs, others, alpha=0.1)
+        self.assertEqual(inputs, expected, atol=0, rtol=0)
+
+    @onlyOn("cpu")
+    @dtypes(torch.bfloat16, torch.float16)
+    @parametrize("scalar", (0.95, 0.999, 1e5))
+    @parametrize("stride", (1, 2))
+    def test_mul_reduced_float_scalar_precision(self, device, dtype, scalar, stride):
+        inputs = [
+            (torch.arange(13, 13 + n * stride, device=device).float() / 32768).to(
+                dtype
+            )[::stride]
+            for n in (1, 33, 65)
+        ]
+        expected = [(x.float() * scalar).to(dtype) for x in inputs]
+        self.assertEqual(torch.foreach.mul(inputs, scalar), expected, atol=0, rtol=0)
+        torch.foreach.mul_(inputs, scalar)
+        self.assertEqual(inputs, expected, atol=0, rtol=0)
 
     @onlyAccelerator
     def test_div_reciprocal(self, device):

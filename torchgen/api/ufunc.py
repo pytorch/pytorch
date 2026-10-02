@@ -92,8 +92,8 @@ def ufunctor_apply_type(
 
 
 # The actual ufunc template function the user writes.  Everything here
-# is done in the computation type.  compute_t is opmath_t in CUDA and scalar_t
-# in CPU
+# is done in the computation type. compute_t is opmath_t in CUDA and for
+# reduced floating-point types on CPU, and scalar_t otherwise.
 def ufunc_type(t: Type, *, binds: ArgName, compute_t: CType) -> NamedCType:
     r = cpp.valuetype_type(t, binds=binds, symint=False)
     if r is not None:
