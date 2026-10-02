@@ -27,6 +27,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch import sub
+from torch._dynamo.comptime import comptime
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
@@ -7658,6 +7659,102 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
         x = torch.randn(1)
         self.assertEqual(opt_mod(x), x + 1)
+
+    def test_type_dynamic_class_creation(self):
+        def fn(x):
+            cls = type("Generated", (), {"value": 1})
+            return x + 1, cls
+
+        def fullgraph_fn(x):
+            cls = type("Generated", (), {"value": 1})
+            return x + 1, cls
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def invalid_fn(x):
+            try:
+                type(comptime, (), {})
+            except TypeError:
+                return x + 1
+
+        x = torch.ones(1)
+        self.assertEqual(invalid_fn(x), x + 1)
+
+        with self.assertRaisesRegex(Unsupported, "Dynamic class creation with type"):
+            torch.compile(fullgraph_fn, backend="eager", fullgraph=True)(x)
+
+        eager_cls = fn(x)[1]
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        num_calls = torch._dynamo.config.recompile_limit + 1
+        classes = [opt_fn(x)[1] for _ in range(num_calls)]
+
+        self.assertEqual(len(set(classes)), num_calls)
+        self.assertEqual(counter.frame_count, 0)
+        self.assertEqual(classes[0].__module__, eager_cls.__module__)
+        self.assertEqual(classes[0].__qualname__, eager_cls.__qualname__)
+
+    @parametrize("variant", ("name", "bases", "namespace", "keyword"))
+    def test_type_dynamic_class_creation_subclasses_and_kwargs(self, variant):
+        calls = []
+
+        class Base:
+            def __init_subclass__(cls, *, flag=None):
+                calls.append(flag)
+                cls.flag = flag
+
+        class Name(str):
+            __slots__ = ()
+
+        class Bases(tuple):
+            __slots__ = ()
+
+        class Namespace(dict):
+            pass
+
+        name = Name("Generated") if variant == "name" else "Generated"
+        bases = Bases((Base,)) if variant == "bases" else (Base,)
+        namespace = Namespace(value=1) if variant == "namespace" else {"value": 1}
+        kwargs = {"flag": True} if variant == "keyword" else {}
+
+        def fn(x):
+            return x + 1, type(name, bases, namespace, **kwargs)
+
+        def fullgraph_fn(x):
+            return x + 1, type(name, bases, namespace, **kwargs)
+
+        x = torch.ones(1)
+        with self.assertRaisesRegex(Unsupported, "Dynamic class creation with type"):
+            torch.compile(fullgraph_fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(calls, [])
+
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        results = [opt_fn(x) for _ in range(2)]
+        classes = [result[1] for result in results]
+        self.assertEqual([result[0] for result in results], [x + 1, x + 1])
+        self.assertIsNot(classes[0], classes[1])
+        self.assertEqual(counter.frame_count, 0)
+        expected_flag = True if variant == "keyword" else None
+        self.assertEqual(calls, [expected_flag, expected_flag])
+        self.assertEqual([cls.flag for cls in classes], [expected_flag, expected_flag])
+
+    def test_type_dynamic_class_creation_inlined(self):
+        def fn(module, x):
+            torch.nn.utils.parametrize._inject_new_class(module)
+            return x + 1, type(module)
+
+        x = torch.ones(1)
+        eager_module = torch.nn.Linear(1, 1)
+        fn(eager_module, x)
+        counter = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+        num_calls = torch._dynamo.config.recompile_limit + 1
+        results = [opt_fn(torch.nn.Linear(1, 1), x) for _ in range(num_calls)]
+        classes = [result[1] for result in results]
+        self.assertEqual([result[0] for result in results], [x + 1] * num_calls)
+        self.assertEqual(len(set(classes)), num_calls)
+        self.assertEqual(counter.frame_count, 0)
+        self.assertEqual(classes[0].__module__, type(eager_module).__module__)
 
     def test_property_functools_partial(self):
         def p_getter(obj, *, delta: int):
