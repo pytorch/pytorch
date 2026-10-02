@@ -138,6 +138,37 @@ def read_json(path: str) -> dict:
     return loaded if isinstance(loaded, dict) else {}
 
 
+# (row column, modelUsage field) for each token count.
+_TOKEN_FIELDS = (
+    ("input_tokens", "inputTokens"),
+    ("output_tokens", "outputTokens"),
+    ("cache_read_input_tokens", "cacheReadInputTokens"),
+    ("cache_creation_input_tokens", "cacheCreationInputTokens"),
+)
+
+
+def token_counts(usage: dict, model_usage: object) -> dict:
+    """Token columns, summed over every model entry in `modelUsage`.
+
+    The result's `usage` covers only the top-level session; sub-agent tokens
+    appear only in `modelUsage`. Checked on Claude Code 2.1.280: with one
+    sub-agent, `usage` had 156 output tokens and `modelUsage` 2730, matching
+    `total_cost_usd`; without sub-agents the two agree, so rows stay comparable.
+    `usage` is the fallback when `modelUsage` carries no token fields.
+    """
+    entries = (
+        [e for e in model_usage.values() if isinstance(e, dict)]
+        if isinstance(model_usage, dict)
+        else []
+    )
+    if any(field in e for e in entries for _, field in _TOKEN_FIELDS):
+        return {
+            column: sum(as_int(str(e.get(field, 0))) for e in entries)
+            for column, field in _TOKEN_FIELDS
+        }
+    return {column: as_int(str(usage.get(column, 0))) for column, _ in _TOKEN_FIELDS}
+
+
 def usage_metrics(path: str) -> dict:
     """Pull cost/latency from the usage file, if present.
 
@@ -176,15 +207,10 @@ def usage_metrics(path: str) -> dict:
         # the "telemetry must never be the reason a review fails" promise in
         # this function's own docstring.
         "total_cost_usd": as_float(last.get("total_cost_usd")),
-        "input_tokens": as_int(str(usage.get("input_tokens", 0))),
-        "output_tokens": as_int(str(usage.get("output_tokens", 0))),
-        "cache_read_input_tokens": as_int(str(usage.get("cache_read_input_tokens", 0))),
-        "cache_creation_input_tokens": as_int(
-            str(usage.get("cache_creation_input_tokens", 0))
-        ),
+        **token_counts(usage, model_usage),
         # Alphabetically first when several models appear, which is arbitrary
-        # but deterministic. Practically there is one: the review makes a single
-        # model call. If sub-agents ever land, this needs a real rule.
+        # but deterministic. Practically there is one: the workflow forces
+        # sub-agents onto the review model (CLAUDE_CODE_SUBAGENT_MODEL_FORCE).
         "model": safe_model(
             sorted(model_usage)[0]
             if isinstance(model_usage, dict) and model_usage
