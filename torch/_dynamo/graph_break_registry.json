@@ -4191,6 +4191,16 @@
       ]
     }
   ],
+  "GB4320": [
+    {
+      "Gb_type": "ScriptFunction with mutable-capable schema",
+      "Context": "schema: {schema}",
+      "Explanation": "Dynamo cannot safely inline a torch.jit.ScriptFunction whose schema contains List, Dict, Any, Class, or Interface because TorchScript may copy mutable containers or class instances at the Python call boundary.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB3069": [
     {
       "Gb_type": "Custom op missing fake impl during tracing",

@@ -14342,10 +14342,17 @@ class TestNNDeviceType(NNTestCase):
 
         # Positive control: a supported prob target takes the chunked
         # path with no fallback warning.
-        out = self.assertNotWarn(
-            lambda: nn.functional.linear_cross_entropy(
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            out = nn.functional.linear_cross_entropy(
                 inp, lw, target, reduction="mean", options=options,
             )
+        unexpected = [
+            w for w in ws
+            if "forcing allow_retain_graph=True under torch.compile" not in str(w.message)
+        ]
+        self.assertFalse(
+            unexpected, f"supported prob target unexpectedly warned: {unexpected}"
         )
 
         # target.requires_grad: falls back; the target gradient flows.
