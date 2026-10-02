@@ -5842,8 +5842,10 @@ def max_pool_checks(
 def _pool_argmax_inner_fn(x, kernel_size, inner_fn):
     # Loop reordering runs after lowering and may permute the reduction ranges, so
     # the offset is returned as an explicit row-major index into the window.
-    supports_logical_index_argreduce = is_triton(x) or (
-        ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+    supports_logical_index_argreduce = (
+        is_triton(x)
+        or ir.get_device_type(x) == "mps"
+        or (ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp")
     )
     if len(kernel_size) == 1 or not supports_logical_index_argreduce:
         return inner_fn
@@ -7344,8 +7346,10 @@ def _make_reduction_inner(
 
     # Loop reordering happens after lowering, so the input IR cannot reliably predict
     # when the physical reduction order will differ from the logical order.
-    supports_logical_index_argreduce = is_triton(x) or (
-        ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+    supports_logical_index_argreduce = (
+        is_triton(x)
+        or ir.get_device_type(x) == "mps"
+        or (ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp")
     )
     should_compute_logical_index = (
         reduction_type
