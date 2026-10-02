@@ -151,12 +151,19 @@ class CuspyConfig(_ProfilerExtensionConfig):
             dependency edges.
         enable_event_node_ids (bool, optional): Associate CUDA events with CUDA
             graph event-record nodes.
+        annotate_collectives (bool, optional): Tag the kernels of c10d
+            collectives on process groups that exist when recording starts
+            with ``record_param_comms``-style fields. Coalesced and batched p2p
+            collectives are not tagged. Pass ``False`` when a wrapper already
+            annotates them, e.g. with ``add_collective_metadata``: both write
+            the same per-collective fields, so one overwrites the other.
     """
 
     enable_cuda_sync_events: bool = False
     enable_environment_counters: bool = False
     enable_graph_dependencies: bool = False
     enable_event_node_ids: bool = False
+    annotate_collectives: bool = True
 
     def _to_config_entries(self) -> dict[str, str]:
         return {}
@@ -422,6 +429,7 @@ class _KinetoProfile:
         # at start, closed at stop (_cuspy_window_id), exported by export_chrome_trace.
         self._cuspy_profiler_observer: Any = None
         self._cuspy_window_id: int | None = None
+        self._cuspy_collective_annotations: Any = None
         # cuspy exports synchronously by default (like the stock profiler).
         # {"cuspy_async_export": true} hands the merge+write off-thread, joined by
         # wait_for_exports; cuspy-only, rejected elsewhere.
@@ -569,6 +577,14 @@ class _KinetoProfile:
             prof._set_active_cuspy_profiler_observer(self._cuspy_profiler_observer)
         self.profiler._prepare_trace()
 
+    def _close_cuspy_collective_annotations(self) -> None:
+        if self._cuspy_collective_annotations is not None:
+            annotations, self._cuspy_collective_annotations = (
+                self._cuspy_collective_annotations,
+                None,
+            )
+            annotations.close()
+
     def start_trace(self) -> None:
         if self.execution_trace_observer:
             self.execution_trace_observer.start()
@@ -579,6 +595,22 @@ class _KinetoProfile:
             # Open the trace window here (stamps the start boundary, native clock, no
             # device sync); records before this are excluded from the window.
             self._cuspy_profiler_observer.open_window()
+            # Not at prepare_trace: warmup collectives would pay for annotations
+            # the window drops.
+            self._close_cuspy_collective_annotations()
+            if (
+                self._cuspy_config is not None
+                and self._cuspy_config.annotate_collectives
+                and torch.distributed.is_available()
+                and torch.distributed.is_initialized()
+            ):
+                from torch.distributed._collective_annotations import (
+                    CollectiveAnnotations,
+                )
+
+                self._cuspy_collective_annotations = CollectiveAnnotations(
+                    self._cuspy_profiler_observer.annotate_collective
+                )
 
         if self.profile_memory:
             self.add_metadata_json("profile_memory", "1")
@@ -630,6 +662,7 @@ class _KinetoProfile:
             # window (end boundary, native clock, no device sync), queuing it for deferred
             # export; the observer is kept alive past stop for the async write.
             prof._set_active_cuspy_profiler_observer(None)
+            self._close_cuspy_collective_annotations()
             if self._cuspy_profiler_observer is not None:
                 self._cuspy_window_id = self._cuspy_profiler_observer.close_window()
         self.profiler.__exit__(None, None, None)

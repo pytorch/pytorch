@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import json
 import logging
 import threading
 from collections.abc import Callable
@@ -374,6 +375,45 @@ class CuspyObserver:
             yield ext_id
         finally:
             self.pop_annotation()
+
+    @contextlib.contextmanager
+    def annotate_collective(self, metadata: dict[str, Any]) -> Iterator[None]:
+        """Attach ``metadata`` to the kernels launched inside the block, for a
+        collective whose CPU op Cuspy does not see (c10d's ``record_param_comms``).
+        Eager only: captured kernels are tagged through ``mark_kernels``."""
+        import torch
+
+        cuspy = self._cuspy
+        if (
+            not self.available
+            or cuspy is None
+            or torch.cuda.is_current_stream_capturing()
+        ):
+            yield
+            return
+        chain = cuspy.external_id_chain(cuspy.current_external_correlation_id() or 0)
+        with self._ann_lock:
+            name = next(
+                (self._ext_names[i] for i in reversed(chain) if i in self._ext_names),
+                None,
+            )
+        ext_id = cuspy.push_external_correlation_id()
+        try:
+            if ext_id is not None:
+                # CUPTI tags a kernel with only the innermost external id, so carry
+                # the enclosing record_function name onto the new one.
+                if name is not None:
+                    with self._ann_lock:
+                        self._ext_names[ext_id] = name
+                # Keyed by ext_id rather than the current id: if CUPTI rejected the
+                # push, the current id is still the enclosing region's.
+                torch._C._profiler._cuspy.metadata_put_external(
+                    json.dumps(metadata), ext_id
+                )
+            yield
+        finally:
+            if ext_id is not None:
+                cuspy.pop_external_correlation_id()
 
     def annotation_names(self, *, reset: bool = False) -> dict[int, str]:
         """Snapshot of the ``external_id -> name`` map pushed so far; pass
