@@ -16,9 +16,15 @@ from torch.testing._internal.common_quantization import (
     _make_conv_test_input,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import raise_on_run_directly, IS_PPC
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_PPC,
+    raise_on_run_directly,
+)
 
 class TestQuantizedFunctionalOps(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_relu_api(self):
         X = torch.arange(-5, 5, dtype=torch.float)
         scale = 2.0
