@@ -162,7 +162,7 @@ jobs:
           # to find a cross-run artifact that exists, with the rate rising under
           # load. Here that would skip every downstream step, so the PR is
           # never reviewed AND no row is written. Same loop, and same reason,
-          # as .github/workflows/claude-issue-triage-run.yml.
+          # as .github/workflows/issue-triage-pi.yml.
           #
           # This bounds the TRANSIENT case only. Exhausting the retries still
           # exits before the `started` row, so a missing row must be rendered

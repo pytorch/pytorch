@@ -74,6 +74,8 @@ For a job that reads untrusted input, combine the action with:
 - No write scope in the model's job; apply effects in a separate job without AWS access.
 - No `bash` in `tools` (the default is `read,grep,find,ls`).
 
+`scripts/issue_triage_pi/test_workflow_contract.py` pins these properties for issue triage.
+
 ## Models
 
 Use an exact ID from `allowed-models.json`, including its inference-profile prefix and
@@ -84,3 +86,25 @@ subscription by an account admin.
 Before adding an ID, verify it with `pi-bedrock-smoke.yml` in `pytorch/ciforge`. That trusted
 probing workflow uses `allow-unlisted-model: "true"`; normal callers keep the allowlist.
 `models.json` supplies definitions missing from the pinned pi catalog for offline runs.
+
+## Issue triage
+
+`.github/workflows/issue-triage-pi.yml` is stage 2 of issue triage, after
+`issue-triage.yml` captures the opened issue. It uses the `triaging-issues` skill with
+`global.openai.gpt-6.1-sol` at medium thinking (the Claude Code stage 2 used Sonnet 5):
+
+1. **plan** (`pi-triage-plan.yml`; Bedrock, `issues: read`, egress blocked): the model reads
+   the issue through read-only `gh` tools (`.github/pi/extensions/github-issue-tools.ts`: `get_issue`,
+   `get_issue_comments`, `search_issues`, fixed to this repository) and submits a plan
+   matching `.github/pi/schemas/issue-triage-plan.json`.
+2. **apply** (`issues: write`, no AWS): `scripts/issue_triage_pi/apply_plan.py` filters the
+   plan with the skill's label rules (forbidden → `triage review`; unknown and redundant
+   dropped), only adds labels, posts only `templates.json` comments the bot has not already
+   posted, closes only usage questions and expected numerical behavior, and adds
+   `bot-triaged`. It then hands the issue to `claude-distributed-triage.yml`.
+
+Run it manually with `mode`: `replay` shows already-triaged issues as they were before the
+triage bot acted (their labels and human comments from before its first label event) and
+compares each plan with the labels added since; `dry-run` plans against the issues as they
+are now; `apply` writes. Issue transfers and issue-body redaction are not automated: a
+transfer becomes `triage review`, and download links stay in the body.

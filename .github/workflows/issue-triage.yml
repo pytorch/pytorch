@@ -1,5 +1,5 @@
 # Owner(s): ["module: ci"]
-name: Claude Issue Triage
+name: Issue Triage
 
 on:
   issues:
