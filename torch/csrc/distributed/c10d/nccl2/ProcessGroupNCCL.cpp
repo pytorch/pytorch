@@ -105,8 +105,14 @@ void waitForNcclChildComm(
         deadline - now);
   };
   try {
+    // A nonblocking split/shrink returns ncclSuccess while the child is still
+    // initializing; its failure is only reported via the parent's async error.
     waitForNcclCompletion(
-        nccl_api, parent_comm, status, remaining(), operation);
+        nccl_api,
+        parent_comm,
+        status == ncclSuccess ? ncclInProgress : status,
+        remaining(),
+        operation);
     if (!expect_child) {
       return;
     }
