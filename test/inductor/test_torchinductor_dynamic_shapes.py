@@ -62,7 +62,6 @@ importlib.import_module("filelock")
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
-    "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     # A symbolic rnumel defeats should_use_persistent_reduction for BOTH halves
     # of the model, so the parent stops emitting triton_per_ and the
     # persistent-vs-looped contrast the test asserts no longer exists.

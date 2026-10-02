@@ -158,6 +158,16 @@
       ]
     }
   ],
+  "GB3780": [
+    {
+      "Gb_type": "non-literal key in object __dict__",
+      "Context": "key={key}, type={type(key)}",
+      "Explanation": "Dynamo models object __dict__ keys as literal constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0010": [
     {
       "Gb_type": "Attempted to read a deleted variable",
@@ -1754,6 +1764,16 @@
       ]
     }
   ],
+  "GB7494": [
+    {
+      "Gb_type": "Dynamic class creation with type",
+      "Context": "type(name, bases, namespace)",
+      "Explanation": "Dynamo does not support tracing class creation with type().",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4778": [
     {
       "Gb_type": "nested function with non-constructible closure in output",
@@ -2811,6 +2831,16 @@
       ]
     }
   ],
+  "GB1583": [
+    {
+      "Gb_type": "builtin isinstance() with classinfo that does not support issubclass()",
+      "Context": "isinstance({arg}, {isinstance_type})",
+      "Explanation": "issubclass({arg_type}, {member}) raised TypeError: {e}. Dynamo emulates isinstance() with issubclass() for this argument and cannot determine the result.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0170": [
     {
       "Gb_type": "Data-dependent branching",
@@ -2860,6 +2890,14 @@
     }
   ],
   "GB0172": [
+    {
+      "Gb_type": "async_op=True for distributed collectives",
+      "Context": "{self.fn}, args={args}, kwargs={kwargs}",
+      "Explanation": "_ASYNC_OP_REMAP_ERROR",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "async_op=True for distributed collectives",
       "Context": "{self.fn}, args={args}, kwargs={kwargs}",
@@ -4163,6 +4201,16 @@
       ]
     }
   ],
+  "GB4320": [
+    {
+      "Gb_type": "ScriptFunction with mutable-capable schema",
+      "Context": "schema: {schema}",
+      "Explanation": "Dynamo cannot safely inline a torch.jit.ScriptFunction whose schema contains List, Dict, Any, Class, or Interface because TorchScript may copy mutable containers or class instances at the Python call boundary.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB3069": [
     {
       "Gb_type": "Custom op missing fake impl during tracing",
@@ -4314,6 +4362,26 @@
       "Explanation": "Dynamo does not support tracing TypedDict with optional keys",
       "Hints": [
         "Avoid using TypedDict with optional keys",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3837": [
+    {
+      "Gb_type": "bytearray constructor",
+      "Context": "arg type: {type(arg).__name__}",
+      "Explanation": "Dynamo cannot trace bytearray() with this argument type.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5460": [
+    {
+      "Gb_type": "bytearray constructor with non-constant args",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo cannot trace bytearray() with non-constant arguments.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
