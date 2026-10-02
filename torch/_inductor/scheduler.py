@@ -9707,8 +9707,6 @@ class Scheduler:
     ) -> bool:
         candidate_nodes = (node1, node2)
         for node_with_mutations in candidate_nodes:
-            if not isinstance(node_with_mutations, BaseSchedulerNode):
-                continue
             for mutating_node, weak_dep in node_with_mutations.iter_pruned_weak_deps():
                 reading_node = next(
                     (
