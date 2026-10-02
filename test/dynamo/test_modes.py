@@ -1013,6 +1013,33 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(opt_fn(x), fn(x))
         self.assertEqual(opt_fn(x), fn(x))
 
+    def test_handle_torch_function_subclass_dispatch(self):
+        from torch.overrides import handle_torch_function
+
+        def fn(x):
+            return handle_torch_function(fn, (x,), x)
+
+        class TestSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func is fn:
+                    return len(types)
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        class TypesMode(BaseTorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if func is fn:
+                    return len(types)
+                return super().__torch_function__(func, types, args, kwargs or {})
+
+        x = torch.ones(1).as_subclass(TestSubclass)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), 1)
+        self.assertEqual(opt_fn(x), 1)
+        with TypesMode(), torch._C.DisableTorchFunctionSubclass():
+            self.assertEqual(fn(x), 0)
+            self.assertEqual(opt_fn(x), 0)
+
     def test_handle_torch_function_respects_disable(self):
         from torch.overrides import handle_torch_function
 
