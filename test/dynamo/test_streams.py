@@ -2898,6 +2898,46 @@ instantiate_device_type_tests(
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
     @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("barrier", ("device_sync", "current_stream_sync"))
+    def test_current_stream_input_mutation_before_sync_errors(
+        self, backend, barrier
+    ) -> None:
+        def fn(x, small):
+            x.add_(1)
+            if barrier == "device_sync":
+                torch.cuda.synchronize()
+            else:
+                torch.cuda.current_stream().synchronize()
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input mutation write-back after a user stream barrier",
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(x, small)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.zeros_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_unrelated_stream_sync_after_current_input_mutation(self, backend) -> None:
+        def fn(x, small, unrelated):
+            x.add_(1)
+            unrelated.synchronize()
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros_like(x)
+        unrelated = torch.cuda.Stream()
+        torch.cuda.synchronize()
+        result = torch.compile(fn, backend=backend, fullgraph=True)(x, small, unrelated)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(result, torch.ones_like(result))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
     @parametrize("barrier", ("wait_stream", "stream_sync", "device_sync"))
     def test_input_mutation_writeback_after_user_join_errors(
         self, backend, barrier

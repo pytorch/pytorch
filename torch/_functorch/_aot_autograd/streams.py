@@ -343,7 +343,6 @@ def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
 
         if (
             epi_copy.args[0].op != "placeholder"
-            or arg_stream is None
             or get_device(epi_copy.args[0]).type == "cpu"
         ):
             continue
@@ -361,13 +360,19 @@ def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
                 torch.ops.streams.synchronize_stream.default,
             ):
                 barrier_stream = barrier.args[-1]
-                joined = barrier_stream == arg_stream
+                joined = arg_stream is not None and barrier_stream == arg_stream
                 if not joined and not isinstance(barrier_stream, int):
                     joined = True
                 elif not joined:
                     try:
                         observed = _get_stream_by_index(barrier_stream)
-                        mutated = _get_stream_by_index(arg_stream)
+                        mutated = (
+                            _get_stream_by_index(arg_stream)
+                            if arg_stream is not None
+                            else torch.accelerator.current_stream(
+                                get_device(epi_copy.args[0])
+                            )
+                        )
                     except AssertionError:
                         joined = True
                     else:
