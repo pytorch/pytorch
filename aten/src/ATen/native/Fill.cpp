@@ -148,10 +148,12 @@ static Tensor& zero_cpu_(Tensor &self, int64_t nelements) {
 }
 
 Tensor& zero_(Tensor &self) {
-  int64_t nelements = c10::multiply_integers(self.sizes());
-  if (self.device() == at::kCPU &&
-      self.is_non_overlapping_and_dense() &&
-      nelements < internal::GRAIN_SIZE) {
+  // For dense CPU tensors, zero via memset on the underlying byte range.
+  // This avoids dispatching through fill_(0)'s parallel TensorIterator, whose
+  // thread-pool startup overhead dominates near the GRAIN_SIZE boundary and
+  // produces a sharp perf cliff for ops such as torch.eye. See #48251.
+  if (self.device() == at::kCPU && self.is_non_overlapping_and_dense()) {
+    int64_t nelements = c10::multiply_integers(self.sizes());
     return zero_cpu_(self, nelements);
   }
   return self.fill_(0);
