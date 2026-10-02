@@ -4451,6 +4451,38 @@ def _full(fill_value, device, dtype, size):
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
 
+    if (
+        device.type == "cpu"
+        and config.cpp_wrapper
+        and isinstance(value, sympy.Symbol)
+        and dtype
+        in (
+            torch.bool,
+            torch.uint64,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+        )
+    ):
+        # A uint64 item can exceed the range of the C++ wrapper's int64_t
+        # unbacked symbol, even when the destination can represent the value.
+        # Load the scalar tensor in the full kernel instead; integer destinations
+        # that can overflow still use the wrapper's checked conversion.
+        for buffer in V.graph.buffers:
+            if (
+                isinstance(buffer, ir.DynamicScalar)
+                and buffer.sym == value
+                and not buffer.keypath
+                and all(
+                    V.graph.sizevars.is_size_one_or_false(dim)
+                    for dim in buffer.inputs[0].get_size()
+                )
+                and buffer.inputs[0].get_dtype() == torch.uint64
+                and buffer.inputs[0].get_device() == device
+            ):
+                value = ir.SqueezeView.create(buffer.inputs[0])
+                break
+
     if isinstance(value, (int, float)):
 
         def inner_fn(index):

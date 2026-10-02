@@ -1773,6 +1773,44 @@ class TestSymbolicFull(TestCase):
         with self.assertRaisesRegex(RuntimeError, self._overflow_error):
             compiled_f(x)
 
+    @onlyOn(["cpu"])
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize(
+        "dtype",
+        (torch.uint64, torch.bfloat16, torch.float32, torch.float64, torch.bool),
+    )
+    def test_full_symbolic_uint64_large_fill_cpp_wrapper(self, device, dtype):
+        def f(x):
+            return torch.full((2,), x.item(), dtype=dtype, device=device)
+
+        compiled_f = torch.compile(f, fullgraph=True)
+        for value in (1 << 63, torch.iinfo(torch.uint64).max):
+            x = torch.tensor(value, dtype=torch.uint64, device=device)
+            self.assertEqual(compiled_f(x), f(x))
+
+    @onlyOn(["cpu"])
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize("layout", ("rank1", "strided_view", "rank2_view"))
+    def test_full_symbolic_uint64_singleton_fill_cpp_wrapper(self, device, layout):
+        def f(x):
+            return torch.full((2,), x.item(), dtype=torch.float32, device=device)
+
+        compiled_f = torch.compile(f, fullgraph=True)
+        for value in (1 << 63, torch.iinfo(torch.uint64).max):
+            if layout == "rank1":
+                x = torch.tensor([value], dtype=torch.uint64, device=device)
+            elif layout == "strided_view":
+                base = torch.tensor([0, value, 0], dtype=torch.uint64, device=device)
+                x = base[1::2]
+            else:
+                base = torch.tensor(
+                    [[0, 0], [0, value]], dtype=torch.uint64, device=device
+                )
+                x = base[1:2, 1:2]
+            self.assertEqual(compiled_f(x), f(x))
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 instantiate_device_type_tests(
