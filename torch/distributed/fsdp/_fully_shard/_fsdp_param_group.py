@@ -708,9 +708,11 @@ class FSDPParamGroup:
             with record_function(self._with_fqn("FSDP::post_backward_reshard")):
                 if not self.reduce_grads:
                     self._post_backward_pending = True
-                    self._set_unsharded_grad_dtypes(defer_upcast=False)
                     if self.reshard_after_backward:
                         self.reshard()
+                    # Upcast after resharding so that wider gradients never
+                    # coexist with the unsharded parameters
+                    self._set_unsharded_grad_dtypes(defer_upcast=False)
                     return
                 self._post_backward_pending = False
                 self._validate_unused_param_grad_dtypes()
@@ -931,19 +933,17 @@ class FSDPParamGroup:
     def _set_unsharded_grad_dtypes(self, defer_upcast: bool) -> None:
         # Leave gradients in the dtype autograd produces, saving a cast per
         # parameter: AccumulateGrad adds them in place to existing wider
-        # gradients, and the reduce-scatter copy-in upcasts the rest. Only a
-        # gradient that starts accumulating across backwards needs the cast.
+        # gradients, and the reduce-scatter copy-in upcasts the rest. A new
+        # gradient that is not reduced is upcast once, after resharding.
         for fsdp_param in self._fsdp_params_with_wider_grad_dtype:
             param = getattr(fsdp_param, "_unsharded_param", None)
             if param is None or not param.requires_grad:
                 continue
             grad, dtype = param.grad, fsdp_param.unsharded_grad_dtype
             if defer_upcast:
-                if grad is not None or self.reduce_grads:
-                    param.grad_dtype = None
+                param.grad_dtype = None
                 continue
             if grad is not None and grad.dtype != dtype:
-                # Created while deferred but not reduced
                 param.grad = grad.to(dtype)
             param.grad_dtype = dtype
 
