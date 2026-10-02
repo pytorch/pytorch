@@ -39,6 +39,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     TEST_ACCELERATOR,
+    TEST_MPS,
     TestCase,
 )
 from torch.utils._pytree import tree_map_only
@@ -969,9 +970,7 @@ class TestExpandedWeightModule(TestCase):
 class ContextManagerTests(TestBase):
     def __init__(self, *args, **kwargs):
         self.test_cpu = kwargs.get("test_cpu", True)
-        self.test_accelerator = kwargs.get(
-            "test_accelerator", kwargs.get("test_cuda", True)
-        )
+        self.test_accelerator = kwargs.get("test_accelerator", True)
         super().__init__(*args, **kwargs)
 
     @property
