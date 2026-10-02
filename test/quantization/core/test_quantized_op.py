@@ -5369,6 +5369,119 @@ class TestQuantizedEmbeddingOps(TestCase):
             fallback_to_no_sparse,
             sparsity=sparsity, atol=0.005, rtol=1e-3)
 
+    @skipIfNoFBGEMM
+    def test_embedding_bag_byte_kernel_cache_rekeys(self):
+        # Regression coverage for the FBGEMM byte-kernel handle caches in
+        # embedding_bag_byte_impl, keyed by embedding dimension and weight mode.
+        def run_case(
+                embedding_dim, has_weight, sparse,
+                index_dtype, offset_dtype, fallback_to_no_sparse=False):
+            num_embeddings = 6
+            weights = torch.arange(
+                num_embeddings * embedding_dim, dtype=torch.float32
+            ).reshape(num_embeddings, embedding_dim) / 100.0
+            reference_weights = weights.clone()
+
+            if sparse:
+                kept_rows = torch.tensor([0, 2, 3, 5], dtype=torch.long)
+                packed_weights = torch.ops.quantized.embedding_bag_byte_prepack(
+                    weights[kept_rows].contiguous()
+                )
+                mapping = torch.tensor([0, -1, 1, 2, -1, 3], dtype=torch.int32)
+                reference_weights[[1, 4]] = 0
+                pruned_weights = True
+            else:
+                packed_weights = torch.ops.quantized.embedding_bag_byte_prepack(
+                    weights
+                )
+                mapping = (
+                    torch.tensor([0], dtype=torch.int32)
+                    if fallback_to_no_sparse else None
+                )
+                pruned_weights = fallback_to_no_sparse
+
+            indices = torch.tensor(
+                [0, 1, 2, 3, 4, 5, 5, 1, 0], dtype=index_dtype
+            )
+            offsets = torch.tensor([0, 3, 6, 9], dtype=offset_dtype)
+            per_sample_weights = (
+                torch.linspace(0.25, 1.0, indices.numel())
+                if has_weight else None
+            )
+
+            reference = torch.nn.EmbeddingBag(
+                num_embeddings=num_embeddings,
+                embedding_dim=embedding_dim,
+                include_last_offset=True,
+                _weight=reference_weights,
+                scale_grad_by_freq=False,
+                mode="sum",
+            )(
+                indices.long(),
+                offsets.long(),
+                per_sample_weights=per_sample_weights,
+            )
+            result = torch.ops.quantized.embedding_bag_byte_rowwise_offsets(
+                packed_weights,
+                indices,
+                offsets,
+                mode=0,
+                pruned_weights=pruned_weights,
+                per_sample_weights=per_sample_weights,
+                compressed_indices_mapping=mapping,
+                include_last_offset=True,
+            )
+            torch.testing.assert_close(reference, result, atol=0.005, rtol=1e-3)
+
+        # Guard against incorrect kernel reuse across repeated keys, dimension
+        # changes in both directions, and weight-key changes. This checks
+        # numerics, not whether a cache hit occurred.
+        cache_key_sequence = (
+            (8, False),
+            (8, False),
+            (12, False),
+            (12, True),
+            (12, False),
+            (8, False),
+        )
+        previous_num_threads = torch.get_num_threads()
+        try:
+            torch.set_num_threads(1)
+            for index_dtype, offset_dtype in itertools.product(
+                    (torch.int32, torch.int64), repeat=2):
+                for sparse in (False, True):
+                    for embedding_dim, has_weight in cache_key_sequence:
+                        with self.subTest(
+                                index_dtype=index_dtype,
+                                offset_dtype=offset_dtype,
+                                sparse=sparse,
+                                embedding_dim=embedding_dim,
+                                has_weight=has_weight):
+                            run_case(
+                                embedding_dim,
+                                has_weight,
+                                sparse,
+                                index_dtype,
+                                offset_dtype,
+                            )
+
+                # The one-entry mapping takes the dense fallback after sparse
+                # calls and must use the correct dense key.
+                with self.subTest(
+                        index_dtype=index_dtype,
+                        offset_dtype=offset_dtype,
+                        fallback_to_no_sparse=True):
+                    run_case(
+                        8,
+                        False,
+                        False,
+                        index_dtype,
+                        offset_dtype,
+                        fallback_to_no_sparse=True,
+                    )
+        finally:
+            torch.set_num_threads(previous_num_threads)
+
     """ Tests the correctness of the embedding_bag_4bit quantized operator """
     @given(num_embeddings=st.integers(10, 100),
            embedding_dim=st.integers(5, 50).filter(lambda x: x % 4 == 0),
@@ -8934,6 +9047,27 @@ class TestQuantizedConv(TestCase):
         torch.manual_seed(0)  # For reproducibility in 3D conv tests
         self._test_qconv_fp8_helper(3, pointwise_post_op)
 
+    @unittest.skipUnless(IS_ARM64, "AArch64 only")
+    def test_aarch64_quantized_engines(self):
+        engines = torch.backends.quantized.supported_engines
+        self.assertNotIn("x86", engines)
+        self.assertNotIn("fbgemm", engines)
+        self.assertNotIn(torch.backends.quantized.engine, ("x86", "fbgemm"))
+
+    @unittest.skipIf(
+        torch.backends.quantized.engine == "none",
+        "No default quantized engine available",
+    )
+    def test_qconv1d_default_engine(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/177254
+        # On aarch64, fbgemmSupportedCPU() incorrectly returned True, causing
+        # the default quantized engine to be X86 which crashed in FBGEMM with
+        # "RuntimeError: unknown architecure".  # codespell:ignore architecure
+        qconv1d = torch.ao.nn.quantized.Conv1d(4, 8, 3)
+        x = torch.quantize_per_tensor(
+            torch.randn(1, 4, 16), scale=1.0, zero_point=0, dtype=torch.quint8
+        )
+        qconv1d(x)
 
 
 class TestPadding(TestCase):
