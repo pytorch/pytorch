@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.nn.functional import scaled_dot_product_attention
+from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.attention.bias import CausalVariant, causal_lower_right, causal_upper_left
 from torch.nn.parameter import Parameter
@@ -2585,6 +2586,33 @@ class TestSDPAGeneric(NNTestCase):
             expected_shape = list(q_shape)
             expected_shape[-1] = v_shape[-1]
             self.assertEqual(actual.shape, torch.Size(expected_shape))
+
+    @parametrize(
+        "q_shape,kv_shape",
+        [
+            ((1, 4, 4, 64), (2, 4, 16, 64)),
+            ((1, 4, 4, 64), (2, 4, 1024, 64)),
+            ((1, 4, 32, 64), (2, 4, 32, 64)),
+            ((1, 4, 4, 8), (2, 4, 16, 8)),
+            ((4, 4, 64), (2, 4, 16, 64)),
+            ((2, 1, 4, 4, 64), (1, 3, 4, 16, 64)),
+        ],
+    )
+    @parametrize("use_mask", [False, True])
+    def test_sdpa_math_broadcast_batch_dims(self, device, q_shape, kv_shape, use_mask):
+        q = torch.randn(q_shape, device=device)
+        k = torch.randn(kv_shape, device=device)
+        v = torch.randn(kv_shape, device=device)
+        mask = torch.randn(*q_shape[:-1], kv_shape[-2], device=device) if use_mask else None
+        batch_shape = torch.broadcast_shapes(q_shape[:-3], kv_shape[:-3])
+        expanded = [t.expand(*batch_shape, *t.shape[-3:]).contiguous() for t in (q, k, v)]
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            actual = F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
+            expected = F.scaled_dot_product_attention(*expanded, attn_mask=mask)
+            with FakeTensorMode() as mode:
+                fake = F.scaled_dot_product_attention(*map(mode.from_tensor, (q, k, v)))
+        self.assertEqual(actual, expected)
+        self.assertEqual(fake.shape, expected.shape)
 
     def test_sdpa_export_unbacked_attn_mask(self, device):
         """SDPA backend selection should not crash on unbacked symbolic mask shapes."""
