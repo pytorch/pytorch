@@ -10,6 +10,9 @@ export PATH="$RUNNER_TEMP/pi-install/node_modules/.bin:$PATH"
 # Hermetic config: no user/global settings, auth, telemetry, or network beyond the model.
 export PI_CODING_AGENT_DIR="$RUNNER_TEMP/pi-agent-config"
 mkdir -p "$PI_CODING_AGENT_DIR"
+# Pinned definitions for allowlisted models newer than pi's bundled catalog, so
+# they run without fetching the catalog from pi.dev (blocked under lockdown).
+cp "$PI_ACTION_PATH/models.json" "$PI_CODING_AGENT_DIR/models.json"
 export PI_OFFLINE=1 PI_SKIP_VERSION_CHECK=1 PI_TELEMETRY=0
 
 allowlist="$PI_ACTION_PATH/allowed-models.json"
@@ -62,6 +65,7 @@ if ! known; then
 fi
 
 echo "pi $(pi --version) | amazon-bedrock/$PI_MODEL | thinking=$PI_THINKING | tools=$tools"
+started=$(date +%s)
 set +e
 pi --mode json "${isolation[@]}" "${extensions[@]}" ${skills[@]+"${skills[@]}"} \
   --session-dir "$out/session" --provider amazon-bedrock --model "$PI_MODEL" \
@@ -70,6 +74,7 @@ pi --mode json "${isolation[@]}" "${extensions[@]}" ${skills[@]+"${skills[@]}"} 
   | jq --unbuffered -r 'select(.type == "tool_execution_start") | "→ \(.toolName) \(.args | tostring | .[0:240])"'
 rc=${PIPESTATUS[0]}
 set -e
+duration_ms=$((($(date +%s) - started) * 1000))
 
 session_file=$(find "$out/session" -name '*.jsonl' -print -quit)
 [[ -z "$session_file" ]] || pi --export "$session_file" "$out/transcript.html" > /dev/null 2>&1 || true
@@ -87,6 +92,10 @@ jq -s '[.[] | select(.type == "message_end" and .message.role == "assistant") | 
      last_stop: ($m | last | .stopReason // null),
      last_error: ($m | last | .errorMessage // null)}' "$events" > "$out/usage.json" 2> /dev/null \
   || echo '{}' > "$out/usage.json"
+
+# Claude Code execution-file shape, for the review log inspector and usage upload.
+jq -s --arg version "$(pi --version)" --arg model "$PI_MODEL" --argjson duration_ms "$duration_ms" \
+  -f "$PI_ACTION_PATH/claude-execution.jq" "$events" > "$out/execution.json" || rm -f "$out/execution.json"
 
 # Every tool declared to the model or run successfully must be in the allowlist.
 declared=$(jq -r 'select(.type == "message_end" and .message.role == "system") | .message.toolsAdded[]?.name' "$events" | sort -u)
@@ -134,6 +143,7 @@ fi
 delim="PI_EOF_$(openssl rand -hex 16)"
 {
   echo "usage=$(jq -c . "$out/usage.json")"
+  [[ ! -s "$out/execution.json" ]] || echo "execution-file=$out/execution.json"
   if [[ -s "$out/result.json" ]]; then
     echo "structured_output<<$delim"
     jq -c . "$out/result.json"
