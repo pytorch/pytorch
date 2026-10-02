@@ -336,6 +336,20 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
 def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
     nodes = list(gm.graph.nodes)
     positions = {node: pos for pos, node in enumerate(nodes)}
+    first_barrier_position = next(
+        (
+            pos
+            for pos, node in enumerate(nodes)
+            if node.op == "call_function"
+            and node.target
+            in (
+                torch.ops.streams.wait_stream.default,
+                torch.ops.streams.synchronize_stream.default,
+                torch.ops.streams.synchronize_device.default,
+            )
+        ),
+        len(nodes),
+    )
     for epi_copy in gm.graph.find_nodes(op="call_function", target=aten.copy_.default):
         arg_stream = get_stream(epi_copy.args[1])
         copy_stream = get_stream(epi_copy)
@@ -346,6 +360,10 @@ def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
             epi_copy.args[0].op != "placeholder"
             or get_device(epi_copy.args[0]).type == "cpu"
         ):
+            continue
+        # Without any preceding observable barrier, there is no ordering to
+        # reject and no reason to traverse this input's mutation ancestors.
+        if first_barrier_position >= positions[epi_copy]:
             continue
         # Functionalization erases earlier in-place writes. Conservatively
         # consider all ancestors of the deferred copy's value: an input
