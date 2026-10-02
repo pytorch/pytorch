@@ -190,6 +190,7 @@ from .utils import (
     constants_identical,
     dataclass_fields,
     dict_keys,
+    find_bound_builtin_method_descriptor,
     get_current_stream,
     get_torch_function_mode_stack,
     get_torch_function_mode_stack_at,
@@ -2953,6 +2954,24 @@ class GuardBuilder(GuardBuilderBase):
             guard.user_stack,
         )
 
+    @unsupported_guard_check_spec
+    def BUILTIN_METHOD_MATCH(self, guard: Guard, descriptor: object) -> None:
+        value = self.get(guard)
+        if find_bound_builtin_method_descriptor(value) is not descriptor:
+            raise AssertionError(
+                "bound builtin method descriptor changed during tracing"
+            )
+
+        def check_fn(current: object) -> bool:
+            return find_bound_builtin_method_descriptor(current) is descriptor
+
+        code = [f"bound builtin method matches {descriptor!r}"]
+        self.get_guard_manager(guard).add_lambda_guard(
+            check_fn,
+            get_verbose_code_parts(code, guard),
+            guard.user_stack,
+        )
+
     @register_guard_check_spec(
         get_metadata_fn=lambda guard, value: value,
         eval_fn=lambda value, metadata: constants_identical(value, metadata),
@@ -5326,6 +5345,7 @@ class CheckFunctionManager:
         "CLASS_MATCH",
         "MODULE_MATCH",
         "CLOSURE_MATCH",
+        "BUILTIN_METHOD_MATCH",
         "WEAKREF_ALIVE",
     )
 
