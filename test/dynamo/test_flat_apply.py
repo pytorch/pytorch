@@ -16,6 +16,7 @@ from torch._higher_order_ops.flat_apply import (
     flat_apply,
     func_to_graphable,
     is_graphable,
+    is_graphable_type,
     to_graphable,
 )
 from torch.testing._internal.common_utils import skipIfTorchDynamo
@@ -132,6 +133,22 @@ class FlatApplyTests(PytreeRegisteringTestCase):
         result = flat_apply(func_spec, in_spec, *flat_args)
         self.assertEqual(result, f(*args, **kwargs))
 
+    def test_none_leaves(self):
+        def f(x, maybe_y, payload):
+            return x + 1, maybe_y, payload["bias"]
+
+        args = (torch.tensor(1), None, {"bias": None})
+        kwargs = {}
+
+        flat_args, in_spec = to_graphable((args, kwargs))
+        self.assertEqual(flat_args, [args[0], None, None])
+        self.assertTrue(is_graphable(None))
+        self.assertTrue(is_graphable_type(type(None)))
+
+        empty_list, func_spec = func_to_graphable(f)
+        self.assertEqual(empty_list, [])
+        self.assertEqual(flat_apply(func_spec, in_spec, *flat_args), f(*args, **kwargs))
+
     def test_nonstrict_trace_dynamo_graph(self):
         class Point:
             x: Tensor
@@ -168,9 +185,12 @@ class FlatApplyTests(PytreeRegisteringTestCase):
             return p.x * p.y
 
         @torch._dynamo.nonstrict_trace
-        def trace_point_tensor(pt):
+        def trace_point_tensor(pt, maybe_bias):
             torch._dynamo.graph_break()
-            return pt.t + trace_point(pt.p)
+            result = pt.t + trace_point(pt.p)
+            if maybe_bias is None:
+                return result
+            return result + maybe_bias
 
         backend = EagerAndRecordGraphs()
 
@@ -179,7 +199,7 @@ class FlatApplyTests(PytreeRegisteringTestCase):
             p = Point(x, y)
             t = x + y
             pt = PointTensor(p, t)
-            res = trace_point_tensor(pt)
+            res = trace_point_tensor(pt, None)
             return res
 
         fn(torch.randn(10), torch.randn(10))
@@ -195,7 +215,7 @@ class GraphModule(torch.nn.Module):
 
         trace_point_tensor_callable : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.trace_point_tensor_callable
         trace_point_tensor_input_spec : torch.utils._pytree.TreeSpec = self.trace_point_tensor_input_spec
-        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(trace_point_tensor_callable, trace_point_tensor_input_spec, l_x_, l_y_, add);  trace_point_tensor_callable = trace_point_tensor_input_spec = l_x_ = l_y_ = add = None
+        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(trace_point_tensor_callable, trace_point_tensor_input_spec, l_x_, l_y_, add, None);  trace_point_tensor_callable = trace_point_tensor_input_spec = l_x_ = l_y_ = add = None
         getitem: "f32[10]" = flat_apply_capture[0];  flat_apply_capture = None
         return (getitem,)
 """,
@@ -265,20 +285,28 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_i_values: "f32[4, 4]"):
         l_i_values = L_i_values
 
+        # code: x = torch.sin(i.values)
+        sin: "f32[4, 4]" = torch.sin(l_i_values)
+
         # code: y, z_result1, z_result2 = gn(i.count, i.values)
         gn_callable : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.gn_callable
         gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
-        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_callable, gn_input_spec, 5, l_i_values);  gn_callable = gn_input_spec = None
+        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_callable, gn_input_spec, 5, l_i_values);  gn_callable = gn_input_spec = l_i_values = None
         getitem: "f32[4, 4]" = flat_apply_capture[0]
-        getitem_1: "f32[4, 4]" = flat_apply_capture[1]
-        getitem_2: "f32[4, 4]" = flat_apply_capture[2];  flat_apply_capture = None
-
-        # code: x = torch.sin(i.values)
-        sin: "f32[4, 4]" = torch.sin(l_i_values);  l_i_values = None
 
         # code: return x + y + z_result1 + z_result2
         add: "f32[4, 4]" = sin + getitem;  sin = getitem = None
+
+        # code: y, z_result1, z_result2 = gn(i.count, i.values)
+        getitem_1: "f32[4, 4]" = flat_apply_capture[1]
+
+        # code: return x + y + z_result1 + z_result2
         add_1: "f32[4, 4]" = add + getitem_1;  add = getitem_1 = None
+
+        # code: y, z_result1, z_result2 = gn(i.count, i.values)
+        getitem_2: "f32[4, 4]" = flat_apply_capture[2];  flat_apply_capture = None
+
+        # code: return x + y + z_result1 + z_result2
         add_2: "f32[4, 4]" = add_1 + getitem_2;  add_1 = getitem_2 = None
         return (add_2,)
 """,
@@ -318,20 +346,28 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_i_values: "f32[4, 4]"):
         l_i_values = L_i_values
 
+        # code: x = torch.sin(i.values)
+        sin: "f32[4, 4]" = torch.sin(l_i_values)
+
         # code: y, z_result1, z_result2 = gn(i)
         gn_callable : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.gn_callable
         gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
-        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_callable, gn_input_spec, 5, l_i_values);  gn_callable = gn_input_spec = None
+        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_callable, gn_input_spec, 5, l_i_values);  gn_callable = gn_input_spec = l_i_values = None
         getitem: "f32[4, 4]" = flat_apply_capture[0]
-        getitem_1: "f32[4, 4]" = flat_apply_capture[1]
-        getitem_2: "f32[4, 4]" = flat_apply_capture[2];  flat_apply_capture = None
-
-        # code: x = torch.sin(i.values)
-        sin: "f32[4, 4]" = torch.sin(l_i_values);  l_i_values = None
 
         # code: return x + y + z_result1 + z_result2
         add: "f32[4, 4]" = sin + getitem;  sin = getitem = None
+
+        # code: y, z_result1, z_result2 = gn(i)
+        getitem_1: "f32[4, 4]" = flat_apply_capture[1]
+
+        # code: return x + y + z_result1 + z_result2
         add_1: "f32[4, 4]" = add + getitem_1;  add = getitem_1 = None
+
+        # code: y, z_result1, z_result2 = gn(i)
+        getitem_2: "f32[4, 4]" = flat_apply_capture[2];  flat_apply_capture = None
+
+        # code: return x + y + z_result1 + z_result2
         add_2: "f32[4, 4]" = add_1 + getitem_2;  add_1 = getitem_2 = None
         return (add_2,)
 """,
@@ -400,20 +436,28 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_i_values: "f32[4, 4]"):
         l_i_values = L_i_values
 
+        # code: x = torch.sin(i.values)
+        sin: "f32[4, 4]" = torch.sin(l_i_values)
+
         # code: y, z = gn(i.count, i.values)
         gn_callable : torch._higher_order_ops.invoke_leaf_function._LeafCallable = self.gn_callable
         gn_input_spec : torch.utils._pytree.TreeSpec = self.gn_input_spec
-        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_callable, gn_input_spec, 5, l_i_values);  gn_callable = gn_input_spec = None
+        flat_apply_capture = torch__dynamo_variables_torch_flat_apply_capture(gn_callable, gn_input_spec, 5, l_i_values);  gn_callable = gn_input_spec = l_i_values = None
         getitem: "f32[4, 4]" = flat_apply_capture[0]
-        getitem_1: "f32[4, 4]" = flat_apply_capture[1]
-        getitem_2: "f32[4, 4]" = flat_apply_capture[2];  flat_apply_capture = None
-
-        # code: x = torch.sin(i.values)
-        sin: "f32[4, 4]" = torch.sin(l_i_values);  l_i_values = None
 
         # code: return x + y + z.result1 + z.result2
         add: "f32[4, 4]" = sin + getitem;  sin = getitem = None
+
+        # code: y, z = gn(i.count, i.values)
+        getitem_1: "f32[4, 4]" = flat_apply_capture[1]
+
+        # code: return x + y + z.result1 + z.result2
         add_1: "f32[4, 4]" = add + getitem_1;  add = getitem_1 = None
+
+        # code: y, z = gn(i.count, i.values)
+        getitem_2: "f32[4, 4]" = flat_apply_capture[2];  flat_apply_capture = None
+
+        # code: return x + y + z.result1 + z.result2
         add_2: "f32[4, 4]" = add_1 + getitem_2;  add_1 = getitem_2 = None
         return (add_2,)
 """,

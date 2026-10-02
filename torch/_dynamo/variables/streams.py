@@ -18,7 +18,7 @@ from ..graph_bytecode_inputs import (
     reset_user_object_tracking,
 )
 from ..source import CurrentStreamSource
-from .base import GetSet, Method, VariableTracker
+from .base import GetSet, Method, readonly_setter, VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
 from .lazy import LazyVariableTracker
@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from ..codegen import PyCodegen
+    from .tensor import CurrentDeviceVariable
 
 from torch._library.custom_ops import custom_op
 
@@ -177,12 +178,17 @@ has_side_effect(torch.ops.streams.synchronize_event.default)
 
 
 @custom_op("streams::synchronize_device", mutates_args=())
-def synchronize_device(device_type: str, device_index: int) -> None:
-    torch.accelerator.synchronize(torch.device(device_type, device_index))
+def synchronize_device(device_type: str, device_index: int | None) -> None:
+    device = (
+        torch.device(device_type)
+        if device_index is None
+        else torch.device(device_type, device_index)
+    )
+    torch.accelerator.synchronize(device)
 
 
 @synchronize_device.register_fake
-def _(device_type: str, device_index: int) -> None:
+def _(device_type: str, device_index: int | None) -> None:
     pass
 
 
@@ -270,10 +276,16 @@ class SymbolicStreamState:
 
         cur_stack: list[StreamVariable] = []
         if torch.accelerator.is_available():
+            from torch.fx.experimental.proxy_tensor import _coor_device_index_is_current
+
             # Reset the registry so the current stream is guaranteed index 0.
             reset_user_object_tracking()
             stream = torch.accelerator.current_stream()
-            source = CurrentStreamSource(stream.device)
+            device = stream.device
+            if _coor_device_index_is_current(device):
+                # Reconstruct the stream relative to each rank's current device.
+                device = torch.device(device.type)
+            source = CurrentStreamSource(device)
             # Register the current stream so it gets index 0 (registry is
             # fresh at tracing start).  The inductor wrapper updates this
             # entry at runtime so cudagraph capture uses the capture stream
@@ -382,6 +394,7 @@ class StreamVariable(StreamContextVariable):
         proxy: Proxy,
         value: torch.Stream,
         user_object_index: int | None = None,
+        current_device: "CurrentDeviceVariable | None" = None,
         **kwargs: Any,
     ) -> None:
         # Index into the user object table
@@ -395,12 +408,50 @@ class StreamVariable(StreamContextVariable):
         self.proxy = proxy
         self.value = value
         self.device = value.device
+        source = kwargs.get("source")
+        if (
+            current_device is None
+            and isinstance(source, CurrentStreamSource)
+            and source.device.index is None
+        ):
+            from .tensor import CurrentDeviceVariable
+
+            current_device = CurrentDeviceVariable(torch.device(self.device.type))
+        self.current_device = current_device
 
         self.user_object_index = user_object_index
         super().__init__(None, **kwargs)
 
     def python_type(self) -> type:
+        # A current stream's example value is a plain torch.Stream; any other value
+        # keeps its own, possibly more derived, type (e.g. a user subclass).
+        value_type = type(self.value)
+        if issubclass(value_type, self._cpython_type):
+            return value_type
         return self._cpython_type
+
+    def _stream_device_get(
+        self, tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        return self.current_device
+
+    def _stream_device_index_get(
+        self, tx: "InstructionTranslatorBase"
+    ) -> "VariableTracker | None":
+        if self.current_device is None:
+            return None
+        return self.current_device.tp_getattro_impl(tx, "index")
+
+    def _is_current_stream(self) -> bool:
+        return (
+            isinstance(self.source, CurrentStreamSource)
+            and self.source.device.index is None
+        )
+
+    tp_getset = {
+        "device": GetSet(_stream_device_get, readonly_setter),
+        "device_index": GetSet(_stream_device_index_get, readonly_setter),
+    }
 
     def _stream_device_handle_get(
         self: "StreamVariable", tx: "InstructionTranslatorBase"
@@ -538,19 +589,42 @@ class StreamVariable(StreamContextVariable):
         from ..utils import cmp_name_to_op_mapping
         from .constant import ConstantVariable
 
+        if op not in ("__eq__", "__ne__"):
+            # THPStream_richcompare only implements == and !=.
+            return ConstantVariable.create(NotImplemented)
         if not isinstance(other, StreamVariable):
             # Stream's tp_richcompare (THPStream_richcompare) compares
             # stream_id/device and never returns NotImplemented.
             return ConstantVariable.create(op == "__ne__")
-        if self.source:
-            install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
-        if other.source:
-            install_guard(other.source.make_guard(GuardBuilder.EQUALS_MATCH))
-        op_fn = cmp_name_to_op_mapping[op]
-        return VariableTracker.build(
-            tx,
-            op_fn(self.value, other.value),  # pyrefly: ignore[bad-argument-type]
-        )
+        self_is_current = self._is_current_stream()
+        other_is_current = other._is_current_stream()
+        if self_is_current != other_is_current:
+            stream = other if self_is_current else self
+            if stream.source:
+                install_guard(
+                    stream.source.make_guard(GuardBuilder.CURRENT_STREAM_MATCH)
+                )
+        elif not self_is_current:
+            if self.source:
+                install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+            if other.source:
+                install_guard(other.source.make_guard(GuardBuilder.EQUALS_MATCH))
+
+        def eager_value(var: StreamVariable, is_current: bool) -> torch.Stream:
+            # A current stream is traced as a plain torch.Stream; give it the type
+            # its API returns so the comparison dispatches as it does in eager.
+            value, cls = var.value, var.python_type()
+            if not is_current or type(value) is cls:
+                return value
+            return cls(
+                stream_id=value.stream_id,
+                device_index=value.device_index,
+                device_type=value.device_type,
+            )
+
+        lhs = eager_value(self, self_is_current)
+        rhs = eager_value(other, other_is_current)
+        return VariableTracker.build(tx, cmp_name_to_op_mapping[op](lhs, rhs))
 
     def as_proxy(self) -> Proxy:
         return self.proxy
@@ -615,7 +689,9 @@ class CudaStreamVariable(StreamVariable):
     _device_handle_attr = "cuda_stream"
 
     tp_getset = {
-        "cuda_stream": GetSet(StreamVariable._stream_device_handle_get, None),
+        "cuda_stream": GetSet(
+            StreamVariable._stream_device_handle_get, readonly_setter
+        ),
     }
 
 
@@ -626,7 +702,7 @@ class XpuStreamVariable(StreamVariable):
     _device_handle_attr = "sycl_queue"
 
     tp_getset = {
-        "sycl_queue": GetSet(StreamVariable._stream_device_handle_get, None),
+        "sycl_queue": GetSet(StreamVariable._stream_device_handle_get, readonly_setter),
     }
 
 
