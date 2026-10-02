@@ -152,17 +152,33 @@ void ProcessGroupNCCL::waitForNcclOperation(
     ncclResult_t status,
     std::chrono::milliseconds timeout,
     std::string_view operation) {
-  // A failed launch has no Work for the watchdog to track, and a timed-out
-  // nonblocking launch may still enqueue its kernel later. Revoke so that
-  // kernel cannot block the stream forever and getError() reports the failure.
+  // A launch that returned ncclInProgress and then failed or timed out has no
+  // Work for the watchdog to track, and may still enqueue its kernel later.
+  // Revoke so that kernel cannot block the stream forever and getError()
+  // reports the failure. Immediate errors (e.g. invalid arguments) leave the
+  // comm usable. Without reconfigure or blocking wait the watchdog owns
+  // teardown, so leave the comm to it.
+  const bool revokeOnFailure = status == ncclInProgress &&
+      (options_c10d_->enable_reconfigure || blocking_wait_);
+  const int64_t uuid = reconfigure_uuid_;
+  auto onFailure = [&](WorkNCCL::WorkStatus workStatus) {
+    if (!revokeOnFailure) {
+      return;
+    }
+    try {
+      handleBlockingWaitFailure(workStatus, uuid);
+    } catch (const std::exception& e) {
+      TC_LOG(ERROR, this) << "Failed to tear down after " << operation
+                          << " launch failure: " << e.what();
+    }
+  };
   try {
     waitForNcclCompletion(*nccl_api_, nccl_comm_, status, timeout, operation);
   } catch (const NCCLException&) {
-    handleBlockingWaitFailure(WorkNCCL::WorkStatus::ERROR, reconfigure_uuid_);
+    onFailure(WorkNCCL::WorkStatus::ERROR);
     throw;
   } catch (const c10::DistBackendError&) {
-    handleBlockingWaitFailure(
-        WorkNCCL::WorkStatus::TIMEDOUT, reconfigure_uuid_);
+    onFailure(WorkNCCL::WorkStatus::TIMEDOUT);
     throw;
   }
 }

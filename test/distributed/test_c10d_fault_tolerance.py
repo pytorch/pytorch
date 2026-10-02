@@ -203,6 +203,8 @@ class AbstractFaultToleranceTest:
             self.skipTest("nonblocking NCCL launch behavior")
         from torch._C._distributed_c10d import ErrorType
 
+        # Peers connect at the first collective only with runtime connect.
+        os.environ["NCCL_RUNTIME_CONNECT"] = "1"
         self._create_reconfigured_pg("ft_launch_timeout", 1500)
         if self.rank == 0:
             # The first collective on a fresh comm blocks at launch until
