@@ -2422,6 +2422,10 @@ def fake_alias(
     return _fake_alias(fake_mode, x)
 
 
+# C++ FakeTensor runs alias's C++ meta kernel instead.
+torch._C._fake_dispatch_deregister_op_impl("aten::alias", "")
+
+
 # pyrefly: ignore [implicit-any]
 FAST_OP_IMPLEMENTATIONS = {}
 
