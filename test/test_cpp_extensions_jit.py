@@ -920,6 +920,27 @@ with tempfile.TemporaryDirectory() as build_directory:
         )
         self.assertEqual(module.f(), 123)
 
+    def test_load_inline_with_non_ascii_source(self):
+        # `load_inline` persists the sources it is given to `main.cpp` via
+        # `_maybe_write`, which used to `open()` the file without an explicit
+        # encoding. On Windows the platform default text encoding is usually
+        # cp1252, not UTF-8, so a source string containing a character outside
+        # cp1252 (e.g. a Greek letter in a comment, which is common in
+        # numerics code) raised UnicodeEncodeError before the extension was
+        # ever compiled. See https://github.com/pytorch/pytorch/issues/151310
+        cpp_source = """
+        // Comment with a non-Latin-1 character not representable in cp1252: λ
+        int non_ascii_source_test() { return 456; }
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="non_ascii_source_extension",
+            cpp_sources=cpp_source,
+            functions=["non_ascii_source_test"],
+            verbose=True,
+        )
+        self.assertEqual(module.non_ascii_source_test(), 456)
+
     def test_cpp_frontend_module_has_same_output_as_python(self, dtype=torch.double):
         extension = torch.utils.cpp_extension.load(
             name="cpp_frontend_extension",
