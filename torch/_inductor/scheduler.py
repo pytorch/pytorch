@@ -829,7 +829,6 @@ class NestedReduction:
             scheduler_nodes,
             numel,
             parent_rnumel,
-            allow_translation=allow_translation,
         )
         if grouping is None:
             return None
@@ -911,8 +910,6 @@ class NestedReduction:
                 known_extent_subs,
                 sub_parent_factor,
             )
-            if output_relations is None:
-                return None
         if not source_relations:
             return None
         broadcast_relations = cls._sub_parent_broadcast_access_relations(
@@ -1063,7 +1060,6 @@ class NestedReduction:
         nodes: Sequence[SchedulerNode],
         numel: sympy.Expr,
         rnumel: sympy.Expr,
-        allow_translation: bool = False,
     ) -> SubParentEpilogueGrouping | None:
         """Group lane-resolution consumers and choose their lane factor.
 
@@ -1719,19 +1715,6 @@ class NestedReduction:
                 )
                 if proof is None:
                     return None
-                dense_extent = cls._sub_parent_logical_extent(
-                    dep, parent_numel, extent_subs
-                )
-                if dense_extent is None:
-                    return None
-                if not cls._sub_parent_affine_relation_is_admissible(
-                    1,
-                    proof.translation[1],
-                    dense_extent,
-                    V.graph.sizevars.simplify(sympy_subs(parent_rnumel, extent_subs)),
-                    sub_parent_factor,
-                ):
-                    return None
                 owners = read_owners.get(dep, ())
                 group_indices = OrderedSet(group_index for group_index, _node in owners)
                 if len(group_indices) != 1:
@@ -1746,7 +1729,7 @@ class NestedReduction:
                         consumer_access=dep,
                         parent_r_stride=1,
                         base_offset=proof.translation[1],
-                        extent=dense_extent,
+                        extent=proof.compatible_extents[1][1],
                         requires_live_source=requires_live_source,
                         output_group=output_group,
                         consumer_nodes=consumer_nodes,
@@ -1877,8 +1860,6 @@ class NestedReduction:
         )
         if len(active_axes) != source.num_vars:
             return None
-        if output.get_name() != source.name:
-            return None
         index = layout.offset + sum(
             (
                 stride * var
@@ -1903,7 +1884,7 @@ class NestedReduction:
         parent_rnumel: sympy.Expr,
         extent_subs: dict[sympy.Expr, sympy.Expr],
         sub_parent_factor: int,
-    ) -> tuple[SubParentAccessRelation, ...] | None:
+    ) -> tuple[SubParentAccessRelation, ...]:
         """Record translated graph-output views of parent-produced buffers.
 
         Args:
@@ -1914,7 +1895,7 @@ class NestedReduction:
             sub_parent_factor: Number of sub-parent lanes.
 
         Returns:
-            Output access relations, or None if they cannot be proved.
+            Proved output-view metadata; other views use ordinary materialization.
         """
         writes_by_name: dict[str, list[MemoryDep]] = defaultdict(list)
         for node in parent_nodes:
@@ -1931,7 +1912,7 @@ class NestedReduction:
             if not writes:
                 continue
             if len(writes) != 1:
-                return None
+                continue
             source = writes[0]
             output_access = cls.sub_parent_layout_access(output, source)
             if output_access is None:
@@ -1950,19 +1931,14 @@ class NestedReduction:
                 extent_subs,
             )
             if proof is None:
-                return None
-            output_extent = cls._sub_parent_logical_extent(
-                output_access, parent_numel, extent_subs
-            )
-            if output_extent is None:
-                return None
+                continue
             relations.append(
                 SubParentAccessRelation(
                     source_accesses=(source,),
                     consumer_access=output_access,
                     parent_r_stride=1,
                     base_offset=proof.translation[1],
-                    extent=output_extent,
+                    extent=proof.compatible_extents[1][1],
                     requires_live_source=False,
                 )
             )

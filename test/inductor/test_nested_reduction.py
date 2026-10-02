@@ -2833,11 +2833,13 @@ class TranslatedSubParentEpilogueTest(TestCase):
         self.assertEqual(kernels, 1)
 
     @parametrize("offset", [0, 64])
-    def test_output_view_matching_epilogue_read(self, device, offset):
+    @parametrize("strided_output", [False, True])
+    def test_output_view_matching_epilogue_read(self, device, offset, strided_output):
         def fn(x):
             y = x + x.sum(-1, keepdim=True)
             view = y[:, offset : offset + 64]
-            return view, view * 2, y
+            outputs = (view, view * 2, y)
+            return (*outputs, y[:, ::2]) if strided_output else outputs
 
         def capture(nodes):
             staged = [node for node in nodes if type(node) is FusedStagedReduction]
@@ -2882,8 +2884,16 @@ class TranslatedSubParentEpilogueTest(TestCase):
             actual[0].untyped_storage().data_ptr(),
             actual[2].untyped_storage().data_ptr(),
         )
+        if strided_output:
+            self.assertEqual(actual[3].stride(), actual[2][:, ::2].stride())
+            self.assertEqual(
+                actual[3].untyped_storage().data_ptr(),
+                actual[2].untyped_storage().data_ptr(),
+            )
         actual[0].add_(1)
         self.assertEqual(actual[0], actual[2][:, offset : offset + 64])
+        if strided_output:
+            self.assertEqual(actual[3], actual[2][:, ::2])
         self.assertEqual(metrics.generated_kernel_count, 1)
 
     @parametrize(

@@ -1558,9 +1558,9 @@ class _SubParentRelationDescriptor:
     """Immutable replay metadata for one planned source-to-consumer relation."""
 
     relation: scheduler.SubParentAccessRelation
-    output_group: int | None
+    output_group: int
     output_lanes: int
-    replay_node: Any | None
+    replay_node: scheduler.SchedulerNode
     parent_shape: tuple[sympy.Expr, sympy.Expr]
     child_shape: tuple[sympy.Expr, sympy.Expr]
 
@@ -2140,6 +2140,7 @@ class _GroupedReductionLayout:
         output_lanes: int,
         output_lane: int,
         factor: int,
+        split_parts: dict[CSEVariable, tuple[CSEVariable, ...]],
     ) -> CSEVariable:
         """Project one proved contiguous child interval from a parent tile."""
         if value.dtype is None:
@@ -2195,14 +2196,19 @@ class _GroupedReductionLayout:
         # dimensions textually (for example, ``64`` vs ``R0_BLOCK//4``).
         child_block = family.sub_parent_tree().block_size_str()
         part_shape = (*value.shape[:-1], child_block)
-        parts = tuple(
-            kernel.cse.newvar(bounds=value.bounds, dtype=value.dtype, shape=part_shape)
-            for _ in range(factor)
-        )
-        reshape_shape = (*value.shape[:-1], factor, child_block)
-        kernel.emit_contiguous_split_via_reshape(
-            value, reshape_shape, tuple(map(str, parts))
-        )
+        parts = split_parts.get(value)
+        if parts is None:
+            parts = tuple(
+                kernel.cse.newvar(
+                    bounds=value.bounds, dtype=value.dtype, shape=part_shape
+                )
+                for _ in range(factor)
+            )
+            reshape_shape = (*value.shape[:-1], factor, child_block)
+            kernel.emit_contiguous_split_via_reshape(
+                value, reshape_shape, tuple(map(str, parts))
+            )
+            split_parts[value] = parts
         family.set_value_masks(kernel, parts)
         part_index = base_offset // child_width + output_lane
         if part_index >= len(parts):
@@ -2625,26 +2631,18 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             )
             if not V.graph.sizevars.statically_known_equals(child_feature, extent):
                 raise AssertionError("affine extent does not match the consumer frame")
-            group_index = relation.output_group
-            if group_index is None:
-                raise AssertionError(
-                    "dense affine relation is missing output ownership"
-                )
-            if not 0 <= group_index < len(output_groups):
-                raise AssertionError("dense affine relation has invalid output group")
-            group = output_groups[group_index]
-            if not relation.consumer_nodes or any(
-                node not in group.nodes
-                or not any(
-                    isinstance(read, MemoryDep)
-                    and relation.matches_consumer_access(read, parent_numel)
-                    for read in node.read_writes.reads
-                )
-                for node in relation.consumer_nodes
+            if not scheduler.NestedReduction._sub_parent_dense_relations_are_admitted(
+                (relation,),
+                output_groups,
+                parent_numel,
+                parent_rnumel,
+                sub_parent_factor,
             ):
                 raise AssertionError(
                     "dense affine relation lost its consumer ownership"
                 )
+            group_index = cast(int, relation.output_group)
+            group = output_groups[group_index]
             for replay_node in relation.consumer_nodes:
                 descriptor = _SubParentRelationDescriptor(
                     relation=relation,
@@ -2707,6 +2705,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         self._values: dict[str, OrderedSet[CSEVariable]] = {}
         self._materialized: dict[CSEVariable, MaterializedSubParentValue] = {}
         self._dense_materialized: dict[tuple[CSEVariable, int, int], CSEVariable] = {}
+        self._dense_parts: dict[CSEVariable, tuple[CSEVariable, ...]] = {}
         self._lane_projections: dict[CSEVariable, _LaneProjection] = {}
         # Pointwise results at parent resolution, recorded as they are
         # emitted, so a lane replay of the same op can fold onto them.
@@ -2886,48 +2885,28 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         self,
         name: str,
         index: sympy.Expr,
-        replay_context: _SubParentReplayContext | None,
-        replay_node: Any | None,
-        replay_accesses: tuple[tuple[MemoryDep, sympy.Expr], ...] | None,
+        replay_context: _SubParentReplayContext,
+        replay_node: scheduler.SchedulerNode,
+        replay_accesses: tuple[tuple[MemoryDep, sympy.Expr], ...],
     ) -> tuple[int, _SubParentRelationDescriptor] | None:
-        candidates = [
-            (descriptor_index, self._relation_descriptors[descriptor_index])
-            for descriptor_index in self._dense_descriptor_indices.get(name, ())
-        ]
-        if replay_context is not None:
-            candidates = [
-                (descriptor_index, descriptor)
-                for descriptor_index, descriptor in candidates
-                if descriptor.output_group == replay_context.output_group
-                and descriptor.output_lanes == replay_context.output_lanes
-                and replay_context.output_lane < descriptor.output_lanes
-            ]
-        if replay_node is not None:
-            candidates = [
-                (descriptor_index, descriptor)
-                for descriptor_index, descriptor in candidates
-                if descriptor.replay_node is replay_node
-            ]
-        if replay_accesses is None:
-            candidates = [
-                (descriptor_index, descriptor)
-                for descriptor_index, descriptor in candidates
-                if V.graph.sizevars.statically_known_equals(
-                    descriptor.relation.consumer_access.index, index
+        candidates = []
+        for descriptor_index in self._dense_descriptor_indices.get(name, ()):
+            descriptor = self._relation_descriptors[descriptor_index]
+            if (
+                descriptor.output_group != replay_context.output_group
+                or descriptor.output_lanes != replay_context.output_lanes
+                or replay_context.output_lane >= descriptor.output_lanes
+                or descriptor.replay_node is not replay_node
+            ):
+                continue
+            if any(
+                descriptor.relation.matches_consumer_access(
+                    read, descriptor.parent_shape[0]
                 )
-            ]
-        else:
-            candidates = [
-                (descriptor_index, descriptor)
-                for descriptor_index, descriptor in candidates
-                if any(
-                    descriptor.relation.matches_consumer_access(
-                        read, descriptor.parent_shape[0]
-                    )
-                    and V.graph.sizevars.statically_known_equals(replay_index, index)
-                    for read, replay_index in replay_accesses
-                )
-            ]
+                and V.graph.sizevars.statically_known_equals(replay_index, index)
+                for read, replay_index in replay_accesses
+            ):
+                candidates.append((descriptor_index, descriptor))
         if len(candidates) == 1:
             return candidates[0]
         if not candidates:
@@ -2963,6 +2942,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             output_lanes=descriptor.output_lanes,
             output_lane=output_lane,
             factor=self._sub_parent_factor,
+            split_parts=self._dense_parts,
         )
         self._dense_materialized[key] = value
         return value
@@ -3018,7 +2998,6 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             if (
                 relation not in required_relations
                 or not relation.requires_live_source
-                or descriptor.output_group is None
                 or relation.parent_r_stride != 1
             ):
                 continue
@@ -3135,6 +3114,10 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
     ) -> CSEVariable | None:
         """Try each live source, requiring in-kernel values to resolve."""
         if name in self._dense_descriptor_indices:
+            if replay_context is None or replay_node is None or replay_accesses is None:
+                raise AssertionError(
+                    "dense replay requires consumer context and accesses"
+                )
             selected = self._select_dense_descriptor(
                 name, index, replay_context, replay_node, replay_accesses
             )
@@ -3145,9 +3128,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
                     )
                 return None
             descriptor_index, descriptor = selected
-            output_lane = (
-                replay_context.output_lane if replay_context is not None else 0
-            )
+            output_lane = replay_context.output_lane
             for source in self.resolve_sources(name):
                 value = self._materialize_dense_source(
                     descriptor_index, descriptor, source, output_lane

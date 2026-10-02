@@ -18,6 +18,7 @@ from torch._inductor.codegen.common import CSEVariable
 from torch._inductor.codegen.simd import (
     _GroupedReductionLayout,
     _PointwiseRemapHandler,
+    _SubParentReplayContext,
     _SubParentValueResolver,
     SIMDScheduling,
 )
@@ -1304,7 +1305,7 @@ class TestScheduler(TestCase):
             )
         with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
             if not replayed:
-                with self.assertRaisesRegex(AssertionError, "missing output ownership"):
+                with self.assertRaisesRegex(AssertionError, "consumer ownership"):
                     self._make_sub_parent_value_resolver(
                         (relation,),
                         parent_numel=2,
@@ -1331,13 +1332,25 @@ class TestScheduler(TestCase):
             resolver._kernel.cse.contains_value.return_value = True
             with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
                 self.assertIs(
-                    resolver.resolve_load("buf0", consumer.index, replay_node=node),
+                    resolver.resolve_load(
+                        "buf0",
+                        consumer.index,
+                        replay_context=_SubParentReplayContext(0, 1, 0),
+                        replay_node=node,
+                        replay_accesses=((consumer, consumer.index),),
+                    ),
                     resolver._materialize_dense_source.return_value,
                 )
                 with self.assertRaisesRegex(
                     AssertionError, "no dense sub-parent relation"
                 ):
-                    resolver.resolve_load("buf0", consumer.index + 1, replay_node=node)
+                    resolver.resolve_load(
+                        "buf0",
+                        consumer.index + 1,
+                        replay_context=_SubParentReplayContext(0, 1, 0),
+                        replay_node=node,
+                        replay_accesses=((consumer, consumer.index),),
+                    )
         else:
             resolver._materialize_dense_source.assert_not_called()
 
