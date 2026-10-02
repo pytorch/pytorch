@@ -24,7 +24,8 @@ Tensor binary_ref_meta(
     const Tensor& other,
     ELEMENTWISE_TYPE_PROMOTION_KIND kind,
     bool fake_devices,
-    const std::optional<Scalar>& alpha = std::nullopt);
+    const std::optional<Scalar>& alpha = std::nullopt,
+    bool is_sub = false);
 
 // _make_elementwise_binary_reference, with its Python scalar checks. name is
 // the prim's name, used in the error messages.

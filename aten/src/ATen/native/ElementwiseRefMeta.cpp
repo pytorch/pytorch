@@ -749,6 +749,7 @@ std::optional<Scalar> symbolic_number(const Tensor& t) {
 // alpha must not be a wider number type than the computation dtype unless that
 // is bool. The output strides follow the operands' memory layout, and the
 // output dtype is the result dtype for kind.
+// is_sub rejects two bool tensors and drops the bool exemption for alpha.
 // other_number is other's value when other wraps a Scalar argument.
 Tensor binary_ref_meta_impl(
     const Tensor& self,
@@ -756,7 +757,8 @@ Tensor binary_ref_meta_impl(
     const std::optional<Scalar>& other_number,
     ELEMENTWISE_TYPE_PROMOTION_KIND kind,
     bool fake_devices,
-    const std::optional<Scalar>& alpha) {
+    const std::optional<Scalar>& alpha,
+    bool is_sub) {
   // A kernel running under the Meta key (e.g. a composite) can mix its own meta
   // tensors with fakes; every tensor then reports meta, as in Python fake.
   const auto real_meta = [](const Tensor& t) {
@@ -768,6 +770,12 @@ Tensor binary_ref_meta_impl(
       {_maybe_convert_to_dtype(meta_desc(self, fake_devices), compute_dtype, symbolic_number(self)),
        _maybe_convert_to_dtype(
            meta_desc(other, fake_devices), compute_dtype, other_number ? other_number : symbolic_number(other))});
+  if (is_sub) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        args[0].is_number || args[1].is_number || (args[0].dtype != kBool && args[1].dtype != kBool),
+        "Subtraction, the `-` operator, with two bool tensors is not supported. "
+        "Use the `^` or `logical_xor()` operator instead.");
+  }
   if (alpha.has_value()) {
     // utils.is_weakly_lesser_type
     static constexpr std::array<const char*, 4> python_type_names = {
@@ -775,7 +783,7 @@ Tensor binary_ref_meta_impl(
     const auto rank = python_type_rank(compute_dtype);
     const auto alpha_rank = python_type_rank(alpha->type());
     TORCH_CHECK_VALUE(
-        rank == 0 || alpha_rank <= rank,
+        (rank == 0 && !is_sub) || alpha_rank <= rank,
         "alpha argument of type ", python_type_names[alpha_rank], " cannot be safely cast to type ",
         python_type_names[rank], "!");
     auto& b = args[1];
@@ -817,7 +825,7 @@ Tensor elementwise_binary_ref_meta_impl(
   TORCH_CHECK_VALUE(
       !self_number || !other.unsafeGetTensorImpl()->is_wrapped_number(), name,
       ": Receive two Number inputs to an elementwise binary operation!");
-  return binary_ref_meta_impl(self, other, other_number, kind, fake_devices, std::nullopt);
+  return binary_ref_meta_impl(self, other, other_number, kind, fake_devices, std::nullopt, /*is_sub=*/false);
 }
 
 // A Scalar argument as the Python number the refs see. The value is only
@@ -881,8 +889,9 @@ Tensor binary_ref_meta(
     const Tensor& other,
     ELEMENTWISE_TYPE_PROMOTION_KIND kind,
     bool fake_devices,
-    const std::optional<Scalar>& alpha) {
-  return binary_ref_meta_impl(self, other, std::nullopt, kind, fake_devices, alpha);
+    const std::optional<Scalar>& alpha,
+    bool is_sub) {
+  return binary_ref_meta_impl(self, other, std::nullopt, kind, fake_devices, alpha, is_sub);
 }
 
 Tensor elementwise_binary_ref_meta(
