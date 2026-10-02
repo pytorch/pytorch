@@ -55,7 +55,9 @@ struct AsyncGemmConfig
     static constexpr ck_tile::index_t NumWaveGroups = 1;
     static constexpr bool Preshuffle = false;
 
-    static constexpr ck_tile::index_t TilePartitionerGroupNum = 8;
+    // Visit tiles in M order, the order chunks arrive in. With more groups,
+    // only the blocks of the last chunk's groups work on it once it arrives.
+    static constexpr ck_tile::index_t TilePartitionerGroupNum = 1;
     static constexpr ck_tile::index_t TilePartitionerM01 = 4;
     static constexpr bool PermuteA = false;
     static constexpr bool PermuteB = false;
@@ -212,14 +214,15 @@ void async_input_mm_impl(
 #if ROCM_VERSION >= 70000
   C10_CUDA_CHECK(hipDeviceGetAttribute(&num_xcc, hipDeviceAttributeNumberOfXccs, a.get_device()));
 #endif
-  // The host path copies chunks in pieces of at most 1 MiB, which HIP runs as
-  // shader kernels spread over every shader engine. Keep one CU per shader
-  // engine out of the persistent grid, or blocks spinning on unsignaled chunks
-  // can starve those copies and deadlock.
-  const int gemm_cus = std::max(
-      at::cuda::getCurrentDeviceProperties()->multiProcessorCount -
-          num_xcc * kShaderEnginesPerXcc,
-      1);
+  // Blocks spin until the peer copies signal their chunk. HIP runs the signal
+  // writes, and peer copies of at most 1 MiB, as kernels, so keep one CU per
+  // shader engine out of the persistent grid or the GEMM can starve them and
+  // deadlock. Count CUs per engine rounded down: MI300X's 38 CUs per XCC do not
+  // split evenly over 4 engines.
+  const int num_se = num_xcc * kShaderEnginesPerXcc;
+  const int cus_per_se =
+      at::cuda::getCurrentDeviceProperties()->multiProcessorCount / num_se;
+  const int gemm_cus = std::max((cus_per_se - 1) * num_se, 1);
   const int max_grid = gemm_cus * std::max(occupancy, 1);
   const dim3 grids(std::min<int>(TilePartitioner::GridSize(M, N), max_grid));
 
@@ -269,18 +272,11 @@ at::Tensor async_input_mm_out(
       "async_input_mm: `a`, `b` and `out` must each have at most ", kMaxNumel, " elements");
 
   TORCH_CHECK(
-      a_chunk_signals.dim() == 1 && a_chunk_signals.numel() > 0 &&
-          a_chunk_signals.is_contiguous() &&
-          a_chunk_signals.scalar_type() == at::kUInt32 &&
-          a_chunk_signals.device() == a.device(),
-      "async_input_mm: `a_chunk_signals` must be a non-empty contiguous 1D uint32 tensor on the device of `a`");
-  const int64_t num_chunks = a_chunk_signals.numel();
+      a_chunk_signals.dim() == 1,
+      "async_input_mm: `a_chunk_signals` must be a 1D tensor.");
   TORCH_CHECK(
-      M % num_chunks == 0,
+      M % a_chunk_signals.numel() == 0,
       "async_input_mm: `a.shape(0)` must be an integer multiple of `a_chunk_signals.numel()`");
-  TORCH_CHECK(
-      a_chunk_pivot >= 0 && a_chunk_pivot < num_chunks,
-      "async_input_mm: `a_chunk_pivot` must be in [0, ", num_chunks, "), got ", a_chunk_pivot);
 
 #if defined(USE_ROCM_ASYNC_MM)
   // The CK kernel is 1.6x (gfx942) to 6x (gfx950) slower with column-major B
