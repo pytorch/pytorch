@@ -764,7 +764,13 @@ def align_trace_from_beginning(
         entries (Dict[str, List[Dict[str, Any]]]): Entries sorted by record ID and filtered by the maximum starting point.
     """
 
-    maximum_starting_record_id = 0
+    # A dump can concatenate several recorders, each numbering record_id from 0
+    # (e.g. _dump_nccl_trace with both ProcessGroupNCCL and nccl2 groups), so
+    # align each comm lib separately.
+    def comm_lib(entry: dict[str, Any]) -> str:
+        return entry["profiling_name"].rpartition(":")[0]
+
+    maximum_starting_record_id: dict[str, int] = {}
     for rank in entries:
         # Although this is a ring buffer, we already sort the entries by `record_id` when dumping, we just
         # need to find the largest starting point. For example, if the buffer has the following entries:
@@ -776,16 +782,19 @@ def align_trace_from_beginning(
         # we don't have complete records from all ranks so we need to ignore them.
         # If we don't have any trace from some ranks, ignore them
         # as well.
-        if len(entries[rank]) == 0:
-            continue
-        first_record_id = entries[rank][0]["record_id"]
-        maximum_starting_record_id = max(maximum_starting_record_id, first_record_id)
+        first_record_ids: dict[str, int] = {}
+        for entry in entries[rank]:
+            first_record_ids.setdefault(comm_lib(entry), entry["record_id"])
+        for lib, first_record_id in first_record_ids.items():
+            maximum_starting_record_id[lib] = max(
+                maximum_starting_record_id.get(lib, 0), first_record_id
+            )
 
     for rank in entries:
         entries[rank] = [
             entry
             for entry in entries[rank]
-            if entry["record_id"] >= maximum_starting_record_id
+            if entry["record_id"] >= maximum_starting_record_id[comm_lib(entry)]
         ]
 
     return entries
