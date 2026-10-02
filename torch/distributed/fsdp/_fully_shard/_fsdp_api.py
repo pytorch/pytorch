@@ -30,14 +30,24 @@ class MixedPrecisionPolicy:
             the unsharded parameter uses the original dtype. The optimizer step
             uses the sharded parameter in the original dtype. (Default:
             ``None``)
-        reduce_dtype (Optional[torch.dtype]): This specifies the dtype for
-            gradient reduction (i.e. reduce-scatter or all-reduce). If this is
-            ``None`` but ``param_dtype`` is not ``None``, then the reduction
-            uses the compute dtype. This can be used to run gradient reduction
-            in full precision while using low precision for compute. If also
-            gradient reduction is disabled via :meth:`set_requires_gradient_sync`,
-            then FSDP will accumulate gradients using ``reduce_dtype``.
-            (Default: ``None``)
+        reduce_dtype (Optional[torch.dtype]): The dtype for autograd accumulation
+            and gradient reduction (reduce-scatter or all-reduce). If ``None``,
+            follows the parameter's ``grad_dtype`` configured before lazy
+            initialization (the first forward or :meth:`FSDPModule.unshard`):
+            unset uses the original parameter dtype;
+            explicit ``None`` accepts any incoming gradient dtype. This fallback
+            is independent of ``param_dtype``. Gradients with different dtypes
+            in one communication group are reduced in their promoted dtype
+            (e.g. fp32 for bf16 and fp32). Reduced shards retain the input
+            ``grad_dtype`` policy. (Default: ``None``)
+
+            .. versionchanged:: 2.15
+                With ``reduce_dtype=None``, gradients were previously reduced
+                in ``param_dtype`` when it was set. They now follow the
+                parameter's ``grad_dtype`` as described above, e.g. fp32 for fp32
+                parameters with ``param_dtype=torch.bfloat16``. Set
+                ``reduce_dtype=torch.bfloat16`` to keep the previous behavior.
+                FSDP1 still reduces in ``param_dtype``.
         output_dtype (Optional[torch.dtype]): This specifies the dtype for
             casting floating-point forward outputs. This can be used to
             help implement cases where different modules have different mixed
