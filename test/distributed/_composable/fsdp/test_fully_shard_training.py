@@ -275,6 +275,36 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
 
+    @skip_if_lt_x_gpu(4, allow_cpu=True)
+    def test_keep_unsharded_storage_with_post_forward_reshard(self):
+        """Tests storage retention when resharding to a smaller mesh."""
+        device = torch.device(device_type.type, 0)
+        model = nn.Linear(8, 8, device=device)
+        fully_shard(model, reshard_after_forward=2)
+        model.set_keep_unsharded_storage(True)
+        # Get unsharded storage pointers to compare against later
+        model.unshard()
+        param_group = model._get_fsdp_state()._fsdp_param_group
+        self.assertIsNotNone(param_group)
+        data_ptrs = [
+            fsdp_param.unsharded_param.data_ptr()
+            for fsdp_param in param_group.fsdp_params
+        ]
+
+        # Trigger a reshard, which should not free the unsharded storage
+        with torch.inference_mode():
+            model(torch.randn(2, 8, device=device))
+        self.assertTrue(param_group.is_sharded_post_forward)
+        model.unshard()
+        # The unsharded storage pointers remain unchanged after resharding
+        self.assertEqual(
+            [
+                fsdp_param.unsharded_param.data_ptr()
+                for fsdp_param in param_group.fsdp_params
+            ],
+            data_ptrs,
+        )
+
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
         device = torch.device(device_type.type, 0)
@@ -388,6 +418,50 @@ class TestFullyShardCastAfterInit(FSDPTestMultiThread):
             for _optim in (ref_optim, optim):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+
+    def test_conversion_preserves_grad_dtype_policy(self):
+        self.run_subtests(
+            {"grad_dtype": [torch.float32, None]},
+            self._test_conversion_preserves_grad_dtype_policy,
+        )
+
+    def _test_conversion_preserves_grad_dtype_policy(self, grad_dtype):
+        model = nn.Sequential(*[nn.Linear(4, 4, bias=False) for _ in range(2)])
+        model.to(device_type)
+        for param in model.parameters():
+            param.grad_dtype = grad_dtype
+        fully_shard(list(model))
+        fully_shard(model)
+        for param in model.parameters():
+            param.grad = torch.ones_like(param)
+        # An explicit grad_dtype, not the parameter dtype, owns the gradient dtype
+        model.bfloat16()
+        inp = torch.ones(2, 4, device=device_type, dtype=torch.bfloat16)
+        model(inp).sum().backward()
+        grads = [param.grad.to_local().clone() for param in model.parameters()]
+        for device in ("cpu", device_type):
+            model.to(device)
+            for param, grad in zip(model.parameters(), grads):
+                self.assertEqual(param.dtype, torch.bfloat16)
+                self.assertEqual(param.grad_dtype, grad_dtype)
+                self.assertEqual(param.grad.dtype, torch.float32)
+                self.assertEqual(param.grad.device, param.device)
+                self.assertEqual(param.grad.to_local().cpu(), grad.cpu())
+        model(inp).sum().backward()
+        for param in model.parameters():
+            self.assertEqual(param.grad.dtype, torch.float32)
+
+    def test_grad_dtype_set_after_fully_shard(self):
+        model = nn.Linear(4, 4, bias=False, device=device_type, dtype=torch.bfloat16)
+        fully_shard(model)
+        # load_state_dict(assign=True) registers a parameter without
+        # grad_dtype, which inherits the policy set before lazy init
+        model.weight.grad_dtype = torch.float32
+        model.load_state_dict(model.state_dict(), assign=True)
+        self.assertEqual(model.weight.grad_dtype, torch.float32)
+        inp = torch.ones(2, 4, device=device_type, dtype=torch.bfloat16)
+        model(inp).sum().backward()
+        self.assertEqual(model.weight.grad.dtype, torch.float32)
 
 
 class TestFullyShard1DTrainingCore(FSDPTest):
@@ -3239,8 +3313,7 @@ class TestFullyShardShareCommContext(FSDPTest):
             reduce_scatter_group: dist.ProcessGroup,
             reduce_scatter_stream: torch.Stream,
             reduce_scatter_comm: ReduceScatter,
-            orig_dtype: torch.dtype | None,
-            reduce_dtype: torch.dtype | None,
+            reduce_dtype: torch.dtype,
             device: torch.device,
             gradient_divide_factor: float | None,
             all_reduce_group: dist.ProcessGroup | None,  # not `None` iff HSDP
@@ -3260,7 +3333,6 @@ class TestFullyShardShareCommContext(FSDPTest):
                 reduce_scatter_group,
                 reduce_scatter_stream,
                 reduce_scatter_comm,
-                orig_dtype,
                 reduce_dtype,
                 device,
                 gradient_divide_factor,
