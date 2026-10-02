@@ -7323,6 +7323,24 @@ class Scheduler:
         if atomic_add_template_epilogue and not config.epilogue_fusion_with_atomic_add:
             return FusionResult.fuse(False)
 
+        # A reduction in a Triton template's epilogue is kept only when the
+        # epilogue benchmark shows it beats the template plus a separate
+        # reduction kernel. Reduction epilogues the backend fuses natively
+        # (NVGEMM) keep their own path.
+        template_reduction = (
+            config.triton.template_reduction_epilogue
+            and isinstance(node1.get_template_node(), ir.TritonTemplateBuffer)
+            and any(n.is_reduction() for n in node2.get_nodes())
+            and not self.get_backend(node1.get_device()).can_fuse_reduction_epilogue(
+                node1, node2
+            )
+        )
+        if template_reduction and not (
+            isinstance(node1.get_template_node(), ir.MultiTemplateBuffer)
+            and config.benchmark_template_fusion
+        ):
+            return FusionResult.fuse(False)
+
         if not config.benchmark_fusion and not is_multi_template:
             return FusionResult.fuse(True)
 
@@ -7345,7 +7363,8 @@ class Scheduler:
                 and self.get_backend(device).has_sub_parent_epilogue(fused_nodes)
             )
         ):
-            return FusionResult.fuse(True)
+            # The tile reduction epilogue can't express a two-level reduction.
+            return FusionResult.fuse(not template_reduction)
 
         if (
             node1.is_template()
@@ -7424,7 +7443,27 @@ class Scheduler:
             if self._has_layout_conflict_for_template(multi_node):
                 return FusionResult.fuse(False)
 
-            from torch._inductor.codegen.simd import CantSplit
+            from torch._inductor.codegen.simd import (
+                CantSplit,
+                tile_fits_reduction_epilogue,
+            )
+
+            # A reduction epilogue needs an output tile that can hold it. Each
+            # Triton choice records its tile when rendered, so reject misfits up
+            # front. Other choices can only host reductions their backend accepts.
+            _, _, epilogue_nodes = BaseSchedulerNode.get_prologue_template_epilogue(
+                node_list_fused
+            )
+            reduction_epilogue = any(n.is_reduction() for n in epilogue_nodes)
+
+            def choice_fits_reduction_epilogue(choice: ir.ChoiceCaller) -> bool:
+                if not reduction_epilogue:
+                    return True
+                if isinstance(choice, ir.TritonTemplateCallerBase):
+                    return tile_fits_reduction_epilogue(
+                        choice.output_tile, multi_node, epilogue_nodes
+                    )
+                return not template_reduction
 
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
             if not has_atomic_add:
@@ -7437,7 +7476,7 @@ class Scheduler:
                         if not isinstance(
                             choice,
                             torch._inductor.select_algorithm.TritonTemplateCaller,
-                        ):
+                        ) or not choice_fits_reduction_epilogue(choice):
                             continue
                         try:
                             with multi_node.swap_as_triton_caller(choice):
@@ -7519,7 +7558,7 @@ class Scheduler:
             def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
                 if not isinstance(
                     choice, torch._inductor.select_algorithm.TritonTemplateCaller
-                ):
+                ) or not choice_fits_reduction_epilogue(choice):
                     return False
                 # For prologue fusion we check if the underlying template of the choice
                 # supports all allowed prologue inputs. If not, we skip this choice in
@@ -7557,7 +7596,7 @@ class Scheduler:
                 return True
 
             if has_atomic_add:
-                if not epilogue_fusion:
+                if not epilogue_fusion or template_reduction:
                     return FusionResult.fuse(False)
 
                 for hint_override in [*config.multi_kernel_hints, None]:
@@ -7612,6 +7651,9 @@ class Scheduler:
                 is_nvgemm = isinstance(choice, NVUniversalGemmCaller)
 
                 if not is_triton and not is_nvgemm:
+                    continue
+
+                if not choice_fits_reduction_epilogue(choice):
                     continue
 
                 # pyrefly: ignore [missing-attribute]
@@ -7986,6 +8028,17 @@ class Scheduler:
 
         return False
 
+    def _is_stale_pending_fusion(self, pending_fusion: PendingFusion) -> bool:
+        """Whether either node of a pending fusion has fused with something else
+        since its speedup was benchmarked. The benchmark (and the template
+        choice it would finalize) only covers the nodes it saw, e.g. it may
+        pick a tile that can't hold a reduction fused in since. Stale fusions
+        are skipped, and the next fusion round benchmarks the new nodes."""
+        return any(
+            self.get_fused_node(node) is not node
+            for node in pending_fusion.get_fusion_nodes()
+        )
+
     def _evaluate_pending_template_fusions(
         self,
         template_fusion_candidates: dict[BaseSchedulerNode, list[PendingFusion]],
@@ -8048,9 +8101,8 @@ class Scheduler:
                     future_to_pending_fusion[f] = (pending_fusion, candidate)
                 else:
                     # Non AsyncCompile path, perform fusion
-                    if self._fusion_memory_state is not None:
-                        node1 = self.get_fused_node(node1)
-                        node2 = self.get_fused_node(node2)
+                    if self._is_stale_pending_fusion(pending_fusion):
+                        continue
                     if self.fuse_if_speedup(
                         node1, node2, pending_fusion.callable_fn, fused_nodes
                     ):
@@ -8059,9 +8111,11 @@ class Scheduler:
             # Evaluate fusion candidates as async_compile completes
             for f in as_completed(template_futures):
                 pending_fusion, cand = future_to_pending_fusion[f]
+                if self._is_stale_pending_fusion(pending_fusion):
+                    continue
                 if self.fuse_if_speedup(
-                    self.get_fused_node(pending_fusion.node1),
-                    self.get_fused_node(pending_fusion.node2),
+                    pending_fusion.node1,
+                    pending_fusion.node2,
                     pending_fusion.callable_fn,
                     fused_nodes,
                 ):
@@ -10628,6 +10682,7 @@ class Scheduler:
                 or (
                     node2.is_reduction()
                     and not backend.can_fuse_reduction_epilogue(node1, node2)
+                    and not backend.can_fuse_template_reduction_epilogue(node1, node2)
                 )
                 or not _is_epilogue_fusion_enabled(node1)
             ):
@@ -12953,6 +13008,14 @@ class BaseScheduling:  # noqa: docstring_linter
     def can_fuse_reduction_epilogue(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
+        return False
+
+    def can_fuse_template_reduction_epilogue(
+        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> bool:
+        """Whether reductions in node2 may join template node1's epilogue,
+        subject to the ordinary vertical fusion checks (unlike
+        can_fuse_reduction_epilogue, which bypasses them)."""
         return False
 
     def can_fuse_reduction_pair(

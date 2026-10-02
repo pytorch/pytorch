@@ -6268,6 +6268,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         make_kernel_render: Callable[_P, _T] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
         allowed_prologue_inps: OrderedSet[str] | None = None,
+        output_tile: tuple[int, int, int] | None = None,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -6288,6 +6289,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         if self.name is None:
             raise AssertionError("Expected self.name is not None")
         self.epilogue_fusable_outputs = {self.name: self.name}
+        self.output_tile = output_tile
 
         self.subgraph_inps: list[IRNode | Expr | None] | None = None
         self.subgraph_outs: list[IRNode | None] | None = None
@@ -6409,6 +6411,11 @@ class ChoiceCaller:
 
 
 class TritonTemplateCallerBase(ChoiceCaller):
+    # (rows, cols, subtiles) of the output tile each store_output call writes,
+    # when the template stores through scalar tile offsets. A tile spans
+    # cols * subtiles columns, split into subtiles stored by an unrolled loop.
+    output_tile: tuple[int, int, int] | None = None
+
     def get_make_kernel_render(self) -> Any:
         raise NotImplementedError
 
@@ -6498,15 +6505,18 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         render = self.make_kernel_render
         prev_kind = self._render_kind
         prev_caller = self._render_caller
+        prev_output_tile = self.output_tile
         self.make_kernel_render = caller.get_make_kernel_render()
         self._render_kind = "triton"
         self._render_caller = caller
+        self.output_tile = caller.output_tile
         try:
             yield
         finally:
             self.make_kernel_render = render
             self._render_kind = prev_kind
             self._render_caller = prev_caller
+            self.output_tile = prev_output_tile
 
     def finalize_as_triton_caller(self, caller: TritonTemplateCallerBase) -> None:
         if not isinstance(
@@ -6520,6 +6530,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self.make_kernel_render = caller.get_make_kernel_render()
         self._render_kind = "triton"
         self._render_caller = caller
+        self.output_tile = caller.output_tile
 
     @contextlib.contextmanager
     def swap_as_nvgemm_caller(self, caller: ChoiceCaller) -> Iterator[None]:
@@ -6574,6 +6585,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self.make_kernel_render = self._make_kernel_renders[None]
         self._render_kind = "triton"
         self._render_caller = callers[None]
+        self.output_tile = callers[None].output_tile
 
 
 class CUTLASSTemplateBuffer(TemplateBuffer):

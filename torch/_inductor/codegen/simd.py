@@ -414,6 +414,59 @@ class IterationRangesEntry(IterationRanges):
         return self.name == other.name
 
 
+def template_reduction_axis(
+    node: scheduler.BaseSchedulerNode,
+    template: ir.Buffer,
+    produced: OrderedSet[str],
+) -> int | None:
+    """The dim of the row-major (M, N) template output that reduction node
+    keeps: 0 for a row reduction, or None. produced are the template and
+    epilogue buffers, which node must read in place. See
+    TritonTemplateKernel.codegen_tile_reduction_epilogue."""
+    m, n = template.get_size()
+
+    def reads(node, is_valid):
+        return all(
+            isinstance(dep, MemoryDep) and is_valid(dep)
+            for dep in node.read_writes.reads
+            if dep.name in produced
+        )
+
+    # Loop merging may have collapsed a contiguous read to a single var.
+    def row_major(dep):
+        dep = dep.normalize()
+        return dep.is_contiguous() and dep.get_numel() == m * n
+
+    if node.group[1] == (m, n) and reads(node, row_major):
+        return 0
+    return None
+
+
+def tile_fits_reduction_epilogue(
+    tile: tuple[int, int, int] | None,
+    template: ir.Buffer,
+    epilogue_nodes: Sequence[scheduler.BaseSchedulerNode],
+) -> bool:
+    """Whether epilogue_nodes, including row reductions, can be generated over
+    template output tiles of shape tile (rows, cols, subtiles). See
+    TritonTemplateKernel.codegen_tile_reduction_epilogue."""
+    if tile is None:
+        return False
+    m, n = template.get_size()
+    # The reduction must see whole rows in one store. Reducing across epilogue
+    # subtiles or across column tiles isn't supported yet.
+    if tile[2] > 1 or not V.graph.sizevars.statically_known_geq(tile[1], n):
+        return False
+    produced = OrderedSet([template.get_name()])
+    for node in epilogue_nodes:
+        produced |= node.get_buffer_names()
+    return all(
+        template_reduction_axis(node, template, produced) == 0
+        for node in epilogue_nodes
+        if node.is_reduction()
+    )
+
+
 class DerivedIterationRangesRoot(IterationRangesRoot):
     """A root with reduced numel/block_size derived from a parent tree.
 
@@ -2828,6 +2881,15 @@ class SIMDScheduling(BaseScheduling):
         _, (numel2, rnumel2) = node2.group
         why = WhyNoFuse(node1, node2)
 
+        if (
+            config.triton.template_reduction_epilogue
+            and node1.is_template()
+            and node1.is_reduction()
+            and not self.can_fuse_template_reduction_epilogue(node1, node2)
+        ):
+            why("template reduction epilogue not satisfied")
+            return False
+
         if isinstance(node1, scheduler.FusedNestedReductions):
             # The scheduler already validated this vertical append. The normal
             # SIMD ladder cannot represent its two iteration spaces.
@@ -4497,6 +4559,23 @@ class SIMDScheduling(BaseScheduling):
         """
         Helper method to codegen a single template kernel variant
         """
+        # Epilogue reductions need an output tile that can hold them (see
+        # tile_fits_reduction_epilogue). The scheduler rejects choices whose
+        # tile doesn't fit, so reaching here with a misfit is a bug.
+        if any(node.is_reduction() for node in epilogue_nodes):
+            template = template_node.node
+            tile = (
+                template.output_tile
+                if isinstance(template, ir.TritonTemplateBuffer)
+                else None
+            )
+            if not tile_fits_reduction_epilogue(tile, template, epilogue_nodes):
+                raise AssertionError(
+                    f"output tile {tile} can't hold the reduction epilogue of "
+                    f"{template.get_name()} (size {template.get_size()}); the "
+                    "scheduler's choice pre-check should have rejected it"
+                )
+
         buf_name_to_prologue_group = {}
         template_reads = template_node.used_buffer_names()
         prologue_group = []
