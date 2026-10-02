@@ -650,8 +650,11 @@ with torch.cuda.use_mem_pool(pool, device="cuda:0"):
 
 Use the allocator only on its owning device; cross-device access is not supported.
 Callback owners are retained for the process lifetime, so tensors can outlive the
-Python allocator and pool objects. Reclaiming physical memory waits for the
-allocation stream.
+Python allocator and pool objects. One owner and primary-context reference per
+device/domain are deliberately retained through interpreter shutdown. Reclaiming
+physical memory waits for the allocation stream. Cleanup failures are logged, not
+raised; memory still in use after a failed stream wait is left for process exit
+to reclaim. During interpreter shutdown, callbacks skip CUDA cleanup entirely.
 
 ```{warning}
 Concurrent allocator activity is unsupported. Other threads must not allocate,
