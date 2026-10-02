@@ -70,13 +70,15 @@ class TestRPCPickler(TestCase):
             try:
                 with _use_rpc_pickler(ShareMemoryRPCPickler()):
                     rpc.init_rpc("worker0", rank=0, world_size=2)
-                    m = torch.nn.Linear(1, 2)
-                    m.share_memory()
-                    rref = rpc.remote("worker1", worker_fn, args=(m,))
+                    try:
+                        m = torch.nn.Linear(1, 2)
+                        m.share_memory()
+                        rref = rpc.remote("worker1", worker_fn, args=(m,))
 
-                    rref.to_here()
+                        rref.to_here()
+                    finally:
+                        rpc.shutdown()
             finally:
-                rpc.shutdown()
                 r.join()
 
 
