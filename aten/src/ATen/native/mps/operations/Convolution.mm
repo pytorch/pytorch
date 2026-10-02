@@ -529,6 +529,9 @@ static Conv1dKernel conv1d_pick_kernel(const Tensor& input,
   if (channels_per_group == 1 && (groups > 1 || std::min(out_channels, out_length) < 64)) {
     return Conv1dKernel::Depthwise;
   }
+  // conv1d_mpp reduces over all of C_in * k inside each tile, so a short output with a large reduction leaves
+  // most of the GPU idle, im2col + addmm splits the reduction. Measured cutoffs: the im2col copy pays off from a
+  // 2048-element reduction and the tile shortage fades as L_out and N grow (N also adds addmm launches, hence N^2).
   const auto reduction = channels_per_group * kernel_size;
   if (groups == 1 && channels_per_group > 0 &&
       (out_length == 1 || (reduction >= 2048 && input.size(0) * input.size(0) * out_length * 32 <= reduction))) {
@@ -540,7 +543,8 @@ static Conv1dKernel conv1d_pick_kernel(const Tensor& input,
   }
   // NLC is required for conv_stride > 1 and avoids a transpose for channels-last input.
   // Dilation > 1 or groups > 1 leave gaps between taps. merging into one matmul would need im2col.
-  // With both 1, windows are contiguous, the 8x heuristic aims to offset the transpose cost.
+  // With both 1, windows are contiguous and one matmul covers all taps, C_out >= 8 * C_in is the measured point
+  // where that saves more than the NCL to NLC transpose costs.
   const bool nlc = conv_stride > 1 || input.is_contiguous(MemoryFormat::ChannelsLast) ||
       (dilation == 1 && groups == 1 && out_channels >= 8 * channels);
   const bool merged = nlc && dilation == 1 && groups == 1;
@@ -580,8 +584,11 @@ static void conv1d_metal_forward(const Tensor& input_t,
   std::string kernel_name;
   const auto kernel = conv1d_pick_kernel(input_t, weight_t, output_t, padding, stride, dilation, groups);
   const auto out_channels_per_group = output_t.size(1) / groups;
+  // The smallest tile that covers C_out per group, a 64-wide tile wastes most of the matmul on C_out <= 32.
   const auto small_tile = out_channels_per_group <= 16 ? 16 : 32;
   const auto out_tile = kernel == Conv1dKernel::MppNcl && out_channels_per_group <= 32 ? small_tile : 64;
+  // Measured crossovers: a 16- or 32-channel tile is too little work to split 4 ways and from a 1536-element
+  // reduction (24 K steps of 64) 2 simdgroups already keep a tile busy while 4 only add synchronization.
   const int simdgroups = out_tile < 64 || weight_t.size(1) * kernel_size >= 1536 ? 2 : 4;
   switch (kernel) {
     case Conv1dKernel::Depthwise:
@@ -593,6 +600,7 @@ static void conv1d_metal_forward(const Tensor& input_t,
       input = input_t.contiguous();
       weight = tap_major_weight();
       if (padding > 0) {
+        // Covers every 64-position tile that starts inside the left padding plus the taps reaching past it.
         const auto head_length =
             std::min(length + padding, c10::metal::ceil_div(padding, int64_t(64)) * 64 + (kernel_size - 1) * dilation);
         head = at::constant_pad_nd(input.narrow(3, 0, head_length - padding), {padding, 0});
@@ -670,6 +678,7 @@ static void conv1d_metal_forward(const Tensor& input_t,
       mtl_setArgs(encoder, input, weight, output_t, params, bias, head);
       if (kernel == Conv1dKernel::Depthwise) {
         const auto threads = c10::metal::ceil_div(params.outW, kConv1dDepthwiseOutputsPerThread);
+        // 256-wide threadgroups, like the other flat kernels in this file.
         [encoder dispatchThreads:MTLSizeMake(threads, params.C_out, input_t.size(0))
             threadsPerThreadgroup:MTLSizeMake(std::min(threads, 256), 1, 1)];
       } else {

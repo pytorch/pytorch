@@ -902,6 +902,9 @@ kernel void conv1d_mpp(
   const int x_off = int(tgid.y) * 64;
   const bool merged = NLC && p.dW == 1 && p.C_in == cg;
   const int K = merged ? p.kW * cg : cg;
+  // Tiles are 64 output positions wide (the matmul2d N extent). `head` holds
+  // the positions read by the tiles that start inside the left padding: up to
+  // ceil(padW / 64) * 64 of them plus the taps reaching past the last one.
   const bool from_head = !NLC && x_off < p.padW;
   const int length = from_head
       ? min(p.W + p.padW, (p.padW + 63) / 64 * 64 + (p.kW - 1) * p.dW)

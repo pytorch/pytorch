@@ -2129,6 +2129,7 @@ class TestConvolutionNNDevice(NNTestCase):
         "stride,dilation,groups", [(1, 3, 2), (2, 1, 1), (3, 2, 2), (1, 2, 16)]
     )
     def test_conv1d_long_input(self, device, dtype, stride, dilation, groups):
+        # length + padding exceeds matmul2d's uint16 row-stride limit on M1/M2, which must take the conv3d fallback
         x = torch.randint(-2, 3, (2, 16, 2**17 + 3), device=device, dtype=dtype)
         w = torch.randint(-2, 3, (32, 16 // groups, 3), device=device, dtype=dtype)
         b = torch.randint(-2, 3, (32,), device=device, dtype=dtype)
