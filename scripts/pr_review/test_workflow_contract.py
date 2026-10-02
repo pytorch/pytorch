@@ -2620,9 +2620,9 @@ class TestPublishHonoursALateOptOut(unittest.TestCase):
 
     def _run(self, labels):
         with tempfile.TemporaryDirectory() as td:
-            (Path(td) / "out").mkdir()
-            (Path(td) / "out" / "verdict.json").write_text(
-                json.dumps({"verdict": "ready_for_human_review"})
+            # The label step reads the verdict back from the row it follows.
+            (Path(td) / "terminal.json").write_text(
+                json.dumps({"status": "succeeded", "verdict": "ready_for_human_review"})
             )
             argv = Path(td) / "gh_calls"
             argv.write_text("")
@@ -5002,6 +5002,17 @@ class TestLabelMoveCannotContradictTheRow(unittest.TestCase):
 
     def test_the_row_step_exports_that_status(self):
         self.assertIn("effective_status=", self.publish)
+
+    def test_status_and_verdict_are_read_back_from_the_row(self):
+        # emit_row.py can refuse a verdict itself, so only the row it wrote
+        # knows the final status and verdict; the artifact does not.
+        self.assertRegex(
+            self.publish, r"EFFECTIVE_STATUS=\"\$\(jq -r '\.status[^']*' terminal\.json"
+        )
+        self.assertIn(
+            "VERDICT=$(jq -r '.verdict // \"none\"' terminal.json", self.publish
+        )
+        self.assertNotIn("'.verdict // \"none\"' out/verdict.json", self.publish)
 
     def test_the_head_is_rechecked_before_the_label_moves(self):
         self.assertIn("CURRENT_SHA", self.publish)
