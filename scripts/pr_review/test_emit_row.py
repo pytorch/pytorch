@@ -78,6 +78,66 @@ class TestUsageMetricsAppliesIt(unittest.TestCase):
             )
 
 
+class TestTokenColumnsCountSubAgents(unittest.TestCase):
+    """`usage` is the top-level session only; `modelUsage` includes sub-agents."""
+
+    # Shape and numbers from a headless Claude Code 2.1.280 run with one
+    # sub-agent on the same model as the main session.
+    RESULT = {
+        "total_cost_usd": 0.5766728,
+        "usage": {
+            "input_tokens": 4,
+            "output_tokens": 156,
+            "cache_read_input_tokens": 10790,
+            "cache_creation_input_tokens": 54627,
+        },
+        "modelUsage": {
+            "claude-opus-4-8": {
+                "inputTokens": 12,
+                "outputTokens": 2730,
+                "cacheReadInputTokens": 59574,
+                "cacheCreationInputTokens": 102022,
+                "costUSD": 0.5766728,
+            }
+        },
+    }
+
+    def _metrics(self, payload):
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            p = Path(tmp) / "usage.json"
+            p.write_text(json.dumps(payload))
+            return usage_metrics(str(p))
+
+    def test_tokens_come_from_model_usage(self):
+        m = self._metrics(self.RESULT)
+        self.assertEqual(
+            (
+                m["input_tokens"],
+                m["output_tokens"],
+                m["cache_read_input_tokens"],
+                m["cache_creation_input_tokens"],
+            ),
+            (12, 2730, 59574, 102022),
+        )
+
+    def test_several_models_are_summed(self):
+        payload = dict(self.RESULT)
+        payload["modelUsage"] = {
+            "a": {"outputTokens": 100, "inputTokens": 1},
+            "b": {"outputTokens": 23, "inputTokens": "x"},
+        }
+        m = self._metrics(payload)
+        self.assertEqual((m["output_tokens"], m["input_tokens"]), (123, 1))
+
+    def test_falls_back_to_usage_without_model_usage_tokens(self):
+        for model_usage in ({}, {"m": {}}, {"m": "junk"}, None, [1]):
+            payload = dict(self.RESULT, modelUsage=model_usage)
+            self.assertEqual(self._metrics(payload)["output_tokens"], 156)
+
+
 class TestSafeModelIsFullyAnchored(unittest.TestCase):
     """`$` also matches before a final newline, so `.match` let one through."""
 
