@@ -3199,6 +3199,18 @@ class VariableBuilder:
             **options,
         )
 
+        # A ZeroTensor has no storage and its fake tensor loses the ZeroTensor
+        # bit, so materialize it in-graph instead of letting compiled kernels
+        # read the null data pointer. The TENSOR_MATCH guard already checks the
+        # dispatch key set, so a dense tensor at this site recompiles.
+        if value._is_zerotensor():
+            tensor_variable = wrap_fx_proxy(
+                tx=self.tx,
+                proxy=self.tx.output.root_tracer.create_proxy(
+                    "call_function", torch.zeros_like, (tensor_proxy,), {}
+                ),
+            )
+
         # Track input tensors for attribute mutation, matching how
         # handle_traced_output tracks intermediate tensors with AttributeMutationNew.
         # This enables setattr on input tensors (e.g. tensor.custom_attr = val)
@@ -3357,7 +3369,7 @@ class VariableBuilder:
 
         # Note: this information is conveyed via subclass_type now
         # type: ignore[attr-defined]
-        fake_tensor_value = tensor_variable.proxy.node.meta["example_value"]
+        fake_tensor_value = tensor_proxy.node.meta["example_value"]
         if maybe_get_fake_mode(fake_tensor_value) is not self.tx.fake_mode:
             raise InternalTorchDynamoError("Wrapped Tensor must be this graph's fake")
 

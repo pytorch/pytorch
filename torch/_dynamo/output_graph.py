@@ -1695,25 +1695,32 @@ class OutputGraph(OutputGraphCommon):
                 elif not is_constant_source(source):
                     install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
+                attr_proxy = tracer.create_proxy("get_attr", module_key, (), {})
                 vt = wrap_fx_proxy(
-                    self.root_tx,
-                    tracer.create_proxy("get_attr", module_key, (), {}),
-                    example_value=target,
-                    **options,
+                    self.root_tx, attr_proxy, example_value=target, **options
                 )
 
-                # Track the object so to avoid duplicate registration in case of
-                # different sources pointing to the same tensor object.
-                vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
-
-                if "tensor_dict" in vt.as_proxy().node.meta:
+                if "tensor_dict" in attr_proxy.node.meta:
                     raise AssertionError(
                         "'tensor_dict' already exists in proxy node meta"
                     )
                 # pyrefly: ignore [bad-argument-type]
-                vt.as_proxy().node.meta["tensor_dict"] = _extract_tensor_dict(target)
+                attr_proxy.node.meta["tensor_dict"] = _extract_tensor_dict(target)
 
-                return vt
+                # See the ZeroTensor note in VariableBuilder.wrap_tensor.
+                if target._is_zerotensor():
+                    vt = wrap_fx_proxy(
+                        self.root_tx,
+                        tracer.create_proxy(
+                            "call_function", torch.zeros_like, (attr_proxy,), {}
+                        ),
+                    )
+
+                # Track the object so to avoid duplicate registration in case of
+                # different sources pointing to the same tensor object.
+                return self.root_tx.output.side_effects.track_object_existing(
+                    target, vt
+                )
 
         elif isinstance(target, torch.nn.Module):
             if not isinstance(target, torch.nn.Module):
