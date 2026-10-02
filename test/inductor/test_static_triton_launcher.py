@@ -3,6 +3,7 @@ import gc
 import os
 import random
 import tempfile
+import threading
 import unittest
 import weakref
 from types import SimpleNamespace
@@ -13,6 +14,8 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime import triton_helpers
 from torch._inductor.runtime.static_triton_launcher import (
+    _is_invalid_kernel_image_error,
+    InvalidTritonKernelArtifactError,
     statically_launched_kernel_by_device,
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
@@ -77,42 +80,6 @@ class TestStaticTritonLauncherUnit(TestCase):
         kernel = kernel_cls(compiled_kernel)
         kernel.function = 1
         return kernel
-
-    def test_xpu_load_kernel_uses_existing_three_tuple_abi(self):
-        load_calls = []
-        kernel_capsule = object()
-
-        class FakeImpl:
-            @staticmethod
-            def _load_kernel(path, name, shared, device):
-                load_calls.append((path, name, shared, device))
-                return kernel_capsule, 7, 11
-
-        launcher = object.__new__(StaticallyLaunchedXpuKernel)
-        launcher.function = None
-        launcher.module = None
-        launcher.device_agnostic = False
-        launcher.functions = {}
-        launcher.modules = {}
-        launcher.cubin_path = "/tmp/kernel.zebin"
-        launcher.cubin_raw = b"zebin"
-        launcher.name = "kernel"
-        launcher.shared = 13
-        launcher.C_impl = FakeImpl
-
-        launcher.load_kernel(3)
-
-        self.assertEqual(load_calls, [("/tmp/kernel.zebin", "kernel", 13, 3)])
-        self.assertIs(launcher.function, kernel_capsule)
-        self.assertEqual(launcher.n_regs, 7)
-        self.assertEqual(launcher.n_spills, 11)
-        self.assertIsNone(launcher.module)
-        self.assertIsNone(launcher.cubin_path)
-        self.assertIsNone(launcher.cubin_raw)
-
-        launcher.close()
-        self.assertIsNone(launcher.function)
-        self.assertIsNone(launcher.module)
 
     def test_fast_launcher_keeps_kernel_owner_alive(self):
         """
@@ -251,6 +218,27 @@ class TestStaticTritonLauncherUnit(TestCase):
         autotuner.prepare_for_caching()
         self.assertEqual(result.kernel.cubin_raw, b"cubin")
 
+    def test_backend_errors_classify_invalid_kernel_images(self):
+        for message in (
+            "CUDA driver error: 98",
+            "CUDA driver error: 200",
+            "CUDA driver error: 209",
+            "CUDA driver error: 218",
+            "CUDA driver error: 500",
+            "CUDA driver error: a PTX JIT compilation failed",
+            "L0 runtime error: 70000004",
+            "L0 runtime error: 78000008",
+            "L0 runtime error: 7800000F",
+            "L0 runtime error: 78000011",
+        ):
+            with self.subTest(message=message):
+                self.assertTrue(_is_invalid_kernel_image_error(RuntimeError(message)))
+        self.assertFalse(
+            _is_invalid_kernel_image_error(
+                RuntimeError("out of resource: shared memory exceeds hardware limit")
+            )
+        )
+
 
 @requires_gpu_and_triton
 class TestStaticTritonLauncher(TestCase):
@@ -301,12 +289,6 @@ class TestStaticTritonLauncher(TestCase):
         cubin_file = self.write_cubin_to_tmp(compiled_kernel)
         compiled_kernel._cubin_path = cubin_file
         result = statically_launched_kernel_by_device(compiled_kernel, GPU_TYPE)
-        # Test reload cubin from raw here
-        old_cubin_path = result.cubin_path
-        if old_cubin_path is None:
-            raise AssertionError
-        result.cubin_path = None
-        result.reload_cubin_from_raw(old_cubin_path)
         device_interface = get_interface_for_device(GPU_TYPE)
         result.load_kernel(device_interface.current_device())
         return result
@@ -337,6 +319,25 @@ class TestStaticTritonLauncher(TestCase):
 
         launcher.run(1, 1, 1, stream, new_arg0, arg1)
         self.assertEqual(new_arg0, arg0)
+
+    def test_missing_symbol_is_invalid_artifact(self):
+        @triton.jit
+        def simple_kernel(arg0):
+            value = tl.load(arg0)
+            tl.store(arg0, value + 1)
+
+        arg0 = torch.zeros(1, dtype=torch.int32, device=GPU_TYPE)
+        compiled_kernel = simple_kernel[(1,)](arg0)
+        cubin_file = self.write_cubin_to_tmp(compiled_kernel)
+        compiled_kernel._cubin_path = cubin_file
+        launcher = statically_launched_kernel_by_device(compiled_kernel, GPU_TYPE)
+        launcher.name = f"{launcher.name}_missing"
+        device_interface = get_interface_for_device(GPU_TYPE)
+
+        with self.assertRaises(InvalidTritonKernelArtifactError):
+            launcher.load_kernel(device_interface.current_device())
+        self.assertIsNone(launcher.function)
+        self.assertIsNone(launcher.module)
 
     # I wish I could macro all int types this into a single unit test on a loop, but
     # 1. variables aren't allowed as type annotations in python
@@ -751,6 +752,7 @@ def kernel_many_args(out_tensor, {decl}):
                 self.function = 0xF00D
                 self.functions = {}
                 self.modules = {}
+                self._load_lock = threading.Lock()
                 self.C_impl = FakeImpl
 
             def close(self):
@@ -953,11 +955,6 @@ class TestFastCudaLauncher(TestCase):
         cubin_file = self.write_cubin_to_tmp(compiled_kernel)
         compiled_kernel._cubin_path = cubin_file
         result = statically_launched_kernel_by_device(compiled_kernel, GPU_TYPE)
-        old_cubin_path = result.cubin_path
-        if old_cubin_path is None:
-            raise AssertionError
-        result.cubin_path = None
-        result.reload_cubin_from_raw(old_cubin_path)
         device_interface = get_interface_for_device(GPU_TYPE)
         result.load_kernel(device_interface.current_device())
         return result
