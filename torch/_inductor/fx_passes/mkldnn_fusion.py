@@ -29,6 +29,7 @@ from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
 from .quantization import (
     _register_int8_woq_concat_linear_pattern,
+    _register_qconv_pointwise_prepack,
     _register_quantization_lowerings,
     _register_woq_lowerings,
 )
@@ -1595,6 +1596,7 @@ if torch._C._has_mkldnn:
             mkldnn._reorder_convolution_transpose_weight,
             mkldnn._reorder_linear_weight,
             mkldnn._reorder_mkldnn_rnn_layer_weight,
+            torch.ops.onednn.qconv_pointwise_prepack.default,
         ]
         if torch._C.has_mkl:
             packed_weight_ops.append(torch.ops.mkl._mkl_reorder_linear_weight)
@@ -1634,4 +1636,5 @@ if torch._C._has_mkldnn:
         if torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available():
             _register_weight_pack_pass()
             _recover_linear()
+            _register_qconv_pointwise_prepack()
             _register_int8_woq_concat_linear_pattern()
