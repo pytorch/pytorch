@@ -2763,13 +2763,10 @@ class TranslatedSubParentEpilogueTest(TestCase):
             self.assertEqual(stage.output_groups[0].output_lanes, 1)
             mappings = {
                 (relation.parent_r_stride, relation.base_offset, relation.extent)
-                for relation in (
-                    *stage.access_relations,
-                    *stage.output_access_relations,
-                )
+                for relation in stage.access_relations
                 if relation.parent_r_stride is not None
             }
-            self.assertEqual(mappings, {(1, 0, 64), (1, 64, 192)})
+            self.assertEqual(mappings, {(1, 0, 64)})
         return nodes
 
     def compile_and_check(
@@ -2854,12 +2851,10 @@ class TranslatedSubParentEpilogueTest(TestCase):
             )
             self.assertIsNotNone(plan)
             stage = plan.sub_parent_stages[0]
-            self.assertEqual(len(stage.output_access_relations), 1)
-            output_relation = stage.output_access_relations[0]
-            self.assertEqual(output_relation.base_offset, offset)
-            self.assertEqual(output_relation.extent, 64)
             reads = [r for r in stage.access_relations if r.parent_r_stride == 1]
             self.assertEqual(len(reads), 1)
+            self.assertEqual(reads[0].base_offset, offset)
+            self.assertEqual(reads[0].extent, 64)
             self.assertTrue(reads[0].requires_live_source)
             return nodes
 

@@ -901,15 +901,6 @@ class NestedReduction:
             sub_parent_factor,
         ):
             return None
-        output_relations = ()
-        if allow_translation:
-            output_relations = cls.sub_parent_output_access_relations(
-                parent_nodes,
-                numel,
-                parent_rnumel,
-                known_extent_subs,
-                sub_parent_factor,
-            )
         if not source_relations:
             return None
         broadcast_relations = cls._sub_parent_broadcast_access_relations(
@@ -953,7 +944,6 @@ class NestedReduction:
                     factor=sub_parent_factor,
                     access_relations=access_relations,
                     output_groups=output_groups,
-                    output_access_relations=output_relations,
                 ),
             ),
             required_post_reduction_index=(
@@ -1836,113 +1826,6 @@ class NestedReduction:
         ):
             return None
         return proof
-
-    @staticmethod
-    def sub_parent_layout_access(
-        output: ir.IRNode, source: MemoryDep
-    ) -> MemoryDep | None:
-        """Express a graph-output view in the source loop-variable frame.
-
-        Args:
-            output: Graph output to inspect.
-            source: Parent source dependency.
-
-        Returns:
-            A matching memory dependency, or None if the view is unsupported.
-        """
-        layout = output.get_layout()
-        sizes = tuple(layout.size)
-        strides = tuple(layout.stride)
-        active_axes = tuple(
-            index
-            for index, size in enumerate(sizes)
-            if not V.graph.sizevars.statically_known_equals(size, 1)
-        )
-        if len(active_axes) != source.num_vars:
-            return None
-        index = layout.offset + sum(
-            (
-                stride * var
-                for stride, var in zip(
-                    (strides[axis] for axis in active_axes), source.var_names
-                )
-            ),
-            sympy.S.Zero,
-        )
-        return MemoryDep(
-            source.name,
-            index,
-            source.var_names,
-            tuple(sizes[axis] for axis in active_axes),
-        )
-
-    @classmethod
-    def sub_parent_output_access_relations(
-        cls,
-        parent_nodes: Sequence[SchedulerNode],
-        parent_numel: sympy.Expr,
-        parent_rnumel: sympy.Expr,
-        extent_subs: dict[sympy.Expr, sympy.Expr],
-        sub_parent_factor: int,
-    ) -> tuple[SubParentAccessRelation, ...]:
-        """Record translated graph-output views of parent-produced buffers.
-
-        Args:
-            parent_nodes: Nodes that produce the parent buffers.
-            parent_numel: Parent non-reduction extent.
-            parent_rnumel: Parent reduction extent.
-            extent_subs: Proven extent substitutions.
-            sub_parent_factor: Number of sub-parent lanes.
-
-        Returns:
-            Proved output-view metadata; other views use ordinary materialization.
-        """
-        writes_by_name: dict[str, list[MemoryDep]] = defaultdict(list)
-        for node in parent_nodes:
-            for write in node.read_writes.writes:
-                if isinstance(write, MemoryDep):
-                    writes_by_name[write.name].append(write)
-
-        relations: list[SubParentAccessRelation] = []
-        for output in V.graph.graph_outputs:
-            name = output.maybe_get_name()
-            if name is None:
-                continue
-            writes = writes_by_name.get(name, ())
-            if not writes:
-                continue
-            if len(writes) != 1:
-                continue
-            source = writes[0]
-            output_access = cls.sub_parent_layout_access(output, source)
-            if output_access is None:
-                continue
-            output_rnumel = V.graph.sizevars.simplify(
-                sympy_product(output_access.size[-1:])
-            )
-            if not V.graph.sizevars.statically_known_lt(output_rnumel, parent_rnumel):
-                continue
-            proof = cls.prove_sub_parent_translation(
-                (source,),
-                output_access,
-                parent_numel,
-                parent_rnumel,
-                sub_parent_factor,
-                extent_subs,
-            )
-            if proof is None:
-                continue
-            relations.append(
-                SubParentAccessRelation(
-                    source_accesses=(source,),
-                    consumer_access=output_access,
-                    parent_r_stride=1,
-                    base_offset=proof.translation[1],
-                    extent=proof.compatible_extents[1][1],
-                    requires_live_source=False,
-                )
-            )
-        return tuple(relations)
 
     @staticmethod
     def _sub_parent_epilogue_outputs_unread(
@@ -3217,8 +3100,6 @@ class SubParentEpilogueStage:
     factor: int
     access_relations: tuple[SubParentAccessRelation, ...]
     output_groups: tuple[SubParentOutputGroup, ...]
-    # Output-view proofs validate materialized views, not register forwarding.
-    output_access_relations: tuple[SubParentAccessRelation, ...] = ()
 
     @property
     def epilogue_nodes(self) -> tuple[SchedulerNode, ...]:
@@ -10961,7 +10842,7 @@ class Scheduler:
                     ),
                 )
             )
-            for relation in (*affine_relations, *stage.output_access_relations):
+            for relation in affine_relations:
                 consumer_frame = child_frame
                 if (
                     plan.allow_translation
