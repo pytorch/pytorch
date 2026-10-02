@@ -52,6 +52,7 @@ from torch._C._distributed_c10d import (
     FlightRecorderHook,
     GatherOptions,
     get_debug_level,
+    HealthCheckHook,
     NanCheckHook,
     PrefixStore,
     ProcessGroup,
@@ -358,6 +359,8 @@ def _create_torchcomms_backend(
     store: Store,
     device_id: torch.device | None,
     backend_options: object | None,
+    timeout: timedelta | None = None,
+    enable_reconfigure: bool = False,
 ) -> C10DBackend:
     """Create a c10d BackendWrapper for one TorchComms backend instance."""
     if not _TORCHCOMM_AVAILABLE:
@@ -380,12 +383,18 @@ def _create_torchcomms_backend(
     os.environ["TORCHCOMM_RANK"] = str(group_rank)
     os.environ["TORCHCOMM_SIZE"] = str(group_size)
     try:
+        dynamic_options: dict[str, object] = {}
+        if enable_reconfigure:
+            dynamic_options["enable_reconfigure"] = True
+            if timeout is not None:
+                dynamic_options["timeout"] = timeout
         comm = new_comm(
             _resolve_torchcomms_backend(backend),
             torch_device,
             name=group_name,
             store=store,
             hints=hints,
+            **dynamic_options,
         )
     finally:
         for key, value in zip(("TORCHCOMM_RANK", "TORCHCOMM_SIZE"), saved_rank_size):
@@ -394,14 +403,20 @@ def _create_torchcomms_backend(
             else:
                 os.environ[key] = value
 
+    # Local references retain ownership until publication, so setup failures
+    # release the communicator through C++ RAII.
+    backend_wrapper = _BackendWrapper(comm)
+
     buffer_size = os.environ.get(
         "TORCH_FR_BUFFER_SIZE",
         os.environ.get("TORCH_NCCL_TRACE_BUFFER_SIZE", "0"),
     )
     recorder = _TorchCommsFlightRecorderHook(max_entries=int(buffer_size))
     recorder.register_with_comm(comm)
+
+    # Publish only after hook registration and wrapper setup succeed.
     _world.comms.append(comm)
-    return _BackendWrapper(comm)
+    return backend_wrapper
 
 
 # Change __module__ of all imported types from torch._C._distributed_c10d that are public
@@ -3074,6 +3089,8 @@ def _new_process_group_helper(
                 store=backend_prefix_store,
                 device_id=device_id,
                 backend_options=backend_options,
+                timeout=timeout,
+                enable_reconfigure=enable_reconfigure,
             )
             # Use the underlying backend's BackendType so distinct torchcomms
             # backends (e.g. gloo vs nccl in a "cpu:gloo,cuda:nccl" PG) don't
@@ -3179,6 +3196,8 @@ def _new_process_group_helper(
     # hook, so there is no handle to keep alive here.
     if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
         NanCheckHook.attach(pg)
+
+    HealthCheckHook.attach(pg)
 
     # Backend-agnostic FlightRecorder recording, for backends with no native
     # integration. Attached here (rather than lazily) so a group is recorded
@@ -4459,27 +4478,19 @@ def all_gather_object(
     object_sizes_tensor = torch.zeros(
         group_size, dtype=torch.long, device=current_device
     )
-    object_size_list = [
-        object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
-    ]
     # Allgather tensor sizes
-    all_gather(object_size_list, local_size, group=group)
-    max_object_size = int(max(object_size_list).item())  # type: ignore[type-var]
+    all_gather_single(object_sizes_tensor, local_size, group=group)
+    max_object_size = int(object_sizes_tensor.max().item())
     # Resize tensor to max size across all ranks.
     input_tensor.resize_(max_object_size)
     coalesced_output_tensor = torch.empty(
         max_object_size * group_size, dtype=torch.uint8, device=current_device
     )
-    # Output tensors are nonoverlapping views of coalesced_output_tensor
-    output_tensors = [
-        coalesced_output_tensor[max_object_size * i : max_object_size * (i + 1)]
-        for i in range(group_size)
-    ]
-    all_gather(output_tensors, input_tensor, group=group)
+    # Allgather the object data into a single coalesced output tensor.
+    all_gather_single(coalesced_output_tensor, input_tensor, group=group)
     # Deserialize outputs back to object.
-    for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.uint8)
-        tensor_size = object_size_list[i]
+    for i, tensor in enumerate(coalesced_output_tensor.chunk(group_size)):
+        tensor_size = object_sizes_tensor[i]
         object_list[i] = cast(
             _T, _tensor_to_object(tensor, tensor_size, group, weights_only)
         )
@@ -7018,6 +7029,7 @@ def split_group(
             f"group name should be set to {group_name} but got {split_pg.group_name}"
         )
 
+    HealthCheckHook.attach(split_pg)
     _maybe_attach_flight_recorder(split_pg, backend_config, global_ranks_in_my_group)
 
     # update global state
