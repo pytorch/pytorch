@@ -8665,7 +8665,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 f"{self.iteration_ranges_ranges_code(entry)}"
             )
             code.writeline(
-                f"{entry.mask_name()} = {entry.name} < {self.index_to_str(entry.numel)}"
+                f"{entry.mask_name()} = {entry.name} < "
+                f"{self.index_to_str(entry.mask_bound())}"
             )
             return
 
@@ -8904,7 +8905,7 @@ class TritonScheduling(SIMDScheduling):
         if not (
             config.triton.template_reduction_epilogue
             and isinstance(template, ir.TritonTemplateBuffer)
-            and len(template.get_size()) == 2
+            and len(template.get_size()) in (2, 3)
             # Only bf16 and fp16 outputs are tested.
             and template.get_dtype() in (torch.bfloat16, torch.float16)
             # The JIT cpp wrapper can't import the Blackwell template's source
@@ -8912,11 +8913,11 @@ class TritonScheduling(SIMDScheduling):
             and not V.graph.cpp_wrapper
         ):
             return False
-        m, n = template.get_size()
-        # Static shapes only: the Blackwell template specializes dynamic sizes.
-        if not (isinstance(m, sympy.Integer) and isinstance(n, sympy.Integer)):
+        size = template.get_size()
+        # Static shapes only: the Blackwell templates specialize dynamic sizes.
+        if not all(isinstance(s, sympy.Integer) for s in size):
             return False
-        if template.get_stride() != [n, 1]:
+        if template.get_stride() != ir.FlexibleLayout.contiguous_strides(size):
             return False
         # Arg reductions can lower to a multi-result tl.reduce, which
         # automatic warp specialization rejects.
