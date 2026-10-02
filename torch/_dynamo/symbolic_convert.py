@@ -4414,14 +4414,7 @@ class InstructionTranslatorBase(
                 if flags & 0x01:
                     defaults = self.pop()
 
-        fn = NestedUserFunctionVariable(
-            fn_name,
-            code,
-            self.f_globals,
-            defaults,
-            kwdefaults,
-            closure,
-        )
+        ann = None
         if annotations:
             if not isinstance(annotations, TupleVariable):
                 raise AssertionError(
@@ -4437,8 +4430,18 @@ class InstructionTranslatorBase(
                 ann_items,
                 mutation_type=ValueMutationNew(),
             )
-            fn.annotations = ann
-        self.push(fn)
+
+        self.push(
+            NestedUserFunctionVariable(
+                fn_name,
+                code,
+                self.f_globals,
+                defaults,
+                kwdefaults,
+                closure,
+                ann,
+            )
+        )
 
     def UNPACK_SEQUENCE(self, inst: Instruction) -> None:
         seq = self.pop()
@@ -5229,8 +5232,10 @@ class InstructionTranslatorBase(
 
             # maybe use Format.VALUE_WITH_FAKE_GLOBALS instead?
             # https://docs.python.org/3/library/annotationlib.html#annotationlib.Format.VALUE_WITH_FAKE_GLOBALS
-            attr = attr.call_function(self, [VariableTracker.build(self, 1)], {})
-            fn.annotations = attr
+            fn.annotate = attr
+            fn.annotations = attr.call_function(
+                self, [VariableTracker.build(self, 1)], {}
+            )
         elif flags & 0x08:
             fn.closure = attr
         elif flags & 0x04:
