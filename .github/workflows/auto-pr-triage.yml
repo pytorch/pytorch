@@ -51,7 +51,7 @@ jobs:
           [[ "$AUTO_PR_TRIAGE_MODE" == "shadow" || "$AUTO_PR_TRIAGE_MODE" == "live" ]] || exit 1
           echo "mode=$AUTO_PR_TRIAGE_MODE" >> "$GITHUB_OUTPUT"
 
-      - name: Admit the first eligible label or ready event
+      - name: Admit the label event or the first ready event after it
         id: history
         env:
           EVENT_ACTION: ${{ github.event.action }}
@@ -88,9 +88,6 @@ jobs:
           HISTORY_TRUNCATED="$(
             jq -r '.data.repository.pullRequest.timelineItems.pageInfo.hasPreviousPage' <<<"$HISTORY"
           )"
-          LABEL_EVENT_COUNT="$(
-            jq '[.data.repository.pullRequest.timelineItems.nodes[] | select(.__typename == "LabeledEvent" and .label.name == "open source")] | length' <<<"$HISTORY"
-          )"
           LATEST_LABEL_INDEX="$(
             jq '[.data.repository.pullRequest.timelineItems.nodes | to_entries[] | select(.value.__typename == "LabeledEvent" and .value.label.name == "open source") | .key] | max // -1' <<<"$HISTORY"
           )"
@@ -98,14 +95,16 @@ jobs:
             jq --argjson label_index "$LATEST_LABEL_INDEX" '[.data.repository.pullRequest.timelineItems.nodes | to_entries[] | select(.key > $label_index and .value.__typename == "ReadyForReviewEvent")] | length' <<<"$HISTORY"
           )"
           [[ "$HISTORY_TRUNCATED" == "true" || "$HISTORY_TRUNCATED" == "false" ]] || exit 1
-          [[ "$LABEL_EVENT_COUNT" =~ ^[0-9]+$ ]] || exit 1
           [[ "$LATEST_LABEL_INDEX" =~ ^-?[0-9]+$ ]] || exit 1
           [[ "$READY_EVENT_COUNT" =~ ^[0-9]+$ ]] || exit 1
-          if [[ "$HISTORY_TRUNCATED" == "true" ]]; then
+          # Adding `open source` needs triage permission, so every such event
+          # is a deliberate request to triage; a PR that already has an outcome
+          # label is a no-op. Remove and re-add the label to triage again.
+          if [[ "$EVENT_ACTION" == "labeled" ]]; then
+            echo "should-run=true" >> "$GITHUB_OUTPUT"
+          elif [[ "$HISTORY_TRUNCATED" == "true" ]]; then
             echo "should-run=false" >> "$GITHUB_OUTPUT"
             echo "Skipping Auto PR Triage because entry-event history exceeds 100 matching events."
-          elif [[ "$EVENT_ACTION" == "labeled" && "$LABEL_EVENT_COUNT" == "1" ]]; then
-            echo "should-run=true" >> "$GITHUB_OUTPUT"
           elif [[ "$EVENT_ACTION" == "ready_for_review" && "$LATEST_LABEL_INDEX" -ge 0 && "$READY_EVENT_COUNT" == "1" ]]; then
             echo "should-run=true" >> "$GITHUB_OUTPUT"
           else
