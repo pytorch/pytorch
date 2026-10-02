@@ -166,12 +166,12 @@ class GraphID:
 
 def clear_cublass_cache() -> None:
     """
-    ROCm and CUDA with TORCH_CUBLAS_WORKSPACE_CACHE=1 keep persistent workspaces for matmuls. This
-    poses a problem for warmup within a CUDAGraph private pool because persistent allocations from
-    one run must not survive into the next. When we begin a new generation, tensors from the previous
-    generation are freed to the memory pool, while a cached cuBLAS workspace would remain in use.
+    TORCH_CUBLAS_WORKSPACE_CACHE=1 keeps persistent workspaces for matmuls. This poses a problem for
+    warmup within a CUDAGraph private pool because persistent allocations from one run must not
+    survive into the next. When we begin a new generation, tensors from the previous generation are
+    freed to the memory pool, while a cached cuBLAS workspace would remain in use.
 
-    Clear cached workspaces before and after warming up or recording. CUDA's default eager workspace
+    Clear cached workspaces before and after warming up or recording. The default eager workspace
     mode does not populate this cache, so these calls are no-ops there.
     """
     torch._C._cuda_clearCublasWorkspaces()

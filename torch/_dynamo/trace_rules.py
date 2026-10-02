@@ -59,6 +59,7 @@ from .utils import (
 )
 from .variables import (
     BuiltinVariable,
+    ByteArrayBuiltinVariable,
     DictBuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
@@ -236,6 +237,7 @@ manual_torch_name_rule_map: dict[
     "torch.nn.utils.rnn.pack_padded_sequence": SkipFunctionVariable,
     # https://github.com/pytorch/pytorch/issues/162374
     "torch.nn.utils.rnn.pad_packed_sequence": SkipFunctionVariable,
+    "torch.nn.modules.utils.consume_prefix_in_state_dict_if_present": UserFunctionVariable,
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
     "torch.nn.Buffer": TorchInGraphFunctionVariable,
     "torch.backends.cuda.SDPAParams": TorchInGraphFunctionVariable,
@@ -265,6 +267,9 @@ manual_torch_name_rule_map: dict[
     "torch.Tensor#__init__": SkipFunctionVariable,
     "torch.Tensor#split": TorchInGraphFunctionVariable,
     "torch.cuda.set_device": SkipFunctionVariable,
+    # Deprecated wrapper; warnings.warn inside it graph-breaks, which would run the
+    # wrapped set_device_index eagerly without reaching the compile_on_one_rank check.
+    "torch.accelerator.set_device_idx": SkipFunctionVariable,
     "torch.cuda.current_device": TorchInGraphFunctionVariable,
     "torch.autograd.grad": TorchInGraphFunctionVariable,
     "torch.autograd.grad_mode._enter_inference_mode": TorchInGraphFunctionVariable,
@@ -708,6 +713,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._dispatch_tls_set_dispatch_key_excluded",
         "torch._C._dispatch_tls_set_dispatch_key_included",
         "torch._C._dist_autograd_init",
+        "torch._C._dynamo.utils.get_current_stream",
         "torch._C._dump_local_tls_set",
         "torch._C._dump_upgraders_map",
         "torch._C._enable_mobile_interface_call_export",
@@ -2999,7 +3005,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.nn.modules.utils._ntuple",
         "torch.nn.modules.utils._quadruple",
         "torch.nn.modules.utils._reverse_repeat_tuple",
-        "torch.nn.modules.utils.consume_prefix_in_state_dict_if_present",
         "torch.nn.parameter.is_lazy",
         "torch.norm",
         "torch.quantization.default_eval_fn",
@@ -4134,6 +4139,7 @@ Main entry point for looking up the trace rule (the Dynamo variable) for a given
 """
 
 BUILTIN_CALLABLES = {
+    bytearray: ByteArrayBuiltinVariable,
     dict: DictBuiltinVariable,
     getattr: GetAttrBuiltinVariable,
     hasattr: HasAttrBuiltinVariable,

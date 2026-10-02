@@ -626,11 +626,10 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
   constexpr auto kChannelsLast = MemoryFormat::ChannelsLast;
   constexpr auto kChannelsLast3d = MemoryFormat::ChannelsLast3d;
   constexpr auto kContiguous = MemoryFormat::Contiguous;
-  const bool is_macos_15_plus = is_macos_at_least(MacOSVersion::MACOS_15_0);
 
   const bool is3DConv = input_t.dim() == 5;
   const auto memory_format = input_t.suggest_memory_format(/*channels_last_strides_exact_match=*/true);
-  const bool is_cl_input = is_macos_15_plus && memory_format == kChannelsLast && !is3DConv;
+  const bool is_cl_input = memory_format == kChannelsLast && !is3DConv;
   const auto input_suggested_layout = is_cl_input ? kChannelsLast : kContiguous;
   // Allocate output in the user-requested layout regardless of fast-path gate.
   const bool is_channels_last = mps_conv_use_channels_last(input_t, weight_t);
@@ -656,12 +655,6 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     return output_t;
   }
   TensorArg output{output_t, "result", 0};
-
-  // TODO: Remove me when MacOS-14 is no longer supported
-  std::optional<Tensor> output_c;
-  if (!is_macos_15_plus && is_channels_last) {
-    output_c = at::empty_like(output_t, output_t.options().memory_format(kContiguous));
-  }
 
   if (!is_macos_at_least(MacOSVersion::MACOS_15_1) && !is3DConv) {
     // On macOS < 15.1, MPS convolution kernel does not support output channels > 2^16
@@ -769,12 +762,9 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
       newCachedGraph->outputTensor_ = outputTensor;
     });
 
-    const auto input_for_graph =
-        output_c ? input_t.contiguous() : materialize_for_conv(input_t, input_suggested_layout);
+    const auto input_for_graph = materialize_for_conv(input_t, input_suggested_layout);
     auto inputPlaceholder = make_conv_placeholder(cachedGraph->inputTensor_, input_for_graph, input_suggested_layout);
-    auto outputPlaceholder = output_c
-        ? Placeholder(cachedGraph->outputTensor_, *output_c)
-        : make_conv_placeholder(cachedGraph->outputTensor_, output_t, input_suggested_layout);
+    auto outputPlaceholder = make_conv_placeholder(cachedGraph->outputTensor_, output_t, input_suggested_layout);
     // MPSGraph conv miscomputes for non-dense (offset/gapped) weight views; gather instead of using the strided API.
     auto weightsPlaceholder =
         Placeholder(cachedGraph->weightTensor_, weight_t, nil, true, MPSDataTypeInvalid, /*useMPSStridedAPI=*/false);
@@ -795,10 +785,6 @@ static Tensor _mps_convolution_impl(const Tensor& input_t,
     }
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-  }
-
-  if (output_c) {
-    output_t.copy_(*output_c);
   }
 
   return output_t;
@@ -841,12 +827,11 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   constexpr auto kChannelsLast = at::MemoryFormat::ChannelsLast;
   constexpr auto kChannelsLast3d = at::MemoryFormat::ChannelsLast3d;
   constexpr auto kContiguous = at::MemoryFormat::Contiguous;
-  const bool is_macos_15_plus = is_macos_at_least(MacOSVersion::MACOS_15_0);
   // Backward uses NDHWC+DHWIO only when the full fast path is beneficial; for
   // factorized kernels / small Cin / depthwise the NCDHW+OIDHW fallback wins.
-  const bool use_dhwio = is3DConv && is_macos_15_plus && is_packed_channels_last_3d(grad_output_t) &&
-      conv3d_dhwio_is_beneficial(weight_t.sizes());
-  const bool use_nhwc = !is3DConv && is_macos_15_plus && is_packed_channels_last_2d(grad_output_t);
+  const bool use_dhwio =
+      is3DConv && is_packed_channels_last_3d(grad_output_t) && conv3d_dhwio_is_beneficial(weight_t.sizes());
+  const bool use_nhwc = !is3DConv && is_packed_channels_last_2d(grad_output_t);
   const auto desc_layout = use_dhwio ? kChannelsLast3d : use_nhwc ? kChannelsLast : kContiguous;
   // Allocate grad_input in the caller-supplied layout so it matches input.
   const bool is_channels_last = output_memory_format == kChannelsLast || output_memory_format == kChannelsLast3d;
@@ -869,7 +854,7 @@ static Tensor mps_convolution_backward_input(IntArrayRef input_size,
   // Contig scratch when graph emits NCDHW but grad_input is CL3d -- covers
   // the macOS-14 fallback and the 3D NCDHW fallback on macOS 15+.
   std::optional<Tensor> grad_input_c;
-  const bool needs_contig_scratch = is_channels_last && (!is_macos_15_plus || (is3DConv && !use_dhwio));
+  const bool needs_contig_scratch = is_channels_last && (is3DConv && !use_dhwio);
   if (needs_contig_scratch) {
     grad_input_c = at::empty_like(grad_input_t, grad_input_t.options().memory_format(MemoryFormat::Contiguous));
   }
@@ -1009,15 +994,13 @@ static Tensor mps_convolution_backward_weights(IntArrayRef weight_size,
   constexpr auto kChannelsLast = at::MemoryFormat::ChannelsLast;
   constexpr auto kChannelsLast3d = at::MemoryFormat::ChannelsLast3d;
   constexpr auto kContiguous = at::MemoryFormat::Contiguous;
-  const bool is_macos_15_plus = is_macos_at_least(MacOSVersion::MACOS_15_0);
   // Half-precision WG regresses on NDHWC+DHWIO; force NCDHW+OIDHW.
   const bool half_precision_wg =
       grad_output_t.scalar_type() == at::kBFloat16 || grad_output_t.scalar_type() == at::kHalf;
   // Require BOTH inputs CL3d-packed; otherwise we'd permute the non-packed one each call.
-  const bool use_dhwio = is3DConv && is_macos_15_plus && !half_precision_wg && is_packed_channels_last_3d(input_t) &&
+  const bool use_dhwio = is3DConv && !half_precision_wg && is_packed_channels_last_3d(input_t) &&
       is_packed_channels_last_3d(grad_output_t) && conv3d_dhwio_is_beneficial(weight_size);
-  const bool use_hwio = !is3DConv && is_macos_15_plus &&
-      (is_packed_channels_last_2d(input_t) || is_packed_channels_last_2d(grad_output_t));
+  const bool use_hwio = !is3DConv && (is_packed_channels_last_2d(input_t) || is_packed_channels_last_2d(grad_output_t));
   const auto desc_layout = use_dhwio ? kChannelsLast3d : use_hwio ? kChannelsLast : kContiguous;
   // grad_weight allocation: 2D follows the caller-supplied layout; 3D always
   // stays contiguous OIDHW (the graph already transposes DHWIO -> OIDHW).
