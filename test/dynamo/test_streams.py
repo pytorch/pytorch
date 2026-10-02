@@ -2954,6 +2954,29 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(x, torch.ones_like(x))
 
     @parametrize("backend", ("aot_eager", "inductor"))
+    def test_late_graph_input_mutation_before_join_errors(self, backend) -> None:
+        def fn(x, y, first_stream, second_stream):
+            with torch.cuda.stream(first_stream):
+                x.add_(1)
+            with torch.cuda.stream(second_stream):
+                y.add_(1)
+            second_stream.synchronize()
+            return x + y
+
+        x = torch.zeros(8, device="cuda")
+        y = torch.zeros_like(x)
+        first_stream = torch.cuda.Stream()
+        second_stream = torch.cuda.Stream()
+        torch.cuda.synchronize()
+        with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+            torch.compile(fn, backend=backend, fullgraph=True)(
+                x, y, first_stream, second_stream
+            )
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.zeros_like(x))
+        self.assertEqual(y, torch.zeros_like(y))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
     def test_cross_device_operand_sync_does_not_join_input_mutation(
         self, backend
     ) -> None:

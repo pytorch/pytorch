@@ -1334,9 +1334,12 @@ class OutputGraph(OutputGraphCommon):
 
         tracer = self.root_tracer
         if self._last_checked_input_versions is None:
-            self._last_checked_input_versions = dict(
-                enumerate(tracer._input_versions_at_beginning)
-            )
+            self._last_checked_input_versions = {}
+        # Dynamo creates placeholders when their inputs are first used. An
+        # input introduced after the first mutation check still needs its
+        # original version as the baseline for this stream's write.
+        for input_idx, version in enumerate(tracer._input_versions_at_beginning):
+            self._last_checked_input_versions.setdefault(input_idx, version)
 
         cur_stream_index = tx.symbolic_stream_state.cur_stream_id()
         input_idx = 0
