@@ -9813,14 +9813,17 @@ class TestLinalgSVD(TestCase):
         sigma[0] = torch.logspace(0, -1, k, dtype=torch.float64)
         A = ((q * sigma.unsqueeze(-2)) @ v.mH).to(dtype)
         ref = torch.linalg.svdvals(A.to(ref_dtype))
-        # S_max = 1, so a backward-stable SVD is accurate to a small multiple of eps in absolute terms
-        atol = 200 * torch.finfo(dtype).eps
+        # S_max = 1, so a backward-stable SVD is accurate to a small multiple of eps in absolute terms; the
+        # orthogonality and reconstruction errors also grow with the dimension
+        eps = torch.finfo(dtype).eps
+        atol = 200 * eps
+        vec_atol = 10 * max(m, n) * eps
         U, S, Vh = (t.cpu().to(ref_dtype) for t in torch.linalg.svd(A.to(device), full_matrices=full_matrices))
         self.assertEqual(S.real, ref, atol=atol, rtol=0)
         self.assertEqual(torch.linalg.svdvals(A.to(device)).cpu().double(), ref, atol=atol, rtol=0)
-        self.assertEqual(U.mH @ U, torch.eye(U.shape[-1], dtype=ref_dtype).expand_as(U.mH @ U), atol=atol, rtol=0)
-        self.assertEqual(Vh @ Vh.mH, torch.eye(Vh.shape[-2], dtype=ref_dtype).expand_as(Vh @ Vh.mH), atol=atol, rtol=0)
-        self.assertEqual((U[..., :k] * S.unsqueeze(-2)) @ Vh[..., :k, :], A.to(ref_dtype), atol=atol, rtol=0)
+        self.assertEqual(U.mH @ U, torch.eye(U.shape[-1], dtype=ref_dtype).expand_as(U.mH @ U), atol=vec_atol, rtol=0)
+        self.assertEqual(Vh @ Vh.mH, torch.eye(Vh.shape[-2], dtype=ref_dtype).expand_as(Vh @ Vh.mH), atol=vec_atol, rtol=0)
+        self.assertEqual((U[..., :k] * S.unsqueeze(-2)) @ Vh[..., :k, :], A.to(ref_dtype), atol=vec_atol, rtol=0)
 
 
 class TestLinalgCudaOnly(TestCase):
