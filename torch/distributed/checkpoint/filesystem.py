@@ -70,6 +70,10 @@ _metadata_fn: str = ".metadata"
 
 CURRENT_DCP_VERSION: Final[str] = "1.0.0"
 
+# Defaults used for IO thread auto-tuning.
+DEFAULT_MAX_THREADS: Final[int] = 16
+DEFAULT_MIN_SIZE_PER_THREAD: Final[int] = 1024 * 1024 * 1024  # 1GB
+
 
 @dataclass
 class _StorageInfo:
@@ -594,11 +598,13 @@ class _FileSystemWriter(StorageWriter):
         path: str | os.PathLike,
         single_file_per_rank: bool = True,
         sync_files: bool = True,
-        thread_count: int = 1,
+        thread_count: int | None = 1,
         per_thread_copy_ahead: int = 10_000_000,
         overwrite: bool = True,
         _extensions: Sequence[StreamTransformExtension] | None = None,
         serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
+        max_threads: int = DEFAULT_MAX_THREADS,
+        min_size_per_thread: int = DEFAULT_MIN_SIZE_PER_THREAD,
         *args: Any,
         **kwargs: Any,
     ) -> None:
@@ -609,10 +615,17 @@ class _FileSystemWriter(StorageWriter):
             path: directory where the checkpoint will be written to.
             single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
             sync_files : force files to be synced to permanent storage. Default to True.
-            thread_count: Number of IO threads to use to write. Default to 1.
+            thread_count: Number of IO threads to use to write. Default to 1. If set to None, the thread count is
+                auto-tuned per save based on the plan size.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving them. Default 10Mb.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)
+            max_threads: Upper bound on the number of IO threads when auto-tuning `thread_count`. Default to 16.
+                Ignored when `thread_count` is not None.
+            min_size_per_thread: Minimum number of payload bytes required to justify one additional IO thread when
+                auto-tuning `thread_count`. Default to 1GB. If set to 0 or a negative value, the size-based limit is
+                disabled and auto-tuning only respects the CPU and write item limits. Ignored when `thread_count` is
+                not None.
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
@@ -622,6 +635,8 @@ class _FileSystemWriter(StorageWriter):
         self.single_file_per_rank = single_file_per_rank
         self.sync_files = sync_files
         self.thread_count = thread_count
+        self.max_threads = max_threads
+        self.min_size_per_thread = min_size_per_thread
         self.per_thread_copy_ahead = per_thread_copy_ahead
         self.save_id = _generate_uuid()
         self.overwrite = overwrite
@@ -681,11 +696,51 @@ class _FileSystemWriter(StorageWriter):
         ]
         return new_plans
 
+    def _calculate_optimal_thread_count(self, plan: SavePlan) -> int:
+        """
+        Dynamically calculate the optimal number of IO threads for writing.
+
+        The thread count is the minimum of the following limits:
+        1. CPU limit: the cores available to this process, capped by ``max_threads``.
+        2. Work limit: the number of write items in the plan, since a thread without a file to write is pure overhead.
+        3. Size limit: total payload bytes // ``min_size_per_thread``, so small checkpoints stay single-threaded and
+           avoid paying thread startup and GIL contention costs. This limit is disabled when ``min_size_per_thread``
+           is 0 or negative.
+
+        Only tensor payloads contribute to the size limit: ``BYTE_IO`` items (for example non-tensor state) carry no
+        size information in the plan and would require materializing the payload to measure. They are typically small
+        relative to tensor data, so they are counted towards the work limit but not the size limit.
+        """
+        try:
+            # Respect CPU affinity in containerized or shared environments.
+            num_cores = len(os.sched_getaffinity(0))
+        except (AttributeError, NotImplementedError, OSError):
+            num_cores = os.cpu_count() or 1
+
+        max_threads = min(num_cores, self.max_threads, len(plan.items))
+
+        if max_threads <= 1:
+            return 1
+
+        if self.min_size_per_thread <= 0:
+            return max_threads
+
+        total_size = sum(
+            _item_size(item) for item in plan.items if item.tensor_data is not None
+        )
+        suggested_threads = total_size // self.min_size_per_thread
+
+        return max(1, min(suggested_threads, max_threads))
+
     def write_data(
         self,
         plan: SavePlan,
         planner: SavePlanner,
     ) -> Future[list[WriteResult]]:
+        thread_count = self.thread_count
+        if thread_count is None:
+            thread_count = self._calculate_optimal_thread_count(plan)
+
         storage_plan: _StoragePrefix = plan.storage_data
         file_count = 0
 
@@ -697,7 +752,7 @@ class _FileSystemWriter(StorageWriter):
 
         file_queue: queue.Queue = queue.Queue()
         if self.single_file_per_rank:
-            for bucket in _split_by_size_and_type(self.thread_count, plan.items):
+            for bucket in _split_by_size_and_type(thread_count, plan.items):
                 file_name = gen_file()
                 path = self.fs.concat_path(self.path, file_name)
                 file_queue.put((path, file_name, bucket))
@@ -707,48 +762,55 @@ class _FileSystemWriter(StorageWriter):
                 path = self.fs.concat_path(self.path, file_name)
                 file_queue.put((path, file_name, [item]))
 
-        return self._write_data(planner, file_queue)
+        return self._write_data(planner, file_queue, thread_count)
 
     def _write_data(
         self,
         planner: SavePlanner,
         file_queue: queue.Queue,
+        thread_count: int | None = None,
     ) -> Future[list[WriteResult]]:
+        thread_count = thread_count or self.thread_count or 1
+
         result_queue: queue.Queue = queue.Queue()
+        thread_exceptions: list[BaseException] = []
+
+        def _write_files_from_queue_with_exceptions(**kwargs: Any) -> None:
+            try:
+                _write_files_from_queue(**kwargs)
+            except BaseException as e:
+                thread_exceptions.append(e)
+
+        worker_kwargs: dict[str, Any] = {
+            "create_stream": self.fs.create_stream,
+            "file_queue": file_queue,
+            "result_queue": result_queue,
+            "planner": planner,
+            "transforms": self.transforms,
+            "inflight_threshhold": self.per_thread_copy_ahead,
+            "use_fsync": self.sync_files,
+            "thread_count": thread_count,
+            "serialization_format": self.serialization_format,
+        }
 
         threads = []
-        for _ in range(1, self.thread_count):
+        for _ in range(1, thread_count):
             t = threading.Thread(
-                target=_write_files_from_queue,
-                args=(
-                    self.fs.create_stream,
-                    file_queue,
-                    result_queue,
-                    planner,
-                    self.transforms,
-                    self.per_thread_copy_ahead,
-                    self.sync_files,
-                    self.thread_count,
-                    self.serialization_format,
-                ),
+                target=_write_files_from_queue_with_exceptions,
+                kwargs=worker_kwargs,
             )
             t.start()
             threads.append(t)
 
-        _write_files_from_queue(
-            create_stream=self.fs.create_stream,
-            file_queue=file_queue,
-            result_queue=result_queue,
-            planner=planner,
-            transforms=self.transforms,
-            inflight_threshhold=self.per_thread_copy_ahead,
-            use_fsync=self.sync_files,
-            thread_count=self.thread_count,
-            serialization_format=self.serialization_format,
-        )
+        try:
+            _write_files_from_queue(**worker_kwargs)
+        finally:
+            # Join unconditionally so a failure on this thread does not leave workers running in the background.
+            for t in threads:
+                t.join()
 
-        for t in threads:
-            t.join()
+        if thread_exceptions:
+            raise thread_exceptions[0]
 
         res = []
         try:
@@ -990,12 +1052,14 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
         path: str | os.PathLike,
         single_file_per_rank: bool = True,
         sync_files: bool = True,
-        thread_count: int = 1,
+        thread_count: int | None = 1,
         per_thread_copy_ahead: int = 10_000_000,
         cache_staged_state_dict: bool = False,
         overwrite: bool = True,
         _extensions: Sequence[StreamTransformExtension] | None = None,
         serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
+        max_threads: int = DEFAULT_MAX_THREADS,
+        min_size_per_thread: int = DEFAULT_MIN_SIZE_PER_THREAD,
     ) -> None:
         """
         Initialize the writer pointing to `path`.
@@ -1004,13 +1068,18 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             path: directory where the checkpoint will be written to.
             single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
             sync_files : force files to be synced to permanent storage. Default to True.
-            thread_count: Number of IO threads to use to write. Default to 1.
+            thread_count: Number of IO threads to use to write. Defaults to 1. If set to None, the thread count is
+                auto-tuned per save based on the plan size, see :meth:`_calculate_optimal_thread_count`.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving them. Default 10Mb.
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
                 at the cost of increased memory usage. Additionally, if this parameter is set to True, it's the expectation
                 that the stager is maintained and reused for multiple dcp.async_save calls. Default to False.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)
+            max_threads: Upper bound on the number of IO threads when auto-tuning `thread_count`. Default to 16.
+                Ignored when `thread_count` is not None.
+            min_size_per_thread: Minimum number of payload bytes required to justify one additional IO thread when
+                auto-tuning `thread_count`. Default to 1GB. Ignored when `thread_count` is not None.
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
@@ -1024,6 +1093,8 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             overwrite=overwrite,
             _extensions=_extensions,
             serialization_format=serialization_format,
+            max_threads=max_threads,
+            min_size_per_thread=min_size_per_thread,
         )
         BlockingAsyncStager.__init__(
             self,
