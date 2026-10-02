@@ -397,6 +397,102 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
             ):
                 opt_fn(x)
 
+    def test_bound_builtin_apply_recompiles_after_replacement(self):
+        class Function(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x + 1
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def fn(target, x):
+            return target(x)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(Function.apply, x), x + 1)
+
+        def replacement(cls, x):
+            return x + 2
+
+        try:
+            Function.apply = classmethod(replacement)
+            with torch._dynamo.config.patch(error_on_recompile=True):
+                with self.assertRaisesRegex(torch._dynamo.exc.RecompileError, "target"):
+                    opt_fn(Function.apply, x)
+        finally:
+            del Function.apply
+
+    def test_apply_override_not_routed_to_autograd_function(self):
+        class Function(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x + 1
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        def replacement(cls, x):
+            return x + 10
+
+        Function.apply = classmethod(replacement)
+        target = Function.apply
+
+        def fn(target, x):
+            return target(x)
+
+        x = torch.randn(2)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(target, x), x + 10
+        )
+
+    def test_bound_builtin_apply_stored_alias_guarded(self):
+        class Function(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x + 1
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+        class Holder:
+            pass
+
+        holder = Holder()
+        holder.target = Function.apply
+
+        def fn(x):
+            return holder.target(x)
+
+        x = torch.randn(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), x + 1)
+
+        replacement = Function.__subclasshook__
+        self.assertIs(replacement.__self__, Function)
+        holder.target = replacement
+        with torch._dynamo.config.patch(error_on_recompile=True):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.RecompileError, "holder.*target"
+            ):
+                opt_fn(x)
+
     def test_apply_uses_setup_context_identity(self):
         class EqualToEverything:
             def __eq__(self, other):
@@ -653,6 +749,74 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         Function.missing = 1
         self.assertEqual(opt_fn(x), (x + 1, True))
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_class_protocols_distinguish_instances(self):
+        class Function(torch.autograd.Function):
+            __hash__ = object.__hash__
+
+        registry = {Function}
+
+        def fn(x):
+            instance = Function()
+            return (
+                x + 1,
+                issubclass(Function, torch.autograd.Function),
+                Function in registry,
+                instance is Function,
+                instance in registry,
+            )
+
+        x = torch.randn(2)
+        expected = fn(x)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(opt_fn(x), expected)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(x), expected
+        )
+
+        def hash_fn():
+            instance = Function()
+            return hash(instance) == hash(Function)
+
+        self.assertEqual(hash_fn(), False)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Comparison on compile-time-only id or hash value",
+        ):
+            torch.compile(hash_fn, backend="eager", fullgraph=True)()
+
+        Function.__hash__ = int.__hash__
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported autograd.Function method"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        for test_fn in (fn, opt_fn):
+            with self.assertRaisesRegex(TypeError, "descriptor '__hash__'"):
+                test_fn(x)
+
+    def test_instance_hash_with_unguardable_class_source(self):
+        class Function(torch.autograd.Function):
+            pass
+
+        @torch._dynamo.assume_constant_result
+        def get_cls():
+            return Function
+
+        def class_fn(x):
+            return x + 1, get_cls() in {Function}
+
+        def instance_fn(x):
+            return x + 1, get_cls()() in {0}
+
+        x = torch.randn(2)
+        self.assertEqual(
+            torch.compile(class_fn, backend="eager", fullgraph=True)(x), class_fn(x)
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Unsupported autograd.Function method"
+        ):
+            torch.compile(instance_fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.compile(instance_fn, backend="eager")(x), instance_fn(x))
 
     @parametrize("name", ("__name__", "__bases__"))
     def test_dunder_attribute_uses_generic_getattr(self, name):
