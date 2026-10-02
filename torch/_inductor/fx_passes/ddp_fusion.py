@@ -12,6 +12,7 @@ from typing import Any, cast
 import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters
+from torch._inductor.utils import collective_config_key
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils._ordered_set import OrderedSet
@@ -508,8 +509,13 @@ def _fuse_ddp_communication(
     comm_blocks = get_all_comm_blocks(graph, ops, comm_filter=ddp_reducer_filter)
     node_indices = {node: i for i, node in enumerate(graph.nodes)}
 
-    for block in algorithm_fn(graph, comm_blocks):
-        fusion_fn(graph, block, node_indices)
+    # Only fuse collectives with the same configuration.
+    blocks_by_config: dict[Any, list[CommBlock]] = collections.defaultdict(list)
+    for block in comm_blocks:
+        blocks_by_config[collective_config_key(block.comm_node)].append(block)
+    for config_blocks in blocks_by_config.values():
+        for block in algorithm_fn(graph, config_blocks):
+            fusion_fn(graph, block, node_indices)
 
 
 def fuse_ddp_with_coalesced_op(graph: fx.Graph, bucket_size_mb: int) -> None:

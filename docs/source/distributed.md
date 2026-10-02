@@ -246,6 +246,9 @@ built-in backends ignore it. NCCL2 rejects vendor options and unsupported
 operations. `all_to_all_single` with a config requires even splits on every
 rank. External NCCL group scopes are unsupported.
 
+Supported synchronous calls can use `torch.compile` and `torch.export`.
+Configuration values are graph constants; changing them recompiles.
+
 (distributed-basics)=
 
 ## Basics

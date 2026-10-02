@@ -21,6 +21,7 @@ from torch._inductor.comm_analysis import (
 )
 from torch._inductor.fx_passes.utils import BitsetAncestors
 from torch._inductor.runtime.runtime_utils import dynamo_timed
+from torch._inductor.utils import collective_config_key, get_collective_config
 from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.traceback import NodeSource, NodeSourceAction
@@ -64,31 +65,45 @@ def _default_bucket_mode() -> BucketMode:
 
 
 # Helper functions moved to top for better organization
-def _ag_group_key(node: torch.fx.Node) -> tuple[str, torch.dtype]:  # type: ignore[name-defined]
-    _, group_size, group_name = node.args
+def _config_kwargs(config: dict[str, Any] | None) -> dict[str, Any]:
+    return {} if config is None else {"config": config}
+
+
+def _ag_group_key(node: torch.fx.Node) -> tuple[Any, ...]:
+    _, group_size, group_name = node.args[:3]
     dtype = node.meta["val"].dtype
-    return (_resolve_group_name(group_name), dtype)
+    return (_resolve_group_name(group_name), dtype, collective_config_key(node))
 
 
-def _ag_group_key_multidtype(node: torch.fx.Node) -> tuple[str]:
-    _, group_size, group_name = node.args
-    return (_resolve_group_name(group_name),)
+def _ag_group_key_multidtype(node: torch.fx.Node) -> tuple[Any, ...]:
+    _, group_size, group_name = node.args[:3]
+    return (_resolve_group_name(group_name), collective_config_key(node))
 
 
-def _rs_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:  # type: ignore[name-defined]
-    _, reduce_op, group_size, group_name = node.args
-    dtype = node.meta["val"].dtype
-    if not isinstance(reduce_op, str):
-        raise AssertionError(f"expected reduce_op to be str, got {type(reduce_op)}")
-    return (_resolve_group_name(group_name), reduce_op, dtype)
-
-
-def _ar_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
-    _, reduce_op, group_name = node.args
+def _rs_group_key(node: torch.fx.Node) -> tuple[Any, ...]:
+    _, reduce_op, group_size, group_name = node.args[:4]
     dtype = node.meta["val"].dtype
     if not isinstance(reduce_op, str):
         raise AssertionError(f"expected reduce_op to be str, got {type(reduce_op)}")
-    return (_resolve_group_name(group_name), reduce_op, dtype)
+    return (
+        _resolve_group_name(group_name),
+        reduce_op,
+        dtype,
+        collective_config_key(node),
+    )
+
+
+def _ar_group_key(node: torch.fx.Node) -> tuple[Any, ...]:
+    _, reduce_op, group_name = node.args[:3]
+    dtype = node.meta["val"].dtype
+    if not isinstance(reduce_op, str):
+        raise AssertionError(f"expected reduce_op to be str, got {type(reduce_op)}")
+    return (
+        _resolve_group_name(group_name),
+        reduce_op,
+        dtype,
+        collective_config_key(node),
+    )
 
 
 def _compute_foreach_groups(
@@ -1091,6 +1106,7 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
     device: torch.device,  # type: ignore[name-defined]
     rs_input_shapes: list[torch.Size] | None = None,
     unpadded_input_indices: list[int] | None = None,
+    config: dict[str, Any] | None = None,
 ) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
     if rs_input_shapes is None:
         new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
@@ -1111,7 +1127,7 @@ def reduce_scatter_merge_fn_to_trace_custom_ops(
     # fires more reliably
     new_rs_out = torch.ops.c10d_functional.wait_tensor(
         torch.ops._c10d_functional.reduce_scatter_tensor.default(
-            new_rs_in, reduce_op, group_size, group_name
+            new_rs_in, reduce_op, group_size, group_name, **_config_kwargs(config)
         )
     )
     new_out_flat = new_rs_out.split(new_out_numels, 0)
@@ -1126,6 +1142,7 @@ def reduce_scatter_merge_fn_to_trace(
     reduce_op: str,
     reduce_dtype: torch.dtype,  # type: ignore[name-defined]
     device: torch.device,  # type: ignore[name-defined]
+    config: dict[str, Any] | None = None,
 ) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
     rs_ins_flattened = [x.reshape(group_size, -1) for x in rs_ins]
 
@@ -1136,7 +1153,7 @@ def reduce_scatter_merge_fn_to_trace(
 
     new_rs_out = torch.ops.c10d_functional.wait_tensor(
         torch.ops._c10d_functional.reduce_scatter_tensor.default(
-            new_rs_in, reduce_op, group_size, group_name
+            new_rs_in, reduce_op, group_size, group_name, **_config_kwargs(config)
         )
     )
     new_out_flat = new_rs_out.split(new_out_numels, 0)
@@ -1151,6 +1168,7 @@ def reduce_scatter_merge_fn_coalesced(
     reduce_op: str,
     reduce_dtype: torch.dtype,
     device: torch.device,
+    config: dict[str, Any] | None = None,
 ) -> list[torch.Tensor]:
     """Bucketed RS via NCCL's coalesced API (ncclGroupStart/End).
 
@@ -1161,7 +1179,7 @@ def reduce_scatter_merge_fn_coalesced(
     new_out_sizes = [(x.shape[0] // group_size,) + x.shape[1:] for x in rs_ins]
 
     rs_outs = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
-        rs_ins_flat, reduce_op, group_size, group_name
+        rs_ins_flat, reduce_op, group_size, group_name, **_config_kwargs(config)
     )
     rs_outs = [torch.ops.c10d_functional.wait_tensor(o) for o in rs_outs]
     return [o.reshape(s) for o, s in zip(rs_outs, new_out_sizes)]
@@ -1173,11 +1191,14 @@ def all_reduce_merge_fn_to_trace(
     reduce_op: str,
     reduce_dtype: torch.dtype,  # type: ignore[name-defined]
     device: torch.device,  # type: ignore[name-defined]
+    config: dict[str, Any] | None = None,
 ) -> list[torch.Tensor]:  # type: ignore[no-untyped-def]
     ar_ins_flattened = [x.reshape(-1) for x in ar_ins]
     new_ar_in = torch.cat(ar_ins_flattened)
     new_ar_out = torch.ops.c10d_functional.wait_tensor(
-        torch.ops._c10d_functional.all_reduce.default(new_ar_in, reduce_op, group_name)
+        torch.ops._c10d_functional.all_reduce.default(
+            new_ar_in, reduce_op, group_name, **_config_kwargs(config)
+        )
     )
     split_sizes = [x.numel() for x in ar_ins]
     new_outs_flat = new_ar_out.split(split_sizes)
@@ -1357,6 +1378,7 @@ def all_gather_merge_fn_to_trace_custom_ops(
     dtype: torch.dtype,  # type: ignore[name-defined]
     out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
     rank: int,
+    config: dict[str, Any] | None = None,
 ) -> list[torch.Tensor]:
     # Don't create convert_element_type ops - _pre_bucket_all_gather handles conversion
     # by viewing destination slices as output dtypes and letting copy do the conversion
@@ -1390,7 +1412,11 @@ def all_gather_merge_fn_to_trace_custom_ops(
     new_ag_in = new_ag_out.narrow(0, ag_input_numel * rank, ag_input_numel)
     wait_tensor = torch.ops.c10d_functional.wait_tensor(
         torch.ops._c10d_functional.all_gather_into_tensor_out.default(
-            new_ag_in, group_size, group_name, out=new_ag_out
+            new_ag_in,
+            group_size,
+            group_name,
+            **_config_kwargs(config),
+            out=new_ag_out,
         )
     )
     return _unpack_bucketed_all_gather_output(
@@ -1410,6 +1436,7 @@ def all_gather_merge_fn_to_trace(
     dtype: torch.dtype,  # type: ignore[name-defined]
     out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
     rank: int,
+    config: dict[str, Any] | None = None,
 ) -> list[torch.Tensor]:
     ins_sizes = [ag_in.shape for ag_in in ag_ins]
     ins_split_sizes = [ag_in.numel() for ag_in in ag_ins]
@@ -1424,7 +1451,11 @@ def all_gather_merge_fn_to_trace(
     new_ag_in.copy_(torch.cat(ag_ins_flattened))
     wait_tensor = torch.ops.c10d_functional.wait_tensor(
         torch.ops._c10d_functional.all_gather_into_tensor_out.default(
-            new_ag_in, group_size, group_name, out=new_ag_out
+            new_ag_in,
+            group_size,
+            group_name,
+            **_config_kwargs(config),
+            out=new_ag_out,
         )
     )
     new_ag_out_reshaped = wait_tensor.reshape(group_size, -1)
@@ -1448,6 +1479,7 @@ def all_gather_merge_fn_to_trace_functional(
     out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
     rank: int,
     use_fsdp_ag_copy_in: bool = False,
+    config: dict[str, Any] | None = None,
 ) -> list[torch.Tensor]:
     # Implementation that is functional in graph,
     # but uses custom op torch.ops.fsdp.all_gather_copy_in.
@@ -1465,7 +1497,11 @@ def all_gather_merge_fn_to_trace_functional(
         new_ag_in = torch.cat(ag_ins_flattened, dim=0)
     wait_tensor = torch.ops.c10d_functional.wait_tensor(
         torch.ops._c10d_functional.all_gather_into_tensor_out.default(
-            new_ag_in, group_size, group_name, out=new_ag_out
+            new_ag_in,
+            group_size,
+            group_name,
+            **_config_kwargs(config),
+            out=new_ag_out,
         )
     )
     new_ag_out_reshaped = wait_tensor.reshape(group_size, -1)
@@ -1767,7 +1803,8 @@ def merge_reduce_scatter_bucket(
     # Validate bucket consistency
     rs0 = rs_nodes[0]
     rs0_val = rs0.meta["val"]
-    _, reduce_op, group_size, group_name = rs0.args
+    _, reduce_op, group_size, group_name = rs0.args[:4]
+    config = get_collective_config(rs0)
     if type(group_size) is not int:
         raise AssertionError(f"expected group size to be int, got {type(group_size)}")
     group_name_str = _resolve_group_name(group_name)
@@ -1782,6 +1819,7 @@ def merge_reduce_scatter_bucket(
             and _resolve_group_name(n.args[3]) == group_name_str
             and rs_val.device == device
             and rs_val.dtype == reduce_dtype
+            and get_collective_config(n) == config
         ):
             raise AssertionError(
                 f"reduce_scatter node {n} does not match bucket parameters"
@@ -1807,14 +1845,17 @@ def merge_reduce_scatter_bucket(
                 packing_nodes |= matched_nodes
 
     # Choose merge function based on mode
-    rs_merge_fn = reduce_scatter_merge_fn_to_trace
+    rs_merge_fn = functools.partial(reduce_scatter_merge_fn_to_trace, config=config)
     if mode == "coalesced":
-        rs_merge_fn = reduce_scatter_merge_fn_coalesced
+        rs_merge_fn = functools.partial(
+            reduce_scatter_merge_fn_coalesced, config=config
+        )
     elif mode and "custom_ops" in mode:
         rs_merge_fn = functools.partial(
             reduce_scatter_merge_fn_to_trace_custom_ops,
             rs_input_shapes=rs_input_shapes if input_replacements else None,
             unpadded_input_indices=unpadded_input_indices or None,
+            config=config,
         )
 
     group_name_val = (
@@ -1863,7 +1904,8 @@ def merge_all_reduce_bucket(
 ) -> tuple[list[torch.fx.Node], dict[torch.fx.Node, torch.fx.Node]]:
     ar0 = ar_nodes[0]
     ar0_val = ar0.meta["val"]
-    _, reduce_op, group_name = ar0.args
+    _, reduce_op, group_name = ar0.args[:3]
+    config = get_collective_config(ar0)
     group_name_str = _resolve_group_name(group_name)
     reduce_dtype = ar0_val.dtype
     device = ar0_val.device
@@ -1875,12 +1917,13 @@ def merge_all_reduce_bucket(
             and _resolve_group_name(n.args[2]) == group_name_str
             and ar_val.device == device
             and ar_val.dtype == reduce_dtype
+            and get_collective_config(n) == config
         ):
             raise AssertionError(
                 f"all_reduce node {n} does not match bucket parameters"
             )
 
-    ar_merge_fn = all_reduce_merge_fn_to_trace
+    ar_merge_fn = functools.partial(all_reduce_merge_fn_to_trace, config=config)
 
     group_name_val = (
         group_name.meta["val"] if isinstance(group_name, torch.fx.Node) else group_name
@@ -1919,13 +1962,16 @@ def merge_all_gather_bucket(
     from torch.distributed.distributed_c10d import _resolve_process_group
 
     ag0 = ag_nodes[0]
-    _, group_size, group_name = ag0.args
+    _, group_size, group_name = ag0.args[:3]
+    config = get_collective_config(ag0)
     group_name_str = _resolve_group_name(group_name)
     _ag_dtypes: list[torch.dtype] = []  # type: ignore[name-defined]
 
     for n in ag_nodes:
         if not (
-            n.args[1] == group_size and _resolve_group_name(n.args[2]) == group_name_str
+            n.args[1] == group_size
+            and _resolve_group_name(n.args[2]) == group_name_str
+            and get_collective_config(n) == config
         ):
             raise AssertionError(
                 f"all_gather node {n} does not match bucket parameters"
@@ -1940,6 +1986,7 @@ def merge_all_gather_bucket(
         logger.info("coalesced bucket_mode not supported for all_gather, using default")
     elif mode and "custom_ops" in mode:
         ag_merge_fn = all_gather_merge_fn_to_trace_custom_ops  # type: ignore[assignment]
+    ag_merge_fn = functools.partial(ag_merge_fn, config=config)
 
     # pyrefly: ignore [bad-argument-type]
     rank: int = dist.get_rank(_resolve_process_group(group_name_str))

@@ -81,6 +81,7 @@ from .utils import (
     cache_on_self,
     cache_on_self_and_args,
     cmp,
+    collective_config_value_key,
     decompose_index,
     device_need_guard,
     fx_node_crosses_devices,
@@ -3586,6 +3587,11 @@ def get_estimate_runtime_cache_key_from_snode(snode: BaseSchedulerNode) -> str:
         (python_kernel_name,)
         + tuple(tuple(a.get_size()) if _is_tensor_ir(a) else None for a in flat_args)
     )
+    if is_collective(snode.node):
+        # Collective configs change runtime.
+        for arg in snode.node.constant_args:  # type: ignore[union-attr]
+            if isinstance(arg, dict):
+                cache_key += str(collective_config_value_key(arg))
     return cache_key
 
 
