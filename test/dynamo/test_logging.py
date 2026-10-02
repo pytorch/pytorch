@@ -21,6 +21,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     find_free_port,
+    HardwareClassification,
     IS_WINDOWS,
     munge_exc,
     skipIfTorchDynamo,
@@ -161,37 +162,11 @@ def single_record_test(**kwargs):
 
 
 class LoggingTests(LoggingTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     test_bytecode = multi_record_test(2, bytecode=True)
     test_output_code = multi_record_test(3, output_code=True)
     test_aot_graphs = multi_record_test(3, aot_graphs=True)
-
-    @requires_gpu
-    @make_logging_test(schedule=True)
-    def test_schedule(self, records):
-        fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device=device_type))
-        self.assertGreater(len(records), 0)
-        self.assertLess(len(records), 5)
-
-    @requires_gpu
-    @make_logging_test(fusion=True)
-    def test_fusion(self, records):
-        fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000, device=device_type))
-        self.assertGreater(len(records), 0)
-
-        # LOAF will add an extra round of fusion and result in more logs
-        self.assertLess(
-            len(records), 8 * (1 + torch._inductor.config.loop_ordering_after_fusion)
-        )
-
-    @requires_cuda_and_triton
-    @make_logging_test(cudagraphs=True)
-    def test_cudagraphs(self, records):
-        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)  # noqa: UNSPECIFIED_BACKEND
-        fn_opt(torch.ones(1000, 1000, device=device_type))
-        self.assertGreater(len(records), 0)
-        self.assertLess(len(records), 8)
 
     @make_logging_test(recompiles=True)
     def test_recompiles(self, records):
@@ -225,13 +200,13 @@ class LoggingTests(LoggingTestCase):
         self.assertIn(
             """\
     - User stack trace:
-    -   File [file_path], line 199, in outmost_fn
+    -   File [file_path], line 174, in outmost_fn
     -     return outer_fn(x, ys, zs)
-    -   File [file_path], line 202, in outer_fn
+    -   File [file_path], line 177, in outer_fn
     -     return fn(x, ys, zs)
-    -   File [file_path], line 205, in fn
+    -   File [file_path], line 180, in fn
     -     return inner(x, ys, zs)
-    -   File [file_path], line 208, in inner
+    -   File [file_path], line 183, in inner
     -     for y, z in zip(ys, zs):""",
             record_str,
         )
@@ -427,33 +402,6 @@ Found from :
         )
 
         exitstack.close()
-
-    @requires_distributed()
-    @requires_cuda_and_triton
-    @make_logging_test(ddp_graphs=True)
-    def test_ddp_graphs(self, records):
-        class ToyModel(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.layers = torch.nn.Sequential(
-                    torch.nn.Linear(1024, 1024),
-                    torch.nn.Linear(1024, 1024),
-                )
-
-            def forward(self, x):
-                return self.layers(x)
-
-        os.environ["MASTER_ADDR"] = "localhost"
-        os.environ["MASTER_PORT"] = str(find_free_port())
-        dist.init_process_group("gloo", rank=0, world_size=1)
-
-        model = DDP(ToyModel().to("cuda:0"), device_ids=[0], bucket_cap_mb=4)
-        ddp_model = torch.compile(model, backend="inductor")
-
-        ddp_model(torch.randn(1024, 1024, device="cuda:0"))
-
-        dist.destroy_process_group()
-        self.assertEqual(len([r for r in records if "__ddp_graphs" in r.name]), 4)
 
     # check that logging to a child log of a registered logger
     # does not register it and result in duplicated records
@@ -1337,47 +1285,6 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             """+- GLOBAL_STATE: ___check_global_state() against {"allow_bf16_reduce": "#","allow_fp16_reduce": "#","allow_tf32": "#","autocast_state":{"cached_enabled": "#","dtype": "#","enabled": "#"},"cuda_matmul_precision": "#","default_dtype": "#","deterministic_algorithms": "#","deterministic_algorithms_warn_only": "#","grad_mode": "#","num_threads": "#","torch_function": "#","torch_function_all_disabled": "#"}""",
         )
 
-    @make_logging_test(cudagraph_static_inputs=True)
-    def test_cudagraph_static_inputs(self, records):
-        @torch.compile(mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
-        def fn(x):
-            return x + 1
-
-        x = torch.ones(2, 2)
-        torch._dynamo.mark_static_address(x)
-        fn(x)
-        self.assertGreater(len(records), 0)
-        self.assertLess(len(records), 4)
-
-    @make_logging_test(perf_hints=True)
-    @requires_gpu
-    def test_optimizer_non_static_param(self, records):
-        params = [torch.randn(10, 10, device=device_type) for _ in range(2)]
-        for param in params:
-            param.grad = torch.zeros_like(param)
-        opt = torch.optim.Adam(params)
-        compiled_opt_step = torch.compile(opt.step, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
-        compiled_opt_step()
-        self.assertGreater(len(records), 0)
-        self.assertLess(len(records), 3)
-
-    @make_logging_test(autotuning=True)
-    @requires_gpu
-    @unittest.skipIf(not SM90OrLater, "requires H100+ GPU")
-    def test_autotuning(self, records):
-        with torch._inductor.utils.fresh_cache():
-
-            def f(a, b):
-                return torch.mm(a, b)
-
-            f = torch.compile(f, mode="max-autotune-no-cudagraphs")  # noqa: UNSPECIFIED_BACKEND
-            f(
-                torch.randn(10, 10, device=device_type),
-                torch.randn(10, 10, device=device_type),
-            )
-            self.assertGreater(len(records), 0)
-            self.assertLess(len(records), 40)
-
     @make_logging_test(graph_region_expansion=True)
     def test_graph_region_expansion(self, records):
         with torch._dynamo.config.patch("track_nodes_for_deduplication", True):
@@ -1550,6 +1457,75 @@ TorchDynamo attempted to trace the following frames: [
         self.assertIn("non-infra torch dispatch mode present", msg)
         self.assertIn("fn", msg)
 
+
+class LoggingTestsAccelerator(LoggingTestCase):
+    """Tests that require a GPU but are not specific to CUDA."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @requires_gpu
+    @make_logging_test(schedule=True)
+    def test_schedule(self, records):
+        fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
+        fn_opt(torch.ones(1000, 1000, device=device_type))
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 5)
+
+    @requires_gpu
+    @make_logging_test(fusion=True)
+    def test_fusion(self, records):
+        fn_opt = torch.compile(inductor_schedule_fn, backend="inductor")
+        fn_opt(torch.ones(1000, 1000, device=device_type))
+        self.assertGreater(len(records), 0)
+
+        # LOAF will add an extra round of fusion and result in more logs
+        self.assertLess(
+            len(records), 8 * (1 + torch._inductor.config.loop_ordering_after_fusion)
+        )
+
+    @requires_distributed()
+    @requires_gpu
+    @make_logging_test(ddp_graphs=True)
+    def test_ddp_graphs(self, records):
+        class ToyModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layers = torch.nn.Sequential(
+                    torch.nn.Linear(1024, 1024),
+                    torch.nn.Linear(1024, 1024),
+                )
+
+            def forward(self, x):
+                return self.layers(x)
+
+        os.environ["MASTER_ADDR"] = "localhost"
+        os.environ["MASTER_PORT"] = str(find_free_port())
+        dist.init_process_group("gloo", rank=0, world_size=1)
+
+        device = f"{device_type}:0"
+        ddp_kwargs = {"bucket_cap_mb": 4}
+        if device_type == "cuda":
+            ddp_kwargs["device_ids"] = [0]
+        model = DDP(ToyModel().to(device), **ddp_kwargs)
+        ddp_model = torch.compile(model, backend="inductor")
+
+        ddp_model(torch.randn(1024, 1024, device=device))
+
+        dist.destroy_process_group()
+        self.assertEqual(len([r for r in records if "__ddp_graphs" in r.name]), 4)
+
+    @make_logging_test(perf_hints=True)
+    @requires_gpu
+    def test_optimizer_non_static_param(self, records):
+        params = [torch.randn(10, 10, device=device_type) for _ in range(2)]
+        for param in params:
+            param.grad = torch.zeros_like(param)
+        opt = torch.optim.Adam(params)
+        compiled_opt_step = torch.compile(opt.step, mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
+        compiled_opt_step()
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 3)
+
     @requires_gpu
     @torch._inductor.config.patch("force_disable_caches", True)
     @make_logging_test(autotuning_inputs=True)
@@ -1583,10 +1559,56 @@ TorchDynamo attempted to trace the following frames: [
         )
 
 
+class LoggingTestsCUDA(LoggingTestCase):
+    """Tests that are specific to CUDA (CUDA graphs, SM90 autotuning)."""
+
+    hw_classification = HardwareClassification.CUDA
+
+    @requires_cuda_and_triton
+    @make_logging_test(cudagraphs=True)
+    def test_cudagraphs(self, records):
+        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)  # noqa: UNSPECIFIED_BACKEND
+        fn_opt(torch.ones(1000, 1000, device=device_type))
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 8)
+
+    @requires_cuda_and_triton
+    @make_logging_test(cudagraph_static_inputs=True)
+    def test_cudagraph_static_inputs(self, records):
+        @torch.compile(mode="reduce-overhead")  # noqa: UNSPECIFIED_BACKEND
+        def fn(x):
+            return x + 1
+
+        x = torch.ones(2, 2, device=device_type)
+        torch._dynamo.mark_static_address(x)
+        fn(x)
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 8)
+
+    @make_logging_test(autotuning=True)
+    @requires_gpu
+    @unittest.skipIf(not SM90OrLater, "requires H100+ GPU")
+    def test_autotuning(self, records):
+        with torch._inductor.utils.fresh_cache():
+
+            def f(a, b):
+                return torch.mm(a, b)
+
+            f = torch.compile(f, mode="max-autotune-no-cudagraphs")  # noqa: UNSPECIFIED_BACKEND
+            f(
+                torch.randn(10, 10, device=device_type),
+                torch.randn(10, 10, device=device_type),
+            )
+            self.assertGreater(len(records), 0)
+            self.assertLess(len(records), 40)
+
+
 class PartitionedScatterLoggingTests(LoggingTestCase):
     """
     Dedicated tests for the partitioned_scatter TORCH_LOGS artifact.
     """
+
+    hw_classification = HardwareClassification.GENERIC
 
     @make_logging_test(partitioned_scatter=True)
     def test_partitioned_scatter(self, records):
