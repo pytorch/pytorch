@@ -29,7 +29,7 @@ from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
-    _template_choice_supports_prologue_fusion,
+    _producer_fusion_enabled_inputs,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
@@ -2181,35 +2181,59 @@ class TestScheduler(TestCase):
         node.read_writes = read_writes
         return node
 
-    def test_template_choice_supports_required_prologue_inputs(self):
-        def make_choice(*inputs: str):
-            choice = Mock()
-            choice.allowed_prologue_inps = OrderedSet(inputs)
-            return choice
+    @parametrize(
+        "prologue_enabled,epilogue_enabled,expected",
+        (
+            (True, True, ("load", "both", "store")),
+            (True, False, ("load",)),
+            (False, True, ("store",)),
+            (False, False, ()),
+        ),
+    )
+    def test_producer_fusion_allowed_inputs_respect_placement_flags(
+        self,
+        prologue_enabled: bool,
+        epilogue_enabled: bool,
+        expected: tuple[str, ...],
+    ):
+        template = Mock()
+        template.allow_prologue_fusion = prologue_enabled
+        template.allow_epilogue_fusion = epilogue_enabled
+        template.load_input_fusion_allowed_inputs = OrderedSet(("load", "both"))
+        template.store_output_fusion_allowed_inputs = OrderedSet(("store", "both"))
 
-        choice_a = make_choice("A")
-        choice_b = make_choice("B")
-        choice_ab = make_choice("A", "B")
+        template_node = Mock()
+        template_node.get_template_node.return_value = template
 
-        required_a = OrderedSet(("A",))
-        self.assertTrue(_template_choice_supports_prologue_fusion(choice_a, required_a))
-        self.assertTrue(
-            _template_choice_supports_prologue_fusion(choice_ab, required_a)
-        )
-        self.assertFalse(
-            _template_choice_supports_prologue_fusion(choice_b, required_a)
+        self.assertEqual(
+            _producer_fusion_enabled_inputs(template_node),
+            OrderedSet(expected),
         )
 
-        required_ab = OrderedSet(("A", "B"))
-        self.assertFalse(
-            _template_choice_supports_prologue_fusion(choice_a, required_ab)
+    def test_multi_template_producer_fusion_uses_choice_placements(self):
+        load_choice = Mock()
+        load_choice.load_input_fusion_allowed_inputs = OrderedSet(("x",))
+        load_choice.store_output_fusion_allowed_inputs = OrderedSet()
+        store_choice = Mock()
+        store_choice.load_input_fusion_allowed_inputs = OrderedSet()
+        store_choice.store_output_fusion_allowed_inputs = OrderedSet(("x",))
+
+        template = object.__new__(ir.MultiTemplateBuffer)
+        template._choices = [load_choice, store_choice]
+        template._render_caller = None
+        template.allow_prologue_fusion = True
+        template.allow_epilogue_fusion = False
+
+        template_node = Mock()
+        template_node.get_template_node.return_value = template
+
+        self.assertEqual(
+            _producer_fusion_enabled_inputs(template_node),
+            OrderedSet(("x",)),
         )
-        self.assertFalse(
-            _template_choice_supports_prologue_fusion(choice_b, required_ab)
-        )
-        self.assertTrue(
-            _template_choice_supports_prologue_fusion(choice_ab, required_ab)
-        )
+
+        template._render_caller = object()
+        self.assertEqual(_producer_fusion_enabled_inputs(template_node), OrderedSet())
 
     def test_prologue_fusion_uses_template_aliasing_hook(self):
         def make_prologue_and_template(hook_blocks: bool):
@@ -2237,8 +2261,10 @@ class TestScheduler(TestCase):
             input_node.get_name.return_value = "x"
             template.inputs = [input_node]
             template.allow_prologue_fusion = True
-            template.get_allowed_prologue_inps.return_value = OrderedSet(["x"])
-            template.has_aliasing_or_mutation_for_prologue_fusion.return_value = (
+            template.allow_epilogue_fusion = False
+            template.load_input_fusion_allowed_inputs = OrderedSet(["x"])
+            template.store_output_fusion_allowed_inputs = OrderedSet()
+            template.has_aliasing_or_mutation_for_producer_fusion.return_value = (
                 hook_blocks
             )
             template_node.get_template_node.return_value = template
@@ -2281,7 +2307,7 @@ class TestScheduler(TestCase):
             with V.set_graph_handler(graph), V.set_choices_handler(choices):
                 result = Scheduler._can_fuse(scheduler, prologue_node, template_node)
 
-            template.has_aliasing_or_mutation_for_prologue_fusion.assert_called_once_with(
+            template.has_aliasing_or_mutation_for_producer_fusion.assert_called_once_with(
                 template_node
             )
             template_node.has_aliasing_or_mutation.assert_not_called()
