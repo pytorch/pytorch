@@ -259,7 +259,7 @@ def _canonical_node_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> obj
 # if every branch is pure, the HOP is pure. Anything not listed here keeps its
 # trace-order position, because its effects can hide somewhere this pass cannot
 # see -- a mutable custom op passed as a plain argument (auto_functionalized), a
-# side-table kernel index (triton_kernel_wrapper_mutation), a torchbind object.
+# side-table kernel index (triton_kernel_wrapper_mutation), or a torchbind object.
 _SUBGRAPH_ONLY_EFFECT_HOPS = frozenset(
     {
         "cond",
@@ -269,12 +269,14 @@ _SUBGRAPH_ONLY_EFFECT_HOPS = frozenset(
         "hints_wrapper",
         "invoke_quant",
         "invoke_quant_packed",
+        "local_map_hop",
         "switch",
         "while_loop",
         "while_loop_stack_output",
         "invoke_subgraph",
         "wrap",
         "tag_activation_checkpoint",
+        "wrap_activation_checkpoint",
         "scan",
         "strict_mode",
         "associative_scan",
@@ -284,38 +286,38 @@ _SUBGRAPH_ONLY_EFFECT_HOPS = frozenset(
 )
 
 
-def _hop_effects_are_pure(node: fx.Node) -> bool:
+def _hop_effects_are_pure(
+    node: fx.Node, *, owning_module: torch.nn.Module | None = None
+) -> bool:
     """Whether a higher order operator node can be reordered.
 
-    ``Node.is_impure()`` never looks inside a HOP's subgraphs, so a ``cond``
-    whose branches mutate their inputs (legal under inference mode, later
-    cleaned up by auto_functionalization) reports pure. Reordering it lets a
-    read of a mutated tensor hoist above the HOP and observe the pre-mutation
-    value. Recurse into the branches instead, and treat anything we cannot
-    resolve as a barrier.
+    ``Node.is_impure()`` never looks inside a HOP's subgraphs. Conservatively
+    keep the HOP fixed if any nested node is not independently reorderable. In
+    the motivating ``cond`` failure, this prevents a read of a mutated input
+    from hoisting above the HOP and observing its pre-mutation value.
     """
     name = getattr(node.target, "__name__", "")
     if name not in _SUBGRAPH_ONLY_EFFECT_HOPS:
         return False
-    owning_module = node.graph.owning_module
+    if owning_module is None:
+        owning_module = node.graph.owning_module
     if owning_module is None:
         return False
-    subgraphs = [
-        arg
-        for arg in pytree.tree_leaves((node.args, node.kwargs))
-        if isinstance(arg, fx.Node) and arg.op == "get_attr"
-    ]
+    subgraphs: list[fx.GraphModule] = []
+    for arg in pytree.tree_leaves((node.args, node.kwargs)):
+        if not (isinstance(arg, fx.Node) and arg.op == "get_attr"):
+            continue
+        try:
+            submodule = owning_module.get_submodule(str(arg.target))
+        except AttributeError:
+            continue
+        if isinstance(submodule, fx.GraphModule):
+            subgraphs.append(submodule)
     if not subgraphs:
         return False
-    for attr in subgraphs:
-        try:
-            submodule = owning_module.get_submodule(str(attr.target))
-        except AttributeError:
-            return False
-        if not isinstance(submodule, fx.GraphModule):
-            return False
+    for submodule in subgraphs:
         if (
-            name == "tag_activation_checkpoint"
+            name in ("tag_activation_checkpoint", "wrap_activation_checkpoint")
             and "_checkpoint_context_fn" in submodule.meta
         ):
             return False
@@ -328,14 +330,16 @@ def _hop_effects_are_pure(node: fx.Node) -> bool:
     return True
 
 
-def _is_safe_to_reorder(node: fx.Node) -> bool:
+def _is_safe_to_reorder(
+    node: fx.Node, *, owning_module: torch.nn.Module | None = None
+) -> bool:
     """Check if a node is safe to reorder during graph canonicalization.
 
     Builds on Node.is_impure() (used by DCE) with additional checks for cases
-    it doesn't cover: in-place call_method nodes, higher order operators whose
-    subgraphs mutate, functional collectives, nodes binding unbacked symbols,
-    and non-OpOverload state-changing functions detected by no-node-arguments
-    and no-tensor-or-symbolic-value heuristics.
+    it doesn't cover: in-place call_method nodes, higher order operators with
+    non-reorderable subgraph nodes, functional collectives, nodes binding
+    unbacked symbols, and non-OpOverload state-changing functions detected by
+    no-node-arguments and no-tensor-or-symbolic-value heuristics.
 
     Returning False is a graph-scale decision, not a node-scale one: barriers
     partition the graph into segments (see ``canonicalize_graph``) and pure nodes
@@ -354,13 +358,18 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
     if node.op == "call_method":
         return not node.target.endswith("_")  # pyrefly: ignore[missing-attribute]
     if node.op == "call_module":
-        return not node.is_impure()
+        if owning_module is None:
+            return not node.is_impure()
+        if not isinstance(node.target, str):
+            raise AssertionError(f"Expected str target, got {type(node.target)}")
+        target_module = owning_module.get_submodule(node.target)
+        return not getattr(target_module, "_is_impure", False)
     if node.op != "call_function":
         return True
     if node.is_impure():
         return False
     if isinstance(node.target, torch._ops.HigherOrderOperator):
-        return _hop_effects_are_pure(node)
+        return _hop_effects_are_pure(node, owning_module=owning_module)
     # Functional collectives (all_reduce, wait_tensor, ...) keep their
     # trace-order position. Reordering a collective relative to surrounding
     # compute changes comm/compute overlap and defeats Inductor's in-place

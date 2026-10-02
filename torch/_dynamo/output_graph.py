@@ -545,14 +545,17 @@ class ExportMetaData:
     ] = dc_field(default_factory=dict)
 
 
-def _canonicalize_graph(graph: fx.Graph) -> None:
+def _canonicalize_graph(
+    graph: fx.Graph, *, owning_module: torch.nn.Module | None = None
+) -> None:
     """Canonicalize a Dynamo output graph's node order and names.
 
     Placeholders with unique source names are ordered by source. Since GraphArg
     stays attached to its node, graphargs, example inputs, and runtime argument
     reconstruction all observe the same reordered calling convention. If any
     source is missing or ambiguous, placeholders retain their original order and
-    names while the rest of the graph is still canonicalized.
+    names while the rest of the graph is still canonicalized. ``owning_module``
+    resolves HOP subgraphs before ``graph`` is wrapped in a GraphModule.
     """
     from torch.fx.passes.canonicalize import (
         _canonical_node_key,
@@ -583,7 +586,7 @@ def _canonicalize_graph(graph: fx.Graph) -> None:
     canonicalize_graph(
         graph,
         _key,
-        _is_safe_to_reorder,
+        lambda node: _is_safe_to_reorder(node, owning_module=owning_module),
         skip_rename_ops=(
             frozenset() if can_reorder_placeholders else frozenset({"placeholder"})
         ),
@@ -2924,7 +2927,7 @@ class OutputGraph(OutputGraphCommon):
                 and not torch.compiler.is_exporting()
                 and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
             ):
-                _canonicalize_graph(self.graph)
+                _canonicalize_graph(self.graph, owning_module=root)
 
             gm = _make_graph_module(root, self.graph)
 
