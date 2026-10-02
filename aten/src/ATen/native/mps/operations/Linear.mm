@@ -171,7 +171,7 @@ Tensor _mps_linear(const Tensor& input, const Tensor& weight_arg, const std::opt
   // No-graph execution causes nonsense if these are non-contiguous.
   const bool is_contiguous = input.is_contiguous() && weight.is_contiguous() && bias.is_contiguous();
 
-  if (is_macos_at_least(MacOSVersion::MACOS_15_0) && is_contiguous && !is_complex) {
+  if (is_contiguous && !is_complex) {
     // The fused 3-source kernel drops the bias for vector-shaped (M==1) inputs on the M1
     // (Apple7) family on macOS 26; add it separately there. Fixed in macOS 27.
     static const bool decompose_bias = is_apple_family_or_newer(AppleGPUFamily::APPLE_7_PLUS) &&

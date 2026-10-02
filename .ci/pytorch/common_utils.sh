@@ -351,34 +351,34 @@ function install_spmd_types() {
 
 function install_flash_attn_cute() {
   echo "Installing FlashAttention 4 from PyPI..."
-  local flash_attn_package=flash-attn-4==4.0.0b17
+  local flash_attn_package=flash-attn-4==4.0.0b31
   if [[ "${DESIRED_CUDA:-}" == 13.* || "${CUDA_VERSION:-}" == 13.* || "${BUILD_ENVIRONMENT:-}" == *cuda13* ]]; then
-    flash_attn_package="flash-attn-4[cu13]==4.0.0b17"
+    flash_attn_package="flash-attn-4[cu13]==4.0.0b31"
   fi
-  # QuACK 0.6.4 pins the CuTeDSL version accepted by torch._native.
+  # FA4 and QuACK support the CuTeDSL version accepted by torch._native.
   pip_install \
     "$flash_attn_package" \
-    quack-kernels==0.6.4 \
-    apache-tvm-ffi==0.1.11
+    quack-kernels==0.6.5 \
+    apache-tvm-ffi==0.1.12
   echo "FlashAttention 4 installation complete."
 }
 
 function install_cutlass_dsl() {
-  local cutlass_dsl_package=nvidia-cutlass-dsl==4.6.2
+  local cutlass_dsl_package=nvidia-cutlass-dsl==4.8.0
   if [[
     "${DESIRED_CUDA:-}" == cu13* ||
     "${DESIRED_CUDA:-}" == 13.* ||
     "${CUDA_VERSION:-}" == 13.* ||
     "${BUILD_ENVIRONMENT:-}" == *cuda13*
   ]]; then
-    cutlass_dsl_package="nvidia-cutlass-dsl[cu13]==4.6.2"
+    cutlass_dsl_package="nvidia-cutlass-dsl[cu13]==4.8.0"
   fi
 
   echo "Installing NVIDIA CUTLASS DSL from PyPI..."
   # Pin to a version accepted by torch._native's cutedsl version gate
   # (_CUTEDSL_REQUIRED_VERSIONS); apache-tvm-ffi is a required runtime dep of
   # the CuTeDSL op overrides but is not pulled in by nvidia-cutlass-dsl.
-  pip_install "$cutlass_dsl_package" apache-tvm-ffi==0.1.11
+  pip_install "$cutlass_dsl_package" apache-tvm-ffi==0.1.12
   echo "NVIDIA CUTLASS DSL installation complete."
 }
 
@@ -397,36 +397,26 @@ function install_nvmath() {
   echo "nvmath-python installation complete."
 }
 
-function install_cutlass_api() {
-  # cutlass-api requires Python >= 3.12
+function install_cutlass_operators() {
+  # cutlass-operators requires Python >= 3.10
   local py_version
   py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-  if [[ "$(echo -e "3.12\n$py_version" | sort -V | head -n1)" != "3.12" ]]; then
-    echo "Skipping CUTLASS API install: requires Python >= 3.12, have $py_version"
+  if [[ "$(echo -e "3.10\n$py_version" | sort -V | head -n1)" != "3.10" ]]; then
+    echo "Skipping CUTLASS Operators install: requires Python >= 3.10, have $py_version"
     return 0
   fi
 
-  echo "Installing CUTLASS API from Github..."
+  echo "Installing CUTLASS Operators from PyPI..."
 
   # Install CuTeDSL dependency first
   install_cutlass_dsl
 
-  # Grab latest til we have a pinned commit
-  local cutlass_commit
-  cutlass_commit=$(git ls-remote https://github.com/NVIDIA/cutlass.git refs/heads/cutlass_api | cut -f1)
+  # Skip [torch] extra so pip does not pull PyPI torch over the CI build.
+  # Pin 0.2.0: Operator.get_workspace_size returns AllocationRequirement
+  # (size_bytes) and CompiledArtifact requires compiled_for.
+  pip_install nvidia-cutlass-operators==0.3.0
 
-  rm -rf cutlass-build
-  git clone --depth 1 -b cutlass_api https://github.com/NVIDIA/cutlass.git cutlass-build
-
-  pushd cutlass-build
-  git checkout "${cutlass_commit}"
-
-  # Install cutlass_api with torch extras
-  pip_install "python/cutlass_api[torch]"
-  popd
-
-  rm -rf cutlass-build
-  echo "CUTLASS API installation complete."
+  echo "CUTLASS Operators installation complete."
 }
 
 function print_sccache_stats() {
