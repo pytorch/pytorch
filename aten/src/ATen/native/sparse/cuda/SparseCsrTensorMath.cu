@@ -36,6 +36,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #include <ATen/native/cuda/Reduce.cuh>
+#include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseBlasImpl.h>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.h>
 #include <ATen/native/sparse/cuda/SparseCUDATensorMath.cuh>
@@ -336,16 +337,20 @@ Tensor& add_out_sparse_compressed_cuda(
       "add: expected 'out' to be CUDA tensor, but got tensor on device: ",
       out.device());
 
-    if (only_sparse_compressed_add_trivial_cases(self, other, alpha, out)) {
-      return out;
+    if (self.layout() == kSparseBsr || self.layout() == kSparseBsc ||
+        other.layout() == kSparseBsr || other.layout() == kSparseBsc) {
+      sparse::impl::add_out_sparse_compressed_blocked(self, other, alpha, out);
+    } else {
+      if (only_sparse_compressed_add_trivial_cases(self, other, alpha, out)) {
+        return out;
+      }
+      // csrgeam2 must not read from storage that out is written to and
+      // resized into, so operate on clones of any input aliasing out.
+      const Tensor self_ = sparse_compressed_members_alias(self, out) ? self.clone() : self;
+      const Tensor other_ = sparse_compressed_members_alias(other, out) ? other.clone() : other;
+      at::native::resize_as_sparse_compressed_(out, self_);
+      sparse::impl::cuda::add_out_sparse_csr(self_, other_, Scalar(1), alpha, out);
     }
-
-    // csrgeam2 must not read from storage that out is written to and
-    // resized into, so operate on clones of any input aliasing out.
-    const Tensor self_ = sparse_compressed_members_alias(self, out) ? self.clone() : self;
-    const Tensor other_ = sparse_compressed_members_alias(other, out) ? other.clone() : other;
-    at::native::resize_as_sparse_compressed_(out, self_);
-    sparse::impl::cuda::add_out_sparse_csr(self_, other_, Scalar(1), alpha, out);
   }
   return out;
 }
