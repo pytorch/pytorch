@@ -1113,6 +1113,16 @@ if(USE_FBGEMM AND (NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|x86_64|aarch64)$"
   set(USE_FBGEMM OFF)
 endif()
 
+# FBGEMM's bundled sources don't build under ROCm on Windows yet, so keep it
+# off there until the fbgemm submodule is updated to support that toolchain.
+if(USE_FBGEMM AND USE_ROCM AND WIN32)
+  message(WARNING
+    "FBGEMM is not yet supported on ROCm Windows. "
+    "Not compiling with FBGEMM. "
+    "Turn this warning off by USE_FBGEMM=OFF.")
+  set(USE_FBGEMM OFF)
+endif()
+
 set(BUILD_ONEDNN_GRAPH OFF)
 
 if(MSVC)
