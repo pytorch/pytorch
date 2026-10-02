@@ -11819,8 +11819,14 @@ class TestGroupedMM(TestCase):
         # backend-specific fp32_precision, so snapshot and restore all of it.
         self._prev_fp32_state = _snapshot_fp32_precision()
         torch.backends.cuda.matmul.allow_tf32 = False
+        if self.device_type == "cuda":
+            # Keep CUTLASS coverage when CUDA 13.4+ defaults to cuBLASLt.
+            self._prev_prefer_cublaslt_grouped_gemm = torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm
+            torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = False
 
     def tearDown(self):
+        if self.device_type == "cuda":
+            torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm = self._prev_prefer_cublaslt_grouped_gemm
         _restore_fp32_precision(self._prev_fp32_state)
         super().tearDown()
 

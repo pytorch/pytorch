@@ -149,7 +149,15 @@ std::string cudnn_depthwise2str(CuDNNDepthwiseKernel k) {
 static constexpr const auto rocm_allow_group_gemm_ck = "ROCM_ALLOW_GROUP_GEMM_CK";
 #endif
 
-Context::Context() = default;
+Context::Context() {
+  // Default to the cuBLASLt grouped GEMM backend for bf16 when built against a
+  // CUDART toolkit that has the improved kernels (13.4+). Still user-overridable
+  // via torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm.
+  const auto& cuda_hooks = detail::getCUDAHooks();
+  if (cuda_hooks.hasCUDART() && cuda_hooks.versionCUDART() >= 13040) {
+    prefer_cublaslt_grouped_gemm = true;
+  }
+}
 
 // TODO: This could be bad juju if someone calls globalContext() in the
 // destructor of an object with static lifetime.
