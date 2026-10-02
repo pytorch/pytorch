@@ -6,14 +6,19 @@ import torch
 from functorch.experimental import control_flow
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
-from torch.export import export
+from torch.export import export, unflatten
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     IS_WINDOWS,
+    parametrize,
     run_tests,
     TestCase,
 )
+
+
+_CANONICALIZE_VALUES = (False, True)
 
 
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
@@ -77,7 +82,8 @@ class TestPassInfra(TestCase):
             _ExportPassBaseDeprecatedDoNotUse()
         )
 
-    def test_node_name_stability(self) -> None:
+    @parametrize("canonicalize", _CANONICALIZE_VALUES)
+    def test_node_name_stability(self, canonicalize) -> None:
         # Tests that graph nodes stay the same for nodes that are not touched
         # during transformation
         class CustomModule(torch.nn.Module):
@@ -105,13 +111,186 @@ class TestPassInfra(TestCase):
         inps = (torch.rand(1), torch.rand(1))
         m = CustomModule()
 
-        ep_before = export(m, inps, strict=True)
+        with torch._dynamo.config.patch(
+            canonicalize_output_graph_node_order=canonicalize
+        ):
+            ep_before = export(m, inps, strict=True)
 
         # No op transformation that doesn't perform any meaningful changes to node
         ep_after = ep_before._transform_do_not_use(_ExportPassBaseDeprecatedDoNotUse())
 
-        for before_node, after_node in zip(ep_before.graph.nodes, ep_after.graph.nodes):
-            self.assertEqual(before_node.name, after_node.name)
+        self.assertEqual(
+            [node.name for node in ep_before.graph.nodes],
+            [node.name for node in ep_after.graph.nodes],
+        )
+
+    @parametrize("canonicalize", _CANONICALIZE_VALUES)
+    def test_preserved_module_call_signature_after_noop_transform(
+        self, canonicalize
+    ) -> None:
+        class Child(torch.nn.Module):
+            def forward(self, input):
+                return input + 1
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, input):
+                return self.child(input) * 2
+
+        model = Model()
+        inputs = (torch.ones(2),)
+        with torch._dynamo.config.patch(
+            canonicalize_output_graph_node_order=canonicalize
+        ):
+            ep_before = export(
+                model,
+                inputs,
+                preserve_module_call_signature=("child",),
+            )
+        ep_after = ep_before._transform_do_not_use(_ExportPassBaseDeprecatedDoNotUse())
+
+        self.assertEqual(ep_after.module_call_graph, ep_before.module_call_graph)
+        self.assertEqual(ep_after.module()(*inputs), model(*inputs))
+
+    @parametrize("canonicalize", _CANONICALIZE_VALUES)
+    def test_preserved_name_uses_returned_node(self, canonicalize) -> None:
+        class Child(torch.nn.Module):
+            def forward(self, x):
+                return torch.cat([x, x])
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.child = Child()
+
+            def forward(self, x):
+                return self.child(x) * 2
+
+        class AddAuxiliaryCat(_ExportPassBaseDeprecatedDoNotUse):
+            def call_operator(self, op, args, kwargs, meta):
+                if op is torch.ops.aten.cat.default:
+                    auxiliary = super().call_operator(op, ([args[0][0]],), kwargs, meta)
+                    auxiliary.node.meta["is_auxiliary"] = True
+                result = super().call_operator(op, args, kwargs, meta)
+                if op is torch.ops.aten.cat.default:
+                    result.node.meta["is_returned"] = True
+                return result
+
+        model = Model()
+        inputs = (torch.tensor([2.0, 3.0]),)
+        with torch._dynamo.config.patch(
+            canonicalize_output_graph_node_order=canonicalize
+        ):
+            ep_before = export(
+                model,
+                inputs,
+                preserve_module_call_signature=("child",),
+            )
+        ep_after = ep_before._transform_do_not_use(AddAuxiliaryCat())
+
+        child_signature = next(
+            entry.signature
+            for entry in ep_after.module_call_graph
+            if entry.fqn == "child"
+        )
+        if child_signature is None:
+            raise AssertionError("child signature must not be None")
+        returned = next(
+            node for node in ep_after.graph.nodes if node.meta.get("is_returned")
+        )
+        auxiliary = next(
+            node for node in ep_after.graph.nodes if node.meta.get("is_auxiliary")
+        )
+        self.assertEqual(returned.name, child_signature.outputs[0].name)
+        self.assertNotEqual(auxiliary.name, returned.name)
+
+        outlined = unflatten(ep_after)
+        self.assertEqual(outlined(*inputs), model(*inputs))
+        self.assertEqual(outlined.child(*inputs), model.child(*inputs))
+
+    def test_intentional_node_rename_is_preserved(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class RenameAdd(_ExportPassBaseDeprecatedDoNotUse):
+            def call_operator(self, op, args, kwargs, meta):
+                result = super().call_operator(op, args, kwargs, meta)
+                if op is torch.ops.aten.add.Tensor:
+                    result.node.name = "intentional_name"
+                return result
+
+        ep = export(M(), (torch.ones(2),))
+        result = RenameAdd().call(ep.graph_module)
+        add = next(
+            node
+            for node in result.graph_module.graph.nodes
+            if node.target is torch.ops.aten.add.Tensor
+        )
+        self.assertEqual(add.name, "intentional_name")
+        graph = result.graph_module.graph
+        placeholder = next(node for node in graph.nodes if node.op == "placeholder")
+        with graph.inserting_before(graph.output_node()):
+            new_add = graph.call_function(
+                torch.ops.aten.add.Tensor,
+                (placeholder, 2),
+                name="add",
+            )
+        self.assertEqual(new_add.name, "add")
+        graph.lint()
+
+    def test_custom_tracer_node_rename_is_preserved(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class PrefixNames(_ExportPassBaseDeprecatedDoNotUse):
+            class ExportTracer(_ExportPassBaseDeprecatedDoNotUse.ExportTracer):
+                def create_node(
+                    self, kind, target, args, kwargs, name=None, type_expr=None
+                ):
+                    if kind == "call_function":
+                        name = f"custom_{name or self.graph._target_to_str(target)}"
+                    return super().create_node(
+                        kind, target, args, kwargs, name, type_expr
+                    )
+
+        ep = export(M(), (torch.ones(2),))
+        result = PrefixNames().call(ep.graph_module)
+        add = next(
+            node
+            for node in result.graph_module.graph.nodes
+            if node.target is torch.ops.aten.add.Tensor
+        )
+        self.assertEqual(add.name, "custom_add")
+
+    def test_replaced_node_does_not_preserve_source_name(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class ReplaceAdd(_ExportPassBaseDeprecatedDoNotUse):
+            def call_operator(self, op, args, kwargs, meta):
+                if op is torch.ops.aten.add.Tensor:
+                    op = torch.ops.aten.sub.Tensor
+                return super().call_operator(op, args, kwargs, meta)
+
+        ep = export(M(), (torch.ones(2),))
+        source_name = next(
+            node.name
+            for node in ep.graph.nodes
+            if node.target is torch.ops.aten.add.Tensor
+        )
+        result = ReplaceAdd().call(ep.graph_module)
+        replacement = next(
+            node
+            for node in result.graph_module.graph.nodes
+            if node.target is torch.ops.aten.sub.Tensor
+        )
+        self.assertNotEqual(replacement.name, source_name)
 
     def test_graph_signature_updated_after_transformation(self) -> None:
         # Checks that pass infra correctly updates graph signature
@@ -198,6 +377,9 @@ class TestPassInfra(TestCase):
 
         old_signature = ep_before.graph_signature
         self.assertNotEqual(sig.user_outputs, old_signature.user_outputs)
+
+
+instantiate_parametrized_tests(TestPassInfra)
 
 
 if __name__ == "__main__":
