@@ -599,7 +599,8 @@ class _KinetoProfile:
             # the window drops.
             self._close_cuspy_collective_annotations()
             if (
-                self._cuspy_config.annotate_collectives
+                self._cuspy_config is not None
+                and self._cuspy_config.annotate_collectives
                 and torch.distributed.is_available()
                 and torch.distributed.is_initialized()
             ):

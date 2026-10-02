@@ -156,6 +156,24 @@ class IntrusivePtrNoGilDestructor {
   }
 };
 
+// A group can outlive the interpreter: the C++ group registry destroys any
+// still-registered group at exit, after Python has finalized. Leak the hook's
+// callable then, since taking the GIL would crash.
+template <typename Args>
+std::function<void(const Args&)> wrapPythonHook(py::function fn) {
+  std::shared_ptr<py::function> holder(
+      new py::function(std::move(fn)), [](py::function* f) {
+        if (Py_IsInitialized()) {
+          pybind11::gil_scoped_acquire gil;
+          delete f;
+        }
+      });
+  return [holder = std::move(holder)](const Args& args) {
+    pybind11::gil_scoped_acquire gil;
+    (*holder)(args);
+  };
+}
+
 } // anonymous namespace
 
 PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true)
@@ -3088,8 +3106,9 @@ Arguments:
               "register_pre_hook",
               [](::c10d::ProcessGroup& self,
                  int64_t hook_id,
-                 ::c10d::PreHook hook,
+                 py::function fn,
                  bool gated) {
+                auto hook = wrapPythonHook<::c10d::PreHookArgs>(std::move(fn));
                 if (gated) {
                   self.registerGatedPreHook(hook_id, std::move(hook));
                 } else {
@@ -3110,8 +3129,10 @@ A gated hook is called only while gated hooks are enabled, see
               "register_post_hook",
               [](::c10d::ProcessGroup& self,
                  int64_t hook_id,
-                 ::c10d::PostHook hook,
+                 py::function fn,
                  bool gated) {
+                auto hook =
+                    wrapPythonHook<::c10d::PostHookArgs>(std::move(fn));
                 if (gated) {
                   self.registerGatedPostHook(hook_id, std::move(hook));
                 } else {
