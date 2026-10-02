@@ -2294,12 +2294,6 @@ class VariableBuilder:
         elif isinstance(value, collections.deque):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-            # maxlen is baked into the DequeVariable as a constant, so guard on
-            # it to recompile if a same-typed deque with a different maxlen
-            # appears.
-            install_guard(
-                AttrSource(self.source, "maxlen").make_guard(GuardBuilder.EQUALS_MATCH)
-            )
 
             output = [
                 LazyVariableTracker.create(
@@ -2581,7 +2575,10 @@ class VariableBuilder:
             for vt in output:
                 vt.realize()
         # type: ignore[arg-type]
-        result = BaseListVariable.cls_for_instance(value)(output, source=self.source)
+        options: dict[str, Any] = {"source": self.source}
+        if type(value) is collections.deque:
+            options["maxlen"] = ConstantVariable.create(value.maxlen)
+        result = BaseListVariable.cls_for_instance(value)(output, **options)
         if istype(value, (list, collections.deque)):
             return self.tx.output.side_effects.track_mutable(value, result)
         return result
