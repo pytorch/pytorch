@@ -5155,6 +5155,7 @@ def build_checkpoint_variable(**options: Any) -> Any:
 
     return TorchHigherOrderOperatorVariable.make(
         activation_checkpoint_op,
+        from_utils_checkpoint=True,
         **options,
     )
 
