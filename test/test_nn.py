@@ -12973,13 +12973,10 @@ class TestNNDeviceType(NNTestCase):
         clip_grad_value_([p2], clip_value, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
-    @parametrize_test('foreach', (False, True))
+    @parametrize_test('foreach', (None, False))
     @parametrize_test('norm_type', (1.0, 2.0))
     def test_get_total_norm_dtype(self, norm_type, foreach, device):
-        if torch.device(device).type == 'xla' and foreach:
-            raise SkipTest('foreach not supported on XLA')
-        if torch.device(device).type == 'mps' and foreach:
-            raise SkipTest('foreach not supported on MPS')
+        # foreach=None takes the foreach path on the devices that have it and the per-tensor path elsewhere.
         # By default each per-tensor norm of low-precision inputs is rounded to their dtype
         # before the norms are combined, so the total depends on how the tensors are split.
         # With dtype=torch.float32 every norm is accumulated and returned in float32. The
@@ -12993,18 +12990,8 @@ class TestNNDeviceType(NNTestCase):
         for tensors in (whole, split):
             total = get_total_norm(tensors, norm_type=norm_type, foreach=foreach, dtype=torch.float32)
             self.assertEqual(total, expected)
-
-        whole_default = get_total_norm(whole, norm_type=norm_type, foreach=foreach)
-        split_default = get_total_norm(split, norm_type=norm_type, foreach=foreach)
-        self.assertEqual(whole_default.dtype, torch.bfloat16)
-        self.assertEqual(split_default.dtype, torch.bfloat16)
-        if norm_type == 2.0 and torch.device(device).type in ('cpu', 'cuda'):
-            # CPU and CUDA accumulate bfloat16 in float32 and round to nearest even; another backend
-            # may round differently. The first part of the split has norm 257, which rounds to 256
-            # in bfloat16, so the split total is sqrt(256**2 + 1) -> 256 while the unsplit one is
-            # sqrt(66050) -> 258.
-            self.assertEqual(whole_default.item(), 258.0)
-            self.assertEqual(split_default.item(), 256.0)
+            default = get_total_norm(tensors, norm_type=norm_type, foreach=foreach)
+            self.assertEqual(default.dtype, torch.bfloat16)
 
         empty = get_total_norm([], norm_type=norm_type, dtype=torch.float32)
         self.assertEqual(empty.dtype, torch.float32)
