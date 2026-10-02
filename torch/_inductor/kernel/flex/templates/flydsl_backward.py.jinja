@@ -17,13 +17,13 @@ _launcher = None
 _launcher_lock = threading.Lock()
 
 
-def _get_launcher():
+def _get_launcher(dispatch_args, compile_only):
     global _launcher
     launcher = _launcher
-    if launcher is None:
+    if compile_only or launcher is None:
         with _launcher_lock:
             launcher = _launcher
-            if launcher is None:
+            if compile_only or launcher is None:
                 launcher = build_flex_attn_bwd_module(
                     BATCH_SIZE,
                     NUM_HEADS,
@@ -52,7 +52,13 @@ def _get_launcher():
                     dv_stride=DV_STRIDE,
                     lse_in_log2=True,
                 )
-                _launcher = launcher
+                compile_args = tuple(
+                    flyc.from_torch_tensor(tensor) for tensor in dispatch_args[:-1]
+                ) + (dispatch_args[-1],)
+                # This generated template fixes shapes, strides, and dtypes.
+                launcher = flyc.compile(launcher, *compile_args)
+                if not compile_only:
+                    _launcher = launcher
     return launcher
 
 
@@ -114,9 +120,6 @@ def _run_flydsl_backward(
         grad_query_workspace,
         stream,
     )
-    compile_args = tuple(
-        flyc.from_torch_tensor(tensor) for tensor in dispatch_args[:-1]
-    ) + (stream,)
     flydsl_compile_only = os.environ.get("FLYDSL_COMPILE_ONLY") == "1"
     compile_only = os.environ.get("COMPILE_ONLY", "").lower() in (
         "1", "true", "yes", "on"
@@ -126,7 +129,9 @@ def _run_flydsl_backward(
             "COMPILE_ONLY and FLYDSL_COMPILE_ONLY must only be enabled together "
             "by the FlyDSL precompile path"
         )
-    _get_launcher()(*compile_args)
+    launcher = _get_launcher(dispatch_args, flydsl_compile_only)
+    if not flydsl_compile_only:
+        launcher(*dispatch_args)
     return grad_query
 
 

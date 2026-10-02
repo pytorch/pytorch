@@ -20,7 +20,6 @@ from .flex_attn_utils import (
     MASK_TRAVERSAL_UNMASKED,
     classify_mask_traversal,
     fast_exp2,
-    make_dq_workspace_layout,
     make_global_view,
 )
 
@@ -148,6 +147,17 @@ def build_flex_attn_bwd_module(
             grad_value_stride,
         )
     )
+    delta_slice_bytes = tuple(
+        (1 + sum((size - 1) * stride for size, stride in zip(
+            (batch_size, num_heads, sequence_length, value_head_dim), strides,
+        ))) * 2
+        for strides in (out_stride, grad_output_stride)
+    )
+    dense_linear_delta = not block_list_traversal and all(
+        stride % 8 == 0 for strides in (out_stride, grad_output_stride) for stride in strides[:-1]
+    ) and max(
+        *delta_slice_bytes, batch_size * num_heads * sequence_length * qk_head_dim * 2,
+    ) <= 0x7FFFFFFF
     batch_heads = batch_size * num_heads
     delta_packs = value_head_dim // 8
     lanes_per_row = delta_packs if delta_packs <= 64 and delta_packs & delta_packs - 1 == 0 else 4
@@ -172,58 +182,86 @@ def build_flex_attn_bwd_module(
     ):
         tid = fx.Int32(fx.thread_idx.x)
         bid = fx.Int32(fx.block_idx.x)
-        if const_expr(heads_are_inner):
-            batch_head = bid % fx.Int32(batch_heads)
-            row_tile = bid // fx.Int32(batch_heads)
-        else:
-            batch_head = bid // fx.Int32(delta_grid)
-            row_tile = bid % fx.Int32(delta_grid)
-        batch = fx.Int64(batch_head // fx.Int32(num_heads))
-        head = fx.Int64(batch_head % fx.Int32(num_heads))
-        row = row_tile * fx.Int32(delta_rows_per_block) + tid // fx.Int32(lanes_per_row)
         chunk = tid % fx.Int32(lanes_per_row)
         atom = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.BFloat16)
-        output_view = make_global_view(
-            attention_output, (batch, head, None, None),
-            (batch_size, num_heads, sequence_length, value_head_dim), out_stride
-        )
-        grad_view = make_global_view(
-            grad_output, (batch, head, None, None),
-            (batch_size, num_heads, sequence_length, value_head_dim), grad_output_stride
-        )
-        zero_view = make_global_view(
-            grad_query, (batch, head, None, None),
-            (batch_size, num_heads, sequence_length, qk_head_dim),
-            contiguous_stride(qk_head_dim),
-        )
-        zero_packs = fx.logical_divide(
-            fx.make_view(fx.get_iter(zero_view), fx.make_layout(sequence_length * qk_head_dim, 1)),
-            fx.make_layout(8, 1),
-        )
+        if const_expr(dense_linear_delta):
+            output_packs = fx.logical_divide(fx.make_view(fx.get_iter(make_global_view(attention_output, None, (batch_size, num_heads, sequence_length, value_head_dim), out_stride)), fx.make_layout(batch_heads * sequence_length * value_head_dim, 1)), fx.make_layout(8, 1))
+            grad_packs = fx.logical_divide(fx.make_view(fx.get_iter(make_global_view(grad_output, None, (batch_size, num_heads, sequence_length, value_head_dim), grad_output_stride)), fx.make_layout(batch_heads * sequence_length * value_head_dim, 1)), fx.make_layout(8, 1))
+            zero_packs = fx.logical_divide(make_global_view(grad_query, None, (batch_heads * sequence_length * qk_head_dim,), (1,)), fx.make_layout(8, 1))
+            logical_row = bid * fx.Int32(delta_rows_per_block) + tid // fx.Int32(lanes_per_row)
+            if const_expr(heads_are_inner):
+                batch = logical_row // fx.Int32(num_heads * sequence_length)
+                head = logical_row % fx.Int32(num_heads)
+                row = logical_row // fx.Int32(num_heads) % fx.Int32(sequence_length)
+            else:
+                batch = logical_row // fx.Int32(num_heads * sequence_length)
+                head = logical_row // fx.Int32(sequence_length) % fx.Int32(num_heads)
+                row = logical_row % fx.Int32(sequence_length)
+            batch_head = batch * fx.Int32(num_heads) + head
+            row_tile = bid
+            output_row = batch * fx.Int32(out_stride[0]) + head * fx.Int32(out_stride[1]) + row * fx.Int32(out_stride[2])
+            grad_row = batch * fx.Int32(grad_output_stride[0]) + head * fx.Int32(grad_output_stride[1]) + row * fx.Int32(grad_output_stride[2])
+            zero_row = logical_row
+        else:
+            if const_expr(heads_are_inner):
+                batch_head = bid % fx.Int32(batch_heads)
+                row_tile = bid // fx.Int32(batch_heads)
+            else:
+                batch_head = bid // fx.Int32(delta_grid)
+                row_tile = bid % fx.Int32(delta_grid)
+            batch = fx.Int64(batch_head // fx.Int32(num_heads))
+            head = fx.Int64(batch_head % fx.Int32(num_heads))
+            row = row_tile * fx.Int32(delta_rows_per_block) + tid // fx.Int32(lanes_per_row)
+            output_view = make_global_view(
+                attention_output, (batch, head, None, None),
+                (batch_size, num_heads, sequence_length, value_head_dim), out_stride
+            )
+            grad_view = make_global_view(
+                grad_output, (batch, head, None, None),
+                (batch_size, num_heads, sequence_length, value_head_dim), grad_output_stride
+            )
+            zero_view = make_global_view(
+                grad_query, (batch, head, None, None),
+                (batch_size, num_heads, sequence_length, qk_head_dim),
+                contiguous_stride(qk_head_dim),
+            )
+            output_packs = fx.logical_divide(fx.slice(output_view, (row, None)), fx.make_layout(8, 1))
+            grad_packs = fx.logical_divide(fx.slice(grad_view, (row, None)), fx.make_layout(8, 1))
+            zero_row = row
+        if const_expr(not dense_linear_delta):
+            zero_packs = fx.logical_divide(
+                fx.make_view(fx.get_iter(zero_view), fx.make_layout(sequence_length * qk_head_dim, 1)),
+                fx.make_layout(8, 1),
+            )
         zeros = fx.make_rmem_tensor(8, fx.BFloat16)
         zeros.store(fx.Vector.filled(8, 0.0, fx.BFloat16).ir_value())
         delta_view = fx.make_view(fx.get_iter(delta), fx.make_layout(batch_heads * sequence_length, 1))
-        output_packs = fx.logical_divide(fx.slice(output_view, (row, None)), fx.make_layout(8, 1))
-        grad_packs = fx.logical_divide(fx.slice(grad_view, (row, None)), fx.make_layout(8, 1))
         output_fragment = fx.make_rmem_tensor(8, fx.BFloat16)
         grad_fragment = fx.make_rmem_tensor(8, fx.BFloat16)
         row_sum = _f32(0.0)
         for load_step in fx.range_constexpr(delta_load_iterations):
             column = (chunk + fx.Int32(load_step * lanes_per_row)) * fx.Int32(8)
-            fx.copy(atom, fx.slice(output_packs, (None, column // fx.Int32(8))), output_fragment)
-            fx.copy(atom, fx.slice(grad_packs, (None, column // fx.Int32(8))), grad_fragment)
+            if const_expr(dense_linear_delta):
+                fx.copy(atom, fx.slice(output_packs, (None, (output_row + column) // fx.Int32(8))), output_fragment)
+                fx.copy(atom, fx.slice(grad_packs, (None, (grad_row + column) // fx.Int32(8))), grad_fragment)
+            else:
+                fx.copy(atom, fx.slice(output_packs, (None, column // fx.Int32(8))), output_fragment)
+                fx.copy(atom, fx.slice(grad_packs, (None, column // fx.Int32(8))), grad_fragment)
             products = fx.Vector(output_fragment.load()).to(fx.Float32) * fx.Vector(grad_fragment.load()).to(fx.Float32)
             for i in fx.range_constexpr(8):
                 row_sum = row_sum + _f32(products[i])
         for shuffle_offset in delta_shuffle_offsets:
             row_sum = row_sum + _f32(fx.gpu.shuffle_xor(row_sum, shuffle_offset, 64))
         if chunk == fx.Int32(0):
-            fx.get_iter(delta_view)[fx.Int64(batch_head) * fx.Int64(sequence_length) + fx.Int64(row)] = row_sum
+            if const_expr(dense_linear_delta):
+                fx.get_iter(delta_view)[batch_head * fx.Int32(sequence_length) + row] = row_sum
+            else:
+                fx.get_iter(delta_view)[fx.Int64(batch_head) * fx.Int64(sequence_length) + fx.Int64(row)] = row_sum
 
         for part in fx.range_constexpr((qk_head_dim // 8 + lanes_per_row - 1) // lanes_per_row):
             pack = chunk + fx.Int32(part * lanes_per_row)
             if pack < fx.Int32(qk_head_dim // 8):
-                fx.copy(atom, zeros, fx.slice(zero_packs, (None, row * fx.Int32(qk_head_dim // 8) + pack)))
+                fx.copy(atom, zeros, fx.slice(zero_packs, (None, zero_row * fx.Int32(qk_head_dim // 8) + pack)))
 
         # Reuse the first delta CTAs in each head for the reverse query lists.
         if const_expr(block_list_traversal):
@@ -305,16 +343,13 @@ def build_flex_attn_bwd_module(
             fx.make_view(fx.get_iter(source_view), fx.make_layout(sequence_length * qk_head_dim, 1)),
             fx.make_layout(8, 1),
         )
-        workspace_layout = make_dq_workspace_layout(sequence_length, qk_head_dim)
         fragments = []
         for block in fx.range_constexpr(qk_head_dim // 64):
             column = lane % fx.Int32(32) * fx.Int32(2) + fx.Int32(block * 64)
+            native_base = query_base * fx.Int32(qk_head_dim) + column // fx.Int32(16) * fx.Int32(256) + row_base * fx.Int32(2) + column % fx.Int32(16) // fx.Int32(4) * fx.Int32(32) + column % fx.Int32(4) // fx.Int32(2) * fx.Int32(128)
             for half in fx.range_constexpr(2):
-                native_index = fx.Int32(
-                    fx.get_scalar(fx.crd2idx((query_base + row_base + fx.Int32(half * 4), column), workspace_layout))
-                )
                 fragment = fx.make_rmem_tensor(8, fx.BFloat16)
-                fx.copy(load, fx.slice(packed_source, (None, native_index // fx.Int32(8))), fragment)
+                fx.copy(load, fx.slice(packed_source, (None, native_base // fx.Int32(8) + fx.Int32(half))), fragment)
                 fragments.append(fragment)
         fx.rocdl.s_waitcnt(vmcnt=0)
         fx.rocdl.s_barrier()

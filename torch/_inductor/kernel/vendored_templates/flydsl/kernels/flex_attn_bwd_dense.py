@@ -308,7 +308,7 @@ def make_dense_kernel(context, f32, exp2):
                 for element in fx.range_constexpr(4):
                     local_row = fx.Int32(fx.get_scalar(ccoords[element]))
                     position = query_tile * fx.Int32(16) + local_row
-                    lse = fx.Float32(shared.stats.ptr[stage * fx.Int32(32) + local_row])
+                    lse = fx.Float32(fx.ptr_load(shared.stats.ptr + stage * fx.Int32(32) + local_row))
                     if const_expr(not lse_in_log2):
                         lse = lse * f32(1.4426950408889634)
                     probability = exp2(f32(fx.math.fma(f32(score_values[element]), f32(scale_log2), -lse)))
@@ -336,7 +336,7 @@ def make_dense_kernel(context, f32, exp2):
                 ds_values = []
                 for element in fx.range_constexpr(4):
                     local_row = fx.Int32(fx.get_scalar(ccoords[element]))
-                    delta_value = fx.Float32(shared.stats.ptr[stage * fx.Int32(32) + fx.Int32(16) + local_row])
+                    delta_value = fx.Float32(fx.ptr_load(shared.stats.ptr + stage * fx.Int32(32) + fx.Int32(16) + local_row))
                     ds_values.append(f32(probability_values[element]) * (f32(dp_values[element]) - delta_value))
                 ps[group].store(probability_values.to(fx.BFloat16).ir_value())
                 ds_vector = fx.Vector.from_elements(ds_values, fx.Float32).to(fx.BFloat16)
