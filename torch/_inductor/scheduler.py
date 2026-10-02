@@ -5694,13 +5694,19 @@ def _producer_fusion_enabled_inputs(
     template_node: BaseSchedulerNode,
     choice: Any | None = None,
 ) -> OrderedSet[str]:
-    """Template inputs a producer may fuse into under the current fusion flags.
+    """This function returns template inputs that a producer may fuse into.
 
     The template's load_input_fusion_allowed_inputs and
     store_output_fusion_allowed_inputs describe what the template supports.
     prologue_fusion/allow_prologue_fusion gate producer fusion into load_input().
     epilogue_fusion/allow_epilogue_fusion gate both producer fusion of
     store_output() inputs and downstream consumer fusion from template outputs.
+
+    If ``choice`` is given, only that autotune choice's inputs are returned
+    (used by the benchmark filter). Otherwise, for a MultiTemplateBuffer, the
+    union over all choices is returned, with the fusion flags applied per choice.
+    The benchmark filter ensures the choice finally selected supports every
+    fused input.
     """
     template = template_node.get_template_node()
     if template is None:
@@ -5710,8 +5716,13 @@ def _producer_fusion_enabled_inputs(
     epilogue_enabled = _is_epilogue_fusion_enabled(template_node)
 
     def enabled_inputs(candidate: Any) -> OrderedSet[str]:
-        load_inputs = candidate.load_input_fusion_allowed_inputs
-        store_inputs = candidate.store_output_fusion_allowed_inputs
+        # Choices without these attributes (e.g. aten, NVGEMM) support none.
+        load_inputs = getattr(
+            candidate, "load_input_fusion_allowed_inputs", OrderedSet()
+        )
+        store_inputs = getattr(
+            candidate, "store_output_fusion_allowed_inputs", OrderedSet()
+        )
         enabled = load_inputs | store_inputs
         if not prologue_enabled:
             enabled -= load_inputs
@@ -5723,21 +5734,9 @@ def _producer_fusion_enabled_inputs(
         return enabled_inputs(choice)
 
     if isinstance(template, ir.MultiTemplateBuffer):
-        if template._render_caller is not None:
-            if hasattr(
-                template._render_caller, "load_input_fusion_allowed_inputs"
-            ) and hasattr(
-                template._render_caller, "store_output_fusion_allowed_inputs"
-            ):
-                return enabled_inputs(template._render_caller)
-            return OrderedSet()
-
         result: OrderedSet[str] = OrderedSet()
         for candidate in template.choices:
-            if hasattr(candidate, "load_input_fusion_allowed_inputs") and hasattr(
-                candidate, "store_output_fusion_allowed_inputs"
-            ):
-                result |= enabled_inputs(candidate)
+            result |= enabled_inputs(candidate)
         return result
 
     return enabled_inputs(template)

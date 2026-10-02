@@ -2220,7 +2220,6 @@ class TestScheduler(TestCase):
 
         template = object.__new__(ir.MultiTemplateBuffer)
         template._choices = [load_choice, store_choice]
-        template._render_caller = None
         template.allow_prologue_fusion = True
         template.allow_epilogue_fusion = False
 
@@ -2231,9 +2230,6 @@ class TestScheduler(TestCase):
             _producer_fusion_enabled_inputs(template_node),
             OrderedSet(("x",)),
         )
-
-        template._render_caller = object()
-        self.assertEqual(_producer_fusion_enabled_inputs(template_node), OrderedSet())
 
     def test_prologue_fusion_uses_template_aliasing_hook(self):
         def make_prologue_and_template(hook_blocks: bool):
