@@ -1262,6 +1262,12 @@ def aot_module_simplified(
             )
     if compiled_fn is None:
         raise AssertionError("compiled_fn must not be None")
+    # Skip SerializableCompiledFunction's pass-through __call__ on the hot path.
+    runtime_fn = (
+        compiled_fn.compiled_fn
+        if isinstance(compiled_fn, SerializableCompiledFunction)
+        else compiled_fn
+    )
     if isinstance(mod, torch._dynamo.utils.GmWrapper):
         # This function is called by the flatten_graph_inputs wrapper, which boxes
         # the inputs so that they can be freed before the end of this scope.
@@ -1269,13 +1275,9 @@ def aot_module_simplified(
         # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
         @simple_wraps(compiled_fn)
         def forward(runtime_args: list[Any]) -> Any:
-            flat_args = []
-            flat_args.extend(params_buffers_flat)
-            flat_args.extend(runtime_args)
+            flat_args = [*params_buffers_flat, *runtime_args]
             runtime_args.clear()
-            if compiled_fn is None:
-                raise AssertionError("compiled_fn must not be None")
-            return compiled_fn(flat_args)
+            return runtime_fn(flat_args)
 
     else:
         # TODO: There is something deeply wrong here; compiled_fn running with
@@ -1285,13 +1287,7 @@ def aot_module_simplified(
         # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
         @simple_wraps(compiled_fn)
         def forward(*runtime_args: tuple[Any]) -> Any:
-            full_args = []
-            full_args.extend(params_buffers_flat)
-            # pyrefly: ignore[bad-argument-type]
-            full_args.extend(runtime_args)
-            if compiled_fn is None:
-                raise AssertionError("compiled_fn must not be None")
-            return compiled_fn(full_args)
+            return runtime_fn([*params_buffers_flat, *runtime_args])
 
     # Just for convenience
     forward.zero_grad = mod.zero_grad  # type: ignore[attr-defined]
