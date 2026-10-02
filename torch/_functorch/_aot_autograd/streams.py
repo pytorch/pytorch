@@ -377,6 +377,22 @@ def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
                         )
             else:
                 continue
+            if joined and barrier.target is torch.ops.streams.wait_stream.default:
+                waiting_index = barrier.args[0]
+                if waiting_index == barrier_stream:
+                    continue
+                if isinstance(waiting_index, int) and isinstance(barrier_stream, int):
+                    try:
+                        waiting = _get_stream_by_index(waiting_index)
+                        waited_on = _get_stream_by_index(barrier_stream)
+                    except AssertionError:
+                        pass
+                    else:
+                        if (
+                            waiting.device == waited_on.device
+                            and waiting.native_handle == waited_on.native_handle
+                        ):
+                            continue
             if joined:
                 raise RuntimeError(
                     "Cannot safely place an input mutation write-back after a user "

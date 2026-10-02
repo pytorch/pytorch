@@ -8,6 +8,7 @@ from unittest.mock import patch
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
+from torch._dynamo import graph_bytecode_inputs
 from torch._dynamo.device_interface import (
     device_interfaces,
     DeviceInterface,
@@ -2950,6 +2951,68 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         torch.cuda.synchronize()
         result = torch.compile(fn, backend="inductor", fullgraph=True)(x)
         self.assertEqual(result, torch.full_like(x, 2))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_self_wait_after_input_mutation_does_not_join(self, backend) -> None:
+        def fn(x, small):
+            side = torch.cuda.Stream()
+            with side:
+                x.add_(1)
+            side.wait_stream(side)
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize()
+        result = torch.compile(fn, backend=backend, fullgraph=True)(x, small)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(result, torch.ones_like(result))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_aliased_self_wait_after_input_mutation_does_not_join(
+        self, backend
+    ) -> None:
+        self.addCleanup(reset_user_object_tracking)
+
+        def fn(x, small, side, alias):
+            with side:
+                x.add_(1)
+            alias.wait_stream(side)
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros_like(x)
+        side = torch.cuda.Stream()
+        alias = torch.cuda.ExternalStream(side.cuda_stream, device=side.device)
+        self.assertIsNot(side, alias)
+        self.assertEqual(side.native_handle, alias.native_handle)
+        torch.cuda.synchronize()
+        result = torch.compile(fn, backend=backend, fullgraph=True)(
+            x, small, side, alias
+        )
+        if backend == "aot_eager":
+            # Inductor releases this temporary registry after lowering.
+            side_indices = {
+                i
+                for i, stream_ref in enumerate(
+                    graph_bytecode_inputs.index_to_external_object_weakref
+                )
+                if stream_ref() is side
+            }
+            alias_indices = {
+                i
+                for i, stream_ref in enumerate(
+                    graph_bytecode_inputs.index_to_external_object_weakref
+                )
+                if stream_ref() is alias
+            }
+            self.assertTrue(side_indices)
+            self.assertTrue(alias_indices)
+            self.assertTrue(side_indices.isdisjoint(alias_indices))
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(result, torch.ones_like(result))
 
     @parametrize("backend", ("aot_eager", "inductor"))
     def test_unrelated_stream_join_after_input_mutation(self, backend) -> None:
