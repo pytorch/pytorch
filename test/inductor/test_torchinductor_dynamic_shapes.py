@@ -1619,7 +1619,7 @@ class TestSymbolicFull(TestCase):
             return torch.div(y, 2, rounding_mode="floor")
 
         x = torch.tensor(fill_value, device=device)
-        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x))
+        self.assertEqual(torch.compile(f, fullgraph=True)(x), f(x), rtol=0, atol=0)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @parametrize(
@@ -1800,7 +1800,7 @@ class TestSymbolicFull(TestCase):
         compiled_f = torch.compile(f, fullgraph=True)
         for value in (1 << 63, torch.iinfo(torch.uint64).max):
             x = torch.tensor(value, dtype=torch.uint64, device=device)
-            self.assertEqual(compiled_f(x), f(x))
+            self.assertEqual(compiled_f(x), f(x), rtol=0, atol=0)
 
     @onlyOn(["cpu"])
     @torch._inductor.config.patch(cpp_wrapper=True)
@@ -1822,7 +1822,7 @@ class TestSymbolicFull(TestCase):
                     [[0, 0], [0, value]], dtype=torch.uint64, device=device
                 )
                 x = base[1:2, 1:2]
-            self.assertEqual(compiled_f(x), f(x))
+            self.assertEqual(compiled_f(x), f(x), rtol=0, atol=0)
 
     @onlyOn(["cpu"])
     @torch._inductor.config.patch(cpp_wrapper=True)
@@ -1843,7 +1843,7 @@ class TestSymbolicFull(TestCase):
             torch.iinfo(torch.uint64).max,
         ):
             x = torch.tensor(value, dtype=torch.uint64, device=device)
-            self.assertEqual(compiled_f(x), f(x))
+            self.assertEqual(compiled_f(x), f(x), rtol=0, atol=0)
 
     @onlyOn(["cpu"])
     @torch._inductor.config.patch(cpp_wrapper=True)
