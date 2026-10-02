@@ -103,10 +103,21 @@ supported". Some models need a one-time AWS Marketplace subscription by an accou
    plan with the skill's label rules (forbidden → `triage review`; unknown and redundant
    dropped), only adds labels, posts only `templates.json` comments the bot has not already
    posted, closes only usage questions and expected numerical behavior, and adds
-   `bot-triaged`. It then hands the issue to `claude-distributed-triage.yml`.
+   `bot-triaged`. It then hands the issue to `distributed-triage-pi.yml`.
 
 Run it manually with `mode`: `replay` shows already-triaged issues as they were before the
 triage bot acted (their labels and human comments from before its first label event) and
 compares each plan with the labels added since; `dry-run` plans against the issues as they
 are now; `apply` writes. Issue transfers and issue-body redaction are not automated: a
 transfer becomes `triage review`, and download links stay in the body.
+
+## Distributed triage
+
+`.github/workflows/distributed-triage-pi.yml` runs the `distributed-triage` skill on issues
+in the `oncall: distributed` queue: after `issue-triage-pi.yml` hands one off, and when the
+daily sweep (`claude-distributed-triage-cron.yml`) dispatches it. The plan job has the same
+lockdown; `scripts/issue_triage_pi/apply_distributed_plan.py` adds only labels from
+`distributed-labels.json`, keeps at most one sub-oncall label, never pairs `triaged` with
+`triage review` or `needs reproduction`, posts only the skill's templates, and never closes.
+A model-free `record` job appends the result to the daily manifest. Dispatch with
+`mode: dry-run` to see the effects without writing.

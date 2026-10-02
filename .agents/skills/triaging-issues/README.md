@@ -9,7 +9,7 @@ bump this list w/ their description. I made this static because the full set of 
 `bot-triaged` whenever any triage action is taken; you can filter those decisions here: https://fburl.com/pt-bot-triaged
 2. `templates.json`: This is basically where we want to put canned responses. It includes `redirect_to_forum` (for usage questions) and
 `request_more_info` (when classification is unclear). There are likely others we should add here as we notice more patterns. These are the only comments the bot can post.
-3. `scripts/validate_labels.py` holds the label rules (forbidden prefixes, the `labels.json` allowlist, redundant pairs). The apply step of the triage workflow uses them, and the `distributed-triage` skill runs it and `scripts/validate_issue_target.py` as Claude Code hooks.
+3. The label rules (forbidden prefixes, the `labels.json` allowlist, redundant pairs) live in `scripts/issue_triage_pi/labels.py`, which the triage workflow's apply step enforces.
 4. The gh action uses a **two-stage workflow** to support issues opened by OSS users:
    - **Stage 1** (`.github/workflows/issue-triage.yml`): Triggers on `issues: opened`, captures the issue number, and uploads it as an artifact. This stage has no protected environment, so OSS actors can run it.
    - **Stage 2** (`.github/workflows/issue-triage-pi.yml`): Triggers on `workflow_run` completion of Stage 1. A [pi](https://github.com/earendil-works/pi) agent in the protected `bedrock` environment reads the issue with read-only tools and submits a plan; a separate job without model access applies it (`scripts/issue_triage_pi/apply_plan.py`), adds `bot-triaged`, and hands `oncall: distributed` issues to the distributed triage workflow. See `.github/actions/pi-agent/README.md`.

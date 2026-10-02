@@ -25,11 +25,13 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
-SKILL_DIR = Path(__file__).resolve().parents[2] / ".agents/skills/triaging-issues"
-sys.path.insert(0, str(SKILL_DIR / "scripts"))
-
-from validate_labels import is_forbidden, load_valid_labels, strip_redundant
+from labels import (
+    is_forbidden,
+    load_templates,
+    load_valid_labels,
+    strip_redundant,
+    TRIAGE_SKILL,
+)
 
 
 BOT_TRIAGED = "bot-triaged"
@@ -276,7 +278,7 @@ def main() -> int:
     args = parser.parse_args()
 
     plan = json.loads(args.plan.read_text())
-    templates = json.loads((SKILL_DIR / "templates.json").read_text())["templates"]
+    templates = load_templates(TRIAGE_SKILL)
     issue = json.loads(gh_api([f"repos/{args.repo}/issues/{args.issue}"]))
     current = {label["name"] for label in issue["labels"]}
     comments = json.loads(

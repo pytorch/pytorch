@@ -1,13 +1,12 @@
 """Behavior of the trusted plan-to-effects mapping for pi issue triage."""
 
-import json
 import unittest
 
-from apply_plan import labels_before_triage, plan_effects, SKILL_DIR
-from validate_labels import load_valid_labels
+from apply_plan import labels_before_triage, plan_effects
+from labels import load_templates, load_valid_labels, TRIAGE_SKILL
 
 
-TEMPLATES = json.loads((SKILL_DIR / "templates.json").read_text())["templates"]
+TEMPLATES = load_templates(TRIAGE_SKILL)
 VALID = load_valid_labels()
 
 

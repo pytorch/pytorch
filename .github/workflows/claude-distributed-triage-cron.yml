@@ -178,7 +178,7 @@ jobs:
           for ISSUE_NUM in $(echo "$ISSUES" | jq -r '.[]'); do
             echo "--- Triggering triage for issue #${ISSUE_NUM} ---"
 
-            gh workflow run claude-distributed-triage.yml \
+            gh workflow run distributed-triage-pi.yml \
               --repo ${{ github.repository }} \
               -f issue_number="$ISSUE_NUM"
 

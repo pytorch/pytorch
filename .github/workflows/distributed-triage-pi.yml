@@ -1,0 +1,298 @@
+# Owner(s): ["oncall: distributed"]
+name: Distributed Triage (pi)
+
+# Second-level triage for issues routed to `oncall: distributed`, with the
+# `distributed-triage` skill. Runs after "Issue Triage (pi)" applies triage and
+# hands an issue off, and on dispatch (the daily sweep in
+# claude-distributed-triage-cron.yml dispatches one issue at a time). Split by
+# trust level like issue triage:
+#   plan   (bedrock, issues:read)   the model reads the issue through read-only gh
+#                                   tools and submits a plan; no write token, no
+#                                   shell, egress blocked
+#   apply  (issues:write, no AWS)   apply_distributed_plan.py filters and writes it
+#   record (bedrock, no model)      appends the result to the daily manifest in
+#                                   s3://ossci-raw-job-status/review-logs/distributed-triage/
+#   report (issues:read)            dry-run dispatches only: prints the effects
+# See .github/actions/pi-agent/README.md.
+
+on:
+  workflow_run:
+    workflows: ["Issue Triage (pi)"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "Issue number to triage"
+        required: true
+        type: string
+      mode:
+        type: choice
+        default: apply
+        options: ["apply", "dry-run"]
+      model:
+        description: "Bedrock model ID from .github/actions/pi-agent/allowed-models.json"
+        default: global.openai.gpt-6.1-sol
+        type: string
+      thinking:
+        type: choice
+        default: medium
+        options: ["low", "medium", "high", "xhigh"]
+
+jobs:
+  prepare:
+    name: Resolve issue
+    if: >-
+      github.repository == 'pytorch/pytorch' &&
+      (github.event_name == 'workflow_dispatch' ||
+       github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      actions: read
+      contents: read
+      issues: read
+    outputs:
+      issue: ${{ steps.config.outputs.issue }}
+      mode: ${{ steps.config.outputs.mode }}
+      model: ${{ steps.config.outputs.model }}
+      thinking: ${{ steps.config.outputs.thinking }}
+    steps:
+      - name: Check out pytorch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Contract tests
+        run: |
+          python3 -m pip install --quiet pyyaml==6.0.2
+          python3 -m unittest discover -s scripts/issue_triage_pi -v
+
+      # Only issue-triage-pi.yml runs that applied triage hand off an issue;
+      # replays and dry runs upload no triage-completed-data.
+      - name: Download the handed-off issue number (workflow_run only)
+        if: github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          if ! gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" \
+              --jq '.artifacts[].name' | grep -qx triage-completed-data; then
+            echo "Run $RUN_ID handed off no issue; nothing to do"
+            exit 0
+          fi
+          for attempt in 1 2 3 4 5; do
+            rm -f issue_number.txt
+            gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name triage-completed-data --dir . && exit 0
+            sleep "$((attempt * 5))"
+          done
+          echo "::error::Failed to download triage-completed-data from run $RUN_ID"
+          exit 1
+
+      - name: Resolve issue, gate on oncall:distributed
+        id: config
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          ISSUE: ${{ inputs.issue_number }}
+          MODE: ${{ inputs.mode || 'apply' }}
+          MODEL: ${{ inputs.model || 'global.openai.gpt-6.1-sol' }}
+          THINKING: ${{ inputs.thinking || 'medium' }}
+        run: |
+          if [[ "$EVENT" == "workflow_run" ]]; then
+            [[ -f issue_number.txt ]] || exit 0
+            ISSUE=$(cat issue_number.txt)
+          fi
+          [[ "$ISSUE" =~ ^[1-9][0-9]*$ ]] || { echo "::error::issue number must be a positive integer"; exit 1; }
+          if ! gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE/labels" --jq '.[].name' | grep -qxF "oncall: distributed"; then
+            echo "#$ISSUE is not labeled oncall: distributed; nothing to do"
+            exit 0
+          fi
+          {
+            echo "issue=$ISSUE"
+            echo "mode=$MODE"
+            echo "model=$MODEL"
+            echo "thinking=$THINKING"
+          } >> "$GITHUB_OUTPUT"
+
+  plan:
+    name: "Distributed triage #${{ needs.prepare.outputs.issue }}"
+    needs: prepare
+    if: needs.prepare.outputs.issue != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: bedrock
+    permissions:
+      contents: read
+      issues: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TRIAGE_REPO: ${{ github.repository }}
+    steps:
+      # MUST be the first step; same allowlist as issue-triage-pi.yml.
+      - name: Harden runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2
+        with:
+          egress-policy: block
+          disable-sudo: true
+          allowed-endpoints: >
+            sts.us-east-1.amazonaws.com:443
+            bedrock-runtime.us-east-1.amazonaws.com:443
+            api.github.com:443
+            github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            registry.npmjs.org:443
+            ossci-raw-job-status.s3.us-east-1.amazonaws.com:443
+            ossci-raw-job-status.s3.amazonaws.com:443
+
+      - name: Check out pytorch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Render prompt
+        env:
+          ISSUE_NUMBER: ${{ needs.prepare.outputs.issue }}
+        run: |
+          python3 - <<'EOF'
+          import os
+          values = {
+              "ISSUE_NUMBER": os.environ["ISSUE_NUMBER"],
+              "REPO": os.environ["TRIAGE_REPO"],
+              "SKILL_DIR": ".agents/skills/distributed-triage",
+          }
+          text = open(".github/pi/prompts/distributed-triage.md").read()
+          for key, value in values.items():
+              text = text.replace("{{" + key + "}}", value)
+          open(os.path.join(os.environ["RUNNER_TEMP"], "prompt.md"), "w").write(text)
+          EOF
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-duration-seconds: 900
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
+          aws-region: us-east-1
+
+      - name: Plan distributed triage with pi
+        id: pi
+        timeout-minutes: 8
+        uses: ./.github/actions/pi-agent
+        with:
+          model: ${{ needs.prepare.outputs.model }}
+          thinking: ${{ needs.prepare.outputs.thinking }}
+          tools: read,grep,find,ls,get_issue,get_issue_comments,search_issues
+          extensions: ${{ github.workspace }}/.github/pi/extensions/github-issue-tools.ts
+          skills: ${{ github.workspace }}/.agents/skills/distributed-triage
+          prompt: ${{ runner.temp }}/prompt.md
+          result-schema: ${{ github.workspace }}/.github/pi/schemas/distributed-triage-plan.json
+          artifact-name: distributed-triage-pi-${{ needs.prepare.outputs.issue }}
+
+      - name: Upload usage metrics
+        if: always() && steps.pi.outputs.execution-file != ''
+        uses: pytorch/test-infra/.github/actions/upload-claude-usage@ca88203856609d21d36a0219da0a29792c3aff73 # main
+        with:
+          metrics-file: ${{ steps.pi.outputs.execution-file }}
+
+      # Only real triage: dry runs must not overwrite the log of the run that
+      # actually triaged the issue.
+      - name: Upload execution log to S3
+        if: >-
+          always() && steps.pi.outputs.execution-file != '' &&
+          needs.prepare.outputs.mode == 'apply' && github.repository == 'pytorch/pytorch'
+        continue-on-error: true
+        env:
+          EXECUTION_FILE: ${{ steps.pi.outputs.execution-file }}
+          S3_KEY: review-logs/distributed-triage/${{ needs.prepare.outputs.issue }}.json
+        run: |
+          combined="$RUNNER_TEMP/combined-execution.json"
+          if aws s3 cp "s3://ossci-raw-job-status/$S3_KEY" "$RUNNER_TEMP/previous.json" 2> /dev/null \
+            && jq -s 'add' "$RUNNER_TEMP/previous.json" "$EXECUTION_FILE" > "$combined" 2> /dev/null; then
+            :
+          else
+            cp "$EXECUTION_FILE" "$combined"
+          fi
+          aws s3 cp "$combined" "s3://ossci-raw-job-status/$S3_KEY"
+
+  report:
+    name: Dry-run report
+    needs: [prepare, plan]
+    if: needs.prepare.outputs.mode == 'dry-run' && needs.plan.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - name: Check out pytorch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Download pi run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: distributed-triage-pi-${{ needs.prepare.outputs.issue }}
+          path: run
+      - name: Report effects (no writes)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ needs.prepare.outputs.issue }}
+        run: python3 scripts/issue_triage_pi/apply_distributed_plan.py "$GITHUB_REPOSITORY" "$ISSUE" run/result.json
+
+  apply:
+    name: Apply distributed triage
+    needs: [prepare, plan]
+    if: needs.prepare.outputs.mode == 'apply' && needs.plan.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out pytorch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Download pi run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: distributed-triage-pi-${{ needs.prepare.outputs.issue }}
+          path: run
+      - name: Apply plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ needs.prepare.outputs.issue }}
+        run: python3 scripts/issue_triage_pi/apply_distributed_plan.py "$GITHUB_REPOSITORY" "$ISSUE" run/result.json --apply
+
+  record:
+    name: Append to daily manifest
+    needs: [prepare, apply]
+    if: needs.apply.result == 'success' && github.repository == 'pytorch/pytorch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: bedrock
+    permissions:
+      contents: read
+      issues: read
+      id-token: write
+    steps:
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-duration-seconds: 900
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
+          aws-region: us-east-1
+      - name: Append to daily manifest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ needs.prepare.outputs.issue }}
+        run: |
+          MANIFEST_KEY="review-logs/distributed-triage/manifest-$(date -u +%Y-%m-%d).jsonl"
+          gh api "repos/$GITHUB_REPOSITORY/issues/$ISSUE" \
+            | jq -c --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                '{issue: .number, title, labels: [.labels[].name], source: "llm-triage", timestamp: $timestamp}' \
+            > entry.json
+          aws s3 cp "s3://ossci-raw-job-status/$MANIFEST_KEY" manifest.jsonl 2> /dev/null || : > manifest.jsonl
+          cat entry.json >> manifest.jsonl
+          aws s3 cp manifest.jsonl "s3://ossci-raw-job-status/$MANIFEST_KEY"

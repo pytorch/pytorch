@@ -71,7 +71,7 @@ The apply step enforces it:
 
 **If unsure whether a label is allowed:** leave it out. The apply step drops forbidden labels and adds `triage review` in their place, so a human will look.
 
-These rules are enforced by the apply step, which validates every label against `labels.json` (`scripts/validate_labels.py`).
+These rules are enforced by the apply step, which validates every label against `labels.json` (`scripts/issue_triage_pi/labels.py`).
 
 ### Never Override Human Labels
 
