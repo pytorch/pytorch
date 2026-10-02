@@ -4132,6 +4132,17 @@ class View(GenericView):
 
             raise GuardOnDataDependentSymNode(sympy.Eq(a, b))
 
+        def check_equals_or_raise(a: Expr, b: Expr) -> None:
+            if V.graph.sizevars.statically_known_equals(a, b):
+                return
+            # For unbacked symbols check_equals() adds a runtime assert instead
+            # of raising. That is only safe when both stacks are empty: every
+            # other size has been matched, and for a valid reshape the total
+            # sizes must match, so a == b must hold.
+            if stack_old or stack_new:
+                raise GuardOnDataDependentSymNode(sympy.Eq(a, b))
+            V.graph.sizevars.check_equals(a, b)
+
         # TODO: These symbols may not escape, if they don't assert so and
         # treat them as temporary
         vars = [
@@ -4170,7 +4181,7 @@ class View(GenericView):
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
-                V.graph.sizevars.check_equals(size_new, size_old)
+                check_equals_or_raise(size_new, size_old)
             elif compare_sizes(size_new, size_old) > 0:
                 divisor = sympy.S.One
                 modulus = size_old
@@ -4181,7 +4192,7 @@ class View(GenericView):
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
                     size_old = size_old * modulus
-                V.graph.sizevars.check_equals(size_new, size_old)
+                check_equals_or_raise(size_new, size_old)
             else:
                 raise AssertionError
 
