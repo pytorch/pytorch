@@ -1102,7 +1102,6 @@ class TestBlackwellTMALoadFusion(TestCase):
             "cpp_wrapper",
             "fp32",
             "wide_n",
-            "column",
         ),
     )
     def test_blackwell_mm_row_reduction_epilogue_not_fused(self, case: str):
@@ -1110,11 +1109,10 @@ class TestBlackwellTMALoadFusion(TestCase):
         kernel benchmarks slower or isn't benchmarked, for arg reductions,
         configs that can't host it (EPILOGUE_SUBTILE > 1, data partitioning,
         2CTA), dynamic shapes, cpp_wrapper, fp32 outputs,
-        tiles narrower than N, and column reductions."""
+        and tiles narrower than N."""
         fn = {
             "max_values": lambda a, b: (a @ b).float().max(-1).values,
             "argmax": lambda a, b: (a @ b).argmax(-1),
-            "column": lambda a, b: (a @ b).float().sum(0),
         }.get(case, self.ROW_OPS["sum"])
         # With N == 8, BLOCK_N is clamped to 16, so one of two subtiles spans N.
         M, K, N = 1024, 512, {"wide_n": 256, "subtile": 8}.get(case, 128)
@@ -1167,17 +1165,133 @@ class TestBlackwellTMALoadFusion(TestCase):
             any(k.startswith(("triton_per", "triton_red")) for k in kernels), kernels
         )
 
+    COL_OPS = {
+        "sum": lambda a, b: (a @ b).float().sum(0),
+        # Every column is negative (positive), so unmasked out-of-range rows
+        # would win.
+        "amax": lambda a, b: ((a @ b) - 100).amax(0),
+        "amin": lambda a, b: ((a @ b) + 100).amin(0),
+        "mean": lambda a, b: (a @ b).float().mean(0),
+        "center": lambda a, b: (c := (a @ b).float()) - c.sum(0),
+        "sum_bf16": lambda a, b: (a @ b).sum(0),
+        "sum_and_out": lambda a, b: ((c := a @ b), c.float().sum(0)),
+        "relu_sum": lambda a, b: (a @ b).float().relu().sum(0, keepdim=True),
+    }
+
     @unittest.skipIf(
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
-    def test_blackwell_mm_reduction_epilogue_transposed_read(self):
-        """A square output read transposed by a pointwise node must not fuse,
-        since epilogue loads take the tile element at the store position."""
+    @parametrize("op", tuple(COL_OPS))
+    @parametrize("M", (1000, 4096))
+    @parametrize("split", (False, True))
+    def test_blackwell_mm_col_reduction_epilogue_fusion(
+        self, op: str, M: int, split: bool
+    ):
+        kernels, _ = self._run_reduction(
+            self.COL_OPS[op],
+            M,
+            128,
+            200,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{"triton.template_reduction_epilogue": True, "split_reductions": split},
+        )
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        # Nodes reading the finished column results stay unfused.
+        self.assertEqual(len(kernels), 2 if op in ("mean", "center") else 1, kernels)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize(
+        "case", ("disabled", "argmax", "fp64", "dynamic", "subtile", "data_partition")
+    )
+    def test_blackwell_mm_col_reduction_epilogue_not_fused(self, case: str):
+        """The column reduction stays unfused when the flag is off, it is an
+        arg reduction, its fp32 partials would lose precision, the shape is
+        dynamic, or the config can't host it (EPILOGUE_SUBTILE > 1, data
+        partitioning)."""
+        fn = {
+            "argmax": lambda a, b: (a @ b).float().argmax(0),
+            "fp64": lambda a, b: (a @ b).double().sum(0),
+        }.get(case, self.COL_OPS["sum"])
+        if case == "data_partition" and not _use_template_autows():
+            self.skipTest("needs template autoWS")
+        test_config = BlackwellGPUGemmConfig(
+            128, 128, 64, 3, 8, epilogue_subtile=2 if case == "subtile" else 1
+        )
+        with torch._dynamo.config.patch(assume_static_by_default=case != "dynamic"):
+            kernels, _ = self._run_reduction(
+                fn,
+                1024,
+                128,
+                256,
+                test_config,
+                autows=(2, False) if case == "data_partition" else (1, False),
+                **{"triton.template_reduction_epilogue": case != "disabled"},
+            )
+        self.assertTrue(
+            any(k.startswith(("triton_red", "triton_per")) for k in kernels), kernels
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_row_and_col_reduction_epilogue(self):
+        """Only the column reduction fuses; mixing row and column reductions
+        in one epilogue is not supported."""
 
         def fn(a, b):
-            return (p := (a @ b).t().contiguous()), p.float().sum(1)
+            c = (a @ b).float()
+            return c.sum(0), c.sum(1)
 
+        kernels, _ = self._run_reduction(
+            fn,
+            1024,
+            128,
+            256,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertEqual(len(kernels), 2, kernels)
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_reduction_epilogue_benchmark_times_finish(self):
+        """The benchmark harness of a kernel with column reduction partials also
+        runs the wrapper's finish, so epilogue benchmarking pays for it."""
+        _, code = self._run_reduction(
+            self.COL_OPS["sum"],
+            1024,
+            128,
+            128,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{"triton.template_reduction_epilogue": True, "benchmark_kernel": True},
+        )
+        finish = re.findall(
+            r"\.run\(\*args, stream=\w+\)\n\s+args\[\d+\]\[\d+:\d+\]"
+            r"\.view\(torch\.float32\)\.view\(\d+, 128\)\.sum\(dim=0\)",
+            code,
+        )
+        self.assertEqual(len(finish), 1, code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", ("row", "col"))
+    def test_blackwell_mm_reduction_epilogue_transposed_read(self, op: str):
+        """A square output read transposed by a pointwise node must not fuse,
+        since epilogue loads take the tile element at the store position."""
+        fn = {
+            "row": lambda a, b: ((p := (a @ b).t().contiguous()), p.float().sum(1)),
+            "col": lambda a, b: ((c := a @ b).t().contiguous(), c.float().sum(0)),
+        }[op]
         kernels, _ = self._run_reduction(
             fn,
             256,
