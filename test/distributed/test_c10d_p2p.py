@@ -133,7 +133,7 @@ class AbstractP2PTest(P2PTestMixin, C10dBackendTestContinuous):
 
 class AbstractIsolatedP2PTest(P2PTestMixin, C10dBackendTest):
     """Drops send work without waiting on it. A reused worker would carry that
-    work into the next test's teardown, so these keep fresh rank processes."""
+    work into the next test, so these keep fresh rank processes."""
 
     def test_async_work_lifetime(self):
         if not self.supports_dropped_p2p_work:
