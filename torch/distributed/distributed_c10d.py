@@ -2964,6 +2964,14 @@ _FR_SELF_RECORDING_BACKENDS = {
 }
 
 
+def _maybe_attach_nan_check(pg: ProcessGroup) -> None:
+    # Backend-agnostic NaN checking, for backends without a native checker (the
+    # NCCL backends consume TORCH_NCCL_NAN_CHECK themselves). The group owns the
+    # hook, so there is no handle to keep alive here.
+    if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
+        NanCheckHook.attach(pg)
+
+
 def _maybe_attach_flight_recorder(
     pg: ProcessGroup, backend_config: BackendConfig, global_ranks: list[int]
 ) -> None:
@@ -3250,12 +3258,7 @@ def _new_process_group_helper(
     pg._set_group_name(group_name)
     pg._set_group_desc(group_desc)
 
-    # Backend-agnostic NaN checking, for backends without a native checker
-    # (ProcessGroupNCCL consumes TORCH_NCCL_NAN_CHECK itself). The group owns the
-    # hook, so there is no handle to keep alive here.
-    if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
-        NanCheckHook.attach(pg)
-
+    _maybe_attach_nan_check(pg)
     HealthCheckHook.attach(pg)
 
     # Backend-agnostic FlightRecorder recording, for backends with no native
@@ -7092,6 +7095,7 @@ def split_group(
             f"group name should be set to {group_name} but got {split_pg.group_name}"
         )
 
+    _maybe_attach_nan_check(split_pg)
     HealthCheckHook.attach(split_pg)
     _maybe_attach_flight_recorder(split_pg, backend_config, global_ranks_in_my_group)
 

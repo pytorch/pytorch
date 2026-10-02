@@ -29,7 +29,13 @@ from torch.testing._internal.common_utils import run_tests
 
 
 # Tests in which the check is expected to fire.
-DETECTING_TESTS = ("test_nan_in_input_detected", "test_env_var_auto_attach")
+DETECTING_TESTS = (
+    "test_nan_in_input_detected",
+    "test_env_var_auto_attach",
+    "test_split_group_env_var_auto_attach",
+    "test_nccl_env_var",
+    "test_set_enable_nan_check",
+)
 
 
 class AbstractNanCheckHookTest(C10dBackendTest):
@@ -44,11 +50,17 @@ class AbstractNanCheckHookTest(C10dBackendTest):
                 getattr(self, self._testMethodName).__wrapped__: signal.SIGABRT
             }
 
-    def _assert_nan_detected(self, tensor):
+    def _skip_unless_native_nan_check(self):
+        # ProcessGroupNCCL and ProcessGroupNCCL2 check natively; nccl-lazy wraps
+        # ProcessGroupNCCL2 without exposing the setter.
+        if self.backend_name not in ("nccl-legacy", "nccl2"):
+            self.skipTest(f"{self.backend_name} has no native NaN check")
+
+    def _assert_nan_detected(self, tensor, group=None):
         if self.device_type == "cuda":
             with core_dumps_disabled():
                 try:
-                    dist.all_reduce(tensor)
+                    dist.all_reduce(tensor, group=group)
                     torch.cuda.synchronize()
                 except Exception:
                     # os._exit, not sys.exit: the CUDA context is poisoned, so
@@ -58,7 +70,7 @@ class AbstractNanCheckHookTest(C10dBackendTest):
             self.fail("NaN in collective input was not detected")
         else:
             with self.assertRaisesRegex(RuntimeError, "NaN"):
-                dist.all_reduce(tensor)
+                dist.all_reduce(tensor, group=group)
 
     def test_nan_in_input_detected(self):
         self._init_pg()
@@ -75,7 +87,21 @@ class AbstractNanCheckHookTest(C10dBackendTest):
     def test_nan_in_recv_buffer_ok(self):
         self._init_pg()
         hook = NanCheckHook.attach(dist.group.WORLD)
+        self._check_recv_buffers_not_flagged()
+        hook.remove()
 
+    def test_nccl_env_var_recv_buffer_ok(self):
+        if not self.backend_name.startswith("nccl"):
+            self.skipTest("TORCH_NCCL_NAN_CHECK is consumed by the NCCL backends")
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
+        try:
+            self._init_pg()
+        finally:
+            del os.environ["TORCH_NCCL_NAN_CHECK"]
+        self._check_recv_buffers_not_flagged()
+        torch.cuda.synchronize()
+
+    def _check_recv_buffers_not_flagged(self):
         # Non-root broadcast buffers are receive buffers.
         t = torch.ones(3, 4, device=self.device)
         if self.rank != 0:
@@ -103,7 +129,6 @@ class AbstractNanCheckHookTest(C10dBackendTest):
         self.assertEqual(t, torch.ones(3, 4, device=self.device))
         for o in out:
             self.assertEqual(o, expected)
-        hook.remove()
 
     def test_legitimate_data_not_flagged(self):
         self._init_pg()
@@ -146,6 +171,66 @@ class AbstractNanCheckHookTest(C10dBackendTest):
         dist.all_reduce(t)
         t[0] = float("nan")
         self._assert_nan_detected(t)
+
+    def test_split_group_env_var_auto_attach(self):
+        self._init_pg()
+        default_pg = dist.distributed_c10d._get_default_group()
+        if not default_pg._get_backend(self.device).supports_splitting:
+            self.skipTest(f"{self.backend_name} does not support split_group")
+        if self.device_type != "cpu":
+            default_pg.bound_device_id = self.device
+        # Initialize the parent communicator before splitting.
+        dist.all_reduce(torch.ones(8, device=self.device))
+
+        # Only the child is created with the check enabled.
+        os.environ["TORCH_DIST_NAN_CHECK"] = "1"
+        try:
+            child = dist.split_group(split_ranks=[list(range(self.world_size))])
+        finally:
+            del os.environ["TORCH_DIST_NAN_CHECK"]
+
+        t = torch.ones(8, device=self.device)
+        dist.all_reduce(t, group=child)
+        t[0] = float("nan")
+        self._assert_nan_detected(t, group=child)
+
+    def test_nccl_env_var(self):
+        if not self.backend_name.startswith("nccl"):
+            self.skipTest("TORCH_NCCL_NAN_CHECK is consumed by the NCCL backends")
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
+        try:
+            self._init_pg()
+        finally:
+            del os.environ["TORCH_NCCL_NAN_CHECK"]
+
+        t = torch.ones(8, device=self.device)
+        dist.all_reduce(t)
+        t[0] = float("nan")
+        self._assert_nan_detected(t)
+
+    def test_set_enable_nan_check(self):
+        self._skip_unless_native_nan_check()
+        self._init_pg()
+        t = torch.ones(8, device=self.device)
+        dist.all_reduce(t)
+
+        dist.get_backend_impl(device=self.device)._set_enable_nan_check(True)
+        t[0] = float("nan")
+        self._assert_nan_detected(t)
+
+    def test_set_enable_nan_check_disables_env_var(self):
+        self._skip_unless_native_nan_check()
+        os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
+        try:
+            self._init_pg()
+        finally:
+            del os.environ["TORCH_NCCL_NAN_CHECK"]
+
+        dist.get_backend_impl(device=self.device)._set_enable_nan_check(False)
+        t = torch.ones(8, device=self.device)
+        t[0] = float("nan")
+        dist.all_reduce(t)
+        torch.cuda.synchronize()
 
 
 instantiate_backend_tests(

@@ -7,6 +7,7 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <nccl.h>
+#include <torch/csrc/distributed/c10d/NanCheck.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
 #include <algorithm>
@@ -558,6 +559,20 @@ void ProcessGroupNCCL::checkTensorsDevice(
     const std::vector<at::Tensor>& tensors) const {
   for (const auto& t : tensors) {
     checkTensorDevice(t);
+  }
+}
+
+// Runs on the current stream, which the operation stream waits on.
+void ProcessGroupNCCL::maybeCheckForNan(const at::Tensor& tensor) const {
+  if (enable_nan_check_) {
+    ::c10d::checkForNan(tensor);
+  }
+}
+
+void ProcessGroupNCCL::maybeCheckForNan(
+    const std::vector<at::Tensor>& tensors) const {
+  for (const auto& t : tensors) {
+    maybeCheckForNan(t);
   }
 }
 
