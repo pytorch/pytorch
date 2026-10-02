@@ -25,28 +25,14 @@ if TYPE_CHECKING:
 def decompose_k_split_bounds(device: torch.device) -> tuple[int, int]:
     """Return (min_output_ctas, max_workspace_bytes) for decompose-K splits.
 
-    Unset config values use per-device defaults tuned on B200 (SM100) and H100.
+    0 means unbounded. Tuned on B200 (SM100) and H100.
     """
-    min_output_ctas = config.triton.decompose_k_min_output_ctas
-    max_workspace_bytes = config.triton.decompose_k_max_workspace_bytes
-    if min_output_ctas is not None and max_workspace_bytes is not None:
-        return min_output_ctas, max_workspace_bytes
-
     device_properties = DeviceProperties.create(device)
-    is_nvidia = device_properties.type == "cuda" and torch.version.hip is None
-    is_sm100_or_newer = is_nvidia and (device_properties.major or 0) >= 10
-    if min_output_ctas is None:
-        if not is_nvidia:
-            min_output_ctas = 0
-        elif is_sm100_or_newer:
-            min_output_ctas = (device_properties.multi_processor_count + 1) // 2
-        else:
-            min_output_ctas = 8
-    if max_workspace_bytes is None:
-        max_workspace_bytes = (
-            8 * 1024 * 1024 if is_nvidia and not is_sm100_or_newer else 0
-        )
-    return min_output_ctas, max_workspace_bytes
+    if device_properties.type != "cuda" or torch.version.hip is not None:
+        return 0, 0
+    if (device_properties.major or 0) >= 10:
+        return (device_properties.multi_processor_count + 1) // 2, 0
+    return 8, 8 * 1024 * 1024
 
 
 def filter_decompose_k_splits(
@@ -122,7 +108,12 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         k_splits = get_k_splits(m, n, k)
         m_is_static = not isinstance(m, sympy.Expr) or bool(m.is_number)
         n_is_static = not isinstance(n, sympy.Expr) or bool(n.is_number)
-        if m_is_static and n_is_static:
+        if (
+            config.triton.decompose_k_filter_splits
+            and config.max_autotune_gemm_search_space != "EXHAUSTIVE"
+            and m_is_static
+            and n_is_static
+        ):
             min_output_ctas, max_workspace_bytes = decompose_k_split_bounds(
                 kernel_inputs.device()
             )

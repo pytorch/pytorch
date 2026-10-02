@@ -2398,22 +2398,11 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
-    # Lower bound on a decompose-K split's estimated output CTAs,
-    # split * ceil(M / 64) * ceil(N / 64). None uses a per-device default: half
-    # the SM count on SM100+, 8 on other NVIDIA GPUs, and 0 elsewhere. 0 disables.
-    decompose_k_min_output_ctas: int | None = (
-        int(os.environ["TORCHINDUCTOR_DECOMPOSE_K_MIN_OUTPUT_CTAS"])
-        if "TORCHINDUCTOR_DECOMPOSE_K_MIN_OUTPUT_CTAS" in os.environ
-        else None
-    )
-
-    # Upper bound on a decompose-K split's FP32 partial workspace,
-    # split * M * N * 4 bytes. None uses a per-device default: 8 MiB on NVIDIA
-    # GPUs before SM100, and 0 elsewhere. 0 disables.
-    decompose_k_max_workspace_bytes: int | None = (
-        int(os.environ["TORCHINDUCTOR_DECOMPOSE_K_MAX_WORKSPACE_BYTES"])
-        if "TORCHINDUCTOR_DECOMPOSE_K_MAX_WORKSPACE_BYTES" in os.environ
-        else None
+    # Drop decompose-K split choices that rarely win: too few estimated output
+    # CTAs or a large FP32 partial workspace, with per-device bounds. Not applied
+    # to the EXHAUSTIVE GEMM search space.
+    decompose_k_filter_splits: bool = (
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_FILTER_SPLITS", "1") == "1"
     )
 
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
