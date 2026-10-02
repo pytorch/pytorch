@@ -1289,6 +1289,31 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
+    def test_blackwell_mm_row_reduction_epilogue_wide_n_unfused_kernels(self):
+        """Nodes reading the finished partials of two row reductions run as two
+        kernels after the template. Both read buffers whose last use is the
+        template's node, which must stay alive until the second has run."""
+        kernels, _ = self._run_reduction(
+            lambda a, b: (
+                (c := (a @ b).float()).mean(1),
+                c * torch.rsqrt((c * c).mean(1, keepdim=True) + 1),
+            ),
+            1000,
+            128,
+            200,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            tol=1e-5,
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertEqual(
+            [k.split("_fused")[0] for k in kernels],
+            ["triton_tem", "triton_poi", "triton_poi"],
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
     @parametrize("op", ("sum", "gated", "amax_sum", "mean", "sum_and_out"))
     # At 4096x128 the split column reduction's group equals the output's; at
     # 65536 the two reductions form a mix-order reduction when unfused.

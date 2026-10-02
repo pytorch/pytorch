@@ -2035,11 +2035,25 @@ class TritonTemplateKernel(TritonKernel):
         # Consecutive nodes over the same ranges run as one kernel.
         scheduler = V.graph.scheduler
         backend = scheduler.get_backend(self.output_node.get_device())
-        for _, group in itertools.groupby(self._unfused_epilogues, lambda n: n.group):
-            nodes = list(group)
-            backend.codegen_node(
-                nodes[0] if len(nodes) == 1 else FusedSchedulerNode(scheduler, nodes)
-            )
+        # The buffers the template's fused nodes last read are already queued
+        # for freeing, and each kernel below frees the queue when it finishes,
+        # so hold them until the last one has run.
+        to_free, scheduler.buffer_names_to_free = (
+            scheduler.buffer_names_to_free,
+            OrderedSet(),
+        )
+        try:
+            for _, group in itertools.groupby(
+                self._unfused_epilogues, lambda n: n.group
+            ):
+                nodes = list(group)
+                backend.codegen_node(
+                    nodes[0]
+                    if len(nodes) == 1
+                    else FusedSchedulerNode(scheduler, nodes)
+                )
+        finally:
+            scheduler.buffer_names_to_free |= to_free
 
     def get_unfused_epilogues(self) -> list[Any]:
         return self._unfused_epilogues
