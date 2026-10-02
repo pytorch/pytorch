@@ -4289,6 +4289,43 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @skip_on_cpu
+    @skip_on_mps
+    @skip_on_xpu
+    def test_template_fp_fusion_matches_inductor(self, device):
+        q, k, v = (
+            torch.randn(1, 2, 512, 64, device=device, dtype=torch.float32)
+            for _ in range(3)
+        )
+        block_mask = create_block_mask(
+            lambda batch, head, query_index, key_index: query_index >= key_index,
+            1,
+            2,
+            512,
+            512,
+            device=device,
+        )
+        # Unlike a direct Triton JIT call, Inductor-generated templates must
+        # not inherit Triton's version-dependent floating-point fusion default.
+        for emulate_precision_casts in (False, True):
+            with self.subTest(emulate_precision_casts=emulate_precision_casts):
+                with config.patch(emulate_precision_casts=emulate_precision_casts):
+                    compiled = torch.compile(
+                        functools.partial(
+                            flex_attention, kernel_options={"BACKEND": "TRITON"}
+                        )
+                    )
+                    _, code = run_and_get_code(
+                        compiled, q, k, v, block_mask=block_mask
+                    )
+
+                FileCheck().check_regex(
+                    r"triton_tem_fused_flex_attention_\d+ = async_compile.triton"
+                ).check_regex(
+                    rf"triton_meta=.*'enable_fp_fusion': {not emulate_precision_casts}"
+                ).run(code[0])
+
+    @supported_platform
+    @skip_on_cpu
     @skip_on_mps  # asserts "triton_tem_fused" in generated code
     def test_epilogue_fused(self, device):
         # set so that metrics appear
