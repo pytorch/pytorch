@@ -190,12 +190,6 @@ static_assert(
 
 namespace c10d {
 
-// Select a stream compatible with the current capture. Idle pool streams join
-// the capture before being returned; callers must still synchronize each op.
-TORCH_API at::cuda::CUDAStream getNCCLStreamForCapture(
-    const at::cuda::CUDAStream& defaultStream,
-    at::cuda::CUDAEvent& event);
-
 // NCCL type typing
 static std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
     {at::kChar, ncclInt8},

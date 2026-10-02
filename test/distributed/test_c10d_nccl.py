@@ -82,7 +82,6 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     skipIfRocmArch,
     TEST_CUDA,
-    TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     TEST_WITH_DEV_DBG_ASAN,
     TEST_WITH_ROCM,
     TestCase,
@@ -333,84 +332,6 @@ class ProcessGroupNCCLInitTest(MultiProcessTestCase):
         x = torch.empty(1, device=self.device)
         c10d.all_reduce(x)
         os.environ["TORCH_NCCL_RANKS_PER_ROOT"] = "0"
-
-
-@instantiate_parametrized_tests
-@unittest.skipIf(
-    not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
-    "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
-)
-@unittest.skipIf(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
-class ProcessGroupNCCLCaptureStreamTest(MultiProcessTestCase):
-    @property
-    def world_size(self):
-        return 2
-
-    def setUp(self):
-        super().setUp()
-        with mock.patch.dict(os.environ, {"NCCL_GRAPH_MIXING_SUPPORT": "0"}):
-            self._spawn_processes()
-
-    @requires_nccl()
-    @parametrize("backend", ["nccl-legacy", "nccl2"])
-    @parametrize("high_priority_stream", [False, True])
-    def test_cudagraph_stream_outlives_process_group(
-        self, backend, high_priority_stream
-    ):
-        self.assertEqual(os.environ["NCCL_GRAPH_MIXING_SUPPORT"], "0")
-        torch.cuda.set_device(self.rank)
-        store = c10d.FileStore(self.file_name, self.world_size)
-        for generation in range(2):
-            opts = c10d.ProcessGroupNCCL.Options()
-            opts.is_high_priority_stream = high_priority_stream
-            c10d.init_process_group(
-                backend,
-                store=c10d.PrefixStore(str(generation), store),
-                rank=self.rank,
-                world_size=self.world_size,
-                timeout=timedelta(seconds=60),
-                pg_options=opts,
-            )
-            send = torch.full((4,), self.rank + 1.0, device=self.rank)
-            recv = torch.empty_like(send)
-            parent_input = torch.ones_like(send)
-            pred = torch.tensor(True, device=self.rank)
-
-            def exchange(send, recv):
-                ops = [
-                    c10d.P2POp(c10d.isend, send, 1 - self.rank),
-                    c10d.P2POp(c10d.irecv, recv, 1 - self.rank),
-                ]
-                for work in c10d.batch_isend_irecv(ops):
-                    work.wait()
-
-            c10d.all_reduce(parent_input, async_op=True).wait()
-            exchange(send, recv)
-            torch.cuda.synchronize()
-            stream = torch.cuda.Stream(device=self.rank)
-            stream.wait_stream(torch.cuda.current_stream())
-            graph = torch.cuda.CUDAGraph(keep_graph=True)
-            try:
-                with torch.cuda.graph(graph, stream=stream):
-                    c10d.all_reduce(parent_input, async_op=True).wait()
-                    graph.begin_capture_to_if_node(pred)
-                    try:
-                        exchange(send, recv)
-                    finally:
-                        graph.end_capture_to_conditional_node()
-                graph.instantiate()
-                for offset in (0, 2, 4):
-                    send.fill_(self.rank + 1 + offset)
-                    graph.replay()
-                    torch.cuda.synchronize()
-                    expected = torch.full_like(recv, 2 - self.rank + offset)
-                    self.assertEqual(recv, expected)
-            finally:
-                graph.reset()
-                c10d.destroy_process_group()
-            # P2P recordStream references must remain valid after PG destruction.
-            del send, recv
-            torch.cuda.synchronize()
 
 
 class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
