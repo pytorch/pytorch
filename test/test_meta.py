@@ -1681,18 +1681,6 @@ class TestMetaCudaRef(_TestMetaBase):
 
         self._run_dispatch_meta_test(device, dtype, op, symbolic_meta=True, inplace=False)
 
-    # opinfo test is using aten.fill_, it's not testing aten.fill
-    def test_fill_stride(self, device):
-        to_meta = MetaConverter()
-        sample_args = [torch.rand(2, 2, 2, 2), 1.0]
-
-        for args in get_strided_args(sample_args):
-            meta_args = to_meta(args)
-            ref_out = torch.ops.aten.fill(*args)
-            meta_out = torch.ops.aten.fill(*meta_args)
-            self.assertEqual(ref_out.size(), meta_out.size())
-            self.assertEqual(ref_out.stride(), meta_out.stride())
-
     def _assert_fft_meta_stride_matches_eager(self, op, *args):
         to_meta = MetaConverter()
         meta_args = tree_map_only(torch.Tensor, to_meta, args)
@@ -1917,6 +1905,18 @@ class TestMetaCore(TestCase):
         # aten.fill returns a new tensor
         r2 = torch.ops.aten.fill(inps, 1.0)
         self.assertNotEqual(id(inps), id(r2))
+
+    # opinfo test is using aten.fill_, it's not testing aten.fill
+    def test_fill_stride(self):
+        to_meta = MetaConverter()
+        sample_args = [torch.rand(2, 2, 2, 2), 1.0]
+
+        for args in get_strided_args(sample_args):
+            meta_args = to_meta(args)
+            ref_out = torch.ops.aten.fill(*args)
+            meta_out = torch.ops.aten.fill(*meta_args)
+            self.assertEqual(ref_out.size(), meta_out.size())
+            self.assertEqual(ref_out.stride(), meta_out.stride())
 
     def test_quantized_embedding_bag(self):
         tab_shape = [8, 128]
