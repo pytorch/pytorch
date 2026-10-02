@@ -606,15 +606,16 @@ bool try_launch_fused_panel_register_resident(
   dim3 grid(batch_count);
   auto stream = at::cuda::getCurrentCUDAStream();
 
+  // avoiding (potential) UB with blocks less than 32
+  int padded_nrows = std::max(32, nrows);
   if (compute_pivots) {
-    int padded_nrows = std::max(32, nrows);
     size_t shmem = nb * sizeof(scalar_t) + padded_nrows * sizeof(real_t) + padded_nrows * sizeof(int) + nb * sizeof(int);
     batched_panel_register_resident_fused_kernel<<<grid, padded_nrows, shmem, stream>>>(
       dA, matrix_stride, lda, m, col_start, nb, ipiv_stride, dipiv, dinfo
     );
   } else {
     size_t shmem = nb * sizeof(scalar_t);
-    batched_panel_register_resident_nopiv_fused_kernel<<<grid, nrows, shmem, stream>>>(
+    batched_panel_register_resident_nopiv_fused_kernel<<<grid, padded_nrows, shmem, stream>>>(
       dA, matrix_stride, lda, m, col_start, nb, dinfo
     );
   }
@@ -749,6 +750,12 @@ void lu_batched_panel_recursive(
       return;
     }
     // Fallback: nrows > 1024 or nb is larger than what the register-resident kernel requires
+    TORCH_CHECK(
+      compute_pivots && (nrows > 1024 || nb > MAX_RECNB),
+      "nrows=", nrows, " > 1024 or ",
+      "nb=", nb, " > ", MAX_RECNB,
+      " is not supported for the nopiv LU kernel"
+    );
     auto grid = dim3(1, 1, batch_count);
     if ((m - col_start) > tuning.panel_threshold) {
       batched_panel_colserial_fused_kernel<scalar_t, 1024><<<grid, 1024, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -826,6 +833,7 @@ void lu_batched_panel_recursive(
 } // anonymous namespace
 
 void lu_batched_blas3_kernel(const Tensor& input, const Tensor& pivots, const Tensor& infos, bool compute_pivots) {
+  // NOTE: while tuning is done for the pivoted case, it performs well even for the nopiv variant.
   const auto tuning = get_tuning();
   int batch_count = cuda_int_cast(batchCount(input), "batchCount");
   int m = cuda_int_cast(input.size(-2), "input.size(-2)");

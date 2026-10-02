@@ -96,9 +96,10 @@ function build_cpython {
         py_suffix=${py_suffix::-1}
         py_folder=$py_suffix
     fi
-    # Only b1 is available now
+    # 3.15.0 has no final release yet; build the latest release candidate
+    # (the ABI is frozen from rc1 on).
     if [ "$py_suffix" == "3.15.0" ]; then
-        py_suffix="3.15.0b1"
+        py_suffix="3.15.0rc2"
     fi
     retry wget -q $PYTHON_DOWNLOAD_URL/$py_folder/Python-$py_suffix.tgz -O Python-$py_ver.tgz
     do_cpython_build $py_ver Python-$py_suffix
