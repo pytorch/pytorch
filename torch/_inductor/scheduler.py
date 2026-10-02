@@ -49,7 +49,7 @@ from torch._inductor.ir import TritonTemplateCallerBase
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch._inductor.stream_utils import get_stream_name
 from torch.fx.experimental.symbolic_shapes import free_symbols
-from torch.utils._sympy.functions import FloorDiv, Identity
+from torch.utils._sympy.functions import FloorDiv, Identity, Mod, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._triton import has_triton
 
@@ -110,181 +110,6 @@ def _real_dep_names(deps: OrderedSet[Dep]) -> OrderedSet[str]:
     """Names of real reads/writes, excluding WeakDep (ordering-only deps that
     do not actually read or write the buffer)."""
     return OrderedSet(dep.name for dep in deps if not isinstance(dep, WeakDep))
-
-
-@dataclasses.dataclass(frozen=True)
-class TranslationProof:
-    """Facts proved for one or more dense staged access relations."""
-
-    matched_dependencies: tuple[MemoryDepMatch, ...]
-    compatible_extents: tuple[tuple[sympy.Expr, sympy.Expr], ...]
-    translation: tuple[sympy.Expr, ...]
-
-
-def affine_proof_strides(
-    dep: MemoryDep, context: SizeVarAllocator
-) -> tuple[sympy.Expr, ...] | None:
-    """Extract row-major affine strides from a memory dependency.
-
-    Args:
-        dep: Access dependency to analyze.
-        context: Shape facts used to simplify and validate the access.
-
-    Returns:
-        The affine strides, or None if the access is not affine.
-    """
-    zero = dict.fromkeys(dep.var_names, sympy.S.Zero)
-    offset = sympy_subs(dep.index, zero)
-    strides = []
-    for var in dep.var_names:
-        one = dict(zero)
-        one[var] = sympy.S.One
-        strides.append(context.simplify(sympy_subs(dep.index, one) - offset))
-    reconstructed = offset + sum(
-        (stride * var for stride, var in zip(strides, dep.var_names)),
-        sympy.S.Zero,
-    )
-    if not context.statically_known_equals(reconstructed, dep.index):
-        return None
-    return tuple(strides)
-
-
-def prove_translation_pair(
-    producer: MemoryDep,
-    consumer: MemoryDep,
-    context: SizeVarAllocator,
-) -> TranslationProof | None:
-    """Prove a dense translation relation for two accesses.
-
-    Args:
-        producer: Source access.
-        consumer: Consumer access.
-        context: Shape facts used during the proof.
-
-    Returns:
-        The proof, or None if the relation is invalid.
-    """
-    if producer.name != consumer.name:
-        return None
-    if producer.mode is not None or consumer.mode is not None:
-        return None
-    if producer.is_indirect() or consumer.is_indirect():
-        return None
-    if producer.num_vars == 0 or producer.num_vars != consumer.num_vars:
-        return None
-
-    producer_strides = affine_proof_strides(producer, context)
-    consumer_strides = affine_proof_strides(consumer, context)
-    if producer_strides is None or consumer_strides is None:
-        return None
-
-    # Dense row-major strides: each axis steps over all trailing dimensions.
-    # The innermost axis therefore has stride 1.
-    expected_strides = tuple(
-        sympy_product(producer.size[axis + 1 :]) for axis in range(producer.num_vars)
-    )
-    if any(
-        not context.statically_known_equals(coefficient, expected)
-        for coefficient, expected in zip(producer_strides, expected_strides)
-    ):
-        return None
-    if any(
-        not context.statically_known_equals(producer_coefficient, consumer_coefficient)
-        for producer_coefficient, consumer_coefficient in zip(
-            producer_strides, consumer_strides
-        )
-    ):
-        return None
-    if any(
-        not context.statically_known_geq(producer_extent, consumer_extent)
-        for producer_extent, consumer_extent in zip(producer.size, consumer.size)
-    ):
-        return None
-
-    delta = context.simplify(consumer.get_offset() - producer.get_offset())
-    if not context.statically_known_geq(delta, sympy.S.Zero):
-        return None
-
-    remaining = delta
-    translation_reversed: list[sympy.Expr] = []
-    for axis in reversed(range(producer.num_vars)):
-        stride = producer_strides[axis]
-        if not context.statically_known_geq(stride, sympy.S.One):
-            return None
-        remainder = context.simplify(sympy.Mod(remaining, stride))
-        if not context.statically_known_equals(remainder, sympy.S.Zero):
-            return None
-        quotient = context.simplify(FloorDiv(remaining, stride))
-        digit = context.simplify(sympy.Mod(quotient, producer.size[axis]))
-        if not context.statically_known_geq(digit, sympy.S.Zero):
-            return None
-        if not context.statically_known_leq(
-            consumer.size[axis] + digit, producer.size[axis]
-        ):
-            return None
-        translation_reversed.append(digit)
-        remaining = context.simplify(remaining - digit * stride)
-
-    if not context.statically_known_equals(remaining, sympy.S.Zero):
-        return None
-    translation = tuple(reversed(translation_reversed))
-    translated_offset = producer.get_offset() + sum(
-        (stride * offset for stride, offset in zip(producer_strides, translation)),
-        sympy.S.Zero,
-    )
-    if not context.statically_known_equals(translated_offset, consumer.get_offset()):
-        return None
-
-    return TranslationProof(
-        matched_dependencies=(MemoryDepMatch(producer, consumer),),
-        compatible_extents=tuple(zip(producer.size, consumer.size)),
-        translation=translation,
-    )
-
-
-def prove_translation(
-    source_accesses: MemoryDep | typing.Sequence[MemoryDep],
-    consumer_access: MemoryDep,
-    *,
-    context: SizeVarAllocator,
-) -> TranslationProof | None:
-    """Prove a shared dense translation relation.
-
-    Args:
-        source_accesses: Source accesses to compare with the consumer.
-        consumer_access: Consumer access.
-        context: Shape facts used during the proof.
-
-    Returns:
-        The proof, or None if the accesses do not share one relation.
-    """
-    sources = (
-        (source_accesses,)
-        if isinstance(source_accesses, MemoryDep)
-        else source_accesses
-    )
-    if not sources:
-        return None
-
-    raw_proofs = tuple(
-        prove_translation_pair(source, consumer_access, context) for source in sources
-    )
-    if any(proof is None for proof in raw_proofs):
-        return None
-    proofs = typing.cast(tuple[TranslationProof, ...], raw_proofs)
-    first = proofs[0]
-    if any(
-        proof.translation != first.translation
-        or proof.compatible_extents != first.compatible_extents
-        for proof in proofs[1:]
-    ):
-        return None
-    return dataclasses.replace(
-        first,
-        matched_dependencies=tuple(
-            match for proof in proofs for match in proof.matched_dependencies
-        ),
-    )
 
 
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
@@ -1264,7 +1089,6 @@ class NestedReduction:
         """
         if V.graph.sizevars.statically_known_equals(node_numel, 0):
             return None
-
         # TODO: Generalize once other rates have end-to-end legality and codegen coverage.
         for rate in cls.SUB_PARENT_RATES:
             factor, output_lanes = rate
@@ -2615,12 +2439,160 @@ class NestedReductionStage:
 
 
 @dataclasses.dataclass(frozen=True)
+class MemoryDepMatch:
+    """An exact producer write and consumer read relation."""
+
+    write: MemoryDep
+    read: MemoryDep
+
+
+@dataclasses.dataclass(frozen=True)
+class TranslationProof:
+    """Facts proved for one or more dense staged access relations."""
+
+    matched_dependencies: tuple[MemoryDepMatch, ...]
+    compatible_extents: tuple[tuple[sympy.Expr, sympy.Expr], ...]
+    translation: tuple[sympy.Expr, ...]
+
+
+def _affine_proof_strides(
+    dep: MemoryDep, sizevars: SizeVarAllocator
+) -> tuple[sympy.Expr, ...] | None:
+    """Extract affine strides, treating singleton coordinates as zero.
+
+    Args:
+        dep: Access dependency to analyze.
+        sizevars: Shape facts used to simplify and validate the access.
+
+    Returns:
+        The affine strides, or None if the access is not affine.
+    """
+    singleton_vars = {
+        var: sympy.S.Zero
+        for var, size in zip(dep.var_names, dep.size)
+        if sizevars.statically_known_equals(size, 1)
+    }
+    index = sympy_subs(dep.index, singleton_vars)
+    zero = dict.fromkeys(dep.var_names, sympy.S.Zero)
+    offset = sympy_subs(index, zero)
+    strides = []
+    for var in dep.var_names:
+        one = dict(zero)
+        one[var] = sympy.S.One
+        strides.append(sizevars.simplify(sympy_subs(index, one) - offset))
+    reconstructed = offset + sum(
+        (stride * var for stride, var in zip(strides, dep.var_names)),
+        sympy.S.Zero,
+    )
+    if not sizevars.statically_known_equals(reconstructed, index):
+        return None
+    return tuple(strides)
+
+
+def _prove_translation_pair(
+    producer: MemoryDep,
+    consumer: MemoryDep,
+    sizevars: SizeVarAllocator,
+) -> TranslationProof | None:
+    """Prove a dense translation relation for two accesses.
+
+    Args:
+        producer: Source access.
+        consumer: Consumer access.
+        sizevars: Shape facts used during the proof.
+
+    Returns:
+        The proof, or None if the relation is invalid.
+    """
+    if producer.name != consumer.name:
+        return None
+    if producer.mode is not None or consumer.mode is not None:
+        return None
+    if producer.is_indirect() or consumer.is_indirect():
+        return None
+    if producer.num_vars == 0 or producer.num_vars != consumer.num_vars:
+        return None
+
+    producer_strides = _affine_proof_strides(producer, sizevars)
+    consumer_strides = _affine_proof_strides(consumer, sizevars)
+    if producer_strides is None or consumer_strides is None:
+        return None
+
+    # Dense row-major strides: each axis steps over all trailing dimensions.
+    # The innermost axis therefore has stride 1.
+    expected_strides = tuple(
+        sympy_product(producer.size[axis + 1 :]) for axis in range(producer.num_vars)
+    )
+    if any(
+        not sizevars.statically_known_equals(size, 1)
+        and not sizevars.statically_known_equals(coefficient, expected)
+        for size, coefficient, expected in zip(
+            producer.size, producer_strides, expected_strides
+        )
+    ):
+        return None
+    if any(
+        not sizevars.statically_known_equals(size, 1)
+        and not sizevars.statically_known_equals(expected, coefficient)
+        for size, expected, coefficient in zip(
+            consumer.size, expected_strides, consumer_strides
+        )
+    ):
+        return None
+    if any(
+        not sizevars.statically_known_geq(producer_extent, consumer_extent)
+        for producer_extent, consumer_extent in zip(producer.size, consumer.size)
+    ):
+        return None
+
+    delta = sizevars.simplify(consumer.get_offset() - producer.get_offset())
+    if not sizevars.statically_known_geq(delta, sympy.S.Zero):
+        return None
+
+    remaining = delta
+    translation_reversed: list[sympy.Expr] = []
+    for axis in reversed(range(producer.num_vars)):
+        stride = expected_strides[axis]
+        if not sizevars.statically_known_geq(stride, sympy.S.One):
+            return None
+        if not sizevars.statically_known_multiple_of(remaining, stride):
+            return None
+        period = stride * producer.size[axis]
+        positive = sizevars.statically_known_geq(period, 1)
+        if positive and sizevars.statically_known_equals(Mod(remaining, period), 0):
+            digit = sympy.S.Zero
+        else:
+            digit = sizevars.simplify_with_ranges(
+                ModularIndexing(remaining, stride, producer.size[axis]), {}
+            )
+        if not sizevars.statically_known_geq(digit, sympy.S.Zero):
+            return None
+        if not sizevars.statically_known_leq(
+            consumer.size[axis] + digit, producer.size[axis]
+        ):
+            return None
+        translation_reversed.append(digit)
+        remaining = sizevars.simplify(remaining - digit * stride)
+
+    if not sizevars.statically_known_equals(remaining, sympy.S.Zero):
+        return None
+    translation = tuple(reversed(translation_reversed))
+
+    return TranslationProof(
+        matched_dependencies=(MemoryDepMatch(producer, consumer),),
+        compatible_extents=tuple(zip(producer.size, consumer.size)),
+        translation=translation,
+    )
+
+
+@dataclasses.dataclass(frozen=True)
 class SubParentAccessRelation:
     """A source-to-consumer relation used for sub-parent register forwarding.
 
     ``source_accesses`` are raw-frame aliases for the same logical source, such as
-    flat and grouped reads of one input. Fusion proves each consumer against these
-    accesses; codegen validates their per-name replay consequences. ``parent_lane``
+    flat and grouped reads of one input. Translation callers normalize these
+    accesses into a common frame before invoking the pure proof; codegen validates
+    their per-name replay consequences. ``parent_lane``
     selects one part of a parent-width value; without a lane, codegen derives direct
     use or reduced-width broadcast from the live value's shape. Sharing a buffer
     name alone does not establish this relation.
@@ -2635,7 +2607,6 @@ class SubParentAccessRelation:
     consumer_access: MemoryDep
     parent_lane: int | None
     requires_live_source: bool
-    translation: tuple[sympy.Expr, ...] = ()
 
     def __post_init__(self) -> None:
         """Validate that all accesses refer to one nonempty source relation."""
@@ -2644,33 +2615,55 @@ class SubParentAccessRelation:
         if not self.source_accesses or len(names) != 1:
             raise AssertionError("sub-parent accesses must share one buffer name")
 
-    @classmethod
+    @staticmethod
     def prove_translation(
-        cls,
         source_accesses: MemoryDep | typing.Sequence[MemoryDep],
         consumer_access: MemoryDep,
         *,
         sizevars: SizeVarAllocator,
     ) -> TranslationProof | None:
-        """Prove a dense translation relation.
+        """Prove a dense translation relation in a common coordinate frame.
+
+        Callers must normalize differently shaped accesses into a common coordinate
+        frame first. Every source must prove the same translation and extents;
+        sharing a buffer name or flat offset alone is insufficient.
 
         Args:
-            source_accesses: Source accesses to compare with the consumer.
-            consumer_access: Consumer access.
+            source_accesses: Equivalent source accesses normalized into one frame.
+            consumer_access: Consumer access in the same frame.
             sizevars: Shape facts used during the proof.
 
         Returns:
             The proof, or None if the relation is invalid.
         """
-        return prove_translation(source_accesses, consumer_access, context=sizevars)
+        sources = (
+            (source_accesses,)
+            if isinstance(source_accesses, MemoryDep)
+            else source_accesses
+        )
+        if not sources:
+            return None
 
-
-@dataclasses.dataclass(frozen=True)
-class MemoryDepMatch:
-    """An exact producer write and consumer read relation."""
-
-    write: MemoryDep
-    read: MemoryDep
+        raw_proofs = tuple(
+            _prove_translation_pair(source, consumer_access, sizevars)
+            for source in sources
+        )
+        if any(proof is None for proof in raw_proofs):
+            return None
+        proofs = typing.cast(tuple[TranslationProof, ...], raw_proofs)
+        first = proofs[0]
+        if any(
+            proof.translation != first.translation
+            or proof.compatible_extents != first.compatible_extents
+            for proof in proofs[1:]
+        ):
+            return None
+        return dataclasses.replace(
+            first,
+            matched_dependencies=tuple(
+                match for proof in proofs for match in proof.matched_dependencies
+            ),
+        )
 
 
 @dataclasses.dataclass(frozen=True)
