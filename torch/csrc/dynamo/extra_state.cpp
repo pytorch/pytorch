@@ -218,6 +218,16 @@ static CacheEntry* lookup_in_list(
                       cache_entry, /*is_skip_guard_eval_unsafe=*/true) ||
               torch::dynamo::run_root_guard_manager(
                       cache_entry.diff_guard_root_mgr, f_locals);
+        } else if (cache_entry.lease_guard_root_mgr != nullptr) {
+          valid = torch::dynamo::run_root_guard_manager(
+              cache_entry.lease_guard_root_mgr, f_locals);
+          if (valid) {
+            cache_entry.lease_guard_hits++;
+          } else {
+            cache_entry.lease_guard_misses++;
+            valid = torch::dynamo::run_root_guard_manager(
+                cache_entry.root_mgr, f_locals);
+          }
         } else {
           valid = torch::dynamo::run_root_guard_manager(
               cache_entry.root_mgr, f_locals);

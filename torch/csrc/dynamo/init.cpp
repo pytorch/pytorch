@@ -469,6 +469,8 @@ void initDynamoBindings(PyObject* torch) {
       .def_readonly("compile_id", &CacheEntry::compile_id)
       .def_readonly("trace_annotation", &CacheEntry::trace_annotation)
       .def_readonly("backend", &CacheEntry::backend)
+      .def_readonly("lease_guard_hits", &CacheEntry::lease_guard_hits)
+      .def_readonly("lease_guard_misses", &CacheEntry::lease_guard_misses)
       .def_readonly(
           "isolate_recompiles_id", &CacheEntry::_isolate_recompiles_id)
       .def(

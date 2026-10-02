@@ -50,6 +50,9 @@ class GuardFilterEntry:
 
 
 class GuardFn(Protocol):
+    root: object
+    diff_guard_root: object | None
+    lease_guard_root: object | None
     closure_vars: dict[str, object]
     args: list[str]
     code_parts: list[str]

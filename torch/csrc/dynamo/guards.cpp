@@ -3522,6 +3522,34 @@ class GuardManager {
     return _is_tag_safe_root;
   }
 
+  void set_versioned_guard_lease_source(GuardManager* source) {
+    TORCH_CHECK(
+        source != nullptr && source->is_tag_safe_root(),
+        "Versioned guard lease source must be a tag-safe root");
+    _versioned_guard_lease_source = source;
+    _disable_dict_tag_matching = true;
+    std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard =
+        get_no_tensor_aliasing_guard(source->get_root());
+    if (no_tensor_aliasing_guard != nullptr) {
+      add_relational_guard_resetter_to_cloned_root(
+          _root, std::move(no_tensor_aliasing_guard));
+    }
+  }
+
+  bool check_versioned_guard_lease_nolock(PyObject* value) {
+    if (_disable_dict_tag_matching || !_is_tag_safe_root) {
+      return false;
+    }
+    auto it = _dict_pointers.find(value);
+    if (it == _dict_pointers.end() || !check_dict_pointer_tags(value) ||
+        !check_tensor_metadata_fast(value)) {
+      return false;
+    }
+    std::optional<bool> no_tensor_aliasing_result =
+        check_no_tensor_aliasing_guards_fast(value);
+    return no_tensor_aliasing_result.value_or(false);
+  }
+
  public:
   // tag safe optimizations
   void stash_dict_pointers(
@@ -3733,6 +3761,11 @@ class GuardManager {
   }
 
   virtual bool check_nopybind(PyObject* value) {
+    if (_versioned_guard_lease_source != nullptr) {
+      return _versioned_guard_lease_source->check_versioned_guard_lease_nolock(
+          value);
+    }
+
     // -----------------------------------------------------------------------------
     // Recursive Dict‑Tag Matching
     // -----------------------------------------------------------------------------
@@ -4091,6 +4124,17 @@ class GuardManager {
       PyObject* value) { // borrowed ref
     int num_guards_executed = 0;
 
+    if (_versioned_guard_lease_source != nullptr) {
+      bool result =
+          _versioned_guard_lease_source->check_versioned_guard_lease_nolock(
+              value);
+      if (result) {
+        return GuardDebugInfo(true, 1);
+      }
+      return GuardDebugInfo(
+          false, "VERSIONED_GUARD_LEASE(" + get_source() + ")", 1);
+    }
+
     const GuardDebugInfo& debug_info =
         check_leaf_guards_verbose_nopybind(value, num_guards_executed);
     if (!debug_info.result) {
@@ -4277,6 +4321,8 @@ class GuardManager {
 
   // 3.12+ related helper
   bool _dict_callback_installed = false;
+
+  GuardManager* _versioned_guard_lease_source = nullptr;
 
  protected:
   // weakref to the type of guarded value
@@ -8008,6 +8054,9 @@ PyObject* torch_c_dynamo_guards_init() {
       .def("mark_tag_safe_root", &GuardManager::mark_tag_safe_root)
       .def("is_tag_safe", &GuardManager::is_tag_safe)
       .def("is_tag_safe_root", &GuardManager::is_tag_safe_root)
+      .def(
+          "set_versioned_guard_lease_source",
+          &GuardManager::set_versioned_guard_lease_source)
       .def(
           "is_recursive_dict_tag_matching_disabled",
           &GuardManager::is_recursive_dict_tag_matching_disabled)

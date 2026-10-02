@@ -496,6 +496,11 @@ assume_dunder_attributes_remain_unchanged = True
 # tags to avoid full guard execution.
 use_recursive_dict_tags_for_guards = False
 
+# Reuse guards under recursively tag-safe nn.Module roots while their dictionary
+# versions match. Tensor metadata and guards outside those roots still run on
+# every invocation. A lease miss falls back to the complete guard tree.
+use_versioned_guard_lease = False
+
 # Maximum number of objects for which we check dict pointers tags. This is
 # useful for regional compilation.
 max_saved_pointers_for_recursive_dict_tags_check = 256

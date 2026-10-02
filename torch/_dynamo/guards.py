@@ -318,6 +318,7 @@ class GuardManagerWrapper:
             self.root.set_local_state(local_state)
 
         self.diff_guard_root: RootGuardManager | None = None
+        self.lease_guard_root: RootGuardManager | None = None
         self.closure_vars: dict[str, Any] | None = None
         self.args: list[str] | None = None
         self.code_parts: list[str] = []
@@ -332,6 +333,7 @@ class GuardManagerWrapper:
         self.printed_relational_guards: set[RelationalGuard] = set()
 
         self.diff_guard_sources: OrderedSet[str] = OrderedSet()
+        self.tag_safe_roots: list[GuardManager] = []
 
     @contextmanager
     def _preserve_printed_relational_guards(self) -> Generator[None, None, None]:
@@ -395,10 +397,14 @@ class GuardManagerWrapper:
         return self.diff_guard_sources
 
     def finalize(self) -> None:
-        if config.use_recursive_dict_tags_for_guards and justknobs_check(
-            "pytorch/compiler:use_recursive_dict_tags_for_guards"
-        ):
+        use_tag_safety = (
+            config.use_recursive_dict_tags_for_guards
+            or config.use_versioned_guard_lease
+        ) and justknobs_check("pytorch/compiler:use_recursive_dict_tags_for_guards")
+        if use_tag_safety:
             self.find_tag_safe_roots()
+        if config.use_versioned_guard_lease and self.tag_safe_roots:
+            self.prepare_versioned_guard_lease()
         self.prepare_diff_guard_manager()
 
     def prepare_diff_guard_manager(self) -> None:
@@ -669,6 +675,51 @@ class GuardManagerWrapper:
         for node in tag_safe_roots:
             if issubclass(node.get_type_of_guarded_value(), torch.nn.Module):
                 node.mark_tag_safe_root()
+                self.tag_safe_roots.append(node)
+
+    def prepare_versioned_guard_lease(self) -> None:
+        chosen_sources: OrderedSet[str] = OrderedSet()
+
+        def children(node: GuardManager) -> list[GuardManager]:
+            if isinstance(node, DictGuardManager):
+                result = []
+                for key_mgr, value_mgr in node.get_key_value_managers().values():
+                    if key_mgr is not None:
+                        result.append(key_mgr)
+                    if value_mgr is not None:
+                        result.append(value_mgr)
+                return result
+            return list(node.get_child_managers())
+
+        def collect(node: GuardManager, leased: bool) -> bool:
+            child_is_leased = leased or node.is_tag_safe_root()
+            keep = not leased
+            for child in children(node):
+                keep |= collect(child, child_is_leased)
+            if keep:
+                chosen_sources.add(node.get_source())
+            return keep
+
+        collect(self.root, False)
+        lease_root = self.clone_with_chosen_sources(chosen_sources)
+
+        cloned_by_source: dict[str, GuardManager] = {}
+
+        def index(node: GuardManager) -> None:
+            cloned_by_source[node.get_source()] = node
+            for child in children(node):
+                index(child)
+
+        index(lease_root)
+        for tag_safe_root in self.tag_safe_roots:
+            cloned = cloned_by_source.get(tag_safe_root.get_source())
+            if cloned is None:
+                raise AssertionError(
+                    f"Missing leased root for {tag_safe_root.get_source()}"
+                )
+            cloned.set_versioned_guard_lease_source(tag_safe_root)
+
+        self.lease_guard_root = lease_root
 
     def populate_diff_guard_manager(self) -> None:
         self.diff_guard_root = self.clone_with_chosen_sources(self.diff_guard_sources)

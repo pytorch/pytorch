@@ -52,6 +52,10 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   void* root_mgr{nullptr};
   // diff guard root guard manager if exists
   void* diff_guard_root_mgr{nullptr};
+  // versioned guard lease root manager if exists
+  void* lease_guard_root_mgr{nullptr};
+  uint64_t lease_guard_hits{0};
+  uint64_t lease_guard_misses{0};
   // backend used to create this cache entry
   py::object backend;
   // Reference to owning ExtraState
