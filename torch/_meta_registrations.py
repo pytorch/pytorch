@@ -9376,6 +9376,7 @@ cpp_meta_supports_symint_ops = {
     aten.sub.Tensor,
     aten.mul.Tensor,
     aten.div.Tensor,
+    aten.add_.Tensor,
 }
 
 
