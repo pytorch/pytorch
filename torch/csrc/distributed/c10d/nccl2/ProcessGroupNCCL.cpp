@@ -696,6 +696,7 @@ void ProcessGroupNCCL::revokeNcclComm() {
   // observe the same timeout and attempt a revoke. Run the teardown (abort
   // hooks, memory hook detach, commRevoke) at most once per communicator
   // generation. revoked_ is reset on reconfigure.
+  std::lock_guard revokeLock(revoke_mutex_);
   if (revoked_.exchange(true)) {
     return;
   }
