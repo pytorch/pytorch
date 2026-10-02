@@ -157,7 +157,7 @@ c10::intrusive_ptr<at::ivalue::Future> PythonEngine::execute_with_graph_task(
 }
 } // namespace torch::autograd::python
 
-static Edge parseGradientEdge(PyObject* obj, int64_t index) {
+static Edge parseGradientEdge(PyObject* obj) {
   PyObject* grad_fn = PyTuple_GetItem(obj, 0);
   auto output_nr = THPUtils_unpackLong(PyTuple_GetItem(obj, 1));
   c10::intrusive_ptr<torch::autograd::Node> grad_fn_sp;
@@ -177,7 +177,7 @@ static Edge parseGradientEdge(PyObject* obj, int64_t index) {
 
 // Implementation of torch._C._EngineBase.run_backward
 static PyObject* THPEngine_run_backward(
-    PyObject* self,
+    PyObject* /*self*/,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
@@ -263,7 +263,7 @@ static PyObject* THPEngine_run_backward(
           "with your use case.");
       gradient_edge = torch::autograd::impl::gradient_edge(mb_output.value());
     } else if (PyObject_IsInstance(_tensor, THPGradientEdgeClass)) {
-      gradient_edge = parseGradientEdge(_tensor, i);
+      gradient_edge = parseGradientEdge(_tensor);
     } else {
       TORCH_CHECK(
           false,
@@ -344,7 +344,7 @@ static PyObject* THPEngine_run_backward(
           output_edges.emplace_back(grad_fn, output_nr);
         }
       } else if (PyObject_IsInstance(input, THPGradientEdgeClass)) {
-        output_edges.emplace_back(parseGradientEdge(input, i));
+        output_edges.emplace_back(parseGradientEdge(input));
       } else {
         TORCH_CHECK(
             false,
@@ -384,7 +384,9 @@ static PyObject* THPEngine_run_backward(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
+static PyObject* THPEngine_queue_callback(
+    PyObject* /*self*/,
+    PyObject* _callback) {
   HANDLE_TH_ERRORS
   auto& engine = python::PythonEngine::get_python_engine();
   std::shared_ptr<PyObject> callback(_callback, [](PyObject* obj) {
@@ -407,8 +409,8 @@ static PyObject* THPEngine_queue_callback(PyObject* self, PyObject* _callback) {
 }
 
 static PyObject* THPEngine_is_checkpoint_valid(
-    PyObject* self,
-    PyObject* noargs) {
+    PyObject* /*self*/,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto& engine = python::PythonEngine::get_python_engine();
   if (engine.is_checkpoint_valid()) {
@@ -421,8 +423,8 @@ static PyObject* THPEngine_is_checkpoint_valid(
 
 static PyObject* THPEngine_new(
     PyTypeObject* type,
-    PyObject* args,
-    PyObject* kwargs) {
+    PyObject* /*args*/,
+    PyObject* /*kwargs*/) {
   return type->tp_alloc(type, 0);
 }
 

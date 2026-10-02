@@ -1249,7 +1249,7 @@ Tensor unbind_backward(const variable_list& grads, int64_t dim) {
 Tensor unbind_backward_nested(
     const variable_list& grads,
     const Tensor& nt_sizes,
-    int64_t dim,
+    int64_t /*dim*/,
     const at::TensorOptions& options) {
   std::vector<Tensor> grads_tensors;
   grads_tensors.reserve(grads.size());
@@ -1573,7 +1573,7 @@ Tensor convolution_jvp(
     const Tensor& input_t,
     const Tensor& weight_p,
     const Tensor& weight_t,
-    const Tensor& bias_p,
+    const Tensor& /*bias_p*/,
     const Tensor& bias_t,
     at::SymIntArrayRef stride,
     at::SymIntArrayRef padding,
@@ -1611,7 +1611,7 @@ Tensor _convolution_jvp(
     const Tensor& input_t,
     const Tensor& weight_p,
     const Tensor& weight_t,
-    const Tensor& bias_p,
+    const Tensor& /*bias_p*/,
     const Tensor& bias_t,
     at::SymIntArrayRef stride,
     at::SymIntArrayRef padding,
@@ -1697,7 +1697,7 @@ Tensor convolution_backward_jvp_grad_bias(
 //  input_name         Name of `input` tensor, from derivative formula
 at::SymIntArrayRef strides_or_error(
     const Tensor& input,
-    std::string_view const& input_name) {
+    std::string_view const& /*input_name*/) {
   // TODO: Ideally, this function would never be called if requires_grad is
   // not set. Once codegen is updated to avoid the call, we can remove this
   // check.
@@ -3601,7 +3601,7 @@ Tensor as_strided_backward(
 Tensor as_strided_scatter_backward(
     const Tensor& grad,
     const TensorGeometry& input_geometry,
-    const TensorGeometry& src_geometry,
+    const TensorGeometry& /*src_geometry*/,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
     std::optional<c10::SymInt> storage_offset) {
@@ -5042,7 +5042,7 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
 
 std::tuple<Tensor, Tensor> cholesky_solve_backward(
     const Tensor& grad_x,
-    const Tensor& self,
+    const Tensor& /*self*/,
     const Tensor& input2,
     const Tensor& result,
     const bool upper,
@@ -6242,7 +6242,7 @@ std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
     const Tensor& result,
     const Tensor& self,
     const Tensor& tau,
-    const Tensor& other,
+    const Tensor& /*other*/,
     bool left,
     bool transpose,
     std::array<bool, 3> grad_output_mask) {
@@ -6971,7 +6971,7 @@ Tensor batch_norm_jvp(
     const Tensor& input_t,
     const Tensor& weight_p,
     const Tensor& weight_t,
-    const Tensor& bias_p,
+    const Tensor& /*bias_p*/,
     const Tensor& bias_t,
     const std::optional<Tensor>& running_mean,
     const std::optional<Tensor>& running_var,
@@ -7026,7 +7026,7 @@ Tensor layer_norm_jvp(
     const Tensor& input_t,
     const Tensor& weight_p,
     const Tensor& weight_t,
-    const Tensor& bias_p,
+    const Tensor& /*bias_p*/,
     const Tensor& bias_t,
     const Tensor& saved_mean,
     const Tensor& saved_invstd,
@@ -7157,7 +7157,7 @@ Tensor group_norm_jvp(
     const Tensor& input_t,
     const Tensor& weight_p,
     const Tensor& weight_t,
-    const Tensor& bias_p,
+    const Tensor& /*bias_p*/,
     const Tensor& bias_t,
     const Tensor& saved_mean,
     const Tensor& saved_invstd,
@@ -7905,21 +7905,21 @@ mkldnn_rnn_layer_differentiable_backward(
     const Tensor& hx_,
     const Tensor& cx_tmp,
     const Tensor& output,
-    const Tensor& hy_,
-    const Tensor& cy_,
+    const Tensor& /*hy_*/,
+    const Tensor& /*cy_*/,
     const std::optional<Tensor>& grad_output_r_opt,
     const std::optional<Tensor>& grad_hy_r_opt,
     const std::optional<Tensor>& grad_cy_r_opt,
     bool reverse,
-    int64_t mode,
+    int64_t /*mode*/,
     int64_t hidden_size,
-    int64_t num_layers,
+    int64_t /*num_layers*/,
     bool has_biases,
-    bool train,
-    bool bidirectional,
-    at::IntArrayRef batch_sizes,
-    bool batch_first,
-    const at::Tensor& workspace) {
+    bool /*train*/,
+    bool /*bidirectional*/,
+    at::IntArrayRef /*batch_sizes*/,
+    bool /*batch_first*/,
+    const at::Tensor& /*workspace*/) {
   const Tensor& grad_output_r = grad_output_r_opt.value_or(Tensor());
   const Tensor& grad_hy_r = grad_hy_r_opt.value_or(Tensor());
   const Tensor& grad_cy_r = grad_cy_r_opt.value_or(Tensor());

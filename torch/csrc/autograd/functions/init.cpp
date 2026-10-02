@@ -47,7 +47,7 @@ struct UndefinedGradCtor {
 };
 
 struct NoCtor {
-  Node* operator()(PyObject* args) {
+  Node* operator()(PyObject* /*args*/) {
     TORCH_CHECK(false, "Cannot construct");
   }
 };
@@ -73,7 +73,7 @@ template <
     ValueT ParamsT::* ptr,
     typename ConvertArgT,
     PyObject* (*Convert)(ConvertArgT)>
-static PyObject* getTupleAttr(PyObject* obj, void* _unused) {
+static PyObject* getTupleAttr(PyObject* obj) {
   HANDLE_TH_ERRORS
   THPCppFunction* self = (THPCppFunction*)obj;
   auto& arr = ((T*)(self->cdata.get()))->*ptr;
@@ -95,7 +95,7 @@ template <
     ValueT ParamsT::* ptr,
     typename ConvertArgT,
     PyObject* (*Convert)(ConvertArgT)>
-static PyObject* getValueAttr(PyObject* obj, void* _unused) {
+static PyObject* getValueAttr(PyObject* obj) {
   HANDLE_TH_ERRORS
   THPCppFunction* self = (THPCppFunction*)obj;
   auto& val = ((T*)(self->cdata.get()))->*ptr;
@@ -103,7 +103,7 @@ static PyObject* getValueAttr(PyObject* obj, void* _unused) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* accumulateGradVar(PyObject* _self, void* _unused) {
+static PyObject* accumulateGradVar(PyObject* _self, void* /*_unused*/) {
   THPCppFunction* self = (THPCppFunction*)_self;
   auto grad_acc = (AccumulateGrad*)self->cdata.get();
   return THPVariable_Wrap(grad_acc->variable);

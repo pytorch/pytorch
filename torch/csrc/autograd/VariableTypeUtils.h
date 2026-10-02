@@ -410,7 +410,7 @@ class WrapperFunctor final : public c10::OperatorKernel {
 
   void operator()(
       const c10::OperatorHandle& op,
-      c10::DispatchKeySet ks,
+      c10::DispatchKeySet /*ks*/,
       torch::jit::Stack* stack) {
     impl_->run_jit_decomposition(op, stack);
   }
