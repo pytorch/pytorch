@@ -449,7 +449,7 @@ def _set_name(
     tx: "InstructionTranslatorBase",
     value: "VariableTracker | None",
 ) -> None:
-    if value is not None and not issubclass(value.python_type(), str):
+    if value is not None and not issubclass(maybe_get_python_type(value), str):
         raise_type_error(tx, "__name__ must be set to a string object")
     store_attr_mutation(tx, vt, "__name__", value)
 
@@ -459,7 +459,7 @@ def _set_qualname(
     tx: "InstructionTranslatorBase",
     value: "VariableTracker | None",
 ) -> None:
-    if value is not None and not issubclass(value.python_type(), str):
+    if value is not None and not issubclass(maybe_get_python_type(value), str):
         raise_type_error(tx, "__qualname__ must be set to a string object")
     store_attr_mutation(tx, vt, "__qualname__", value)
 
@@ -784,7 +784,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if (
             value is not None
             and not value.is_constant_match(None)
-            and not issubclass(value.python_type(), tuple)
+            and not issubclass(maybe_get_python_type(value), tuple)
         ):
             raise_type_error(tx, "__defaults__ must be set to a tuple object")
         store_attr_mutation(tx, self, "__defaults__", value)
@@ -797,7 +797,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         if (
             value is not None
             and not value.is_constant_match(None)
-            and not issubclass(value.python_type(), dict)
+            and not issubclass(maybe_get_python_type(value), dict)
         ):
             raise_type_error(tx, "__kwdefaults__ must be set to a dict object")
         store_attr_mutation(tx, self, "__kwdefaults__", value)
@@ -806,7 +806,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
     def _set_type_params(
         self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
     ) -> "VariableTracker":
-        if value is not None and not issubclass(value.python_type(), tuple):
+        if value is not None and not issubclass(maybe_get_python_type(value), tuple):
             raise_type_error(tx, "__type_params__ must be set to a tuple object")
         store_attr_mutation(tx, self, "__type_params__", value)
         return ConstantVariable.create(None)
@@ -829,7 +829,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         # TypeError.
         if value is not None and value.is_constant_match(None):
             value = None
-        if value is not None and not issubclass(value.python_type(), dict):
+        if value is not None and not issubclass(maybe_get_python_type(value), dict):
             raise_type_error(tx, "__annotations__ must be set to a dict object")
         store_attr_mutation(tx, self, "__annotations__", value)
         return ConstantVariable.create(None)
@@ -2268,7 +2268,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if (
             value is not None
             and not value.is_constant_match(None)
-            and not issubclass(value.python_type(), tuple)
+            and not issubclass(maybe_get_python_type(value), tuple)
         ):
             raise_type_error(tx, "__defaults__ must be set to a tuple object")
         self.defaults = value
@@ -2281,7 +2281,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if (
             value is not None
             and not value.is_constant_match(None)
-            and not issubclass(value.python_type(), dict)
+            and not issubclass(maybe_get_python_type(value), dict)
         ):
             raise_type_error(tx, "__kwdefaults__ must be set to a dict object")
         self.kwdefaults = value
@@ -2326,7 +2326,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         # TypeError.
         if value is not None and value.is_constant_match(None):
             value = None
-        if value is not None and not issubclass(value.python_type(), dict):
+        if value is not None and not issubclass(maybe_get_python_type(value), dict):
             raise_type_error(tx, "__annotations__ must be set to a dict object")
         self.annotations = value
         # function___annotations___set_impl also clears func_annotate.
@@ -2362,7 +2362,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         tx: "InstructionTranslatorBase",
         value: "VariableTracker | None",
     ) -> None:
-        if value is not None and not issubclass(value.python_type(), tuple):
+        if value is not None and not issubclass(maybe_get_python_type(value), tuple):
             raise_type_error(tx, "__type_params__ must be set to a tuple object")
         store_attr_mutation(tx, self, "__type_params__", value)
 
@@ -5129,6 +5129,30 @@ class BoundBuiltinMethodVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.obj)
         codegen.extend_output(codegen.create_load_attrs(self.descriptor.__name__))
+
+    def _get_qualname(self, tx: "InstructionTranslatorBase") -> VariableTracker | None:
+        # meth_get__qualname__: the receiver if it is a type, else its type.
+        try:
+            owner = self.obj.python_type()
+            if issubclass(owner, type):
+                owner = self.obj.as_python_constant()
+        except NotImplementedError:
+            return None
+        name = self.descriptor.__name__
+        return ConstantVariable.create(f"{owner.__qualname__}.{name}")
+
+    # meth_getsets: https://github.com/python/cpython/blob/v3.13.0/Objects/methodobject.c#L249-L256
+    tp_getset = {
+        "__name__": GetSet(
+            lambda s, tx: ConstantVariable.create(s.descriptor.__name__),
+            readonly_setter,
+        ),
+        "__qualname__": GetSet(_get_qualname, readonly_setter),
+        "__doc__": GetSet(
+            lambda s, tx: ConstantVariable.create(s.descriptor.__doc__),
+            readonly_setter,
+        ),
+    }
 
 
 class ClassMethodDescriptorVariable(DescriptorVariable):

@@ -209,7 +209,6 @@ from .user_defined import (
     RemovableHandleVariable,
     SimpleNamespaceVariable,
     StructSequenceVariable,
-    ThreadLocalVariable,
     UserDefinedClassVariable,
     UserDefinedConstantVariable,
     UserDefinedDefaultDictVariable,

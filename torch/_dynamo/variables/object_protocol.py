@@ -13,6 +13,7 @@ import enum
 import inspect
 import operator
 import sys
+import threading
 import types
 import typing
 from functools import lru_cache, partial
@@ -2632,7 +2633,7 @@ def object_generic_setattr_str(
             return result
 
     has_dict = py_type.__dictoffset__ != 0 or isinstance(
-        obj, variables.ThreadLocalVariable
+        getattr(obj, "value", None), threading.local
     )
 
     if has_dict is False:
@@ -2673,7 +2674,7 @@ def object_generic_setattr_str(
                         "reload it from.",
                         hints=[*graph_break_hints.SUPPORTABLE],
                     )
-            if obj.is_tensor():
+            if obj.is_tensor() or isinstance(obj, variables.PythonModuleVariable):
                 # handle_traced_output leaves aliased Tensor outputs untracked
                 # (repeated objects, returned inputs): replaying onto them as
                 # new objects would be wrong.

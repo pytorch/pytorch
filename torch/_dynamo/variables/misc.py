@@ -74,7 +74,9 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    GetSet,
     getset_build,
+    load_pending_mutation,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
@@ -1119,6 +1121,25 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.saved_tensors = saved_tensors
         self.non_differentiable = non_differentiable
         self.dirty_tensors = dirty_tensors
+
+    # _FunctionBase.needs_input_grad is a writable getset. apply() seeds it as an
+    # instance-dict entry, so user writes go there too and reads see them;
+    # without a pending entry the read falls through to tp_getattro_impl.
+    def _get_needs_input_grad(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker | None:
+        return load_pending_mutation(tx, self, "needs_input_grad")
+
+    def _set_needs_input_grad(
+        self, tx: "InstructionTranslatorBase", value: VariableTracker | None
+    ) -> None:
+        stored = variables.DeletedVariable() if value is None else value
+        se = tx.output.side_effects
+        se.store_instance_dict_attr(self, "needs_input_grad", stored)
+
+    tp_getset = {
+        "needs_input_grad": GetSet(_get_needs_input_grad, _set_needs_input_grad)
+    }
 
     @staticmethod
     def create(

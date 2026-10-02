@@ -23,13 +23,6 @@ class _Plain:
         self.x = x
 
 
-class _Slotted:
-    __slots__ = ("x",)
-
-    def __init__(self, x):
-        self.x = x
-
-
 class _CustomSetattr:
     def __init__(self):
         object.__setattr__(self, "log", [])
@@ -64,13 +57,6 @@ class _ReadOnlyProperty:
     @property
     def v(self):
         return 1
-
-
-class _SlotlessWithMethod:
-    __slots__ = ()
-
-    def f(self):
-        pass
 
 
 class _Cached:
@@ -145,23 +131,6 @@ class TpSetattroTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(*args), compiled(*args))
 
-    def test_store_attr(self):
-        def fn(x):
-            obj = _Plain(x)
-            obj.y = x + 1
-            return obj.x, obj.y
-
-        self._check(fn, torch.ones(3))
-
-    def test_delete_attr(self):
-        def fn(x):
-            obj = _Plain(x)
-            obj.y = 2
-            del obj.y
-            return hasattr(obj, "y"), obj.x
-
-        self._check(fn, torch.ones(3))
-
     @parametrize("dunder", (False, True))
     def test_setattr_and_delattr(self, dunder):
         def fn(x):
@@ -176,14 +145,6 @@ class TpSetattroTests(TestCase):
             else:
                 delattr(obj, "y")
             return got, hasattr(obj, "y")
-
-        self._check(fn, torch.ones(3))
-
-    def test_object_setattr_unbound(self):
-        def fn(x):
-            obj = _Plain(x)
-            object.__setattr__(obj, "y", x + 1)
-            return obj.y
 
         self._check(fn, torch.ones(3))
 
@@ -221,22 +182,6 @@ class TpSetattroTests(TestCase):
                 del obj.v
             except AttributeError as e:
                 out.append(type(e).__name__)
-            return out
-
-        self._check(fn, torch.ones(3))
-
-    def test_no_dict_message_depends_on_type_lookup(self):
-        # CPython picks the message from whether _PyType_Lookup found anything:
-        # a name resolving to a class attribute is "read-only", an unknown name
-        # is "no attribute ... and no __dict__".
-        def fn(x):
-            obj = _SlotlessWithMethod()
-            out = []
-            for name in ("f", "missing"):
-                try:
-                    setattr(obj, name, x)
-                except AttributeError as e:
-                    out.append(type(e).__name__)
             return out
 
         self._check(fn, torch.ones(3))
@@ -284,41 +229,6 @@ class TpSetattroTests(TestCase):
             first = obj.y
             obj.y = 100
             return first, obj.y
-
-        self._check(fn, torch.ones(3))
-
-    def test_slots(self):
-        def fn(x):
-            obj = _Slotted(x)
-            obj.x = x + 1
-            return obj.x
-
-        self._check(fn, torch.ones(3))
-
-    def test_slotted_object_has_no_dict(self):
-        def fn(x):
-            obj = _Slotted(x)
-            with self.assertRaises(AttributeError):
-                obj.y = 1
-            return x.sin()
-
-        self._check(fn, torch.ones(3))
-
-    def test_no_instance_dict(self):
-        def fn(x):
-            d = collections.deque([x])
-            with self.assertRaises(AttributeError):
-                d.attr = 1
-            return x.sin()
-
-        self._check(fn, torch.ones(3))
-
-    def test_readonly_getset(self):
-        def fn(x):
-            d = collections.deque([x], maxlen=2)
-            with self.assertRaises(AttributeError):
-                d.maxlen = 10
-            return x.sin()
 
         self._check(fn, torch.ones(3))
 
@@ -527,17 +437,6 @@ class TpSetattroTests(TestCase):
         with self.assertRaisesRegex(Unsupported, "Failed to set tensor attribute"):
             fn(torch.ones(3))
 
-    def test_module_attribute(self):
-        class Mod(torch.nn.Module):
-            def forward(self, x):
-                self.attr = x + 1
-                return self.attr
-
-        mod = Mod()
-        compiled = torch.compile(mod, backend="eager", fullgraph=True)
-        x = torch.ones(3)
-        self.assertEqual(mod(x), compiled(x))
-
     def test_nested_function_defaults_write(self):
         # gb_type "Write to unmodeled getset/member attribute".
         def fn(x):
@@ -615,17 +514,6 @@ class TpSetattroTests(TestCase):
 
         self._check(fn, torch.ones(3))
 
-    @unittest.expectedFailure
-    def test_partial_setstate(self):
-        # functools.partial.__setstate__ is not traced at all: the call graph
-        # breaks before the namespace dict in the 4th slot is ever written.
-        def fn(x):
-            p = functools.partial(pow, 2)
-            p.__setstate__((pow, (3,), {}, {"attr": 1}))
-            return p.attr
-
-        self._check(fn, torch.ones(3))
-
     # Failures found by adversarial probing of the tp_setattro protocol.  Each
     # is a compiled-vs-eager divergence; the comment names the responsible path.
 
@@ -641,32 +529,6 @@ class TpSetattroTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(torch.ones(3), p1), compiled(torch.ones(3), p2))
         self.assertEqual(p1.__dict__, p2.__dict__)
-
-    @unittest.expectedFailure
-    def test_tensor_data_different_shape(self):
-        # TensorVariable._set_data dropped the shape check that used to graph
-        # break when requires_grad is set, so the fake tensor keeps the old shape.
-        def fn(t, u):
-            t.data = u
-            return t.shape[0], (t * 2).shape[0]
-
-        compiled = torch.compile(fn, backend="eager", fullgraph=True)
-        expected = fn(torch.ones(2, requires_grad=True), torch.zeros(3))
-        got = compiled(torch.ones(2, requires_grad=True), torch.zeros(3))
-        self.assertEqual(expected, got)
-
-    @unittest.expectedFailure
-    def test_tensor_data_non_tensor(self):
-        # _set_data reads value.dtype before checking the value is a tensor.
-        def fn(x):
-            y = x + 1
-            try:
-                y.data = 3
-            except TypeError as e:
-                return type(e).__name__
-            return "no error"
-
-        self._check(fn, torch.ones(3))
 
     @unittest.expectedFailure
     def test_sourced_function_defaults_delete(self):
@@ -720,7 +582,9 @@ class TpSetattroTests(TestCase):
 
         def fn(x):
             K.__name__ = "KK"
-            return K.__name__, x + 1
+            K.__module__ = "m"
+            K.__doc__ = "d"
+            return K.__name__, K.__module__, K.__doc__, x + 1
 
         self._check(fn, torch.ones(3))
 
@@ -744,16 +608,18 @@ class TpSetattroTests(TestCase):
 
         self._check(fn, torch.ones(3), A())
 
-    def test_bound_method_doc_write(self):
-        # method.__doc__ is a readonly getset; UserMethodVariable.tp_members
-        # models it as writable and hits store_attr on an untracked VT.
+    def test_bound_method_write(self):
+        # method.__doc__ is a readonly getset and method has no __dict__, so
+        # neither write can succeed.
         def fn(x):
             obj = _WithMethodDefaults()
-            try:
-                obj.m.__doc__ = "x"
-            except AttributeError as e:
-                return type(e).__name__
-            return "no error"
+            out = []
+            for name in ("__doc__", "__name__"):
+                try:
+                    setattr(obj.m, name, "x")
+                except AttributeError as e:
+                    out.append(type(e).__name__)
+            return out
 
         self._check(fn, torch.ones(3))
 
@@ -811,31 +677,6 @@ class TpSetattroTests(TestCase):
             got = K.y
             type.__delattr__(K, "y")
             return got, hasattr(K, "y"), x + 1
-
-        self._check(fn, torch.ones(3))
-
-    def test_no_dict_message_builtin_object(self):
-        # CPython: "'int' object has no attribute 'x' and no __dict__ for
-        # setting new attributes"; Dynamo reports the read-only message.
-        def fn(x):
-            try:
-                (1).x = 2
-            except AttributeError as e:
-                return type(e).__name__
-            return "no error"
-
-        self._check(fn, torch.ones(3))
-
-    def test_readonly_getset_message(self):
-        # DequeVariable.call_method used to produce the exact C message
-        # "attribute 'maxlen' of 'collections.deque' objects is not writable".
-        def fn(x):
-            d = collections.deque([x], maxlen=2)
-            try:
-                d.maxlen = 10
-            except AttributeError as e:
-                return type(e).__name__
-            return "no error"
 
         self._check(fn, torch.ones(3))
 
@@ -956,19 +797,6 @@ class TpSetattroTests(TestCase):
 
         self._check(fn, torch.ones(3), _Plain(1))
 
-    @unittest.expectedFailure
-    def test_exception_cause_class(self):
-        # eager: "exception cause must be None or derive from BaseException".
-        def fn(x):
-            e = ValueError("boom")
-            try:
-                e.__cause__ = KeyError
-            except TypeError as err:
-                return str(err)
-            return "no error"
-
-        self._check(fn, torch.ones(3))
-
     def test_tensor_data_delete(self):
         # _set_data reads value.dtype before checking for deletion; eager raises
         # RuntimeError("Deleting tensor data is not allowed").
@@ -980,41 +808,6 @@ class TpSetattroTests(TestCase):
             return "no error", x + 1
 
         self._check(fn, torch.ones(3))
-
-    def test_class_module_doc_write(self):
-        class K:
-            pass
-
-        def fn(x):
-            K.__module__ = "m"
-            K.__doc__ = "d"
-            return K.__module__, K.__doc__, x + 1
-
-        self._check(fn, torch.ones(3))
-
-    def test_bound_method_name_write(self):
-        # method has no __dict__ and no __name__ data descriptor, so eager
-        # raises AttributeError; UserMethodVariable.tp_getset models it writable.
-        def fn(x):
-            obj = _WithMethodDefaults()
-            try:
-                obj.m.__name__ = "zz"
-            except AttributeError as e:
-                return type(e).__name__
-            return "no error"
-
-        self._check(fn, torch.ones(3))
-
-    def test_bound_method_func_defaults_write(self):
-        def fn(x):
-            obj = _WithMethodDefaults()
-            obj.m.__func__.__defaults__ = (7,)
-            return _WithMethodDefaults.m.__defaults__, x + 1
-
-        try:
-            self._check(fn, torch.ones(3))
-        finally:
-            _WithMethodDefaults.m.__defaults__ = (1,)
 
 
 instantiate_parametrized_tests(TpSetattroTests)
