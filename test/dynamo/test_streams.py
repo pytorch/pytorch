@@ -2929,6 +2929,25 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(x, torch.ones_like(x))
         self.assertEqual(result, torch.ones_like(result))
 
+    @torch._dynamo.config.patch(debug_backend_override=">=0:inductor")
+    def test_overridden_eager_backend_rejects_input_mutation_join(self) -> None:
+        def fn(x, small):
+            side = torch.cuda.Stream()
+            with side:
+                x.zero_()
+            torch.cuda.current_stream().wait_stream(side)
+            x.fill_(3)
+            return small + 1
+
+        x = torch.ones(8, device="cuda")
+        small = torch.zeros_like(x)
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot safely place an input mutation write-back"
+        ):
+            torch.compile(fn, backend="eager", fullgraph=True)(x, small)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+
     @parametrize("backend", ("aot_eager", "inductor"))
     @parametrize("first_mutation", ("add", "zero", "fill", "copy"))
     def test_earlier_input_mutation_before_join_errors(

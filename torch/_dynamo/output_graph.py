@@ -1385,9 +1385,15 @@ class OutputGraph(OutputGraphCommon):
         from .backends.debugging import eager
         from .eval_frame import innermost_backend
 
-        if self.compiler_fn is None:
+        backend = (
+            get_backend_override_for_compile_id(
+                self.dynamo_compile_id, config.debug_backend_override
+            )
+            or self.compiler_fn
+        )
+        if backend is None:
             return True
-        backend = innermost_backend(self.compiler_fn)
+        backend = innermost_backend(backend)
         if isinstance(backend, torch._TorchCompileWrapper):
             backend = backend.compiler_fn
         return backend is not eager
