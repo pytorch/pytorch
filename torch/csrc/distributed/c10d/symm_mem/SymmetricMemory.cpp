@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <mutex>
+#include <shared_mutex>
 
 namespace {
 
@@ -38,19 +39,19 @@ class AllocatorMap {
   void register_allocator(
       c10::DeviceType device_type,
       c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock lock(mutex_);
     map_[device_type] = std::move(allocator);
   }
 
   void register_availability(
       const std::string& name,
       c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock lock(mutex_);
     avail_map_[name] = std::move(allocator);
   }
 
   void set_backend(const std::string& name) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::unique_lock lock(mutex_);
     auto it = avail_map_.find(name);
     TORCH_CHECK(
         it != avail_map_.end(),
@@ -70,7 +71,7 @@ class AllocatorMap {
   }
 
   std::optional<std::string> get_backend(c10::DeviceType device_type) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::shared_lock lock(mutex_);
     auto it = map_.find(device_type);
     if (it == map_.end()) {
       return std::nullopt;
@@ -78,20 +79,24 @@ class AllocatorMap {
     return it->second->name();
   }
 
+  // On every op's rendezvous, so readers share the lock. A reader that
+  // returned before set_backend() took it exclusively has set in_use_.
   c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
       c10::DeviceType device_type) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::shared_lock lock(mutex_);
     auto it = map_.find(device_type);
     TORCH_CHECK(
         it != map_.end(),
         "SymmetricMemory does not support device type ",
         device_type);
-    in_use_ = true;
+    if (!in_use_.load(std::memory_order_relaxed)) {
+      in_use_.store(true);
+    }
     return it->second;
   }
 
   bool has_allocator(c10::DeviceType device_type) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::shared_lock lock(mutex_);
     auto it = map_.find(device_type);
     return it != map_.end();
   }
@@ -103,7 +108,7 @@ class AllocatorMap {
  private:
   AllocatorMap() = default;
 
-  std::mutex mutex_;
+  std::shared_mutex mutex_;
   std::unordered_map<
       c10::DeviceType,
       c10::intrusive_ptr<SymmetricMemoryAllocator>>
@@ -118,7 +123,7 @@ class AllocatorMap {
       c10::intrusive_ptr<SymmetricMemoryAllocator>>
       avail_map_;
 
-  bool in_use_ = false;
+  std::atomic<bool> in_use_ = false;
 };
 
 static std::mutex group_info_mutex;

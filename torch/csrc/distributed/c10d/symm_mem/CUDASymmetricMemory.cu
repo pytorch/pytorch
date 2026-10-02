@@ -443,7 +443,12 @@ void* CUDASymmetricMemoryAllocator::alloc(
 
 void CUDASymmetricMemoryAllocator::free(void* ptr) {
   std::unique_lock lock(mutex_);
-  ptr_to_block_.erase(ptr);
+  auto it = ptr_to_block_.find(ptr);
+  if (it == ptr_to_block_.end()) {
+    return;
+  }
+  handles_.erase_block(it->second.get());
+  ptr_to_block_.erase(it);
 }
 
 size_t CUDASymmetricMemoryAllocator::get_alloc_size(void* ptr) {
@@ -1065,9 +1070,53 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
 
 } // namespace
 
+c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::HandleCache::find(
+    void* ptr,
+    const std::string& group) const {
+  auto it = by_ptr_.find(ptr);
+  if (it == by_ptr_.end()) {
+    return nullptr;
+  }
+  for (const auto& entry : it->second) {
+    if (entry.group == group) {
+      return entry.handle;
+    }
+  }
+  return nullptr;
+}
+
+void CUDASymmetricMemoryAllocator::HandleCache::insert(
+    const Block* block,
+    void* ptr,
+    std::string group,
+    c10::intrusive_ptr<SymmetricMemory> handle) {
+  auto& entries = by_ptr_[ptr];
+  if (entries.empty()) {
+    ptrs_by_block_[block].push_back(ptr);
+  }
+  entries.push_back(Entry{std::move(group), std::move(handle)});
+}
+
+void CUDASymmetricMemoryAllocator::HandleCache::erase_block(const Block* block) {
+  auto it = ptrs_by_block_.find(block);
+  if (it == ptrs_by_block_.end()) {
+    return;
+  }
+  for (void* ptr : it->second) {
+    by_ptr_.erase(ptr);
+  }
+  ptrs_by_block_.erase(it);
+}
+
 c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     void* ptr,
     const std::optional<std::string>& group_name) {
+  if (group_name.has_value() && !group_name->empty()) {
+    std::shared_lock lock(mutex_);
+    if (auto handle = handles_.find(ptr, *group_name)) {
+      return handle;
+    }
+  }
   // In case of MemPool, the `ptr` passed in (i.e. tensor storage ptr) may not
   // be the same as the allocation base pointer, so we need to find the block
   // that covers the `ptr`
@@ -1112,8 +1161,23 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
   }
 
   // Create symm mem handle for this tensor, specified by its offset
-  auto pai = it->second;
-  return c10::make_intrusive<CUDASymmetricMemory>(pai, offset);
+  c10::intrusive_ptr<SymmetricMemory> handle =
+      c10::make_intrusive<CUDASymmetricMemory>(it->second, offset);
+  std::unique_lock lock(mutex_);
+  // The block was looked up without the lock held for the costly part above,
+  // so another thread may have freed it since. Cache the handle only while the
+  // block is still allocated: free() drops a block's entries, and one added
+  // after it would outlive the block.
+  void* base = static_cast<char*>(ptr) - offset;
+  auto block_it = ptr_to_block_.find(base);
+  if (block_it == ptr_to_block_.end() || block_it->second != block) {
+    return handle;
+  }
+  if (auto existing = handles_.find(ptr, group_name_)) {
+    return existing;
+  }
+  handles_.insert(block.get(), ptr, group_name_, handle);
+  return handle;
 }
 
 bool CUDASymmetricMemoryAllocator::has_multicast_support(int device_idx) {
@@ -1143,27 +1207,21 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block_covering(
     void* ptr,
     size_t& offset) {
   std::shared_lock lock(mutex_);
-  // In case of MemPool, tensor.storage().data_ptr() may not match
-  // exactly an allocation's base address. Thus we perform the search by
-  // testing if the former is within an allocation's range.
-  auto alloc_it = std::find_if(
-      ptr_to_block_.begin(), ptr_to_block_.end(), [&](const auto& pair) {
-        auto& block = pair.second;
-        auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
-        // pair.first is buffer_ptr, the key alloc()
-        // stored (alloc_base + buffer_offset), i.e. the
-        // data buffer start past the signal pad.
-        auto buffer_ptr = reinterpret_cast<uintptr_t>(pair.first);
-        // Modify offset so that it is returned
-        offset = ptr_int - buffer_ptr;
-        return ptr_int >= buffer_ptr && offset < block->buffer_size;
-      });
-
-  if (alloc_it == ptr_to_block_.end()) {
+  // In case of MemPool, tensor.storage().data_ptr() may not match exactly an
+  // allocation's base address: the covering block is the one with the
+  // greatest base not above it, if its buffer reaches that far.
+  auto it = ptr_to_block_.upper_bound(ptr);
+  if (it == ptr_to_block_.begin()) {
     return nullptr;
   }
-
-  return alloc_it->second;
+  --it;
+  const auto distance = reinterpret_cast<uintptr_t>(ptr) -
+      reinterpret_cast<uintptr_t>(it->first);
+  if (distance >= it->second->buffer_size) {
+    return nullptr;
+  }
+  offset = distance;
+  return it->second;
 }
 
 bool CUDASymmetricMemoryAllocator::has_allocation(void* ptr) {

@@ -387,6 +387,27 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    @skip_if_lt_x_gpu(2)
+    def test_rendezvous_after_free(self) -> None:
+        """Rendezvous returns the handle it cached for a pointer it has seen. A
+        freed allocation's handles must go with it: its old address belongs to
+        no allocation, and must not get a handle onto the freed memory."""
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+        t = symm_mem.empty(1024, device=self.device)
+        symm_mem.rendezvous(t, group=group_name)
+        ptr, nbytes = t.data_ptr(), t.nbytes
+        del t
+        # A tensor at the freed address; its memory is never touched.
+        storage = torch._C._construct_storage_from_data_pointer(
+            ptr, self.device, nbytes
+        )
+        stale = torch.empty(0, device=self.device).set_(storage)
+        self.assertIsNone(symm_mem.rendezvous(stale, group=group_name))
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
     @requires_cuda
     def test_allow_overlapping_devices(self) -> None:
         os.environ["TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES"] = "1"
