@@ -1049,7 +1049,7 @@ class TestBlackwellTMALoadFusion(TestCase):
     @parametrize("op", tuple(ROW_OPS))
     @parametrize("shape", ((1024, 128, 512), (1000, 120, 512)))
     @parametrize("variant", ("ws", "ws_tma_store", "ws_flatten"))
-    @parametrize("epilogue_subtile", (1, 2))
+    @parametrize("epilogue_subtile", (1, 2, 4))
     def test_blackwell_mm_row_reduction_epilogue_fusion(
         self, op: str, shape: tuple[int, int, int], variant: str, epilogue_subtile: int
     ):
@@ -1225,7 +1225,7 @@ class TestBlackwellTMALoadFusion(TestCase):
     @parametrize("op", tuple(COL_OPS))
     @parametrize("M", (1000, 4096))
     @parametrize("split", (False, True))
-    @parametrize("epilogue_subtile", (1, 2))
+    @parametrize("epilogue_subtile", (1, 2, 4))
     def test_blackwell_mm_col_reduction_epilogue_fusion(
         self, op: str, M: int, split: bool, epilogue_subtile: int
     ):
@@ -1292,13 +1292,14 @@ class TestBlackwellTMALoadFusion(TestCase):
         ),
     )
     @parametrize("M", (1000, 4096))
-    @parametrize("N", (200, 512))
-    @parametrize("epilogue_subtile", (1, 2))
+    @parametrize("N", (160, 200, 512))
+    @parametrize("epilogue_subtile", (1, 2, 4))
     def test_blackwell_mm_row_reduction_epilogue_wide_n(
         self, op: str, M: int, N: int, epilogue_subtile: int
     ):
         """Row reductions of an output wider than the tile fuse as per-tile
-        partials that the wrapper finishes."""
+        partials that the wrapper finishes. The last column tile ends in a fully
+        masked subtile at N=160 with EPILOGUE_SUBTILE=2 and N=160 or 200 with 4."""
         self._skip_if_meta_ws_subtiled(epilogue_subtile)
         fn = {
             "sum": lambda a, b: (a @ b).float().sum(1),
@@ -1336,11 +1337,36 @@ class TestBlackwellTMALoadFusion(TestCase):
         not has_datacenter_blackwell_tma_device(),
         "Need Blackwell with device-side TMA support in Triton",
     )
+    def test_blackwell_mm_row_reduction_epilogue_wide_n_unfused_kernels(self):
+        """Nodes reading the finished partials of two row reductions run as two
+        kernels after the template. Both read buffers whose last use is the
+        template's node, which must stay alive until the second has run."""
+        kernels, _ = self._run_reduction(
+            lambda a, b: (
+                (c := (a @ b).float()).mean(1),
+                c * torch.rsqrt((c * c).mean(1, keepdim=True) + 1),
+            ),
+            1000,
+            128,
+            200,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            tol=1e-5,
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertEqual(
+            [k.split("_fused")[0] for k in kernels],
+            ["triton_tem", "triton_poi", "triton_poi"],
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
     @parametrize("op", ("sum", "gated", "amax_sum", "mean", "sum_and_out"))
     # At 4096x128 the split column reduction's group equals the output's; at
     # 65536 the two reductions form a mix-order reduction when unfused.
     @parametrize("M", (1000, 4096, 65536))
-    @parametrize("epilogue_subtile", (1, 2))
+    @parametrize("epilogue_subtile", (1, 2, 4))
     def test_blackwell_mm_row_and_col_reduction_epilogue(
         self, op: str, M: int, epilogue_subtile: int
     ):

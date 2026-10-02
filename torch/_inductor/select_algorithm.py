@@ -2036,11 +2036,25 @@ class TritonTemplateKernel(TritonKernel):
         # Consecutive nodes over the same ranges run as one kernel.
         scheduler = V.graph.scheduler
         backend = scheduler.get_backend(self.output_node.get_device())
-        for _, group in itertools.groupby(self._unfused_epilogues, lambda n: n.group):
-            nodes = list(group)
-            backend.codegen_node(
-                nodes[0] if len(nodes) == 1 else FusedSchedulerNode(scheduler, nodes)
-            )
+        # The buffers the template's fused nodes last read are already queued
+        # for freeing, and each kernel below frees the queue when it finishes,
+        # so hold them until the last one has run.
+        to_free, scheduler.buffer_names_to_free = (
+            scheduler.buffer_names_to_free,
+            OrderedSet(),
+        )
+        try:
+            for _, group in itertools.groupby(
+                self._unfused_epilogues, lambda n: n.group
+            ):
+                nodes = list(group)
+                backend.codegen_node(
+                    nodes[0]
+                    if len(nodes) == 1
+                    else FusedSchedulerNode(scheduler, nodes)
+                )
+        finally:
+            scheduler.buffer_names_to_free |= to_free
 
     def get_unfused_epilogues(self) -> list[Any]:
         return self._unfused_epilogues
@@ -2322,10 +2336,16 @@ class TritonTemplateKernel(TritonKernel):
                 )
             )
             indexing = self.indexing(index, block_ptr=False)
+            mask = indexing.mask_str
+            if not columns and subtiles > 1:
+                # A trailing subtile can start past the last column; its slot
+                # would be past this partial's region in the workspace.
+                in_bounds = f"({tile[0]} < {n})"
+                mask = in_bounds if mask == "None" else f"{mask} & {in_bounds}"
             self.post_loop_store.writeline(
                 f"tl.store(({ws_ptr} + {offset}).to(tl.pointer_type(tl.float32)) + "
                 f"{size} * ({tile[0]} // {tile[1]}) + {indexing.index_str}, "
-                f"{value}, {indexing.mask_str})"
+                f"{value}, {mask})"
             )
 
         tile_syms = [tree.index_sym() for tree in range_trees]
