@@ -394,9 +394,7 @@ class TestScheduler(TestCase):
         )
 
     @parametrize("memory_guard_enabled", (False, True))
-    def test_pending_template_fusion_resolves_retired_operand(
-        self, memory_guard_enabled
-    ):
+    def test_pending_template_fusion_skips_retired_operand(self, memory_guard_enabled):
         scheduler = object.__new__(Scheduler)
         template = self._mock_base_snode("template")
         retired = self._mock_base_snode("retired")
@@ -416,10 +414,9 @@ class TestScheduler(TestCase):
 
         scheduler._evaluate_pending_template_fusions({retired: [pending]}, fused_nodes)
 
-        expected = current if memory_guard_enabled else retired
-        scheduler.fuse_if_speedup.assert_called_once_with(
-            template, expected, speedup, fused_nodes
-        )
+        # The speedup was benchmarked without what retired fused with since.
+        scheduler.fuse_if_speedup.assert_not_called()
+        speedup.assert_not_called()
 
     def test_nested_reduction_fuse_with_propagates_mempool(self):
         scheduler = object.__new__(Scheduler)
