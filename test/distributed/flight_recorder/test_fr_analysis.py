@@ -12,7 +12,10 @@ from torch.distributed.flight_recorder.components.types import (
     MatchState,
     Op,
 )
-from torch.distributed.flight_recorder.components.utils import match_one_event
+from torch.distributed.flight_recorder.components.utils import (
+    align_trace_from_beginning,
+    match_one_event,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -400,6 +403,26 @@ def create_one_entry(
     event.update({"record_id": record_id})
     event.update({"is_p2p": False})
     return event
+
+
+class AlignTraceTest(TestCase):
+    def test_merged_recorders_align_separately(self):
+        # _dump_nccl_trace concatenates ProcessGroupNCCL's recorder, which has
+        # wrapped here, with nccl2's, which numbers record_id from 0.
+        def entries(legacy_ids, nccl2_ids):
+            return [
+                {"profiling_name": "nccl:all_reduce", "record_id": i}
+                for i in legacy_ids
+            ] + [
+                {"profiling_name": "nccl2:all_reduce", "record_id": i}
+                for i in nccl2_ids
+            ]
+
+        aligned = align_trace_from_beginning(
+            {0: entries([100, 101], [0, 1]), 1: entries([101], [1])}
+        )
+        for rank in (0, 1):
+            self.assertEqual(aligned[rank], entries([101], [1]))
 
 
 class FlightRecorderE2ETest(TestCase):
