@@ -947,6 +947,8 @@ class TritonTemplateKernel(TritonKernel):
             self.triton_meta = triton_meta
         else:
             self.triton_meta.update(triton_meta)
+        if not config.emulate_precision_casts:
+            self.triton_meta.setdefault("enable_fp_fusion", True)
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
@@ -2756,6 +2758,7 @@ class GeneratedCodeCache:
                 "transpose_discontiguous_tensor_descriptors_override": transpose_discontiguous_tensor_descriptors_override,
                 "kwargs": kwargs,
                 "hint_override": hint_override,
+                "emulate_precision_casts": config.emulate_precision_casts,
                 "triton_meta": triton_meta,
             }
         )
