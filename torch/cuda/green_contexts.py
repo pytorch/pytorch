@@ -47,8 +47,12 @@ _CONTEXT_STACK_DEPRECATION = (
 @functools.cache
 def _get_driver_version() -> int:
     # Loading cuda.bindings' driver dispatch alongside NVML can break CUDA after fork.
+    try:
+        driver = _get_cuda_library()
+    except OSError as e:
+        raise RuntimeError(f"CUDA driver library could not be loaded: {e}") from e
     version = c_int()
-    _check_cuda(_get_cuda_library().cuDriverGetVersion(byref(version)))
+    _check_cuda(driver.cuDriverGetVersion(byref(version)))
     return version.value
 
 

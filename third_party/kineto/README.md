@@ -15,11 +15,9 @@ The central component of Kineto is Libkineto, a profiling library with special f
 Libkineto is an in-process profiling library integrated with the PyTorch Profiler. Please refer to the [README](libkineto/README.md) file in the `libkineto` folder as well as documentation on the [new PyTorch Profiler API](https://pytorch.org/docs/master/profiler.html).
 
 ## Releases and Contributing
-We will follow the PyTorch release schedule which roughly happens on a 3 month basis.
+Kineto lives in the PyTorch repository and ships as part of each PyTorch release; there is no separate Kineto release.
 
-We appreciate all contributions. If you are planning to contribute back bug-fixes, please do so without any further discussion.
-
-If you plan to contribute new features, please first open an issue and discuss the feature with us. Sending a PR without discussion might end up resulting in a rejected PR because we might be taking the infrastructure in a different direction than you might be aware of. We expect the architecture to keep evolving.
+Contributions are made as regular PyTorch pull requests, following PyTorch's [contributing guide](../../CONTRIBUTING.md). Changes under `third_party/kineto` are reviewed by the PyTorch Profiler maintainers. If you plan to contribute a new feature, please open a PyTorch issue to discuss it first.
 
 ## License
 Kineto has a BSD-style license, as found in the [LICENSE](LICENSE) file.
