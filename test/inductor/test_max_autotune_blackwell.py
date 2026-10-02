@@ -1,19 +1,26 @@
 # Owner(s): ["module: inductor"]
+import dataclasses
+import re
 import unittest
 from unittest import mock
 
 import torch
 from torch._inductor import config
+from torch._inductor.autows_utils import has_two_ctas, meta_ws_enabled
+from torch._inductor.codegen import simd
 from torch._inductor.heuristics.registry import _HEURISTIC_CACHE, get_template_heuristic
 from torch._inductor.heuristics.template.triton import (
+    _use_template_autows,
     BaseHeuristicSingleton,
     BlackwellGPUGemmConfig,
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAScaledBlackwellTMATemplateConfigHeuristic,
 )
+from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.kernel.mm import blackwell_ws_persistent_tma_mm_template
 from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
+from torch._inductor.scheduler import Scheduler
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_num_sms, run_and_get_code
 from torch.testing import FileCheck
@@ -898,6 +905,678 @@ class TestBlackwellTMALoadFusion(TestCase):
         FileCheck().check("triton_tem_fused").check("tma_descriptor").check(
             ".load(["
         ).run(code[0])
+
+    @staticmethod
+    def _run_with_mm_config(
+        fn,
+        args,
+        test_config,
+        *extra_configs,
+        autows=(1, False),
+        dynamic=None,
+        fused_ms=0.0,
+        **patches,
+    ):
+        """Compile fn with only the given configs as Triton choices. Under
+        template autoWS, only the (DATA_PARTITION_FACTOR, TWO_CTAS) = autows
+        variants of them. Fused epilogue benchmarks report fused_ms, so by
+        default every fusion the gates allow is kept."""
+        key = ("triton::blackwell_ws_persistent_tma", "cuda", "mm")
+        heuristic = get_template_heuristic(*key)
+        # Template autoWS builds its configs from blackwell_persistent_mm_configs.
+        orig = heuristic.mm_configs, heuristic.blackwell_persistent_mm_configs
+        heuristic.mm_configs = heuristic.blackwell_persistent_mm_configs = [
+            test_config,
+            # Epilogues are only benchmarked, and so reductions only fused,
+            # when autotuning has more than one choice. This twin hosts the
+            # same reductions.
+            dataclasses.replace(test_config, num_stages=test_config.num_stages - 1),
+            *extra_configs,
+        ]
+        generate_autows_configs = type(heuristic)._generate_autows_configs
+
+        def autows_configs(self):
+            return [
+                cfg
+                for cfg in generate_autows_configs(self)
+                if (cfg.data_partition_factor, cfg.two_ctas) == autows
+            ]
+
+        try:
+            with (
+                config.patch(
+                    {
+                        "max_autotune": True,
+                        "max_autotune_gemm_backends": "TRITON",
+                        "triton.enable_persistent_tma_matmul": True,
+                        "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+                        "benchmark_template_fusion": True,
+                        **patches,
+                    }
+                ),
+                mock.patch.object(
+                    type(heuristic), "_generate_autows_configs", autows_configs
+                ),
+                mock.patch.object(
+                    Scheduler, "benchmark_codegened_module", return_value=(fused_ms, "")
+                ),
+            ):
+                return run_and_get_code(torch.compile(fn, dynamic=dynamic), *args)
+        finally:
+            if key in _HEURISTIC_CACHE:
+                (
+                    _HEURISTIC_CACHE[key].mm_configs,
+                    _HEURISTIC_CACHE[key].blackwell_persistent_mm_configs,
+                ) = orig
+
+    def _run_reduction(
+        self,
+        fn,
+        M,
+        K,
+        N,
+        test_config,
+        *extra_configs,
+        tol=0,
+        dtype=torch.bfloat16,
+        **patches,
+    ):
+        """Run fn on a (M, K) @ (K, N) GEMM and compare against eager. Returns the
+        generated kernel names and the output code."""
+        # Small integers make the GEMM and the sums exact, so results don't
+        # depend on summation order and must match eager bitwise.
+        a = torch.randint(-1, 2, (M, K), device=GPU_TYPE).to(dtype)
+        b = torch.randint(-1, 2, (K, N), device=GPU_TYPE).to(dtype)
+
+        # Poison allocations so unwritten outputs show up as NaN.
+        def empty_strided(size, stride, dtype):
+            out = torch.empty_strided(size, stride, dtype=dtype, device=GPU_TYPE)
+            out.untyped_storage().fill_(255)
+            return out
+
+        with mock.patch("torch._C._dynamo.guards._empty_strided_cuda", empty_strided):
+            actual, code = self._run_with_mm_config(
+                fn, (a, b), test_config, *extra_configs, **patches
+            )
+        self.assertEqual(actual, fn(a, b), atol=tol, rtol=tol)
+        return re.findall(r"def (triton_\w+)\(", code[0]), code[0]
+
+    def _skip_if_meta_ws_subtiled(self, epilogue_subtile):
+        if epilogue_subtile > 1 and meta_ws_enabled():
+            self.skipTest(
+                "covered by test_blackwell_mm_reduction_epilogue_not_fused_meta_ws"
+            )
+
+    def _assert_row_fused(self, kernels, code, op="sum"):
+        self.assertEqual(len(kernels), 1, kernels)
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        FileCheck().check("tl.sum" if op != "amax" else "max2").run(code)
+
+    ROW_OPS = {
+        "sum": lambda a, b: (a @ b).float().sum(-1),
+        # Every row is negative, so unmasked out-of-range columns would win.
+        "amax": lambda a, b: ((a @ b) - 100).amax(-1),
+        "mean": lambda a, b: (a @ b).float().mean(-1),
+        "mean_and_sqmean": lambda a, b: (
+            (c := (a @ b).float()).mean(-1),
+            c.pow(2).mean(-1),
+        ),
+        "var_mean": lambda a, b: torch.var_mean((a @ b).float(), -1),
+        "sum_and_out": lambda a, b: ((c := a @ b), c.float().sum(-1)),
+        "extra_input": lambda a, b: ((a @ b).float() * b[0].float()).sum(-1),
+    }
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", tuple(ROW_OPS))
+    @parametrize("shape", ((1024, 128, 512), (1000, 120, 512)))
+    @parametrize("variant", ("ws", "ws_tma_store", "ws_flatten"))
+    @parametrize("epilogue_subtile", (1, 2))
+    def test_blackwell_mm_row_reduction_epilogue_fusion(
+        self, op: str, shape: tuple[int, int, int], variant: str, epilogue_subtile: int
+    ):
+        if variant == "ws_flatten" and meta_ws_enabled():
+            self.skipTest("meta WS doesn't support FLATTEN")
+        if op == "var_mean" and epilogue_subtile > 1:
+            self.skipTest(
+                "covered by test_blackwell_mm_row_reduction_epilogue_not_fused"
+            )
+        self._skip_if_meta_ws_subtiled(epilogue_subtile)
+        M, N, K = shape
+        test_config = BlackwellGPUGemmConfig(
+            128,
+            128,
+            64,
+            3,
+            8,
+            epilogue_subtile=epilogue_subtile,
+            warp_specialize=True,
+            flatten=variant == "ws_flatten",
+        )
+        kernels, code = self._run_reduction(
+            self.ROW_OPS[op],
+            M,
+            K,
+            N,
+            test_config,
+            # Divisions (mean, var) may be reassociated.
+            tol=1e-5 if "mean" in op else 0,
+            **{
+                "triton.template_reduction_epilogue": True,
+                "triton.enable_template_tma_store": variant == "ws_tma_store",
+            },
+        )
+        self._assert_row_fused(kernels, code, op)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_row_reduction_epilogue_fusion_fp16(self):
+        kernels, code = self._run_reduction(
+            self.ROW_OPS["sum_and_out"],
+            1024,
+            512,
+            128,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            dtype=torch.float16,
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self._assert_row_fused(kernels, code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_row_reduction_epilogue_subtile_spans_n(self):
+        """With EPILOGUE_SUBTILE=2 and N == BLOCK_N // 2 (BLOCK_N is clamped to at
+        least 16), the second subtile is fully masked and must not contribute."""
+        if meta_ws_enabled():
+            self.skipTest("meta WS has no valid choice for this GEMM")
+        kernels, code = self._run_reduction(
+            self.ROW_OPS["sum"],
+            1024,
+            512,
+            8,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8, epilogue_subtile=2),
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self._assert_row_fused(kernels, code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize(
+        "case",
+        (
+            "disabled",
+            "unprofitable",
+            "no_benchmark",
+            "max_values",
+            "argmax",
+            "center_subtiled",
+            "var_mean_subtiled",
+            "data_partition",
+            "two_ctas",
+            "dynamic",
+            "cpp_wrapper",
+            "fp32",
+        ),
+    )
+    def test_blackwell_mm_row_reduction_epilogue_not_fused(self, case: str):
+        """The reduction stays unfused when the flag is off, when the fused
+        kernel benchmarks slower or isn't benchmarked, for arg reductions,
+        subtiled outputs that read their reduction back or need a multi-output
+        reduction, configs that can't host it (data partitioning, 2CTA),
+        dynamic shapes, cpp_wrapper, and fp32 outputs."""
+        fn = {
+            "max_values": lambda a, b: (a @ b).float().max(-1).values,
+            "argmax": lambda a, b: (a @ b).argmax(-1),
+            "center_subtiled": lambda a, b: (
+                (c := (a @ b).float()) - c.mean(-1, keepdim=True)
+            ),
+            "var_mean_subtiled": self.ROW_OPS["var_mean"],
+        }.get(case, self.ROW_OPS["sum"])
+        M, K, N = 1024, 512, 128
+        test_config = BlackwellGPUGemmConfig(
+            128,
+            128,
+            64,
+            3,
+            8,
+            epilogue_subtile=2 if case.endswith("subtiled") else 1,
+        )
+        patches = {
+            "benchmark_template_fusion": case != "no_benchmark",
+            "triton.template_reduction_epilogue": case != "disabled",
+            "triton.enable_template_tma_store": case == "two_ctas",
+            "cpp_wrapper": case == "cpp_wrapper",
+        }
+        autows = {"data_partition": (2, False), "two_ctas": (1, True)}.get(
+            case, (1, False)
+        )
+        if case in ("data_partition", "two_ctas") and not _use_template_autows():
+            self.skipTest("needs template autoWS")
+        if case == "two_ctas" and not has_two_ctas():
+            self.skipTest("needs 2CTA support in Triton")
+        if case == "fp32" and meta_ws_enabled():
+            self.skipTest("fp32 GEMMs fail to compile under meta WS")
+        if case == "cpp_wrapper":
+            # The cpp wrapper can't embed the template's source (T5).
+            patches["triton.autotune_at_compile_time"] = True
+        dtype = torch.float32 if case == "fp32" else torch.bfloat16
+        a = torch.randint(-1, 2, (M, K), device=GPU_TYPE).to(dtype)
+        b = torch.randint(-1, 2, (K, N), device=GPU_TYPE).to(dtype)
+        actual, code = self._run_with_mm_config(
+            fn,
+            (a, b),
+            test_config,
+            autows=autows,
+            dynamic=case == "dynamic" or None,
+            # Otherwise fused kernels benchmark as free, so a perf rejection
+            # can't hide a missing gate.
+            fused_ms=1e6 if case == "unprofitable" else 0.0,
+            **patches,
+        )
+        tol = 1e-5 if case in ("center_subtiled", "var_mean_subtiled") else 0
+        self.assertEqual(actual, fn(a, b), atol=tol, rtol=tol)
+        kernels = re.findall(r"def (triton_\w+)\(", code[0])
+        self.assertTrue(any(k.startswith("triton_tem") for k in kernels), kernels)
+        self.assertTrue(
+            any(k.startswith(("triton_per", "triton_red")) for k in kernels), kernels
+        )
+
+    COL_OPS = {
+        "sum": lambda a, b: (a @ b).float().sum(0),
+        # Every column is negative (positive), so unmasked out-of-range rows
+        # would win.
+        "amax": lambda a, b: ((a @ b) - 100).amax(0),
+        "amin": lambda a, b: ((a @ b) + 100).amin(0),
+        "mean": lambda a, b: (a @ b).float().mean(0),
+        "center": lambda a, b: (c := (a @ b).float()) - c.sum(0),
+        "sum_bf16": lambda a, b: (a @ b).sum(0),
+        "sum_and_out": lambda a, b: ((c := a @ b), c.float().sum(0)),
+        "relu_sum": lambda a, b: (a @ b).float().relu().sum(0, keepdim=True),
+    }
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", tuple(COL_OPS))
+    @parametrize("M", (1000, 4096))
+    @parametrize("split", (False, True))
+    @parametrize("epilogue_subtile", (1, 2))
+    def test_blackwell_mm_col_reduction_epilogue_fusion(
+        self, op: str, M: int, split: bool, epilogue_subtile: int
+    ):
+        self._skip_if_meta_ws_subtiled(epilogue_subtile)
+        kernels, _ = self._run_reduction(
+            self.COL_OPS[op],
+            M,
+            128,
+            200,
+            BlackwellGPUGemmConfig(
+                128, 128, 64, 3, 8, epilogue_subtile=epilogue_subtile
+            ),
+            **{"triton.template_reduction_epilogue": True, "split_reductions": split},
+        )
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        # Nodes reading the finished column results stay unfused.
+        self.assertEqual(len(kernels), 2 if op in ("mean", "center") else 1, kernels)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("case", ("disabled", "argmax", "fp64", "dynamic", "data_partition"))
+    def test_blackwell_mm_col_reduction_epilogue_not_fused(self, case: str):
+        """The column reduction stays unfused when the flag is off, it is an
+        arg reduction, its fp32 partials would lose precision, the shape is
+        dynamic, or the config can't host it (data partitioning)."""
+        fn = {
+            "argmax": lambda a, b: (a @ b).float().argmax(0),
+            "fp64": lambda a, b: (a @ b).double().sum(0),
+        }.get(case, self.COL_OPS["sum"])
+        if case == "data_partition" and not _use_template_autows():
+            self.skipTest("needs template autoWS")
+        test_config = BlackwellGPUGemmConfig(128, 128, 64, 3, 8)
+        with torch._dynamo.config.patch(assume_static_by_default=case != "dynamic"):
+            kernels, _ = self._run_reduction(
+                fn,
+                1024,
+                128,
+                256,
+                test_config,
+                autows=(2, False) if case == "data_partition" else (1, False),
+                **{"triton.template_reduction_epilogue": case != "disabled"},
+            )
+        self.assertTrue(
+            any(k.startswith(("triton_red", "triton_per")) for k in kernels), kernels
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize(
+        "op",
+        (
+            "sum",
+            "amax",
+            "sum_and_out",
+            "extra_input",
+            "row_col",
+            "mean",
+            "mean_and_sqmean",
+            "center",
+        ),
+    )
+    @parametrize("M", (1000, 4096))
+    @parametrize("N", (200, 512))
+    @parametrize("epilogue_subtile", (1, 2))
+    def test_blackwell_mm_row_reduction_epilogue_wide_n(
+        self, op: str, M: int, N: int, epilogue_subtile: int
+    ):
+        """Row reductions of an output wider than the tile fuse as per-tile
+        partials that the wrapper finishes."""
+        self._skip_if_meta_ws_subtiled(epilogue_subtile)
+        fn = {
+            "sum": lambda a, b: (a @ b).float().sum(1),
+            # Every row is negative, so unmasked out-of-range columns would win.
+            "amax": lambda a, b: ((a @ b) - 100).amax(1),
+            "sum_and_out": lambda a, b: ((c := a @ b), c.float().sum(1)),
+            "extra_input": lambda a, b: ((a @ b).float() * b[0].float()).sum(1),
+            "row_col": lambda a, b: ((c := (a @ b).float()).sum(0), c.sum(1)),
+            "mean": lambda a, b: (a @ b).float().mean(1),
+            "mean_and_sqmean": lambda a, b: (
+                (c := (a @ b).float()).mean(1),
+                (c * c).mean(1),
+            ),
+            "center": lambda a, b: (c := (a @ b).float()) - c.sum(1, keepdim=True),
+        }[op]
+        kernels, _ = self._run_reduction(
+            fn,
+            M,
+            128,
+            N,
+            BlackwellGPUGemmConfig(
+                128, 128, 64, 3, 8, epilogue_subtile=epilogue_subtile
+            ),
+            tol=1e-5 if "mean" in op else 0,
+            **{"triton.template_reduction_epilogue": True},
+        )
+        # The reductions fuse; nodes reading their finished results run after.
+        after = op in ("mean", "mean_and_sqmean", "center")
+        self.assertEqual(
+            [k.split("_fused")[0] for k in kernels],
+            ["triton_tem", "triton_poi"] if after else ["triton_tem"],
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", ("sum", "gated", "amax_sum", "mean", "sum_and_out"))
+    # At 4096x128 the split column reduction's group equals the output's; at
+    # 65536 the two reductions form a mix-order reduction when unfused.
+    @parametrize("M", (1000, 4096, 65536))
+    @parametrize("epilogue_subtile", (1, 2))
+    def test_blackwell_mm_row_and_col_reduction_epilogue(
+        self, op: str, M: int, epilogue_subtile: int
+    ):
+        """Row and column reductions of one output fuse into one epilogue,
+        including at sizes where they would otherwise form a mix-order
+        reduction."""
+        self._skip_if_meta_ws_subtiled(epilogue_subtile)
+        source = torch.randint(-2, 3, (M, 128), device=GPU_TYPE).float()
+        gate = torch.randint(0, 3, (M, 128), device=GPU_TYPE) / 2
+        fn = {
+            "sum": lambda a, b: ((c := (a @ b).float()).sum(0), c.sum(1)),
+            "gated": lambda a, b: (
+                (c := (a @ b).float() * source * gate * (1 - gate)).sum(0),
+                c.sum(1),
+            ),
+            "amax_sum": lambda a, b: ((c := (a @ b).float()).sum(0), c.amax(1)),
+            "mean": lambda a, b: ((c := (a @ b).float()).mean(0), c.mean(1)),
+            "sum_and_out": lambda a, b: ((c := a @ b), c.float().sum(0), c.sum(1)),
+        }[op]
+        kernels, code = self._run_reduction(
+            fn,
+            M,
+            128,
+            128,
+            BlackwellGPUGemmConfig(
+                128, 128, 64, 3, 8, epilogue_subtile=epilogue_subtile
+            ),
+            tol=1e-5 if op == "mean" else 0,
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertTrue(kernels[0].startswith("triton_tem_fused"), kernels)
+        # mean's column division reads the finished column sum.
+        self.assertEqual(len(kernels), 2 if op == "mean" else 1, kernels)
+        if op == "gated":
+            # The column pass reuses the row pass's loads of source and gate.
+            self.assertEqual(code.count("tl.load(in_ptr"), 2, code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("axis", (0, 1))
+    def test_blackwell_mm_reduction_epilogue_not_fused_meta_ws(self, axis: int):
+        """Meta automatic warp specialization can miscompile subtiled reduction
+        epilogues, so they stay unfused under it."""
+        if not meta_ws_enabled():
+            self.skipTest("needs Meta Triton autoWS enabled")
+        kernels, _ = self._run_reduction(
+            lambda a, b: ((c := a @ b), c.float().sum(axis)),
+            1024,
+            128,
+            256,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8, epilogue_subtile=2),
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertTrue(
+            any(k.startswith(("triton_red", "triton_per")) for k in kernels), kernels
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", ("col_reads_row", "row_reads_col", "pw_reads_col"))
+    def test_blackwell_mm_row_and_col_reduction_epilogue_not_fused(self, op: str):
+        """A column reduction may not read a row result, and nothing may read a
+        column result, since column results finish after the kernel."""
+        fn = {
+            "col_reads_row": lambda a, b: (
+                (d := (c := (a @ b).float()) - c.sum(1, keepdim=True)),
+                d.sum(0),
+            ),
+            "row_reads_col": lambda a, b: (
+                (s := (c := (a @ b).float()).sum(0)),
+                (c * s).sum(1),
+            ),
+            "pw_reads_col": lambda a, b: (
+                (s := (c := (a @ b).float()).sum(0)),
+                c * s,
+                c.sum(1),
+            ),
+        }[op]
+        kernels, _ = self._run_reduction(
+            fn,
+            1024,
+            128,
+            128,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertGreater(len(kernels), 1, kernels)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", ("col", "row_wide"))
+    def test_blackwell_mm_reduction_epilogue_benchmark_times_finish(self, op: str):
+        """The benchmark harness of a kernel with reduction partials also runs
+        the wrapper's finish, so epilogue benchmarking pays for it."""
+        fn, n = {
+            "col": (self.COL_OPS["sum"], 128),
+            "row_wide": (lambda a, b: (a @ b).float().sum(1), 256),
+        }[op]
+        _, code = self._run_reduction(
+            fn,
+            1024,
+            128,
+            n,
+            BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+            **{"triton.template_reduction_epilogue": True, "benchmark_kernel": True},
+        )
+        size = 1024 if op == "row_wide" else n
+        finish = re.findall(
+            r"\.run\(\*args, stream=\w+\)\n\s+args\[\d+\]\[\d+:\d+\]"
+            rf"\.view\(torch\.float32\)\.view\(\d+, {size}\)\.sum\(dim=0\)",
+            code,
+        )
+        self.assertEqual(len(finish), 1, code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_reduction_epilogue_benchmark_mix_order(self):
+        """Epilogue benchmarking times the real mix-order reduction kernel, and
+        restores its nodes for codegen afterwards."""
+        from torch._inductor.codegen.simd import SIMDScheduling
+
+        timed = []
+        bench = SIMDScheduling.benchmark_mix_order_reduction
+
+        def spy(self, node):
+            timed.append(bench(self, node))
+            return timed[-1]
+
+        with mock.patch.object(SIMDScheduling, "benchmark_mix_order_reduction", spy):
+            self._run_reduction(
+                lambda a, b: ((y := (a @ b).float()).sum(0), y.sum(1)),
+                65536,
+                128,
+                128,
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+                BlackwellGPUGemmConfig(128, 64, 64, 3, 8),
+                **{
+                    "triton.template_reduction_epilogue": True,
+                    "benchmark_template_fusion": True,
+                },
+            )
+        self.assertTrue(timed and None not in timed, timed)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_reduction_epilogue_benchmark_deferred_epilogue(self):
+        """Epilogue benchmarking also times the nodes run after the finish of
+        the reduction partials."""
+        from torch._inductor.scheduler import Scheduler
+
+        benchmarked = []
+        bench = Scheduler.benchmark_fused_nodes
+
+        def spy(self, nodes, *args, **kwargs):
+            benchmarked.append(nodes)
+            return bench(self, nodes, *args, **kwargs)
+
+        with mock.patch.object(Scheduler, "benchmark_fused_nodes", spy):
+            self._run_reduction(
+                lambda a, b: ((y := (a @ b).float()).mean(1), (y * y).mean(1)),
+                1024,
+                128,
+                256,
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+                BlackwellGPUGemmConfig(128, 64, 64, 3, 8),
+                tol=1e-5,
+                **{
+                    "triton.template_reduction_epilogue": True,
+                    "benchmark_template_fusion": True,
+                },
+            )
+        deferred = [n for n in benchmarked if not any(x.is_reduction() for x in n)]
+        self.assertEqual(len(deferred), 1, benchmarked)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("op", ("row", "col"))
+    def test_blackwell_mm_reduction_epilogue_transposed_read(self, op: str):
+        """A square output read transposed by a pointwise node must not fuse,
+        since epilogue loads take the tile element at the store position."""
+        fn = {
+            "row": lambda a, b: ((p := (a @ b).t().contiguous()), p.float().sum(1)),
+            "col": lambda a, b: ((c := a @ b).t().contiguous(), c.float().sum(0)),
+        }[op]
+        kernels, _ = self._run_reduction(
+            fn,
+            256,
+            128,
+            256,
+            BlackwellGPUGemmConfig(128, 256, 64, 3, 8),
+            **{"triton.template_reduction_epilogue": True},
+        )
+        self.assertFalse(
+            any(k.startswith("triton_tem") and "clone" in k for k in kernels), kernels
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_blackwell_mm_row_reduction_epilogue_skips_misfit_tile(self):
+        """The fusion benchmark skips choices whose tile can't host the
+        reduction epilogue, even when they rank first, and fuses into one that
+        can. Reading a row reduction back doesn't fit subtiled outputs."""
+        orig_choice_timings = MultiTemplateBuffer.choice_timings
+        orig_tile_fits = simd.tile_fits_reduction_epilogue
+        rejected_tiles = []
+
+        def choice_timings(self, hint_override=None):
+            # Rank the subtiled choices first.
+            timings = orig_choice_timings(self, hint_override)
+            subtiled = [c for c in timings if (c.output_tile or (0, 0, 1))[2] > 1]
+            return dict.fromkeys([*subtiled, *timings], 1.0)
+
+        def tile_fits(tile, template, epilogue_nodes):
+            fits = orig_tile_fits(tile, template, epilogue_nodes)
+            if not fits:
+                rejected_tiles.append(tile)
+            return fits
+
+        with (
+            mock.patch.object(MultiTemplateBuffer, "choice_timings", choice_timings),
+            mock.patch.object(simd, "tile_fits_reduction_epilogue", tile_fits),
+        ):
+            kernels, code = self._run_reduction(
+                lambda a, b: (c := (a @ b).float()) - c.mean(-1, keepdim=True),
+                1024,
+                512,
+                128,
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8, epilogue_subtile=2),
+                tol=1e-5,
+                **{"triton.template_reduction_epilogue": True},
+            )
+        self._assert_row_fused(kernels, code)
+        self.assertTrue(rejected_tiles)
+        self.assertTrue(
+            all(tile is not None and tile[2] > 1 for tile in rejected_tiles),
+            rejected_tiles,
+        )
 
 
 @instantiate_parametrized_tests

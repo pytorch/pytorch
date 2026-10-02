@@ -183,6 +183,11 @@ class ArgProperty(TypedDict, total=False):
 
 
 log = logging.getLogger(__name__)
+
+# Lowering contract for the exact two-input cat/cast prologue supported by the
+# Blackwell decompose-K template. The value is the ordered pair of source
+# buffer names. FX origins are provenance and must not be used as this contract.
+CAT2_FP32_TO_BF16_SOURCES = "cat2_fp32_to_bf16_sources"
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
 
@@ -6268,6 +6273,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         make_kernel_render: Callable[_P, _T] | None,
         mutated_inputs: Iterable[IRNode] | None = None,
         allowed_prologue_inps: OrderedSet[str] | None = None,
+        output_tile: tuple[int, int, int] | None = None,
     ) -> None:
         """
         NOTE:[TritonTemplates with multiple outputs]
@@ -6288,6 +6294,7 @@ class TritonTemplateBuffer(TemplateBuffer):
         if self.name is None:
             raise AssertionError("Expected self.name is not None")
         self.epilogue_fusable_outputs = {self.name: self.name}
+        self.output_tile = output_tile
 
         self.subgraph_inps: list[IRNode | Expr | None] | None = None
         self.subgraph_outs: list[IRNode | None] | None = None
@@ -6409,6 +6416,11 @@ class ChoiceCaller:
 
 
 class TritonTemplateCallerBase(ChoiceCaller):
+    # (rows, cols, subtiles) of the output tile each store_output call writes,
+    # when the template stores through scalar tile offsets. A tile spans
+    # cols * subtiles columns, split into subtiles stored by an unrolled loop.
+    output_tile: tuple[int, int, int] | None = None
+
     def get_make_kernel_render(self) -> Any:
         raise NotImplementedError
 
@@ -6498,15 +6510,18 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         render = self.make_kernel_render
         prev_kind = self._render_kind
         prev_caller = self._render_caller
+        prev_output_tile = self.output_tile
         self.make_kernel_render = caller.get_make_kernel_render()
         self._render_kind = "triton"
         self._render_caller = caller
+        self.output_tile = caller.output_tile
         try:
             yield
         finally:
             self.make_kernel_render = render
             self._render_kind = prev_kind
             self._render_caller = prev_caller
+            self.output_tile = prev_output_tile
 
     def finalize_as_triton_caller(self, caller: TritonTemplateCallerBase) -> None:
         if not isinstance(
@@ -6520,6 +6535,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self.make_kernel_render = caller.get_make_kernel_render()
         self._render_kind = "triton"
         self._render_caller = caller
+        self.output_tile = caller.output_tile
 
     @contextlib.contextmanager
     def swap_as_nvgemm_caller(self, caller: ChoiceCaller) -> Iterator[None]:
@@ -6574,6 +6590,7 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self.make_kernel_render = self._make_kernel_renders[None]
         self._render_kind = "triton"
         self._render_caller = callers[None]
+        self.output_tile = callers[None].output_tile
 
 
 class CUTLASSTemplateBuffer(TemplateBuffer):
@@ -8647,6 +8664,61 @@ class SubgraphBuffer(ExternKernel):
             [*self.sym_inputs, *outer_inputs],
             [self.name],
         )
+
+
+class MultiSubgraphBuffer(ExternKernel):
+    """A bounded set of whole, potentially multi-kernel subgraph plans.
+
+    Selection is intentionally deferred until scheduler construction.  This is
+    the multi-operation counterpart to ``MultiTemplateBuffer``: the selected
+    choice is materialized into ordinary IR before dependency analysis, so only
+    the winning plan reaches memory planning and code generation.
+
+    This initial form defers complete-plan selection.  A later scheduler
+    transaction can use ``SubgraphChoiceCaller.speculative_inline`` to expose a
+    choice's internal template boundary before calling ``finalize``.
+    """
+
+    def __init__(
+        self,
+        layout: Layout,
+        input_nodes: list[Buffer],
+        choices: list[ChoiceCaller],
+        selection_name: str,
+        *,
+        benchmark_with_cudagraphs: bool = False,
+    ) -> None:
+        super().__init__(None, layout, input_nodes)
+        if not choices:
+            raise AssertionError("MultiSubgraphBuffer requires at least one choice")
+        self.choices = choices
+        self.selection_name = selection_name
+        self.benchmark_with_cudagraphs = benchmark_with_cudagraphs
+        self.name = V.graph.register_buffer(self)
+        V.graph.register_operation(self)
+
+    def finalize(self) -> OperationBuffer:
+        from .select_algorithm import autotune_select_algorithm
+
+        output, _ = autotune_select_algorithm(
+            self.selection_name,
+            self.choices,
+            self.inputs,
+            self.layout,
+            benchmark_with_cudagraphs=self.benchmark_with_cudagraphs,
+            return_multi_template=False,
+        )
+        storage = output.data
+        if isinstance(storage, StorageBox):
+            storage = storage.data
+        if not isinstance(storage, OperationBuffer):
+            raise AssertionError(
+                "deferred subgraph choice must materialize an OperationBuffer"
+            )
+        return storage
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        raise AssertionError("MultiSubgraphBuffer must be finalized before codegen")
 
 
 class UserDefinedTritonKernel(ExternKernel):

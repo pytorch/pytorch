@@ -2447,6 +2447,13 @@ class triton:
     enable_persistent_tma_matmul = (
         os.environ.get("ENABLE_PERSISTENT_TMA_MATMUL", "0") == "1"
     )
+    # Try fusing row reductions of a Triton template's output into its epilogue,
+    # for template configs whose output tile spans full rows. A fusion is kept
+    # only when epilogue benchmarking shows it is faster, so this needs
+    # benchmark_template_fusion.
+    template_reduction_epilogue = (
+        os.environ.get("TORCHINDUCTOR_TEMPLATE_REDUCTION_EPILOGUE", "1") == "1"
+    )
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
@@ -2481,10 +2488,37 @@ class triton:
         )
     )
 
+    # Backends for the partial BMM nested inside a decompose-K subgraph. This
+    # is independent of max_autotune_gemm_backends, which gates the outer MM.
+    decompose_k_bmm_backends = os.environ.get(
+        "TORCHINDUCTOR_DECOMPOSE_K_BMM_BACKENDS", "ATEN"
+    )
+
     # specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables
     # it as an autotuning choice for all matmuls
     decompose_k_threshold = int(
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
+    )
+
+    # Experimental Blackwell decompose-K subgraph with divisor-free aligned K
+    # partitions. Kept opt-in until complete-plan coverage is broader.
+    enable_blackwell_decompose_k = (
+        os.environ.get("TORCHINDUCTOR_ENABLE_BLACKWELL_DECOMPOSE_K", "0") == "1"
+    )
+
+    # Benchmark complete materialized and producer-fused Triton decompose-K
+    # plans. Initially supported producer contracts remain separately guarded
+    # by their lowering legality checks.
+    enable_blackwell_decompose_k_producer_selection = (
+        os.environ.get(
+            "TORCHINDUCTOR_ENABLE_BLACKWELL_DECOMPOSE_K_PRODUCER_SELECTION", "0"
+        )
+        == "1"
+    )
+
+    # Maximum number of fused whole-plan choices for Triton decompose-K.
+    max_triton_decompose_k_fusion_choices = int(
+        os.environ.get("TORCHINDUCTOR_MAX_TRITON_DECOMPOSE_K_FUSION_CHOICES", "2")
     )
 
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
