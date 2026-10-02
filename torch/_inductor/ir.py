@@ -6907,6 +6907,8 @@ def is_node_sequence(
 
 @ir_dataclass(frozen=False)
 class InputsKernel(OperationBuffer):
+    """A kernel that tracks and manages a sequence of input IR nodes."""
+
     inputs: Sequence[IRNode | Sequence[IRNode]]
 
     def input_name(self, i: int) -> str:
@@ -6979,6 +6981,22 @@ class InputsKernel(OperationBuffer):
     def num_reads(self) -> int:
         return 1
 
+    @staticmethod
+    def _input_symbol_uses(
+        inp: IRNode, unbacked_only: bool
+    ) -> OrderedSet[sympy.Symbol]:
+        """Symbols from an input's layout only, not from upstream operations."""
+        if isinstance(inp, ShapeAsConstantBuffer):
+            return inp.get_free_symbol_uses(unbacked_only)
+        layout = inp.maybe_get_layout()
+        if isinstance(layout, Layout):
+            return (
+                get_free_symbols(layout.size, unbacked_only)
+                | get_free_symbols(layout.stride, unbacked_only)
+                | get_free_symbols(layout.offset, unbacked_only)
+            )
+        return OrderedSet()
+
     @cache_on_self_and_args("InputsKernel")
     def get_free_symbol_uses(
         self, unbacked_only: bool = False
@@ -6986,10 +7004,10 @@ class InputsKernel(OperationBuffer):
         r = OrderedSet[sympy.Symbol]()
         for inp in self.inputs:
             if isinstance(inp, IRNode):
-                r |= inp.get_free_symbol_uses(unbacked_only)
+                r |= self._input_symbol_uses(inp, unbacked_only)
             else:
                 for inner_inp in inp:
-                    r |= inner_inp.get_free_symbol_uses(unbacked_only)
+                    r |= self._input_symbol_uses(inner_inp, unbacked_only)
         return r
 
 
