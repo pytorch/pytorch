@@ -2,8 +2,15 @@
 
 #include <include/openreg.h>
 
+#include <cstdio>
 #include <map>
 #include <mutex>
+
+#ifndef _WIN32
+#include <cinttypes>
+#include <fcntl.h>
+#include <sys/stat.h>
+#endif
 
 namespace {
 
@@ -124,7 +131,7 @@ class MemoryManager {
     if (!attributes || !ptr)
       return orErrorUnknown;
 
-    std ::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard<std::mutex> lock(m_mutex);
     Block* info = getBlockInfoNoLock(ptr);
 
     if (!info) {
@@ -149,6 +156,105 @@ class MemoryManager {
     std::lock_guard<std::mutex> lock(m_mutex);
     return protectNoLock(getBlockInfoNoLock(ptr));
   }
+
+#ifndef _WIN32
+  orError_t getIpcMemHandle(
+      void* ptr,
+      char* name_out,
+      size_t name_buf_len,
+      ptrdiff_t* offset_out) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    Block* info = getBlockInfoNoLock(ptr);
+    if (!info || info->type != orMemoryType::orMemoryTypeDevice) {
+      return orErrorUnknown;
+    }
+
+    // Byte delta from the allocation base to the requested pointer.
+    ptrdiff_t offset =
+        static_cast<const char*>(ptr) -
+        static_cast<const char*>(info->pointer);
+
+    // Build a unique shm name: /or_<pid>_<base_hex>_<seq>.
+    // m_ipc_seq is protected by m_mutex; no extra atomics are needed.
+    char name[OR_IPC_HANDLE_MAX_LEN];
+    snprintf(
+        name,
+        sizeof(name),
+        "/or_%d_%" PRIxPTR "_%" PRIu64,
+        static_cast<int>(getpid()),
+        reinterpret_cast<uintptr_t>(info->pointer),
+        static_cast<uint64_t>(m_ipc_seq));
+
+    if (name_buf_len < strlen(name) + 1) {
+      return orErrorUnknown;
+    }
+    ++m_ipc_seq;
+
+    int fd = shm_open(name, O_CREAT | O_RDWR | O_EXCL, 0600);
+    if (fd < 0) {
+      return orErrorUnknown;
+    }
+    if (ftruncate(fd, static_cast<off_t>(info->size)) != 0) {
+      close(fd);
+      shm_unlink(name);
+      return orErrorUnknown;
+    }
+    void* shm = ::mmap(
+        nullptr, info->size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if (shm == MAP_FAILED) {
+      shm_unlink(name);
+      return orErrorUnknown;
+    }
+
+    // Temporarily unprotect source block, copy into shm, re-protect.
+    unprotectNoLock(info);
+    ::memcpy(shm, info->pointer, info->size);
+    protectNoLock(info);
+    ::munmap(shm, info->size);
+
+    // Leave the shm name live; the consumer calls shm_unlink after
+    // shm_open so the kernel reclaims the name slot automatically.
+    snprintf(name_out, name_buf_len, "%s", name);
+    *offset_out = offset;
+    return orSuccess;
+  }
+
+  orError_t openIpcMemHandle(
+      void** ptr_out,
+      const char* name,
+      size_t* size_out) {
+    int fd = shm_open(name, O_RDWR, 0);
+    if (fd < 0) {
+      return orErrorUnknown;
+    }
+    struct stat st{};
+    if (fstat(fd, &st) != 0) {
+      close(fd);
+      return orErrorUnknown;
+    }
+    auto size = static_cast<size_t>(st.st_size);
+    void* ptr =
+        ::mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if (ptr == MAP_FAILED) {
+      return orErrorUnknown;
+    }
+    // Unlink now: the mapping survives until munmap; the name is reclaimed.
+    shm_unlink(name);
+
+    *ptr_out = ptr;
+    *size_out = size;
+    return orSuccess;
+  }
+
+  orError_t closeIpcMemHandle(void* ptr, size_t size) {
+    if (::munmap(ptr, size) != 0) {
+      return orErrorUnknown;
+    }
+    return orSuccess;
+  }
+#endif // !_WIN32
 
  private:
   MemoryManager() = default;
@@ -198,6 +304,8 @@ class MemoryManager {
 
   std::map<void*, Block> m_registry;
   std::mutex m_mutex;
+  // Sequence counter for unique shm names. Incremented under m_mutex.
+  uint64_t m_ipc_seq{0};
 };
 
 } // namespace
@@ -257,3 +365,28 @@ orError_t orMemoryUnprotect(void* devPtr) {
 orError_t orMemoryProtect(void* devPtr) {
   return MemoryManager::getInstance().protect(devPtr);
 }
+
+#ifndef _WIN32
+orError_t orGetIpcMemHandle(
+    void* devPtr,
+    char* name_out,
+    size_t name_buf_len,
+    ptrdiff_t* offset_out) {
+  // Sync before snapshotting so all device writes are visible in the shm copy.
+  orDeviceSynchronize();
+  return MemoryManager::getInstance().getIpcMemHandle(
+      devPtr, name_out, name_buf_len, offset_out);
+}
+
+orError_t orOpenIpcMemHandle(
+    void** ptr_out,
+    const char* name,
+    size_t* size_out) {
+  return MemoryManager::getInstance().openIpcMemHandle(
+      ptr_out, name, size_out);
+}
+
+orError_t orCloseIpcMemHandle(void* ptr, size_t size) {
+  return MemoryManager::getInstance().closeIpcMemHandle(ptr, size);
+}
+#endif // !_WIN32
