@@ -5,6 +5,7 @@ import functools
 import gc
 import math
 import unittest
+import weakref
 from unittest import mock
 
 import torch
@@ -326,6 +327,40 @@ class TestFullyShardMemory(FSDPTest):
         mem_mb = self._get_curr_active_memory_mb()
         self.assertEqual(mem_mb, base_mem_mb)
 
+    @skip_if_lt_x_gpu(2)
+    def test_unsharded_grads_freed_after_copy_in(self):
+        from torch.distributed.fsdp._fully_shard import _fsdp_collectives
+
+        model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 32)).to(device_type)
+        fully_shard(model)
+        copy_in = _fsdp_collectives.foreach_reduce_scatter_copy_in
+        cast_and_view = _fsdp_collectives._cast_and_view_sharded_grads
+        grad_refs: list[weakref.ref] = []
+        num_alive_grads: list[int] = []
+
+        def recording_copy_in(grads, *args, **kwargs):
+            grad_refs[:] = [weakref.ref(grad) for grad in grads]
+            copy_in(grads, *args, **kwargs)
+
+        def counting_cast_and_view(*args):
+            num_alive_grads.append(sum(ref() is not None for ref in grad_refs))
+            return cast_and_view(*args)
+
+        with (
+            mock.patch.object(
+                _fsdp_collectives, "foreach_reduce_scatter_copy_in", recording_copy_in
+            ),
+            mock.patch.object(
+                _fsdp_collectives,
+                "_cast_and_view_sharded_grads",
+                counting_cast_and_view,
+            ),
+        ):
+            model(torch.randn(4, 16, device=device_type)).sum().backward()
+        # Clearing foreach_reduce's list after the copy-in must free the
+        # unsharded gradients before the reduce allocates its outputs
+        self.assertEqual(num_alive_grads, [0])
+
     def _get_peak_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()
         # HPU uses different memory stat keys.
@@ -554,6 +589,53 @@ class TestFullyShardHSDPSyncCorrectness(FSDPTest):
             for param, value in zip(module.parameters(), expected):
                 actual = param.grad.full_tensor()
                 self.assertEqual(actual, torch.full_like(actual, value))
+
+
+class TestFullyShardAllReduceHookSyncCorrectness(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(2, torch.get_device_module(device_type).device_count())
+
+    # This test is CUDA-specific because it relies on torch.cuda._sleep.
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not TEST_CUDA, "all-reduce hook sync test is CUDA-only")
+    def test_all_reduce_hook_buffer_lifetime_mixed_dtype(self):
+        # Without native HSDP, the all-reduce hook and the cast to orig_dtype
+        # read the RS output on the hook stream. If nothing holds it past the
+        # cast, the next RS (for the first linear) can reuse its block before
+        # the slow hook finishes, and the last linear's grad reads that data.
+        torch.manual_seed(0)
+        dim = 512
+        model = nn.Sequential(
+            nn.Linear(dim, dim, bias=False),
+            nn.ReLU(),
+            nn.Linear(dim, dim, bias=False),
+        ).to(device_type)
+        # bf16 reduce with fp32 params, so the cast drops the last RS output ref
+        mp = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.bfloat16
+        )
+        linears = [layer for layer in model if isinstance(layer, nn.Linear)]
+        for linear in linears:
+            fully_shard(linear, mp_policy=mp)
+        fully_shard(model, mp_policy=mp)
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randn(4, dim, device=device_type)
+
+        model(inp).sum().backward()
+        ref_grads = [param.grad.to_local().clone() for param in model.parameters()]
+        model.zero_grad()
+
+        sleep_cycles = int(200 * get_cycles_per_ms())
+
+        def slow_hook(output: torch.Tensor) -> None:
+            torch.get_device_module(device_type)._sleep(sleep_cycles)
+
+        for linear in linears:
+            linear.set_all_reduce_hook(slow_hook)
+        model(inp).sum().backward()
+        for param, ref_grad in zip(model.parameters(), ref_grads):
+            self.assertEqual(param.grad.to_local(), ref_grad)
 
 
 if __name__ == "__main__":
