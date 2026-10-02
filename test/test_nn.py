@@ -11817,7 +11817,6 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out.cpu(), ref)
 
     # Ref: https://github.com/pytorch/pytorch/issues/85005
-    @skipMPS
     @onlyAccelerator
     @largeTensorTest("120GB", "cpu")
     @largeTensorTest("45GB")
@@ -11851,7 +11850,6 @@ class TestNNDeviceType(NNTestCase):
                 self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
 
     # Ref: https://github.com/pytorch/pytorch/issues/108345
-    @skipMPS
     @onlyAccelerator
     @largeTensorTest("20GB", "cpu")
     @largeTensorTest("20GB")
@@ -12213,7 +12211,6 @@ class TestNNDeviceType(NNTestCase):
                 check_equal(loss, (inp1, targ_positive_ignore_index), (inp2[1:], targ_positive_ignore_index[1:]))
 
     # Ref: https://github.com/pytorch/pytorch/issues/85005
-    @skipMPS
     @onlyAccelerator
     @largeTensorTest("120GB", "cpu")
     @largeTensorTest("70GB")
