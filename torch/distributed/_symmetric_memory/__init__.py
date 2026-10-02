@@ -1000,34 +1000,9 @@ def _fused_all_gather_matmul(
         )
 
 
-# The ROCm _async_input_mm is a CK-tile kernel built only for these archs. It
-# uses 256-row M tiles without M padding, so each rank's chunk must be a multiple
-# of 256 rows.
-_ROCM_ASYNC_MM_ARCHS = ("gfx942", "gfx950")
+# Each 256-row M tile of the ROCm _async_input_mm waits on one chunk's signal,
+# so each rank's chunk must be a whole number of tiles.
 _ROCM_ASYNC_MM_TILE_M = 256
-# N and K must be multiples of the kernel's 16-byte bf16 vector loads.
-_ROCM_ASYNC_MM_VECTOR = 8
-# Native only beats the decomposition fallback for small K. Latency relative
-# to the fallback on MI355X (M=4096, bf16, 2 and 4 ranks): ~0.65-0.97x at
-# K=512, ~0.95-1.4x at K=1024, ~1.0-1.6x at K=2048 and above.
-_ROCM_ASYNC_MM_MAX_K = 1024
-
-
-def _rocm_supports_fused_all_gather_matmul_native(
-    A_shard: torch.Tensor, B: torch.Tensor, local_M: int
-) -> bool:
-    arch = torch.cuda.get_device_properties(A_shard.device).gcnArchName.split(":")[0]
-    return (
-        arch in _ROCM_ASYNC_MM_ARCHS
-        and A_shard.dtype == torch.bfloat16
-        and B.dtype == torch.bfloat16
-        and B.dim() == 2
-        and (B.is_contiguous() or B.t().is_contiguous())
-        and local_M % _ROCM_ASYNC_MM_TILE_M == 0
-        and A_shard.shape[-1] % _ROCM_ASYNC_MM_VECTOR == 0
-        and B.shape[-1] % _ROCM_ASYNC_MM_VECTOR == 0
-        and A_shard.shape[-1] < _ROCM_ASYNC_MM_MAX_K
-    )
 
 
 def _should_use_fused_all_gather_matmul_native(
@@ -1052,10 +1027,7 @@ def _should_use_fused_all_gather_matmul_native(
         and 2048 < local_M * group.size() <= 4096
         # _async_input_mm only supports a single B.
         and len(Bs) == 1
-        and (
-            torch.version.hip is None
-            or _rocm_supports_fused_all_gather_matmul_native(A_shard, Bs[0], local_M)
-        )
+        and (torch.version.hip is None or local_M % _ROCM_ASYNC_MM_TILE_M == 0)
     )
 
 
@@ -1116,15 +1088,16 @@ def _fused_all_gather_matmul_native(
     return A, out
 
 
-# HIP runs device copies larger than 1 MiB on a DMA engine, and each switch
-# between that engine and the stream_write_value32 kernel on the backend stream
-# stalls the async GEMM by ~100 us. Copies of at most 1 MiB run as kernels on
-# the stream's own queue.
-_ROCM_ASYNC_MM_MAX_COPY_BYTES = 1 << 20
+# HIP runs peer copies of more than 1 MiB on a DMA engine and smaller ones as
+# kernels. Copying peer shards in pieces of at most 1 MiB makes the native path
+# 2-3x faster per call on MI300X and MI355X.
+_ROCM_ASYNC_MM_MAX_PEER_COPY_BYTES = 1 << 20
 
 
 def _rocm_copy_in_pieces(dst: torch.Tensor, src: torch.Tensor) -> None:
-    rows = max(1, _ROCM_ASYNC_MM_MAX_COPY_BYTES // (dst.stride(0) * dst.element_size()))
+    rows = max(
+        1, _ROCM_ASYNC_MM_MAX_PEER_COPY_BYTES // (dst.stride(0) * dst.element_size())
+    )
     for d, s in zip(dst.split(rows), src.split(rows)):
         d.copy_(s)
 
@@ -1139,12 +1112,9 @@ def _fused_all_gather_matmul_native_rocm(
         symm_mem = get_symm_mem_workspace(
             group_name, A_shard.numel() * A_shard.element_size()
         )
-        # No barrier before overwriting this rank's workspace: ops that access
-        # peers' workspace end with a symm_mem.barrier() after those accesses.
-        # The low-contention ops issue theirs on a side stream, so their results
-        # must be waited on before the group is used again.
+        symm_mem.barrier()
         buf = symm_mem.get_buffer(symm_mem.rank, A_shard.shape, A_shard.dtype)
-        _rocm_copy_in_pieces(buf, A_shard)
+        buf.copy_(A_shard)
         A_shard = buf
 
     rank = symm_mem.rank
@@ -1154,7 +1124,9 @@ def _fused_all_gather_matmul_native_rocm(
     backend_stream = _get_backend_stream(priority=-1)
 
     # A_signals is zeroed on current_stream and set on backend_stream, so it is
-    # allocated before backend_stream is ordered after current_stream.
+    # allocated before backend_stream is ordered after current_stream. In a
+    # captured graph, zeroing it later would put the zeroing on the GEMM's
+    # branch, which HIP can replay after the peer signals.
     A = A_shard.new_empty(A_shard.shape[0] * world_size, A_shard.shape[1])
     A_signals = torch.zeros(world_size, dtype=torch.uint32, device=A_shard.device)
     A_shards = A.chunk(world_size)
@@ -1163,13 +1135,10 @@ def _fused_all_gather_matmul_native_rocm(
     backend_stream.wait_stream(current_stream)
     current_stream.wait_stream(backend_stream)
 
-    _rocm_copy_in_pieces(A_shards[rank], A_shard)
-    if not torch.cuda.is_current_stream_capturing():
-        _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
-    else:
-        _SymmetricMemory.memset32(A_signals, offset=rank, val=1, count=1)
-
-    out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
+    # The GEMM spins on the signals the peer copies set, so the peer copies are
+    # issued first. HIP can put current_stream and backend_stream on one
+    # in-order hardware queue, and it can replay the branches of a small
+    # captured graph one after another, in capture order.
     for step in range(1, world_size):
         src_rank = (rank + step) % world_size
         src_buf = symm_mem.get_buffer(src_rank, A_shard.shape, A_shard.dtype)
@@ -1180,9 +1149,16 @@ def _fused_all_gather_matmul_native_rocm(
             else:
                 _SymmetricMemory.memset32(A_signals, offset=src_rank, val=1, count=1)
 
-    # backend_stream is not re-ordered after current_stream here: every user of
-    # the backend stream does that at entry before issuing work on it.
+    A_shards[rank].copy_(A_shard)
+    if not torch.cuda.is_current_stream_capturing():
+        _SymmetricMemory.stream_write_value32(A_signals, rank, 1)
+    else:
+        _SymmetricMemory.memset32(A_signals, offset=rank, val=1, count=1)
+
+    out = torch.ops.symm_mem._async_input_mm(A, B, A_signals, rank)
+
     current_stream.wait_stream(backend_stream)
+    backend_stream.wait_stream(current_stream)
 
     symm_mem.barrier()
     return A, out
