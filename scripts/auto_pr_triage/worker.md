@@ -101,11 +101,13 @@ reviewable contract.
 
 Each concern has a description of the distinct, material change, the smallest
 useful set of changed files demonstrating it, and one to three strongest pieces
-of evidence from those files. Each evidence item must contain a short,
-contiguous `diff_excerpt` made of complete lines copied verbatim from the
+of evidence from those files. Each evidence item must contain a
+`diff_excerpt` of one or more contiguous lines copied verbatim from the
 supplied patch, including at least one `+` or `-` changed line, plus a concise
-explanation of its relevance. Do not reconstruct, normalize, or paraphrase an
-excerpt.
+explanation of its relevance. Keep an excerpt short by choosing fewer lines,
+never by cutting a line: copy every line in full, including its leading `+`,
+`-`, or space and any trailing comment, however long. Do not reconstruct,
+normalize, or paraphrase an excerpt.
 
 ## Bypass intake
 
