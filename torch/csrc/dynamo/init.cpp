@@ -117,7 +117,7 @@ struct IsValidVarName {
   // Takes a raw unicode pointer and length in code points and returns a
   // new/owned reference. T will be one of Py_UCS1, Py_UCS2, Py_UCS4.
   template <typename T>
-  static THPObjectPtr apply(PyObject* original, const T* start, size_t length) {
+  static THPObjectPtr apply(const T* start, size_t length) {
     if (length < 1)
       return THPObjectPtr::dup(Py_False);
 
@@ -139,7 +139,7 @@ struct IsValidVarName {
 };
 
 PyObject* _strip_function_call(
-    PyObject* self,
+    PyObject* /*self*/,
     PyObject* const* args,
     Py_ssize_t nargs) {
   if (!_checkParamCount(nargs, 1)) {
@@ -150,7 +150,7 @@ PyObject* _strip_function_call(
 }
 
 PyObject* _is_valid_var_name(
-    PyObject* self,
+    PyObject* /*self*/,
     PyObject* const* args,
     Py_ssize_t nargs) {
   if (!_checkParamCount(nargs, 1)) {
