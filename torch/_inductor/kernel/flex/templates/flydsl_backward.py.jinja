@@ -1,3 +1,4 @@
+import contextlib
 import os
 import threading
 
@@ -6,11 +7,7 @@ import torch
 from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     build_flex_attn_bwd_module,
 )
-from torch._inductor.runtime.flydsl_cache import (
-    configure_flydsl_cache_dir,
-    run_cached_flydsl,
-    temporary_env,
-)
+from torch._inductor.runtime.cache_dir_utils import cache_dir
 
 
 {{gen_defines()}}
@@ -84,7 +81,10 @@ def _run_flydsl_backward(
     grad_query,
     stream,
 ):
-    configure_flydsl_cache_dir()
+    if "FLYDSL_RUNTIME_CACHE_DIR" not in os.environ:
+        os.environ["FLYDSL_RUNTIME_CACHE_DIR"] = os.path.join(
+            cache_dir(), "flydsl_compile_cache"
+        )
 {% for index in range(MASK_BUFFER_COUNT, 4) %}
     mask_buffer_{{index}} = kv_num_blocks
 {% endfor %}
@@ -126,17 +126,7 @@ def _run_flydsl_backward(
             "COMPILE_ONLY and FLYDSL_COMPILE_ONLY must only be enabled together "
             "by the FlyDSL precompile path"
         )
-    launcher = _get_launcher()
-    if flydsl_compile_only:
-        flyc.compile(launcher, *compile_args)
-    else:
-        run_cached_flydsl(
-            launcher,
-            *compile_args,
-            constexpr_param=compile_args[0],
-            compiler=flyc.compile,
-            dispatch_args=dispatch_args,
-        )
+    _get_launcher()(*compile_args)
     return grad_query
 
 
@@ -202,8 +192,12 @@ def {{kernel_name}}_precompile(
     if flydsl_gpu_arch is not None:
         env_updates["FLYDSL_GPU_ARCH"] = flydsl_gpu_arch
 
-    with temporary_env(env_updates):
-        from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch._inductor.utils import _set_env
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    with contextlib.ExitStack() as stack:
+        for key, value in env_updates.items():
+            stack.enter_context(_set_env(key, value))
 
         with FakeTensorMode():
             query = _fake_proxy("query")

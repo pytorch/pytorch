@@ -2,15 +2,16 @@
 
 The launcher computes delta and zeros a BF16 dQ workspace, runs the
 cross-iteration MFMA pipeline, then scatters dQ into its requested layout.
-Dense and arbitrary block-list masks use the same producer/consumer pipeline.
-Dense masks traverse contiguous query ranges; block masks traverse transposed
-partial/full query lists. Mask semantics select traversal and tile geometry.
+Dense masks use the register-tuned producer/consumer kernel over contiguous
+query ranges. Block masks use the shared pipeline over transposed partial/full
+query lists. Mask semantics select the kernel and tile geometry.
 """
 
 import flydsl.compiler as flyc
 import flydsl.expr as fx
 from flydsl.expr import const_expr
 
+from .flex_attn_bwd_dense import make_dense_kernel
 from .flex_attn_bwd_pipeline import make_pipeline_kernel
 from .flex_attn_utils import (
     DIRECT_RANGE_CAUSAL,
@@ -268,7 +269,12 @@ def build_flex_attn_bwd_module(
 
     fused_grid = (sequence_length + key_rows - 1) // key_rows
     compute_num_threads = num_waves * 64
-    compute_kernel = make_pipeline_kernel(locals(), _f32, fast_exp2)
+    if block_list_traversal:
+        compute_kernel = make_pipeline_kernel(locals(), _f32, fast_exp2)
+        compute_attrs = {}
+    else:
+        compute_kernel = make_dense_kernel(locals(), _f32, fast_exp2)
+        compute_attrs = {"llvm.passthrough": [["amdgpu-agpr-alloc", "256"]]}
 
     @flyc.kernel
     def dq_layout_kernel(grad_query: fx.Tensor, grad_query_workspace: fx.Tensor):
@@ -381,6 +387,7 @@ def build_flex_attn_bwd_module(
             mask_buffer_2,
             mask_buffer_3,
         ).launch(
+            value_attrs=compute_attrs,
             grid=((batch_heads, fused_grid, 1) if heads_are_inner else (fused_grid, batch_heads, 1)),
             block=(compute_num_threads, 1, 1),
             stream=stream,
@@ -393,4 +400,6 @@ def build_flex_attn_bwd_module(
 
     if num_waves == 8:
         _launch.compile_hints["waves_per_eu"] = 1
+    if not block_list_traversal:
+        _launch.compile_hints["llvm_options"] = {"amdgpu-mfma-vgpr-form": True}
     return _launch
