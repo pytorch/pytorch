@@ -224,6 +224,19 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         x = inline_unused(x)
         return
 
+    def test_script_function_graph_break(self):
+        @torch.jit.script
+        def scripted():
+            if torch.jit.is_scripting():
+                return 1
+            print("unreachable")
+            return 2
+
+        def fn():
+            return scripted()
+
+        self.assertEqual(torch.compile(fn, backend="eager")(), 1)
+
     @make_test
     def test_inline_script_if_tracing_fn_with_default_args(a, b):
         return inline_script_if_tracing_fn_with_default_args(a, b)
@@ -2350,6 +2363,36 @@ partial_fn = functools.partial(fn, scale=2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
+
+    @parametrize("wrapped", (False, True))
+    def test_inspect_signature_skip_function(self, wrapped):
+        def fn(x):
+            target = torch.fx.Node.__init__
+            if wrapped:
+                target = torch.no_grad()(target)
+            return x + 1, str(inspect.signature(target))
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.ones(1)
+        self.assertEqual(fn(x), opt_fn(x))
+
+        with patch.object(
+            torch.fx.Node.__init__, "__signature__", inspect.Signature(), create=True
+        ):
+            self.assertEqual(fn(x), opt_fn(x))
+
+    def test_skip_function_missing_attr_error(self):
+        def fn(x):
+            try:
+                torch.fx.Node.__init__.__missing_attribute__
+            except AttributeError as exc:
+                return x + 1, exc.args, exc.name, exc.obj
+
+        x = torch.ones(1)
+        expected = fn(x)
+        actual = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(expected[:3], actual[:3])
+        self.assertIs(expected[3], actual[3])
 
     def test_default_dict_constr(self):
         param = torch.nn.Parameter(torch.ones([2, 2]))
