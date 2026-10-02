@@ -73,6 +73,24 @@ def log_analysis_record(record: dict[str, Any]) -> None:
         print(f"Auto PR Triage result | {safe_line}")
 
 
+def is_excerpt_of_patch(*, excerpt_lines: list[str], patch_lines: list[str]) -> bool:
+    """Return whether every excerpt line comes from the patch, in patch order.
+
+    Lines between excerpt lines may be skipped, and an excerpt line may stop
+    early if it keeps some text after its +, -, or space marker, so the excerpt
+    can drop comments and other detail but never add text.
+    """
+
+    remaining = iter(patch_lines)
+    return all(
+        any(
+            line == excerpt or (excerpt[1:].strip() and line.startswith(excerpt))
+            for line in remaining
+        )
+        for excerpt in excerpt_lines
+    )
+
+
 def evidence_errors(
     *,
     subject: str,
@@ -80,7 +98,7 @@ def evidence_errors(
     supporting_paths: tuple[str, ...],
     changed_files: dict[str, ChangedFile],
 ) -> list[str]:
-    """Check that each excerpt is a verbatim changed hunk of a supporting file."""
+    """Check that each excerpt quotes changed lines of a supporting file's patch."""
 
     errors: list[str] = []
     for item in evidence:
@@ -95,11 +113,9 @@ def evidence_errors(
         if patch is None:
             errors.append(f"evidence patch for {subject} is unavailable: {path}")
             continue
-        patch_lines = patch.splitlines()
         excerpt_lines = item.diff_excerpt.splitlines()
-        if not any(
-            patch_lines[index : index + len(excerpt_lines)] == excerpt_lines
-            for index in range(len(patch_lines) - len(excerpt_lines) + 1)
+        if not is_excerpt_of_patch(
+            excerpt_lines=excerpt_lines, patch_lines=patch.splitlines()
         ):
             errors.append(f"evidence excerpt for {subject} is not in patch: {path}")
             continue
