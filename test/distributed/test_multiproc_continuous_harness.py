@@ -70,17 +70,25 @@ class TestMultiProcContinuousHarness(TestCase):
         self._wait(["ok", "ok"])
         self.assertFalse(self.Fake.poison_pill)
 
-    def test_teardown_kills_hung_rank(self):
-        p = multiprocessing.get_context("spawn").Process(target=_sleep, daemon=True)
-        p.start()
+    def test_teardown_kills_hung_ranks(self):
+        ctx = multiprocessing.get_context("spawn")
+        procs = [ctx.Process(target=_sleep, daemon=True) for _ in range(3)]
+        for p in procs:
+            p.start()
         self.Hung._processes_spawned = True
-        self.Hung.processes = [p]
+        self.Hung.processes = procs
         self.Hung.task_queues = []
         self.Hung.rdvz_file = "/nonexistent"
-        with patch.object(cd, "TIMEOUT_DEFAULT", 1):
-            with self.assertRaisesRegex(RuntimeError, r"ranks \[0\] did not exit"):
+        start = time.monotonic()
+        with patch.object(cd, "TIMEOUT_DEFAULT", 2):
+            with self.assertRaisesRegex(
+                RuntimeError, r"ranks \[0, 1, 2\] did not exit"
+            ):
                 self.Hung.tearDownClass()
-        self.assertFalse(p.is_alive())
+        # One shared deadline, not one per rank.
+        self.assertLess(time.monotonic() - start, 5)
+        for p in procs:
+            self.assertFalse(p.is_alive())
 
 
 if __name__ == "__main__":
