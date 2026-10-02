@@ -1381,6 +1381,8 @@ Example:
       .def_readwrite("timeout", &::c10d::DistributedBackendOptions::timeout)
       .def_readwrite("group_id", &::c10d::DistributedBackendOptions::group_id)
       .def_readwrite(
+          "group_desc", &::c10d::DistributedBackendOptions::group_desc)
+      .def_readwrite(
           "global_ranks_in_group",
           &::c10d::DistributedBackendOptions::global_ranks_in_group)
       .def_readwrite(
@@ -3753,6 +3755,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               "global_ranks_in_group",
               &::c10d::Backend::Options::global_ranks_in_group)
           .def_readwrite("group_name", &::c10d::Backend::Options::group_name)
+          .def_readwrite("group_desc", &::c10d::Backend::Options::group_desc)
           .def_readwrite(
               "enable_reconfigure",
               &::c10d::Backend::Options::enable_reconfigure);

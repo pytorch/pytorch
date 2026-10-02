@@ -131,6 +131,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
                                             : options_c10d_->group_name;
 
   setGroupUid(options_c10d_->group_name);
+  // Binding a device creates the comm before Python's _set_group_desc.
+  setGroupDesc(options_c10d_->group_desc);
 
   if (options_c10d_->config.blocking == NCCL_CONFIG_UNDEF_INT) {
     auto nonblocking = c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING");

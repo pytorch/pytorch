@@ -381,6 +381,7 @@ class _DistributedBackendOptions:
     def group_id(self) -> GroupName: ...
     @group_id.setter
     def group_id(self, group_id: GroupName) -> None: ...
+    group_desc: str
     @property
     def global_ranks_in_group(self) -> list[int]: ...
     @global_ranks_in_group.setter
@@ -419,6 +420,7 @@ class Backend:
         def _timeout(self, val: timedelta) -> None: ...
         global_ranks_in_group: list[int]
         group_name: GroupName
+        group_desc: str
         use_pg_for_symm_mem_rendezvous: bool
         enable_reconfigure: bool
 
