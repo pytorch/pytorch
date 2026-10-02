@@ -1,13 +1,17 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import functools
 import importlib
 import os
 import sys
+import unittest
 
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     IS_LINUX,
     MI350_ARCH,
     skipIfRocmArch,
@@ -16,7 +20,6 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
-    GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
 )
@@ -511,7 +514,7 @@ if not TEST_WITH_ROCM:
     test_failures.update(
         {
             "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
-                ("cuda") if IS_LINUX else ("cpu", "cuda", "xpu")
+                ("cuda",) if IS_LINUX else ("cpu", "cuda", "xpu")
             ),
         }
     )
@@ -540,10 +543,15 @@ class DynamicShapesCodegenTestCase(TestCase):
         cls._triton_assert_stack.close()
         super().tearDownClass()
 
+    @property
+    def device(self):
+        return self.device_type
+
 
 if HAS_CPU:
 
     class DynamicShapesCodegenCpuTests(TestCase):
+        hw_classification = HardwareClassification.CPU
         maxDiff = None
         device = "cpu"
 
@@ -636,7 +644,7 @@ if HAS_CPU:
                 )
 
         def common(
-            self: TestCase,
+            self,
             model,
             example_inputs,
             kwargs=None,
@@ -661,14 +669,16 @@ if HAS_CPU:
     )
 
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if not TEST_WITH_ASAN:
 
-    class DynamicShapesCodegenGPUTests(DynamicShapesCodegenTestCase):
+    class DynamicShapesCodegenGPUTests(
+        DynamicShapesCodegenCommonTemplate, DynamicShapesCodegenTestCase
+    ):
+        hw_classification = HardwareClassification.ACCELERATOR
         maxDiff = None
-        device = GPU_TYPE
 
         def common(
-            self: TestCase,
+            self,
             model,
             example_inputs,
             kwargs=None,
@@ -687,21 +697,60 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 assert_dynamic_dims=assert_dynamic_dims,
             )
 
-    copy_tests(
-        DynamicShapesCodegenCommonTemplate,
+    instantiate_device_type_tests(
         DynamicShapesCodegenGPUTests,
-        GPU_TYPE,
-        test_failures,
+        globals(),
+        allow_xpu=True,
+        except_for="cpu",
     )
 
-    if HAS_GPU and hasattr(
-        DynamicShapesCodegenGPUTests,
-        "test_randint_distribution_dynamic_shapes_cuda",
-    ):
-        # gfx950 shows a deterministic randint64 distribution mismatch for high bounds.
-        DynamicShapesCodegenGPUTests.test_randint_distribution_dynamic_shapes_cuda = skipIfRocmArch(
-            MI350_ARCH
-        )(DynamicShapesCodegenGPUTests.test_randint_distribution_dynamic_shapes_cuda)
+    # copy_tests used to consult `test_failures` per device suffix when
+    # creating the GPU variant classes. instantiate_device_type_tests has
+    # no equivalent mechanism, so re-attach the non-CPU xfail/skip markers
+    # to the generated variant classes, matching the copy_tests semantics.
+    # NB: the template tests are exposed on the variant classes through MRO
+    # inheritance under their original (unsuffixed) names; wrapping a
+    # variant's attribute only affects that variant, not the shared template
+    # method used by the other device variants.
+    for _name, _failure in test_failures.items():
+        for _suffix in _failure.suffixes:
+            if _suffix == "cpu":
+                # CPU entries are applied by copy_tests above.
+                continue
+            _variant_cls = globals().get(
+                f"DynamicShapesCodegenGPUTests{_suffix.upper()}"
+            )
+            _test = getattr(_variant_cls, _name, None)
+            if _test is None:
+                # Variant class not generated on this machine (e.g. no XPU).
+                continue
+
+            # unittest.expectedFailure mutates the test item in place on
+            # Python >= 3.12, which would mark the shared template method for
+            # every device variant. Bind the method into a per-variant copy
+            # first (same technique as copy_tests) so the marker only applies
+            # to this variant.
+            @functools.wraps(_test)
+            def _copy(self, _test=_test):
+                return _test(self)
+
+            _marker = (
+                unittest.skip("Skipped!")
+                if _failure.is_skip
+                else unittest.expectedFailure
+            )
+            setattr(_variant_cls, _name, _marker(_copy))
+
+    for _name in list(globals().keys()):
+        if not _name.startswith("DynamicShapesCodegenGPUTests"):
+            continue
+        _cls = globals()[_name]
+        if hasattr(_cls, "test_randint_distribution_dynamic_shapes"):
+            # gfx950 shows a deterministic randint64 distribution mismatch
+            # for high bounds.
+            _cls.test_randint_distribution_dynamic_shapes = skipIfRocmArch(MI350_ARCH)(
+                _cls.test_randint_distribution_dynamic_shapes
+            )
 
 
 if __name__ == "__main__":

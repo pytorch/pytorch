@@ -12,53 +12,47 @@ MPSEvent::~MPSEvent() {
     [m_event release];
     m_event = nil;
   }
-  if (m_listener) {
-    [m_listener release];
-    m_listener = nil;
-  }
 }
 
 void MPSEvent::recordLocked(bool syncEvent) {
+  TORCH_INTERNAL_ASSERT(!m_enable_timing || syncEvent, "Timing-enabled MPS events must commit when recorded");
   // active encoders must end before encoding or waiting
   m_stream->endKernelCoalescing();
-  ++m_signalCounter;
+  const uint64_t signalCounter = ++m_signalCounter;
+  id<MTLCommandBuffer> commandBuffer = m_stream->commandBuffer();
   if (m_enable_timing) {
-    notifyLocked(^(id<MTLSharedEvent>, uint64_t) {
-      m_completion_time = getTime();
-      notifyCpuSync();
-    });
+    uint64_t timingGeneration;
+    {
+      std::lock_guard<std::mutex> lock(m_cpu_sync_mutex);
+      timingGeneration = ++m_timing_generation;
+    }
+    // Public timing events commit immediately after the signal, making the
+    // command buffer's GPU end time the timestamp for this event boundary.
+    [commandBuffer addCompletedHandler:^(id<MTLCommandBuffer> cb) {
+      notifyCpuSync(timingGeneration, cb.GPUEndTime);
+    }];
   }
-  id<MTLCommandBuffer> commandBuffer = m_stream->commandBuffer();
-  [commandBuffer encodeSignalEvent:m_event value:m_signalCounter];
+  [commandBuffer encodeSignalEvent:m_event value:signalCounter];
+  m_recorded.store(true);
   if (syncEvent) {
     m_stream->synchronize(SyncType::COMMIT);
   }
 }
 
-bool MPSEvent::waitLocked(bool syncEvent) {
-  // check if event is not recorded yet
-  if (m_event.signaledValue >= m_signalCounter) {
+bool MPSEvent::waitLocked(bool syncEvent, MPSStream* stream) {
+  const uint64_t signalCounter = m_signalCounter.load();
+  // skip the wait if the event is unrecorded or already signaled
+  if (!m_recorded.load() || m_event.signaledValue >= signalCounter) {
     return false;
   }
+  MPSStream* wait_stream = stream ? stream : m_stream;
   // active encoders must end before encoding or waiting
-  m_stream->endKernelCoalescing();
-  id<MTLCommandBuffer> commandBuffer = m_stream->commandBuffer();
-  [commandBuffer encodeWaitForEvent:m_event value:m_signalCounter];
+  wait_stream->endKernelCoalescing();
+  id<MTLCommandBuffer> commandBuffer = wait_stream->commandBuffer();
+  [commandBuffer encodeWaitForEvent:m_event value:signalCounter];
   if (syncEvent) {
     m_stream->synchronize(SyncType::COMMIT);
   }
-  return true;
-}
-
-bool MPSEvent::notifyLocked(MTLSharedEventNotificationBlock block) {
-  // check if event is not recorded yet
-  if (m_event.signaledValue >= m_signalCounter) {
-    return false;
-  }
-  if (!m_listener) {
-    m_listener = [[MTLSharedEventListener alloc] init];
-  }
-  [m_event notifyListener:m_listener atValue:m_signalCounter block:block];
   return true;
 }
 
@@ -74,72 +68,67 @@ void MPSEvent::record(bool needsLock, bool syncEvent) {
   });
 }
 
-bool MPSEvent::wait(bool needsLock, bool syncEvent) {
+bool MPSEvent::wait(bool needsLock, bool syncEvent, MPSStream* stream) {
   __block bool waited = false;
   if (!needsLock) {
-    return waitLocked(syncEvent);
+    return waitLocked(syncEvent, stream);
   }
-  dispatch_sync(m_stream->queue(), ^() {
+  MPSStream* dispatch_stream = stream ? stream : m_stream;
+  dispatch_sync(dispatch_stream->queue(), ^() {
     @autoreleasepool {
-      waited = waitLocked(syncEvent);
+      waited = waitLocked(syncEvent, stream);
     }
   });
   return waited;
 }
 
-bool MPSEvent::notify(bool needsLock, MTLSharedEventNotificationBlock block) {
-  if (!needsLock) {
-    return notifyLocked(block);
-  }
-  __block bool scheduledNotify = false;
-  dispatch_sync(m_stream->queue(), ^() {
-    @autoreleasepool {
-      scheduledNotify = notifyLocked(block);
-    }
-  });
-  return scheduledNotify;
-}
-
-void MPSEvent::notifyCpuSync() {
+void MPSEvent::notifyCpuSync(uint64_t timingGeneration, double completionTime) {
   std::lock_guard<std::mutex> lock(m_cpu_sync_mutex);
-  m_cpu_sync_completed = true;
+  if (timingGeneration > m_completed_timing_generation) {
+    m_completion_time = completionTime;
+    m_completed_timing_generation = timingGeneration;
+  }
   m_cpu_sync_cv.notify_one();
 }
 
-void MPSEvent::waitForCpuSync() {
+double MPSEvent::waitForTiming() {
   std::unique_lock<std::mutex> lock(m_cpu_sync_mutex);
-  m_cpu_sync_cv.wait(lock, [&] { return m_cpu_sync_completed; });
-  m_cpu_sync_completed = false;
+  m_cpu_sync_cv.wait(lock, [&] { return m_completed_timing_generation >= m_timing_generation; });
+  return m_completion_time;
 }
 
 bool MPSEvent::synchronize() {
-  bool scheduledNotify = notifyLocked(^(id<MTLSharedEvent>, uint64_t) {
-    m_completion_time = getTime();
-    notifyCpuSync();
-  });
-
-  if (scheduledNotify) {
-    waitForCpuSync();
-    return true;
+  const uint64_t signalCounter = m_signalCounter.load();
+  if (!m_recorded.load() || m_event.signaledValue >= signalCounter) {
+    return false;
   }
-  return false;
+  // Metal has no documented infinite-timeout value. Retry finite waits to
+  // preserve synchronize()'s unbounded semantics without risking timeout
+  // conversion overflow; a never-signaled event remains blocked as before.
+  constexpr uint64_t wait_interval_ms = 60'000;
+  while (![m_event waitUntilSignaledValue:signalCounter timeoutMS:wait_interval_ms]) {
+  }
+  return true;
 }
 
 bool MPSEvent::query() const {
+  const uint64_t signalCounter = m_signalCounter.load();
   // return false if not recorded or signaled yet
-  return m_signalCounter && (m_event.signaledValue >= m_signalCounter);
+  return m_recorded.load() && (m_event.signaledValue >= signalCounter);
 }
 
 void MPSEvent::reset(MPSStream* stream, bool enable_timing) {
-  if (stream != m_stream) {
-    m_signalCounter = 0;
-    m_event.signaledValue = 0;
-    m_stream = stream;
+  // Deliberately do not reset `m_signalCounter` or `m_event.signaledValue`.
+  // Their absolute values don't matter, only the difference between them does.
+  // Resetting them could cause a subsequent `waitLocked` call to incorrectly
+  // determine that an event was satisfied without waiting for it.
+  m_stream = stream;
+  {
+    std::lock_guard<std::mutex> lock(m_cpu_sync_mutex);
+    m_completion_time = 0.0;
   }
-  // reset record time
-  m_completion_time = 0;
   m_enable_timing = enable_timing;
-  m_cpu_sync_completed = false;
+  m_recorded.store(false);
 };
 
 //-----------------------------------------------------------------
@@ -205,14 +194,19 @@ void MPSEventPool::releaseEvent(id_t event_id) {
   m_in_use_events.erase(event_id);
 }
 
+void MPSEventPool::resetEvent(id_t event_id, MPSStream* stream, bool enable_timing) {
+  MPSEvent* event = getInUseEvent(event_id);
+  event->reset(stream, enable_timing);
+}
+
 void MPSEventPool::recordEvent(id_t event_id, bool syncEvent) {
   MPSEvent* event = getInUseEvent(event_id);
   event->record(/*needsLock*/ true, syncEvent);
 }
 
-void MPSEventPool::waitForEvent(id_t event_id, bool syncEvent) {
+void MPSEventPool::waitForEvent(id_t event_id, bool syncEvent, MPSStream* stream) {
   MPSEvent* event = getInUseEvent(event_id);
-  event->wait(/*needsLock*/ true, syncEvent);
+  event->wait(/*needsLock*/ true, syncEvent, stream);
 }
 
 void MPSEventPool::synchronizeEvent(id_t event_id) {
@@ -226,22 +220,25 @@ bool MPSEventPool::queryEvent(id_t event_id) {
 }
 
 double MPSEventPool::elapsedTime(id_t start_event_id, id_t end_event_id) {
-  // first make sure notifyListeners are called to capture events' completion times
+  // First make sure the command buffers containing both events have completed.
   dispatch_sync(m_default_stream->queue(), ^() {
     m_default_stream->synchronize(SyncType::COMMIT_AND_WAIT);
   });
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
   MPSEvent* start_event = getInUseEvent(start_event_id, false);
   MPSEvent* end_event = getInUseEvent(end_event_id, false);
-  // the notify is called on a separate thread, so this waits for that
-  end_event->waitForCpuSync();
-  const uint64_t start_time = start_event->getCompletionTime();
-  const uint64_t end_time = end_event->getCompletionTime();
+  TORCH_CHECK(start_event->isTimingEnabled() && end_event->isTimingEnabled(),
+              "Events were not created with argument 'enable_timing=True'");
+  TORCH_CHECK(start_event->isRecorded() && end_event->isRecorded(),
+              "Both events must be recorded before calculating elapsed time");
+  const double start_time = start_event->waitForTiming();
+  const double end_time = end_event->waitForTiming();
 
-  TORCH_CHECK(start_time > 0 && end_time > 0, "Events were not created with argument 'enable_timing=True'");
+  TORCH_CHECK(start_time > 0.0 && end_time > 0.0,
+              "MPS event timing failed because the GPU work for an event did not complete");
   TORCH_CHECK(
-      end_time > start_time, "End event ", end_event_id, " was not recorded after start event ", start_event_id);
-  return double(end_time - start_time) * 1e-6;
+      end_time >= start_time, "End event ", end_event_id, " was not recorded after start event ", start_event_id);
+  return (end_time - start_time) * 1e3;
 }
 
 MPSEvent* MPSEventPool::getInUseEvent(id_t event_id, bool locked) {

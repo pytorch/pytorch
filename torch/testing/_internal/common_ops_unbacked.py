@@ -128,7 +128,6 @@ ops_dde_xfail = {
     xfail("nn.functional.binary_cross_entropy"),
     xfail("nn.functional.binary_cross_entropy_with_logits"),
     xfail("nn.functional.channel_shuffle"),
-    xfail("nn.functional.cosine_similarity"),
     xfail("nn.functional.cross_entropy"),
     xfail("nn.functional.ctc_loss"),
     xfail("nn.functional.dropout"),

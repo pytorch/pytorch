@@ -8,7 +8,9 @@ import torch
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfMPS,
     instantiate_device_type_tests,
+    skipMPS,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
@@ -34,6 +36,7 @@ CUDA_FLOAT8_DTYPES = [
     torch.float8_e4m3fn,
     torch.float8_e8m0fnu,
 ]
+MPS_FLOAT8_DTYPES = [torch.float8_e4m3fn]
 
 # The following information are not yet provided by torch.finfo.
 
@@ -246,6 +249,7 @@ ROUND_TRIP_TEST_CASES = (
 class TestFloat8Dtype(TestCase):
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
+    @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_creation_with_zeros(self, dtype, device):
         """Sanity test, round-trip casting of zeros."""
         x8 = torch.zeros(8, dtype=dtype, device=device)
@@ -260,6 +264,7 @@ class TestFloat8Dtype(TestCase):
 
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
+    @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     @parametrize("get_input", ROUND_TRIP_TEST_CASES)
     def test_cast_round_trip(self, dtype, get_input, device):
         """Numerical test of float8 conversion, by performing a round-trip cast
@@ -274,6 +279,7 @@ class TestFloat8Dtype(TestCase):
         x8_simulated = simulate_fp8_precision(x, dtype)
         self.assertEqual(x8_simulated, x8.float())
 
+    @skipMPS
     def test_float8_e8m0fnu_rne_rounding(self, device):
         """
         For every possible e8m0 exponent (256 options) and for every possible
@@ -332,6 +338,7 @@ class TestFloat8Dtype(TestCase):
 
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
+    @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_special_numbers(self, dtype, device):
         """Test special numbers."""
 
@@ -356,6 +363,7 @@ class TestFloat8Dtype(TestCase):
 
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
+    @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_type_promotion_fails(self, dtype, device):
         """Test that float8 is not promoted to higher precision Float Type."""
         for other_dtype in [
@@ -364,6 +372,8 @@ class TestFloat8Dtype(TestCase):
             torch.float32,
             torch.float64,
         ]:
+            if other_dtype == torch.float64 and self.device_type == "mps":
+                continue  # MPS does not support float64
             x = torch.randn(8, device=device).to(dtype)
             y = torch.randn(8, device=device).to(other_dtype)
             with self.assertRaisesRegex(
@@ -373,6 +383,7 @@ class TestFloat8Dtype(TestCase):
 
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
+    @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_empty(self, dtype, device):
         with DeterministicGuard(torch.are_deterministic_algorithms_enabled()):
             for use_deterministic in (True, False):
@@ -381,16 +392,19 @@ class TestFloat8Dtype(TestCase):
 
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
+    @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_to_string(self, dtype, device):
         x = torch.empty(4, 4, device=device, dtype=dtype)
         str(x)
 
     @dtypes(*FLOAT8_DTYPES)
+    @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_finfo(self, dtype, device):
         torch.finfo(dtype)
 
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
+    @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_cat(self, dtype, device):
         x1 = torch.empty(4, 4, device=device, dtype=dtype)
         x2 = torch.empty(4, 4, device=device, dtype=dtype)
@@ -398,6 +412,7 @@ class TestFloat8Dtype(TestCase):
 
     @dtypes(*FLOAT8_DTYPES)
     @dtypesIfCUDA(*CUDA_FLOAT8_DTYPES)
+    @dtypesIfMPS(*MPS_FLOAT8_DTYPES)
     def test_save_load(self, dtype, device):
         x1 = torch.randint(0, 10, (4, 4), device=device, dtype=torch.uint8).view(dtype)
         with TemporaryFileName() as fname:
@@ -442,7 +457,7 @@ class TestFloat4Dtype(TestCase):
             )
 
 
-instantiate_device_type_tests(TestFloat8Dtype, globals())
+instantiate_device_type_tests(TestFloat8Dtype, globals(), allow_mps=True)
 instantiate_device_type_tests(TestFloat4Dtype, globals())
 
 

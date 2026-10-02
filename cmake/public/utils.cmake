@@ -376,11 +376,15 @@ function(torch_compile_options libname)
       -Wno-strict-aliasing
       )
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      list(APPEND private_compile_options -Wredundant-move)
+      list(APPEND private_compile_options -Wredundant-move -Wpessimizing-move)
       # -Wno-interference-size only exists in GCC 12+
       if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
         list(APPEND private_compile_options -Wno-interference-size)
       endif()
+    endif()
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "IntelLLVM")
+      # icpx uses the clang frontend but reports its own compiler ID
+      list(APPEND private_compile_options -Wmove)
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       if(NOT USE_CUDA)
@@ -493,11 +497,11 @@ include(CheckLinkerFlag)
 
 ##############################################################################
 # Check if given flag is supported and append it to provided outputvar
-# Also define HAS_UPPER_CASE_FLAG_NAME variable
+# Also define HAS_<LANG>_UPPER_CASE_FLAG_NAME variable
 # Usage:
 #   append_cxx_flag_if_supported("-Werror" CMAKE_CXX_FLAGS)
 function(append_cxx_flag_if_supported flag outputvar)
-    string(TOUPPER "HAS${flag}" _FLAG_NAME)
+    string(TOUPPER "HAS_CXX${flag}" _FLAG_NAME)
     string(REGEX REPLACE "[=-]" "_" _FLAG_NAME "${_FLAG_NAME}")
     # GCC silents unknown -Wno-XXX flags, so we detect the corresponding -WXXX.
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -513,7 +517,7 @@ function(append_cxx_flag_if_supported flag outputvar)
 endfunction()
 
 function(append_c_flag_if_supported flag outputvar)
-    string(TOUPPER "HAS${flag}" _FLAG_NAME)
+    string(TOUPPER "HAS_C${flag}" _FLAG_NAME)
     string(REGEX REPLACE "[=-]" "_" _FLAG_NAME "${_FLAG_NAME}")
 
     # GCC silences unknown -Wno-XXX flags, so test the corresponding -WXXX.

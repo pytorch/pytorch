@@ -13,7 +13,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check-ci:
+    if: github.repository_owner == 'pytorch'
+    uses: ./.github/workflows/_check-ci.yml
+
   check_binary_linux_cpu:
+    needs: check-ci
     if: github.repository_owner == 'pytorch'
     name: Test check_binary.sh for Linux CPU
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
@@ -29,6 +34,7 @@ jobs:
           popd
 
   check_binary_linux_cuda:
+    needs: check-ci
     if: github.repository_owner == 'pytorch'
     name: Test check_binary.sh for Linux CUDA
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main

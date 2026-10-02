@@ -14,7 +14,7 @@ from torch._inductor.heuristics.registry import (
     CodegenConfigHeuristics,
     register_codegen_heuristic,
 )
-from torch._inductor.runtime.hints import ReductionHint, TRITON_MAX_BLOCK
+from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TRITON_MAX_BLOCK
 from torch._inductor.runtime.runtime_utils import next_power_of_2
 from torch._inductor.utils import prefix_is_reduction
 from torch.utils._ordered_set import OrderedSet
@@ -210,6 +210,11 @@ class ReductionHeuristic(CodegenConfigHeuristics):
 
         device_major = triton_meta["device"].major
         warp_size = triton_meta["device"].warp_size_or_default
+        # Kernels with per-row accumulators have room for larger reduction
+        # blocks than the contiguous default.
+        scalar_accumulators = AutotuneHint.SCALAR_ACCUMULATORS in inductor_meta.get(
+            "autotune_hints", ()
+        )
         MAX_R0_BLOCK = 1024 if device_major is not None and device_major >= 10 else 2048
         if size_hints["x"] >= 1024 and loads_and_red >= 10:
             MAX_R0_BLOCK = 1024
@@ -265,6 +270,9 @@ class ReductionHeuristic(CodegenConfigHeuristics):
                     warp_size=warp_size,
                 )
 
+        contiguous_rblock = (
+            4096 if scalar_accumulators and "y" in size_hints else MAX_R0_BLOCK
+        )
         contiguous_config = make_config(
             # Default XBLOCK=2 launches too few programs to fill
             # the device. Prefer XBLOCK=1 so the autotuner has a candidate
@@ -272,7 +280,7 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             1
             if (torch.version.hip and size_hints.get("x", 0) <= 64)
             else (2 if rnumel <= 2048 else 1),
-            min(rnumel, MAX_R0_BLOCK),
+            min(rnumel, contiguous_rblock),
             register_intensive=register_intensive,
         )
 
@@ -313,6 +321,14 @@ class ReductionHeuristic(CodegenConfigHeuristics):
             register_intensive,
         )
 
+        scalar_acc_configs: list[Config] = []
+        if scalar_accumulators and "y" not in size_hints:
+            scalar_acc_configs = [
+                make_config(1, min(rnumel, 4096)),
+                make_config(1, min(rnumel, 8192), num_warps=4),
+                make_config(1, min(rnumel, 16384), num_warps=8),
+            ]
+
         configs: list[Config] = []
 
         if inductor_meta.get("add_persistent_rblock") and loads_and_red <= 8:
@@ -331,23 +347,31 @@ class ReductionHeuristic(CodegenConfigHeuristics):
         elif max_autotune_enabled:
             pass
         elif reduction_hint == ReductionHint.INNER:
+            configs.extend(
+                self._get_inner_extra_configs(make_config, register_intensive)
+            )
+            inner_configs = scalar_acc_configs or [contiguous_config]
             if sm103_config is not None:
                 # Adding B300/GB300 config as autotuning option
-                return configs + [contiguous_config, sm103_config]
-            return configs + [contiguous_config]
+                inner_configs.append(sm103_config)
+            return configs + inner_configs
         elif reduction_hint == ReductionHint.OUTER:
             return configs + [outer_config]
         elif reduction_hint == ReductionHint.OUTER_TINY:
             return configs + [tiny_config]
 
-        result_configs = configs + [
-            contiguous_config,
-            outer_config,
-            tiny_config,
-            make_config(64, 64),
-            make_config(8, 512),
-            make_config(64, 4, num_warps=8),
-        ]
+        result_configs = (
+            configs
+            + [
+                contiguous_config,
+                outer_config,
+                tiny_config,
+                make_config(64, 64),
+                make_config(8, 512),
+                make_config(64, 4, num_warps=8),
+            ]
+            + scalar_acc_configs
+        )
 
         return self._finalize_configs(
             result_configs, make_config, size_hints, inductor_meta
@@ -523,6 +547,10 @@ class ReductionHeuristic(CodegenConfigHeuristics):
     def _finalize_configs(self, configs, make_config, size_hints, inductor_meta):
         """Post-process non-persistent configs."""
         return configs
+
+    def _get_inner_extra_configs(self, make_config, register_intensive):
+        """Extra candidate configs to try for the INNER reduction hint."""
+        return []
 
     def _persistent_xblock_vals(self) -> list[int]:
         """XBLOCK values for persistent reduction."""
@@ -750,6 +778,12 @@ class ROCmReductionHeuristic(ReductionHeuristic):
 @register_codegen_heuristic("reduction", "xpu", register=torch.xpu._is_compiled())
 class XPUReductionHeuristic(ReductionHeuristic):
     """Reduction configs for XPU devices."""
+
+    def _get_inner_extra_configs(self, make_config, register_intensive):
+        # We see performance regression on xpu in some models because the
+        # default INNER config lacks a high-num_warps candidate. Add one back
+        # for XPU to recover the regressed performance.
+        return [make_config(64, 64, num_warps=16)]
 
     def _persistent_inner_config(
         self,

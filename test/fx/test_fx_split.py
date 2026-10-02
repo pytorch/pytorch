@@ -7,7 +7,7 @@ import torch
 import torch.fx.passes.operator_support as op_support
 import torch.fx.passes.splitter_base as splitter_base
 from torch.fx.passes.split_utils import split_by_tags
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import HardwareClassification, TestCase
 
 
 @torch.jit.script
@@ -24,6 +24,8 @@ def wrapped_add(_dataclass, y):
 
 
 class TestFXSplit(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_split_preserve_node_meta(self):
         class TestModule(torch.nn.Module):
             def forward(self, x, y):
@@ -115,6 +117,8 @@ class TestFXSplit(TestCase):
 
 
 class TestSplitByTags(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     class TestModule(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -227,6 +231,8 @@ class TestSplitByTags(TestCase):
 
 
 class TestSplitOutputType(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     class TestModule(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()

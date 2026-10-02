@@ -1,0 +1,229 @@
+# Owner(s): ["module: ci"]
+name: Hardened PR Review
+
+# Stage 1 of the hardened PR review. It records seven fields about the pull
+# request and hands them to Stage 2 as an artifact. That is all it does.
+# (Seven, pinned by `test_a_well_formed_event_captures_exactly_the_declared_
+# fields`: five read off the event, plus `trigger_event` and `trigger_label`.)
+#
+# THE TRIGGER IS `pull_request_target`, AND THAT IS THE TRUST BOUNDARY.
+# pytorch/pytorch requires a maintainer to approve CI for contributors without
+# write access. This review is meant to start when a maintainer applies the
+# label, not after a second click on an approval button, so it must run without
+# that approval - and `pull_request_target` is the trigger that does, precisely
+# because it runs from a TRUSTED ref with the repository's secrets and token
+# rather than from the pull request. (Specifically the DEFAULT branch — see
+# the changelog note below. The older "base ref" phrasing is out of date.)
+#
+# The price of that trigger is absolute: this file must execute NO
+# pull-request content. It checks nothing out, and every value it records comes
+# from the `github.event` payload GitHub itself populated. Each of the
+# following is pinned by `TestStage1RunsNoPullRequestContent` rather than left
+# to review:
+#
+#   * THE SET OF STEPS, not only their shape. A step that merely `curl`s a
+#     script and pipes it to bash breaks none of the rules below, so the job
+#     and step names are pinned and adding one is a deliberate edit.
+#   * no `actions/checkout` and no `ref:` - no PR tree, no submodules, no
+#     PR-supplied `.git/config`, nothing on disk for a later step to source
+#   * every `uses:` is a pinned third-party SHA. A `./...` action resolves out
+#     of the WORKSPACE, so today it would resolve to nothing at all - it is
+#     forbidden because it is the shape that turns lethal the moment anyone
+#     adds a checkout, not because it is dangerous as things stand.
+#   * no step shell reads a workspace path, fetches, or evaluates fetched
+#     text. (The upload action does read the artifact this job wrote there;
+#     the property is that nothing reads a path a PULL REQUEST could fill.)
+#   * every `${{ }}` in the file is on a reviewed allowlist of
+#     GitHub-generated scalars - no contributor-authored text, so nothing
+#     needs escaping on its way to a shell. SIX reach the shell as `env:`
+#     values, read as quoted variables; four of those are also regex-checked
+#     before use, and the other two (`is_fork`, a GitHub-computed boolean,
+#     and the event action) are carried to jq as data and re-validated by
+#     Stage 2. The rest never leave a concurrency group or a job condition.
+#   * no `secrets.*`, and `permissions: {}` - the write-scoped token this
+#     trigger hands out is refused rather than merely left unused
+#
+# WORKFLOW SOURCE IS ALWAYS THE DEFAULT BRANCH, which removes a drift class
+# this design would otherwise have. Since 2025-12-08, `pull_request_target`
+# takes the workflow file, GITHUB_REF and GITHUB_SHA from the repository's
+# DEFAULT branch regardless of the pull request's base branch (GitHub
+# changelog, 2025-11-07, "Actions pull_request_target and environment branch
+# protections changes"). So a release branch carrying a stale copy of THIS
+# file cannot produce a run from it.
+#
+# Read that precisely: it is the same BRANCH, not the same COMMIT. Stage 1
+# reads the default branch when the pull-request event fires and Stage 2 reads
+# it when the completion event fires, and the branch can advance in between -
+# so the two files are independent snapshots and a trigger change lands in two
+# steps. It also says nothing about a stale workflow triggered by
+# `pull_request`, which is a different event and is read from the PR's ref.
+# The practical consequence is for any FUTURE change to either trigger: a
+# capture already in flight completes against the new gate and is silently
+# skipped, so re-label those PRs rather than expecting them to recover.
+#
+# TWO REAL BEHAVIOUR CHANGES, both in WHICH pull requests get reviewed:
+#
+#   * MORE: `pull_request` does not run when the PR has a merge conflict,
+#     `pull_request_target` does. Harmless here - the review diffs against an
+#     API-resolved merge base, never against a merge commit.
+#   * FEWER, AND SILENTLY: "branches with names that match certain patterns
+#     (such as those which look similar to SHAs) may not trigger workflows
+#     with the pull_request_target event" (GitHub, "Events that trigger
+#     workflows"). Such a PR can carry the label and produce NO Stage 1 run,
+#     no artifact and no telemetry row - there is nothing to diagnose because
+#     nothing ran. GitHub does not document the patterns, so this cannot be
+#     detected here; it is an accepted platform limitation of the trigger.
+#
+# NONE OF WHICH MAKES THE ARTIFACT TRUSTED. Stage 2 re-derives pr_number,
+# head_sha, base_sha and is_fork from the REST API, and authenticates the
+# artifact against `github.event.workflow_run.head_sha` before using it. The
+# artifact is corroborated, never believed. See hardened-pr-review-run.yml.
+
+on:
+  pull_request_target:
+    types: [labeled, synchronize, reopened, ready_for_review]
+
+
+# `pull_request_target` mints a token with write scopes by default. This
+# workflow needs none: it reads the event payload and uploads an artifact,
+# which travels on the runtime token rather than on GITHUB_TOKEN. Declared at
+# workflow level as well as on the job, so a job added later starts at zero.
+permissions: {}
+
+
+# NO WORKFLOW-LEVEL `concurrency:`, and that is the fix for a live defect rather
+# than a style choice. GitHub claims a workflow-level group BEFORE evaluating the
+# job `if:`, so a run this workflow is going to SKIP still joins the group and,
+# with `cancel-in-progress`, kills a review already running.
+#
+# The group that used to be here ended `-${{ github.event.label.name }}`, and
+# that suffix separates `labeled` runs ONLY. Three of the four declared types
+# carry no label object, so it renders empty and they all share one group:
+#
+#   labeled   + 'in progress'        runs     ...-false-in progress
+#   labeled   + 'cla signed' (bot)   SKIPS    ...-false-cla signed
+#   synchronize, non-draft, labelled runs     ...-false-
+#   synchronize, DRAFT, labelled     SKIPS    ...-false-     <- same group
+#   synchronize + 'ready for review' SKIPS    ...-false-     <- same group
+#
+# So: push, `capture` starts; the PR is converted to draft or picks up
+# `ready for review` inside that window; push again, and the second run joins
+# `...-false-`, cancels the first, then skips its own `capture`. The first run
+# ends `cancelled`, Stage 2 requires `conclusion == 'success'`, and the PR gets
+# no review, no telemetry row and nothing to say so. That is the pytorch/ciforge
+# incident, reachable here with one trigger and no stale file anywhere.
+#
+# `.github/scripts/ensure_actions_will_cancel.py` is why one used to be here: it
+# demands a cancelling workflow-level group with a fixed prefix on every
+# pull-request workflow. It selects files with `"pull_request" in on`, an exact
+# key match, so `pull_request_target` took this file out of its scope — verified
+# by running the checker, which exits 0. pytorch/ciforge removed its group after
+# the same incident, so the two repositories now agree.
+#
+# The collapse group therefore lives on the `capture` JOB below, where a run the
+# `if:` rejects never enters it.
+
+env:
+  # The PR-lifecycle state label that gates automated review.
+  REVIEW_LABEL: "in progress"
+
+jobs:
+  capture:
+    if: |
+      github.repository == 'pytorch/pytorch' &&
+      !github.event.pull_request.draft &&
+      (
+        (github.event.action == 'labeled' && github.event.label.name == 'in progress') ||
+        (github.event.action != 'labeled' &&
+         contains(github.event.pull_request.labels.*.name, 'in progress') &&
+         !contains(github.event.pull_request.labels.*.name, 'ready for review'))
+      )
+    # `github.event_name` is a CONSTANT while this file has one trigger, and it
+    # is here for the run this file does not produce. `pull_request` reads the
+    # workflow from the PULL REQUEST'S OWN REF, so a PR that adds its own copy
+    # of this file fires a second run under the same workflow name, which no
+    # contract test can forbid — they all read one tree. Unkeyed, both runs
+    # claim this group and `cancel-in-progress` kills whichever started first;
+    # if the survivor is the `pull_request` one, Stage 2 refuses its event and
+    # the review ends `skipped` with no row.
+    #
+    # WHAT IT IS NOT: a fence against anyone who WANTS to suppress a review,
+    # and the residual is bigger than it first looks. A group is a STRING the
+    # attacker types, groups are repository-scoped and shared across workflows,
+    # and nothing binds the PR number in that string to the PR carrying the
+    # file. So a contributor whose CI has been approved once can write
+    # `hardened-pr-review-pytorch/pytorch-<someone-else's-number>-pull_request_target`
+    # with `cancel-in-progress: true` and cancel THAT contributor's capture —
+    # cross-PR, not self-inflicted. Aimed at `capture` it leaves no telemetry
+    # row at all, because Stage 2 requires `conclusion == 'success'`; aimed at
+    # Stage 2's own group it costs the review but does leave a `blocked` row.
+    # A per-SHA check run would make the missing review VISIBLE; it would not
+    # prevent the cancellation. Closing it means not sharing a group with
+    # anything a pull request can name.
+    #
+    # What the suffix buys, then, is separation from an HONEST PR-ref copy —
+    # someone iterating on this very file in a pull request — which is the case
+    # that actually happens. Bursts still collapse: the value is one string for
+    # all four declared types.
+    concurrency:
+      group: hardened-pr-review-${{ github.repository }}-${{ github.event.pull_request.number }}-${{ github.event_name }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # ZERO, not `contents: read`. There is no checkout and no API call here, so
+    # read access to the repository is a capability this job simply does not
+    # use - and under `pull_request_target` an unused capability sits in a job
+    # whose whole safety argument is that it touches nothing untrusted.
+    permissions: {}
+
+    steps:
+      - name: Capture PR coordinates
+        env:
+          PR_NUM: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          TRIGGER_EVENT: ${{ github.event.action }}
+        run: |
+          set -euo pipefail
+
+          [[ "$PR_NUM"   =~ ^[0-9]+$ ]]           || { echo "::error::bad pr_number: '$PR_NUM'"; exit 1; }
+          [[ "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]     || { echo "::error::bad head_sha: '$HEAD_SHA'"; exit 1; }
+          [[ "$BASE_SHA" =~ ^[0-9a-f]{40}$ ]]     || { echo "::error::bad base_sha: '$BASE_SHA'"; exit 1; }
+          [[ "$BASE_REF" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "::error::bad base_ref: '$BASE_REF'"; exit 1; }
+
+          # `--arg review_label`, NOT `--arg label`: `label` is a jq KEYWORD
+          # (`label $out | ...`), and jq 1.6 refuses `$label` at parse time
+          # with "unexpected label, expecting IDENT". jq 1.7 accepts it, so
+          # this runs on a 24.04 image and dies on a 22.04 one - and it dies
+          # by writing no artifact, which Stage 2 cannot distinguish from a PR
+          # nobody labelled. `ubuntu-latest` is not a pinned image.
+          # TestNoJqArgumentIsAJqKeyword covers the rest of the names.
+          jq -n \
+            --argjson pr "$PR_NUM" \
+            --arg sha "$HEAD_SHA" \
+            --arg base_sha "$BASE_SHA" \
+            --arg base_ref "$BASE_REF" \
+            --argjson is_fork "$IS_FORK" \
+            --arg trigger_event "$TRIGGER_EVENT" \
+            --arg review_label "$REVIEW_LABEL" \
+            '{
+               pr_number: $pr,
+               head_sha: $sha,
+               base_sha: $base_sha,
+               base_ref: $base_ref,
+               is_fork: $is_fork,
+               trigger_event: $trigger_event,
+               trigger_label: $review_label
+             }' > pr-review-request.json
+
+          echo "Captured PR #${PR_NUM} @ ${HEAD_SHA} (base ${BASE_REF} @ ${BASE_SHA}, fork=${IS_FORK})"
+
+      - name: Upload capture artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hardened-pr-review-request
+          path: pr-review-request.json
+          retention-days: 1
+          if-no-files-found: error

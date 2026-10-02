@@ -405,7 +405,6 @@ class _DDPSink(Function):
                 reducer._delay_all_reduce
             )
             ddp_weakref._static_graph_delay_allreduce_enqueued = True
-
         return (None, *grad_outputs)
 
 
@@ -989,6 +988,9 @@ class DistributedDataParallel(Module, Joinable):
             self.forward_sync_buffers = effective_broadcast
             init_sync_buffers = effective_broadcast
         self.find_unused_parameters = find_unused_parameters
+        # Unlike the existing synchronization flags, this is a property because
+        # updates must be validated and forwarded to the C++ reducer.
+        self._require_manual_backward_finalization = False
         self.require_backward_grad_sync = True
         self.require_forward_param_sync = True
         self.gradient_as_bucket_view = gradient_as_bucket_view
@@ -1499,6 +1501,7 @@ class DistributedDataParallel(Module, Joinable):
         super().__setstate__(state)
         self.__dict__.setdefault("require_forward_param_sync", True)
         self.__dict__.setdefault("require_backward_grad_sync", True)
+        self.__dict__.setdefault("_require_manual_backward_finalization", False)
         # broadcast_buffers is now a property; pop it so it doesn't shadow.
         # Old pickles may only have broadcast_buffers; use it to seed forward_sync_buffers.
         old_broadcast = self.__dict__.pop("broadcast_buffers", True)
@@ -1513,6 +1516,11 @@ class DistributedDataParallel(Module, Joinable):
             param_to_name_mapping,
             self.static_graph,
         )
+
+        # Restore manual mode in the newly rebuilt C++ reducer.
+        if self._require_manual_backward_finalization:
+            self.require_manual_backward_finalization = True
+
         if self.static_graph:
             self.reducer._set_static_graph()
             if self.logger is None:
@@ -2616,6 +2624,94 @@ class DistributedDataParallel(Module, Joinable):
                 "`_set_static_graph`.",
                 stacklevel=2,
             )
+
+    @property
+    def require_manual_backward_finalization(self) -> bool:
+        r"""Whether the caller must manually finalize backward.
+
+        When ``True``, the reducer will not automatically finalize the
+        backward pass after all gradient buckets are ready. Instead, the caller
+        must invoke :meth:`finalize_backward` after all buckets are ready to
+        wait for in-flight gradient synchronization and perform write-back.
+
+        This allows later sparse work to overlap an in-flight gradient
+        all-reduce, or ``optimizer.step()`` to overlap remaining sparse
+        communication when the all-reduce finishes first.
+
+        Must be set before forward or after backward finalization. For each
+        synchronized backward, the caller must invoke :meth:`finalize_backward`
+        exactly once.
+        """
+        return self._require_manual_backward_finalization
+
+    def _check_manual_backward_finalization_supported(self) -> None:
+        if self._delay_all_reduce_all_params:
+            raise RuntimeError(
+                "Manual backward finalization is not supported when all DDP "
+                "parameters use delay_all_reduce_named_params."
+            )
+        if self._use_python_reducer:
+            raise RuntimeError(
+                "Manual backward finalization is not supported with the Python reducer."
+            )
+
+    @require_manual_backward_finalization.setter
+    def require_manual_backward_finalization(self, required: bool) -> None:
+        if required:
+            self._check_manual_backward_finalization_supported()
+        if self._delay_all_reduce_all_params:
+            # This configuration has no C++ reducer, and manual finalization
+            # cannot have been enabled because the check above rejects it.
+            return
+        self.reducer._set_manual_finalization_required(required)
+        self._require_manual_backward_finalization = required
+
+    @property
+    def should_finalize_after_backward(self) -> bool:
+        r"""Whether manual finalization must run after backward returns.
+
+        Query this after forward for the upcoming backward pass. When ``True``,
+        call :meth:`finalize_backward` only after backward returns. When
+        ``False``, it may instead be called from a backward hook after all DDP
+        buckets are ready.
+
+        This is ``True`` while DDP is rebuilding buckets and when DDP native
+        mixed precision requires end-of-backward stream synchronization. It is
+        ``False`` when manual finalization is disabled. In manual mode, the
+        caller is responsible for honoring this ordering requirement.
+        """
+        if not self._require_manual_backward_finalization:
+            return False
+        return (
+            self.mixed_precision is not None
+            or self.reducer._should_finalize_after_backward()
+        )
+
+    def finalize_backward(self) -> None:
+        r"""Finalize a backward pass that requires manual finalization.
+
+        When :attr:`should_finalize_after_backward` is ``True``, call this after
+        backward returns. Otherwise, call it after all DDP buckets are ready,
+        either from a backward hook or after backward returns. This waits for
+        all in-flight gradient all-reduces to complete and writes the reduced
+        gradients back into parameter ``.grad`` fields.
+
+        Finalization runs on the caller's current device stream, and DDP's
+        communication-end timing reflects this caller-selected point.
+
+        Defer this method to let later sparse work overlap an in-flight
+        gradient all-reduce, or call it from a backward hook to run
+        ``optimizer.step()`` while remaining sparse communication is in flight.
+
+        Raises:
+            RuntimeError: If :attr:`require_manual_backward_finalization` is
+                ``False``, if called before all gradient buckets are ready, if
+                no gradient reduction requires finalization, or if called
+                during ``no_sync()`` or with an unsupported DDP reducer
+                configuration.
+        """
+        self._check_manual_backward_finalization_supported()
+        self.reducer._finalize_backward_manual()
 
     def _remove_autograd_hooks(self):
         """Remove autograd hooks registered by the reducer on the model parameters."""

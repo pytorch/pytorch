@@ -413,6 +413,49 @@ Instead these mapping have to be done manually. The allocator now has an
 `enablePeerAccess` method to do this.
 */
 
+// Address space to reserve for a segment that may still grow: 1 1/8 of device
+// memory, less any downsizing configured for the stream's reserve class.
+static size_t growableReserveBytes(
+    c10::DeviceIndex device,
+    std::optional<cudaStream_t> stream) {
+  cudaDeviceProp prop{};
+  C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+  // we allocate enough address space for 1 1/8 the total memory on the GPU.
+  // This allows for some cases where we have to unmap pages earlier in the
+  // segment to put them at the end.
+  const size_t full_reserve = prop.totalGlobalMem + prop.totalGlobalMem / 8;
+  // Serving streams may be tagged with a reserve class to downsize their VA
+  // reservation (see PYTORCH_CUDA_ALLOC_CONF expandable_segments_reserve*).
+  // Untagged streams keep the full reserve, so this path is a byte-for-byte
+  // no-op unless reserve config is set. A single allocation cannot span
+  // segments, so the reserve is raised to the floor, and the result is capped
+  // at the historical full reserve (see clamp_reserve_bytes).
+  if (!stream.has_value()) {
+    return full_reserve;
+  }
+  const std::string reserve_class =
+      getExpandableSegmentReserveClassForStream(*stream);
+  // Single locked snapshot so a concurrent setAllocatorSettings() re-parse
+  // cannot compose an inconsistent (reserve, class_known, floor) view.
+  const auto decision =
+      CUDAAllocatorConfig::expandable_segments_reserve_decision(
+          reserve_class, prop.totalGlobalMem);
+  if (decision.reserve_bytes.has_value() && !reserve_class.empty() &&
+      !decision.class_known) {
+    static std::mutex warn_mutex;
+    static ska::flat_hash_set<std::string> warned;
+    std::lock_guard<std::mutex> lock(warn_mutex);
+    if (warned.insert(reserve_class).second) {
+      TORCH_WARN(
+          "expandable_segments reserve class '",
+          reserve_class,
+          "' has no configured reserve in "
+          "expandable_segments_reserve_by_class; using the default reserve.");
+    }
+  }
+  return CUDAAllocatorConfig::clamp_reserve_bytes(decision, full_reserve);
+}
+
 struct ExpandableSegment {
   ExpandableSegment(
       c10::DeviceIndex device,
@@ -420,53 +463,25 @@ struct ExpandableSegment {
       size_t segment_size,
       std::vector<c10::DeviceIndex> peers,
       Expandable_Segments_Handle_Type handle_type =
-          Expandable_Segments_Handle_Type::UNSPECIFIED)
+          Expandable_Segments_Handle_Type::UNSPECIFIED,
+      // Set only by fromShared(), to the producer's exact handle count. An
+      // imported segment cannot grow: map() is reachable only from map_block()
+      // on segments the allocator owns in expandable_segments_, and an
+      // imported segment is never inserted there. Reserving growth headroom
+      // for one therefore strands 1 1/8 of device memory worth of address
+      // space apiece, which exhausts the 128 TiB user VA after a few hundred
+      // imports.
+      std::optional<size_t> imported_handles = std::nullopt)
       : device_(device),
         stream_(stream),
         // 2MB for small pool, 20MB for large pool
         segment_size_(segment_size),
         peers_(std::move(peers)),
         handle_type_(handle_type) {
-    cudaDeviceProp prop{};
-    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
     mapped_size_ = 0;
-    // we allocate enough address space for 1 1/8 the total memory on the GPU.
-    // This allows for some cases where we have to unmap pages earlier in the
-    // segment to put them at the end.
-    const size_t full_reserve = prop.totalGlobalMem + prop.totalGlobalMem / 8;
-    size_t reserve = full_reserve;
-    // Serving streams may be tagged with a reserve class to downsize their VA
-    // reservation (see PYTORCH_CUDA_ALLOC_CONF expandable_segments_reserve*).
-    // Untagged streams and IPC-imported segments (no stream) keep the full
-    // reserve, so this path is a byte-for-byte no-op unless reserve config is
-    // set. A single allocation cannot span segments, so the reserve is raised
-    // to the floor, and the result is capped at the historical full reserve
-    // (see clamp_reserve_bytes).
-    if (stream.has_value()) {
-      const std::string reserve_class =
-          getExpandableSegmentReserveClassForStream(*stream);
-      // Single locked snapshot so a concurrent setAllocatorSettings() re-parse
-      // cannot compose an inconsistent (reserve, class_known, floor) view.
-      const auto decision =
-          CUDAAllocatorConfig::expandable_segments_reserve_decision(
-              reserve_class, prop.totalGlobalMem);
-      if (decision.reserve_bytes.has_value() && !reserve_class.empty() &&
-          !decision.class_known) {
-        static std::mutex warn_mutex;
-        static ska::flat_hash_set<std::string> warned;
-        std::lock_guard<std::mutex> lock(warn_mutex);
-        if (warned.insert(reserve_class).second) {
-          TORCH_WARN(
-              "expandable_segments reserve class '",
-              reserve_class,
-              "' has no configured reserve in "
-              "expandable_segments_reserve_by_class; using the default reserve.");
-        }
-      }
-      reserve =
-          CUDAAllocatorConfig::clamp_reserve_bytes(decision, full_reserve);
-    }
-    max_handles_ = numSegments(reserve);
+    max_handles_ = imported_handles.has_value()
+        ? *imported_handles
+        : numSegments(growableReserveBytes(device_, stream));
     const size_t reserve_bytes = segment_size_ * max_handles_;
     // Log expandable-segment VA context immediately BEFORE the (unchanged)
     // driver check throws, so an out-of-virtual-memory crash is self-explaining
@@ -764,12 +779,16 @@ struct ExpandableSegment {
           "on the producer, or disable expandable_segments.");
     }
 #endif
+    TORCH_CHECK(
+        header.num_handles > 0,
+        "IPC share header describes an empty expandable segment");
     auto segment = std::make_unique<ExpandableSegment>(
         device,
         std::nullopt,
         header.segment_size,
         std::move(peers),
-        header.handle_type);
+        header.handle_type,
+        header.num_handles);
 // older build setups (e.g. multiwheels) do not have this syscall, added 2020
 // but the kernel on the system might still support it.
 #ifndef _WIN32
@@ -1013,10 +1032,10 @@ struct ExpandableSegment {
     // cannot call c10::cuda::stream_synchronize because
     // it might grab the GIL which can lead to a deadlock
     // Locking order must be GIL -> Allocator Lock
+    cuda::CUDAGuard device_guard(device_);
     if (stream_) {
       C10_CUDA_CHECK(cudaStreamSynchronize(*stream_));
     } else {
-      cuda::CUDAGuard device_guard(device_);
       C10_CUDA_CHECK(cudaDeviceSynchronize());
     }
     for (auto i : c10::irange(begin, end)) {
@@ -4054,15 +4073,19 @@ class DeviceCachingAllocator {
 
       if (p.err != cudaSuccess) {
         if (p.err == cudaErrorMemoryAllocation) {
+          // Logged on every failed attempt, including ones recovered by the
+          // release-and-retry path, since each retry is a costly perf signal.
+          // INFO (opt-in via TORCH_CPP_LOG_LEVEL=INFO) so workloads that
+          // intentionally run near-full are not spammed by default (#193195).
           {
             size_t device_free = 0;
             size_t device_total = 0;
             (void)cudaMemGetInfo(&device_free, &device_total);
-            LOG(WARNING) << "memory allocation failed with OOM on device "
-                         << static_cast<int>(device_id)
-                         << " while trying to allocate " << size
-                         << " bytes (free: " << device_free
-                         << ", total: " << device_total << ").";
+            LOG(INFO) << "memory allocation failed with OOM on device "
+                      << static_cast<int>(device_id)
+                      << " while trying to allocate " << size
+                      << " bytes (free: " << device_free
+                      << ", total: " << device_total << ").";
           }
           // If this is the first attempt (!isRetry), we can forgive and clear
           // CUDA's internal error state.
