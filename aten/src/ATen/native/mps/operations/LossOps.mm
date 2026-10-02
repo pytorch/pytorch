@@ -409,14 +409,12 @@ static void nllnd_loss_forward_impl(Tensor& output,
   TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(output.scalar_type()),
                               "nll_loss for complex is not supported for MPS");
 
+  TORCH_CHECK(!weight_arg.defined() || input_arg.scalar_type() == weight_arg.scalar_type(),
+              "expected scalar type ",
+              input_arg.scalar_type(),
+              " but found ",
+              weight_arg.scalar_type());
   const bool has_weight = weight_arg.defined() && weight_arg.numel() > 0;
-  if (has_weight) {
-    TORCH_CHECK(input_arg.scalar_type() == weight_arg.scalar_type(),
-                "expected scalar type ",
-                input_arg.scalar_type(),
-                " but found ",
-                weight_arg.scalar_type());
-  }
 
   if (reduction == Reduction::None) {
     output.resize_(target_arg.sizes());
