@@ -16,6 +16,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -242,6 +243,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   bool supportsSplitting() const override {
     return true;
   }
+  bool isInitialized() override;
   bool supportsShrinking() const override {
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
     return true;
@@ -299,7 +301,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // over the surviving/new members. Implemented in
   // ReconfigureNCCL.cpp.
   bool supportsReconfigure() const override {
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0) && !defined(USE_ROCM)
+#ifdef NCCL_HAS_COMM_REVOKE
     return true;
 #else
     return false;
@@ -338,8 +340,17 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // Returns {window handle, byte offset of ptr within the segment}, or
   // {nullptr, 0} if ptr is not inside a window-registered segment.
   std::pair<ncclWindow_t, size_t> lookupSegmentWindow(const void* ptr);
+#if defined(USE_ROCM)
+  // Returns true when ptr exactly matches an ncclMemAlloc segment base on this
+  // process group's device and len does not exceed the allocation size.
+  bool isNcclAllocatorSegment(const void* ptr, size_t len) const;
+#endif
   // Registers the segment containing ptr as a NCCL_WIN_COLL_SYMMETRIC window
   // if it is not one already. Collective: all ranks must call it together.
+  // On ROCm the segment must be a live ncclMemAlloc/getMemAllocator range:
+  // an ineligible segment returns ncclInvalidArgument (caller should throw),
+  // while ncclInvalidUsage stays reserved for a missing symmetric transport
+  // (caller keeps the plain registration and warns).
   ncclResult_t ensureSegmentWindow(const void* ptr);
 
   bool supportsAbortHooks() const override {
@@ -588,6 +599,7 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void checkInitialized() const;
   void checkAndAbortIfTimedOutOrError();
   void checkWorkQueue();
+  void drainRetiredGraphWork();
   std::pair<std::chrono::milliseconds, std::chrono::milliseconds>
   applyEphemeralTimeout(std::chrono::milliseconds timeout);
   void releaseEphemeralTimeout(std::chrono::milliseconds timeout);
@@ -675,7 +687,11 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
     ncclWindow_t winHandle{nullptr};
     size_t len{0};
   };
-  std::map<void*, RegistrationHandle, std::less<>> memoryRegistrationHandles_;
+  using RegistrationMap = std::map<void*, RegistrationHandle, std::less<>>;
+  RegistrationMap memoryRegistrationHandles_;
+  // Caller must hold memory_registration_mutex_. Returns end() when ptr is not
+  // inside a registered segment.
+  RegistrationMap::iterator findContainingRegistrationLocked(const void* ptr);
   // Guards memoryRegistrationHandles_ and registeredMemPools_:
   // register/deregister_address run on allocator threads while window ops look
   // segments up on the main thread.
@@ -712,6 +728,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       unsigned long long,
       std::vector<std::shared_ptr<WorkNCCL::State>>>
       graph_capture_work_refs_;
+  std::list<std::vector<std::shared_ptr<WorkNCCL::State>>>
+      retired_graph_work_refs_;
   std::mutex graph_capture_work_mutex_;
 
   struct GraphCleanupData {

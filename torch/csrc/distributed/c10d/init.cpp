@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
+#include <torch/csrc/distributed/c10d/hooks/HealthCheckHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/NanCheckHook.hpp>
 #include <string_view>
 #include <utility>
@@ -820,6 +821,19 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
              c10::intrusive_ptr<::c10d::ProcessGroup> new_process_group) {
             return reducer.update_process_group(std::move(new_process_group));
           },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_manual_finalization_required",
+          &::c10d::Reducer::set_manual_finalization_required,
+          py::arg("required"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_should_finalize_after_backward",
+          &::c10d::Reducer::should_finalize_after_backward,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_finalize_backward_manual",
+          &::c10d::Reducer::finalize_backward_manual,
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
@@ -1009,7 +1023,19 @@ This class does not support ``__members__`` property.)");
             }
             return py::cast(preMulSupplement->tensor_factor);
           },
-          R"(The factor of the PREMUL_SUM ReduceOp.)");
+          R"(The factor of the PREMUL_SUM ReduceOp.)")
+      .def(
+          "boxed",
+          [](const ::c10d::ReduceOp& self) {
+            return torch::jit::toPyObject(
+                c10::IValue(c10::make_intrusive<::c10d::ReduceOp>(self)));
+          })
+      .def_static("unbox", [](py::object obj) {
+        auto typePtr =
+            torch::getCustomClass("__torch__.torch.classes.c10d.ReduceOp");
+        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
+        return *ivalue.toCustomClass<::c10d::ReduceOp>();
+      });
 
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
@@ -2157,9 +2183,8 @@ Example::
 
             std::optional<std::size_t> numWorkers = std::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
-              if (worldSize.value() == 0) {
-                throw py::value_error("TCPStore world size cannot be 0");
-              }
+              TORCH_CHECK_VALUE(
+                  worldSize.value() != 0, "TCPStore world size cannot be 0");
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
 
@@ -2222,9 +2247,7 @@ Arguments:
       .def(
           py::init([](const std::string& prefix,
                       c10::intrusive_ptr<::c10d::Store> store) {
-            if (!store) {
-              throw py::value_error("store argument cannot be None");
-            }
+            TORCH_CHECK_VALUE(store, "store argument cannot be None");
             return new ::c10d::PrefixStore(prefix, std::move(store));
           }),
           py::arg("prefix"),
@@ -3766,8 +3789,8 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               return ::c10d::ProcessGroupGloo::createDeviceForInterface(
                   interface, lazyInit);
             }
-            throw std::invalid_argument(
-                "Specify either `hostname` or `interface` argument.");
+            TORCH_CHECK_VALUE(
+                false, "Specify either `hostname` or `interface` argument.");
           },
           py::arg("hostname") = "",
           py::arg("interface") = "",
@@ -3908,11 +3931,12 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("size"),
               py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
               R"(Create a new ProcessGroupNCCL instance.)")
-          .def(
-              "_comm_ptr",
+          .def("_comm_ptr", &::c10d::ProcessGroupNCCL::getCommPtr)
+          .def_property_readonly(
+              "comm_ptr",
               &::c10d::ProcessGroupNCCL::getCommPtr,
               R"(
-            Get the communicator of the current device.
+            The communicator of the current device, as an opaque handle.
 
             .. warning ::
                 Unsafe to use. The collectives launched into the communicator
@@ -4325,6 +4349,22 @@ Returns:
           .def(
               "perform_nocolor_split",
               &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
+          .def("_comm_ptr", &::c10d::nccl2::ProcessGroupNCCL::getCommPtr)
+          .def_property_readonly(
+              "comm_ptr",
+              &::c10d::nccl2::ProcessGroupNCCL::getCommPtr,
+              R"(
+            This process group's ``ncclComm_t``, as an opaque handle.
+
+            The process group holds a single communicator, created in its
+            constructor, so the value does not depend on the current device.
+
+            .. warning ::
+                The communicator is owned by the process group. Do not modify
+                or free it. Collectives launched into it from outside the
+                process group are not monitored by the watchdog, so check the
+                communicator's readiness before launching any.
+            )")
           .def_property_readonly(
               "options",
               &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
@@ -4383,6 +4423,17 @@ Returns:
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self, at::Device device) {
             self.getPrimary()->performNocolorSplit(device);
           })
+      .def(
+          "_comm_ptr",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
+            return self.getPrimary()->getCommPtr();
+          })
+      .def_property_readonly(
+          "comm_ptr",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
+            return self.getPrimary()->getCommPtr();
+          },
+          R"(The primary communicator's ``ncclComm_t``, as an opaque handle.)")
       .def_property_readonly(
           "options",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
@@ -5045,6 +5096,15 @@ a RuntimeError; on CUDA it triggers a device-side assert. The process group
 owns the hook, so the returned handle only has to be kept if the check should
 be removed again via remove().)")
       .def("remove", &::c10d::NanCheckHook::remove);
+
+  py::class_<::c10d::HealthCheckHook>(module, "HealthCheckHook")
+      .def_static(
+          "attach",
+          &::c10d::HealthCheckHook::attach,
+          py::arg("pg"),
+          R"(
+Attach health reporting to every backend in a process group that supports
+abort hooks. The backends own the registered hooks for their lifetimes.)");
 
   module.def(
       "_dump_fr_trace_json",

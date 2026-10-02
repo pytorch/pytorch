@@ -29,14 +29,6 @@ from ._common import (
 
 _DEBUG_COORD_MAP = os.environ.get("TORCH_CUTEDSL_DEBUG_COORD_MAP") == "1"
 
-# cute.nvgpu re-exports OperandMajorMode only from 4.5 on; 4.4 has it under
-# warpgroup, which newer versions deprecate. Resolved once, without touching
-# the deprecated name where the new one exists.
-if hasattr(cute.nvgpu, "OperandMajorMode"):
-    _MAJOR_MODE = cute.nvgpu.OperandMajorMode
-else:
-    _MAJOR_MODE = warpgroup.OperandMajorMode
-
 
 def _make_fake_matmul_operand(dtype, dim0, dim1):
     return cute.runtime.make_fake_tensor(
@@ -593,8 +585,8 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
         tiled_mma = hopper.make_trivial_tiled_mma(
             Float8E4M3FN,
             Float8E4M3FN,
-            _MAJOR_MODE.K,
-            _MAJOR_MODE.K,
+            cute.nvgpu.OperandMajorMode.K,
+            cute.nvgpu.OperandMajorMode.K,
             Float32,
             atom_layout_mnk=self.atom_layout_mnk,
             tiler_mn=(64, self.tile_n),
@@ -907,11 +899,10 @@ class _DeepSeekPersistentWgmma(_DeepSeekWgmmaBase):
             cta_layout_vmnk=cute.make_layout((1, *cta_layout_mnk.shape)),
             defer_sync=True,
         )
-        # Each cute.copy with this atom must be wrapped in elect_one: from
-        # CuTeDSL 4.6.2 on it emits no lane election (4.6.1 did), so all 32
-        # lanes issue the copy and the barrier is handed 32x the bytes its
-        # expect_tx declared, which never completes. The op's docstring claims
-        # the compiler elects; it does not.
+        # Each cute.copy with this atom must be wrapped in elect_one: it emits
+        # no lane election, so all 32 lanes issue the copy and the barrier is
+        # handed 32x the bytes its expect_tx declared, which never completes.
+        # The op's docstring claims the compiler elects; it does not.
         scale_copy_atom = cute.make_copy_atom(
             cute.nvgpu.cpasync.CopyBulkG2SOp(), Float32
         )

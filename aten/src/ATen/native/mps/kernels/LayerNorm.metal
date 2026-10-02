@@ -13,10 +13,8 @@ kernel void layer_norm_single_row(
     device T* rstdTensor [[buffer(3)]],
     constant idx_t& axis_size [[buffer(4)]],
     constant float& epsilon [[buffer(5)]],
-    constant int& use_weight [[buffer(6)]],
-    constant int& use_bias [[buffer(7)]],
-    device T* weight [[buffer(8)]],
-    device T* bias [[buffer(9)]],
+    device T* weight [[buffer(6)]],
+    device T* bias [[buffer(7)]],
     uint tg_id [[threadgroup_position_in_grid]],
     uint tid [[thread_position_in_threadgroup]],
     uint lsize [[threads_per_threadgroup]],
@@ -66,9 +64,9 @@ kernel void layer_norm_single_row(
     if (i < count) {
       float norm = (vals[i] - mean) * inv_std;
       uint lane_idx = base_lane + i;
-      if (use_weight)
+      if (weight != nullptr)
         norm *= float(weight[lane_idx]);
-      if (use_bias)
+      if (bias != nullptr)
         norm += float(bias[lane_idx]);
       out[i] = static_cast<T>(norm);
     }
@@ -88,10 +86,8 @@ kernel void layer_norm_looped(
     device T* rstdTensor [[buffer(3)]],
     constant idx_t& axis_size [[buffer(4)]],
     constant float& epsilon [[buffer(5)]],
-    constant int& use_weight [[buffer(6)]],
-    constant int& use_bias [[buffer(7)]],
-    device T* weight [[buffer(8)]],
-    device T* bias [[buffer(9)]],
+    device T* weight [[buffer(6)]],
+    device T* bias [[buffer(7)]],
     uint tg_id [[threadgroup_position_in_grid]],
     uint tid [[thread_position_in_threadgroup]],
     uint lsize [[threads_per_threadgroup]],
@@ -153,9 +149,9 @@ kernel void layer_norm_looped(
       for (int i = 0; i < N_READS; i++) {
         float xi = float(x[base + i]);
         float norm = (xi - mean) * inv_std;
-        if (use_weight)
+        if (weight != nullptr)
           norm *= float(weight[base + i]);
-        if (use_bias)
+        if (bias != nullptr)
           norm += float(bias[base + i]);
         out[base + i] = T(norm);
       }
@@ -165,9 +161,9 @@ kernel void layer_norm_looped(
         if (base + i < axis_size) {
           float xi = float(x[base + i]);
           float norm = (xi - mean) * inv_std;
-          if (use_weight)
+          if (weight != nullptr)
             norm *= float(weight[base + i]);
-          if (use_bias)
+          if (bias != nullptr)
             norm += float(bias[base + i]);
           out[base + i] = T(norm);
         }
@@ -191,10 +187,8 @@ kernel void layer_norm_looped(
       device DTYPE * rstdTensor [[buffer(3)]],                   \
       constant IDX_T & axis_size [[buffer(4)]],                  \
       constant float& epsilon [[buffer(5)]],                     \
-      constant int& use_weight [[buffer(6)]],                    \
-      constant int& use_bias [[buffer(7)]],                      \
-      device DTYPE* weight [[buffer(8)]],                        \
-      device DTYPE* bias [[buffer(9)]],                          \
+      device DTYPE* weight [[buffer(6)]],                        \
+      device DTYPE* bias [[buffer(7)]],                          \
       uint tg_id [[threadgroup_position_in_grid]],               \
       uint tid [[thread_position_in_threadgroup]],               \
       uint lsize [[threads_per_threadgroup]],                    \
@@ -210,10 +204,8 @@ kernel void layer_norm_looped(
           device DTYPE * rstdTensor [[buffer(3)]],                           \
           constant IDX_T & axis_size [[buffer(4)]],                          \
           constant float& epsilon [[buffer(5)]],                             \
-          constant int& use_weight [[buffer(6)]],                            \
-          constant int& use_bias [[buffer(7)]],                              \
-          device DTYPE* weight [[buffer(8)]],                                \
-          device DTYPE* bias [[buffer(9)]],                                  \
+          device DTYPE* weight [[buffer(6)]],                                \
+          device DTYPE* bias [[buffer(7)]],                                  \
           uint tg_id [[threadgroup_position_in_grid]],                       \
           uint tid [[thread_position_in_threadgroup]],                       \
           uint lsize [[threads_per_threadgroup]],                            \
