@@ -988,15 +988,6 @@ class FSDPParam:
                 f"All-gather output size ({numel}) must be divisible by the shard "
                 f"world size ({shard_world_size})"
             )
-        shard_dim = self.fsdp_placement.dim
-        if shard_dim != 0 and self._orig_size[0] % shard_world_size != 0:
-            # Post-forward shards are flat chunks of the unsharded data, which
-            # match their dim-0 chunked metadata only if dim 0 divides evenly
-            raise NotImplementedError(
-                f"FSDP does not support resharding Shard({shard_dim}) parameters "
-                f"after forward to a world size of {shard_world_size}, which does "
-                f"not divide dim 0: {self._orig_size}"
-            )
         shard_rank = self.post_forward_mesh_info.shard_mesh_rank
         sharded_numel = numel // shard_world_size
         self._sharded_post_forward_param_data = (
