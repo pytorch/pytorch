@@ -198,6 +198,27 @@ class AbstractFaultToleranceTest:
             time.sleep(1)
             self.backend.abort()
 
+    def test_launch_timeout_revokes_comm(self):
+        if self.backend_name != "nccl2":
+            self.skipTest("nonblocking NCCL launch behavior")
+        from torch._C._distributed_c10d import ErrorType
+
+        self._create_reconfigured_pg("ft_launch_timeout", 1500)
+        if self.rank == 0:
+            # The first collective on a fresh comm blocks at launch until
+            # peers connect; they never join this one.
+            self.backend.set_timeout(timedelta(milliseconds=500))
+            with self.assertRaisesRegex(dist.DistBackendError, "timed out"):
+                dist.all_reduce(torch.ones(4, device=self.device))
+            self.assertEqual(self.backend.get_error(), ErrorType.TIMEOUT)
+            torch.cuda.synchronize()
+            self.backend.set_timeout(timedelta(seconds=30))
+        self._store_barrier("ft_launch_timeout_observed")
+
+        handles = self._collect_handles("ft_launch_timeout_recover")
+        self._reconfigure(1501, handles)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
     def test_shrink_exclude_last_rank(self):
         handles = self._create_reconfigured_pg("ft_shrink_last", 400)
         excluded_rank = self.world_size - 1

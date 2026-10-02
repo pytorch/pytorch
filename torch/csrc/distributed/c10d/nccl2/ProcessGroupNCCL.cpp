@@ -152,7 +152,19 @@ void ProcessGroupNCCL::waitForNcclOperation(
     ncclResult_t status,
     std::chrono::milliseconds timeout,
     std::string_view operation) {
-  waitForNcclCompletion(*nccl_api_, nccl_comm_, status, timeout, operation);
+  // A failed launch has no Work for the watchdog to track, and a timed-out
+  // nonblocking launch may still enqueue its kernel later. Revoke so that
+  // kernel cannot block the stream forever and getError() reports the failure.
+  try {
+    waitForNcclCompletion(*nccl_api_, nccl_comm_, status, timeout, operation);
+  } catch (const NCCLException&) {
+    handleBlockingWaitFailure(WorkNCCL::WorkStatus::ERROR, reconfigure_uuid_);
+    throw;
+  } catch (const c10::DistBackendError&) {
+    handleBlockingWaitFailure(
+        WorkNCCL::WorkStatus::TIMEDOUT, reconfigure_uuid_);
+    throw;
+  }
 }
 
 ncclResult_t NCCLException::getResult() const noexcept {
