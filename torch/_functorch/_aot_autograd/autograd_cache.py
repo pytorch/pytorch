@@ -314,6 +314,40 @@ def check_node_safe(node: Node) -> None:
 
     # I'd love to use a match statement here, but it wasn't introduced until py3.10
     if node.op == "call_function":
+        if node.target is torch.nn.attention._backend_from_string:
+            if (
+                not node.kwargs
+                and len(node.args) == 1
+                and isinstance(node.args[0], str)
+                and node.args[0] in torch.nn.attention.SDPBackend.__members__
+            ):
+                return
+            raise BypassAOTAutogradCache("SDPA backend name must be constant")
+        if node.target is torch.nn.attention._sdpa_kernel:
+            normalized = torch.fx.operator_schemas.normalize_function(
+                node.target, node.args, node.kwargs, normalize_to_only_use_kwargs=True
+            )
+            if normalized is not None:
+                _, kwargs = normalized
+                backends = kwargs["backends"]
+                if (
+                    kwargs["set_priority"] is False
+                    and isinstance(backends, (list, tuple))
+                    and all(
+                        isinstance(backend, Node)
+                        and backend.op == "call_function"
+                        and backend.target is torch.nn.attention._backend_from_string
+                        and not backend.kwargs
+                        and len(backend.args) == 1
+                        and isinstance(backend.args[0], str)
+                        and backend.args[0] in torch.nn.attention.SDPBackend.__members__
+                        for backend in backends
+                    )
+                ):
+                    return
+            raise BypassAOTAutogradCache(
+                "SDPA context requires constant backends and set_priority=False"
+            )
         if node.meta and node.meta.get("is_wrapped", False):
             # This is fx.wrap function
             # By default we BypassAOTAutogradCache for unknown functions,
