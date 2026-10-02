@@ -2019,14 +2019,20 @@ class TestSDPAFailureModes(NNTestCase):
                 torch.nn.functional.scaled_dot_product_attention(q, k, v, None, 0.0, False)
 
     @onlyCUDA
-    @unittest.skipIf(TEST_WITH_ROCM, "CUTLASS mem efficient attention alignment check is CUDA-only")
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support mem efficient attention")
     def test_mem_efficient_attention_misaligned_data_ptr_sm80_or_later(self, device):
-        if torch.cuda.get_device_capability(device)[0] < 8:
+        is_rocm = TEST_WITH_ROCM
+        if not is_rocm and torch.cuda.get_device_capability(device)[0] < 8:
             self.skipTest("sm80 or newer requires aligned mem efficient attention kernels")
+        # fp32 mem-efficient attention is AOTriton-only. With CK preferred,
+        # dispatch falls back to MATH and the EFFICIENT-only call has no kernel.
+        if is_rocm and torch.backends.cuda.preferred_rocm_fa_library() == torch._C._ROCmFABackend.Ck:
+            self.skipTest("CK does not implement fp32 mem-efficient attention")
 
         B, H, S, D = 6, 4, 64, 64
-        storage = torch.zeros(B * H * S * D + 4, dtype=torch.float32, device=device)
+        # Nonzero values: an all-zero QKV matches every backend even if a
+        # kernel reads the misaligned pointers incorrectly.
+        storage = torch.randn(B * H * S * D + 4, dtype=torch.float32, device=device)
         q = storage[1:1 + B * H * S * D].view(B, H, S, D)
         k = storage[2:2 + B * H * S * D].view(B, H, S, D)
         v = storage[3:3 + B * H * S * D].view(B, H, S, D)
@@ -2035,20 +2041,32 @@ class TestSDPAFailureModes(NNTestCase):
         self.assertNotEqual(k.data_ptr() % alignment_bytes, 0)
         self.assertNotEqual(v.data_ptr() % alignment_bytes, 0)
 
-        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
-            self.assertEqual(torch._fused_sdp_choice(q, k, v), SDPBackend.MATH.value)
-            actual = torch.nn.functional.scaled_dot_product_attention(q, k, v)
         with sdpa_kernel(backends=[SDPBackend.MATH]):
             expected = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.MATH]):
+            # ROCm does not apply the CUTLASS sm80 pointer-alignment gate
+            # (check_data_ptr_alignment_mem_efficient is a no-op). AOTriton
+            # mem-efficient attention stays eligible for misaligned QKV.
+            expected_backend = (
+                SDPBackend.EFFICIENT_ATTENTION if is_rocm else SDPBackend.MATH
+            )
+            self.assertEqual(torch._fused_sdp_choice(q, k, v), expected_backend.value)
+            actual = torch.nn.functional.scaled_dot_product_attention(q, k, v)
         self.assertEqual(actual, expected)
 
-        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
-            with self.assertWarnsRegex(UserWarning, "storage offsets"):
-                self.assertRaisesRegex(
-                    RuntimeError,
-                    "No available kernel|No viable backend",
-                    lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v),
-                )
+        if is_rocm:
+            with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+                actual_me = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+            self.assertEqual(actual_me, expected)
+        else:
+            with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION]):
+                with self.assertWarnsRegex(UserWarning, "storage offsets"):
+                    self.assertRaisesRegex(
+                        RuntimeError,
+                        "No available kernel|No viable backend",
+                        lambda: torch.nn.functional.scaled_dot_product_attention(q, k, v),
+                    )
 
     @onlyAccelerator
     @skipXPUIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU, "XPU Flash Attention is not supported")
