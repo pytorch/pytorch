@@ -1,0 +1,102 @@
+name: Pi Agent (Bedrock)
+description: >
+  Run one hermetic, non-interactive pi coding-agent session against Amazon Bedrock.
+  The caller must configure AWS credentials first (aws-actions/configure-aws-credentials).
+
+inputs:
+  model:
+    description: Bedrock model ID; must be listed in allowed-models.json next to this file
+    required: true
+  allow-unlisted-model:
+    description: Skip the allowlist check (model-probing workflows only)
+    default: "false"
+  prompt:
+    description: Prompt text, or a path to a prompt file
+    required: true
+  thinking:
+    description: off | minimal | low | medium | high | xhigh | max (clamped to the model)
+    default: medium
+  tools:
+    description: >
+      Comma-separated tool allowlist. Enforced per call; read/grep/find/ls are
+      confined to the working directory. Add bash only for trusted input.
+    default: read,grep,find,ls
+  result-schema:
+    description: >
+      Optional JSON Schema text or file path (root type object). Adds a submit_result
+      tool; the run fails unless the model submits a schema-valid result.
+    default: ""
+  extensions:
+    description: Newline-separated extra extension paths (trusted files only)
+    default: ""
+  skills:
+    description: >
+      Newline-separated skill directories to load (trusted files only). Skills are
+      never discovered from the checkout; only these load.
+    default: ""
+  artifact-name:
+    description: >
+      Name of the uploaded run artifact. Must be unique across the workflow run
+      (upload-artifact v4); include the job or matrix key.
+    required: true
+
+outputs:
+  structured_output:
+    description: Compact JSON from submit_result (empty when no result-schema)
+    value: ${{ steps.run.outputs.structured_output }}
+  execution-file:
+    description: >
+      The session in claude-code-action's execution-file shape, for the review log
+      inspector and pytorch/test-infra's upload-claude-usage action
+    value: ${{ steps.run.outputs.execution-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      with:
+        node-version: "22"
+
+    # Lockfile-pinned install with integrity hashes; no package install scripts run.
+    - name: Install pi
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        mkdir -p "$RUNNER_TEMP/pi-install"
+        cp "$ACTION_PATH/package.json" "$ACTION_PATH/package-lock.json" "$RUNNER_TEMP/pi-install/"
+        npm ci --prefix "$RUNNER_TEMP/pi-install" --ignore-scripts --no-fund --no-audit
+
+    - name: Run pi
+      id: run
+      shell: bash
+      env:
+        PI_ACTION_PATH: ${{ github.action_path }}
+        PI_OUTPUT_DIR: ${{ runner.temp }}/pi-run
+        PI_MODEL: ${{ inputs.model }}
+        PI_ALLOW_UNLISTED_MODEL: ${{ inputs.allow-unlisted-model }}
+        PI_PROMPT: ${{ inputs.prompt }}
+        PI_THINKING: ${{ inputs.thinking }}
+        PI_TOOLS: ${{ inputs.tools }}
+        PI_RESULT_SCHEMA: ${{ inputs.result-schema }}
+        PI_EXTENSIONS: ${{ inputs.extensions }}
+        PI_SKILLS: ${{ inputs.skills }}
+      run: bash "$PI_ACTION_PATH/run.sh"
+
+    - name: Upload pi run
+      id: upload
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ runner.temp }}/pi-run
+        retention-days: 14
+        if-no-files-found: warn
+
+    - name: Link transcript
+      if: always() && steps.upload.outputs.artifact-url != ''
+      shell: bash
+      env:
+        URL: ${{ steps.upload.outputs.artifact-url }}
+      run: echo "📎 [Transcript, events, and result]($URL) (open \`transcript.html\`)" >> "$GITHUB_STEP_SUMMARY"

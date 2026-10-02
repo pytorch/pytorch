@@ -1,0 +1,8 @@
+{
+  "name": "pi-agent-action",
+  "private": true,
+  "description": "Pinned pi install for .github/actions/pi-agent; update with `npm install --package-lock-only --ignore-scripts`.",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "0.99.1"
+  }
+}
