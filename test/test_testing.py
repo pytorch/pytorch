@@ -2989,6 +2989,7 @@ class TestImports(TestCase):
                            "torch._native.ops.reductions.kernel_xcta",  # depends on cutlass
                            "torch._native.ops.reductions.kernel_coltile",  # depends on cutlass
                            "torch._native.ops.scatter_add",  # depends on cutlass
+                           "torch._native.ops.scaled_grouped_mm",  # depends on cutlass
                            "torch._native.ops.topk",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
