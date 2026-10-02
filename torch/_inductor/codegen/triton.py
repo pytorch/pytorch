@@ -130,6 +130,7 @@ from .simd import (
     PartialAccumulate,
     SIMDKernel,
     SIMDScheduling,
+    TRITON_MAX_TENSOR_DIMS,
 )
 from .simd_kernel_features import tiling_scores_suggest_inner_reduction
 from .triton_utils import (
@@ -272,7 +273,7 @@ class TritonSymbols:
     Stores sympy.Symbol instances and constants associated with triton codegen.
     """
 
-    reduction_types = OrderedSet([SymT.R0_INDEX, SymT.R1_INDEX])
+    reduction_types = OrderedSet([SymT.R0_INDEX, SymT.R1_INDEX, SymT.R2_INDEX])
     block_types = OrderedSet([SymT.XBLOCK, SymT.YBLOCK, SymT.ZBLOCK, *reduction_types])
 
     block_offsets = {
@@ -3662,6 +3663,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             SymT.ZBLOCK,
             SymT.R0_INDEX,
             SymT.R1_INDEX,
+            SymT.R2_INDEX,
         ):
             if symbol_is_type(symbol, symt):
                 return prefix_str[symt]
@@ -4403,6 +4405,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     stride_sorter_cls=stride_sorter_cls,
                 )
                 if isinstance(options, TensorDescriptorOptions):
+                    if len(options.params.block_shape) > TRITON_MAX_TENSOR_DIMS:
+                        return None
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
                     )
@@ -5702,9 +5706,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         codegen reduction of value to Triton according the reduction_type
         """
 
-        def should_upcast(d: torch.dtype | None) -> bool:
-            return d is not None and d.is_floating_point and d.itemsize < 4
-
         def maybe_upcast(value: CSEVariable) -> CSEVariable:
             # Math reductions in small floats are less accurate because the Triton
             # compiler does not automatically promote to FP32 for accumulation.
@@ -5712,18 +5713,18 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # promote to FP32 here.
             return (
                 ops.to_dtype(value, torch.float32)
-                if should_upcast(value.dtype)
+                if low_precision_fp_var(value)
                 else value
             )
 
-        do_upcast = pytree.tree_any(lambda v: should_upcast(v.dtype), value)
+        do_upcast = pytree.tree_any(low_precision_fp_var, value)
         original_dtype = dtype
         original_src_dtype = src_dtype
         if do_upcast:
             # Only promote FB16/BF16; do not promote other integer/boolean dtypes
             value = pytree.tree_map(maybe_upcast, value)
-            src_dtype = torch.float32 if should_upcast(src_dtype) else src_dtype
-            dtype = torch.float32 if should_upcast(dtype) else dtype
+            src_dtype = torch.float32 if low_precision_fp(src_dtype) else src_dtype
+            dtype = torch.float32 if low_precision_fp(dtype) else dtype
 
         if not self.inside_reduction:
             raise AssertionError("expected inside_reduction")
@@ -5745,7 +5746,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         strict_op = "*" if reduction_type == "prod" else "+"
 
         # When we do native matmtul codegen,
-        # we don't want to keep the R0_BLOCK/R1_BLOCK in the accumulator.
+        # we don't want to keep reduction blocks in the accumulator.
         # so instead of naively calling dense_size_str(), we filter out
         # reduction block from accumulator and only keep (Y,X).
         # In bmm (Z,Y,R)x(Z,R,X) case, we also remove z dimension from accumulator
@@ -6995,7 +6996,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         broadcasted_values = []
         accumulators = []
 
-        dtypes = tuple(upcast_compute_type(dtype) for dtype in dtypes)
+        # Mirrors the promotion in `reduction()`. A scan accumulates across the
+        # whole scanned axis, so a narrow float rounds at every partial result,
+        # exactly the error `reduction()` avoids by widening. Unlike that one,
+        # `upcast_compute_type` is gated on `codegen_upcast_to_fp32`, so on a
+        # backend that turns the flag off the combine stays at the input width.
+        do_upcast = any(low_precision_fp(dtype) for dtype in dtypes)
+        original_dtypes = dtypes
+        dtypes = tuple(
+            torch.float32 if low_precision_fp(dtype) else upcast_compute_type(dtype)
+            for dtype in dtypes
+        )
         cse_compute = functools.partial(self.cse.generate, self.compute)
         combine_helper_fn = self._lift_helper(combine_fn, values, dtypes)
         dim = self.triton_tensor_ndim() - self.num_reduction_dims
@@ -7096,6 +7107,16 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 )
         else:
             result_vars = partial_scan_vars
+
+        # If the combine was promoted, narrow each result once now that the
+        # scan is complete, as `reduction()` does for its own results.
+        if do_upcast:
+            for result_var, target_dtype in zip(result_vars, original_dtypes):
+                if result_var.dtype != target_dtype:
+                    self.compute.writeline(
+                        f"{result_var} = {result_var}.to("
+                        f"{triton_compute_type(target_dtype)})"
+                    )
 
         for result_var in result_vars:
             if not isinstance(result_var, TritonCSEVariable):
