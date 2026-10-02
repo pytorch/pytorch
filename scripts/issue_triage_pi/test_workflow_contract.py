@@ -55,6 +55,8 @@ class TriageWorkflowContract(unittest.TestCase):
                 "codeload.github.com:443",
                 "objects.githubusercontent.com:443",
                 "registry.npmjs.org:443",
+                "ossci-raw-job-status.s3.us-east-1.amazonaws.com:443",
+                "ossci-raw-job-status.s3.amazonaws.com:443",
             },
         )
 
@@ -90,6 +92,17 @@ class TriageWorkflowContract(unittest.TestCase):
         for step in all_steps():
             if step.get("uses", "").startswith("actions/checkout@"):
                 self.assertIs(step.get("with", {}).get("persist-credentials"), False)
+
+    def test_only_applied_triage_writes_the_issue_execution_log(self):
+        # Replays and dry runs share the issue's S3 key; they must not overwrite
+        # the log of the run that actually triaged it.
+        (upload,) = [
+            step
+            for step in steps(JOBS["plan"])
+            if step.get("name") == "Upload execution log to S3"
+        ]
+        self.assertIn("needs.prepare.outputs.mode == 'apply'", upload["if"])
+        self.assertIn("github.repository == 'pytorch/pytorch'", upload["if"])
 
     def test_model_credentials_are_short_lived(self):
         (aws,) = [

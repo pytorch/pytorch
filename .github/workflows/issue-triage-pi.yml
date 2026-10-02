@@ -134,6 +134,8 @@ jobs:
       #   github.com, codeload,  checkout and action downloads
       #   objects.githubusercontent.com
       #   registry.npmjs.org     installing pi
+      #   ossci-raw-job-status   execution log and usage metrics (S3; both
+      #                          endpoint spellings, the CLI picks either)
       # No pi.dev: the triage model is in pi's bundled catalog, so the action
       # skips the catalog refresh. A model that needs it fails here, loudly.
       # The artifact service needs no entry: upload-artifact works under `block`
@@ -151,6 +153,8 @@ jobs:
             codeload.github.com:443
             objects.githubusercontent.com:443
             registry.npmjs.org:443
+            ossci-raw-job-status.s3.us-east-1.amazonaws.com:443
+            ossci-raw-job-status.s3.amazonaws.com:443
 
       - name: Check out pytorch
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -184,6 +188,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Plan triage with pi
+        id: pi
         timeout-minutes: 8
         uses: ./.github/actions/pi-agent
         with:
@@ -195,6 +200,35 @@ jobs:
           prompt: ${{ runner.temp }}/prompt.md
           result-schema: ${{ github.workspace }}/.github/pi/schemas/issue-triage-plan.json
           artifact-name: issue-triage-pi-${{ matrix.issue }}
+
+      # The execution file has claude-code-action's shape, so the usage table and
+      # the review log inspector read pi runs unchanged.
+      - name: Upload usage metrics
+        if: always() && steps.pi.outputs.execution-file != ''
+        uses: pytorch/test-infra/.github/actions/upload-claude-usage@ca88203856609d21d36a0219da0a29792c3aff73 # main
+        with:
+          metrics-file: ${{ steps.pi.outputs.execution-file }}
+
+      # Only real triage of this repository's issues: replays and dry runs must
+      # not overwrite the log of the run that actually triaged the issue.
+      - name: Upload execution log to S3
+        if: >-
+          always() && steps.pi.outputs.execution-file != '' &&
+          needs.prepare.outputs.mode == 'apply' && github.repository == 'pytorch/pytorch'
+        continue-on-error: true
+        env:
+          EXECUTION_FILE: ${{ steps.pi.outputs.execution-file }}
+          S3_KEY: review-logs/${{ matrix.issue }}.json
+        run: |
+          # Keep earlier runs' events for the same issue in one JSON array.
+          combined="$RUNNER_TEMP/combined-execution.json"
+          if aws s3 cp "s3://ossci-raw-job-status/$S3_KEY" "$RUNNER_TEMP/previous.json" 2> /dev/null \
+            && jq -s 'add' "$RUNNER_TEMP/previous.json" "$EXECUTION_FILE" > "$combined" 2> /dev/null; then
+            :
+          else
+            cp "$EXECUTION_FILE" "$combined"
+          fi
+          aws s3 cp "$combined" "s3://ossci-raw-job-status/$S3_KEY"
 
 
   report:

@@ -45,6 +45,11 @@ outputs:
   usage:
     description: JSON token and cost totals for the session
     value: ${{ steps.run.outputs.usage }}
+  execution-file:
+    description: >
+      The session in claude-code-action's execution-file shape, for the review log
+      inspector and pytorch/test-infra's upload-claude-usage action
+    value: ${{ steps.run.outputs.execution-file }}
 
 runs:
   using: composite
