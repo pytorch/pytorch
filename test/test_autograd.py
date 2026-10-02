@@ -875,17 +875,14 @@ class TestAutograd(TestCase):
         # During autograd.grad(), leaf AccumulateGrad nodes are captured rather
         # than executed, so _will_engine_execute_node raises. Tensor hooks on
         # those leaves still fire; _will_execute_tensor_hook reports that.
-        def get_grad_fn(t):
-            if t.requires_grad and t.grad_fn is None:
-                return t.clone().grad_fn.next_functions[0][0]
-            return t.grad_fn
-
+        # Capture AccumulateGrad before backward: clone() inside a hook has no
+        # grad_fn because grad mode is off during the backward pass.
         a = torch.randn(2, 3, requires_grad=True)
+        leaf_acc = a.clone().grad_fn.next_functions[0][0]
         b = a * 2
         seen = []
 
         def fn(_g):
-            leaf_acc = get_grad_fn(a)
             self.assertTrue(torch._C._will_execute_tensor_hook(leaf_acc))
             with self.assertRaisesRegex(
                 RuntimeError, "are currently running autograd.grad()"
