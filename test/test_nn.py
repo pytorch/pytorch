@@ -16403,12 +16403,17 @@ class TestNNCUDA(NNTestCase):
         self, device, dtype, affine, track_running_stats, training
     ):
         shape = (2, 4, 3, 5, 7)
-        input_ref = torch.randn(shape, device=device, dtype=dtype, requires_grad=True)
-        input = input_ref.detach().clone(memory_format=torch.channels_last_3d).requires_grad_()
-        module_ref = nn.InstanceNorm3d(
+        input = torch.randn(shape, device=device, dtype=dtype).to(
+            memory_format=torch.channels_last_3d
+        ).requires_grad_()
+        module = nn.InstanceNorm3d(
             shape[1], affine=affine, track_running_stats=track_running_stats
         ).to(device=device, dtype=dtype)
-        module = deepcopy(module_ref)
+        # The contiguous reference folds N into C and sums the repeated affine
+        # grads in the input dtype, so compute it in fp32 to avoid comparing
+        # against a reference less accurate than the channels-last path.
+        input_ref = input.detach().float().contiguous().requires_grad_()
+        module_ref = deepcopy(module).float()
         module_ref.train(training)
         module.train(training)
 
@@ -16416,16 +16421,14 @@ class TestNNCUDA(NNTestCase):
         output = module(input)
 
         self.assertTrue(output.is_contiguous(memory_format=torch.channels_last_3d))
-        # GroupNorm and folded BatchNorm use different reduction kernels, so
-        # compare their low-precision results at the corresponding precision.
-        low_precision_tolerance = {
+        tol = {
             torch.half: {"atol": 5e-4, "rtol": 8e-3},
             torch.bfloat16: {"atol": 5e-3, "rtol": 5e-2},
         }.get(dtype, {})
-        self.assertEqual(output, output_ref, **low_precision_tolerance)
+        self.assertEqual(output, output_ref, exact_dtype=False, **tol)
         if track_running_stats:
-            self.assertEqual(module.running_mean, module_ref.running_mean)
-            self.assertEqual(module.running_var, module_ref.running_var)
+            self.assertEqual(module.running_mean, module_ref.running_mean, exact_dtype=False, **tol)
+            self.assertEqual(module.running_var, module_ref.running_var, exact_dtype=False, **tol)
 
         grad_output = torch.randn_like(output)
         grad_inputs = (input,)
@@ -16437,14 +16440,12 @@ class TestNNCUDA(NNTestCase):
         grads_ref = torch.autograd.grad(
             output_ref,
             grad_inputs_ref,
-            grad_output.contiguous(),
+            grad_output.float().contiguous(),
         )
         gradient_tolerance = (
-            {"atol": 2e-2, "rtol": 1e-1}
-            if dtype == torch.bfloat16
-            else low_precision_tolerance
+            {"atol": 2e-2, "rtol": 1e-1} if dtype == torch.bfloat16 else tol
         )
-        self.assertEqual(grads, grads_ref, **gradient_tolerance)
+        self.assertEqual(grads, grads_ref, exact_dtype=False, **gradient_tolerance)
 
     @dtypes(torch.half, torch.bfloat16)
     @parametrize_test("training", [False, True])
