@@ -2737,6 +2737,9 @@ class TranslatedSubParentEpilogueTest(TestCase):
     def assert_outputs(self, actual, expected):
         self.assertEqual(len(actual), len(expected))
         for result, reference in zip(actual, expected):
+            if not isinstance(reference, torch.Tensor):
+                self.assertEqual(result, reference)
+                continue
             self.assertEqual(result.shape, reference.shape)
             self.assertEqual(result.dtype, reference.dtype)
             self.assertTrue(torch.isfinite(result).all().item())
@@ -2971,6 +2974,24 @@ class TranslatedSubParentEpilogueTest(TestCase):
             dynamic=True,
             expected=not dynamic_feature_width,
         )
+
+    @parametrize("extra_output", ["none", "symint"])
+    def test_non_tensor_graph_output(self, device, extra_output):
+        def fn(x, *args):
+            outputs = self._shifted_mla_indexer(x, *args)
+            return (*outputs, None if extra_output == "none" else x.shape[0])
+
+        input_sets = tuple(
+            self._make_mla_inputs(device=device, batch_size=batch, seq_len=8)
+            for batch in (2, 4)
+        )
+        for tensor in input_sets[0]:
+            if tensor.dim() >= 2:
+                torch._dynamo.mark_dynamic(tensor, 0)
+                torch._dynamo.mark_static(tensor, tensor.dim() - 1)
+            else:
+                torch._dynamo.mark_static(tensor, 0)
+        self.compile_and_check(fn, input_sets, dynamic=True, force_persistent=True)
 
     @parametrize(
         "kind,head_dim,options",

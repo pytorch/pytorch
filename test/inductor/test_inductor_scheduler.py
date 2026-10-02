@@ -1354,6 +1354,41 @@ class TestScheduler(TestCase):
         else:
             resolver._materialize_dense_source.assert_not_called()
 
+    def test_sub_parent_dense_projection_reuses_split_parts(self):
+        r_tree = Mock()
+        r_tree.block_size_str.return_value = "R0_BLOCK"
+        layout = _GroupedReductionLayout(Mock(), r_tree, sympy.Integer(256), True)
+        family = Mock()
+        family.sub_parent_tree.return_value.block_size_str.return_value = "R0_BLOCK//4"
+        kernel = Mock()
+        parts = tuple(Mock() for _ in range(8))
+        kernel.cse.newvar.side_effect = parts
+        sources = tuple(
+            Mock(dtype=torch.float32, shape=("XBLOCK", "R0_BLOCK")) for _ in range(2)
+        )
+        split_parts = {}
+        with V.set_graph_handler(Mock(sizevars=SizeVarAllocator())):
+            for source_index, source in enumerate(sources):
+                for _ in range(2):
+                    for lane in range(3):
+                        projected = layout.project_parent_value(
+                            kernel,
+                            family,
+                            source,
+                            parent_r_stride=1,
+                            base_offset=sympy.Integer(64),
+                            extent=sympy.Integer(192),
+                            parent_shape=(sympy.Integer(2), sympy.Integer(256)),
+                            child_shape=(sympy.Integer(2), sympy.Integer(192)),
+                            output_lanes=3,
+                            output_lane=lane,
+                            factor=4,
+                            split_parts=split_parts,
+                        )
+                        self.assertIs(projected, parts[4 * source_index + 1 + lane])
+        self.assertEqual(kernel.emit_contiguous_split_via_reshape.call_count, 2)
+        self.assertEqual(kernel.cse.newvar.call_count, 8)
+
     def test_sub_parent_resolver_uses_masked_load_ownership(self):
         d0 = sympy.Symbol("d0", integer=True)
         graph_handler = Mock(sizevars=SizeVarAllocator())
