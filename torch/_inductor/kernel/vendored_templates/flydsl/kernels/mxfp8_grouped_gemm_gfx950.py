@@ -5,38 +5,18 @@
 #
 #     out[group_g] = X[group_g] @ W[g]^T        X(M,K), W(E,N,K) -> (M,N)
 #
-# The ragged axis is NOT the contraction: K is uniform across experts, so the
-# K-walk never learns the groups are ragged. Raggedness is therefore confined
-# to the four points below -- the 8-buffer LDS ping-pong, the AGPR-pinned
-# scaled MFMA, the cooperative scale load, the interleave plan and the
-# hand-counted vmcnt barriers are all independent of it.
+# The ragged axis is NOT the contraction, so the pipelined K-walk is unaware of
+# the groups. Raggedness is confined to: the block -> (group, row tile, col
+# tile) mapping, resolved ON DEVICE from `OFFS`; `row0 = m_start + r_base`; and
+# an epilogue mask on `r_ < m_end`, since a row tile may overhang its group.
+# The compile key is (K, N, E, BLOCK_C) only: M is routing-dependent, and keying
+# on it would JIT per step under real routing.
 #
-#   1. `OFFS` is a new kernel argument, and the block -> (group, row tile,
-#      col tile) mapping is resolved ON DEVICE from it, rather than from a
-#      constexpr M_G.
-#   2. `row0 = m_start + r_base` instead of `g * M_G + r_base`.
-#   3. The epilogue store masks on `r_ < m_end`: a row tile may
-#      overhang its group, and those rows hold this expert's weights applied to
-#      the next group's tokens.
-#   4. The compile key drops M_G and M_TOTAL, keeping only (K, N, E, BLOCK_C).
-#      Both are routing-dependent, so keying on them recompiles per token
-#      count -- invisible under balanced routing, a per-step JIT under real
-#      routing.
-#
-# Host side: cap a row-tile upper bound at one workgroup per CU. Workgroups
-# traverse actual tiles in N-fast order. When the upper bound fits in the grid,
-# specialize away persistence. Rows beyond OFFS[-1] remain untouched.
-#
-# Two structural consequences of the short contraction (K/128 = 11-16 steps):
-#   * The K-loop is fully unrolled at compile time; the loop-carried a0/b0
-#     fragments and scale chunk disappear.
-#   * Pipeline fill and drain are a much larger fraction of the kernel (2 of 16
-#     steps are prologue, 2 are tails), so prologue cost matters here.
-#
-# The vmcnt accounting is derived, not transcribed: with the loop unrolled the
-# issue pattern is not perfectly periodic, so `_VmCounter` tracks issued
-# vector-memory ops and each barrier waits for exactly "everything up to the op
-# I depend on".
+# Host side caps a row-tile upper bound at one workgroup per CU; workgroups walk
+# actual tiles N-fast, and persistence is compiled away when the bound fits.
+# Rows past OFFS[-1] are untouched. The short contraction (K/128 = 11-16 steps)
+# is fully unrolled, so `_VmCounter` derives each vmcnt barrier from the ops
+# actually issued rather than a periodic pattern.
 
 # NOTE: no `from __future__ import annotations` -- fx.struct needs real types.
 
@@ -65,23 +45,11 @@ _INT32_MAX = 2**31 - 1
 
 
 def pick_block_r(m_total: int, e: int) -> int:
-    """Row tile height, from the AVERAGE group size.
+    """Row tile height, scoring MFMA density against overhang at the AVERAGE group.
 
-    A row tile is charged for every row it covers: a group of m_avg rows under a
-    BLOCK_R tile is charged ceildiv(m_avg, BLOCK_R) * BLOCK_R rows and discards
-    the rest at the masked store. A narrower tile removes that overhang but
-    costs per-block efficiency -- the MFMA-per-ds_read ratio is NA*NB/(NA+NB),
-    2.0 at 4x4 (BLOCK_R=256), 1.33 at 2x4 (128), 0.8 at 1x4 (64) -- so the two
-    are scored against each other below.
-
-    AVERAGE, not per-group, and that is forced: the group sizes live on the
-    device and this kernel's whole design is not to sync on them. m_total and E
-    are host-side shape metadata, so m_total // E costs nothing. Under real MoE
-    routing the groups are within ~2x of the mean; a skewed batch gets a tile
-    sized for its mean, which is no worse than the fixed 256.
-
-    BLOCK_R=64 computed wrong answers until the `wait_barrier` lgkmcnt fix in
-    `mxfp8_gemm_utils`; verified clean since.
+    A narrower tile wastes fewer rows past a group's end but issues fewer MFMAs
+    per ds_read (2.0 at BLOCK_R=256, 1.33 at 128, 0.8 at 64). The average is
+    forced: group sizes live on the device and this kernel never syncs on them.
     """
     if e <= 0:
         return 256
@@ -103,23 +71,11 @@ def pick_block_r(m_total: int, e: int) -> int:
 
 
 def pick_tile(m_total: int, e: int, n: int, num_cus: int | None = None) -> tuple:
-    """(BLOCK_R, BLOCK_C) for this shape, shrinking both when the grid starves.
+    """(BLOCK_R, BLOCK_C) for this shape, halving tiles while the grid starves.
 
-    `pick_block_r` answers a local question and does not look at how many
-    blocks the resulting tile produces. That is fine everywhere except
-    small N, where BLOCK_C=256 leaves ONE column tile and the row dim is the
-    only parallelism left: K4096 x N256 tiles to 16 blocks on a 256-CU part.
-
-    Halving a tile dimension doubles the block count, and at a starved grid that
-    trade is strongly positive even though the narrower tile is worse per block.
-    THE THRESHOLD IS ONE FULL WAVE -- one workgroup per CU, the same cap the
-    persistent grid uses -- and the shrink stops at (128, 128): going on to
-    BLOCK_R=64 gains too little to pay for another branch here.
-
-    `num_cus` defaults to the current device's CU count. It is read rather than
-    assumed because gfx950 parts differ: a full MI350X has 256 CUs, but a
-    partitioned one (e.g. the 128-CU mi350 CI runners) has half that, and a
-    hard-coded 256 would shrink tiles on grids that already fill the device.
+    Starved means fewer blocks than one full wave, i.e. `num_cus` workgroups
+    (default: the current device's CU count, which differs across gfx950 parts
+    and partitions). The shrink stops at (128, 128).
     """
     br = pick_block_r(m_total, e)
     # BLOCK_C is always 256 to start: a tile that overhangs N is not free, but
@@ -137,11 +93,8 @@ def pick_tile(m_total: int, e: int, n: int, num_cus: int | None = None) -> tuple
     tiles = max(1, e * ceildiv(max(m_total // e, 1), br)) * ceildiv(n, bc)
     if tiles >= starved:
         return br, bc
-    # Only a tile that is 256 in BOTH dims can be halved: halving one that is
-    # already 128 lands on (128, 128). SHRINK ONE STEP AT A TIME, re-checking;
-    # the partial-wave shapes gain from the first step. (128,128) and
-    # BLOCK_R=64 were banned until the `wait_barrier` lgkmcnt fix, which is what
-    # made the N_ACCUMS=4 tiles compute wrong answers.
+    # Shrink one step at a time, re-checking; partial-wave shapes gain from the
+    # first step.
     tiles_at = lambda r, c: (
         max(1, e * ceildiv(max(m_total // e, 1), r)) * ceildiv(n, c)
     )
@@ -797,15 +750,9 @@ def ceildiv(a: int, b: int) -> int:
 class MXFP8GroupedGemmParam:
     """The compile key of one MXFP8 grouped GEMM specialisation.
 
-    Deliberately absent: the token count and every group size. Both are
-    runtime values under real MoE routing, and a shape-keyed compile would
-    leak a JIT compile plus a retained GPU module per step per layer.
-
-    This is a plain dataclass rather than an ``fx.struct``: the kernel body
-    closes over these values at trace time (see ``_compile``) instead of
-    reading them from a device-side struct, so FlyDSL never sees the param.
-    It carries ``__cache_signature__`` only so ``run_cached_flydsl`` can key
-    on it exactly as it keys on the dense ``GemmGfx950Param``.
+    Token counts and group sizes are deliberately absent: they are runtime
+    values under real MoE routing. ``__cache_signature__`` lets
+    ``run_cached_flydsl`` key on it like the dense ``GemmGfx950Param``.
     """
 
     k: int
@@ -847,18 +794,10 @@ def make_mxfp8_grouped_gemm_param(
 ) -> MXFP8GroupedGemmParam:
     """Validate one (K, N, E, BLOCK_R, BLOCK_C) against what `_compile` accepts.
 
-    Raises ``ValueError`` rather than tripping the asserts inside ``_compile``,
-    so the Inductor heuristics can prune a config without catching
-    ``AssertionError``.
-
-    Also rejects shapes whose operands cannot be passed at all. FlyDSL's CABI
-    packs each shape entry as int32 and every operand goes over as a 1-D view
-    (see `_row_windows`). The M-dependent operands are split into row windows
-    at launch, but B is ``(E, N, K)`` and is passed whole: it cannot be windowed
-    over rows, and windowing it over experts would need the device-resident
-    offsets on the host to know which rows each expert slice owns. So a B past
-    int32 is refused HERE, where the caller can still fall back, rather than
-    raising ``struct.error`` from inside the dispatch.
+    Raises ``ValueError`` so the Inductor heuristics can prune a config. That
+    includes a B ``(E, N, K)`` past int32 elements: unlike the M-dependent
+    operands, B cannot be split into row windows (see `_row_windows`), so it is
+    refused here, where the caller can still fall back.
     """
     if k <= 0 or n <= 0 or group_count <= 0:
         raise ValueError(f"degenerate shape K={k}, N={n}, E={group_count}")
@@ -942,11 +881,6 @@ def launch_mxfp8_grouped_gemm_gfx950(
 
         out[group_g] = mat_a[group_g] @ mat_b[g]^T
 
-    Groups partition the token (output row) dim with device-resident, unequal
-    sizes. Because the ragged axis is NOT the contraction, the whole pipelined
-    K-walk carries over from the even-groups body untouched -- only the
-    block -> (group, tile) mapping and the epilogue mask change.
-
         out       (M, N)      bf16, contiguous, allocated by the caller
         mat_a     (M, K)      fp8 e4m3, row-major
         mat_b     (E, N, K)   fp8 e4m3, row-major (i.e. a [E, K, N] operand
@@ -956,19 +890,10 @@ def launch_mxfp8_grouped_gemm_gfx950(
         offs      (E,) int32  cumulative group ends along M, ON DEVICE.
                               Read by the block itself -- never synced here.
 
-    ROWS PAST ``offs[-1]`` ARE LEFT ALONE. They are covered by no block, which
-    matches what ATen's own 2d-3d grouped GEMMs do with the same tail; the
-    alternative is a full M*N memset, measured at 9.5% of the kernel.
-
-    `tensor_arg` wraps each tensor for the *compile* call; Inductor passes
-    ``flyc.from_torch_tensor(t).mark_layout_dynamic()`` so one compiled
-    dispatcher serves every M.
-
-    `compile_only` warms the disk cache and returns without dispatching. It is
-    what Inductor's precompile entry point uses, where the tensors are fake and
-    the only thing wanted is the compiled artifact. Only the first window is
-    compiled in both traversal modes, and the layout-dynamic
-    compile args make the window's row count a runtime slot.
+    Rows past ``offs[-1]`` are left alone, as ATen's 2d-3d grouped GEMMs do.
+    `tensor_arg` wraps each tensor for the compile call (Inductor makes the
+    layout dynamic, so one dispatcher serves every M). `compile_only` warms the
+    cache for both traversal modes and returns without dispatching.
     """
     if tensor_arg is None:
 
@@ -1013,10 +938,7 @@ def launch_mxfp8_grouped_gemm_gfx950(
             stream,
         )
 
-        # Deferred: the descriptors are only needed if a compile happens, and
-        # after the first call for a given param it never does. Building them
-        # eagerly cost ~8us of the launcher's ~26us per call, which is dead
-        # weight on shapes whose kernel time is of that order.
+        # Deferred: descriptors are only needed on a compile (~8us per call).
         def compile_args_factory(dispatch_args=dispatch_args):
             return tuple(
                 tensor_arg(arg) if idx < 6 else arg
@@ -1045,11 +967,8 @@ def launch_mxfp8_grouped_gemm_gfx950(
 def _compile_gfx950(jit_func, *args):
     """`flyc.compile`, refusing any target but gfx950.
 
-    Every scaled MFMA and ``ds_read_tr`` here is gfx950-only, and gfx942 has no
-    MX support at all. FlyDSL resolves its target from the environment and, if
-    it cannot, silently assumes gfx942 -- which would surface as an LLVM
-    instruction-selection abort, or a kernel for the wrong chip. Checked at
-    compile time, where the resolved target is what will actually be built.
+    The scaled MFMAs and ``ds_read_tr`` are gfx950-only. FlyDSL silently assumes
+    gfx942 when it cannot detect the arch, so check the target being built.
     """
     from flydsl.compiler.backends import get_backend
 
@@ -1065,21 +984,11 @@ def _compile_gfx950(jit_func, *args):
 def _row_windows(M, K, N, offs, block_r=BLOCK_R):
     """Split the token dim into windows no single launch can overflow int32 on.
 
-    FlyDSL's CABI packs a tensor's shape entries as int32
-    (``jit_argument._LayoutPlan``: ``"i" * len(shape)``), and every operand goes
-    over as a 1-D view, so ``shape[0]`` IS the element count. Past 2**31 the pack
-    raises ``struct.error`` from inside the dispatch, which surfaces as a hard
-    failure rather than a fallback. This is reachable in practice: at 65k
-    tokens/rank, M=1,108,768 x K=2048 = 2,270,756,864.
-
-    Splitting is sound HERE, and only here, because the groups partition the
-    OUTPUT ROWS rather than the contraction: each window owns a disjoint row
-    range, so the windows never share a partial sum and need no accumulation.
-
-    Yields ``(row_start, n_rows, window_offsets)``. The offsets are rebased and
-    clamped ON DEVICE -- a group that straddles a boundary ends at ``n_rows`` in
-    one window and starts at 0 in the next, and groups wholly outside collapse to
-    size 0. No host sync, which is the property this whole kernel is built around.
+    FlyDSL's CABI packs shape entries as int32 and every operand goes over as a
+    1-D view, so an operand past 2**31 elements raises ``struct.error`` in the
+    dispatch (reachable: M=1,108,768 x K=2048). Windows own disjoint output
+    rows, so they share no partial sums. Yields ``(row_start, n_rows,
+    window_offsets)``, with offsets rebased and clamped on device (no host sync).
     """
     # Bound the widest M-dependent operand: A is (M, K), out is (M, N), and A's
     # scales are (M, K//32).

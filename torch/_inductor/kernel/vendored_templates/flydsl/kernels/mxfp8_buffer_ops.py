@@ -8,31 +8,14 @@
 # change is `_aux_is_positional`, which handles the 0.3.1+ buffer-op builders.
 """Buffer-descriptor loads and stores on rocdl ops in flydsl 0.2.4 through 0.3.4.1.
 
-WHY THIS FILE EXISTS. These kernels were written against flydsl 0.2.4 and called
-``flydsl.expr.buffer_ops`` and ``flydsl.expr.vector``. 0.3.0 DELETED both
-modules, so the kernels only ran there via a compat shim that grafted the two
-0.2.4 modules back under their old names -- which meant carrying 763 lines of
-someone else's deleted code, on a path outside this repo.
+flydsl 0.3.0 deleted ``flydsl.expr.buffer_ops``; this re-implements the part of
+it these kernels use directly on ``rocdl.MakeBufferRsrcOp``,
+``RawPtrBufferLoadOp`` and ``RawPtrBufferStoreOp``, which every release has.
 
-The shim was never the only option: ``rocdl.MakeBufferRsrcOp``,
-``RawPtrBufferLoadOp`` and ``RawPtrBufferStoreOp`` are present in every release
-from 0.2.4 through 0.3.4.1.
-0.2.4's ``buffer_ops`` was a convenience layer over exactly those, and this is
-that layer, re-implemented against the ops directly and kept to what these
-kernels actually use. No shim, no version branch, no ``flydsl.expr.buffer_ops``.
-
-What is deliberately NOT here, because no caller needs it: ``mask=``,
-``cache_modifier``, ``stride``, ``base_byte_offset``, ``offset_is_bytes``, the
-``from_addr`` descriptor constructor, and the memref-derived size fallback (every
-caller passes ``num_records_bytes`` explicitly). Adding one back means porting
-its logic from 0.2.4, not guessing.
-
-THE BOUNDS ARE LOAD-BEARING, not an optimisation. ``num_records`` is what makes
-an out-of-range read return 0 instead of faulting, and this kernel relies on that:
-it over-provisions row-tile slots and lets a surplus block's scale read go past
-the plane, where 0 as an e8m0 is 2**-127 and underflows exactly as the epilogue
-mask intends. Dropping the bound gives ``hipErrorIllegalAddress`` on real
-DSV3-16B shapes -- see the descriptor comments in `_fwd_kernel.py`.
+THE BOUNDS ARE LOAD-BEARING. ``num_records`` makes an out-of-range read return
+0 instead of faulting, and the kernel relies on it: a surplus block's scale read
+may pass the plane, where 0 as e8m0 underflows exactly as the epilogue mask
+intends. Without the bound, real DSV3-16B shapes hit ``hipErrorIllegalAddress``.
 """
 
 from __future__ import annotations
