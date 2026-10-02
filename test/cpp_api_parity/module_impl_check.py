@@ -296,7 +296,7 @@ def process_test_params_for_module(test_params_dict, device, test_instance_class
 
 
 def write_test_to_test_class(
-    unit_test_class, test_params_dict, test_instance_class, parity_table, devices
+    unit_test_class, test_params_dict, test_instance_class, parity_table
 ):
     if is_torch_nn_functional_test(test_params_dict):
         raise AssertionError("Expected non-functional test")
@@ -318,33 +318,45 @@ def write_test_to_test_class(
             f"(Discovered while processing\n{pprint.pformat(test_params_dict)}.)"
         )
 
-    for device in devices:
+    test_params_dict["constructor"] = test_params_dict.get(
+        "constructor", getattr(torch.nn, module_name)
+    )
+    test_instance = test_instance_class(**test_params_dict)
+    unit_test_name = f"test_torch_nn_{test_instance.get_name()[5:]}"
+
+    def make_test_params(unit_test_class, device):
         test_params = process_test_params_for_module(
             test_params_dict=test_params_dict,
             device=device,
             test_instance_class=test_instance_class,
         )
         try_remove_folder(test_params.cpp_tmp_folder)
-        unit_test_name = f"test_torch_nn_{test_params.module_variant_name}"
         unit_test_class.module_test_params_map[unit_test_name] = test_params
 
-        def test_fn(self):
-            test_forward_backward(
-                unit_test_class=self,
-                test_params=unit_test_class.module_test_params_map[
-                    self._testMethodName
-                ],
-            )
+    unit_test_class.module_test_param_factories[unit_test_name] = make_test_params
 
-        test_fn = decorate_test_fn(
-            test_fn=test_fn,
-            test_cuda=test_params_dict.get("test_cuda", True),
-            has_impl_parity=parity_table["torch::nn"][module_full_name][0]
-            and test_params_dict.get("has_parity", True),
-            device=device,
+    def test_fn(self, device):
+        device = torch.device(device).type
+        make_test_params(self.__class__, device)
+        test_forward_backward(
+            unit_test_class=self,
+            test_params=self.__class__.module_test_params_map[unit_test_name],
         )
 
-        add_test(unit_test_class, unit_test_name, test_fn)
+    test_fn = decorate_test_fn(
+        test_fn=test_fn,
+        test_cuda=test_params_dict.get("test_cuda", True),
+        has_impl_parity=parity_table["torch::nn"][module_full_name][0]
+        and test_params_dict.get("has_parity", True),
+    )
+
+    add_test(unit_test_class, unit_test_name, test_fn)
+
+
+def prepare_test_params(unit_test_class, device):
+    unit_test_class.module_test_params_map = {}
+    for make_test_params in unit_test_class.module_test_param_factories.values():
+        make_test_params(unit_test_class, device)
 
 
 def generate_test_cpp_sources(test_params, template):
@@ -387,6 +399,8 @@ def build_cpp_tests(unit_test_class, print_cpp_source=False):
         print(cpp_sources)
 
     cpp_module = compile_cpp_code_inline(
-        name="module_impl_check", cpp_sources=cpp_sources, functions=functions
+        name=f"module_impl_check_{unit_test_class.__name__.lower()}",
+        cpp_sources=cpp_sources,
+        functions=functions,
     )
     unit_test_class.module_impl_check_cpp_module = cpp_module
