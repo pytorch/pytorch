@@ -1,4 +1,5 @@
 #include <ATen/PythonTorchFunctionTLS.h>
+#include <ATen/SavedTensorHooks.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/functional.h>
 #include <c10/core/SafePyObject.h>
@@ -2697,6 +2698,48 @@ class DUAL_LEVEL_MATCH : public LeafGuard {
  private:
   int64_t _level;
   py::object forward_ad_module;
+};
+
+// Checks if the autograd saved tensor hooks have changed.
+class AUTOGRAD_SAVED_TENSORS_HOOKS : public LeafGuard {
+ public:
+  AUTOGRAD_SAVED_TENSORS_HOOKS(
+      RootGuardManager* root_guard_manager,
+      py::object graph_module_type_obj,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard{root_guard_manager, std::move(verbose_code_parts), std::move(user_stack)},
+        graph_module_type{py::cast<py::type>(std::move(graph_module_type_obj))},
+        guard_hooks_ids{get_guard_hooks_ids()} {}
+
+  bool check_nopybind(PyObject* value) override {
+    return guard_hooks_ids == get_guard_hooks_ids();
+  }
+
+ private:
+  py::type graph_module_type;
+  std::array<PyObject*, 2> guard_hooks_ids;
+
+  std::array<PyObject*, 2> get_guard_hooks_ids() {
+    auto hooks{at::SavedTensorDefaultHooks::get_hooks(true)};
+    if (!hooks) {
+      return {};
+    }
+
+    auto is_graph_module{[&](PyObject* o) {
+      return PyType_IsSubtype(
+          Py_TYPE(o), reinterpret_cast<PyTypeObject*>(graph_module_type.ptr()));
+    }};
+    auto* pack{hooks->first.ptr(&hooks->first.pyinterpreter())};
+    auto* unpack{hooks->second.ptr(&hooks->second.pyinterpreter())};
+    if (!is_graph_module(pack) || !is_graph_module(unpack)) {
+      return {};
+    }
+
+    // This is safe since we're not accessing the contents of these pointers,
+    // only the contained address.
+    return std::array<PyObject*, 2>{pack, unpack};
+  }
 };
 
 /**
@@ -7967,6 +8010,13 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DUAL_LEVEL_MATCH")
       .def(py::init<RootGuardManager*, int64_t, py::list, py::object>())
       .def("__call__", &DUAL_LEVEL_MATCH::check);
+  py::class_<
+      AUTOGRAD_SAVED_TENSORS_HOOKS,
+      LeafGuard,
+      std::shared_ptr<AUTOGRAD_SAVED_TENSORS_HOOKS>>(
+      py_m, "AUTOGRAD_SAVED_TENSORS_HOOKS")
+      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
+      .def("__call__", &AUTOGRAD_SAVED_TENSORS_HOOKS::check);
   py::class_<FLOAT_IS_NAN, LeafGuard, std::shared_ptr<FLOAT_IS_NAN>>(
       py_m, "FLOAT_IS_NAN")
       .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
@@ -8474,6 +8524,18 @@ PyObject* torch_c_dynamo_guards_init() {
             self.add_leaf_guard(std::make_shared<DUAL_LEVEL_MATCH>(
                 self.get_root(),
                 level,
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
+          "add_autograd_saved_tensors_hooks_guard",
+          [](GuardManager& self,
+             py::object graph_module_type,
+             py::object verbose_code_parts,
+             py::object user_stack) {
+            self.add_leaf_guard(std::make_shared<AUTOGRAD_SAVED_TENSORS_HOOKS>(
+                self.get_root(),
+                std::move(graph_module_type),
                 std::move(verbose_code_parts),
                 std::move(user_stack)));
           })
