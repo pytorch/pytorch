@@ -181,8 +181,10 @@ class _AllGatherOutputLayout:
     outer_size: int
 
 
-# Post-forward shards are flat chunks of the unsharded data
-_FLAT_ALL_GATHER_OUTPUT_LAYOUT = _AllGatherOutputLayout(torch.Size((-1,)), 1)
+# Post-forward resharding keeps a flat chunk of the unsharded data, so the
+# all-gather before backward concatenates flat chunks into the unsharded data.
+# Its copy-out must stay flat instead of reassembling along the Shard(i) dim.
+_POST_FORWARD_ALL_GATHER_OUTPUT_LAYOUT = _AllGatherOutputLayout(torch.Size((-1,)), 1)
 
 
 class FSDPParam:
@@ -974,7 +976,7 @@ class FSDPParam:
     @property
     def all_gather_copy_layouts(self) -> tuple[_AllGatherOutputLayout, ...]:
         if self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
-            return (_FLAT_ALL_GATHER_OUTPUT_LAYOUT,)
+            return (_POST_FORWARD_ALL_GATHER_OUTPUT_LAYOUT,)
         return self._all_gather_copy_layouts
 
     def to_sharded(self) -> None:
