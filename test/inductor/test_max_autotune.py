@@ -5060,6 +5060,18 @@ class TestPrologueFusion(TestCase):
 
         self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
+        # The bias use needs the materialized producer, so the pointwise kernel
+        # computes x * 2.0 and the template kernel must not recompute it before
+        # tl.dot (i.e. the producer is not fused into the template's A input).
+        (
+            FileCheck()
+            .check("def triton_poi")
+            .check("2.0")
+            .check("def triton_tem")
+            .check_not("2.0")
+            .check("tl.dot")
+            .run(code[0])
+        )
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
