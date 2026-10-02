@@ -421,7 +421,9 @@ def _create_nested_fn(
             f"annotations must be None or a dict, got {type(annotations)}"
         )
     func.__annotations__ = annotations  # type: ignore[assignment]
-    func.__annotate__ = annotate  # type: ignore[attr-defined]
+    if sys.version_info >= (3, 14):
+        # After __annotations__, whose assignment clears __annotate__.
+        func.__annotate__ = annotate  # type: ignore[attr-defined]
 
     return func
 
@@ -2298,7 +2300,11 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def _get_annotations(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # func_get_annotations lazily creates and stores an empty dict. The dict
         # is a fresh value (ValueMutationNew), so it must carry no source.
-        if self.annotations is None and self.annotate is not None:
+        if (
+            sys.version_info >= (3, 14)
+            and self.annotations is None
+            and self.annotate is not None
+        ):
             ann = self.annotate.call_function(tx, [ConstantVariable.create(1)], {})
             if not issubclass(ann.python_type(), dict):
                 raise_type_error(
@@ -2672,7 +2678,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         else:
             codegen.extend_output([codegen.create_load_const(None)])
 
-        if self.annotate is not None:
+        if sys.version_info >= (3, 14) and self.annotate is not None:
             codegen(self.annotate)
         else:
             codegen.extend_output([codegen.create_load_const(None)])
@@ -5620,7 +5626,10 @@ class PropertyVariable(VariableTracker):
         fn = getattr(self.descriptor, attr)
 
         if fn is None:
-            display_name = getattr(self.descriptor.fget, "__name__", None)
+            if sys.version_info >= (3, 13):
+                display_name = getattr(self.descriptor, "__name__", "?")
+            else:
+                display_name = getattr(self.descriptor.fget, "__name__", "?")
             kind = "setter" if value is not None else "deleter"
             if sys.version_info >= (3, 11):
                 # property_descr_set formats %R of the owner's *type*, whose
