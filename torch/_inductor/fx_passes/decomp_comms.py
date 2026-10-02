@@ -19,6 +19,7 @@ import torch
 import torch.fx as fx
 from torch._inductor.fx_passes.bucketing import get_collective_type, is_wait_tensor
 from torch._inductor.fx_utils import get_fake_args_kwargs
+from torch._inductor.utils import get_collective_config
 from torch._inductor.virtualized import V
 from torch.utils._ordered_set import OrderedSet
 
@@ -139,6 +140,8 @@ def find_all_gather_ancestor(
         if (
             not isinstance(ag_node, fx.Node)
             or ag_node.target is not c10d.all_gather_into_tensor.default
+            # Configs are specific to the all_gather.
+            or get_collective_config(ag_node) is not None
         ):
             continue
         # all_gather_into_tensor(shard, world_size, group_name)

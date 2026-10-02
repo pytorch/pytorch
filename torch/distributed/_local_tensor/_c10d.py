@@ -128,6 +128,7 @@ def _local_functional_all_gather_into_tensor(
     tensor: torch.Tensor,
     group_size: int,
     group_name: GroupName | ProcessGroup,
+    config: dict[str, Any] | None = None,
 ) -> torch.Tensor:
     # "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor"
     from . import LocalTensor
@@ -164,6 +165,7 @@ def _local_functional_reduce_scatter_tensor(
     reduce_op: str,
     group_size: int,
     group_name: GroupName | ProcessGroup,
+    config: dict[str, Any] | None = None,
 ) -> torch.Tensor:
     #  "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor"
     from . import _zero_sized_like, LocalTensor
@@ -256,6 +258,7 @@ def _local_functional_all_to_all_single(
     output_split_sizes: list[torch.SymInt],
     input_split_sizes: list[torch.SymInt],
     group_name: GroupName | ProcessGroup,
+    config: dict[str, Any] | None = None,
 ) -> torch.Tensor:
     # "all_to_all_single(Tensor input, SymInt[] output_split_sizes, SymInt[] input_split_sizes, str group_name) -> Tensor"
     from . import LocalIntNode, LocalTensor

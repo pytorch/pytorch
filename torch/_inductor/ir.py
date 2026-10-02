@@ -12323,6 +12323,16 @@ class _CollectiveKernel(FallbackKernel):
             return packed
 
 
+def _drop_shim_config(args: Sequence[Any]) -> Sequence[Any]:
+    # The all_reduce C shims predate the optional config argument.
+    if not V.graph.cpp_wrapper:
+        return args
+    *args, config = args
+    if config is not None:
+        raise NotImplementedError("cpp_wrapper does not support collective configs")
+    return args
+
+
 class _AllReduce_Kernel(_CollectiveKernel):
     def __init__(
         self,
@@ -12345,6 +12355,11 @@ class _AllReduce_Kernel(_CollectiveKernel):
             unbacked_bindings=unbacked_bindings,
         )
         self.set_cpp_kernel_name("aoti_torch_cpu__c10d_functional_all_reduce_")
+
+    def fill_non_provided_args(
+        self, args: Sequence[Any], kwargs: dict[str, Any]
+    ) -> Sequence[Any]:
+        return _drop_shim_config(super().fill_non_provided_args(args, kwargs))
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.include_extra_header("torch/csrc/inductor/aoti_torch/c/shim_cpu.h")
