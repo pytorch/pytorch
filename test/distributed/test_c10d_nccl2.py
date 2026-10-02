@@ -1455,6 +1455,74 @@ backend.shutdown()
         self._run_child("dist.barrier()")
 
 
+_IGNORED_ENV_WARNING = "nccl2 ignores these ProcessGroupNCCL environment variables"
+_IGNORED_ENV = (
+    "TORCH_NCCL_RETHROW_CUDA_ERRORS",
+    "TORCH_NCCL_TEARDOWN_ON_TIMEOUT",
+    "TORCH_NCCL_PROPAGATE_ERROR",
+    "TORCH_NCCL_DESYNC_DEBUG",
+    "NCCL_DESYNC_DEBUG",
+    "TORCH_NCCL_EXTRA_DUMP_ON_EXEC",
+)
+_IGNORED_ENV_SCRIPT = """\
+import torch
+import torch.distributed as dist
+
+dist.init_process_group(
+    "nccl2",
+    rank=0,
+    world_size=1,
+    store=dist.HashStore(),
+    device_id=torch.device("cuda:0"),
+)
+dist.new_group([0])
+dist.destroy_process_group()
+"""
+
+
+class ProcessGroupNCCL2IgnoredEnvTest(TestCase):
+    """Runs in a subprocess because the warning fires once per process."""
+
+    def _run_child(self, env: dict[str, str]) -> str:
+        child_env = {k: v for k, v in os.environ.items() if k not in _IGNORED_ENV}
+        child_env.update(env)
+        try:
+            return subprocess.check_output(
+                [sys.executable, "-c", _IGNORED_ENV_SCRIPT],
+                stderr=subprocess.STDOUT,
+                env=child_env,
+                timeout=300,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(f"child process failed with:\n{e.output}")
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_warns_once(self) -> None:
+        output = self._run_child(
+            {
+                # Legacy default, so not ignored.
+                "TORCH_NCCL_RETHROW_CUDA_ERRORS": "1",
+                "TORCH_NCCL_PROPAGATE_ERROR": "1",
+                "NCCL_DESYNC_DEBUG": "1",
+            }
+        )
+        self.assertEqual(output.count(_IGNORED_ENV_WARNING), 1, output)
+        self.assertIn(
+            "no effect: TORCH_NCCL_PROPAGATE_ERROR, TORCH_NCCL_DESYNC_DEBUG", output
+        )
+        self.assertNotIn("TORCH_NCCL_RETHROW_CUDA_ERRORS", output)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_no_warning_when_unset(self) -> None:
+        output = self._run_child({})
+        self.assertNotIn(_IGNORED_ENV_WARNING, output)
+
+
 if __name__ == "__main__":
     if TEST_CUDA:
         run_tests()

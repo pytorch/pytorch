@@ -11,6 +11,7 @@
 #include <torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCL.hpp>
 
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
@@ -108,6 +109,34 @@ c10::intrusive_ptr<WorkNCCL> coalesceWorks(
   return work;
 }
 
+// Legacy ProcessGroupNCCL knobs that nccl2 does not implement, paired with
+// their legacy defaults.
+void warnIgnoredLegacyEnvOnce() {
+  static const bool warned [[maybe_unused]] = [] {
+    const std::vector<std::pair<std::vector<std::string>, bool>> knobs = {
+        {::c10d::TORCH_NCCL_RETHROW_CUDA_ERRORS, true},
+        {::c10d::TORCH_NCCL_TEARDOWN_ON_TIMEOUT, false},
+        {::c10d::TORCH_NCCL_PROPAGATE_ERROR, false},
+        {::c10d::TORCH_NCCL_DESYNC_DEBUG, false},
+        {::c10d::TORCH_NCCL_EXTRA_DUMP_ON_EXEC, false},
+    };
+    std::vector<std::string> ignored;
+    for (const auto& [env, def] : knobs) {
+      if (getCvarBool(env, def) != def) {
+        ignored.push_back(env.front());
+      }
+    }
+    if (ignored.empty()) {
+      return false;
+    }
+    TORCH_WARN(
+        "nccl2 ignores these ProcessGroupNCCL environment variables, so their "
+        "values have no effect: ",
+        c10::Join(", ", ignored));
+    return true;
+  }();
+}
+
 } // namespace
 
 ProcessGroupNCCL::ProcessGroupNCCL(
@@ -127,6 +156,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
           ::c10d::SkipCleanUp))),
       blocking_wait_(getCvarBool(::c10d::TORCH_NCCL_BLOCKING_WAIT, false)),
       options_c10d_(options ? std::move(options) : Options::create()) {
+  warnIgnoredLegacyEnvOnce();
   name_ = options_c10d_->group_name.empty() ? std::string(kBackendName)
                                             : options_c10d_->group_name;
 
