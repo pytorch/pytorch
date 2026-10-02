@@ -53,8 +53,6 @@ from torch.testing._internal.common_utils import (
     gradgradcheck,
     HardwareClassification,
     instantiate_parametrized_tests,
-    IS_ARM64,
-    IS_LINUX,
     MACOS_VERSION,
     parametrize as parametrize_test,
     run_tests,
@@ -2124,6 +2122,19 @@ class TestConvolutionNNDevice(NNTestCase):
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)
 
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    @parametrize_test(
+        "stride,dilation,groups", [(1, 3, 2), (2, 1, 1), (3, 2, 2), (1, 2, 16)]
+    )
+    def test_conv1d_long_input(self, device, dtype, stride, dilation, groups):
+        # length + padding exceeds matmul2d's uint16 row-stride limit on M1/M2, which must take the conv3d fallback
+        x = torch.randint(-2, 3, (2, 16, 2**17 + 3), device=device, dtype=dtype)
+        w = torch.randint(-2, 3, (32, 16 // groups, 3), device=device, dtype=dtype)
+        b = torch.randint(-2, 3, (32,), device=device, dtype=dtype)
+        args = (stride, 2, dilation, groups)
+        expected = F.conv1d(x.cpu().double(), w.cpu().double(), b.cpu().double(), *args)
+        self.assertEqual(F.conv1d(x, w, b, *args), expected, exact_dtype=False)
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
     @dtypesIfMPS(
@@ -3853,8 +3864,6 @@ class TestConvolutionNNCPU(NNTestCase):
 
     hw_classification = HardwareClassification.CPU
 
-    @xfailIf(IS_LINUX and IS_ARM64)
-    # see https://github.com/pytorch/pytorch/issues/177245
     def test_conv_contiguous_for_oneDNN(self):
         # See https://github.com/pytorch/pytorch/issues/80837.
         for dtype in [torch.float, torch.bfloat16, torch.half]:
@@ -3880,8 +3889,6 @@ class TestConvolutionNNCPU(NNTestCase):
                     y_ = conv(x2)
                     self.assertEqual(y, y_)
 
-    @xfailIf(IS_LINUX and IS_ARM64)
-    # see https://github.com/pytorch/pytorch/issues/177245
     def test_conv_ic1_channels_last_for_oneDNN(self):
         # See https://github.com/pytorch/pytorch/issues/82060, N > 1 will call in OneDNN path.
         for dtype in [torch.float, torch.bfloat16, torch.half]:
