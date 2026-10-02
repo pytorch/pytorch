@@ -803,6 +803,16 @@ class FSDPParam:
             raise AssertionError("Expected post_forward_mesh_info to not be None")
         param_data = param._local_tensor if isinstance(param, DTensor) else param
         if isinstance(mesh_info, FSDPMeshInfo):
+            shard_dim = self.fsdp_placement.dim
+            if shard_dim != 0 and param_data.size(0) % mesh_info.shard_mesh_size != 0:
+                # Post-forward shards are flat chunks of the unsharded data,
+                # which match these dim-0 chunks only if dim 0 divides evenly
+                raise NotImplementedError(
+                    f"FSDP does not support resharding Shard({shard_dim}) "
+                    "parameters after forward to a world size of "
+                    f"{mesh_info.shard_mesh_size}, which does not divide dim 0: "
+                    f"{param_data.size()}"
+                )
             chunks = _chunk_with_empty(param_data, mesh_info.shard_mesh_size, dim=0)
             self.sharded_post_forward_size = _get_dim_chunked_size(
                 chunks[mesh_info.shard_mesh_rank],
