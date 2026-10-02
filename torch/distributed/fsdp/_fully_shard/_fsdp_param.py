@@ -28,6 +28,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
@@ -1097,6 +1098,14 @@ class FSDPParam:
         for tensor in self._unsharded_inner_tensors:
             free_storage(tensor)
 
+    def restore_sharded_param(self) -> None:
+        for tensor in _get_sharded_param_data_tensors(self._sharded_param_data):
+            alloc_storage(tensor)
+
+    def free_sharded_param(self) -> None:
+        for tensor in _get_sharded_param_data_tensors(self._sharded_param_data):
+            free_storage(tensor)
+
     @property
     def all_gather_inputs(self) -> list[torch.Tensor]:  # 1D
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
@@ -1356,6 +1365,18 @@ def alloc_storage(tensor: torch.Tensor) -> None:
 def free_storage(tensor: torch.Tensor) -> None:
     if (storage := tensor.untyped_storage()).size() != 0:
         storage.resize_(0)
+
+
+def _get_sharded_param_data_tensors(tensor: torch.Tensor) -> list[torch.Tensor]:
+    if not is_traceable_wrapper_subclass(tensor):
+        return [tensor]
+    tensors = []
+    inner_names, _ = tensor.__tensor_flatten__()
+    for name in inner_names:
+        inner = getattr(tensor, name)
+        if isinstance(inner, torch.Tensor):
+            tensors.extend(_get_sharded_param_data_tensors(inner))
+    return tensors
 
 
 # NOTE: These bypass `nn.Module.__setattr__` checks, which incur non-trivial

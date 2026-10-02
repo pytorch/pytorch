@@ -346,6 +346,20 @@ class FSDPModule:
         for fsdp_param_group in state._fsdp_param_groups:
             fsdp_param_group.reshard()
 
+    def _restore_sharded_params(self) -> None:
+        """Restores this module's sharded parameter storage non-recursively."""
+        state = self._get_fsdp_state()
+        for fsdp_param_group in state._fsdp_param_groups:
+            for fsdp_param in fsdp_param_group.fsdp_params:
+                fsdp_param.restore_sharded_param()
+
+    def _free_sharded_params(self) -> None:
+        """Frees this module's sharded parameter storage non-recursively."""
+        state = self._get_fsdp_state()
+        for fsdp_param_group in state._fsdp_param_groups:
+            for fsdp_param in fsdp_param_group.fsdp_params:
+                fsdp_param.free_sharded_param()
+
     def unshard(self, async_op: bool = False) -> UnshardHandle | None:
         """
         Unshards the module's parameters by allocating memory and all-gathering
