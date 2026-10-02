@@ -53,7 +53,7 @@ if [[ "$TEST_CONFIG" != "onnx" ]]; then
 fi
 
 # Remove dill to test that serialization works without it
-if [[ "$BUILD_ENVIRONMENT" == *py3.10-gcc11 ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *py3.11-gcc11 ]]; then
   pip uninstall -y dill 2>/dev/null || true
 fi
 
@@ -96,6 +96,12 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     # thread, which runs compilation inline with no pool) but bounds the number of
     # concurrent GPU-attached workers below the oversubscription threshold.
     export TORCHINDUCTOR_COMPILE_THREADS=16
+    # ROCr loads code objects larger than HSA_CO_DMACOPY_SIZE (default 1 MiB)
+    # via a blit kernel whose first dispatch can execute stale instructions and
+    # fault or hang (ROCm/rocm-systems#12209, fixed in ROCm 10.2). Raise the
+    # threshold to 1 GiB so code-object loads stay on the memcpy path. The value
+    # is parsed with atoi, so it must stay within int range.
+    export HSA_CO_DMACOPY_SIZE=1073741824
 fi
 
 export VALGRIND=ON
@@ -217,7 +223,7 @@ export LANG=C.UTF-8
 
 PR_NUMBER=${PR_NUMBER:-${CIRCLE_PR_NUMBER:-}}
 
-if [[ -d "${HF_CACHE}" && "$TEST_CONFIG" != "onnx" ]]; then
+if [[ -d "${HF_CACHE}" ]]; then
   export HF_HOME="${HF_CACHE}"
 fi
 
@@ -397,7 +403,7 @@ fi
 if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
-  export ATEN_CPU_CAPABILITY=avx2
+  export ATEN_CPU_CAPABILITY=avx512
 fi
 
 test_tsan() {
@@ -1578,13 +1584,17 @@ test_inductor_set_cpu_affinity(){
   thread_per_core=$(lscpu | grep 'Thread(s) per core:' | awk '{print $4}')
   cores=$((cpus / thread_per_core))
 
-  export OMP_NUM_THREADS=$cores
-
   # Handle cgroups slice start and end CPU
   start_cpu=$(python -c 'import os; print(min(os.sched_getaffinity(0)))')
   # Leaving one physical CPU for other tasks
   end_cpu=$(($(python -c 'import os; print(max(os.sched_getaffinity(0)))') - thread_per_core))
   export TASKSET="taskset -c $start_cpu-$end_cpu"
+  if [[ "$(uname -m)" == "aarch64" ]]; then
+    # Match OpenMP threads to the CPUs retained by taskset
+    # https://github.com/pytorch/pytorch/issues/195629
+    cores=$(taskset -c "$start_cpu-$end_cpu" nproc)
+  fi
+  export OMP_NUM_THREADS=$cores
 }
 
 test_inductor_torchbench_cpu_smoketest_perf(){
@@ -1761,6 +1771,10 @@ test_libtorch_profiler() {
     # Kineto's xpu tests compile SYCL device code through an ExternalProject,
     # so the PyTorch build leaves them out. See cmake/Dependencies.cmake.
     echo "Skipping Kineto C++ tests on XPU"
+  elif [[ "${TEST_CONFIG}" == *nogpu* ]]; then
+    # CUDA builds link Kineto's tests against CUPTI, which segfaults without
+    # a driver present rather than letting the tests skip.
+    echo "Skipping Kineto C++ tests on nogpu"
   else
     echo "Testing Kineto C++ tests"
     local kineto_bin_dir="${BUILD_BIN_DIR}/kineto"
