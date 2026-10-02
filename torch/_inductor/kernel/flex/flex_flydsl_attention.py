@@ -55,9 +55,13 @@ def _get_supported_bhsd_stride(node, *, allow_strided: bool) -> tuple[int, ...] 
     if strides == _contiguous_strides(sizes):
         return tuple(strides)
     # A zero stride is not a broadcast when the corresponding extent is one.
-    if allow_strided and strides[-1] == 1 and all(
-        stride > 0 or (size == 1 and stride == 0)
-        for size, stride in zip(sizes, strides)
+    if (
+        allow_strided
+        and strides[-1] == 1
+        and all(
+            stride > 0 or (size == 1 and stride == 0)
+            for size, stride in zip(sizes, strides)
+        )
     ):
         return tuple(strides)
     return None
@@ -328,7 +332,10 @@ def _get_flydsl_flex_attention_backward_config(
             for node in metadata_nodes
         )
     except (AttributeError, NotImplementedError, TypeError, ValueError):
-        return None, "FlyDSL flex bwd requires statically known BlockMask metadata strides"
+        return (
+            None,
+            "FlyDSL flex bwd requires statically known BlockMask metadata strides",
+        )
     if not all(
         _is_contiguous_shape_stride(shape, stride)
         for shape, stride in zip(metadata_shapes, metadata_strides)
@@ -490,8 +497,8 @@ def create_flydsl_flex_attention_backward_kernel(
             full_kv_indices,
         ]
     )
-    score_mod_other_buffers = maybe_realize(score_mod_other_buffers or [])
-    mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers or [])
+    score_mod_other_buffers = maybe_realize(list(score_mod_other_buffers or []))
+    mask_mod_other_buffers = maybe_realize(list(mask_mod_other_buffers or []))
     freeze_irnodes(score_mod_other_buffers)
     freeze_irnodes(mask_mod_other_buffers)
 
@@ -577,19 +584,19 @@ def create_flydsl_flex_attention_backward_kernel(
         )
 
     delta = make_scratch(bh * s, torch.float32)
-    grad_query_workspace = make_scratch(
-        bh * s * config["QK_HEAD_DIM"], torch.bfloat16
-    )
+    grad_query_workspace = make_scratch(bh * s * config["QK_HEAD_DIM"], torch.bfloat16)
     # Dense ranges need no reverse lists. Allocate minimal placeholders for
     # the common ABI; sparse traversal uses one list per 128-row KV owner.
     from ..vendored_templates.flydsl.kernels.flex_attn_utils import (
-        MASK_TRAVERSAL_BLOCK_LIST,
         classify_mask_traversal,
+        MASK_TRAVERSAL_BLOCK_LIST,
     )
 
     traversal, _ = classify_mask_traversal(
-        config["MASK_PROGRAM"], config["MASK_PROGRAM_OUTPUT"],
-        config["MASK_BUFFER_SHAPES"], sequence_length=s,
+        config["MASK_PROGRAM"],
+        config["MASK_PROGRAM_OUTPUT"],
+        config["MASK_BUFFER_SHAPES"],
+        sequence_length=s,
     )
     if traversal != MASK_TRAVERSAL_BLOCK_LIST:
         kv_chunks = q_chunks = 1
