@@ -7549,7 +7549,7 @@ def use_two_step_variance(x, axis, keepdim, input_dtype):
         # 1024 is a default value to pass all the UTs about accuracy.
         # A larger threshold can still get performance benefits.
         threshold = config.cpp.use_two_step_variance_threshold
-    elif device and device.type == "cuda" and is_triton(x) and is_cuda_two_step_dtype:
+    elif device and is_triton(x) and is_cuda_two_step_dtype:
         min_numel = config.triton.use_two_step_variance_min_numel
         threshold = config.triton.use_two_step_variance_threshold
         check_for_split = True
