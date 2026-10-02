@@ -64,8 +64,7 @@ std::string PyAnomalyMetadata::format_stack(
         PyDict_GetItemStringRef(
             parent_metadata.get(), ANOMALY_TRACE_KEY, &parent_stack_ptr) >= 0);
     THPObjectPtr parent_stack(parent_stack_ptr);
-    out << "\n\n"
-        << _format_stack(parent_stack.get(), parent_name, true);
+    out << "\n\n" << _format_stack(parent_stack.get(), parent_name, true);
     // get the parent of this node, if this node is a root, pyparent is simply
     // null
     PyObject* next_parent_ptr = nullptr;

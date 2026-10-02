@@ -6,7 +6,6 @@ import contextlib
 import contextvars
 import functools
 import gc
-import io
 import math
 import operator
 import os

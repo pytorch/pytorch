@@ -18,9 +18,11 @@
 #endif
 
 #include <c10/core/DeviceGuard.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/core/Event.h>
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
+#include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
@@ -922,10 +924,18 @@ void GraphTask::set_exception(
   if (!future_completed_.exchange(true)) {
     if (AnomalyMode::is_enabled() && fn) {
       try {
-        eptr = wrap_exception_with_anomaly_trace(
-            std::move(eptr), fn->metadata()->format_stack(fn->name()));
+        // FakeTensor/AOT tracing turns on detect_anomaly and matches on exact
+        // exception types and messages (e.g. "aten._unique.default"). Keep the
+        // original exception there and emit the forward traceback as a warning.
+        if (c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Fake)) {
+          fn->metadata()->print_stack(fn->name());
+        } else {
+          eptr = wrap_exception_with_anomaly_trace(
+              std::move(eptr), fn->metadata()->format_stack(fn->name()));
+        }
       } catch (...) {
-        // Keep the original exception if formatting the forward traceback fails.
+        // Keep the original exception if formatting the forward traceback
+        // fails.
       }
     }
     future_result_->setError(std::move(eptr));
