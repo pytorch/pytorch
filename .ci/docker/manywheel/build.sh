@@ -33,53 +33,44 @@ ACL_VERSION=${ACL_VERSION:-}
 case ${image} in
     manylinux2_28-builder:cpu)
         TARGET=cpu_final
-        GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=13"
         MANY_LINUX_VERSION="2_28"
         ;;
     manylinux2_28_aarch64-builder:cpu-aarch64)
         TARGET=final
-        GPU_IMAGE=arm64v8/almalinux:8
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=13"
         MANY_LINUX_VERSION="2_28_aarch64"
         ;;
     manylinuxs390x-builder:cpu-s390x)
         TARGET=final
-        GPU_IMAGE=s390x/almalinux:8
         DOCKER_GPU_BUILD_ARG=""
         MANY_LINUX_VERSION="s390x"
         ;;
     manylinux2_28-builder:cuda11*)
         TARGET=cuda_final
-        GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=11"
         MANY_LINUX_VERSION="2_28"
         ;;
     manylinux2_28-builder:cuda12*)
         TARGET=cuda_final
-        GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=13"
         MANY_LINUX_VERSION="2_28"
         ;;
     manylinux2_28-builder:cuda13*)
         TARGET=cuda_final
-        GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=13"
         MANY_LINUX_VERSION="2_28"
         ;;
-    manylinuxaarch64-builder:cuda*)
+    manylinuxaarch64-builder:cuda*|manylinux2_28_aarch64-builder:cuda*)
         TARGET=cuda_final
-        GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG="--build-arg BASE_CUDA_VERSION=${GPU_ARCH_VERSION} --build-arg DEVTOOLSET_VERSION=13"
-        MANY_LINUX_VERSION="aarch64"
-        DOCKERFILE_SUFFIX="_cuda_aarch64"
+        MANY_LINUX_VERSION="2_28_aarch64"
         ;;
     manylinux2_28-builder:rocm*)
         MANY_LINUX_VERSION="2_28"
         DEVTOOLSET_VERSION="13"
         PYTORCH_ROCM_ARCH="gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1103;gfx1200;gfx1201;gfx1150;gfx1151;gfx1250"
         TARGET=rocm_final
-        GPU_IMAGE=amd64/almalinux:8
         if [[ "${GPU_ARCH_VERSION}" == "7.14" ]]; then
             THEROCK_INDEX_URL="https://repo.amd.com/rocm/whl-multi-arch/"
         else
@@ -89,7 +80,6 @@ case ${image} in
         ;;
     manylinux2_28-builder:xpu)
         TARGET=xpu_final
-        GPU_IMAGE=amd64/almalinux:8
         DOCKER_GPU_BUILD_ARG=" --build-arg DEVTOOLSET_VERSION=13"
         MANY_LINUX_VERSION="2_28"
         ;;
@@ -114,7 +104,6 @@ fi
 
 docker buildx build \
     ${DOCKER_GPU_BUILD_ARG} \
-    --build-arg "GPU_IMAGE=${GPU_IMAGE}" \
     --build-arg "OPENBLAS_VERSION=${OPENBLAS_VERSION:-}" \
     --build-arg "ACL_VERSION=${ACL_VERSION:-}" \
     --target "${TARGET}" \
