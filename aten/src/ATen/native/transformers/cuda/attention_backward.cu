@@ -564,13 +564,13 @@ _efficient_attention_backward(
         "philox_seed and philox_offset must be on the same device");
     if (philox_seed.is_cuda()) {
       rng_engine_inputs = at::PhiloxCudaState(
-          philox_seed.data_ptr<int64_t>(),
-          philox_offset.data_ptr<int64_t>(),
+          philox_seed.mutable_data_ptr<int64_t>(),
+          philox_offset.mutable_data_ptr<int64_t>(),
           0);
     } else {
       rng_engine_inputs = at::PhiloxCudaState(
-          *philox_seed.data_ptr<int64_t>(),
-          *philox_offset.data_ptr<int64_t>());
+          *philox_seed.mutable_data_ptr<int64_t>(),
+          *philox_offset.mutable_data_ptr<int64_t>());
     }
   }
 
