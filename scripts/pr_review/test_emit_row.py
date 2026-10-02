@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Tests for the telemetry row builder's one attacker-adjacent string.
+"""Tests for the telemetry row builder's attacker-adjacent strings.
 
-`model` is the only value in the row we do not construct ourselves: it is a key
-from the usage file's `modelUsage`, produced by a jq pass in the job that reads
-untrusted PR code. Influence over it is marginal — but it was the single string
-crossing that boundary without validation, and it lands in ClickHouse.
+`model`, a key from the usage file's `modelUsage`, and the verdict, summary,
+findings and failure_detail read back out of verdict.json all come from the job
+that reads untrusted PR code, and all land in ClickHouse.
 
 Run: python3 -m unittest discover -s scripts/pr_review -t .
 """
@@ -21,14 +20,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # Collected as a test of THIS module, so the suite notices if this file is the
 # one deleted. See _suite_manifest for why the guard is shared, not copied.
 from _suite_manifest import run_this_suite, TestTheSuiteIsWhole  # noqa: E402,F401
-from emit_row import (  # noqa: E402
-    neutral_path,
-    neutral_prose,
+from emit_row import safe_detail, safe_model, usage_metrics  # noqa: E402
+from extract_verdict import (  # noqa: E402
+    is_neutral_path,
+    is_neutral_prose,
+    neutralize,
+    neutralize_path,
     published_findings,
-    safe_model,
-    usage_metrics,
 )
-from extract_verdict import neutralize, neutralize_path  # noqa: E402
 
 
 class TestSafeModel(unittest.TestCase):
@@ -132,6 +131,7 @@ class TestPublishedFindings(unittest.TestCase):
             {**FINDING, "message": "x" * 601},
             {**FINDING, "message": "a \u2014 b"},
             {**FINDING, "path": "a\nb.py"},
+            {**FINDING, "path": "x.py\n"},
         ]
         self.assertEqual(published_findings({"findings": bad + [FINDING]}), [FINDING])
 
@@ -143,31 +143,35 @@ class TestPublishedFindings(unittest.TestCase):
             self.assertEqual(published_findings(verdict), [])
 
 
-class TestTerminalRowCarriesFindings(unittest.TestCase):
-    def _row(self, verdict: dict) -> dict:
-        import json
-        import subprocess
-        import tempfile
+def terminal_row(verdict: dict) -> dict:
+    """Run emit_row.py on `verdict` the way the publish job does."""
+    import json
+    import subprocess
+    import tempfile
 
-        with tempfile.TemporaryDirectory() as tmp:
-            verdict_file = Path(tmp) / "verdict.json"
-            verdict_file.write_text(json.dumps(verdict))
-            out = Path(tmp) / "row.json"
-            subprocess.run(
-                [
-                    sys.executable,
-                    str(Path(__file__).resolve().parent / "emit_row.py"),
-                    "--phase",
-                    "terminal",
-                    "--verdict-file",
-                    str(verdict_file),
-                    "--out",
-                    str(out),
-                ],
-                check=True,
-                capture_output=True,
-            )
-            return json.loads(out.read_text())
+    with tempfile.TemporaryDirectory() as tmp:
+        verdict_file = Path(tmp) / "verdict.json"
+        verdict_file.write_text(json.dumps(verdict))
+        out = Path(tmp) / "row.json"
+        subprocess.run(
+            [
+                sys.executable,
+                str(Path(__file__).resolve().parent / "emit_row.py"),
+                "--phase",
+                "terminal",
+                "--verdict-file",
+                str(verdict_file),
+                "--out",
+                str(out),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        return json.loads(out.read_text())
+
+
+class TestTerminalRowCarriesFindings(unittest.TestCase):
+    _row = staticmethod(terminal_row)
 
     def test_succeeded_row_has_findings_json(self):
         import json
@@ -197,6 +201,66 @@ class TestTerminalRowCarriesFindings(unittest.TestCase):
         )
         self.assertEqual(row["extra"], {})
 
+    def test_a_publish_side_drop_is_recorded_in_the_row(self):
+        import json
+
+        row = self._row(
+            {
+                "status": "succeeded",
+                "verdict": "changes_requested",
+                "summary": "s",
+                "findings": [FINDING, {**FINDING, "path": "x.py\n"}],
+            }
+        )
+        self.assertEqual(row["findings_count"], 2)
+        self.assertEqual(json.loads(row["extra"]["findings"]), [FINDING])
+        self.assertEqual(row["extra"]["findings_dropped_at_publish"], "1")
+
+    def test_a_forged_blob_is_not_published(self):
+        import base64
+
+        blob = base64.b64encode(bytes(range(256))).decode()
+        row = self._row(
+            {
+                "status": "succeeded",
+                "verdict": "changes_requested",
+                "summary": "s",
+                "findings": [FINDING, {**FINDING, "message": blob}],
+            }
+        )
+        self.assertNotIn(blob, row["extra"]["findings"])
+        self.assertEqual(row["extra"]["findings_dropped_at_publish"], "1")
+        self.assertFalse(is_neutral_prose(blob, 600))
+
+    def test_no_drop_key_when_nothing_was_dropped(self):
+        row = self._row(
+            {
+                "status": "succeeded",
+                "verdict": "changes_requested",
+                "summary": "s",
+                "findings": [FINDING],
+            }
+        )
+        self.assertNotIn("findings_dropped_at_publish", row["extra"])
+
+
+class TestFailureDetail(unittest.TestCase):
+    def test_sanitizer_detail_passes_through(self):
+        for detail in ("", "claude step outcome=failure", "summary is not a string"):
+            self.assertEqual(safe_detail(detail), detail)
+
+    def test_unchecked_detail_is_replaced_not_published(self):
+        for detail in ("@pytorchbot merge -f", "</details>", ["x"], 3, "a\u2014b"):
+            self.assertEqual(
+                safe_detail(detail), "failure_detail failed the publish-side re-check"
+            )
+
+    def test_the_row_carries_the_replacement(self):
+        row = terminal_row({"status": "model_error", "failure_detail": "<!-- x"})
+        self.assertEqual(
+            row["failure_detail"], "failure_detail failed the publish-side re-check"
+        )
+
 
 HOSTILE = [
     "@pytorchbot merge -f",
@@ -207,6 +271,7 @@ HOSTILE = [
     "<!-- pr-status-start -->",
     "back\\slash \\[x\\] and C:\\path",
     "a & b; x<y; z>w; &amp; &lt; &gt; &quot;",
+    "pytorch/pytorch#199409/test-infra#8972 and a/b#1/c#2/d#3",
 ]
 
 
@@ -225,16 +290,16 @@ class TestPublishSideRecheckMatchesTheSanitizer(unittest.TestCase):
         for text in samples:
             out = neutralize(text, 600).strip()
             if out:
-                self.assertTrue(neutral_prose(out, 600), repr((text, out)))
+                self.assertTrue(is_neutral_prose(out, 600), repr((text, out)))
 
     def test_text_cut_at_the_cap_still_passes(self):
         # neutralize() escapes and then caps, so the cap can split an entity.
         for cap in (600, 1500):
             for fill in range(cap - 12, cap + 1):
                 for tail in ("<", ">", "&", "x < y", "[a]", "#12", "@me"):
-                    out = neutralize("p" * fill + tail, cap).strip()
+                    out = neutralize(("lorem " * cap)[:fill] + tail, cap).strip()
                     if out:
-                        self.assertTrue(neutral_prose(out, cap), repr(out[-12:]))
+                        self.assertTrue(is_neutral_prose(out, cap), repr(out[-12:]))
 
     def test_malformed_verdict_shapes_still_write_a_row(self):
         for verdict in (
@@ -247,16 +312,16 @@ class TestPublishSideRecheckMatchesTheSanitizer(unittest.TestCase):
                 "findings": 1,
             },
         ):
-            row = TestTerminalRowCarriesFindings._row(self, verdict)
+            row = terminal_row(verdict)
             self.assertIn(row["status"], ("sanitizer_rejected", "succeeded"))
 
     def test_raw_hostile_text_is_refused(self):
         for text in HOSTILE:
-            self.assertFalse(neutral_prose(text, 600), repr(text))
+            self.assertFalse(is_neutral_prose(text, 600), repr(text))
 
     def test_paths_must_be_escaped_repo_paths(self):
         for good in ("torch/nn/x.py", "a/@babel/core.js", "x[0]_y.py"):
-            self.assertTrue(neutral_path(neutralize_path(good)), good)
+            self.assertTrue(is_neutral_path(neutralize_path(good)), good)
         for bad in (
             "a/@babel/core.js",  # unescaped
             "../x.py",
@@ -264,12 +329,13 @@ class TestPublishSideRecheckMatchesTheSanitizer(unittest.TestCase):
             "a\tb.py",
             "x`y.py",
             "a/</details>.py",
+            "x.py\n",
+            "torch/x.py\n",
         ):
-            self.assertFalse(neutral_path(bad), repr(bad))
+            self.assertFalse(is_neutral_path(bad), repr(bad))
 
     def test_an_unneutralized_summary_is_not_published(self):
-        row = TestTerminalRowCarriesFindings._row(
-            self,
+        row = terminal_row(
             {
                 "status": "succeeded",
                 "verdict": "ready_for_human_review",
@@ -283,8 +349,7 @@ class TestPublishSideRecheckMatchesTheSanitizer(unittest.TestCase):
         self.assertEqual(row["extra"], {})
 
     def test_an_unknown_verdict_is_not_published(self):
-        row = TestTerminalRowCarriesFindings._row(
-            self,
+        row = terminal_row(
             {
                 "status": "succeeded",
                 "verdict": "approve",
