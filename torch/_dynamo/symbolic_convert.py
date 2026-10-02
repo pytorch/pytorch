@@ -3130,12 +3130,6 @@ class InstructionTranslatorBase(
                 # instruction translator. We use special exception for this.
                 self.stack.clear()
 
-                # As in CPython, the caller adds its own traceback entry
-                # when the exception surfaces at its call site.
-                curr_exc = self.exn_vt_stack.get_raised_exception()
-                if self.parent is not None:
-                    self.parent._attach_traceback_to_exception(curr_exc)
-
                 if type(self) is InstructionTranslator:
                     bubble_exception_to_interpreter()
                 raise raised_exception
@@ -6213,7 +6207,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 kwargs,
                 allow_nested_graph_breaks=allow_nested_graph_breaks,
             )
-            return tracer.inline_call_()
+            try:
+                return tracer.inline_call_()
+            except exc.ObservedException:
+                # As in CPython's PyTraceBack_Here, the frame the exception
+                # surfaces in adds its own entry, here at the call site.
+                parent._attach_traceback_to_exception(
+                    parent.exn_vt_stack.get_raised_exception()
+                )
+                raise
 
     @staticmethod
     def check_inlineable(
@@ -6439,6 +6441,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
         return tracer
 
+    def freeze_frame_variable(self) -> None:
+        frame_variable = self.__dict__.get("frame_variable")
+        if frame_variable is not None:
+            frame_variable.freeze(self)
+
+    def finish_frame(self) -> None:
+        self.freeze_frame_variable()
+
     def inline_call_(self) -> VariableTracker:
         parent = self.parent
         parent.has_no_inlined_calls = False
@@ -6473,6 +6483,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # while the inlined tx's error_on_graph_break was set to False.
             parent.error_on_graph_break = self.error_on_graph_break
             parent.is_child_tracer_active = False
+            self.finish_frame()
 
         if self.output.should_exit:
             # graph break
@@ -6738,6 +6749,11 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     def inline_call_(self) -> VariableTracker:
         with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
             return super().inline_call_()
+
+    def finish_frame(self) -> None:
+        # inline_call_ re-enters on every send; the frame only finishes when
+        # the generator completes (see GeneratorVariable.gen_send_ex2).
+        pass
 
     def should_compile_partial_graph(self) -> bool:
         # resuming on graph break on inlined generator not supported

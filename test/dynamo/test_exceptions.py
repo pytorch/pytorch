@@ -1838,6 +1838,86 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertGreater(len(txs), 0)
         self.assertEqual(alive, 0)
 
+    def test_exception_traceback_finished_frame_lineno(self):
+        # A finished frame keeps its lasti, so f_lineno must not depend on
+        # when the garbage collector frees its translator.
+        def inner():
+            raise ValueError("boom")
+
+        def raised_then_more_work(x):
+            try:
+                inner()
+            except ValueError as e:
+                tb = e.__traceback__
+            for i in range(20):
+                x = x + i
+            return x, tb.tb_next.tb_frame.f_lineno
+
+        def helper():
+            try:
+                1 / 0
+            except ZeroDivisionError as e:
+                return e
+
+        def returned_exception(x):
+            e = helper()
+            return x + 1, e.__traceback__.tb_frame.f_lineno
+
+        for fn in (raised_then_more_work, returned_exception):
+            with self.subTest(fn=fn.__name__):
+                torch._dynamo.reset()
+                x = torch.ones(2)
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(fn(x), opt_fn(x))
+
+    def test_exception_traceback_generator_consumed_by_caller(self):
+        # The frame that resumes a generator receives its exception, not the
+        # frame that created it.
+        def gen():
+            yield 1
+            raise ValueError
+
+        def make_gen():
+            return gen()
+
+        def names(tb):
+            out = []
+            while tb:
+                out.append(tb.tb_frame.f_code.co_name)
+                tb = tb.tb_next
+            return out
+
+        def fn(x):
+            g = make_gen()
+            next(g)
+            try:
+                next(g)
+            except ValueError as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        @contextlib.contextmanager
+        def cm():
+            try:
+                yield
+            except KeyError:
+                raise ValueError from None
+
+        def fn_cm(x):
+            try:
+                with cm():
+                    raise KeyError
+            except ValueError as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        for f in (fn, fn_cm):
+            with self.subTest(fn=f.__name__):
+                torch._dynamo.reset()
+                x = torch.ones(2)
+                opt_f = torch.compile(f, backend="eager", fullgraph=True)
+                self.assertEqual(f(x), opt_f(x))
+
     def test_exception_traceback_chain_lineno(self):
         # Each entry is the line where its frame called the next one.
         def inner():

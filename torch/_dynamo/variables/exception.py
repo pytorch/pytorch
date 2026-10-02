@@ -65,7 +65,13 @@ class FrameSummaryVariable(VariableTracker):
 class FrameVariable(VariableTracker):
     """A frame object of a frame traced by `tx`, as reached via `tb_frame`."""
 
-    _nonvar_fields = {"tx_ref", "f_code", *VariableTracker._nonvar_fields}
+    _nonvar_fields = {
+        "tx_ref",
+        "f_code",
+        "is_frozen",
+        "frozen_positions",
+        *VariableTracker._nonvar_fields,
+    }
 
     def __init__(self, tx: "InstructionTranslatorBase", **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -73,6 +79,14 @@ class FrameVariable(VariableTracker):
         # value of the frame alive until the next gc cycle.
         self.tx_ref = weakref.ref(tx)
         self.f_code = tx.f_code
+        self.is_frozen = False
+        self.frozen_positions: Any = None
+
+    def freeze(self, tx: "InstructionTranslatorBase") -> None:
+        # A finished frame's lasti no longer changes (CPython keeps it too), so
+        # keep its positions and stop depending on tx staying alive.
+        self.frozen_positions = tx.lasti_instruction().positions
+        self.is_frozen = True
 
     def python_type(self) -> type[types.FrameType]:
         return types.FrameType
@@ -80,16 +94,20 @@ class FrameVariable(VariableTracker):
     def _get_f_lineno(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # tx is the frame doing the read; the traced frame may be a finished
         # callee further down the traceback.
-        frame_tx = self.tx_ref()
-        inst = frame_tx.lasti_instruction() if frame_tx is not None else None
-        if inst is None or inst.positions is None:
+        if self.is_frozen:
+            positions = self.frozen_positions
+        else:
+            frame_tx = self.tx_ref()
+            inst = frame_tx.lasti_instruction() if frame_tx is not None else None
+            positions = inst.positions if inst is not None else None
+        if positions is None:
             unimplemented(
                 gb_type="frame.f_lineno not supported",
                 context=f"{self} accessing 'f_lineno'",
                 explanation="Dynamo cannot recover the line number of this frame.",
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
-        return ConstantVariable.create(inst.positions.lineno)
+        return ConstantVariable.create(positions.lineno)
 
     def tp_getattro_impl(
         self, tx: "InstructionTranslatorBase", name: str
