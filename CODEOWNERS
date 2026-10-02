@@ -1172,14 +1172,17 @@
 # /torch/nativert/
 #
 # [ai_agent_tooling]
+# /.agents/
 # /.claude/
+# /.github/actions/pi-agent/
 # /.github/copilot-instructions.md
+# /.github/pi/
 # /.github/workflows/claude-autorevert-advisor.yml
 # /.github/workflows/claude-code.yml
 # /.github/workflows/claude-distributed-triage-cron.yml
 # /.github/workflows/claude-distributed-triage.yml
-# /.github/workflows/claude-issue-triage-run.yml
-# /.github/workflows/claude-issue-triage.yml
+# /.github/workflows/issue-triage-pi.yml
+# /.github/workflows/issue-triage.yml
 # /AGENTS.md
 # /AI_POLICY.md
 # /CLAUDE.md
