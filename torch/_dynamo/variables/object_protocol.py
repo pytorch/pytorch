@@ -28,7 +28,7 @@ from torch._C._dynamo import (
     PyTypeSlots,
 )
 
-from .. import graph_break_hints, polyfills, variables
+from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     handle_observed_exception,
     ObservedTypeError,
@@ -1126,6 +1126,8 @@ def pynumber_invert(
     )
 
 
+# This host-side protocol dispatch and validation has no resumable frame.
+@config.patch(nested_graph_breaks=False)
 def generic_getiter(
     tx: "InstructionTranslatorBase", obj: VariableTracker
 ) -> "VariableTracker":
