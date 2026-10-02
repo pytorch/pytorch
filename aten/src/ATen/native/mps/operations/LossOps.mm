@@ -372,12 +372,7 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
       auto pso = lib.getPipelineStateForFunc("nllnd_loss_backward_" + scalarToMetalTypeString(input_arg));
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder,
-                  getMTLBufferStorage(grad_input_arg),
-                  getMTLBufferStorage(grad_output),
-                  getMTLBufferStorage(target),
-                  getMTLBufferStorage(weight),
-                  getMTLBufferStorage(total_weight_cast));
+      mtl_setArgs(encoder, grad_input_arg, grad_output, target, weight, total_weight_cast);
       // For 1D (no batch dim) input the loss has a single element and only
       // target[0] is used; dispatching target.numel() threads would read
       // grad_output (a single element) out of bounds and scatter garbage into
