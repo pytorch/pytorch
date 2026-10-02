@@ -79,8 +79,8 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_bool_template(
   if (return_counts) {
     counts.resize_({num_out});
   }
-  bool* output_data = output.data_ptr<bool>();
-  int64_t* counts_data = return_counts ? counts.data_ptr<int64_t>() : nullptr;
+  bool* output_data = output.mutable_data_ptr<bool>();
+  int64_t* counts_data = return_counts ? counts.mutable_data_ptr<int64_t>() : nullptr;
 
   // write output and counts
   if (num_false > 0) {
@@ -98,7 +98,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_bool_template(
 
   if (return_inverse) {
     inverse_indices.resize_(input.sizes());
-    int64_t* inverse_indices_data = inverse_indices.data_ptr<int64_t>();
+    int64_t* inverse_indices_data = inverse_indices.mutable_data_ptr<int64_t>();
     at::parallel_for(0, numel, grain_size, [&](int64_t begin, int64_t end) {
       for (const auto i : c10::irange(begin, end)) {
         const bool value = c10::load(&input_data[i]);
@@ -217,22 +217,22 @@ std::tuple<Tensor, Tensor, Tensor> unique_cpu_sorted_template(
   }
 
   output.resize_({unique_count});
-  scalar_t* output_data = output.data_ptr<scalar_t>();
+  scalar_t* output_data = output.mutable_data_ptr<scalar_t>();
 
   int64_t* inverse_indices_data = nullptr;
   if (return_inverse) {
     inverse_indices.resize_(input.sizes());
-    inverse_indices_data = inverse_indices.data_ptr<int64_t>();
+    inverse_indices_data = inverse_indices.mutable_data_ptr<int64_t>();
   }
 
   int64_t* counts_data = nullptr;
   int64_t* unique_index_data = nullptr;
   if (return_counts) {
     counts.resize_({unique_count});
-    counts_data = counts.data_ptr<int64_t>();
+    counts_data = counts.mutable_data_ptr<int64_t>();
 
     unique_index.resize_({unique_count + 1});
-    unique_index_data = unique_index.data_ptr<int64_t>();
+    unique_index_data = unique_index.mutable_data_ptr<int64_t>();
     unique_index_data[unique_count] = numel;
   }
 
@@ -286,15 +286,15 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
   }
 
   if (numel > 0) {
-    scalar_t *output_data = output.data_ptr<scalar_t>();
-    int64_t *inverse_data = inverse_indices.data_ptr<int64_t>();;
+    scalar_t *output_data = output.mutable_data_ptr<scalar_t>();
+    int64_t *inverse_data = inverse_indices.mutable_data_ptr<int64_t>();;
     int64_t *counts_data = nullptr;
     scalar_t last_value = c10::load(input_data);
     *output_data = last_value;
 
     if (return_counts) {
       counts.resize_({numel});
-      counts_data = counts.data_ptr<int64_t>();
+      counts_data = counts.mutable_data_ptr<int64_t>();
     }
     scalar_t *p = output_data;
     int64_t *q = counts_data;
@@ -341,8 +341,8 @@ ForwardIt _unique_dim_cpu_impl(ForwardIt first, ForwardIt last,
         "_unique_dim_cpu_impl only support contiguous counts");
 
     int64_t *indices_data = indices.data();
-    int64_t *inverse_data = inverse_indices_vec.data_ptr<int64_t>();
-    int64_t *counts_data = counts.data_ptr<int64_t>();
+    int64_t *inverse_data = inverse_indices_vec.mutable_data_ptr<int64_t>();
+    int64_t *counts_data = counts.mutable_data_ptr<int64_t>();
 
     ForwardIt result = first;
     ForwardIt previous = first;

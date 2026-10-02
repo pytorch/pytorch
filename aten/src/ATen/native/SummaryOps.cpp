@@ -64,14 +64,14 @@ Tensor _bincount_cpu_template(
         weights.options().layout_opt(),
         weights.options().device_opt(),
         weights.options().pinned_memory_opt());
-    weights_t* output_p = output.data_ptr<weights_t>();
+    weights_t* output_p = output.mutable_data_ptr<weights_t>();
     const weights_t* weights_p = weights.const_data_ptr<weights_t>();
     for (const auto i : c10::irange(self_size)) {
       output_p[self_p[i]] += weights_p[i];
     }
   } else {
     output = at::zeros({nbins}, kLong);
-    int64_t* output_p = output.data_ptr<int64_t>();
+    int64_t* output_p = output.mutable_data_ptr<int64_t>();
     for (const auto i : c10::irange(self_size)) {
       output_p[self_p[i]] += 1L;
     }
