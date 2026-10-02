@@ -645,7 +645,7 @@ def arith_promoted(op, a, b):
 
 
 class CppOverrides(OpOverrides):
-    """Map element-wise ops to C++"""
+    """Map element-wise ops to scalar C++ expressions for the CPU kernels"""
 
     @staticmethod
     def add(a, b):
@@ -770,9 +770,10 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def neg(x):
-        if isinstance(x, CppCSEVariable) and x.dtype in (torch.int32, torch.int64):
+        dtype = x.dtype if isinstance(x, CppCSEVariable) else None
+        if dtype is not None and dtype in (torch.int32, torch.int64):
             # -INT_MIN is signed overflow in C++; eager wraps
-            cpp_type = DTYPE_TO_CPP[x.dtype]
+            cpp_type = DTYPE_TO_CPP[dtype]
             return f"{cpp_type}(-static_cast<std::make_unsigned_t<{cpp_type}>>({x}))"
         return f"decltype({x})(-{x})"
 
