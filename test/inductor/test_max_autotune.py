@@ -41,7 +41,7 @@ from torch._inductor.autotune_process import (
     TuningProcessPool,
     use_pipelined_autotuning,
 )
-from torch._inductor.autows_utils import meta_ws_enabled
+from torch._inductor.autows_utils import has_meta_ws, meta_ws_enabled
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.registry import (
@@ -343,6 +343,57 @@ class TestMaxAutotune(TestCase):
             broadcast_b=False,
             data_partition_factor=data_partition_factor,
             epilogue_subtile=epilogue_subtile,
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Blackwell BMM template requires data-center Blackwell",
+    )
+    @parametrize("use_meta_ws", (False, True))
+    @fresh_cache()
+    def test_blackwell_bmm_template_from_tuned_bmm(self, use_meta_ws: bool) -> None:
+        if use_meta_ws and not has_meta_ws():
+            self.skipTest("requires Meta Triton autoWS")
+        from triton import knobs
+
+        # Small integers keep every product and partial sum exact in fp32 and
+        # every output exact in bf16, so the result must match bitwise.
+        a = torch.randint(-1, 2, (3, 192, 256), device=GPU_TYPE).to(torch.bfloat16)
+        b = torch.randint(-1, 2, (3, 256, 136), device=GPU_TYPE).to(torch.bfloat16)
+        names: list[str] = []
+
+        def record(choices):
+            names.extend(choice.name for choice in choices)
+            return choices
+
+        add_preprocessing_fn(record)
+        try:
+            with (
+                knobs.nvidia.scope(),
+                config.patch(
+                    {
+                        "max_autotune": True,
+                        "compile_threads": 1,
+                        "triton.enable_persistent_tma_matmul": True,
+                        "triton.native_matmul": False,
+                        "test_configs.autotune_choice_name_regex": "blackwell_bmm",
+                    }
+                ),
+            ):
+                knobs.nvidia.use_meta_ws = use_meta_ws
+                actual, codes = run_and_get_code(
+                    torch.compile(torch.bmm, fullgraph=True), a, b
+                )
+        finally:
+            clear_preprocessing_fns(clear_defaults=False)
+
+        self.assertTrue(names, "tuned_bmm offered no Blackwell BMM choices")
+        self.assertTrue(all("blackwell_bmm" in name for name in names), names)
+        self.assertIn("make_tensor_descriptor", codes[0])
+        self.assertIn("num_tiles = BATCH * num_tiles_per_batch", codes[0])
+        self.assertIn(f"USE_META_WS : tl.constexpr = {use_meta_ws}", codes[0])
+        self.assertEqual(
+            actual, torch.bmm(a.float(), b.float()).bfloat16(), atol=0, rtol=0
         )
 
     @unittest.skipIf(not SM100OrLater, "Blackwell BMM template requires SM100+")
