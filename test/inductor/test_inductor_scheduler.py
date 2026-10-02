@@ -2193,6 +2193,9 @@ class TestScheduler(TestCase):
 
         required_a = OrderedSet(("A",))
         self.assertTrue(_template_choice_supports_prologue_fusion(choice_a, required_a))
+        self.assertTrue(
+            _template_choice_supports_prologue_fusion(choice_ab, required_a)
+        )
         self.assertFalse(
             _template_choice_supports_prologue_fusion(choice_b, required_a)
         )
