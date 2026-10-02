@@ -2398,6 +2398,13 @@ class triton:
         os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_THRESHOLD", "32")
     )
 
+    # Drop decompose-K split choices that rarely win: too few estimated output
+    # CTAs or a large FP32 partial workspace, with per-device bounds. Not applied
+    # to the EXHAUSTIVE GEMM search space.
+    decompose_k_filter_splits: bool = (
+        os.environ.get("TORCHINDUCTOR_DECOMPOSE_K_FILTER_SPLITS", "1") == "1"
+    )
+
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.
