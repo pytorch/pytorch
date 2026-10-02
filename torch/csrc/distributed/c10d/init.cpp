@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
+#include <torch/csrc/distributed/c10d/hooks/HealthCheckHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/NanCheckHook.hpp>
 #include <string_view>
 #include <utility>
@@ -3930,11 +3931,12 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("size"),
               py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
               R"(Create a new ProcessGroupNCCL instance.)")
-          .def(
-              "_comm_ptr",
+          .def("_comm_ptr", &::c10d::ProcessGroupNCCL::getCommPtr)
+          .def_property_readonly(
+              "comm_ptr",
               &::c10d::ProcessGroupNCCL::getCommPtr,
               R"(
-            Get the communicator of the current device.
+            The communicator of the current device, as an opaque handle.
 
             .. warning ::
                 Unsafe to use. The collectives launched into the communicator
@@ -4347,6 +4349,7 @@ Returns:
           .def(
               "perform_nocolor_split",
               &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
+          .def("_comm_ptr", &::c10d::nccl2::ProcessGroupNCCL::getCommPtr)
           .def_property_readonly(
               "comm_ptr",
               &::c10d::nccl2::ProcessGroupNCCL::getCommPtr,
@@ -4420,6 +4423,17 @@ Returns:
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self, at::Device device) {
             self.getPrimary()->performNocolorSplit(device);
           })
+      .def(
+          "_comm_ptr",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
+            return self.getPrimary()->getCommPtr();
+          })
+      .def_property_readonly(
+          "comm_ptr",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
+            return self.getPrimary()->getCommPtr();
+          },
+          R"(The primary communicator's ``ncclComm_t``, as an opaque handle.)")
       .def_property_readonly(
           "options",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
@@ -5082,6 +5096,15 @@ a RuntimeError; on CUDA it triggers a device-side assert. The process group
 owns the hook, so the returned handle only has to be kept if the check should
 be removed again via remove().)")
       .def("remove", &::c10d::NanCheckHook::remove);
+
+  py::class_<::c10d::HealthCheckHook>(module, "HealthCheckHook")
+      .def_static(
+          "attach",
+          &::c10d::HealthCheckHook::attach,
+          py::arg("pg"),
+          R"(
+Attach health reporting to every backend in a process group that supports
+abort hooks. The backends own the registered hooks for their lifetimes.)");
 
   module.def(
       "_dump_fr_trace_json",

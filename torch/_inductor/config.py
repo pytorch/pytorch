@@ -326,6 +326,10 @@ pattern_matcher = True
 # set to True to enable the back-to-back GEMM pass
 b2b_gemm_pass = False
 
+# fuse shared var/std reduction computations in the post-grad pattern matcher.
+# opt-in until scheduler-level dedup is implemented.
+var_std_reduction_dedup = False
+
 # register custom graph optimization pass hook. so far, pre/post passes are
 # only applied before/after pattern_matcher in post_grad_passes.
 #
@@ -2191,6 +2195,10 @@ class triton:
     # Warn loudly when the number of cudagraphs due to dynamic shape
     # exceeds this limit
     cudagraph_dynamic_shape_warn_limit: int | None = 8
+
+    # Stop re-recording new cudagraphs after this many distinct dynamic shapes.
+    # Shapes already recorded keep replaying; further new shapes run eager.
+    cudagraph_dynamic_shape_rerecord_limit: int | None = None
 
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
