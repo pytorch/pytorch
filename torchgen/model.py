@@ -1414,6 +1414,10 @@ class BackendIndex:
     # Other backend-specific information that is on a per-operator basis
     index: dict[OperatorName, BackendMetadata]
 
+    # Whether to emit C++ default arguments in external backends'
+    # NativeFunctions-style declarations, for hand-written callers.
+    generate_default_args: bool = False
+
     @staticmethod
     def grow_index(
         parent_index: dict[DispatchKey, dict[OperatorName, BackendMetadata]],
