@@ -14,14 +14,14 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     FSDPTestContinuous,
     FSDPTestMultiThread,
-    get_devtype,
     MLP,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -29,17 +29,16 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-device_type = torch.device(get_devtype())
-
-
 class TestFullyShardStateDictMultiProcess(FSDPTestContinuous):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self) -> int:
-        return min(8, torch.get_device_module(device_type).device_count())
+        return min(8, torch.get_device_module(self.device_type).device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_dp_state_dict_save_load(self):
-        fsdp_mesh = init_device_mesh(device_type.type, (self.world_size,))
+    def test_dp_state_dict_save_load(self, device):
+        fsdp_mesh = init_device_mesh(self.device_type, (self.world_size,))
         self.run_subtests(
             {"mlp_dim": [2, 3, 4, 5], "mesh": [fsdp_mesh]},
             self._test_dp_state_dict_save_load,
@@ -58,7 +57,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTestContinuous):
         if self.world_size % 2 != 0:
             return
         hsdp_mesh = init_device_mesh(
-            device_type.type,
+            self.device_type,
             (self.world_size // 2, 2),
             mesh_dim_names=("dp_replicate", "dp_shard"),
         )
@@ -108,7 +107,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTestContinuous):
         fully_shard_fn(model2, reshard_after_forward=False)
         self._test_state_dict_save_load(model2)
         ref_sharded_sd = model2.state_dict()
-        inp = torch.randn((2, mlp_dim), device=device_type.type)
+        inp = torch.randn((2, mlp_dim), device=self.device_type)
         model2(inp)  # parameters are not resharded after this forward
         # Check that state dict hooks reshard
         sharded_sd = model2.state_dict()
@@ -117,7 +116,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTestContinuous):
             self.assertEqual(value, sharded_sd[key])
 
     @skip_if_lt_x_gpu(2)
-    def test_cached_state_dict(self):
+    def test_cached_state_dict(self, device):
         self.run_subtests(
             {"mlp_dim": [2, 3, 4, 5], "mutate_after_state_dict": [True, False]},
             self._test_cached_state_dict,
@@ -141,14 +140,14 @@ class TestFullyShardStateDictMultiProcess(FSDPTestContinuous):
             )
         else:
             model = model.cpu()
-            model = model.to(device_type)
+            model = model.to(self.device_type)
             self.assertTrue(
                 sd["weight"]._local_tensor.untyped_storage().data_ptr()
                 != model.weight._local_tensor.untyped_storage().data_ptr()
             )
 
         torch.manual_seed(42 + self.rank)
-        inp = torch.rand(mlp_dim, mlp_dim, device=device_type.type)
+        inp = torch.rand(mlp_dim, mlp_dim, device=self.device_type)
         for _ in range(5):
             optim.zero_grad()
             loss = model(inp).sum()
@@ -161,7 +160,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTestContinuous):
                 )
 
     @skip_if_lt_x_gpu(2)
-    def test_dp_state_dict_cpu_offload(self):
+    def test_dp_state_dict_cpu_offload(self, device):
         self.run_subtests(
             {
                 "offload_policy": [
@@ -204,12 +203,12 @@ class TestFullyShardStateDictMultiProcess(FSDPTestContinuous):
             model.load_state_dict(sd, assign=True, strict=False)
 
         # lazy init without error
-        inp = torch.rand((mlp_dim, mlp_dim), device=device_type.type)
+        inp = torch.rand((mlp_dim, mlp_dim), device=self.device_type)
 
         context = (
             self.assertRaisesRegex(
                 RuntimeError,
-                rf"Found following parameters on non-CPU device: \[\('0.weight', device\(type='{device_type.type}'",
+                rf"Found following parameters on non-CPU device: \[\('0.weight', device\(type='{self.device_type}'",
             )
             if not cpu_state_dict
             else nullcontext()
@@ -221,10 +220,10 @@ class TestFullyShardStateDictMultiProcess(FSDPTestContinuous):
                 self.assertEqual(dtensor.device.type, "cpu")
 
     @skip_if_lt_x_gpu(2)
-    def test_2d_state_dict_correctness(self):
+    def test_2d_state_dict_correctness(self, device):
         dp_size = 2
         global_mesh = init_device_mesh(
-            device_type.type,
+            self.device_type,
             (dp_size, self.world_size // dp_size),
             mesh_dim_names=("dp", "tp"),
         )
@@ -263,10 +262,10 @@ class TestFullyShardStateDictMultiProcess(FSDPTestContinuous):
             self.assertEqual(tensor, dtensor.full_tensor())
 
     @skip_if_lt_x_gpu(2)
-    def test_dp_tp_state_dict_save_load(self):
+    def test_dp_tp_state_dict_save_load(self, device):
         dp_size = 2
         global_mesh = init_device_mesh(
-            device_type.type,
+            self.device_type,
             (dp_size, self.world_size // dp_size),
             mesh_dim_names=("dp", "tp"),
         )
@@ -297,9 +296,9 @@ class TestFullyShardStateDictMultiProcess(FSDPTestContinuous):
         self._test_state_dict_save_load(model)
 
     @skip_if_lt_x_gpu(4)
-    def test_hsdp_tp_state_dict_save_load(self):
+    def test_hsdp_tp_state_dict_save_load(self, device):
         global_mesh = init_device_mesh(
-            device_type.type,
+            self.device_type,
             (2, 2, self.world_size // 4),
             mesh_dim_names=("dp_replicate", "dp_shard", "tp"),
         )
@@ -395,16 +394,18 @@ class TestFullyShardStateDictMultiProcess(FSDPTestContinuous):
 
 
 class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
 
     @skip_if_lt_x_gpu(1)
-    def test_rank0_offload_full_state_dict(self):
+    def test_rank0_offload_full_state_dict(self, device):
         # Construct a reference unsharded model on all ranks
         model_args = ModelArgs(dropout_p=0.0)
         torch.manual_seed(42)
-        ref_model = Transformer(model_args).to(device_type)
+        ref_model = Transformer(model_args).to(self.device_type)
         for param in ref_model.parameters():
             torch.distributed.broadcast(param.detach(), src=0)
 
@@ -446,6 +447,20 @@ class TestFullyShardStateDictMultiThread(FSDPTestMultiThread):
                 self.assertEqual(param, ref_param)
         else:
             self.assertEqual(len(full_sd), 0)
+
+
+instantiate_device_type_tests(
+    TestFullyShardStateDictMultiProcess,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+instantiate_device_type_tests(
+    TestFullyShardStateDictMultiThread,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
