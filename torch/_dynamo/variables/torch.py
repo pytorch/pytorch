@@ -979,6 +979,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         return self.value
 
     @staticmethod
+    def _get_mutating_kwarg_names(
+        fn: torch._ops.OpOverload | torch._ops.OpOverloadPacket,
+    ) -> tuple[str, ...]:
+        if isinstance(fn, torch._ops.OpOverload):
+            schemas = (fn._schema,)
+        else:
+            schemas = fn._schemas.values()
+
+        return tuple(
+            dict.fromkeys(
+                arg.name
+                for schema in schemas
+                for arg in schema.arguments
+                if arg.kwarg_only
+                and arg.alias_info is not None
+                and arg.alias_info.is_write
+            )
+        )
+
+    @staticmethod
     @functools.cache
     def _get_handlers() -> dict[Callable[..., Any], Callable[..., Any]]:
         """Build a dict from function -> method to handle it so that we are O(1)
@@ -3876,16 +3896,43 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # defined `@allow_in_graph` function as well, which doesn't have the
         # same semantics as the torch ops.
 
-        # Calling fake tensor propagation can mutate the out= tensor in
+        # Calling fake tensor propagation can mutate writable output tensors in
         # tx.output.tracked_fakes. tracked_fakes are used to apply
         # symbolic_shape guards. Mutating them destroys the information
         # prior to tracing, which is essential for creating right
         # guards. So save the shape now, and check later if it has
         # changed. If it has, graph break.
-        saved_out_shapes = None
-        out_kwarg_vt = None
-        if "out" in kwargs:
-            out_kwarg_vt = kwargs["out"]
+        out_arg_names: list[str] = []
+        selected_overload: torch._ops.OpOverload | None = None
+        if isinstance(self.value, torch._ops.OpOverload):
+            selected_overload = self.value
+        elif isinstance(self.value, torch._ops.OpOverloadPacket) and kwargs:
+            possible_out_args = self._get_mutating_kwarg_names(self.value)
+            if any(name in kwargs for name in possible_out_args):
+                from ..output_graph import resolve_op_overload
+
+                proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+                selected_overload = resolve_op_overload(
+                    tx.output, self.value, proxy_args, proxy_kwargs
+                )
+
+        if selected_overload is not None:
+            out_arg_names.extend(
+                name
+                for name in self._get_mutating_kwarg_names(selected_overload)
+                if name in kwargs
+            )
+        elif (
+            not isinstance(self.value, torch._ops.OpOverloadPacket) and "out" in kwargs
+        ):
+            out_arg_names.append("out")
+
+        saved_out_args: list[
+            tuple[VariableTracker, torch.Size | list[torch.Size | None]]
+        ] = []
+        for out_arg_name in out_arg_names:
+            out_kwarg_vt = kwargs[out_arg_name]
+            saved_out_shapes: torch.Size | list[torch.Size | None] | None = None
 
             # e.g., out=(t1, t2, ...)
             if isinstance(out_kwarg_vt, (TupleVariable, ListVariable)):
@@ -3902,6 +3949,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 saved_out_shapes = (
                     out_kwarg_vt.as_proxy().node.meta["example_value"].shape
                 )
+
+            if saved_out_shapes is not None:
+                saved_out_args.append((out_kwarg_vt, saved_out_shapes))
 
         ctx = nullcontext
         if fn_ in ops_consuming_unbacked_scalars:
@@ -3935,10 +3985,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ],
             )
 
-        # Handle e.g., `torch.add(a, b, out=result)`
-        if saved_out_shapes is not None:
-            # out variants of torch operators like torch.sort and torch.sigmoid
-            # mutate the tensors in the out field.
+        # Handle e.g., `torch.add(a, b, out=result)` and operators whose writable
+        # output arguments have schema-specific names such as `values` or `out0`.
+        for out_kwarg_vt, saved_out_shapes in saved_out_args:
+            # Out variants of torch operators like torch.sort and torch.sigmoid
+            # mutate the tensors passed as writable outputs.
             #
             # However, it's non-trivial to update all references of the old
             # `TensorVariable` to the new one returned (`result_var`), so we
@@ -3992,8 +4043,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             ],
                         )
             else:
-                if out_kwarg_vt is None:
-                    raise AssertionError("Expected out= kwarg to be set")
                 if not out_kwarg_vt.is_tensor():
                     raise AssertionError("Expected out= kwarg to be a tensor")
                 if "example_value" not in out_kwarg_vt.as_proxy().node.meta:
