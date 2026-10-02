@@ -188,44 +188,47 @@ This implementation of gatherTopK is a modified version of the original gatherTo
 after we have found the k-th highest (or lowest, depending on the sort direction) element in our input. It gathers
 values that are greater (or less than) than the k-th element (phase 1) and then adds the values that are equal to
 the k-th element as long as there is space available (phase 2). In the original implementation, we call
-exclusiveBinaryPrefixScan to calculate the index to write the result to. However, exclusiveBinaryPrefixScan has two
-block level synchronization points, which is not efficient, specially considering that exclusiveBinaryPrefixScan is
-called in a loop. In this implementation, we use warp level compaction to calculate the index to write the result
-to. In both phases, each warp first counts the number of values it intends to add to the result. Then through an
-atomic add, the warp reserves space for itself (atomically increases the write index variable) and then writes the
-result to the corresponding indices. This requires no block level synchronization. It should be noted that we have
-added a block level synchronization point after phase 1 to make sure all threads have completed phase 1. This
-synchronization is cheaper than the ones in exclusiveBinaryPrefixScan because it is called only once. This
-synchronization is necessary because phase 1 assumes it always has space to write all the values that are larger (or
-smaller) than the k-th element but phase 2 tops off the output as long as there is space available.
+exclusiveBinaryPrefixScan to calculate the index to write the result to, which costs two block level
+synchronization points per iteration. Here each warp counts its matches with a ballot and publishes the count to
+shared memory; after a single barrier every thread derives its warp's exclusive prefix and the iteration total.
+Results therefore land in ascending input-index order, exactly like the prefix-scan version, so the output is
+deterministic run to run (an atomicAdd-based reservation would make the order depend on warp scheduling).
+The counts are double buffered, so the next iteration's barrier also orders this iteration's reads before the
+buffer is overwritten, and one barrier per iteration suffices. The running write index is kept in a register by
+every thread; it is identical across the block, which keeps the phase 2 early exit block-uniform.
 */
 
-// helper function to reserve space for a warp in the output.
-// hasTopK: boolean flag to indicate if the current thread has a value to add to the output.
-// writeIndexStart: atomic variable to track the index to write the result to.
-// start_index: index to write the result to. (output of function)
-// my_offset: offset to write the result to. (output of function)
-// warp_count: number of threads that have values to add to the output. (output of function)
+// Upper bound on warps per block; sizes the per-warp count buffer and the shuffle scan over it.
+constexpr int kMaxWarps = 1024 / C10_WARP_SIZE_LOWER_BOUND;
+
+// Returns the exclusive prefix of matches in warps before this one for the current iteration, the iteration's
+// total over the block, and this lane's offset within its warp. All threads of the block must call it.
 template <typename IndexType>
-__device__ __forceinline__ void reserveWarpSpace(bool hasTopK,
-                                                IndexType& writeIndexStart,
-                                                IndexType& start_index,
-                                                int& my_offset,
-                                                int& warp_count) {
-  auto ballot = WARP_BALLOT(hasTopK); // a bitmask of threads that have hasTopK == true within the warp.
-  warp_count = __popcll(ballot); // count the number of threads that have hasTopK == true within the warp.
-
+__device__ __forceinline__ IndexType orderedWarpOffset(bool hasTopK,
+                                                       IndexType* warpCounts,
+                                                       IndexType& total,
+                                                       int& my_offset) {
+  auto ballot = WARP_BALLOT(hasTopK);
   int lane_id = at::cuda::getLaneId();
-
-  // if > 0 threads have hasTopK == true within the warp,
-  // reserve space for them by incrementing writeIndexStart atomically + saving the old value  as start index.
-  if (warp_count > 0 && lane_id == 0) {
-    start_index = atomicAdd(&writeIndexStart, (IndexType)warp_count);
+  int warp_id = threadIdx.x / C10_WARP_SIZE;
+  int num_warps = blockDim.x / C10_WARP_SIZE;
+  if (lane_id == 0) {
+    warpCounts[warp_id] = __popcll(ballot);
   }
-  start_index = __shfl(start_index, 0); // broadcast the start index to all threads in the warp.
-
-  uint64_t mask = (1ULL << lane_id) - 1; // a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (64-lane_id) 0s and (lane_id) 1s
-  my_offset = __popcll(ballot & mask);  // get number of threads that have hasTopK == true to the right of the current lane
+  __syncthreads();
+  // Lane w of every warp loads warp w's count; an inclusive shuffle scan across lanes then gives
+  // every warp's prefix. num_warps <= kMaxWarps <= warp size, so it fits in one warp.
+  IndexType c = (lane_id < num_warps) ? warpCounts[lane_id] : 0;
+  IndexType incl = c;
+  #pragma unroll
+  for (int d = 1; d < kMaxWarps; d <<= 1) {
+    IndexType n = __shfl_up(incl, d);
+    incl += (lane_id >= d) ? n : 0;
+  }
+  total = __shfl(incl, num_warps - 1);
+  IndexType prefix = __shfl(incl, warp_id) - __shfl(c, warp_id);
+  my_offset = __popcll(ballot & at::cuda::getLaneMaskLt());
+  return prefix;
 }
 
 // helper function to write the result to the output.
@@ -270,7 +273,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // HIP workgroups have at most 1024 threads. Warp size is at least 32 (can be 64 on some
   // architectures), so we use 32 for safety: 2 buffers * (1024/32) warps * 4 radix bins = 256.
   __shared__ IndexType smem[256];
-  __shared__ IndexType writeIndexStart; // index to track where to write results. This is shared by all threads in the block. Increases atomically.
+  // Per-warp match counts for the ordered compaction, double buffered.
+  __shared__ IndexType warpCounts[2][kMaxWarps];
 
   IndexType slice = getLinearBlockId<IndexType>();
   if (slice >= numInputSlices) {
@@ -308,18 +312,12 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   //
   // Since there are a variable number of elements that we see that
   // are within the top-k, we don't know at what index to write out
-  // the resulting values.
-  // In order to get this, we perform warp level compaction.
-  // each warp counts its own number of hasTopk threads and
-  // reserves space for them by incrementing writeIndexStart atomically + saving the old value as start index.
+  // the resulting values. orderedWarpOffset computes it.
 
-  // Initialize writeIndexStart to 0 by the first thread in the block.
-  if (threadIdx.x == 0) {
-    writeIndexStart = 0;
-  }
-  __syncthreads();
-  // All threads within the warp need to participate in the loop, so rounding up to a multiple of the warp size.
-  IndexType numIterations = round_up(inputSliceSize, (IndexType) C10_WARP_SIZE);
+  // orderedWarpOffset has a barrier, so every thread must run the same number of iterations.
+  IndexType numIterations = round_up(inputSliceSize, (IndexType) blockDim.x);
+  IndexType writeIndex = 0;
+  int buf = 0;
 
   // phase 1: write actual > `pattern` (or < `pattern`, depending on the sort direction) values to the output.
   // prefetching data from global memory.
@@ -333,39 +331,39 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
       hasTopK = (largest) ? (convertedV > topKConverted) : (convertedV < topKConverted);
     }
 
-    IndexType start_index;
-    int my_offset, warp_count;
-    reserveWarpSpace(hasTopK, writeIndexStart, start_index, my_offset, warp_count);
+    IndexType total;
+    int my_offset;
+    IndexType warpStart = writeIndex + orderedWarpOffset(hasTopK, warpCounts[buf], total, my_offset);
 
-    // now warp has reserved space for itself. If hasTopK == true, we need to find the index to write the result to.
     if (hasTopK) {
       writeResult(topKSliceStart,
         indicesSliceStart,
         topKWithinSliceStride,
         indicesWithinSliceStride,
         outputSliceSize,
-        /*writeIndex=*/start_index + my_offset,
+        /*writeIndex=*/warpStart + my_offset,
         /*value=*/v,
         /*index=*/i);
     }
 
+    writeIndex += total;
+    buf ^= 1;
     v = v_next;
   }
 
-  // till this point, actual > `pattern` values were being written.
-  // we first need to sync to make sure all threads have completed phase 1:
-  __syncthreads();
-
   // We need to fill in the rest with actual == top-K values.
-  // The number that we need is outputSliceSize - writeIndexStart.
+  // The number that we need is outputSliceSize - writeIndex.
   // There might be more than that number available in input,
-  // in which case we have to choose the first seen set. We do this
-  // in a similar warp level compaction fashion as in phase 1.
+  // in which case we have to choose the first seen set.
 
   // phase 2: write actual == `pattern` values to the output.
   // prefetching data from global memory.
   T V = (threadIdx.x < inputSliceSize) ? doLdg(&inputSliceStart[threadIdx.x * inputWithinSliceStride]) : static_cast<T>(0);
   for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
+    // writeIndex is the same in every thread, so the whole block exits together.
+    if (writeIndex >= outputSliceSize) {
+      break;
+    }
     T V_next = (i + blockDim.x < inputSliceSize) ? doLdg(&inputSliceStart[(i + blockDim.x) * inputWithinSliceStride]) : static_cast<T>(0);
     bool hasTopK = false;
     if (i < inputSliceSize) {
@@ -373,28 +371,23 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
       hasTopK = convertedV == topKConverted;
     }
 
-    IndexType start_index;
-    int my_offset, warp_count;
-    reserveWarpSpace(hasTopK, writeIndexStart, start_index, my_offset, warp_count);
+    IndexType total;
+    int my_offset;
+    IndexType warpStart = writeIndex + orderedWarpOffset(hasTopK, warpCounts[buf], total, my_offset);
 
-    if ((warp_count > 0) && (outputSliceSize <= start_index)){
-      break; // there is no space to add topk values. Break out of the loop.
+    if (hasTopK && warpStart + my_offset < outputSliceSize) {
+      writeResult(topKSliceStart,
+        indicesSliceStart,
+        topKWithinSliceStride,
+        indicesWithinSliceStride,
+        outputSliceSize,
+        /*writeIndex=*/warpStart + my_offset,
+        /*value=*/V,
+        /*index=*/i);
     }
 
-    if (hasTopK){
-      IndexType slots_available = outputSliceSize - start_index;
-      if (my_offset < slots_available){
-        writeResult(topKSliceStart,
-          indicesSliceStart,
-          topKWithinSliceStride,
-          indicesWithinSliceStride,
-          outputSliceSize,
-          /*writeIndex=*/start_index + my_offset,
-          /*value=*/V,
-          /*index=*/i);
-      }
-    }
-
+    writeIndex += total;
+    buf ^= 1;
     V = V_next;
   }
 }
