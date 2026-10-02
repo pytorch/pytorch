@@ -28,9 +28,10 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.common_device_type import (
     OpDTypes, onlyCPU, onlyCUDA, onlyNativeDeviceTypes, expectedFailureMeta, expectedFailureXPU, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
     dtypesIfCPU, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
-    precisionOverride)
+    precisionOverride, skipCUDAIf)
 from torch.testing._internal.common_methods_invocations import (
     ReductionOpInfo, ReductionPythonRefInfo, reduction_ops, reference_masked_ops)
+from torch.utils._triton import has_triton
 
 
 
@@ -1853,6 +1854,7 @@ class TestReductions(TestCase):
 
     @dtypes(torch.int32, torch.int64)
     @skipIfMPS
+    @skipCUDAIf(not has_triton(), "torch.compile with cuda requires triton")
     def test_nansum_int_out_dtype_matches_inductor(self, device, dtype):
         # Eager/inductor parity for #183318.
         out_dtype = dtype
