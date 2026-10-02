@@ -20348,6 +20348,35 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
 
 
 class SymbolicNumericFormattingTests(torch._dynamo.test_case.TestCase):
+    @parametrize("floating", (False, True))
+    def test_numeric_format_preserves_dynamic_range(self, device, floating):
+        def fn(x):
+            text = (
+                f"ratio={x.shape[0] / 7.0:.3f}"
+                if floating
+                else f"size={x.shape[0]:04d}"
+            )
+            return x.sin(), text
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+        for size in range(3, 13):
+            x = torch.randn(size, device=device)
+            torch._dynamo.mark_dynamic(x, 0, min=3, max=16)
+            self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_character_format_keeps_specialization(self, device):
+        def fn(x):
+            return x.sin(), f"{x.shape[0]:c}"
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+        for size in (3, 7, 3):
+            x = torch.randn(size, device=device)
+            self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 2)
+
     @parametrize("spec", ("d", "04d", "x", "+d"))
     def test_issue_197093_symint(self, device, spec):
         def fn(x):
@@ -20358,7 +20387,7 @@ class SymbolicNumericFormattingTests(torch._dynamo.test_case.TestCase):
         for size in (3, 7, 3):
             x = torch.randn(size, device=device)
             self.assertEqual(compiled(x), fn(x))
-        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(counter.frame_count, 1)
 
     @parametrize("spec", (".3f", "+08.2f", "e"))
     def test_issue_197093_symfloat(self, device, spec):
@@ -20370,7 +20399,7 @@ class SymbolicNumericFormattingTests(torch._dynamo.test_case.TestCase):
         for size in (3, 7, 3):
             x = torch.randn(size, device=device)
             self.assertEqual(compiled(x), fn(x))
-        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(counter.frame_count, 1)
 
     @parametrize("conversion", ("s", "r", "a"))
     def test_issue_197093_conversion(self, device, conversion):

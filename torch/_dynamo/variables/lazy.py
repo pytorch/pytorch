@@ -693,6 +693,10 @@ class LazySymNodeFormatString:
         from .constant import ConstantVariable
 
         self.sym_node_var = sym_node_variable
+        self.runtime_format = (
+            conversion == 0
+            and fmt_spec_var.as_python_constant().endswith(tuple("bdoxXeEfFgGn%"))
+        )
         self.fmt_var = ConstantVariable.create(
             "{"
             + ("", "!s", "!r", "!a")[conversion]
