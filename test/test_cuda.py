@@ -3936,6 +3936,55 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    def test_graph_capture_pauses_automatic_gc(self):
+        # A finalizer run by automatic GC mid-capture can make a CUDA call that
+        # invalidates the capture, as Triton does when it unloads a dead kernel.
+        finalized_while_capturing = []
+
+        class CyclicGarbage:
+            def __init__(self):
+                self.cycle = self
+
+            def __del__(self):
+                finalized_while_capturing.append(
+                    torch.cuda.is_current_stream_capturing()
+                )
+                torch.cuda.synchronize()
+
+        x = torch.zeros(4, device="cuda")
+        g = torch.cuda.CUDAGraph()
+        gc_enabled = gc.isenabled()
+        thresholds = gc.get_threshold()
+        gc.collect()
+        CyclicGarbage()
+        try:
+            with torch.cuda.graph(g):
+                gc.set_threshold(1, 1, 1)
+                ys = [x + i for i in range(3)]
+        finally:
+            gc.set_threshold(*thresholds)
+
+        self.assertEqual(gc.isenabled(), gc_enabled)
+        gc.collect()
+        self.assertEqual(finalized_while_capturing, [False])
+        g.replay()
+        self.assertEqual(ys[2], x + 2)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_capture_error_restores_gc(self):
+        x = torch.zeros(4, device="cuda")
+        gc_enabled = gc.isenabled()
+        with self.assertRaisesRegex(RuntimeError, "capture body failed"):
+            with torch.cuda.graph(torch.cuda.CUDAGraph()):
+                x.add_(1)
+                raise RuntimeError("capture body failed")
+        self.assertEqual(gc.isenabled(), gc_enabled)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_graph_rng_concurrent_replay_on_different_streams(self):
         """Concurrent replay of two graphs sharing a generator on different streams.
 
