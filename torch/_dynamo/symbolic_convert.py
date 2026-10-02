@@ -5855,6 +5855,9 @@ class InstructionTranslator(InstructionTranslatorBase):
                 function_live_names = livevars_analysis(
                     self.instructions, self.instructions[0]
                 )
+                if f_code.co_argcount:
+                    # Zero-argument super() implicitly reads the first positional argument.
+                    function_live_names.add(f_code.co_varnames[0])
 
             dynamism = code_context.get_context(f_code).get("dynamism", None)
             for name, value in f_locals.items():

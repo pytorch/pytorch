@@ -2916,12 +2916,6 @@ class BuiltinVariable(BaseBuiltinVariable):
             arg0 = tx.symbolic_locals.get(arg0_name)
             if arg0_name in tx.cellvars() and isinstance(arg0, CellVariable):
                 arg0 = tx.output.side_effects.load_cell(arg0)
-            if arg0 is None and arg0_name in tx.f_locals:
-                from .builder import VariableBuilder
-
-                arg0 = VariableBuilder(tx, LocalSource(arg0_name))(
-                    tx.f_locals[arg0_name]
-                )
             if arg0 is None or isinstance(arg0, variables.DeletedVariable):
                 raise_observed_exception(
                     RuntimeError, tx, args=["super(): arg[0] deleted"]
