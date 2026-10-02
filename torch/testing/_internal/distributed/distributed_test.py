@@ -562,18 +562,8 @@ class TestDistBackend(MultiProcessTestCase):
 
     def setUp(self):
         # Skip in the parent when every rank would skip, avoiding worker startup.
-        test = getattr(self, self._testMethodName)
-        if (
-            getattr(test, "_skip_small_worldsize_before_spawn", False)
-            and os.environ["BACKEND"] != "mpi"
-            and int(os.environ["WORLD_SIZE"]) < 8
-        ):
-            self.skipTest(TEST_SKIPS["small_worldsize"].message)
-        reason = getattr(test, "_skip_no_accelerator_before_spawn", None)
-        if (
-            reason is not None
-            and torch.accelerator.current_accelerator(check_available=False) is None
-        ):
+        reason = getattr(getattr(self, self._testMethodName), "_skipped_reason", None)
+        if reason is not None:
             self.skipTest(reason)
         super().setUp()
         # initialize temp directories
