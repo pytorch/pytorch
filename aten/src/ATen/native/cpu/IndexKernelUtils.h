@@ -78,17 +78,17 @@ void cpu_index_kernel(TensorIteratorBase& iter, IntArrayRef index_size, IntArray
     if (is_constant_index(ntensor, strides)) {
       // specialization for when every element uses the same index
       int64_t offset = indexer.get(0);
-      for (const auto i : c10::irange(n)) {
+      for (int64_t i = 0; i < n; ++i) {
         f(dst + strides[0] * i, src + strides[1] * i, offset);
       }
     } else if (indexer.num_indexers == 1) {
       // specialization for a single index tensor
-      for (const auto i : c10::irange(n)) {
+      for (int64_t i = 0; i < n; ++i) {
         int64_t offset = indexer.get_1(i);
         f(dst + strides[0] * i, src + strides[1] * i, offset);
       }
     } else {
-      for (const auto i : c10::irange(n)) {
+      for (int64_t i = 0; i < n; ++i) {
         int64_t offset = indexer.get(i);
         f(dst + strides[0] * i, src + strides[1] * i, offset);
       }
