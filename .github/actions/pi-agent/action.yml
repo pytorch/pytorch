@@ -35,8 +35,10 @@ inputs:
       never discovered from the checkout; only these load.
     default: ""
   artifact-name:
-    description: Name of the uploaded run artifact; must be unique per job
-    default: pi-agent-run
+    description: >
+      Name of the uploaded run artifact. Must be unique across the workflow run
+      (upload-artifact v4); include the job or matrix key.
+    required: true
 
 outputs:
   structured_output:

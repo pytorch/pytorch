@@ -4,6 +4,9 @@
 set -euo pipefail
 
 out="$PI_OUTPUT_DIR"
+# Start clean: a second invocation in the same job must not see the previous
+# session's result.json, events, or transcript.
+rm -rf "$out"
 mkdir -p "$out/session"
 export PATH="$RUNNER_TEMP/pi-install/node_modules/.bin:$PATH"
 
