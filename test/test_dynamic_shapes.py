@@ -2664,6 +2664,56 @@ class TestFloorDiv(TestCase):
             self.assertEqual(shape_env.simplify(expr), result)
             self.assertEqual(shape_env.evaluate_expr(expr), result)
 
+    def test_clean_div_simplify(self):
+        shape_env = ShapeEnv()
+        x, y = sympy.symbols("x y", integer=True)
+        divisor, other_divisor = sympy.symbols("C D", integer=True, positive=True)
+
+        self.assertEqual(shape_env.simplify(2 * CleanDiv(x, 2)), x)
+        self.assertEqual(
+            shape_env.simplify(3 * CleanDiv(x, 2)),
+            3 * CleanDiv(x, 2),
+        )
+        self.assertEqual(
+            shape_env.simplify(
+                divisor * CleanDiv(divisor * CleanDiv(x, divisor), divisor)
+            ),
+            x,
+        )
+        self.assertEqual(
+            shape_env.simplify(
+                divisor
+                * CleanDiv(x, divisor)
+                * other_divisor
+                * CleanDiv(y, other_divisor)
+            ),
+            x * y,
+        )
+
+    @skipIfTorchDynamo("directly exercises ShapeEnv guard registration")
+    def test_floordiv_simplify_with_divisibility_guard(self):
+        shape_env = ShapeEnv()
+        x = create_symint(shape_env, 4, duck=False)
+        equality = x == 2 * (x // 2)
+
+        self.assertFalse(statically_known_true(equality))
+        torch._check(x % 2 == 0)
+        self.assertTrue(statically_known_true(equality))
+        self.assertEqual(
+            shape_env.simplify((3 * (x // 2)).node.expr),
+            3 * CleanDiv(x.node.expr, 2),
+        )
+
+    @skipIfTorchDynamo("directly exercises ShapeEnv runtime assertions")
+    def test_floordiv_simplify_with_unbacked_runtime_assert(self):
+        shape_env = ShapeEnv()
+        x = shape_env.create_unbacked_symint()
+        equality = x == 2 * (x // 2)
+
+        self.assertFalse(statically_known_true(equality))
+        torch._check(x % 2 == 0)
+        self.assertFalse(statically_known_true(equality))
+
     def test_floordiv_assumptions(self):
         cases = (
             sympy.Symbol("i1", integer=True),
@@ -6878,6 +6928,91 @@ class TestMaybeFastEvalComparison(TestCase):
         compiled_result = compiled_fn(token_states, expert_weights, tokens_per_expert)
 
         self.assertEqual(eager_result, compiled_result)
+
+
+class TestSingletonIntStaticEval(TestCase):
+    def test_singleton_int_only_expr_can_be_statically_evaluated(self):
+        from torch.utils._sympy.singleton_int import SingletonInt
+
+        shape_env = ShapeEnv()
+        s = sympy.Symbol("s", integer=True)
+        shape_env.backed_var_to_val[s] = SingletonInt(1)
+
+        cases = [
+            (sympy.Ne(s, 1, evaluate=False), sympy.true),
+            (sympy.Ge(s, 2, evaluate=False), sympy.true),
+            (sympy.Le(2, s, evaluate=False), sympy.true),
+            (sympy.Gt(2, s, evaluate=False), sympy.false),
+            (sympy.Lt(s, 2, evaluate=False), sympy.false),
+        ]
+        for expr, expected in cases:
+            with self.subTest(expr=expr):
+                self.assertEqual(shape_env._maybe_evaluate_static(expr), expected)
+
+    def test_singleton_int_coefficient_is_statically_evaluated(self):
+        from torch.utils._sympy.singleton_int import SingletonInt
+
+        shape_env = ShapeEnv()
+        s = sympy.Symbol("s", integer=True)
+        t = sympy.Symbol("t", integer=True)
+        shape_env.backed_var_to_val[s] = SingletonInt(1)
+        shape_env.backed_var_to_val[t] = SingletonInt(1, coeff=2)
+
+        cases = [
+            (sympy.Eq(2 * s, t, evaluate=False), sympy.true),
+            (sympy.Ne(2 * s, t, evaluate=False), sympy.false),
+            (sympy.Eq(3 * s, t, evaluate=False), sympy.false),
+            (sympy.Le(s, t, evaluate=False), sympy.true),
+            (sympy.Lt(t, s, evaluate=False), sympy.false),
+        ]
+        for expr, expected in cases:
+            with self.subTest(expr=expr):
+                self.assertEqual(shape_env._maybe_evaluate_static(expr), expected)
+
+        # Non-multiplicative arithmetic on a SingletonInt is undefined.
+        expr = sympy.Eq(s + 1, t, evaluate=False)
+        self.assertIsNone(shape_env._maybe_evaluate_singleton_int(expr))
+        self.assertIsNone(shape_env._maybe_evaluate_static(expr))
+
+    def test_indeterminate_singleton_int_comparison_is_not_statically_evaluated(self):
+        from torch.utils._sympy.singleton_int import SingletonInt
+
+        shape_env = ShapeEnv()
+        s = sympy.Symbol("s", integer=True)
+        shape_env.backed_var_to_val[s] = SingletonInt(1)
+
+        for expr in (
+            sympy.Ge(2, s, evaluate=False),
+            sympy.Gt(s, 2, evaluate=False),
+        ):
+            with self.subTest(expr=expr):
+                self.assertIsNone(shape_env._maybe_evaluate_singleton_int(expr))
+                self.assertIsNone(shape_env._maybe_evaluate_static(expr))
+
+    def test_mixed_singleton_int_expr_is_not_statically_evaluated(self):
+        from torch.utils._sympy.singleton_int import SingletonInt
+
+        shape_env = ShapeEnv()
+        s = sympy.Symbol("s", integer=True)
+        u = create_symint(shape_env, 4, duck=False).node.expr
+        shape_env.backed_var_to_val[s] = SingletonInt(1)
+
+        expr = sympy.Eq(u, s, evaluate=False)
+        self.assertIsNone(shape_env._maybe_evaluate_singleton_int(expr))
+        self.assertIsNone(shape_env._maybe_evaluate_static(expr))
+
+    def test_unsupported_singleton_int_expr_is_not_statically_evaluated(self):
+        from torch.utils._sympy.singleton_int import SingletonInt
+
+        shape_env = ShapeEnv()
+        s = sympy.Symbol("s", integer=True)
+        shape_env.backed_var_to_val[s] = SingletonInt(1)
+
+        for fn in (sympy.Max, sympy.Min):
+            with self.subTest(fn=fn):
+                expr = sympy.Eq(fn(2, s), s, evaluate=False)
+                self.assertIsNone(shape_env._maybe_evaluate_singleton_int(expr))
+                self.assertIsNone(shape_env._maybe_evaluate_static(expr))
 
 
 class TestTransferSymbolsFromForeignShapeEnv(TestCase):
