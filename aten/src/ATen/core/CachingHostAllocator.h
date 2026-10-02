@@ -18,7 +18,6 @@
 #include <mutex>
 #include <shared_mutex>
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
 namespace at {
 
 using c10::CachingAllocator::Stat;
@@ -470,8 +469,23 @@ struct CachingHostAllocatorImpl {
     if (!allocated_during_capture) {
       // Event recording must be done outside the mutex to avoid potential
       // deadlocks (e.g., when Python GIL is involved)
-      for (auto stream : streams) {
-        record_stream(events, stream);
+      //
+      // free() is reached from ~StorageImpl, so a throw here would cross a
+      // noexcept destructor and terminate. Leaving event_count_ elevated
+      // retires the block permanently, as the capture path below also does.
+      try {
+        for (auto stream : streams) {
+          record_stream(events, stream);
+        }
+      } catch ([[maybe_unused]] const std::exception& e) {
+        TORCH_WARN_ONCE(
+            "Failed to record an event while freeing a pinned host block; "
+            "the block will not be reused: ",
+            e.what());
+      } catch (...) {
+        TORCH_WARN_ONCE(
+            "Failed to record an event while freeing a pinned host block; "
+            "the block will not be reused");
       }
     }
 
@@ -542,7 +556,16 @@ struct CachingHostAllocatorImpl {
       for (auto it = graph_pools_freeable_.begin(); it != graph_pools_freeable_.end();) {
         process_events(it->second->blocks, nullptr);
         free_from_pool(it->second->blocks);
-        if (it->second->blocks.blocks_.empty()) {
+        // blocks_ is guarded by blocks_mutex_, not instance_mutex_: a
+        // concurrent free() can be destroying this pool's last block
+        // (maybe_cache_block above pinned_max_cached_size). It releases
+        // blocks_mutex_ last, so seeing blocks_ empty means it is done with
+        // the pool.
+        bool no_blocks = [&] {
+          std::lock_guard<std::mutex> g(it->second->blocks.blocks_mutex_);
+          return it->second->blocks.blocks_.empty();
+        }();
+        if (no_blocks) {
           auto erase_count = graph_pools_.erase(it->first);
           TORCH_INTERNAL_ASSERT(erase_count == 1);
           it = graph_pools_freeable_.erase(it);
@@ -694,13 +717,22 @@ struct CachingHostAllocatorImpl {
   virtual B* get_free_block(size_t size, BlockPool& pool) {
     auto index = size_index(size);
     std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
-    if (!pool.free_list_[index].list_.empty()) {
-      B* block = pool.free_list_[index].list_.back();
-      pool.free_list_[index].list_.pop_back();
-      block->allocated_.store(true, std::memory_order_relaxed);
-      stats_.active_bucket_stats[index].increase(1);
-      stats_.active_bytes_bucket_stats[index].increase(size);
-      return block;
+    // A bucket normally holds only exact-power-of-two blocks, since allocate
+    // rounds every request up to a power of two. But requests above
+    // pinned_max_round_threshold skip rounding while still being cached, so a
+    // single Log2_64_Ceil bucket can hold blocks of differing (unrounded)
+    // sizes. Returning a block smaller than the request would overflow the
+    // buffer, so scan for one that is large enough.
+    auto& list = pool.free_list_[index].list_;
+    for (auto it = list.rbegin(); it != list.rend(); ++it) {
+      B* block = *it;
+      if (block->size_ >= size) {
+        list.erase(std::next(it).base());
+        block->allocated_.store(true, std::memory_order_relaxed);
+        stats_.active_bucket_stats[index].increase(1);
+        stats_.active_bytes_bucket_stats[index].increase(block->size_);
+        return block;
+      }
     }
     return nullptr;
   }
@@ -791,7 +823,8 @@ struct CachingHostAllocatorImpl {
       }
 
       if (available) {
-        auto& pool = pool_from_block(block);
+        // pool.events_ holds only blocks of pool, so skip pool_from_block():
+        // it takes instance_mutex_, which empty_cache() may hold exclusively.
         maybe_cache_block(block, pool, context);
         if (size != -1) {
           return;
@@ -830,7 +863,10 @@ struct CachingHostAllocatorImpl {
     auto index = size_index(size);
 
     if (size > pinned_max_cached_size()) {
-      std::scoped_lock lock(pool.free_list_[index].mutex_, pool.blocks_mutex_);
+      // empty_cache() erases a pool once blocks_ is empty, so blocks_mutex_
+      // must be released last.
+      std::lock_guard<std::mutex> gb(pool.blocks_mutex_);
+      std::lock_guard<std::mutex> gf(pool.free_list_[index].mutex_);
       destroy_block(block, pool, /*is_active=*/true);
     } else {
       std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
@@ -1320,25 +1356,25 @@ struct TORCH_API HostAllocator : public at::Allocator {
   virtual void reset_peak_stats() = 0;
 
   virtual void begin_allocate_to_pool(
-      c10::MempoolId_t pool_id,
-      std::function<bool(c10::Stream)> filter) {
+      c10::MempoolId_t /*pool_id*/,
+      std::function<bool(c10::Stream)> /*filter*/) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for begin_allocate_to_pool");
   }
 
-  virtual void end_allocate_to_pool(c10::MempoolId_t pool_id) {
+  virtual void end_allocate_to_pool(c10::MempoolId_t /*pool_id*/) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for end_allocate_to_pool");
   }
 
-  virtual void release_pool(c10::MempoolId_t pool_id) {
+  virtual void release_pool(c10::MempoolId_t /*pool_id*/) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for release_pool");
   }
 
   virtual void record_history(
-      bool enabled,
-      c10::CachingDeviceAllocator::CreateContextFn context_recorder,
-      size_t max_entries,
-      c10::CachingDeviceAllocator::RecordContext when,
-      bool clearHistory) {}
+      bool /*enabled*/,
+      c10::CachingDeviceAllocator::CreateContextFn /*context_recorder*/,
+      size_t /*max_entries*/,
+      c10::CachingDeviceAllocator::RecordContext /*when*/,
+      bool /*clearHistory*/) {}
 
   virtual bool is_history_enabled() const {
     return false;
@@ -1483,4 +1519,3 @@ struct HostAllocatorRegistry {
   }
 
 } // namespace at
-C10_DIAGNOSTIC_POP()

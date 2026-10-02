@@ -206,7 +206,7 @@ bool readFile(
     return false;
   }
   // Some files (notably under /proc and /sys on Linux) lie about
-  // their size, so treat the size advertised by fstat under advise
+  // their size, so treat the size advertised by fstat as advisory
   // but don't rely on it. In particular, if the size is zero, we
   // should attempt to read stuff. If not zero, we'll attempt to read
   // one extra byte.

@@ -1238,7 +1238,7 @@ def register_fake(
         >>> @torch.library.register_fake("mylib::custom_nonzero")
         >>> def _(x):
         >>> # Number of nonzero-elements is data-dependent.
-        >>> # Since we cannot peek at the data in an fake impl,
+        >>> # Since we cannot peek at the data in a fake impl,
         >>> # we use the ctx object to construct a new symint that
         >>> # represents the data-dependent size.
         >>>     ctx = torch.library.get_ctx()
@@ -1342,6 +1342,17 @@ def register_autograd(
     The ``ctx`` object is `the same ctx object <context_method_mixins>`_ used by
     :class:`torch.autograd.Function`. The semantics of ``backward_fn`` are the
     same as :meth:`torch.autograd.Function.backward`.
+
+    .. warning::
+        The strides of the gradients passed to ``backward_fn`` are undefined:
+        they may not match the strides of the corresponding forward outputs
+        (for example, the backward of :func:`torch.cat` produces gradients
+        that are non-contiguous views into a larger tensor). If
+        ``backward_fn`` calls a kernel that assumes a particular memory
+        layout (such as a raw Triton or CUDA kernel), it must call
+        :meth:`~torch.Tensor.contiguous` on the gradients or handle their
+        strides explicitly. Backward formulas composed of PyTorch operations
+        handle arbitrary strides automatically.
 
     ``setup_context(ctx, inputs, output)`` runs during the forward pass.
     Please save quantities needed for backward onto the ``ctx`` object via
@@ -1696,7 +1707,7 @@ def _check_pystubs_once(func, qualname, actual_module_name):
 def get_ctx() -> "torch._library.fake_impl.FakeImplCtx":
     """get_ctx() returns the current AbstractImplCtx object.
 
-    Calling ``get_ctx()`` is only valid inside of an fake impl
+    Calling ``get_ctx()`` is only valid inside of a fake impl
     (see :func:`torch.library.register_fake` for more usage details.
     """
     return torch._library.fake_impl.global_ctx_getter()

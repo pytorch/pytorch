@@ -117,10 +117,12 @@
 
 ### CUDA graph lifecycle hooks
 
-Register callbacks that fire when any CUDA graph is instantiated or destroyed --
-for example, a profiler observing graph lifecycle without the graph code carrying
-any consumer knowledge. Registering a hook is the opt-in; with none registered
-both are no-ops. Live in `torch.cuda.graphs`.
+Register callbacks that fire at each point in any CUDA graph's lifecycle -- capture
+start, capture end, instantiate, each replay, and destroy -- for example, a profiler
+observing graph lifecycle without the graph code carrying any consumer knowledge, and
+including graphs the consumer did not build. Registering a hook is the opt-in and the whole
+API -- the graph fires them; with none registered they are no-ops. Each has a per-graph
+counterpart on {class}`torch.cuda.CUDAGraph`. Live in `torch.cuda.graphs`.
 
 ```{eval-rst}
 .. currentmodule:: torch.cuda.graphs
@@ -128,11 +130,12 @@ both are no-ops. Live in `torch.cuda.graphs`.
     :toctree: generated
     :nosignatures:
 
+    register_graph_capture_start_hook
+    register_graph_capture_end_hook
     register_graph_instantiate_hook
-    run_graph_instantiate_hooks
+    register_graph_replay_start_hook
+    register_graph_replay_end_hook
     register_graph_destroy_hook
-    run_graph_destroy_hooks
-    graph_destroy_hooks_active
 
 .. currentmodule:: torch.cuda
 ```
@@ -154,7 +157,19 @@ is not supported on ROCm. Use
 
 The end-to-end workflow: annotate during capture, profile the replay,
 then merge the annotations into the exported trace and view it in
-[Perfetto](https://ui.perfetto.dev). During capture:
+[Perfetto](https://ui.perfetto.dev).
+
+```{note}
+Keep the graphs alive until all profiles using their annotations have been
+exported. For asynchronous Cuspy exports, also call
+`prof.wait_for_exports()` before resetting or destroying the graphs.
+Stopping the profiler or synchronizing CUDA alone does not guarantee that
+buffered profiling records have been processed. Resetting or destroying a
+graph removes its annotations, so pending profiles can lose that metadata.
+Save any Python launch stacks before graph cleanup as well.
+```
+
+During capture:
 
 ```python
 import torch
@@ -209,6 +224,50 @@ Because annotations live in a process-global registry keyed by ids that
 match the profiler's, the pickle of ``dict(get_kernel_annotations())``
 can equally be saved next to a trace and joined offline.
 
+To capture Python launch stacks as well, set
+``annotation_config={"record_py_stacks": True}`` with ``enable_annotations=True``.
+Recording uses Cuspy's CUPTI node-creation callbacks, even when no profiler
+session is running. It requires `cupti-python`, CUPTI >= 13.3, and a CUPTI
+subscription not already held by Kineto, Nsight Systems, or another profiler.
+Use Cuspy for subsequent GPU profiling in the same process. Disable autograd
+multithreading during both warmup and capture.
+
+Stacks contain user Python frames on the launching thread for kernel, memcpy,
+memset, batch-memory, event, and host nodes. Framework and generated Inductor
+frames are omitted by default; C++ autograd nodes do not recover their forward Python
+stacks. Conditional and child-graph body stacks require ``key_by="source"``
+(CUPTI and driver >= 13.4); they are omitted with ``key_by="exec"``.
+
+```python
+from torch.cuda.graph_annotations import dump_kernel_py_stacks
+
+g = torch.cuda.CUDAGraph()
+with (
+    torch.autograd.grad_mode.set_multithreading_enabled(False),
+    torch.cuda.graph(
+        g, enable_annotations=True, annotation_config={"record_py_stacks": True}
+    ),
+):
+    y = x @ x.t()
+dump_kernel_py_stacks("graph_stacks.json.gz")
+```
+
+Use ``annotation_config["py_stack_filter_paths"]`` to customize filtering:
+``None`` keeps the defaults, a list or tuple of directory paths replaces them,
+and ``[]`` disables frame filtering. For example, ``{"record_py_stacks": True, "py_stack_filter_paths":
+["/my_project/wrappers"]}`` excludes only frames in that directory. Paths match
+on directory boundaries, and relative paths are resolved when capture begins.
+
+Read stacks with {func}`~torch.cuda.graph_annotations.get_kernel_py_stacks`
+or save them beside the trace with
+{func}`~torch.cuda.graph_annotations.dump_kernel_py_stacks`. The gzip-compressed
+JSON maps decimal node-id strings to newline-separated ``filename:line:function``
+frames, innermost first. With the default ``key_by="exec"``, look up a Cuspy
+Chrome trace event using ``str((args["graph id"] << 32) | args["graph node id"])``.
+For consumers reading CUPTI's ``sourceGraphNodeId``, use ``key_by="source"``
+and look up that ID directly.
+Save after instantiation and before resetting or destroying the graph.
+
 ```{eval-rst}
 .. currentmodule:: torch.cuda.graph_annotations
 ```
@@ -221,6 +280,8 @@ can equally be saved next to a trace and joined offline.
     is_available
     mark_kernels
     get_kernel_annotations
+    get_kernel_py_stacks
+    dump_kernel_py_stacks
     clear_kernel_annotations
 ```
 
@@ -380,9 +441,14 @@ direct memory access transfers between GPU memory and storage, avoiding a bounce
 [cufile api documentation](https://docs.nvidia.com/gpudirect-storage/api-reference-guide/index.html#cufile-io-api)
 for more details.
 
-These APIs can be used in versions greater than or equal to CUDA 12.6. In order to use these APIs, one must
+These APIs can be used with CUDA 12.6 or newer. In order to use these APIs, one must
 ensure that their system is appropriately configured to use GPUDirect Storage per the
 [GPUDirect Storage documentation](https://docs.nvidia.com/gpudirect-storage/troubleshooting-guide/contents.html).
+
+On ROCm, the same APIs are backed by [hipFile](https://rocm.docs.amd.com/projects/hipFile/en/latest/)
+rather than cuFile and require ROCm 7.14 or newer. The hipFile entry points and the ROCm system
+configuration steps, which differ from the CUDA ones, are covered in
+{ref}`hipFile (GPUDirect Storage)<rocm-gds>`.
 
 See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use these.
 
@@ -395,6 +461,7 @@ See the docs for {class}`~torch.cuda.gds.GdsFile` for an example of how to use t
     :toctree: generated
     :nosignatures:
 
+    is_available
     gds_register_buffer
     gds_deregister_buffer
     GdsFile
@@ -431,6 +498,96 @@ custom stream.
 The `GreenContext.set_context()` and `GreenContext.pop_context()` methods are
 deprecated compatibility APIs.
 
+To create contexts with disjoint SM allocations (CUDA driver and bindings
+13.1+), specify all groups in one operation:
+
+```python
+from torch.cuda.green_contexts import GreenContext, SMPartition
+
+a, b = GreenContext.split(
+    num_sms=(24, 40), coscheduled_sm_count=(8, 4), device_id=0
+)
+print(a.sm_count, b.sm_count)
+```
+
+To retain the remainder, use `SMPartition.split`. To subdivide a returned
+partition or remainder, create a context from it and split the resource queried
+through its `sm_partition` property. CUDA drivers can reject raw split outputs
+as already partitioned resources, so the context creation is explicit:
+
+```python
+sms = SMPartition.from_device(device_id=0)
+(first,), rest = sms.split(num_sms=4, coscheduled_sm_count=2)
+rest_ctx = GreenContext(sm_partition=rest)
+(second,), rest = rest_ctx.sm_partition.split(num_sms=4, coscheduled_sm_count=2)
+ctx = GreenContext(sm_partition=second, workqueue_scope="balanced")
+```
+
+Each split partitions its input resource. Its children and remainder are
+mutually disjoint, but overlap the parent. Results of separate splits on the same
+or overlapping input resources may overlap.
+CUDA evaluates new constraints when subdividing a resource; the remainder does
+not inherit the earlier split's alignment.
+Partitioning does not reserve SMs against other contexts or guarantee concurrent
+execution. Each split option accepts a scalar or a sequence. All sequences must
+have the same nonzero length; scalars are broadcast to that length. With scalars
+only, one group is created. The default `num_sms=0` discovers the largest group
+satisfying its constraints. Groups are evaluated in order, so an early discovery
+group can exhaust the SMs needed by later groups.
+A group with both `num_sms=0` and `backfill=True` consumes all remaining SMs,
+so it must be the last group. Otherwise, specify a positive SM count.
+CUDA validates hardware constraints without PyTorch rounding the requested sizes.
+CUDA permits kernels to use additional SMs in some configurations involving MPS
+or dynamic parallelism; see the
+[CUDA green-context documentation](https://docs.nvidia.com/cuda/cuda-driver-api/cuda_driver_api/group__CUDA__GREEN__CONTEXTS.html).
+
+`GreenContext.sm_count` reports the actual allocation, including for contexts
+created through the existing `num_sms` constructor. Independent constructor
+calls do not guarantee disjoint SMs. A context's `sm_partition` property returns
+a resource that can be subdivided and keeps its originating context alive.
+
+Locality domains describe hardware topology. With CUDA driver and bindings
+13.4+, add locality constraints when splitting a resource:
+
+```python
+from torch.cuda.green_contexts import get_num_locality_domains
+
+n = get_num_locality_domains(device_id=0)
+contexts = GreenContext.split(
+    coscheduled_sm_count=2,
+    locality_domain_ids=tuple(range(n)),
+    device_id=0,
+)
+```
+
+Here, the default zero SM count is broadcast to each locality domain and discovers
+its available SMs. Some device SMs may be outside all locality domains and remain
+unassigned. A domain can contain
+multiple partitions; its ID can also constrain subdivision through an existing
+context's queried SM resource, as shown above. Use `None` for a group with no
+locality constraint. Workqueue settings can be combined with either kind of split.
+
+`backfill=True` permits CUDA to fill a group with SMs outside its co-scheduling
+or locality constraints. It preserves the separation between sibling partitions.
+The `locality_domain_id` property on partitions and contexts reads CUDA's
+reported metadata and returns `None` if CUDA does not specify a domain.
+
+`get_num_locality_domains` returns `1` when the required software is unavailable.
+With CUDA driver and bindings 13.4+, it queries CUDA directly; invalid devices and
+failed queries raise. Supplying an explicit device index initializes only the
+driver, without initializing PyTorch CUDA state or creating a primary context.
+Driver initialization can still prevent CUDA use in subsequently forked children.
+
+`is_localization_supported` returns false for unsupported software or devices
+with at most one domain. Before driver initialization, it attempts a best-effort
+NVML capability check using `CUDA_VISIBLE_DEVICES`. If NVML cannot determine
+support, it raises; initialize CUDA explicitly before querying again if needed.
+After driver initialization, the query always uses CUDA and query errors
+propagate. The predicate does not initialize the driver or a context, so calling
+it does not poison subsequent forks.
+Actual splitting and context creation always use CUDA, independently of this
+capability check.
+
 ```{eval-rst}
 .. currentmodule:: torch.cuda.green_contexts
 ```
@@ -441,6 +598,9 @@ deprecated compatibility APIs.
     :nosignatures:
 
     GreenContext
+    SMPartition
+    get_num_locality_domains
+    is_localization_supported
 ```
 
 

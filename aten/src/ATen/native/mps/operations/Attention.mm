@@ -77,7 +77,6 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
     MPSGraphTensor* outputTensor = nil;
     MPSGraphTensor* attnTensor = nil;
   };
-  const auto macOS15_0_plus = is_macos_at_least(MacOSVersion::MACOS_15_0);
   int64_t batchSize = query.size(0);
   int64_t num_head = query.size(1);
   int64_t qSize = query.size(2);
@@ -101,7 +100,7 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
 
           auto maskedMM = [mpsGraph matrixMultiplicationWithPrimaryTensor:qTensor secondaryTensor:kT name:nil];
 
-          if (macOS15_0_plus && [maskedMM dataType] == MPSDataTypeFloat32) {
+          if ([maskedMM dataType] == MPSDataTypeFloat32) {
             // bug in MacOS15, without this trick SDPA leaks memory, adding 0.0f gets ignored(still takes SDPA sequence
             // path which leaks)
             auto oneTensor = [mpsGraph constantWithScalar:1e-20f shape:getMPSShape({1}) dataType:MPSDataTypeFloat32];
@@ -206,7 +205,6 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
                                                        bool unsqueezed) {
   TORCH_CHECK(q_.size(3) == k_.size(3) && q_.size(3) == v_.size(3),
               "sdpa_vector_fast_mps expects query, key, and value to have the same head dimension");
-  const auto macOS15_0_plus = is_macos_at_least(MacOSVersion::MACOS_15_0);
   using namespace mps;
   uint batchSize = q_.size(0);
   uint num_head = q_.size(1);
@@ -252,8 +250,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
                   out,
                   gqa_factor,
                   N,
-                  std::array<uint32_t, 3>{q_head_stride, k_head_stride, v_head_stride},
-                  std::array<uint32_t, 3>{q_seq_stride, k_seq_stride, v_seq_stride},
+                  c10::metal::vec3<uint32_t>{q_head_stride, k_head_stride, v_head_stride},
+                  c10::metal::vec3<uint32_t>{q_seq_stride, k_seq_stride, v_seq_stride},
                   scale_factor);
 
       if (has_mask) {
@@ -351,8 +349,8 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
                   maxs,
                   gqa_factor,
                   N,
-                  std::array<uint32_t, 3>{q_head_stride, k_head_stride, v_head_stride},
-                  std::array<uint32_t, 3>{q_seq_stride, k_seq_stride, v_seq_stride},
+                  c10::metal::vec3<uint32_t>{q_head_stride, k_head_stride, v_head_stride},
+                  c10::metal::vec3<uint32_t>{q_seq_stride, k_seq_stride, v_seq_stride},
                   scale_factor);
 
       if (has_mask) {

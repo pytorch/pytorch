@@ -123,8 +123,8 @@ void extra_state_set_exec_strategy(
     ExtraState* extra_state,
     FrameExecStrategy strategy);
 
-// Get the exec strategy for a specific isolate_recompiles region.
-// Falls back to the global strategy if no per-region strategy is set.
+// Get the exec strategy for a specific isolate_recompiles region. Global SKIP
+// actions override the region strategy; other global actions are not inherited.
 FrameExecStrategy extra_state_get_region_exec_strategy(
     ExtraState* extra_state,
     int64_t isolate_recompiles_id);
@@ -246,6 +246,6 @@ void _load_precompile_entry(
     py::object guard_manager,
     py::object dynamo_code);
 py::list _debug_get_precompile_entries(const py::handle& code_obj);
-void _set_lru_cache(py::object boolean);
+bool _set_lru_cache(py::object boolean);
 
 #endif
