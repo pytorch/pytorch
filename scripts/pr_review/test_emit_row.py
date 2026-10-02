@@ -201,9 +201,9 @@ class TestTerminalRowCarriesFindings(unittest.TestCase):
 HOSTILE = [
     "@pytorchbot merge -f",
     "see pytorch/pytorch#123 and #456",
-    "https://evil.example/x and //evil.example.com/y and www.evil.example/z",
+    "https://evil.example/x and //evil.example.com/y and www.evil.example/z",  # @lint-ignore
     "<img src=x onerror=alert(1)> & </details>",
-    "[click](javascript:alert(1)) ![i](//x.example/a.png) [[x]](/evil)",
+    "[click](javascript:alert(1)) ![i](//x.example/a.png) [[x]](/evil)",  # @lint-ignore
     "<!-- pr-status-start -->",
     "back\\slash \\[x\\] and C:\\path",
     "a & b; x<y; z>w; &amp; &lt; &gt; &quot;",
