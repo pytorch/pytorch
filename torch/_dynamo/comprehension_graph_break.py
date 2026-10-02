@@ -545,8 +545,7 @@ def _build_comprehension_fn(
 
     def update(instructions: list[Instruction], code_options: dict[str, Any]) -> None:
         code_options["co_name"] = fn_name
-        if sys.version_info >= (3, 11):
-            code_options["co_qualname"] = fn_name
+        code_options["co_qualname"] = fn_name
         code_options["co_firstlineno"] = lineno
         code_options["co_cellvars"] = ()
         code_options["co_freevars"] = freevars

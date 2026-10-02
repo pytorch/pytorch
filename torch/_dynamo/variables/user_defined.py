@@ -5531,9 +5531,7 @@ class UserDefinedListVariable(UserDefinedObjectVariable, ListVariable):
         # overrides __new__ (tp_new != list's tp_new); otherwise it rejects
         # them. See the generated list___init__ wrapper's tp_new comparison:
         # https://github.com/python/cpython/blob/v3.13.0/Objects/clinic/listobject.c.h
-        # 3.10 predates that comparison and only rejects keyword args for exact
-        # list, so every subclass tolerates them there.
-        if sys.version_info >= (3, 11) and type(self.value).__new__ is list.__new__:
+        if type(self.value).__new__ is list.__new__:
             no_keywords(tx, "list", kwargs)
         # UDOV.tp_init_impl would vectorcall the C list.__init__. Route to
         # ListVariable's, which populates this object's storage in place.
