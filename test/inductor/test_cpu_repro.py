@@ -1487,11 +1487,11 @@ class CPUReproTests(TestCase):
                 self.assertEqual(actual, fn(x))
                 if tail_vec:
                     FileCheck().check(
-                        "tmp_acc0_vec.store(out_ptr0 + static_cast<int64_t>(x0 + 66LL*x1), static_cast<int64_t>(2LL))"  # noqa: B950
+                        "tmp_acc0_vec.store(out_ptr0 + static_cast<int64_t>(x0 + 66LL*x1), static_cast<int64_t>(2LL))"
                     ).run(code)
                 else:
                     FileCheck().check(
-                        "out_ptr0[static_cast<int64_t>(x0_tail + 66LL*x1)] = tmp_acc0_arr[x0_tail - static_cast<int64_t>(64LL)];"  # noqa: B950
+                        "out_ptr0[static_cast<int64_t>(x0_tail + 66LL*x1)] = tmp_acc0_arr[x0_tail - static_cast<int64_t>(64LL)];"
                     ).run(code)
 
     @requires_vectorization
