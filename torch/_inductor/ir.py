@@ -107,6 +107,7 @@ from .dependencies import (
     SymbolUsageCollectorOpsHandler,
     var_builder,
 )
+from .fx_utils import get_node_storage
 from .loop_body import LoopBody
 from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
 from .runtime.benchmarking import benchmarker
@@ -4239,6 +4240,9 @@ class ReinterpretView(BaseView):
     def get_name(self) -> str:
         return self.data.get_name()
 
+    def get_read_names(self) -> OrderedSet[str]:
+        return OrderedSet([self.get_name()])
+
     def get_device(self) -> torch.device | None:
         return self.layout.device
 
@@ -4258,7 +4262,10 @@ class ReinterpretView(BaseView):
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         def loader(index: Sequence[Expr]) -> OpsValue:
             indexer = self.layout.make_indexer()
-            tmp_loader = ops.load(self.get_name(), indexer(index))
+            name = self.get_name()
+            if name in V.graph.constants:
+                name = V.graph.constant_name(name, ConstantBuffer.override_device)
+            tmp_loader = ops.load(name, indexer(index))
             if self.layout.dtype != self.data.dtype:
                 return ops.to_dtype_bitcast(tmp_loader, self.dtype, self.data.dtype)
             else:
@@ -5278,6 +5285,32 @@ class MutationLayoutSHOULDREMOVE(Layout):
             raise AssertionError("Expected isinstance(layout, Layout)")
         return layout
 
+    @staticmethod
+    def _reads_only_where_it_writes(node: Pointwise, dst: IRNode) -> bool:
+        """
+        Whether the kernel that computes node, storing straight into dst's
+        buffer, reads that buffer only at the element it writes: x + y does,
+        x + x.flip(0) does not. This is the same index rule that
+        Scheduler.fusable_weak_dep applies to a read and a later in-place write
+        of the same buffer.
+        """
+        name = dst.get_name()
+        if name not in node.get_read_names():
+            return True
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            loader, indexer = node.make_loader(), dst.make_indexer()
+
+            def body(index: Sequence[Expr]) -> None:
+                ops.store(name, indexer(index), loader(index))
+
+            read_writes = extract_read_writes(body, node.get_size())
+        (write,) = read_writes.writes
+        return all(
+            isinstance(read, dependencies.MemoryDep) and read.index == write.index
+            for read in read_writes.reads
+            if read.name == name
+        )
+
     @classmethod
     def realize_into(
         cls, src: IRNode, dst: IRNode, unsafe_alias: bool = False
@@ -5298,6 +5331,20 @@ class MutationLayoutSHOULDREMOVE(Layout):
         # dst would effect users of src. However if there are no more users of
         # dst, we can alias src to dst.
         src.realize_hint()
+
+        if unsafe_alias:
+            # The kernel that computes src would write dst itself. Unless it is
+            # a pointwise one that reads dst only where it writes, compute src
+            # into a buffer of its own and copy that into dst.
+            loops = src.data if isinstance(src, StorageBox) else src
+            if isinstance(loops, ComputedBuffer):
+                loops = loops.data
+            if not (
+                isinstance(loops, Pointwise)
+                and cls._reads_only_where_it_writes(loops, dst)
+            ):
+                src.realize()
+                unsafe_alias = False
 
         if not unsafe_alias:
             node = Pointwise.create(
@@ -7042,6 +7089,14 @@ class ConcatKernel(NopKernel):
             inputs=[],
         )
         kernel = StorageBox(concat_kernel)
+        # An input computed straight into the concat storage would leak any
+        # in-place mutation of that input into the concat result. Conservative
+        # on purpose: these are the inputs of the node being lowered (for
+        # aten.cat, the cat's own), and a mutation anywhere in the graph, even
+        # before the cat, turns the aliasing off for all of them.
+        nodes = V.graph.current_node.all_input_nodes
+        mutated = V.graph.mutated_storages
+        allow_alias = not any(get_node_storage(n) in mutated for n in nodes)
         op_names = []
         for i, inp in enumerate(inputs):
             if not isinstance(inp, (BaseView, MutableBox)):
@@ -7051,6 +7106,7 @@ class ConcatKernel(NopKernel):
                 SliceView.create(
                     kernel, dim, offsets_start[i], offsets_end[i], clamp=False
                 ),
+                allow_alias=allow_alias,
             )
             if not isinstance(input_buffer, Buffer):
                 raise AssertionError(type(input_buffer))
@@ -7130,7 +7186,7 @@ class ConcatKernel(NopKernel):
         return NopKernel.get_free_symbol_uses(self, unbacked_only)
 
     @classmethod
-    def realize_into(cls, src: IRNode, dst: IRNode) -> IRNode:
+    def realize_into(cls, src: IRNode, dst: IRNode, allow_alias: bool = True) -> IRNode:
         # Attempt to turn this into a ReinterpretView rather than assert.
         # This has concessions around layout, as as_storage_and_layout
         # can cause us to go from flexible to fixed layout.
@@ -7142,9 +7198,9 @@ class ConcatKernel(NopKernel):
             raise AssertionError(type(dst))
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
-            return cls.realize_into(src.data, dst)
+            return cls.realize_into(src.data, dst, allow_alias)
 
-        if isinstance(src, StorageBox):
+        if isinstance(src, StorageBox) and allow_alias:
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             if not hasattr(src.data, "layout"):

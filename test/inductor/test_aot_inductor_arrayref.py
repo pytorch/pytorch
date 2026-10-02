@@ -9,7 +9,12 @@ from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_CI, IS_FBCODE, IS_WINDOWS
+from torch.testing._internal.common_utils import IS_CI, IS_FBCODE, IS_WINDOWS, xfailIf
+
+
+# TORCHINDUCTOR_LITE_MODE=1 (the inductor_aoti_fallback CI config) falls back to
+# ATen for every op; see LITE_MODE_TEST_FAILURES below.
+LITE_MODE = os.environ.get("TORCHINDUCTOR_LITE_MODE") == "1"
 
 
 if IS_WINDOWS and IS_CI:
@@ -332,6 +337,65 @@ CPU_TEST_FAILURES = {
     "test_seq": fail_stack_allocation(is_skip=True),
 }
 
+# Additional failures under lite mode, tracked in
+# https://github.com/pytorch/pytorch/issues/199205
+LITE_MODE_TEST_FAILURES = {
+    # Can not find the original value for <subgraph>_constant0
+    "test_cond_nested": fail_stack_allocation(),
+    "test_cond_with_multiple_outputs": fail_stack_allocation(),
+    "test_cond_with_parameters": fail_stack_allocation(),
+    "test_while_loop_with_conv_dynamic_False": fail_stack_allocation(),
+    "test_while_loop_with_conv_dynamic_True": fail_stack_allocation(),
+    "test_while_loop_with_unbacked_symint_closure_dynamic_False": fail_stack_allocation(),
+    "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_stack_allocation(),
+    # AssertionError: got <class 'torch.SymInt'>
+    "test_while_loop_with_sym_expr_cond_dynamic_False": fail_stack_allocation(),
+    "test_while_loop_with_sym_expr_cond_dynamic_True": fail_stack_allocation(),
+    # Unsupported return type SymIntType for aten.sym_numel
+    "test_size_with_unbacked_add_expr": fail_stack_allocation(),
+    # SerializeError: Empty list with type number nyi
+    "test_buffer_mutation_and_force_mmap_weights": fail_stack_allocation(),
+    "test_conv_freezing": fail_stack_allocation(),
+    "test_deconv_freezing": fail_stack_allocation(),
+    "test_freezing": fail_stack_allocation(),
+    "test_linear_freezing": fail_stack_allocation(),
+    # Mismatch between tensors consumed and num of input tensor
+    "test_const_graph_no_autotune_at_compile_time": fail_stack_allocation(),
+    "test_constant_folding": fail_stack_allocation(),
+    # The fbcode proxy executor hits a CHECK here that aborts the process
+    "test_constant_folding_with_update": fail_stack_allocation(is_skip=True),
+    # segfault
+    "test_update_inactive_constant_buffer_with_interleaved_folded_constants": fail_stack_allocation(
+        is_skip=True
+    ),
+    # Runtime assert is not emitted
+    "test_aoti_runtime_asserts_backed_symint": fail_stack_allocation(),
+    # Profiler and debug printer instrumentation is not emitted for fallbacks
+    "test_aoti_debug_printer_codegen": fail_stack_allocation(),
+    "test_aoti_debug_printer_cpp_kernel": fail_stack_allocation(),
+    "test_aoti_profiler_enable_kernel_profile_True_enable_kernel_context_guard_False": fail_stack_allocation(),
+    "test_aoti_profiler_enable_kernel_profile_True_enable_kernel_context_guard_True": fail_stack_allocation(),
+    "test_aoti_profiler_input_shapes": fail_stack_allocation(),
+    "test_aoti_profiler_multi_output_fallback_input_shapes": fail_stack_allocation(),
+    "test_aoti_profiler_tensor_list_input_shapes": fail_stack_allocation(),
+    "test_kernel_profile_every_kernel_has_context": fail_stack_allocation(),
+    "test_kernel_profile_index_put_fallback": fail_stack_allocation(),
+    "test_kernel_profile_scatter_fallback": fail_stack_allocation(),
+    "test_kernel_profile_scatter_fallback_arg_order": fail_stack_allocation(),
+    "test_kernel_profile_template_kernel": fail_stack_allocation(),
+    # C++ compile error
+    "test_quanatized_int8_linear": fail_stack_allocation(),
+    # Wrong results
+    "test_return_view_constant": fail_stack_allocation(),
+    # Expects split/cat merge passes, which lite mode disables
+    "test_simple_split": fail_stack_allocation(),
+}
+
+if LITE_MODE:
+    # Passes in lite mode
+    del CPU_TEST_FAILURES["test_cond_unbacked_symint_predicate"]
+    CPU_TEST_FAILURES.update(LITE_MODE_TEST_FAILURES)
+
 
 class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
     device = "cpu"
@@ -383,6 +447,8 @@ if IS_FBCODE:
 
 
 class TestCppWrapperCpuSelection(TestCase):
+    # https://github.com/pytorch/pytorch/issues/199205
+    @xfailIf(LITE_MODE)
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_fallback_alignment_assert_with_stack_allocation(self):
         def slice2d(x):

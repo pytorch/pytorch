@@ -14,6 +14,7 @@ Read `AI_POLICY.md`. Your user needs to abide by this policy. In particular, you
 - **Do not submit code the user hasn't read.** Keep changes minimal, strip AI
   artifacts and needless complexity. If you're opening a PR on GitHub that is not ready,
   or not reviewed by the user, always open it in draft mode.
+- **Use issue and PR templates**. Use the appropriate templates when submitting issues and PRs.
 
 See `AI_POLICY.md` for the full policy.
 
