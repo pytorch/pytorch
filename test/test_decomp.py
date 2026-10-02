@@ -647,6 +647,32 @@ class TestDecomp(TestCase):
         self.assertEqual(ref, res)
         self.assertEqual(res.dtype, torch.float64)
 
+    def test_cov_decomp(self, device):
+        # The OpInfo cross-ref (test_comprehensive) already exercises this decomp
+        # against eager, but its aweights floor is 0. This guards the weighted
+        # branches with strictly positive weights across correction values, plus
+        # the 1-D reshape/squeeze path.
+        from torch._decomp.decompositions import cov
+
+        torch.manual_seed(0)
+        x = torch.randn(3, 8, device=device)
+        num_observations = x.size(1)
+        fweights = torch.randint(1, 10, (num_observations,), device=device)
+        aweights = make_tensor(
+            (num_observations,), dtype=torch.float, device=device, low=1, high=3
+        )
+        for fw, aw in ((None, None), (fweights, None), (None, aweights), (fweights, aweights)):
+            # Larger corrections can drive the weighted norm_factor non-positive,
+            # where eager clamps to zero; stay in the well-defined regime.
+            corrections = (0, 1, 2) if fw is None and aw is None else (0, 1)
+            for correction in corrections:
+                ref = torch.cov(x, correction=correction, fweights=fw, aweights=aw)
+                res = cov(x, correction=correction, fweights=fw, aweights=aw)
+                self.assertEqual(ref, res)
+
+        v = torch.randn(5, device=device)
+        self.assertEqual(torch.cov(v), cov(v))
+
     def test_uniform(self, device):
         size = (2, 3, 4, 5)
         dtype = torch.float32
