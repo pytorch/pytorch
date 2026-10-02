@@ -33,6 +33,7 @@ from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    make_contiguous_strides_for,
     suggest_memory_format,
     type_to_dtype,
 )
@@ -165,11 +166,17 @@ def register_decomposition(
 
 @register_decomposition(aten.adaptive_max_pool3d.default)
 def adaptive_max_pool3d(input, output_size):
-    # max_pool3d_with_indices returns channels-last indices, but the native
-    # adaptive_max_pool3d backward expects its forward's contiguous indices.
-    if suggest_memory_format(input) == torch.channels_last_3d:
+    result = decomp_adaptive_max_pool3d(input, output_size)
+    if result is NotImplemented:
         return NotImplemented
-    return decomp_adaptive_max_pool3d(input, output_size)
+    values, indices = result
+    values = inductor_prims.force_stride_order(
+        values, make_contiguous_strides_for(values.shape)
+    )
+    indices = inductor_prims.force_stride_order(
+        indices, make_contiguous_strides_for(indices.shape)
+    )
+    return values, indices
 
 
 @register_decomposition([aten.special_log_ndtr])
