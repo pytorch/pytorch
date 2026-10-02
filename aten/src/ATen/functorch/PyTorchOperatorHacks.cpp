@@ -58,7 +58,7 @@ Tensor linear_hack(const Tensor& input, const Tensor& weight, const std::optiona
     // Also hit the fused path for contiguous 3D input.
     const auto input_sizes = input.sizes();
     const auto result = at::addmm(*bias, input.view({input_sizes[0] * input_sizes[1], input_sizes[2]}), weight.t());
-    return result.view({input_sizes[0], input_sizes[1], result.size(1)});
+    return at::_unsafe_view(result, {input_sizes[0], input_sizes[1], result.size(1)});
   }
   auto output = at::matmul(input, weight.t());
   if (bias->defined()) {

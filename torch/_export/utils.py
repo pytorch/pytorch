@@ -1511,10 +1511,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
     Registers a module as a valid input type for :func:`torch.export.export`.
 
     Args:
-        mod: the module instance
-        serialized_type_name: The serialized name for the module. This is
-        required if you want to serialize the pytree TreeSpec containing this
-        module.
+        cls: the module type to register
 
     Example::
 
@@ -1530,7 +1527,7 @@ def register_module_as_pytree_input_node(cls: type[torch.nn.Module]) -> None:
                 return self.linear(x)
 
 
-        torch._export.utils.register_module_as_pytree_node(InputDataClass)
+        torch._export.utils.register_module_as_pytree_input_node(Module)
 
 
         class Mod(torch.nn.Module):
