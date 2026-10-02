@@ -197,7 +197,10 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         return orig_params
 
     def _init_fsdp_param_group(
-        self, params: list[nn.Parameter], reshard_after_forward: bool | int
+        self,
+        params: list[nn.Parameter],
+        reshard_after_forward: bool | int,
+        shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None = None,
     ):
         module = nn.ParameterList([param.detach().clone() for param in params])
         mesh_info = FSDPMeshInfo(_init_default_fully_shard_mesh(), shard_mesh_dim=0)
@@ -210,7 +213,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             mesh_info,
             post_forward_mesh_info,
             self.device,
-            None,  # shard_placement_fn
+            shard_placement_fn,
             MixedPrecisionPolicy(),
             OffloadPolicy(),
         )
@@ -245,6 +248,35 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 all_gather_stream=all_gather_stream,
             )
 
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_post_forward_shard_dim1(self):
+        # Post-forward shards are flat, so their all-gather needs no reassembly
+        stream = device_module.current_stream()
+        self._test_all_gather(
+            [torch.Size([8, 256]), torch.Size([16, 128])],
+            reshard_after_forward=8,
+            async_op=False,
+            all_gather_copy_in_stream=stream,
+            all_gather_stream=stream,
+            shard_placement_fn=lambda _: Shard(1),
+        )
+        params = self._init_params([torch.Size([4, 256])])
+        with self.assertRaisesRegex(
+            NotImplementedError, r"resharding Shard\(1\) parameters after forward"
+        ):
+            self._init_fsdp_param_group(params, 8, lambda _: Shard(1))
+
+    @skip_if_lt_x_gpu(1)
+    def test_all_gather_empty_params(self):
+        stream = device_module.current_stream()
+        self._test_all_gather(
+            [torch.Size([0, 4]), torch.Size([0])],
+            reshard_after_forward=True,
+            async_op=False,
+            all_gather_copy_in_stream=stream,
+            all_gather_stream=stream,
+        )
+
     def _test_all_gather(
         self,
         param_sizes: list[torch.Size],
@@ -252,6 +284,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         async_op: bool,
         all_gather_copy_in_stream,
         all_gather_stream,
+        shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None = None,
     ):
         def all_gather(fsdp_param_group: FSDPParamGroup, group: dist.ProcessGroup):
             all_gather_comm = DefaultAllGather()
@@ -281,7 +314,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         # Set up the reference parameters and construct the FSDP group
         orig_params = self._init_params(param_sizes)
         fsdp_param_group = self._init_fsdp_param_group(
-            orig_params, reshard_after_forward
+            orig_params, reshard_after_forward, shard_placement_fn
         )
         fsdp_params = fsdp_param_group.fsdp_params
         module = fsdp_param_group.modules[0]
