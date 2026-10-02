@@ -1,6 +1,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/GroupStreamGuard.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
@@ -190,6 +191,7 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
   c10::cuda::CUDAGuard guard(sigpad.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, "0");
+  GroupStreamGuard stream_guard("0");
 
   // Always use device-side kernel because this function waits for a SPECIFIC signal value.
   // ncclWaitSignal only synchronizes on a channel without checking values, so it's not
@@ -213,6 +215,7 @@ void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
   // TODO: rendezvous should remember the group name
   auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, "0");
   c10::cuda::CUDAGuard guard(tensor.device());
+  GroupStreamGuard stream_guard("0");
   auto stream = at::cuda::getCurrentCUDAStream();
 
   // Always use device-side kernel because this function writes a SPECIFIC signal value.
@@ -487,7 +490,6 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
       torch::CppFunction::makeFromBoxedFunction<&nccl_get_out_boxed>());
   m.impl("nccl_reduce_scatter_offset", c10d::nccl_extension::nccl_reduce_scatter_offset);
   m.impl("nccl_all_to_all_nd", c10d::nccl_extension::nccl_all_to_all_nd);
-  m.impl("nccl_all_gather_offset", c10d::nccl_extension::nccl_all_gather_offset);
 }
 
 // Use CompositeExplicitAutograd as key since ops do not accept tensor as input
