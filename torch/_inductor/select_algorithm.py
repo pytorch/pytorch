@@ -3913,11 +3913,15 @@ def create_inputs_key(input_nodes) -> str:
 def create_precompile_key(
     name: str, inputs_key: str, choices: list[ChoiceCaller]
 ) -> str:
+    precision = torch.backends.cuda.matmul.fp32_precision
+    # bfx9 has no legacy equivalent, and the legacy getter may reject it.
+    if precision != "bfx9":
+        precision = torch.get_float32_matmul_precision()
     return ":".join(
         [
             name,
             inputs_key,
-            torch.get_float32_matmul_precision(),
+            precision,
         ]
         + [choice.kernel_hash_key() for choice in choices]
     )
@@ -4224,8 +4228,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         has_cutlass = any(isinstance(c, CUTLASSTemplateCaller) for c in choices)
         if config.autotune_in_subproc or has_cutlass:
-            # Warmup the subprocess pool early so it's ready for benchmarking
-            torch._inductor.autotune_process.get_tuning_process_pool()
+            # Initialize the worker pool (subprocess or thread) so it will warmup early.
+            torch._inductor.autotune_process.get_tuning_pool()
 
         precompile_fn = self.make_precompile_fn(
             choices,

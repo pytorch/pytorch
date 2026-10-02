@@ -114,6 +114,10 @@ from torch.testing._internal.jit_utils import JitTestCase
 from torch.utils._sympy.numbers import int_oo
 
 
+if IS_FBCODE:
+    from caffe2.test.dynamo import _pybind11_enum_test
+
+
 pytree_modules = {
     "python": python_pytree,
 }
@@ -238,18 +242,23 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
     @torch.testing._internal.common_utils.scoped_load_inline
     def test_pybind11_enum_conversion(self, load_inline):
-        cpp_source = """
-        #include <torch/extension.h>
+        if IS_FBCODE:
+            # fbcode's Python runtime lacks the shared libs load_inline needs, so
+            # we use the Buck-prebuilt fixture instead of the load_inline argument.
+            mod = _pybind11_enum_test
+        else:
+            cpp_source = """
+            #include <torch/extension.h>
 
-        enum class E { A = 0, B = 1 };
+            enum class E { A = 0, B = 1 };
 
-        PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-            py::enum_<E>(m, "E")
-                .value("A", E::A)
-                .value("B", E::B);
-        }
-        """
-        mod = load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
+            PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+                py::enum_<E>(m, "E")
+                    .value("A", E::A)
+                    .value("B", E::B);
+            }
+            """
+            mod = load_inline(name="pybind11_enum_test", cpp_sources=cpp_source)
         e = mod.E.A
         self.assertEqual(
             torch.compile(lambda x: int(x), backend="eager", fullgraph=True)(e), 0
@@ -15948,6 +15957,344 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(t)
         self.assertEqual(ref, res)
+
+    @parametrize(
+        "grad_mode_decorator",
+        ["no_grad", "enable_grad", "dual_level"],
+    )
+    def test_sourceless_bound_method_in_closure(self, grad_mode_decorator):
+        # Each case makes the decorator's state change observable.
+        if grad_mode_decorator == "no_grad":
+
+            class A:
+                @torch.no_grad()
+                def method(self, x):
+                    return x + 1
+
+            def fn(x):
+                return A().method(x)
+
+        elif grad_mode_decorator == "enable_grad":
+
+            class A:
+                @torch.enable_grad()
+                def method(self, x):
+                    return x + 1
+
+            def fn(x):
+                with torch.no_grad():
+                    return A().method(x)
+
+        else:
+
+            class A:
+                @torch.autograd.forward_ad.dual_level()
+                def method(self, x):
+                    return x + torch.autograd.forward_ad._current_level
+
+            def fn(x):
+                return A().method(x)
+
+        x = torch.tensor(1.0, requires_grad=True)
+        ref = fn(x)
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        if grad_mode_decorator in ("no_grad", "enable_grad"):
+            self.assertEqual(ref.requires_grad, res.requires_grad)
+
+    def test_sourceless_bound_method_in_closure_set_grad_enabled_graph_breaks(self):
+        # set_grad_enabled.clone() is excluded because its constructor needs an arg.
+        class A:
+            @torch.set_grad_enabled(False)
+            def method(self, x):
+                return x + 1
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0, requires_grad=True)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(ref.requires_grad, res.requires_grad)
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+        )
+
+    @parametrize("mode", [True, False])
+    def test_sourceless_bound_method_in_closure_inference_mode_graph_breaks(self, mode):
+        # inference_mode.clone() needs a source to guard self.mode.
+        class A:
+            @torch.inference_mode(mode)
+            def method(self, x):
+                return x + 1
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0, requires_grad=True)
+        ref = fn(x)
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(torch.is_inference(ref), torch.is_inference(res))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+        )
+
+    def test_sourced_inference_mode_clone_guards_on_mode(self):
+        im = torch.inference_mode(True)
+
+        @im
+        def fn(x):
+            return x + 1
+
+        x = torch.tensor(1.0)
+
+        torch._dynamo.reset()
+        res1 = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.is_inference(res1), True)
+
+        im.mode = False
+        # No reset: the guard on im.mode must trigger recompilation.
+        res2 = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(torch.is_inference(res2), False)
+
+    def test_sourceless_generic_ctx_manager_with_usage_graph_breaks(self):
+        class MyCM:
+            def __init__(self):
+                self.entered = 0
+                self.exited = 0
+
+            def __enter__(self):
+                self.entered += 1
+                return self
+
+            def __exit__(self, *a):
+                self.exited += 1
+                return False
+
+        def make_method(cm):
+            local_cm = cm
+
+            def method(self, x):
+                with local_cm:
+                    return x + 1
+
+            return method
+
+        class A:
+            method = make_method(MyCM())
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        cm = A.method.__closure__[0].cell_contents
+        self.assertEqual((cm.entered, cm.exited), (1, 1))
+
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(ref, res)
+        self.assertEqual((cm.entered, cm.exited), (2, 2))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless context manager without mutation support",
+        )
+
+    def test_sourceless_generic_ctx_manager_method_call_graph_breaks(self):
+        class Counter:
+            def __init__(self):
+                self.log = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def rec(self, v):
+                self.log.append(v)
+                return len(self.log)
+
+        def make_method(counter):
+            local_counter = counter
+
+            def method(self, x):
+                return x + local_counter.rec(1)
+
+            return method
+
+        class A:
+            method = make_method(Counter())
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        counter = A.method.__closure__[0].cell_contents
+        self.assertEqual((ref.item(), counter.log), (2.0, [1]))
+
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual((res.item(), counter.log), (3.0, [1, 1]))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless context manager without mutation support",
+        )
+
+    def test_sourceless_decorator_ctx_manager_other_method_graph_breaks(self):
+        class MyCM(torch.utils._contextlib._DecoratorContextManager):
+            def __init__(self):
+                self.log = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def rec(self, v):
+                self.log.append(v)
+                return len(self.log)
+
+        def make_method(bound):
+            local_bound = bound
+
+            def method(self, x):
+                return x + local_bound(1)
+
+            return method
+
+        class A:
+            method = make_method(MyCM().rec)
+
+        def fn(x):
+            return A().method(x)
+
+        cm = A.method.__closure__[0].cell_contents.__self__
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        self.assertEqual((ref.item(), cm.log), (2.0, [1]))
+
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual((res.item(), cm.log), (3.0, [1, 1]))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+        )
+
+    def test_sourceless_decorator_ctx_manager_inherited_clone_graph_breaks(self):
+        class MyCM(torch.utils._contextlib._DecoratorContextManager):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def make_method(bound):
+            local_bound = bound
+
+            def method(self, x):
+                local_bound()
+                return x + 1
+
+            return method
+
+        class A:
+            method = make_method(MyCM().clone)
+
+        def fn(x):
+            return A().method(x)
+
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(ref, res)
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+        )
+
+    def test_sourceless_decorator_ctx_manager_mutating_method_graph_breaks(self):
+        class MyCM(torch.utils._contextlib._DecoratorContextManager):
+            def __init__(self):
+                self.n = 0
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def bump(self):
+                self.n = self.n + 1
+                return self.n
+
+        def make_method(bound):
+            local_bound = bound
+
+            def method(self, x):
+                return x + local_bound()
+
+            return method
+
+        class A:
+            method = make_method(MyCM().bump)
+
+        def fn(x):
+            return A().method(x)
+
+        cm = A.method.__closure__[0].cell_contents.__self__
+        x = torch.tensor(1.0)
+        ref = fn(x)
+        self.assertEqual((ref.item(), cm.n), (2.0, 1))
+
+        torch._dynamo.reset()
+        res = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual((res.item(), cm.n), (3.0, 2))
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.Unsupported) as ctx:
+            torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(
+            ctx.exception.gb_type,
+            "Sourceless _DecoratorContextManager method reconstruction unsupported",
+        )
 
     def test_inspect_signature_parameters(self):
         import inspect

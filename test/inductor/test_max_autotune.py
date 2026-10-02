@@ -43,6 +43,10 @@ from torch._inductor.autotune_process import (
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
 from torch._inductor.heuristics.registry import override_template_heuristics
+from torch._inductor.heuristics.template.decompose_k import (
+    decompose_k_split_bounds,
+    filter_decompose_k_splits,
+)
 from torch._inductor.heuristics.template.triton import (
     BlackwellGPUGemmConfig,
     CUDAAddmmPersistentTMATemplateConfigHeuristic,
@@ -90,8 +94,8 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.utils._triton import (
     has_datacenter_blackwell_tma_device,
+    has_triton_cuda_tma_device,
     has_triton_stable_tma_api,
-    has_triton_tma_device,
 )
 
 
@@ -250,7 +254,7 @@ class TestMaxAutotune(TestCase):
                 )
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -564,7 +568,7 @@ class TestMaxAutotune(TestCase):
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     def test_max_autotune_persistent_tma_workspace_reuse(self):
         """
@@ -639,7 +643,7 @@ class TestMaxAutotune(TestCase):
             mm_heuristic.mm_configs = original_mm_configs
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     def test_workspace_size_bytes_accounts_for_dtype(self):
         """workspace_size passed to benchmark request must be in bytes, not elements."""
@@ -708,7 +712,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(size, expected_bytes)
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -775,7 +779,7 @@ class TestMaxAutotune(TestCase):
         FileCheck().check("triton_tem_fused_mm").check(check_str).run(code[0])
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @skipIfXpu(msg="Covered by XPU TMA")
     @parametrize("dynamic", (False, True))
@@ -806,7 +810,7 @@ class TestMaxAutotune(TestCase):
         self.assertIn("NoValidChoicesError", str(context.exception))
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @parametrize("dynamic", (False, True))
     def test_max_autotune_regular_mm_persistent_tma_illegal_output_alignment(
@@ -843,7 +847,7 @@ class TestMaxAutotune(TestCase):
         self.assertIn("NoValidChoicesError", str(context.exception))
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     def test_max_autotune_regular_mm_tma_dynamic_outer_dim(self):
         def mm(a, b):
@@ -881,7 +885,7 @@ class TestMaxAutotune(TestCase):
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -991,7 +995,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual((100,), extern_bias_shape)
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(),
@@ -1076,7 +1080,7 @@ class TestMaxAutotune(TestCase):
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @skipIfXpu(msg="Covered by XPU TMA")
     @parametrize("dynamic", (False, True))
@@ -1108,7 +1112,7 @@ class TestMaxAutotune(TestCase):
         self.assertIn("NoValidChoicesError", str(context.exception))
 
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     def test_max_autotune_addmm_tma_dynamic_outer_dim(self):
         def addmm(x, a, b):
@@ -1152,7 +1156,7 @@ class TestMaxAutotune(TestCase):
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support sm carveout")
     @unittest.skipIf(IS_WINDOWS, "Windows doesn't support persistent TMA")
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_cuda_tma_device(), "Need device-side TMA support in Triton"
     )
     @unittest.skipIf(
         has_datacenter_blackwell_tma_device(), "B200 doesn't support sm carveout"
@@ -1995,7 +1999,7 @@ class TestMaxAutotune(TestCase):
         {
             "max_autotune": True,
             "max_autotune_gemm_backends": "TRITON",
-            "triton.decompose_k_min_output_tile_size": 64,
+            "triton.decompose_k_min_output_ctas": 64,
         }
     )
     def test_max_autotune_decompose_k_dynamic_input(self):
@@ -2025,9 +2029,9 @@ class TestMaxAutotune(TestCase):
                     "torch._inductor.kernel.mm.use_decompose_k_choice"
                 ) as decomp_mock,
                 mock.patch(
-                    "torch._inductor.heuristics.template.decompose_k.get_k_splits",
-                    wraps=get_k_splits,
-                ) as get_k_splits_mock,
+                    "torch._inductor.heuristics.template.decompose_k.filter_decompose_k_splits",
+                    wraps=filter_decompose_k_splits,
+                ) as filter_mock,
             ):
                 decomp_mock.side_effect = (
                     lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
@@ -2045,11 +2049,12 @@ class TestMaxAutotune(TestCase):
                     atol=1e-4,
                     rtol=1e-4,
                 )
-                self.assertTrue(get_k_splits_mock.called)
+                # Only the weight-gradient mm (32768x64 output) has static M and N.
+                # The forward mm's M is symbolic, so it keeps the unfiltered splits.
                 self.assertTrue(
                     all(
-                        "min_k_split" not in call.kwargs
-                        for call in get_k_splits_mock.call_args_list
+                        call.args[1:3] == (32768, 64)
+                        for call in filter_mock.call_args_list
                     )
                 )
 
@@ -2892,7 +2897,8 @@ class TestMaxAutotune(TestCase):
                 {
                     "triton.num_decompose_k_splits": num_decompose_k_splits,
                     "triton.decompose_k_threshold": decompose_k_threshold,
-                    "triton.decompose_k_min_output_tile_size": 0,
+                    "triton.decompose_k_min_output_ctas": 0,
+                    "triton.decompose_k_max_workspace_bytes": 0,
                 }
             ):
                 compiled_func = torch.compile(lambda a, b: a @ b)
@@ -2917,23 +2923,27 @@ class TestMaxAutotune(TestCase):
 
     @config.patch(
         {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "autotune_fallback_to_aten": False,
             "triton.num_decompose_k_splits": 10,
             "triton.decompose_k_threshold": 8,
-            "triton.decompose_k_min_output_tile_size": 64,
+            "triton.decompose_k_min_output_ctas": 16,
+            "triton.decompose_k_max_workspace_bytes": 128 * 1024,
         }
     )
-    def test_decompose_k_min_output_tile_size(self):
+    def test_decompose_k_split_filter_choices(self):
         M, N, K = 32, 32, 32768
         get_k_splits.cache_clear()
+        use_decompose_k_choice.cache_clear()
         a = torch.randn(M, K, dtype=torch.float16, device=GPU_TYPE)
         b = torch.randn(K, N, dtype=torch.float16, device=GPU_TYPE)
 
-        device_properties = DeviceProperties.create(torch.device(GPU_TYPE))
-        output_ctas = 2 * ((M + 63) // 64) * ((N + 63) // 64)
-        min_k_split = (
-            device_properties.multi_processor_count + output_ctas - 1
-        ) // output_ctas
-        expected_splits = get_k_splits(M, N, K, min_k_split=min_k_split)
+        # One output tile needs split >= 16; a 128 KiB workspace allows split <= 32.
+        expected_splits = filter_decompose_k_splits(
+            get_k_splits(M, N, K), M, N, 16, 128 * 1024
+        )
+        self.assertEqual(expected_splits, [16, 32])
 
         compiled_func = torch.compile(lambda a, b: a @ b)
         _, code = run_and_get_code(compiled_func, a, b)
@@ -2942,31 +2952,52 @@ class TestMaxAutotune(TestCase):
         )
         self.assertEqual(decompose_count, len(expected_splits))
 
-    @config.patch(
-        {
-            "triton.num_decompose_k_splits": 10,
-            "triton.decompose_k_min_output_tile_size": 0,
-            "max_autotune_gemm_search_space": "DEFAULT",
-        }
-    )
-    def test_decompose_k_filters_underfilled_splits(self):
-        get_k_splits.cache_clear()
-        with config.patch(max_autotune_gemm_search_space="EXHAUSTIVE"):
-            all_splits = get_k_splits(80, 72, 1_343_232)
+    def test_filter_decompose_k_splits(self):
+        splits = [2, 4, 8, 16, 32]
+        # 16x16 is one 64x64 output tile.
+        self.assertEqual(filter_decompose_k_splits(splits, 16, 16, 8, 0), [8, 16, 32])
+        # 1024x1024 FP32 partials take 4 MiB per split.
+        self.assertEqual(
+            filter_decompose_k_splits(splits, 1024, 1024, 0, 8 * 1024 * 1024), [2]
+        )
+        self.assertEqual(filter_decompose_k_splits(splits, 16, 16, 0, 0), splits)
+        # Never filter every split away.
+        self.assertEqual(filter_decompose_k_splits(splits, 16, 16, 1000, 0), [32])
+        self.assertEqual(filter_decompose_k_splits(splits, 1024, 1024, 0, 1), [2])
+        self.assertEqual(filter_decompose_k_splits([], 16, 16, 8, 0), [])
 
-        get_k_splits.cache_clear()
-        candidates = get_k_splits(80, 72, 1_343_232, min_k_split=19)
-        self.assertEqual(candidates, [s for s in all_splits if s >= 19][:10])
-        self.assertIn(72, candidates)
+    def test_decompose_k_split_bounds(self):
+        device = torch.device(GPU_TYPE)
+        with config.patch(
+            {
+                "triton.decompose_k_min_output_ctas": 3,
+                "triton.decompose_k_max_workspace_bytes": 0,
+            }
+        ):
+            self.assertEqual(decompose_k_split_bounds(device), (3, 0))
 
-        get_k_splits.cache_clear()
-        self.assertEqual(get_k_splits(64, 64, 5248, min_k_split=74), [])
+        def bounds_for(device_type, major, multi_processor_count, hip=None):
+            props = mock.Mock(
+                type=device_type,
+                major=major,
+                multi_processor_count=multi_processor_count,
+            )
+            with (
+                config.patch(
+                    {
+                        "triton.decompose_k_min_output_ctas": None,
+                        "triton.decompose_k_max_workspace_bytes": None,
+                    }
+                ),
+                mock.patch.object(DeviceProperties, "create", return_value=props),
+                mock.patch("torch.version.hip", hip),
+            ):
+                return decompose_k_split_bounds(device)
 
-        get_k_splits.cache_clear()
-        self.assertEqual(get_k_splits(256, 128, 11_091_857, min_k_split=10), [])
-
-        get_k_splits.cache_clear()
-        self.assertIn(587, get_k_splits(256, 128, 10_954_007, min_k_split=10))
+        self.assertEqual(bounds_for("cuda", 10, 148), (74, 0))
+        self.assertEqual(bounds_for("cuda", 9, 132), (8, 8 * 1024 * 1024))
+        self.assertEqual(bounds_for("cuda", 9, 304, hip="6.4"), (0, 0))
+        self.assertEqual(bounds_for("xpu", None, 64), (0, 0))
 
     @unittest.skipIf(
         config.triton.native_matmul,
@@ -4026,7 +4057,7 @@ class TestTemplateConfigPruning(TestCase):
     ):
         """Test shared memory pruning for addmm operation."""
 
-        if use_tma and (dtype == torch.float32 or not has_triton_tma_device()):
+        if use_tma and (dtype == torch.float32 or not has_triton_cuda_tma_device()):
             return
 
         def addmm_op(bias, mat1, mat2):
@@ -4073,7 +4104,7 @@ class TestTemplateConfigPruning(TestCase):
         mat2_transposed: bool,
         use_tma: bool,
     ):
-        if use_tma and (dtype == torch.float32 or not has_triton_tma_device()):
+        if use_tma and (dtype == torch.float32 or not has_triton_cuda_tma_device()):
             return
 
         def mm_op(mat1, mat2):
@@ -5725,7 +5756,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         finally:
             mm_heuristic.mm_configs = original_mm_configs
 
-    @unittest.skipIf(not has_triton_tma_device(), "Need TMA support in Triton")
+    @unittest.skipIf(not has_triton_cuda_tma_device(), "Need TMA support in Triton")
     @skipIfXpu(msg="Bad tma config can be covered by XPU TMA")
     @unittest.skipIf(
         config.cpp_wrapper, "Skip static analysis codegen checks on cpp_wrapper"

@@ -4,6 +4,7 @@ from typing import Any, TYPE_CHECKING
 
 import sympy
 
+import torch
 from torch._inductor import config
 from torch._inductor.heuristics.registry import register_template_heuristic
 
@@ -19,6 +20,59 @@ from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 
 if TYPE_CHECKING:
     from collections.abc import Generator
+
+
+def decompose_k_split_bounds(device: torch.device) -> tuple[int, int]:
+    """Return (min_output_ctas, max_workspace_bytes) for decompose-K splits.
+
+    Unset config values use per-device defaults tuned on B200 (SM100) and H100.
+    """
+    min_output_ctas = config.triton.decompose_k_min_output_ctas
+    max_workspace_bytes = config.triton.decompose_k_max_workspace_bytes
+    if min_output_ctas is not None and max_workspace_bytes is not None:
+        return min_output_ctas, max_workspace_bytes
+
+    device_properties = DeviceProperties.create(device)
+    is_nvidia = device_properties.type == "cuda" and torch.version.hip is None
+    is_sm100_or_newer = is_nvidia and (device_properties.major or 0) >= 10
+    if min_output_ctas is None:
+        if not is_nvidia:
+            min_output_ctas = 0
+        elif is_sm100_or_newer:
+            min_output_ctas = (device_properties.multi_processor_count + 1) // 2
+        else:
+            min_output_ctas = 8
+    if max_workspace_bytes is None:
+        max_workspace_bytes = (
+            8 * 1024 * 1024 if is_nvidia and not is_sm100_or_newer else 0
+        )
+    return min_output_ctas, max_workspace_bytes
+
+
+def filter_decompose_k_splits(
+    k_splits: list[int],
+    m: int,
+    n: int,
+    min_output_ctas: int,
+    max_workspace_bytes: int,
+) -> list[int]:
+    """Drop split choices that rarely win: too few output CTAs or a large workspace.
+
+    Only removes candidates, and never all of them.
+    """
+    fits = [
+        split
+        for split in k_splits
+        if max_workspace_bytes <= 0 or split * m * n * 4 <= max_workspace_bytes
+    ]
+    output_tiles = ((m + 63) // 64) * ((n + 63) // 64)
+    kept = [split for split in fits if split * output_tiles >= min_output_ctas]
+    if kept:
+        return kept
+    # Keep the split closest to both bounds rather than dropping decompose-K.
+    if fits:
+        return [max(fits)]
+    return [min(k_splits)] if k_splits else []
 
 
 @register_template_heuristic(decompose_k_subgraph_template.uid, None, op_name="mm")
@@ -65,24 +119,16 @@ class DecomposeKConfigHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             return
 
         m, n, k = kernel_inputs.mnk_symbolic()
-        output_tile_size = config.triton.decompose_k_min_output_tile_size
+        k_splits = get_k_splits(m, n, k)
         m_is_static = not isinstance(m, sympy.Expr) or bool(m.is_number)
         n_is_static = not isinstance(n, sympy.Expr) or bool(n.is_number)
-        if output_tile_size > 0 and m_is_static and n_is_static:
-            device_properties = DeviceProperties.create(kernel_inputs.device())
-            m_hint = int(m)
-            n_hint = int(n)
-            output_ctas = (
-                2
-                * ((m_hint + output_tile_size - 1) // output_tile_size)
-                * ((n_hint + output_tile_size - 1) // output_tile_size)
+        if m_is_static and n_is_static:
+            min_output_ctas, max_workspace_bytes = decompose_k_split_bounds(
+                kernel_inputs.device()
             )
-            min_k_split = (
-                device_properties.multi_processor_count + output_ctas - 1
-            ) // output_ctas
-            k_splits = get_k_splits(m, n, k, min_k_split=min_k_split)
-        else:
-            k_splits = get_k_splits(m, n, k)
+            k_splits = filter_decompose_k_splits(
+                k_splits, int(m), int(n), min_output_ctas, max_workspace_bytes
+            )
 
         for k_split in k_splits:
             if not V.graph.sizevars.statically_known_true(

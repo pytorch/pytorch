@@ -360,9 +360,80 @@ class TestExportJobs(unittest.TestCase):
                     export.export_point("fakeop", "aot_kernel.py", {}, "/tmp")
 
     def test_pool_preload_stays_fork_safe(self):
-        # The forkserver's server process is the fork parent, so only modules inert
-        # there may be preloaded: cutlass or triton would build state workers inherit.
-        self.assertEqual(export.POOL_PRELOAD, ("torch",))
+        # CPython gh-117378 was not backported below 3.12.
+        for version, expected in (
+            ((3, 10, 20), ()),
+            ((3, 11, 14), ()),
+            ((3, 12, 7), ()),
+            ((3, 12, 8), ("torch",)),
+            ((3, 13, 0), ()),
+            ((3, 13, 1), ("torch",)),
+            ((3, 14, 0), ("torch",)),
+            ((3, 15, 0), ("torch",)),
+        ):
+            with self.subTest(version=version):
+                self.assertEqual(export._pool_preload(version), expected)
+        self.assertEqual(
+            export.POOL_PRELOAD, export._pool_preload(sys.version_info[:3])
+        )
+
+    def test_pool_preload_ignores_source_torch(self):
+        # The forkserver starts with `python -c` from REPO, putting the checkout
+        # before PYTHONPATH. Its preload helper must still import the installed torch.
+        with tempfile.TemporaryDirectory() as d:
+            installed = os.path.join(d, "site-packages")
+            os.makedirs(os.path.join(installed, "torch"))
+            with open(os.path.join(installed, "torch", "__init__.py"), "w") as f:
+                f.write("ORIGIN = 'installed'\n")
+            probe = os.path.join(d, "probe.py")
+            with open(probe, "w") as f:
+                f.write(
+                    """
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
+
+from tools.native_aot import export
+
+
+def torch_origin():
+    import torch
+
+    return torch.ORIGIN
+
+
+if __name__ == "__main__":
+    ctx = multiprocessing.get_context(export.POOL_START_METHOD)
+    ctx.set_forkserver_preload(list(export.POOL_PRELOAD))
+    with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
+        print("ORIGIN=" + pool.submit(torch_origin).result())
+"""
+                )
+            env = dict(os.environ)
+            env["PYTHONPATH"] = os.pathsep.join(
+                part for part in (installed, REPO, env.get("PYTHONPATH")) if part
+            )
+            proc = subprocess.run(
+                [sys.executable, probe],
+                cwd=REPO,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
+            self.assertIn("ORIGIN=installed", proc.stdout)
+
+    def test_builder_import_error_is_not_misreported_as_missing_runtime(self):
+        with mock.patch.object(
+            export, "load_builder", side_effect=ImportError("torch import failed")
+        ):
+            with self.assertRaisesRegex(RuntimeError, "builder import failed"):
+                export.export_point("fakeop", "aot_kernel.py", {}, "/tmp")
+
+        missing = ModuleNotFoundError("No module named 'cutlass'", name="cutlass")
+        with mock.patch.object(export, "load_builder", side_effect=missing):
+            with self.assertRaisesRegex(RuntimeError, "DSL runtime not installed"):
+                export.export_point("fakeop", "aot_kernel.py", {}, "/tmp")
 
     def test_json_normal_matches_sidecar_round_trip(self):
         # It stands in for a json.dumps/loads pair, so any divergence makes a spec
@@ -2600,6 +2671,8 @@ class TestShouldRun(unittest.TestCase):
         # Free-threaded is not the question; a published tag is.
         for version, ft in (
             ((3, 10), False),
+            ((3, 11), False),
+            ((3, 12), False),
             ((3, 13), False),
             ((3, 14), False),
             ((3, 14), True),
@@ -4323,6 +4396,15 @@ class TestCiAndCMakeWiring(unittest.TestCase):
         # Same single owner of the install decision as .ci/pytorch/build.sh.
         self.assertIn("--print-verdict", block)
         self.assertIn("install_cutlass_dsl", block)
+
+    def test_cutlass_installer_does_not_override_stage_two_verdict(self):
+        text = self._read(".ci/pytorch/common_utils.sh")
+        block = text[text.index("function install_cutlass_dsl()") :]
+        block = block[: block.index("\n}\n") + 3]
+        self.assertNotIn("return 0", block)
+        self.assertNotIn("Skipping CUTLASS DSL install", block)
+        self.assertIn("nvidia-cutlass-dsl[cu13]==4.6.2", block)
+        self.assertIn("apache-tvm-ffi==0.1.11", block)
 
     def test_the_verdict_word_the_shells_compare_is_the_one_stage_two_prints(self):
         # Both shells install the DSL wheels only when stage 2 says RUN, comparing with

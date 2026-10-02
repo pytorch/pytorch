@@ -930,9 +930,9 @@ void ProcessReduceNode(Node* n) {
       std::iota(axes_vector.begin(), axes_vector.end(), 0);
     }
 
-    for (auto idx : c10::irange(axes_vector.size())) {
-      if (axes_vector[idx] < 0) {
-        axes_vector[idx] += rank_0;
+    for (auto& axis : axes_vector) {
+      if (axis < 0) {
+        axis += rank_0;
       }
     }
     final_shape.reserve(rank_0);
@@ -1479,9 +1479,9 @@ void ComputeConstant(Node* n, int opset_version) {
           const auto& input0_shape_value = input0_shape_size.value();
           int64_t total_size = 1;
           auto is_full_static = true;
-          for (const auto i : c10::irange(input0_shape_value.size())) {
-            if (input0_shape_value[i].is_static()) {
-              total_size *= input0_shape_value[i].static_size();
+          for (const auto& shape_symbol : input0_shape_value) {
+            if (shape_symbol.is_static()) {
+              total_size *= shape_symbol.static_size();
             } else {
               is_full_static = false;
               break;
