@@ -156,10 +156,29 @@ flex_decoding_template = TritonTemplate(
 
 
 def get_split_k(B: int, H: int, Mk: int) -> int:
-    if torch.xpu.is_available():
-        num_SM = torch.xpu.get_device_properties("xpu").gpu_subslice_count
+    from torch._utils import _get_device_module
+
+    acc = torch._C._accelerator_getAccelerator()
+    device_type = acc.type if acc is not None else "cpu"
+    dev = _get_device_module(device_type)
+
+    if device_type == "xpu":
+        num_SM = dev.get_device_properties(device_type).gpu_subslice_count
+    elif device_type == "cuda":
+        num_SM = dev.get_device_properties(device_type).multi_processor_count
     else:
-        num_SM = torch.cuda.get_device_properties("cuda").multi_processor_count
+        try:
+            props = dev.get_device_properties(device_type)
+            num_SM = getattr(props, "multi_processor_count", None)
+        except (AttributeError, RuntimeError):
+            num_SM = None
+        if num_SM is None:
+            log.warning(
+                "get_split_k: cannot probe num_SM for device type %r; "
+                "falling back to a default of 32",
+                device_type,
+            )
+            num_SM = 32
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
     if not isinstance(bh, (int, sympy.Integer)):
         raise AssertionError("B and H must be concrete integers")
