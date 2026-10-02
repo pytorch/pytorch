@@ -6147,6 +6147,46 @@ for dtype in (torch.int32, torch.int64):
         )
 
     @requires_gpu()
+    @parametrize(
+        "size,view",
+        ((2, "reshape"), (64, "transpose"), (64, "slice")),
+    )
+    def test_to_device_constant_view(self, size, view):
+        def fn(x):
+            src_device = GPU_TYPE if x.device.type == "cpu" else "cpu"
+            const = torch.tensor(
+                list(range(size)), dtype=torch.float32, device=src_device
+            )
+            if view == "reshape":
+                const = const.view(-1, 2)
+            elif view == "transpose":
+                const = const.view(-1, 2).t()
+            else:
+                const = const[1:]
+            return const.to(x), const
+
+        self.common(
+            fn,
+            (torch.empty(0),),
+            assert_equal=functools.partial(TestCase.assertEqual, exact_device=True),
+        )
+
+    @skip_if_cpu
+    def test_to_device_constant_view_slice_assignment(self):
+        def fn(x):
+            center = torch.tensor([256, 256], dtype=torch.float32).view(1, 2)
+            center = (center / 2.0 - 0.5).expand(x.shape[0], -1)
+            matrix = torch.eye(3, device=x.device).repeat(x.shape[0], 1, 1)
+            matrix[:, :2, 2] = center.to(x)
+            return matrix, center
+
+        self.common(
+            fn,
+            (torch.empty(3),),
+            assert_equal=functools.partial(TestCase.assertEqual, exact_device=True),
+        )
+
+    @requires_gpu()
     def test_to_copy_fp64_to_no_fp64_device(self):
         # See https://github.com/pytorch/pytorch/issues/180664
         # When the target device does not support fp64, _to_copy should

@@ -4240,6 +4240,9 @@ class ReinterpretView(BaseView):
     def get_name(self) -> str:
         return self.data.get_name()
 
+    def get_read_names(self) -> OrderedSet[str]:
+        return OrderedSet([self.get_name()])
+
     def get_device(self) -> torch.device | None:
         return self.layout.device
 
@@ -4259,7 +4262,10 @@ class ReinterpretView(BaseView):
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         def loader(index: Sequence[Expr]) -> OpsValue:
             indexer = self.layout.make_indexer()
-            tmp_loader = ops.load(self.get_name(), indexer(index))
+            name = self.get_name()
+            if name in V.graph.constants:
+                name = V.graph.constant_name(name, ConstantBuffer.override_device)
+            tmp_loader = ops.load(name, indexer(index))
             if self.layout.dtype != self.data.dtype:
                 return ops.to_dtype_bitcast(tmp_loader, self.dtype, self.data.dtype)
             else:
