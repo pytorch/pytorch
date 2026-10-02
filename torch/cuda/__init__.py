@@ -2244,7 +2244,7 @@ __all__ = [
     "memory_summary",
     "memory_usage",
     "MemPool",
-    "LocalizedMemPool",
+    "LocalizedAllocator",
     "use_mem_pool",
     "temperature",
     "power_draw",

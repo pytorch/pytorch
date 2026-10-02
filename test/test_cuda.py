@@ -21,7 +21,7 @@ from collections import defaultdict
 from copy import deepcopy
 from itertools import product
 from random import randint
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import psutil
 
@@ -12964,31 +12964,46 @@ finally:
         self.assertGreater(limited_time, baseline_time)
 
 
-class TestLocalizedMemPool(TestCase):
+class TestLocalizedAllocator(TestCase):
     def _require_localization(self, device: str) -> None:
         from torch.cuda.green_contexts import is_localization_supported
 
         torch.cuda.init()
         if not is_localization_supported(torch.device(device).index):
             self.skipTest("requires CUDA 13.4 and a multi-domain GPU")
+        if torch.cuda.get_allocator_backend() != "native":
+            self.skipTest("requires the native caching allocator")
 
     @parametrize("no_split", [False, True])
     @serialTest()
     def test_localized_allocation(self, device: str, no_split: bool) -> None:
+        from torch.cuda._utils import _check_cuda_bindings, _cuda_bindings_driver as drv
         from torch.cuda.green_contexts import get_num_locality_domains
 
         self._require_localization(device)
         device_id = torch.device(device).index
-        if torch.cuda.get_allocator_backend() != "native":
-            self.skipTest("requires the native caching allocator")
         for domain in range(get_num_locality_domains(device_id)):
-            pool = torch.cuda.LocalizedMemPool(domain, device=device, no_split=no_split)
-            self.assertEqual(pool.device_id, device_id)
-            self.assertEqual(pool.locality_domain_id, domain)
+            allocator = torch.cuda.LocalizedAllocator(domain, device=device)
+            pool = torch.cuda.MemPool(allocator.allocator(), no_split=no_split)
+            self.assertEqual(allocator.device_id, device_id)
+            self.assertEqual(allocator.locality_domain_id, domain)
             with torch.cuda.use_mem_pool(pool, device=device):
                 value = torch.full((1024,), 7, device=device)
             self.assertEqual(value, torch.full_like(value, 7))
             ptr = value.data_ptr()
+            handle = _check_cuda_bindings(drv.cuMemRetainAllocationHandle(ptr))
+            try:
+                prop = _check_cuda_bindings(
+                    drv.cuMemGetAllocationPropertiesFromHandle(handle)
+                )
+                self.assertEqual(
+                    prop.location.type,
+                    drv.CUmemLocationType.CU_MEM_LOCATION_TYPE_DEVICE_LOCALITY_DOMAIN,
+                )
+                self.assertEqual(prop.location.localized.deviceId, device_id)
+                self.assertEqual(prop.location.localized.localityDomainId, domain)
+            finally:
+                _check_cuda_bindings(drv.cuMemRelease(handle))
             del value
             with torch.cuda.use_mem_pool(pool, device=device):
                 reused = torch.empty(1024, device=device)
@@ -13003,10 +13018,102 @@ class TestLocalizedMemPool(TestCase):
         device_id = torch.device(device).index
         for domain in (-1, get_num_locality_domains(device_id)):
             with self.assertRaisesRegex(ValueError, "Invalid locality_domain_id"):
-                torch.cuda.LocalizedMemPool(domain, device=device)
+                torch.cuda.LocalizedAllocator(domain, device=device)
+
+    @serialTest()
+    def test_tensor_outlives_pool_and_allocator(self, device: str) -> None:
+        self._require_localization(device)
+        allocator = torch.cuda.LocalizedAllocator(0, device=device)
+        allocator_ref = weakref.ref(allocator)
+        owner_ref = weakref.ref(allocator._localized_allocator)
+        pool = torch.cuda.MemPool(allocator.allocator())
+        with torch.cuda.use_mem_pool(pool, device=device):
+            value = torch.full((1024,), 7, device=device)
+        ptr = value.data_ptr()
+        del pool, allocator
+        gc.collect()
+        self.assertIsNone(allocator_ref())
+        self.assertIsNotNone(owner_ref())
+        self.assertEqual(value, torch.full_like(value, 7))
+        del value
+        gc.collect()
+        torch.cuda.empty_cache()
+        self.assertNotIn(ptr, owner_ref()._records)
+
+    @serialTest()
+    def test_reclamation_waits_for_allocation_stream(self, device: str) -> None:
+        self._require_localization(device)
+        allocator = torch.cuda.LocalizedAllocator(0, device=device)
+        owner = allocator._localized_allocator
+        pool = torch.cuda.MemPool(allocator.allocator())
+        stream = torch.cuda.Stream(device=device)
+        pending = torch.cuda.Event()
+        settings = torch.cuda.memory._snapshot()["allocator_settings"]
+        config = settings["PYTORCH_CUDA_ALLOC_CONF"]
+        allocate = owner.allocate
+        free = owner.free
+        attempts = 0
+        reclaimed = []
+
+        def fail_once(size: int, device_id: int, raw_stream: int | None) -> int:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                return 0
+            return allocate(size, device_id, raw_stream)
+
+        def check_free(ptr: int, raw_stream: int | None) -> None:
+            before = pending.query()
+            free(ptr, raw_stream)
+            reclaimed.append((before, pending.query(), raw_stream))
+
+        try:
+            torch._C._accelerator_setAllocatorSettings(
+                "expandable_segments:False,max_split_size_mb:32"
+            )
+            with torch.cuda.stream(stream):
+                observed = torch.empty(1, dtype=torch.uint8, device=device)
+                with torch.cuda.use_mem_pool(pool, device=device):
+                    value = torch.empty(
+                        40 * 1024 * 1024, dtype=torch.uint8, device=device
+                    )
+                    torch.cuda._sleep(1)
+                    stream.synchronize()
+                    torch.cuda._sleep(1_000_000_000)
+                    value.fill_(7)
+                    observed.copy_(value[:1])
+                    pending.record(stream)
+                    del value
+                    # Force allocation retry to reclaim the oversized cached
+                    # block while its allocation stream still has queued work.
+                    with (
+                        patch.object(owner, "allocate", side_effect=fail_once),
+                        patch.object(owner, "free", side_effect=check_free),
+                    ):
+                        replacement = torch.empty(
+                            20 * 1024 * 1024, dtype=torch.uint8, device=device
+                        )
+                    self.assertEqual(reclaimed, [(False, True, stream.cuda_stream)])
+                    self.assertEqual(attempts, 2)
+                    del replacement
+            stream.synchronize()
+            self.assertEqual(observed, torch.full_like(observed, 7))
+        finally:
+            stream.synchronize()
+            torch._C._accelerator_setAllocatorSettings(config)
 
 
-class TestLocalizedMemPoolAllocator(TestCase):
+class TestLocalizedAllocatorCallbacks(TestCase):
+    @parametrize("domain", [False, True, 0.0, 1.5, "0", None])
+    def test_noninteger_domain(self, domain: object) -> None:
+        from torch.cuda import memory
+
+        with patch.object(memory, "_lazy_init") as init:
+            for cls in (memory.LocalizedAllocator, memory._DomainLocalityAllocator):
+                with self.assertRaisesRegex(ValueError, "must be an integer"):
+                    cls(domain)  # pyrefly: ignore [bad-argument-type]
+            init.assert_not_called()
+
     def test_initialization_before_support_check(self) -> None:
         from torch.cuda import memory
 
@@ -13040,6 +13147,7 @@ class TestLocalizedMemPoolAllocator(TestCase):
         allocator._records = {}
         with (
             patch.object(memory, "_drv") as driver,
+            patch("torch.cuda.device"),
             patch.object(
                 memory, "_check_cuda_bindings", side_effect=lambda result: result
             ),
@@ -13061,8 +13169,13 @@ class TestLocalizedMemPoolAllocator(TestCase):
                 self.assertEqual(prop.location.localized.deviceId, 0)
                 self.assertEqual(prop.location.localized.localityDomainId, 1)
                 self.assertEqual(allocator._records, {1024: (128, 11)})
-                allocator.free(1024)
+                allocator.free(1024, 7)
                 self.assertEqual(allocator._records, {})
+                driver.cuStreamSynchronize.assert_called_once_with(7)
+                self.assertLess(
+                    driver.mock_calls.index(call.cuStreamSynchronize(7)),
+                    driver.mock_calls.index(call.cuMemUnmap(1024, 128)),
+                )
                 unmap = address_free = release = True
             if unmap:
                 driver.cuMemUnmap.assert_called_once_with(1024, 128)
@@ -13089,8 +13202,8 @@ class TestLocalizedMemPoolAllocator(TestCase):
             driver.cuMemCreate.assert_not_called()
 
 
-instantiate_parametrized_tests(TestLocalizedMemPoolAllocator)
-instantiate_device_type_tests(TestLocalizedMemPool, globals(), only_for="cuda")
+instantiate_parametrized_tests(TestLocalizedAllocatorCallbacks)
+instantiate_device_type_tests(TestLocalizedAllocator, globals(), only_for="cuda")
 
 
 class TestCudaArchList(TestCase):
