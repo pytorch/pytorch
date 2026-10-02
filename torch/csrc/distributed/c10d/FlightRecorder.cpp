@@ -139,6 +139,15 @@ std::string dump_fr_trace(
       onlyActive);
 }
 
+c10::Dict<c10::IValue, c10::IValue> dump_fr_trace_dict(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive,
+    const std::string& backend) {
+  return getFlightRecorder(backend)->dump_dict(
+      std::nullopt, includeCollectives, includeStackTraces, onlyActive);
+}
+
 std::string dump_fr_trace_json(
     bool includeCollectives,
     bool onlyActive,
