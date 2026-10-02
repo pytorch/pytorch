@@ -469,8 +469,23 @@ struct CachingHostAllocatorImpl {
     if (!allocated_during_capture) {
       // Event recording must be done outside the mutex to avoid potential
       // deadlocks (e.g., when Python GIL is involved)
-      for (auto stream : streams) {
-        record_stream(events, stream);
+      //
+      // free() is reached from ~StorageImpl, so a throw here would cross a
+      // noexcept destructor and terminate. Leaving event_count_ elevated
+      // retires the block permanently, as the capture path below also does.
+      try {
+        for (auto stream : streams) {
+          record_stream(events, stream);
+        }
+      } catch ([[maybe_unused]] const std::exception& e) {
+        TORCH_WARN_ONCE(
+            "Failed to record an event while freeing a pinned host block; "
+            "the block will not be reused: ",
+            e.what());
+      } catch (...) {
+        TORCH_WARN_ONCE(
+            "Failed to record an event while freeing a pinned host block; "
+            "the block will not be reused");
       }
     }
 
@@ -541,7 +556,16 @@ struct CachingHostAllocatorImpl {
       for (auto it = graph_pools_freeable_.begin(); it != graph_pools_freeable_.end();) {
         process_events(it->second->blocks, nullptr);
         free_from_pool(it->second->blocks);
-        if (it->second->blocks.blocks_.empty()) {
+        // blocks_ is guarded by blocks_mutex_, not instance_mutex_: a
+        // concurrent free() can be destroying this pool's last block
+        // (maybe_cache_block above pinned_max_cached_size). It releases
+        // blocks_mutex_ last, so seeing blocks_ empty means it is done with
+        // the pool.
+        bool no_blocks = [&] {
+          std::lock_guard<std::mutex> g(it->second->blocks.blocks_mutex_);
+          return it->second->blocks.blocks_.empty();
+        }();
+        if (no_blocks) {
           auto erase_count = graph_pools_.erase(it->first);
           TORCH_INTERNAL_ASSERT(erase_count == 1);
           it = graph_pools_freeable_.erase(it);
@@ -799,7 +823,8 @@ struct CachingHostAllocatorImpl {
       }
 
       if (available) {
-        auto& pool = pool_from_block(block);
+        // pool.events_ holds only blocks of pool, so skip pool_from_block():
+        // it takes instance_mutex_, which empty_cache() may hold exclusively.
         maybe_cache_block(block, pool, context);
         if (size != -1) {
           return;
@@ -838,7 +863,10 @@ struct CachingHostAllocatorImpl {
     auto index = size_index(size);
 
     if (size > pinned_max_cached_size()) {
-      std::scoped_lock lock(pool.free_list_[index].mutex_, pool.blocks_mutex_);
+      // empty_cache() erases a pool once blocks_ is empty, so blocks_mutex_
+      // must be released last.
+      std::lock_guard<std::mutex> gb(pool.blocks_mutex_);
+      std::lock_guard<std::mutex> gf(pool.free_list_[index].mutex_);
       destroy_block(block, pool, /*is_active=*/true);
     } else {
       std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
