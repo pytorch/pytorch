@@ -127,7 +127,7 @@ runs:
           --disable-slash-commands
           --strict-mcp-config
           --mcp-config '{"mcpServers":{}}'
-          --model global.anthropic.claude-sonnet-4-6
+          --model global.anthropic.claude-sonnet-5
           --effort low
           --max-turns 30
           --max-budget-usd 1.50
