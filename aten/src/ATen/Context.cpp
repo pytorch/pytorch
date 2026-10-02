@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <string>
 #include <string_view>
@@ -34,6 +35,21 @@ C10_DIAGNOSTIC_POP()
 #include <cpuinfo.h>
 #endif
 namespace at {
+
+namespace {
+
+std::atomic<bool> xnnpack_backend_available{false};
+
+} // namespace
+
+namespace native::xnnpack::internal {
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+TORCH_API void register_backend() {
+  xnnpack_backend_available.store(true, std::memory_order_relaxed);
+}
+
+} // namespace native::xnnpack::internal
 
 /*
   These const variables defined the fp32 precisions for different backend
@@ -835,7 +851,7 @@ at::QEngine Context::qEngine() const {
     qengine = at::kONEDNN;
 #endif
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && (defined(__x86_64__) || defined(_M_X64))
     if (fbgemm::fbgemmSupportedCPU()) {
       /* X86 is enabled if and only if fbgemm is available.
        * It combines goodness of fbgemm and onednn by dispatching.
@@ -874,7 +890,7 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
     engines.push_back(at::kONEDNN);
 #endif
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && (defined(__x86_64__) || defined(_M_X64))
     if (fbgemm::fbgemmSupportedCPU()) {
       engines.push_back(at::kX86);
       // The X86 qengine is available if and only if FBGEMM is available
@@ -888,11 +904,7 @@ const std::vector<at::QEngine>& Context::supportedQEngines() {
 }
 
 bool Context::isXNNPACKAvailable() {
-#ifdef USE_XNNPACK
-  return true;
-#else
-  return false;
-#endif
+  return xnnpack_backend_available.load(std::memory_order_acquire);
 }
 
 void Context::setCheckSparseTensorInvariants(std::optional<bool> e = std::nullopt) {
