@@ -7,16 +7,34 @@ namespace at::vec {
 inline namespace CPU_CAPABILITY {
 #if defined(__aarch64__)
 
-// Define this specialization to match c10::convert, as defined in TypeCast.h
-template <>
-inline void convert(
-    const float* __restrict src,
+// Define these specializations to match c10::convert, as defined in TypeCast.h,
+// which narrows float -> uint8_t via int64_t for CPU/CUDA consistency (see
+// https://github.com/pytorch/pytorch/issues/36807). Note that torch.Tensor.to
+// documents the result for values that do not fit into uint8_t as undefined.
+template <typename from_type>
+inline void convertToUint8(
+    const from_type* __restrict src,
     uint8_t* __restrict dst,
     int64_t n) {
   uint64_t len = static_cast<uint64_t>(n);
   for (uint64_t i = 0; i < len; i++) {
     dst[i] = static_cast<uint8_t>(static_cast<int64_t>(src[i]));
   }
+}
+
+template <>
+inline void convert(const float* src, uint8_t* dst, int64_t n) {
+  convertToUint8(src, dst, n);
+}
+
+template <>
+inline void convert(const at::Half* src, uint8_t* dst, int64_t n) {
+  convertToUint8(src, dst, n);
+}
+
+template <>
+inline void convert(const c10::BFloat16* src, uint8_t* dst, int64_t n) {
+  convertToUint8(src, dst, n);
 }
 
 #if !defined(CPU_CAPABILITY_SVE256)
@@ -154,7 +172,6 @@ CONVERT_FROM_BOOL_TEMPLATE(double)
     return convertImpl<from_type, float16_t>(src, dstPtr, n);           \
   }
 
-CONVERT_FROM_FP16_TEMPLATE(uint8_t)
 CONVERT_FROM_FP16_TEMPLATE(int8_t)
 CONVERT_FROM_FP16_TEMPLATE(int16_t)
 CONVERT_FROM_FP16_TEMPLATE(int32_t)
@@ -224,7 +241,6 @@ inline void convertFromBf16Impl(
     return convertFromBf16Impl<to_type>(src, dst, n);                      \
   }
 
-CONVERT_FROM_BF16_TEMPLATE(uint8_t)
 CONVERT_FROM_BF16_TEMPLATE(int8_t)
 CONVERT_FROM_BF16_TEMPLATE(int16_t)
 CONVERT_FROM_BF16_TEMPLATE(int32_t)
@@ -404,6 +420,43 @@ struct VecConvert<uint8_t, 1, float, src_n> {
   static inline VectorizedN<uint8_t, 1> apply(
       const VectorizedN<float, src_n>& src) {
     return Vectorized<uint8_t>(convert_float_to_uint8(src));
+  }
+};
+
+template <>
+struct VecConvert<double, 2, float, 1> {
+  static inline VectorizedN<double, 2> apply(const VectorizedN<float, 1>& src) {
+    const float32x4_t f32 = src[0];
+    VectorizedN<double, 2> result;
+    result[0] = vcvt_f64_f32(vget_low_f32(f32));
+    result[1] = vcvt_high_f64_f32(f32);
+    return result;
+  }
+};
+
+// Half register to full register.
+template <>
+struct VecConvert<double, 1, float, 1> {
+  static inline VectorizedN<double, 1> apply(const VectorizedN<float, 1>& src) {
+    return Vectorized<double>(vcvt_f64_f32(vget_low_f32(src[0])));
+  }
+};
+
+template <>
+struct VecConvert<float, 1, double, 2> {
+  static inline VectorizedN<float, 1> apply(const VectorizedN<double, 2>& src) {
+    return Vectorized<float>(vcvt_high_f32_f64(vcvt_f32_f64(src[0]), src[1]));
+  }
+};
+
+// Full register to half register.
+template <>
+struct VecConvert<float, 1, double, 1> {
+  static inline VectorizedN<float, 1> apply(const VectorizedN<double, 1>& src) {
+    // Lanes past the source are zeroed, matching the VectorizedN::loadu(buf,
+    // count) that the generic fallback ends with.
+    return Vectorized<float>(
+        vcombine_f32(vcvt_f32_f64(src[0]), vdup_n_f32(0.0f)));
   }
 };
 
