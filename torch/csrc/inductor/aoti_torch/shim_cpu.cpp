@@ -2,6 +2,7 @@
 #ifdef USE_DISTRIBUTED
 #include <torch/csrc/distributed/c10d/Functional.hpp>
 #endif
+#include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim_cpu.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 
@@ -222,10 +223,16 @@ AOTITorchError aoti_torch_cpu_mkldnn_rnn_layer(
         bidirectional,
         batch_first,
         train);
-    *ret0 = new_tensor_handle(std::move(std::get<0>(tmp_result)));
-    *ret1 = new_tensor_handle(std::move(std::get<1>(tmp_result)));
-    *ret2 = new_tensor_handle(std::move(std::get<2>(tmp_result)));
-    *ret3 = new_tensor_handle(std::move(std::get<3>(tmp_result)));
+    // Build outputs into RAII locals first; release() into *retN only after all
+    // succeed so a mid-sequence std::bad_alloc cannot orphan earlier outputs.
+    RAIIAtenTensorHandle h0(new_tensor_handle(std::move(std::get<0>(tmp_result))));
+    RAIIAtenTensorHandle h1(new_tensor_handle(std::move(std::get<1>(tmp_result))));
+    RAIIAtenTensorHandle h2(new_tensor_handle(std::move(std::get<2>(tmp_result))));
+    RAIIAtenTensorHandle h3(new_tensor_handle(std::move(std::get<3>(tmp_result))));
+    *ret0 = h0.release();
+    *ret1 = h1.release();
+    *ret2 = h2.release();
+    *ret3 = h3.release();
   });
 }
 
