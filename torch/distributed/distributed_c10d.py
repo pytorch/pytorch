@@ -411,6 +411,8 @@ def _create_torchcomms_backend(
     store: Store,
     device_id: torch.device | None,
     backend_options: object | None,
+    timeout: timedelta | None = None,
+    enable_reconfigure: bool = False,
 ) -> C10DBackend:
     """Create a c10d BackendWrapper for one TorchComms backend instance."""
     if not _TORCHCOMM_AVAILABLE:
@@ -440,12 +442,18 @@ def _create_torchcomms_backend(
     os.environ["TORCHCOMM_RANK"] = str(group_rank)
     os.environ["TORCHCOMM_SIZE"] = str(group_size)
     try:
+        dynamic_options: dict[str, object] = {}
+        if enable_reconfigure:
+            dynamic_options["enable_reconfigure"] = True
+            if timeout is not None:
+                dynamic_options["timeout"] = timeout
         comm = new_comm(
             _resolve_torchcomms_backend(backend),
             torch_device,
             name=group_name,
             store=store,
             hints=hints,
+            **dynamic_options,
         )
     finally:
         for key, value in zip(("TORCHCOMM_RANK", "TORCHCOMM_SIZE"), saved_rank_size):
@@ -454,14 +462,20 @@ def _create_torchcomms_backend(
             else:
                 os.environ[key] = value
 
+    # Local references retain ownership until publication, so setup failures
+    # release the communicator through C++ RAII.
+    backend_wrapper = _BackendWrapper(comm)
+
     buffer_size = os.environ.get(
         "TORCH_FR_BUFFER_SIZE",
         os.environ.get("TORCH_NCCL_TRACE_BUFFER_SIZE", "0"),
     )
     recorder = _TorchCommsFlightRecorderHook(max_entries=int(buffer_size))
     recorder.register_with_comm(comm)
+
+    # Publish only after hook registration and wrapper setup succeed.
     _world.comms.append(comm)
-    return _BackendWrapper(comm)
+    return backend_wrapper
 
 
 # Change __module__ of all imported types from torch._C._distributed_c10d that are public
@@ -3134,6 +3148,8 @@ def _new_process_group_helper(
                 store=backend_prefix_store,
                 device_id=device_id,
                 backend_options=backend_options,
+                timeout=timeout,
+                enable_reconfigure=enable_reconfigure,
             )
             # Use the underlying backend's BackendType so distinct torchcomms
             # backends (e.g. gloo vs nccl in a "cpu:gloo,cuda:nccl" PG) don't
