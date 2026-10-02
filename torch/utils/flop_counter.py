@@ -423,11 +423,14 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
 
     Supports GQA (grouped-query attention) where key/value have fewer heads
     than the query. The kernel broadcasts KV heads to match query heads.
+
+    Dims before (heads, seq, head_dim) are batch dims; unbatched 3D (H, S, D)
+    inputs count as batch 1.
     """
-    b, h_q, s_q, d_q = query_shape
-    _b2, h_kv, s_k, _d2 = key_shape
-    _b3, _h3, _s3, d_v = value_shape
-    if not (b == _b2 == _b3 and h_kv == _h3 and d_q == _d2 and s_k == _s3):
+    *batch, h_q, s_q, d_q = query_shape
+    *_batch2, h_kv, s_k, _d2 = key_shape
+    *_batch3, _h3, _s3, d_v = value_shape
+    if not (batch == _batch2 == _batch3 and h_kv == _h3 and d_q == _d2 and s_k == _s3):
         raise AssertionError(
             f"sdpa_flop_count: query/key/value shapes are incompatible: "
             f"q={query_shape}, k={key_shape}, v={value_shape}"
@@ -437,6 +440,7 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
             f"sdpa_flop_count: query heads ({h_q}) must be a multiple of "
             f"key/value heads ({h_kv})"
         )
+    b = prod(batch)
     total_flops = 0
     # q: [b, h_q, s_q, d_q] @ k: [b, h_q, d_q, s_k] -> scores: [b, h_q, s_q, s_k]
     total_flops += bmm_flop((b * h_q, s_q, d_q), (b * h_q, d_q, s_k))
@@ -448,7 +452,8 @@ def sdpa_flop_count(query_shape, key_shape, value_shape):
 @register_flop_formula([aten._scaled_dot_product_efficient_attention,
                         aten._scaled_dot_product_flash_attention,
                         aten._scaled_dot_product_flash_attention_for_cpu,
-                        aten._scaled_dot_product_cudnn_attention])
+                        aten._scaled_dot_product_cudnn_attention,
+                        aten._scaled_dot_product_fused_attention_overrideable])
 def sdpa_flop(query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for self-attention."""
     # NB: We aren't accounting for causal attention here
@@ -651,11 +656,11 @@ def _efficient_attention_forward_flop(
 
 
 def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape):
-    b, h_q, s_q, d_q = query_shape
-    _b2, h_kv, s_k, _d2 = key_shape
-    _b3, _h3, _s3, d_v = value_shape
-    _b4, _h4, _s4, _d4 = grad_out_shape
-    if not (b == _b2 == _b3 == _b4 and h_kv == _h3 and h_q == _h4):
+    *batch, h_q, s_q, d_q = query_shape
+    *_batch2, h_kv, s_k, _d2 = key_shape
+    *_batch3, _h3, _s3, d_v = value_shape
+    *_batch4, _h4, _s4, _d4 = grad_out_shape
+    if not (batch == _batch2 == _batch3 == _batch4 and h_kv == _h3 and h_q == _h4):
         raise AssertionError(
             "sdpa_backward_flop_count: batch/heads mismatch among tensors"
         )
@@ -668,6 +673,7 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
         raise AssertionError(
             "sdpa_backward_flop_count: grad_out/value/key/query shapes are incompatible"
         )
+    b = prod(batch)
     total_flops = 0
     # Step 1: We recompute the scores matrix.
     # q: [b, h_q, s_q, d_q] @ k: [b, h_q, d_q, s_k] -> scores: [b, h_q, s_q, s_k]
@@ -690,7 +696,8 @@ def sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape
 @register_flop_formula([aten._scaled_dot_product_efficient_attention_backward,
                         aten._scaled_dot_product_flash_attention_backward,
                         aten._scaled_dot_product_flash_attention_for_cpu_backward,
-                        aten._scaled_dot_product_cudnn_attention_backward])
+                        aten._scaled_dot_product_cudnn_attention_backward,
+                        aten._scaled_dot_product_fused_attention_overrideable_backward])
 def sdpa_backward_flop(grad_out_shape, query_shape, key_shape, value_shape, *args, out_shape=None, **kwargs) -> int:
     """Count flops for self-attention backward."""
     return sdpa_backward_flop_count(grad_out_shape, query_shape, key_shape, value_shape)
@@ -896,10 +903,12 @@ flop_registry = {
     aten._scaled_dot_product_flash_attention: sdpa_flop,
     aten._scaled_dot_product_flash_attention_for_cpu: sdpa_flop,
     aten._scaled_dot_product_cudnn_attention: sdpa_flop,
+    aten._scaled_dot_product_fused_attention_overrideable: sdpa_flop,
     aten._scaled_dot_product_efficient_attention_backward: sdpa_backward_flop,
     aten._scaled_dot_product_flash_attention_backward: sdpa_backward_flop,
     aten._scaled_dot_product_flash_attention_for_cpu_backward: sdpa_backward_flop,
     aten._scaled_dot_product_cudnn_attention_backward: sdpa_backward_flop,
+    aten._scaled_dot_product_fused_attention_overrideable_backward: sdpa_backward_flop,
     aten._flash_attention_forward: _flash_attention_forward_flop,
     aten._efficient_attention_forward: _efficient_attention_forward_flop,
     aten._flash_attention_backward: _flash_attention_backward_flop,
