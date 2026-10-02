@@ -19,6 +19,10 @@
 #include <ATen/ops/avg_pool2d_native.h>
 #include <ATen/ops/avg_pool3d_backward_native.h>
 #include <ATen/ops/avg_pool3d_native.h>
+#include <ATen/ops/fractional_max_pool2d_backward_native.h>
+#include <ATen/ops/fractional_max_pool2d_native.h>
+#include <ATen/ops/fractional_max_pool3d_backward_native.h>
+#include <ATen/ops/fractional_max_pool3d_native.h>
 #include <ATen/ops/max_pool2d_backward_native.h>
 #include <ATen/ops/max_pool2d_native.h>
 #include <ATen/ops/max_pool2d_with_indices_backward_native.h>
@@ -521,6 +525,229 @@ static void adaptive_max_pool_out_mps_template(const Tensor& output,
   }
 
   launch_max_pool_kernel(input, output, indices, params, op_name);
+}
+
+static void check_fractional_max_pool_dtype(const Tensor& input) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      input.scalar_type() == kFloat || input.scalar_type() == kHalf || input.scalar_type() == kBFloat16,
+      "fractional max pooling on MPS supports float32, float16 and bfloat16");
+}
+
+static void fractional_max_pool2d_out_mps_template(const Tensor& output,
+                                                   const Tensor& indices,
+                                                   const Tensor& input,
+                                                   IntArrayRef pool_size,
+                                                   IntArrayRef output_size,
+                                                   const Tensor& random_samples) {
+  check_fractional_max_pool_dtype(input);
+  fractional_max_pool_check_shape<2>(input, random_samples);
+  TORCH_CHECK(input.device() == random_samples.device(), "Expected input and _random_samples on the same device");
+  safe_downcast<int32_t, int64_t>(input.numel());
+  if (output.numel() == 0) {
+    return;
+  }
+  const auto ndims = input.dim();
+
+  const FractionalMaxPoolParams params{
+      .inputH = safe_downcast<int32_t, int64_t>(input.size(ndims - 2)),
+      .inputW = safe_downcast<int32_t, int64_t>(input.size(ndims - 1)),
+      .outputH = safe_downcast<int32_t, int64_t>(output_size[0]),
+      .outputW = safe_downcast<int32_t, int64_t>(output_size[1]),
+      .poolH = safe_downcast<int32_t, int64_t>(pool_size[0]),
+      .poolW = safe_downcast<int32_t, int64_t>(pool_size[1]),
+  };
+
+  // The shared meta kernel uses set_output_raw_strided, so out tensors may
+  // retain noncontiguous strides. The Metal kernel writes contiguous buffers.
+  auto output_c = output.is_contiguous() ? output : at::empty(output.sizes(), output.options());
+  auto indices_c = indices.is_contiguous() ? indices : at::empty(indices.sizes(), indices.options());
+  const auto input_c = input.contiguous();
+  const auto samples_c = random_samples.contiguous();
+  const auto numThreads = safe_downcast<int32_t, int64_t>(output.numel());
+
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc("fractional_max_pool2d_" + scalarToMetalTypeString(input));
+      getMPSProfiler().beginProfileKernel(pso, "fractional_max_pool2d", {input}, stream);
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder, input_c, samples_c, output_c, indices_c, params);
+      mtl_dispatch1DJob(computeEncoder, pso, numThreads);
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+  if (!output.is_contiguous()) {
+    output.copy_(output_c);
+  }
+  if (!indices.is_contiguous()) {
+    indices.copy_(indices_c);
+  }
+}
+
+static void fractional_max_pool2d_backward_out_mps_template(const Tensor& grad_input,
+                                                            const Tensor& grad_output,
+                                                            const Tensor& input,
+                                                            IntArrayRef output_size,
+                                                            const Tensor& indices) {
+  check_fractional_max_pool_dtype(input);
+  // See Note [Writing Nondeterministic Operations]. Overlapping regions use atomic_add.
+  at::globalContext().alertNotDeterministic("fractional_max_pool2d_backward_mps");
+  TORCH_CHECK(input.dim() == 3 || input.dim() == 4, "Expected 3D or 4D input");
+  TORCH_CHECK(output_size.size() == 2, "Expected 2 output dimensions");
+  auto expected_shape = input.sizes().vec();
+  std::copy(output_size.begin(), output_size.end(), expected_shape.end() - 2);
+  TORCH_CHECK(grad_output.sizes() == IntArrayRef(expected_shape), "gradOutput sizes unexpected");
+  TORCH_CHECK(indices.sizes() == IntArrayRef(expected_shape), "indices sizes unexpected");
+  TORCH_CHECK(grad_output.scalar_type() == input.scalar_type() && grad_input.scalar_type() == input.scalar_type(),
+              "Expected grad_output and grad_input to have the same dtype as input");
+  TORCH_CHECK(indices.scalar_type() == kLong, "Expected indices to have dtype int64");
+  TORCH_CHECK(input.device() == grad_output.device() && input.device() == indices.device() &&
+                  input.device() == grad_input.device(),
+              "Expected all tensors on the same device");
+  safe_downcast<int32_t, int64_t>(input.numel());
+
+  auto grad_input_c = grad_input.is_contiguous() ? grad_input : at::empty(input.sizes(), input.options());
+  grad_input_c.zero_();
+  if (grad_output.numel() == 0) {
+    grad_input.copy_(grad_input_c);
+    return;
+  }
+  const auto ndims = input.dim();
+
+  const FractionalMaxPoolParams params{
+      .inputH = safe_downcast<int32_t, int64_t>(input.size(ndims - 2)),
+      .inputW = safe_downcast<int32_t, int64_t>(input.size(ndims - 1)),
+      .outputH = safe_downcast<int32_t, int64_t>(output_size[0]),
+      .outputW = safe_downcast<int32_t, int64_t>(output_size[1]),
+      .poolH = 0,
+      .poolW = 0,
+  };
+
+  const auto grad_output_c = grad_output.contiguous();
+  const auto indices_c = indices.contiguous();
+  const auto numThreads = safe_downcast<int32_t, int64_t>(grad_output.numel());
+
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc("fractional_max_pool2d_backward_" + scalarToMetalTypeString(input));
+      getMPSProfiler().beginProfileKernel(pso, "fractional_max_pool2d_backward", {grad_output}, stream);
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder, grad_input_c, grad_output_c, indices_c, params, stream->getErrorBuffer());
+      mtl_dispatch1DJob(computeEncoder, pso, numThreads);
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+  if (!grad_input.is_contiguous()) {
+    grad_input.copy_(grad_input_c);
+  }
+}
+
+static void fractional_max_pool3d_out_mps_template(const Tensor& output,
+                                                   const Tensor& indices,
+                                                   const Tensor& input,
+                                                   const FractionalMaxPool3dParams& params,
+                                                   const Tensor& random_samples) {
+  check_fractional_max_pool_dtype(input);
+  fractional_max_pool_check_shape<3>(input, random_samples);
+  TORCH_CHECK(input.device() == random_samples.device(), "Expected input and _random_samples on the same device");
+  safe_downcast<int32_t, int64_t>(input.numel());
+  if (output.numel() == 0) {
+    return;
+  }
+  // The shared meta kernel uses set_output_raw_strided, so out tensors may
+  // retain noncontiguous strides. The Metal kernel writes contiguous buffers.
+  auto output_c = output.is_contiguous() ? output : at::empty(output.sizes(), output.options());
+  auto indices_c = indices.is_contiguous() ? indices : at::empty(indices.sizes(), indices.options());
+  const auto input_c = input.contiguous();
+  const auto samples_c = random_samples.contiguous();
+  const auto numThreads = safe_downcast<int32_t, int64_t>(output.numel());
+
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc("fractional_max_pool3d_" + scalarToMetalTypeString(input));
+      getMPSProfiler().beginProfileKernel(pso, "fractional_max_pool3d", {input}, stream);
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder, input_c, samples_c, output_c, indices_c, params);
+      mtl_dispatch1DJob(computeEncoder, pso, numThreads);
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+  if (!output.is_contiguous()) {
+    output.copy_(output_c);
+  }
+  if (!indices.is_contiguous()) {
+    indices.copy_(indices_c);
+  }
+}
+
+static void fractional_max_pool3d_backward_out_mps_template(const Tensor& grad_input,
+                                                            const Tensor& grad_output,
+                                                            const Tensor& input,
+                                                            IntArrayRef output_size,
+                                                            const Tensor& indices) {
+  check_fractional_max_pool_dtype(input);
+  // See Note [Writing Nondeterministic Operations]. Overlapping regions use atomic_add.
+  at::globalContext().alertNotDeterministic("fractional_max_pool3d_backward_mps");
+  TORCH_CHECK(input.dim() == 4 || input.dim() == 5, "Expected 4D or 5D input");
+  TORCH_CHECK(output_size.size() == 3, "Expected 3 output dimensions");
+  auto expected_shape = input.sizes().vec();
+  std::copy(output_size.begin(), output_size.end(), expected_shape.end() - 3);
+  TORCH_CHECK(grad_output.sizes() == IntArrayRef(expected_shape), "gradOutput sizes unexpected");
+  TORCH_CHECK(indices.sizes() == IntArrayRef(expected_shape), "indices sizes unexpected");
+  TORCH_CHECK(grad_output.scalar_type() == input.scalar_type() && grad_input.scalar_type() == input.scalar_type(),
+              "Expected grad_output and grad_input to have the same dtype as input");
+  TORCH_CHECK(indices.scalar_type() == kLong, "Expected indices to have dtype int64");
+  TORCH_CHECK(input.device() == grad_output.device() && input.device() == indices.device() &&
+                  input.device() == grad_input.device(),
+              "Expected all tensors on the same device");
+  safe_downcast<int32_t, int64_t>(input.numel());
+
+  const auto ndims = input.dim();
+
+  grad_input.resize_as_(input);
+  auto grad_input_c = grad_input.is_contiguous() ? grad_input : at::empty(input.sizes(), input.options());
+  grad_input_c.zero_();
+  if (grad_output.numel() == 0) {
+    grad_input.copy_(grad_input_c);
+    return;
+  }
+
+  const FractionalMaxPool3dParams params{
+      .inputT = safe_downcast<int32_t, int64_t>(input.size(ndims - 3)),
+      .inputH = safe_downcast<int32_t, int64_t>(input.size(ndims - 2)),
+      .inputW = safe_downcast<int32_t, int64_t>(input.size(ndims - 1)),
+      .outputT = safe_downcast<int32_t, int64_t>(output_size[0]),
+      .outputH = safe_downcast<int32_t, int64_t>(output_size[1]),
+      .outputW = safe_downcast<int32_t, int64_t>(output_size[2]),
+      .poolT = 0,
+      .poolH = 0,
+      .poolW = 0,
+  };
+
+  const auto grad_output_c = grad_output.contiguous();
+  const auto indices_c = indices.contiguous();
+  const auto numThreads = safe_downcast<int32_t, int64_t>(grad_output.numel());
+
+  auto stream = getCurrentMPSStream();
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = stream->commandEncoder();
+      auto pso = lib.getPipelineStateForFunc("fractional_max_pool3d_backward_" + scalarToMetalTypeString(input));
+      getMPSProfiler().beginProfileKernel(pso, "fractional_max_pool3d_backward", {grad_output}, stream);
+      [computeEncoder setComputePipelineState:pso];
+      mtl_setArgs(computeEncoder, grad_input_c, grad_output_c, indices_c, params, stream->getErrorBuffer());
+      mtl_dispatch1DJob(computeEncoder, pso, numThreads);
+      getMPSProfiler().endProfileKernel(pso, stream);
+    }
+  });
+  if (!grad_input.is_contiguous()) {
+    grad_input.copy_(grad_input_c);
+  }
 }
 
 static void max_pool_backward_out_mps_template(Tensor& grad_input,
@@ -1090,6 +1317,76 @@ TORCH_IMPL_FUNC(adaptive_max_pool2d_backward_out_mps)
                                           static_cast<int32_t>(input.dim()),
                                           /*pooling_dims=*/2,
                                           "adaptive_max_pool2d_backward");
+}
+
+TORCH_IMPL_FUNC(fractional_max_pool2d_out_mps)
+(const Tensor& input,
+ IntArrayRef pool_size,
+ IntArrayRef output_size,
+ const Tensor& random_samples,
+ const Tensor& output,
+ const Tensor& indices) {
+  mps::fractional_max_pool2d_out_mps_template(output, indices, input, pool_size, output_size, random_samples);
+}
+
+TORCH_IMPL_FUNC(fractional_max_pool2d_backward_mps)
+(const Tensor& grad_output,
+ const Tensor& input,
+ IntArrayRef pool_size,
+ IntArrayRef output_size,
+ const Tensor& indices,
+ const Tensor& grad_input) {
+  mps::fractional_max_pool2d_backward_out_mps_template(grad_input, grad_output, input, output_size, indices);
+}
+
+TORCH_IMPL_FUNC(fractional_max_pool3d_out_mps)
+(const Tensor& input,
+ int64_t poolSizeT,
+ int64_t poolSizeH,
+ int64_t poolSizeW,
+ int64_t outputT,
+ int64_t outputH,
+ int64_t outputW,
+ const Tensor& random_samples,
+ int64_t numBatch,
+ int64_t numPlanes,
+ int64_t inputT,
+ int64_t inputH,
+ int64_t inputW,
+ const Tensor& output,
+ const Tensor& indices) {
+  const FractionalMaxPool3dParams params{
+      .inputT = safe_downcast<int32_t, int64_t>(inputT),
+      .inputH = safe_downcast<int32_t, int64_t>(inputH),
+      .inputW = safe_downcast<int32_t, int64_t>(inputW),
+      .outputT = safe_downcast<int32_t, int64_t>(outputT),
+      .outputH = safe_downcast<int32_t, int64_t>(outputH),
+      .outputW = safe_downcast<int32_t, int64_t>(outputW),
+      .poolT = safe_downcast<int32_t, int64_t>(poolSizeT),
+      .poolH = safe_downcast<int32_t, int64_t>(poolSizeH),
+      .poolW = safe_downcast<int32_t, int64_t>(poolSizeW),
+  };
+  mps::fractional_max_pool3d_out_mps_template(output, indices, input, params, random_samples);
+}
+
+Tensor& fractional_max_pool3d_backward_out_mps(const Tensor& grad_output,
+                                               const Tensor& input,
+                                               IntArrayRef pool_size,
+                                               IntArrayRef output_size,
+                                               const Tensor& indices,
+                                               Tensor& grad_input) {
+  mps::fractional_max_pool3d_backward_out_mps_template(grad_input, grad_output, input, output_size, indices);
+  return grad_input;
+}
+
+Tensor fractional_max_pool3d_backward_mps(const Tensor& grad_output,
+                                          const Tensor& input,
+                                          IntArrayRef pool_size,
+                                          IntArrayRef output_size,
+                                          const Tensor& indices) {
+  Tensor grad_input = at::empty({0}, input.options());
+  mps::fractional_max_pool3d_backward_out_mps_template(grad_input, grad_output, input, output_size, indices);
+  return grad_input;
 }
 
 std::tuple<Tensor&, Tensor&> max_pool3d_with_indices_out_mps(const Tensor& input,
