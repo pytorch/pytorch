@@ -2964,6 +2964,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 if not _coor_enabled():
                     device_index = 0
 
+            tx.output.check_device_barrier_after_input_mutation(
+                torch.device(device.type, device_index)
+                if device_index is not None
+                else device
+            )
+
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.synchronize_device,

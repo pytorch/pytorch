@@ -8,6 +8,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.graph_utils import _get_flat_args
 from torch._dynamo.variables.streams import (
     _get_stream_by_index,
+    _stream_identity,
     get_current_stream,
     new_event,
 )
@@ -346,7 +347,27 @@ def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
             or get_device(epi_copy.args[0]).type == "cpu"
         ):
             continue
-        for barrier in nodes[positions[epi_copy.args[1]] + 1 : positions[epi_copy]]:
+        # Functionalization erases earlier in-place writes. Conservatively
+        # consider all ancestors of the deferred copy's value: an input
+        # mutation like zero_() may become full() with no dependency on the
+        # original input, followed by another mutation after a user join.
+        source: Node = epi_copy.args[1]
+        ancestors: set[Node] = {source}
+        for node in reversed(nodes[: positions[source] + 1]):
+            if node in ancestors:
+                ancestors.update(node.all_input_nodes)
+        source_values: list[Node] = []
+        for node in nodes[: positions[source] + 1]:
+            if (
+                node in ancestors
+                and node.op == "call_function"
+                and node.target not in _SYNC_OPS
+            ):
+                source_values.append(node)
+        first_source_value = (
+            positions[source_values[0]] if source_values else positions[source]
+        )
+        for barrier in nodes[first_source_value + 1 : positions[epi_copy]]:
             if barrier.op != "call_function":
                 continue
             if barrier.target is torch.ops.streams.synchronize_device.default:
@@ -360,43 +381,47 @@ def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
                 torch.ops.streams.synchronize_stream.default,
             ):
                 barrier_stream = barrier.args[-1]
-                joined = arg_stream is not None and barrier_stream == arg_stream
-                if not joined and not isinstance(barrier_stream, int):
-                    joined = True
-                elif not joined:
+                joined = False
+                for value in source_values:
+                    if positions[value] >= positions[barrier]:
+                        break
+                    value_stream = get_stream(value)
+                    if value_stream is not None and barrier_stream == value_stream:
+                        joined = True
+                        break
+                    if not isinstance(barrier_stream, int):
+                        joined = True
+                        break
                     try:
                         observed = _get_stream_by_index(barrier_stream)
                         mutated = (
-                            _get_stream_by_index(arg_stream)
-                            if arg_stream is not None
+                            _get_stream_by_index(value_stream)
+                            if value_stream is not None
                             else torch.accelerator.current_stream(
                                 get_device(epi_copy.args[0])
                             )
                         )
                     except AssertionError:
                         joined = True
-                    else:
-                        joined = (
-                            observed.device == mutated.device
-                            and observed.native_handle == mutated.native_handle
-                        )
+                        break
+                    if _stream_identity(observed) == _stream_identity(mutated):
+                        joined = True
+                        break
             else:
                 continue
             if joined and barrier.target is torch.ops.streams.wait_stream.default:
                 waiting_index = barrier.args[0]
-                if waiting_index == barrier_stream:
+                waited_index = barrier.args[1]
+                if waiting_index == waited_index:
                     continue
-                if isinstance(waiting_index, int) and isinstance(barrier_stream, int):
+                if isinstance(waiting_index, int) and isinstance(waited_index, int):
                     try:
                         waiting = _get_stream_by_index(waiting_index)
-                        waited_on = _get_stream_by_index(barrier_stream)
+                        waited_on = _get_stream_by_index(waited_index)
                     except AssertionError:
                         pass
                     else:
-                        if (
-                            waiting.device == waited_on.device
-                            and waiting.native_handle == waited_on.native_handle
-                        ):
+                        if _stream_identity(waiting) == _stream_identity(waited_on):
                             continue
             if joined:
                 raise RuntimeError(

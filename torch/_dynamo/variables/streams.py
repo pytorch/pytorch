@@ -82,6 +82,12 @@ def _get_stream_by_index(index: int) -> torch.Stream:
     return stream
 
 
+def _stream_identity(stream: torch.Stream) -> tuple[torch.device, int]:
+    # Native stream handles are available on CUDA and XPU streams, though the
+    # torch.Stream type stub does not yet declare them.
+    return stream.device, stream.native_handle  # pyrefly: ignore[missing-attribute]
+
+
 def _get_event_by_index(index: int) -> torch.Event:
     event = get_external_object_by_index(index)
     if not isinstance(event, torch.Event):
@@ -465,6 +471,8 @@ class StreamVariable(StreamContextVariable):
         for stream in (self, other_stream):
             if stream.source:
                 install_guard(stream.source.make_guard(GuardBuilder.EQUALS_MATCH))
+        if _stream_identity(self.value) != _stream_identity(other_stream.value):
+            tx.output.check_stream_barrier_after_input_mutation(other_stream.value)
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.wait_stream,
@@ -483,6 +491,7 @@ class StreamVariable(StreamContextVariable):
 
         if self.source:
             install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+        tx.output.check_stream_barrier_after_input_mutation(self.value)
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.synchronize_stream,

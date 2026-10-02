@@ -2898,6 +2898,147 @@ instantiate_device_type_tests(
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
     @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("first_mutation", ("add", "zero", "fill", "copy"))
+    def test_earlier_input_mutation_before_join_errors(
+        self, backend, first_mutation
+    ) -> None:
+        def fn(x, small):
+            side = torch.cuda.Stream()
+            with side:
+                if first_mutation == "add":
+                    x.add_(1)
+                elif first_mutation == "zero":
+                    x.zero_()
+                elif first_mutation == "fill":
+                    x.fill_(3)
+                else:
+                    x.copy_(small + 1)
+            torch.cuda.current_stream().wait_stream(side)
+            x.add_(2)
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input mutation write-back after a user stream barrier",
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(x, small)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.zeros_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("barrier", ("wait_stream", "stream_sync", "device_sync"))
+    @parametrize("last_mutation", ("fill", "copy"))
+    def test_discarded_input_mutation_before_join_errors(
+        self, backend, barrier, last_mutation
+    ) -> None:
+        def fn(x, small):
+            side = torch.cuda.Stream()
+            with side:
+                x.zero_()
+            if barrier == "wait_stream":
+                torch.cuda.current_stream().wait_stream(side)
+            elif barrier == "stream_sync":
+                side.synchronize()
+            else:
+                torch.cuda.synchronize()
+            if last_mutation == "fill":
+                x.fill_(3)
+            else:
+                x.copy_(small)
+            return small + 1
+
+        x = torch.ones(8, device="cuda")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input mutation write-back after a user stream barrier",
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(x, small)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_discarded_mutation_sync_on_another_device_errors(self, backend) -> None:
+        if torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x, small):
+            x.zero_()
+            torch.cuda.synchronize(x.device)
+            x.fill_(3)
+            return small + 1
+
+        x = torch.ones(8, device="cuda:1")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize(1)
+        with torch.cuda.device(0):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "input mutation write-back after a user stream barrier",
+            ):
+                torch.compile(fn, backend=backend, fullgraph=True)(x, small)
+        torch.cuda.synchronize(1)
+        self.assertEqual(x, torch.ones_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_device_sync_does_not_observe_other_device_mutation(self, backend) -> None:
+        if torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x, small, side):
+            with side:
+                x.zero_()
+            torch.cuda.synchronize()
+            return small + 1
+
+        side = torch.cuda.Stream(device="cuda:1")
+        x = torch.ones(8, device="cuda:1")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize(1)
+        with torch.cuda.device(0):
+            result = torch.compile(fn, backend=backend, fullgraph=True)(x, small, side)
+        torch.cuda.synchronize(1)
+        self.assertEqual(x, torch.zeros_like(x))
+        self.assertEqual(result, torch.ones_like(result))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_other_device_current_stream_change_rechecks_input_mutation(
+        self, backend
+    ) -> None:
+        if torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x, small, side):
+            x.zero_()
+            side.synchronize()
+            return small + 1
+
+        side = torch.cuda.Stream(device="cuda:1")
+        small = torch.zeros(8, device="cuda:1")
+        torch.cuda.synchronize(1)
+        compiled = torch.compile(fn, backend=backend, fullgraph=True)
+        with torch.cuda.device(0):
+            first = torch.ones_like(small)
+            result = compiled(first, small, side)
+            torch.cuda.synchronize(1)
+            self.assertEqual(first, torch.zeros_like(first))
+            self.assertEqual(result, torch.ones_like(result))
+
+            changed = torch.ones_like(small)
+            with torch.cuda.stream(side):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "input mutation write-back after a user stream barrier",
+                ):
+                    compiled(changed, small, side)
+            torch.cuda.synchronize(1)
+            self.assertEqual(changed, torch.ones_like(changed))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
     @parametrize("barrier", ("device_sync", "current_stream_sync"))
     def test_current_stream_input_mutation_before_sync_errors(
         self, backend, barrier
@@ -3026,7 +3167,7 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         side = torch.cuda.Stream()
         alias = torch.cuda.ExternalStream(side.cuda_stream, device=side.device)
         self.assertIsNot(side, alias)
-        self.assertEqual(side.native_handle, alias.native_handle)
+        self.assertEqual(side.cuda_stream, alias.cuda_stream)
         torch.cuda.synchronize()
         result = torch.compile(fn, backend=backend, fullgraph=True)(
             x, small, side, alias

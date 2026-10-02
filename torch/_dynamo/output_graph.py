@@ -130,6 +130,7 @@ from .source import (
     AttrSource,
     BackwardStateSource,
     ConstantSource,
+    CurrentStreamSource,
     DictGetItemSource,
     GetItemSource,
     GlobalStateSource,
@@ -178,6 +179,7 @@ from .variables.functions import ClosureConversionError, VariableTracker
 from .variables.lists import BaseListVariable
 from .variables.misc import NullVariable
 from .variables.nn_module import NNModuleVariable
+from .variables.streams import _stream_identity
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -889,6 +891,7 @@ class OutputGraph(OutputGraphCommon):
         # wouldn't be captured).  We key by id() of the underlying
         # torch.Stream so we can peek lazy variables without realizing them.
         self._input_mutation_streams: dict[int, traceback.StackSummary] = {}
+        self._input_mutation_stream_handles: set[tuple[torch.device, int]] = set()
         self._last_checked_input_versions: dict[int, int] | None = None
 
         # A list of register_finalizer_fns to apply to the output graph module
@@ -1355,8 +1358,48 @@ class OutputGraph(OutputGraphCommon):
                         install_guard(
                             stream.source.make_guard(GuardBuilder.EQUALS_MATCH)
                         )
+                accelerator = torch.accelerator.current_accelerator()
+                if (
+                    accelerator is not None
+                    and example_value.device.type == accelerator.type
+                ):
+                    stream = tx.symbolic_stream_state.cur_stream(example_value.device)
+                    if stream.device == example_value.device:
+                        stream_value = stream.value
+                    else:
+                        stream_value = torch.accelerator.current_stream(
+                            example_value.device
+                        )
+                        install_guard(
+                            CurrentStreamSource(example_value.device).make_guard(
+                                GuardBuilder.EQUALS_MATCH
+                            )
+                        )
+                    self._input_mutation_stream_handles.add(
+                        _stream_identity(stream_value)
+                    )
                 self._last_checked_input_versions[input_idx] = cur_version
             input_idx += 1
+
+    def check_stream_barrier_after_input_mutation(self, stream: torch.Stream) -> None:
+        if _stream_identity(stream) in self._input_mutation_stream_handles:
+            raise RuntimeError(
+                "Cannot safely place an input mutation write-back after a user "
+                "stream barrier inside torch.compile. Move the join after "
+                "the compiled call or avoid side-stream input mutation."
+            )
+
+    def check_device_barrier_after_input_mutation(self, device: torch.device) -> None:
+        if any(
+            mutated.type == device.type
+            and (device.index is None or mutated.index == device.index)
+            for mutated, _ in self._input_mutation_stream_handles
+        ):
+            raise RuntimeError(
+                "Cannot safely place an input mutation write-back after a user "
+                "stream barrier inside torch.compile. Move the join after "
+                "the compiled call or avoid side-stream input mutation."
+            )
 
     _EVENT_INPUT_MUTATION_FIX = (
         "To fix this, either:\n"
