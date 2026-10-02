@@ -67,6 +67,7 @@ from torch.testing._internal.common_utils import (
     requires_cuda_p2p_access,
     requires_cuda_python_bindings,
     run_tests,
+    skip_but_pass_in_sandcastle_if,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -963,7 +964,45 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
                 "expected multimem_barrier_kernel in profiler events",
             )
 
-    # --- GroupStreamGuard / stream-serialization tests ---
+
+# The symm mem backend is a process-wide setting that cannot change once a
+# tensor has been allocated, so each backend gets its own test class;
+# MultiProcContinuousTest spawns its worker processes per class.
+SYMM_MEM_BACKENDS = (
+    ("CUDA", PLATFORM_SUPPORTS_SYMM_MEM),
+    ("NVSHMEM", symm_mem.is_nvshmem_available()),
+)
+
+
+def instantiate_symm_mem_backend_tests(namespace, suite_name, base_class, backends):
+    for backend, available in backends:
+        class_name = f"{backend.capitalize()}{suite_name}Test"
+        test_class = type(
+            class_name,
+            (base_class, MultiProcContinuousTest),
+            {"__module__": namespace["__name__"], "symm_mem_backend": backend},
+        )
+        test_class = requires_cuda_p2p_access()(test_class)
+        namespace[class_name] = skip_but_pass_in_sandcastle_if(
+            not available, f"{backend} symm mem backend is not available"
+        )(test_class)
+
+
+# Ordering of the symmetric memory operations that GroupStreamGuard serializes.
+# Kept out of SymmetricMemoryTest so they can run against every backend that
+# has the guard wired in.
+@instantiate_parametrized_tests
+class AbstractStreamSerializationTest:
+    symm_mem_backend: str
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def _init_process(self):
+        torch.cuda.set_device(self.device)
+        torch.manual_seed(42 + self.rank)
+        symm_mem.set_backend(self.symm_mem_backend)
 
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
@@ -977,9 +1016,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         completes before every rank arrived and the fill on stream B lands
         before the fill on stream A. The peer then reads the wrong value."""
         self._init_process()
-        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
-            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
-
         t = symm_mem.empty(64, dtype=torch.float32, device="cuda")
         hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
         peer = (self.rank + 1) % self.world_size
@@ -1019,9 +1055,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         signal, so round two completes out of order and the final fill is not
         the one the peer observes."""
         self._init_process()
-        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
-            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
-
         t = symm_mem.empty(64, dtype=torch.float32, device="cuda")
         hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
         next_peer = (self.rank + 1) % self.world_size
@@ -1066,9 +1099,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         recorded at the start of B's guard instead of right after A's launch,
         B would also wait for the sleep and this would fail."""
         self._init_process()
-        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
-            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
-
         t = symm_mem.empty(64, dtype=torch.float32, device="cuda")
         hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
 
@@ -1112,9 +1142,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         import threading
 
         self._init_process()
-        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
-            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
-
         t = symm_mem.empty(64, dtype=torch.float32, device="cuda")
         hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
         peer = (self.rank + 1) % self.world_size
@@ -1186,9 +1213,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         here differ by name, so this covers group isolation generally, not the
         identity keying, which only differs under thread isolation mode."""
         self._init_process()
-        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
-            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
-
         t_a = symm_mem.empty(64, dtype=torch.float32, device="cuda")
         t_b = symm_mem.empty(64, dtype=torch.float32, device="cuda")
         group_b = (
@@ -1255,9 +1279,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         Exercises the GroupStreamGuard placement in
         CUDASymmetricMemoryOps.cu."""
         self._init_process()
-        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
-            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
-
         group_name = dist.group.WORLD.group_name
 
         stream_a = torch.cuda.Stream()
@@ -1295,9 +1316,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         """A barrier captured in a CUDA graph replays correctly. Inside a
         capture the guard's event record and wait become graph nodes."""
         self._init_process()
-        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
-            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
-
         t = symm_mem.empty(64, dtype=torch.float32, device="cuda")
         hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
         peer = (self.rank + 1) % self.world_size
@@ -1334,9 +1352,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         graph, recorded only when the graph runs, so waiting on it from
         outside the capture is invalid."""
         self._init_process()
-        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
-            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
-
         t = symm_mem.empty(64, dtype=torch.float32, device="cuda")
         hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
         peer = (self.rank + 1) % self.world_size
@@ -1377,9 +1392,6 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         rank. Replayed several times: a balanced pad protocol must leave the
         pad zero between replays."""
         self._init_process()
-        if symm_mem.get_backend(self.device) not in ("CUDA", "NVSHMEM"):
-            self.skipTest("test applies to the CUDA and NVSHMEM symm mem backends")
-
         t = symm_mem.empty(64, dtype=torch.float32, device="cuda")
         hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
         peer = (self.rank + 1) % self.world_size
@@ -1431,6 +1443,11 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(buf, expected)
         pad = hdl.get_signal_pad(self.rank)
         self.assertEqual(pad, torch.zeros_like(pad))
+
+
+instantiate_symm_mem_backend_tests(
+    globals(), "StreamSerialization", AbstractStreamSerializationTest, SYMM_MEM_BACKENDS
+)
 
 
 # We move AsyncTP tests to a separate test suite because 1) Async TP ops are not
