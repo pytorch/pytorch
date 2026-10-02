@@ -36,6 +36,7 @@ from reviewer_state import (
 )
 from schemas import (
     Action,
+    ACTIONABLE_LABELS,
     ActionPlan,
     AddLabels,
     BOT_TRIAGE_ERROR_LABEL,
@@ -65,6 +66,7 @@ from trusted_config import load_team_members
 # covers the PR.
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MAX_LOGGED_OWNER_FILES = 16
+ACTIONABLE_LABELS_TEXT = " or ".join(map("`{}`".format, sorted(ACTIONABLE_LABELS)))
 
 
 @dataclass(frozen=True)
@@ -128,12 +130,13 @@ def admission_items(
     """List why the PR was admitted: each true intake fact and each bypass match."""
 
     facts = intake.facts
+    labeled = f"labeled {ACTIONABLE_LABELS_TEXT}"
     signals = (
         (facts.author_has_triage_permission, "the author has triage-or-higher access"),
-        (facts.has_actionable_linked_issue, "it fixes an issue labeled `actionable`"),
+        (facts.has_actionable_linked_issue, f"it fixes an issue {labeled}"),
         (facts.has_maintainer_activity, "a maintainer has qualifying activity on it"),
         (facts.has_supporter, "its description names a verified supporter"),
-        (facts.has_related_actionable_issue, "it is part of an `actionable` issue"),
+        (facts.has_related_actionable_issue, f"it is part of an issue {labeled}"),
     )
     items: list[dict[str, Any]] = [{"fact": text} for found, text in signals if found]
     for concern in ownership.additional_owner_concerns:
@@ -208,7 +211,7 @@ def engagement_reason(*, reviewer: str, reason: EngagementReason) -> str:
     if reason.kind == "supporter":
         text = f"The PR description names {reviewer} as a verified supporter."
     else:
-        text = f"{reviewer} labeled a linked or related issue `actionable`."
+        text = f"{reviewer} labeled a linked or related issue {ACTIONABLE_LABELS_TEXT}."
     if reason.already_reviewing:
         text += f" {reviewer} already reviewed or has a pending request, so no new request is needed."
     return text
