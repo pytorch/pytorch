@@ -35,6 +35,7 @@ from torch._inductor.utils import IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     TEST_WITH_ROCM,
@@ -2841,7 +2842,7 @@ class TestPDLWithMultiStream(InductorTestCase):
         ).run(triton_code)
 
 
-@unittest.skipIf(not TEST_CUDA, "requires CUDA")
+@unittest.skipUnless(HAS_GPU, "requires GPU")
 @xfailIfNoAcceleratorTriton
 class TestAOTIUserStreams(InductorTestCase):
     @staticmethod
@@ -2849,6 +2850,24 @@ class TestAOTIUserStreams(InductorTestCase):
         if TEST_WITH_ROCM:
             return cuda_name.replace("cuda", "hip", 1)
         return cuda_name
+
+    def _assert_record_event_emitted(self, code, count=1):
+        # XPU has no cudaEventRecord equivalent; record_event lowers to a call
+        # into the AOTI event cache instead (see streams_xpu.h).
+        if GPU_TYPE == "xpu":
+            self.assertGreaterEqual(code.count("_aoti_event_cache.record("), count)
+        else:
+            self.assertGreaterEqual(
+                code.count(self._runtime_name("cudaEventRecord")), count
+            )
+
+    def _assert_wait_event_emitted(self, code, count=1):
+        if GPU_TYPE == "xpu":
+            self.assertGreaterEqual(code.count("_aoti_event_cache.wait("), count)
+        else:
+            self.assertGreaterEqual(
+                code.count(self._runtime_name("cudaStreamWaitEvent")), count
+            )
 
     def _compile_and_run(self, model, inputs):
         from torch._inductor.utils import fresh_cache, run_and_get_cpp_code
@@ -2865,65 +2884,69 @@ class TestAOTIUserStreams(InductorTestCase):
         return result, code
 
     def test_record_wait_event_basic(self):
+        gpu = getattr(torch, GPU_TYPE)
+
         class Model(torch.nn.Module):
             def forward(self, x):
-                s = torch.cuda.Stream()
-                with torch.cuda.stream(s):
+                s = gpu.Stream()
+                with gpu.stream(s):
                     y = x + 1
                 event = s.record_event()
                 event.wait()
                 return y * 2
 
-        model = Model().cuda()
-        inputs = (torch.randn(1024, device="cuda"),)
+        model = Model().to(GPU_TYPE)
+        inputs = (torch.randn(1024, device=GPU_TYPE),)
         expected = model(*inputs)
 
         result, code = self._compile_and_run(model, inputs)
 
         self.assertEqual(result, expected)
-        self.assertIn(self._runtime_name("cudaEventRecord"), code)
-        self.assertIn(self._runtime_name("cudaStreamWaitEvent"), code)
+        self._assert_record_event_emitted(code)
+        self._assert_wait_event_emitted(code)
         self.assertIn("AOTIPerThreadStreamCache", code)
 
     def test_two_stream_dependency(self):
+        gpu = getattr(torch, GPU_TYPE)
+
         class Model(torch.nn.Module):
             def forward(self, x):
-                s1 = torch.cuda.Stream()
-                s2 = torch.cuda.Stream()
-                with torch.cuda.stream(s1):
+                s1 = gpu.Stream()
+                s2 = gpu.Stream()
+                with gpu.stream(s1):
                     a = x + 1
                 event = s1.record_event()
                 s2.wait_event(event)
-                with torch.cuda.stream(s2):
+                with gpu.stream(s2):
                     b = a * 2
                 final = s2.record_event()
                 final.wait()
                 return b
 
-        model = Model().cuda()
-        inputs = (torch.randn(1024, device="cuda"),)
+        model = Model().to(GPU_TYPE)
+        inputs = (torch.randn(1024, device=GPU_TYPE),)
         expected = model(*inputs)
 
         result, code = self._compile_and_run(model, inputs)
 
         self.assertEqual(result, expected)
-        self.assertGreaterEqual(code.count(self._runtime_name("cudaEventRecord")), 2)
-        self.assertGreaterEqual(
-            code.count(self._runtime_name("cudaStreamWaitEvent")), 2
-        )
+        self._assert_record_event_emitted(code, count=2)
+        self._assert_wait_event_emitted(code, count=2)
         self.assertIn("_aoti_aux_stream_cache.get(2", code)
 
     def test_stream_synchronize_raises(self):
+        gpu = getattr(torch, GPU_TYPE)
+
         class Model(torch.nn.Module):
             def forward(self, x):
-                s = torch.cuda.Stream()
-                with torch.cuda.stream(s):
+                s = gpu.Stream()
+                with gpu.stream(s):
                     y = x + 1
                 s.synchronize()
                 return y * 2
 
-        model = Model().cuda()
-        inputs = (torch.randn(1024, device="cuda"),)
+        model = Model().to(GPU_TYPE)
+        inputs = (torch.randn(1024, device=GPU_TYPE),)
 
         with self.assertRaisesRegex(Exception, "synchronize_stream"):
             self._compile_and_run(model, inputs)

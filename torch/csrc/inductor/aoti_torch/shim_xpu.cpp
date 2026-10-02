@@ -58,6 +58,17 @@ AOTITorchError aoti_torch_get_current_xpu_stream(
       { *ret_stream = &(at::xpu::getCurrentXPUStream(device_index).queue()); });
 }
 
+AOTITorchError aoti_torch_get_xpu_stream_from_pool(
+    int32_t device_index,
+    void** ret_stream) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *ret_stream = &(c10::xpu::getStreamFromPool(
+                        /*isHighPriority=*/false,
+                        static_cast<c10::DeviceIndex>(device_index))
+                        .queue());
+  });
+}
+
 AOTITorchError aoti_torch_get_current_xpu_device(int32_t* device_index) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     *device_index =
