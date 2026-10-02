@@ -1,13 +1,19 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import itertools
+from typing import cast
+from unittest.mock import patch
 
 import sympy
 
 import torch
 from torch._subclasses import FakeTensorMode
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor._collective_utils import pad_tensor, unpad_tensor
+from torch.distributed.tensor._collective_utils import (
+    pad_tensor,
+    pad_tensor_to_size,
+    unpad_tensor,
+)
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._ops.utils import is_tensor_shardable
 from torch.distributed.tensor.placement_types import (
@@ -29,8 +35,36 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
+class _ReduceScatterMesh:
+    def __init__(self, rank, num_chunks):
+        self.rank = rank
+        self.num_chunks = num_chunks
+
+    def get_coordinate(self):
+        return (self.rank,)
+
+    def size(self, mesh_dim):
+        assert mesh_dim == 0
+        return self.num_chunks
+
+    def _sym_get_coordinate(self, mesh_dim):
+        assert mesh_dim == 0
+        return self.rank
+
+
 # Basic functionality test for Placement types.
 class PlacementTypesTestCase(TestCase):
+    @staticmethod
+    def _mock_reduce_scatter(mesh_rank, num_chunks):
+        def reduce_scatter(tensor, reduce_op, scatter_dim, group):
+            del reduce_op, group
+            chunk_size = tensor.size(scatter_dim) // num_chunks
+            return tensor.narrow(
+                scatter_dim, mesh_rank * chunk_size, chunk_size
+            ).clone()
+
+        return reduce_scatter
+
     def test_zero_pad_and_unpad_eager_identity(self):
         tensor = torch.randn(2, 8)
 
@@ -284,6 +318,54 @@ class PlacementTypesTestCase(TestCase):
         self.assertEqual(result.size(1), 4)
         self.assertIsInstance(result.size(0), torch.SymInt)
 
+    def test_reduce_shard_tensor_unpads_uneven_and_empty_shards(self):
+        num_chunks = 4
+        for dim in (0, 1):
+            shard = Shard(dim)
+            for dim_size in (2, 5, 17):
+                shape = (dim_size, 3) if dim == 0 else (3, dim_size)
+                tensor = torch.arange(torch.Size(shape).numel()).reshape(shape)
+                expected_shards, _ = shard._split_tensor(
+                    tensor,
+                    num_chunks,
+                    with_padding=False,
+                    contiguous=True,
+                )
+                for rank, expected in enumerate(expected_shards):
+                    mesh = cast(DeviceMesh, _ReduceScatterMesh(rank, num_chunks))
+                    reduce_scatter = self._mock_reduce_scatter(rank, num_chunks)
+                    with patch(
+                        "torch.distributed.tensor.placement_types.funcol.reduce_scatter_single",
+                        reduce_scatter,
+                    ):
+                        actual = shard._reduce_shard_tensor(
+                            tensor, mesh, "sum", mesh_dim=0
+                        )
+                    self.assertEqual(actual, expected)
+
+    def test_reduce_shard_tensor_unbacked_rank_with_padding(self):
+        num_chunks = 4
+        fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())
+        with fake_mode:
+            shape_env = fake_mode.shape_env
+            assert shape_env is not None
+            symbolic_rank = shape_env.create_unbacked_symint()
+            shape_env.constrain_symbol_range(symbolic_rank.node.expr, 0, num_chunks - 1)
+            mesh = cast(DeviceMesh, _ReduceScatterMesh(symbolic_rank, num_chunks))
+            tensor = torch.empty(2, 3)
+            reduce_scatter = self._mock_reduce_scatter(0, num_chunks)
+            with patch(
+                "torch.distributed.tensor.placement_types.funcol.reduce_scatter_single",
+                reduce_scatter,
+            ):
+                output = Shard(0)._reduce_shard_tensor(tensor, mesh, "sum", mesh_dim=0)
+
+        self.assertIsInstance(output.size(0), torch.SymInt)
+        self.assertEqual(
+            free_unbacked_symbols(output.size(0)), {symbolic_rank.node.expr}
+        )
+        self.assertEqual(output.size(1), 3)
+
     def test_hinted_unbacked_even_shard_skips_padding(self):
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())
         shard = Shard(0)
@@ -299,6 +381,26 @@ class PlacementTypesTestCase(TestCase):
 
         self.assertEqual(padded.shape, local_tensor.shape)
         self.assertEqual(unpadded.shape, full_tensor.shape)
+
+    def test_pad_tensor_to_size_handles_runtime_empty_input(self):
+        traced = make_fx(lambda tensor: pad_tensor_to_size(tensor, 0, 1))(
+            torch.randn(1, 3)
+        )
+        padded = traced(torch.empty(0, 3))
+
+        self.assertEqual(padded, torch.zeros(1, 3))
+        call_targets = {
+            node.target for node in traced.graph.nodes if node.op == "call_function"
+        }
+        self.assertIn(torch.ops._dtensor._pad_tensor_to_size.default, call_targets)
+
+    def test_view_as_input_handles_runtime_empty_input(self):
+        traced = make_fx(torch.ops._dtensor._view_as_input.default)(
+            torch.randn(1, 3), torch.randn(1, 3)
+        )
+        output = traced(torch.empty(0, 3), torch.empty(0, 3))
+
+        self.assertEqual(output.shape, (0, 3))
 
     def test_hinted_unbacked_even_chunk_preserves_symbolic_shard_size(self):
         fake_mode = FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv())

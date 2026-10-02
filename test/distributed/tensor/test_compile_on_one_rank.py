@@ -212,6 +212,38 @@ class TestCompileOnOneRank(DTensorTestBase):
 
     @with_comms
     @compiler_config.patch(compile_on_one_rank=True)
+    def test_make_fx_uneven_shard_backward_with_empty_local_shards(self):
+        """A graph traced with a non-empty shard must run on empty-shard ranks."""
+        mesh = self.build_device_mesh()
+
+        def fn(local_tensor, runtime_mesh):
+            dtensor = DTensor.from_local(
+                local_tensor,
+                runtime_mesh,
+                [Shard(0)],
+                run_check=False,
+                shape=torch.Size((2, 3)),
+                stride=(3, 1),
+            )
+            replicated = dtensor.redistribute(placements=[Replicate()])
+            return torch.autograd.grad(replicated.sum(), local_tensor)[0]
+
+        trace_input = torch.ones(1, 3, device=self.device_type, requires_grad=True)
+        gm = make_fx(fn, tracing_mode="fake")(trace_input, mesh)
+
+        local_size = 1 if self.rank < 2 else 0
+        local_input = torch.ones(
+            local_size, 3, device=self.device_type, requires_grad=True
+        )
+        local_grad = gm(local_input, mesh)
+
+        self.assertEqual(local_grad.shape, local_input.shape)
+        targets = _call_targets(gm)
+        self.assertIn("_dtensor._pad_tensor_to_size.default", targets)
+        self.assertIn("_dtensor._view_as_input.default", targets)
+
+    @with_comms
+    @compiler_config.patch(compile_on_one_rank=True)
     def test_all_reduce_with_implicit_world_group(self):
         """`dist.all_reduce(t)` with no `group=` (implicit `dist.group.WORLD`)
         should compile under compile_on_one_rank=True.
