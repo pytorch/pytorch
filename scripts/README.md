@@ -1,1 +1,1 @@
-This directory contains the useful tools.
+This directory contains useful tools.
