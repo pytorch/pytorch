@@ -7740,6 +7740,26 @@ class Scheduler:
             if len(future_choices) == 0:
                 return FusionResult.fuse(False)
 
+            deferred_ms: dict[frozenset[str], float] = {}
+
+            def deferred_epilogue_ms(tile: tuple[int, int, int] | None) -> float:
+                # Epilogue nodes reading reduction partials run after the
+                # wrapper finishes them, as separate kernels.
+                from torch._inductor.codegen.simd import finished_after_kernel
+
+                epilogue = [n for n in node_list_fused if not n.is_template()]
+                if tile is None or not any(n.is_reduction() for n in epilogue):
+                    return 0.0
+                _, after = finished_after_kernel(tile, multi_node, epilogue)
+                key = frozenset(n.get_name() for n in after)
+                if key not in deferred_ms:
+                    groups = itertools.groupby(after, lambda n: n.group)
+                    deferred_ms[key] = sum(
+                        self.benchmark_fused_nodes(list(nodes))[0]
+                        for _, nodes in groups
+                    )
+                return deferred_ms[key]
+
             def benchmark_when_ready() -> bool:
                 nonlocal choice_timings, future_choices, ms1, min_choice, multi_node
                 min_ms_fused = float("inf")
@@ -7807,6 +7827,9 @@ class Scheduler:
                                 # pyrefly: ignore [bad-argument-type]
                                 device,
                             )
+                            if not is_nvgemm_choice and epilogue_fusion:
+                                # pyrefly: ignore [missing-attribute]
+                                ms_fused += deferred_epilogue_ms(multi_node.output_tile)
                             new_timings[choice] = ms_fused
                             if ms_fused < min_ms_fused:
                                 min_ms_fused = ms_fused
