@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import contextlib
+import copy
 import dataclasses
 import enum
 import functools
@@ -3969,6 +3970,19 @@ class SchedulerNode(BaseSchedulerNode):
             raise AssertionError("expected self.node to be an ir.ComputedBuffer")
         with self.node.with_original_inner_fn():
             self._compute_attrs()
+
+    def unsplit_reduction(self) -> SchedulerNode:
+        """For the first stage of a split reduction, a copy that computes the
+        whole reduction; this node is left unchanged."""
+        if not MixOrderReduction.is_split_reduction(self):
+            return self
+        if not isinstance(self.node, ir.ComputedBuffer):
+            raise AssertionError("expected self.node to be an ir.ComputedBuffer")
+        node = copy.copy(self)
+        with self.node.with_original_inner_fn():
+            node._compute_attrs()
+        self.node.get_default_sizes_body.clear_cache(self.node)
+        return node
 
     def expand_dimension_for_pointwise_node(
         self, dimension: int, new_range: int
@@ -10837,6 +10851,25 @@ class Scheduler:
         if node1.get_operation_names() & node2.ancestors:
             # node2 depends on node1 outputs
             backend = self.get_backend(device)
+            if (
+                staged_matches is None
+                and node1.is_template()
+                and node2.is_reduction()
+                and backend.can_fuse_template_reduction_epilogue(node1, node2)
+            ):
+                # Reductions in a template epilogue read the output tile from
+                # registers, so they may traverse it in any loop order.
+                staged_matches = tuple(
+                    MemoryDepMatch(write, read)
+                    for write in node1.read_writes.writes
+                    for snode in node2.get_nodes()
+                    if snode.is_reduction()
+                    for read in snode.read_writes.reads
+                    if isinstance(write, MemoryDep)
+                    and isinstance(read, MemoryDep)
+                    and write.normalize_with_stride_order()
+                    == read.normalize_with_stride_order()
+                )
             vertical_fusion_legal = (
                 self.can_fuse_vertical(node1, node2)
                 if staged_matches is None
