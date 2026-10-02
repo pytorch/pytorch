@@ -1002,6 +1002,26 @@ class TestFlexDecoding(InductorTestCase):
         )
 
     @supported_platform
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @with_tf32_off
+    def test_pointwise_query_producer(self, device, head_dims):
+        # https://github.com/pytorch/pytorch/issues/198513
+        # The pointwise producer's layout follows its [B, S, H, D] input, not the
+        # contiguous [B, H, S, D] strides it has when flex decoding is lowered.
+        Hq, Hkv = head_dims
+        Q_S, D = 4, 16
+        x = torch.randn(2, Q_S, Hq * D, device=device)
+        scale = torch.rand(D, device=device) + 0.5
+        k = torch.randn(2, Hkv, Q_S, D, device=device)
+        v = torch.randn(2, Hkv, Q_S, D, device=device)
+
+        def f(x, k, v):
+            q = x.view(2, Q_S, Hq, D).transpose(1, 2) * scale
+            return flex_attention(q, k, v, enable_gqa=Hq != Hkv)
+
+        self.assertEqual(torch.compile(f)(x, k, v), f(x, k, v))
+
+    @supported_platform
     @parametrize_device_dtype("dtypes_fast")
     @common_utils.parametrize("head_dims", test_Hq_Hkv)
     @common_utils.parametrize("batch_dims", test_Bq_Bkv)

@@ -24,7 +24,7 @@ from torch.fx.experimental.symbolic_shapes import (
     compute_unbacked_bindings,
     PropagateUnbackedSymInts,
 )
-from torch.fx.graph import CodeGen
+from torch.fx.graph import _Namespace, CodeGen
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils import _pytree as pytree
@@ -73,9 +73,91 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             self.root = torch.nn.Module()
             self.graph = torch.fx.Graph()
             self.graph.set_codegen(codegen)
+            self._implicit_node: tuple[str, torch.fx.node.Target, str | None] | None = (
+                None
+            )
+            self._names_to_preserve: dict[
+                torch.fx.Node,
+                tuple[str, str, str, torch.fx.node.Target],
+            ] = {}
             self.tensor_attrs: dict[str, torch.Tensor] = {}  # type: ignore[assignment]
             self.fake_tensor_mode: FakeTensorMode | None = None
             self.submodules: dict[torch.nn.Module, str] = {}
+
+        def create_node(
+            self,
+            kind: str,
+            target: torch.fx.node.Target,
+            args: tuple[Argument, ...],
+            kwargs: dict[str, Argument],
+            name: str | None = None,
+            type_expr: Any | None = None,
+        ) -> torch.fx.Node:
+            implicit_node = self._implicit_node
+            implicitly_named = (
+                implicit_node is not None
+                and kind == implicit_node[0]
+                and target is implicit_node[1]
+                and name == implicit_node[2]
+            )
+            node = super().create_node(kind, target, args, kwargs, name, type_expr)
+            if implicitly_named and self.callback._created_nodes is not None:
+                self.callback._created_nodes[node] = node.name
+            return node
+
+        def create_proxy_with_implicit_name(
+            self,
+            kind: str,
+            target: torch.fx.node.Target,
+            args: tuple[Any, ...],
+            kwargs: dict[str, Any],
+            name: str | None,
+        ) -> torch.fx.Proxy:
+            prev_implicit_node, self._implicit_node = (
+                self._implicit_node,
+                (kind, target, name),
+            )
+            try:
+                return self.create_proxy(kind, target, args, kwargs, name=name)
+            finally:
+                self._implicit_node = prev_implicit_node
+
+        def _preserve_source_node_names(self) -> None:
+            live_nodes = set(self.graph.nodes)
+            names_to_preserve = {
+                node: source_name
+                for node, (
+                    source_name,
+                    created_name,
+                    source_op,
+                    source_target,
+                ) in self._names_to_preserve.items()
+                if node in live_nodes
+                and node.name == created_name
+                and node.op == source_op
+                and node.target is source_target
+            }
+            namespace = _Namespace()
+            new_names: dict[torch.fx.Node, str] = {}
+
+            def reserve_name(node: torch.fx.Node, name: str) -> bool:
+                if name in namespace._used_names:
+                    return False
+                namespace._used_names.add(name)
+                namespace.associate_name_with_obj(name, node)
+                new_names[node] = name
+                return True
+
+            for node, name in names_to_preserve.items():
+                if not reserve_name(node, name):
+                    raise AssertionError(f"duplicate source node name: {name}")
+            for node in self.graph.nodes:
+                if node not in new_names:
+                    if not reserve_name(node, node.name):
+                        new_names[node] = namespace.create_name(node.name, node)
+            for node, name in new_names.items():
+                node.name = name
+            self.graph._graph_namespace = namespace
 
         def trace(self) -> None:  # type: ignore[override]
             raise ExportPassBaseError("ExportTracer doesn't support trace().")
@@ -289,7 +371,31 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         def run_node(self, n: torch.fx.Node) -> Argument:
             self.node = n
             self.callback.node_debug_str = n.format_node()
-            return super().run_node(n)
+            created_nodes: dict[torch.fx.Node, str] = {}
+            prev_created_nodes, self.callback._created_nodes = (
+                self.callback._created_nodes,
+                created_nodes,
+            )
+            tracer = self.callback.tracer
+            try:
+                result = super().run_node(n)
+                if isinstance(result, ProxyValue):
+                    created_name = created_nodes.get(result.node)
+                    if (
+                        created_name is not None
+                        and result.node.name == created_name
+                        and result.node.op == n.op
+                        and result.node.target is n.target
+                    ):
+                        tracer._names_to_preserve[result.node] = (
+                            n.name,
+                            created_name,
+                            n.op,
+                            n.target,
+                        )
+                return result
+            finally:
+                self.callback._created_nodes = prev_created_nodes
 
     def __init__(self) -> None:
         self.interpreter = PropagateUnbackedSymInts(
@@ -298,6 +404,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         self.tracer = self.ExportTracer(self, CodeGen())
         self.fake_tensor_mode: FakeTensorMode | None = None
         self._initialized = True
+        self._created_nodes: dict[torch.fx.Node, str] | None = None
         self.node_debug_str: str | None = None
 
     def _fx(
@@ -320,8 +427,8 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         if isinstance(target, torch._ops.OpOverload):
             name = self.tracer.graph._target_to_str(target.overloadpacket.__name__)
 
-        res_proxy = self.tracer.create_proxy(
-            kind, target, args_proxy, kwargs_proxy, name=name
+        res_proxy = self.tracer.create_proxy_with_implicit_name(
+            kind, target, args_proxy, kwargs_proxy, name
         )
         res_proxy.node.meta.update(meta.data)
         if self.fake_tensor_mode and (shape_env := self.fake_tensor_mode.shape_env):
@@ -372,7 +479,9 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         pass
 
     def placeholder(self, name: str, arg: Argument, meta: NodeMetadata) -> ProxyValue:
-        arg_proxy = self.tracer.create_proxy("placeholder", name, (), {})
+        arg_proxy = self.tracer.create_proxy_with_implicit_name(
+            "placeholder", name, (), {}, None
+        )
         arg_proxy.node.meta = meta.data
         self.tracer.set_metadata(arg_proxy.node, arg)
         return ProxyValue(arg, arg_proxy)
@@ -463,6 +572,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         with fx_traceback.preserve_node_meta():
             interpreter.run(*inputs_data)
 
+        self.tracer._preserve_source_node_names()
         new_graph_module = torch.fx.GraphModule(self.tracer.root, self.tracer.graph)
 
         self.tracer = prev_tracer

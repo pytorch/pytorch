@@ -19,8 +19,8 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
     skipIfXpu,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -197,8 +197,6 @@ class MultiKernelTest(TestCase):
             self.assertFalse(_contains_multi_kernel_code(wrapper_code))
 
     @requires_triton()
-    # TODO: bobrenjc93 to fix multi-kernel for ROCM
-    @skipIfRocm
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     @skipIfXpu(msg="driver issue, torch-xpu-ops: 2295")
     def test_triton_gemm(self):
@@ -222,13 +220,14 @@ class MultiKernelTest(TestCase):
         # One for the first pass and one for the second pass.
         # We mainly care about the wrapper for the final pass here.
         wrapper_code = wrapper_code[-1]
-        self.assertEqual(ref, act)
+        # fp32 accumulation-order divergence between the triton template and
+        # hipblasLt at K=4096; measured and derived in issue #196494.
+        rocm_tol = {"atol": 2e-3, "rtol": 1e-3} if TEST_WITH_ROCM else {}
+        self.assertEqual(ref, act, **rocm_tol)
         self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
 
     @skipIfXpu(msg="driver issue, torch-xpu-ops: 2295")
     @requires_triton()
-    # TODO: bobrenjc93 to fix multi-kernel for ROCM
-    @skipIfRocm
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
     def test_triton_relu_fused_gemm(self):
         def fn(x, y):
@@ -251,7 +250,10 @@ class MultiKernelTest(TestCase):
         # One for the first pass and one for the second pass.
         # We mainly care about the wrapper for the final pass here.
         wrapper_code = wrapper_code[-1]
-        self.assertEqual(ref, act)
+        # fp32 accumulation-order divergence between the triton template and
+        # hipblasLt at K=4096; measured and derived in issue #196494.
+        rocm_tol = {"atol": 2e-3, "rtol": 1e-3} if TEST_WITH_ROCM else {}
+        self.assertEqual(ref, act, **rocm_tol)
         self.assertTrue(_contains_size_hint_multi_kernel_code(wrapper_code))
 
     @parametrize("force_kernel", (0, 1))

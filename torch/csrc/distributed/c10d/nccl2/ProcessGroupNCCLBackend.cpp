@@ -136,12 +136,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
     auto nonblocking = c10::utils::check_env("TORCH_NCCL_USE_COMM_NONBLOCKING");
     options_c10d_->config.blocking = nonblocking.value_or(false) ? 0 : 1;
   }
-#if NCCL_VERSION_CODE < NCCL_VERSION(2, 28, 0) || defined(USE_ROCM)
   TORCH_CHECK(
-      !options_c10d_->enable_reconfigure,
-      "nccl2 reconfigure requires NCCL 2.28 or later and is not supported "
-      "with RCCL");
-#endif
+      !options_c10d_->enable_reconfigure || supportsReconfigure(),
+      "nccl2 reconfigure requires NCCL 2.28 or later (RCCL 2.30.7 or later "
+      "on ROCm)");
 }
 
 std::chrono::milliseconds ProcessGroupNCCL::operationTimeout(
