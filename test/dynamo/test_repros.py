@@ -2691,6 +2691,70 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         res = fn()
         self.assertEqual(((3, 5), (3, 5)), res)
 
+    def _check_named_out_args_shape_change_before_nested_graph_break(
+        self, explicit_overload, dynamic=False, changed_output=None
+    ):
+        op = torch.ops.aten.topk.values if explicit_overload else torch.ops.aten.topk
+
+        def inspect_shapes(*tensors):
+            shapes = tuple(tensor.shape for tensor in tensors)
+            torch._dynamo.graph_break()
+            return shapes
+
+        def fn(x):
+            values_shape = (3, 2) if changed_output == "indices" else (0,)
+            indices_shape = (3, 2) if changed_output == "values" else (0,)
+            values = torch.empty(values_shape)
+            indices = torch.empty(indices_shape, dtype=torch.int64)
+            op(x, 2, values=values, indices=indices)
+            return inspect_shapes(values, indices)
+
+        result = torch.compile(fn, backend="eager", dynamic=dynamic)(torch.randn(3, 4))
+        self.assertEqual(result, ((3, 2), (3, 2)))
+
+    def test_named_out_args_shape_change_before_nested_graph_break(self):
+        self._check_named_out_args_shape_change_before_nested_graph_break(False)
+
+    @parametrize("explicit_overload", [False, True])
+    @parametrize("dynamic", [False, True])
+    @parametrize("changed_output", ["values", "indices"])
+    def test_named_out_args_shape_change_variants(
+        self, explicit_overload, dynamic, changed_output
+    ):
+        self._check_named_out_args_shape_change_before_nested_graph_break(
+            explicit_overload, dynamic, changed_output
+        )
+
+    def test_packet_overload_mutating_kwarg_resolution(self):
+        namespace = "test_dynamo_mutating_kwarg_resolution"
+        with torch.library._scoped_library(namespace, "FRAGMENT") as lib:
+            torch.library.define(
+                f"{namespace}::foo.write",
+                "(Tensor x, *, Tensor(a!) dst) -> Tensor(a!)",
+                lib=lib,
+            )
+            torch.library.define(
+                f"{namespace}::foo.read",
+                "(int n, *, Tensor dst) -> Tensor",
+                lib=lib,
+            )
+            torch.library.impl(
+                f"{namespace}::foo.read",
+                "CompositeImplicitAutograd",
+                lambda n, *, dst: dst + n,
+                lib=lib,
+            )
+            packet = getattr(torch.ops, namespace).foo
+
+            def fn(dst):
+                return packet(1, dst=dst)
+
+            dst = torch.arange(12).reshape(3, 4)[:, ::2]
+            self.assertFalse(dst.is_contiguous())
+            expected = fn(dst)
+            actual = torch.compile(fn, backend="eager", fullgraph=True)(dst)
+            self.assertEqual(actual, expected)
+
     def test_slice_into_list_mutable(self):
         class Mod(torch.nn.Module):
             def forward(self, listy):
