@@ -355,9 +355,8 @@ jobs:
           # pinned by TestTheReviewJobsTrustedSurfaceIsPinned's
           # prompt-hash tests, which also EXECUTE this step.
           #
-          # The rubric is four files: pr-review-readiness/SKILL.md delegates the
-          # review logic to pr-review's three, so they shape the verdict as
-          # directly as it does and must move the hash when they change.
+          # The rubric delegates the review logic to the pr-review files, so
+          # they shape the verdict too and must move the hash when they change.
           HASH=$(cat .github/workflows/hardened-pr-review-run.yml \
                      scripts/pr_review/extract_verdict.py \
                      scripts/pr_review/emit_row.py \
@@ -369,7 +368,8 @@ jobs:
                      .claude/skills/pr-review-readiness/SKILL.md \
                      .claude/skills/pr-review/SKILL.md \
                      .claude/skills/pr-review/review-checklist.md \
-                     .claude/skills/pr-review/bc-guidelines.md | sha256sum | cut -c1-16)
+                     .claude/skills/pr-review/bc-guidelines.md \
+                     .claude/skills/pr-review/ci-runner-naming.md | sha256sum | cut -c1-16)
           echo "hash=$HASH" >> "$GITHUB_OUTPUT"
 
       - name: Configure AWS credentials via OIDC
