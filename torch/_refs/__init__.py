@@ -3574,13 +3574,15 @@ def _scalar_type_name(dtype: torch.dtype) -> str:
     return dtype_name[:1].upper() + dtype_name[1:]
 
 
-def _check_native_layer_norm_cuda_param_dtype(
+def _check_native_layer_norm_gpu_param_dtype(
     input: Tensor,
     normalized_ndim: int,
     weight: Tensor | None,
     bias: Tensor | None,
 ) -> None:
-    if input.device.type != "cuda":
+    # CUDA and XPU kernels reject mismatched weight/bias dtypes once there is
+    # at least one row to normalize.
+    if input.device.type not in ("cuda", "xpu"):
         return
 
     mismatched_dtype = None
@@ -3658,7 +3660,7 @@ def native_layer_norm(
         not input.is_complex(),
         lambda: "native_layer_norm does not support complex inputs",
     )
-    _check_native_layer_norm_cuda_param_dtype(input, normalized_ndim, weight, bias)
+    _check_native_layer_norm_gpu_param_dtype(input, normalized_ndim, weight, bias)
 
     input = contiguous(input)
     if weight is not None:
@@ -5816,7 +5818,7 @@ def logspace(
         dtype = default_complex_dtype
         _dtype = None  # torch.linspace will update the correct dtype
     else:
-        _dtype = torch.float64
+        _dtype = highest_precision_float(device)
 
     if isinstance(base, complex):
         raise AssertionError(f"base must not be complex, got {type(base)}")  # for mypy

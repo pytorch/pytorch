@@ -4,6 +4,7 @@
 import collections
 import inspect
 import sys
+import traceback
 import types
 import unittest
 
@@ -470,6 +471,92 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         result = torch.compile(fn, backend="eager")(obj)
         self.assertEqual(result, 1)
+
+    def test_user_descriptor_get_on_class(self):
+        calls = []
+
+        class Desc:
+            def __get__(self, obj, objtype=None):
+                calls.append(objtype)
+                return len(calls) * 10
+
+        class Base:
+            d = Desc()
+
+        class Sub(Base):
+            pass
+
+        def fn(cls, x):
+            return x + cls.d, cls.d
+
+        x = torch.ones(3)
+        for cls in (Base, Sub):
+            torch._dynamo.reset()
+            calls.clear()
+            expected = fn(cls, x)
+            expected_calls = list(calls)
+            calls.clear()
+            result = torch.compile(fn, backend="eager", fullgraph=True)(cls, x)
+            self.assertEqual(result, expected)
+            self.assertEqual(calls, expected_calls)
+
+    def test_user_descriptor_untraceable_get_on_class(self):
+        calls = []
+
+        class Desc:
+            def __get__(self, obj, objtype=None):
+                calls.append(objtype)
+                traceback.extract_stack()
+                return len(calls) * 10
+
+        class Base:
+            d = Desc()
+
+        def fn(x):
+            return x + 1, Base.d, Base.d
+
+        x = torch.ones(3)
+        expected = fn(x)
+        expected_calls = list(calls)
+        for nested in (False, True):
+            with torch._dynamo.config.patch(nested_graph_breaks=nested):
+                torch._dynamo.reset()
+                calls.clear()
+                result = torch.compile(fn, backend="eager")(x)
+                self.assertEqual(result, expected)
+                self.assertEqual(calls, expected_calls)
+
+                torch._dynamo.reset()
+                with self.assertRaises(torch._dynamo.exc.Unsupported):
+                    torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_user_descriptor_get_on_class_graph_break(self):
+        # A graph break inside __get__ must graph break the attribute load,
+        # not call __get__ at compile time and guard on its result.
+        calls = []
+
+        class Desc:
+            def __get__(self, obj, objtype=None):
+                calls.append(1)
+                torch._dynamo.graph_break()
+                return len(calls)
+
+        class C:
+            a = Desc()
+
+        def fn(x):
+            return x + C.a
+
+        x = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        for _ in range(2):
+            calls.clear()
+            expected = fn(x)
+            expected_calls = list(calls)
+            calls.clear()
+            self.assertEqual(opt_fn(x), expected)
+            self.assertEqual(calls, expected_calls)
 
     def test_staticmethod_descriptor(self):
         class MyObj:
@@ -1854,6 +1941,67 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaises(torch._dynamo.exc.Unsupported):
             torch.compile(fn, backend="eager", fullgraph=True)()
+
+    def test_builtin_type_and_func_getattr_missing_attr(self):
+        # Issue #198197: getattr on builtin types and functions must raise
+        # observed AttributeError when the attribute is missing.
+        missing_attr = "__nonexistent__"
+        pos_type_attr = "from_bytes"
+        pos_func_attr = "__name__"
+
+        def try_getattr(obj, name):
+            try:
+                getattr(obj, name)
+                return "present"
+            except AttributeError:
+                return "missing"
+
+        def try_load_attr_int():
+            try:
+                return int.__nonexistent__
+            except AttributeError:
+                return "missing"
+
+        def try_load_attr_len():
+            try:
+                return len.__nonexistent__
+            except AttributeError:
+                return "missing"
+
+        def fn(x):
+            results = [
+                # Builtin types missing attributes
+                try_getattr(int, missing_attr),
+                try_getattr(str, missing_attr),
+                try_getattr(list, missing_attr),
+                try_getattr(dict, missing_attr),
+                try_getattr(type, missing_attr),
+                try_getattr(object, missing_attr),
+                try_getattr(float, missing_attr),
+                try_getattr(bool, missing_attr),
+                try_getattr(tuple, missing_attr),
+                try_getattr(set, missing_attr),
+                # Builtin functions missing attributes
+                try_getattr(len, missing_attr),
+                try_getattr(abs, missing_attr),
+                try_getattr(print, missing_attr),
+                # Direct LOAD_ATTR
+                try_load_attr_int(),
+                try_load_attr_len(),
+                # hasattr check
+                "present" if hasattr(int, missing_attr) else "missing",
+                "present" if hasattr(len, missing_attr) else "missing",
+                # Positive check on existing attributes
+                getattr(int, pos_type_attr) is not None,
+                getattr(len, pos_func_attr),
+            ]
+            return results
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        expected = fn(x)
+        actual = compiled_fn(x)
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":

@@ -52,6 +52,7 @@ from torch.utils._pytree import is_namedtuple_class
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
+    CompileOnOneRankUnsupported,
     format_frame_info,
     get_dynamo_observed_exception,
     InfiniteGeneratorError,
@@ -2360,7 +2361,23 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
                 try:
                     value = cell_contents.as_python_constant()
-                    cells.append(make_cell(value))
+                    cell = make_cell(value)
+                    if allow_sourced_cells:
+                        needs_tracking = False
+
+                        def check_mutation(var):
+                            nonlocal needs_tracking
+                            if var.mutation_type is not None:
+                                needs_tracking = True
+
+                        VariableTracker.visit(check_mutation, cell_contents)
+                        if needs_tracking:
+                            # Preserve tracked mutable contents, including
+                            # those nested inside immutable containers.
+                            tx.output.side_effects.track_cell_existing(
+                                None, cell, cell_contents
+                            )
+                    cells.append(cell)
                     continue
                 except (NotImplementedError, Unsupported):
                     if not allow_sourced_cells:
@@ -2603,6 +2620,18 @@ RE_CONSTANT_FOLD_FNS = {
 }
 
 
+@functools.cache
+def _device_setters() -> dict[Any, str]:
+    """Functions that move the rank off whatever device it is currently on."""
+    return {
+        torch.cuda.set_device: "torch.cuda.set_device",
+        torch.xpu.set_device: "torch.xpu.set_device",
+        torch.accelerator.set_device_index: "torch.accelerator.set_device_index",
+        torch.accelerator.set_device_idx: "torch.accelerator.set_device_idx",
+        torch.mtia.set_device: "torch.mtia.set_device",
+    }
+
+
 class SkipFunctionVariable(VariableTracker):
     _nonvar_fields = {
         "value",
@@ -2631,6 +2660,41 @@ class SkipFunctionVariable(VariableTracker):
 
     def get_real_python_backed_value(self) -> Any:
         return self.value
+
+    def get_source(self) -> Source | None:
+        return self.source
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        if not isinstance(self.value, types.FunctionType):
+            return None
+        fn_dict = self.value.__dict__
+        if name not in fn_dict:
+            return None
+        source = self.get_source()
+        source = AttrSource(source, name) if source is not None else None
+        if source is not None:
+            return variables.LazyVariableTracker.create(fn_dict[name], source, tx=tx)
+        return VariableTracker.build(tx, fn_dict[name])
+
+    def call_getattr_fallback(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        if not is_function(self.value):
+            return None
+        source = self.get_source()
+        if source is not None:
+            install_guard(
+                source.make_guard(functools.partial(GuardBuilder.HASATTR, attr=name))
+            )
+        msg = f"'{type(self.value).__name__}' object has no attribute '{name}'"
+        raise_observed_exception(
+            AttributeError,
+            tx,
+            args=[msg],
+            kwargs={"name": ConstantVariable.create(name), "obj": self},
+        )
 
     @classmethod
     def create_with_source(cls, value: Any, source: Source) -> "SkipFunctionVariable":
@@ -2674,6 +2738,28 @@ class SkipFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if self.value in _device_setters():
+            from torch.fx.experimental.proxy_tensor import (
+                _coor_current_accelerator,
+                _coor_enabled,
+            )
+
+            # Under CooR a rank owns exactly one accelerator, and device contexts are
+            # traced as no-ops on that basis. Moving off it would leave the rest of
+            # the frame's rank-relative devices pointing at the wrong GPU, and no
+            # graph break undoes it, so refuse rather than diverge from eager.
+            cur = _coor_current_accelerator() if _coor_enabled() else None
+            if cur is not None:
+                name = _device_setters()[self.value]
+                raise CompileOnOneRankUnsupported(
+                    f"Cannot call {name} under compile_on_one_rank: this rank is on "
+                    f"{cur} and CooR gives it a single accelerator, so changing the "
+                    "current device invalidates every rank-relative device in the "
+                    "frame.\n"
+                    "Next steps: drop the call, or turn off compile_on_one_rank "
+                    "for this region."
+                )
+
         # importlib functions are frozen builtins that Dynamo cannot trace
         # into.  They are deterministic for a given package name, so
         # constant-fold them when all args are constants.
@@ -2924,6 +3010,9 @@ class WrappedSkipFunctionVariable(SkipFunctionVariable):
         self.wrapped = wrapped
         self.context = context
 
+    def get_source(self) -> Source | None:
+        return self.wrapped.get_source()
+
     def call_function(
         self,
         tx: "InstructionTranslatorBase",
@@ -2954,13 +3043,15 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
     __script_if_tracing_wrapper have the original attr at "__original_fn".
     """
 
-    def python_type(self) -> type:
-        return types.FunctionType
+    _cpython_type = types.FunctionType
 
     def __init__(self, wrapper_obj: Any, attr_to_trace: str, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.wrapper_obj = wrapper_obj
         self.attr_to_trace = attr_to_trace
+
+    def python_type(self) -> type:
+        return types.FunctionType
 
     def get_module(self) -> str:
         return self.wrapper_obj.__module__
@@ -3018,6 +3109,37 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if isinstance(self.wrapper_obj, torch.jit.ScriptFunction):
+            schema = cast(torch._C.FunctionSchema, self.wrapper_obj.schema)
+            schema_types = [
+                arg.type for arg in itertools.chain(schema.arguments, schema.returns)
+            ]
+            while schema_types:
+                schema_type = schema_types.pop()
+                if isinstance(
+                    schema_type,
+                    (
+                        torch.ListType,
+                        torch.DictType,
+                        torch.AnyType,
+                        torch.ClassType,
+                        torch.InterfaceType,
+                    ),
+                ):
+                    unimplemented(
+                        gb_type="ScriptFunction with mutable-capable schema",
+                        context=f"schema: {schema}",
+                        explanation="Dynamo cannot safely inline a torch.jit.ScriptFunction whose schema contains List, Dict, Any, Class, or Interface because TorchScript may copy mutable containers or class instances at the Python call boundary.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                if isinstance(
+                    schema_type,
+                    (torch.TupleType, torch.OptionalType, torch.UnionType),
+                ):
+                    schema_types.extend(
+                        cast(torch._C.Type, schema_type).containedTypes()
+                    )
+
         if hasattr(self.wrapper_obj, "cache_info"):
             target_fn = getattr(self.wrapper_obj, self.attr_to_trace, None)
             module_name = getattr(target_fn, "__module__", "") or ""
@@ -3056,10 +3178,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
                     dynamo_logger.debug(user_stack_trace)
 
         all_args = self.self_args() + list(args)
-        # Inner torch.compile wrapper: disable nested graph breaks to
-        # preserve the inner compile's semantics (e.g. fullgraph=True).
-        # Graph breaks inside the inner function should raise Unsupported
-        # so they're handled by the outer frame, not as nested breaks.
+        # Do not resume inside _torchdynamo_inline when the wrapper changes call
+        # semantics. Inner torch.compile preserves options such as fullgraph,
+        # while ScriptFunction must preserve TorchScript semantics.
         # Skip this for recursive calls to the same compiled function
         # (the wrapper's original callable matches the root frame's code).
         is_inner_torch_compile = (
@@ -3076,7 +3197,10 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         )
         polyfill = (
             polyfills.getattr_and_trace_no_nested_graph_breaks
-            if is_inner_torch_compile
+            if (
+                is_inner_torch_compile
+                or isinstance(self.wrapper_obj, torch.jit.ScriptFunction)
+            )
             else polyfills.getattr_and_trace
         )
         return VariableTracker.build(
@@ -3095,28 +3219,67 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         return self.wrapper_obj
 
 
-class WrapperUserMethodVariable(WrapperUserFunctionVariable):
+class WrapperUserMethodVariable(BaseUserFunctionVariable):
     """
-    Similar to WrapperUserFunctionVariable, but for methods. The only delta is
-    saving the vt for `self` object of the method which is then used by
-    WrapperUserFunctionVariable in `call_function` method.
+    Similar to WrapperUserFunctionVariable, but for methods. Sibling class
+    inheriting from BaseUserFunctionVariable so that
+    issubclass(WrapperUserMethodVariable, WrapperUserFunctionVariable) is False,
+    matching CPython (MethodType is not a FunctionType).
     """
+
+    _cpython_type = types.MethodType
+
+    def __init__(
+        self,
+        fn: WrapperUserFunctionVariable,
+        self_obj: VariableTracker,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.fn = fn
+        self.obj = self_obj
 
     def python_type(self) -> type:
         return types.MethodType
 
-    def __init__(
-        self,
-        wrapper_obj: Any,
-        attr_to_trace: str,
-        self_obj: VariableTracker,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(wrapper_obj, attr_to_trace, **kwargs)
-        self.obj = self_obj
-
     def self_args(self) -> list[VariableTracker]:
         return [self.obj]
+
+    def get_module(self) -> str:
+        return self.fn.get_module()
+
+    def get_name(self) -> str:
+        return self.fn.get_name()
+
+    def get_qualname(self) -> str:
+        return self.fn.get_qualname()
+
+    def get_code(self) -> types.CodeType:
+        return self.fn.get_code()
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        return self.fn.tp_getattro_impl(tx, name)
+
+    def get_function(self):
+        return self.fn.get_function()
+
+    def lookup_instance_dict(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker | None":
+        return self.fn.lookup_instance_dict(tx, name)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self.fn.call_function(tx, self.self_args() + list(args), kwargs)
+
+    def get_real_python_backed_value(self) -> object:
+        return self.fn.get_real_python_backed_value()
 
 
 def _traceable_collective_remaps() -> dict[Any, Any]:
@@ -3319,7 +3482,10 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         # It's safe to assume args/kwargs from orig_fn map 1:1 to args/kwargs of remapped_fn,
         # since that's the contract for putting a mapping in `traceable_collective_remaps`
         import torch.distributed as dist
-        from torch.distributed._functional_collectives import REDUCE_OP_TO_STR
+        from torch.distributed._functional_collectives import (
+            _ASYNC_OP_REMAP_ERROR,
+            REDUCE_OP_TO_STR,
+        )
 
         # Merge args into kwargs so positional and keyword args
         # can be processed the same way.
@@ -3331,7 +3497,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
             unimplemented(
                 gb_type="async_op=True for distributed collectives",
                 context=f"{self.fn}, {args=}, {kwargs=}",
-                explanation=f"`torch.compile` doesn't support `async_op=True for {self.fn}",
+                explanation=_ASYNC_OP_REMAP_ERROR,
                 hints=[
                     *graph_break_hints.SUPPORTABLE,
                 ],
@@ -5325,14 +5491,21 @@ class PropertyVariable(VariableTracker):
             tx, f"'{self.python_type_name()}' object has no attribute '__name__'"
         )
 
+    def _isabstractmethod_getter(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker:
+        from ..polyfills import property_isabstractmethod
+
+        # Trace truth testing so user-defined __bool__ methods and their
+        # exceptions are handled within the traced program.
+        return UserFunctionVariable(property_isabstractmethod).call_function(
+            tx, [self], {}
+        )
+
     tp_getset = {
         "__name__": GetSet(_name_getter, getset_set("__name__")),
         "__isabstractmethod__": GetSet(
-            getset_load_or_build(
-                lambda s: s.descriptor.__isabstractmethod__,
-                "__isabstractmethod__",
-                lambda s: s.source and AttrSource(s.source, "__isabstractmethod__"),
-            ),
+            _isabstractmethod_getter,
             readonly_setter,
         ),
     }

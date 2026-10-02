@@ -993,6 +993,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             t.fill_(self.rank + 10.0)
 
         torch.cuda.synchronize()
+        # The fill follows the last barrier, so nothing orders a peer's fill
+        # against this rank's read below. Local synchronize only covers this
+        # device.
+        dist.barrier()
         buf = hdl.get_buffer(peer, (64,), torch.float32)
         expected = torch.full((64,), peer + 10.0, device="cuda")
         self.assertEqual(buf, expected)
@@ -1035,6 +1039,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             t.fill_(self.rank + 100.0)
 
         torch.cuda.synchronize()
+        # wait_signal only shows that prev_peer sent its signal, which precedes
+        # its fill, so nothing orders that fill against this rank's read below.
+        # Local synchronize only covers this device.
+        dist.barrier()
         buf = hdl.get_buffer(prev_peer, (64,), torch.float32)
         expected = torch.full((64,), prev_peer + 100.0, device="cuda")
         self.assertEqual(buf, expected)

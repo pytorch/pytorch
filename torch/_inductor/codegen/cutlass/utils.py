@@ -208,7 +208,10 @@ def _normalize_cuda_arch(arch: str) -> str:
         arch_num = int(arch)
 
     if arch_num > 107:
-        log.warning("Detected CUDA architecture > 107: %s. Please file an issue.", arch)
+        if arch_num > 121:
+            log.warning(
+                "Detected CUDA architecture > 121: %s. Please file an issue.", arch
+            )
         return str(arch_num)
     if arch_num >= 107:
         return "107"
@@ -307,11 +310,14 @@ def _gen_ops_cached(arch: str, version: str, device_type: str) -> dict[Any, Any]
         )
         return {}
 
-    # SM103 and SM107 reuse the SM100 generator, but the CUTLASS manifest must keep
-    # their architecture-specific baseline rather than treating them as SM100.
+    # Some architectures share generators, but the CUTLASS manifest must keep
+    # their architecture-specific baseline.
     if arch in ("103", "107"):
         gen_arch = "100"
         manifest_arch = f"{arch}a"
+    elif arch == "121":
+        gen_arch = "120"
+        manifest_arch = "121a"
     else:
         gen_arch = manifest_arch = arch
 

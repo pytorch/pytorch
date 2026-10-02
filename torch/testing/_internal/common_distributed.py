@@ -71,6 +71,7 @@ if _TORCHCOMM_AVAILABLE:
         ("gloo", "TORCHCOMM_HAS_GLOO"),
         ("xccl", "TORCHCOMM_HAS_XCCL"),
         ("nccl", "TORCHCOMM_HAS_NCCL"),
+        ("rccl", "TORCHCOMM_HAS_RCCL"),
         ("rcclx", "TORCHCOMM_HAS_RCCLX"),
         ("ncclx", "TORCHCOMM_HAS_NCCLX"),
     ]:
@@ -2304,6 +2305,8 @@ class C10dTorchCommsTestBase(MultiProcContinuousTest):
             "rcclx": TORCHCOMM_HAS_RCCLX,
         }
         backend_name = self.backend(device)
+        if TEST_WITH_ROCM and backend_name == "nccl":
+            backend_name = "rccl"
         if backend_name in backend_flags and not backend_flags[backend_name]:
             self.skipTest(f"torchcomms {backend_name} backend is not available")
 
