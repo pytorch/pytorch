@@ -12262,6 +12262,9 @@ get_out().sum().backward()
                 # On Windows, opening the subprocess with the default CWD makes `import torch`
                 # fail, so just set CWD to this script's directory
                 cwd=os.path.dirname(os.path.realpath(__file__)),
+                # Python 3.13+ colorizes tracebacks when FORCE_COLOR is set,
+                # which splits the error message checked below
+                env={**os.environ, "PYTHON_COLORS": "0"},
                 # It is ok to have an extra long timeout here as a timeout means the test failed
                 timeout=20,
             )
