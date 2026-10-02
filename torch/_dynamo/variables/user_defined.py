@@ -107,10 +107,9 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    attr_getset,
     AttrMutationKind,
     GetSet,
-    getset_load_or_build,
-    getset_set,
     Member,
     Method,
     MutationType,
@@ -376,22 +375,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
     value: type[object]
 
     tp_getset = {
-        "__name__": GetSet(
-            getset_load_or_build(lambda vt: vt.value.__name__, "__name__"),
-            getset_set("__name__"),
-        ),
-        "__qualname__": GetSet(
-            getset_load_or_build(lambda vt: vt.value.__qualname__, "__qualname__"),
-            getset_set("__qualname__"),
-        ),
-        "__module__": GetSet(
-            getset_load_or_build(lambda vt: vt.value.__module__, "__module__"),
-            getset_set("__module__"),
-        ),
-        "__doc__": GetSet(
-            getset_load_or_build(lambda vt: vt.value.__doc__, "__doc__"),
-            getset_set("__doc__"),
-        ),
+        "__name__": attr_getset("__name__", lambda vt: vt.value),
+        "__qualname__": attr_getset("__qualname__", lambda vt: vt.value),
+        "__module__": attr_getset("__module__", lambda vt: vt.value),
+        "__doc__": attr_getset("__doc__", lambda vt: vt.value),
         # missing:
         # "__bases__": GetSet(...),
         # "__mro__": GetSet(...),

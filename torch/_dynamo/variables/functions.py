@@ -100,6 +100,7 @@ from .base import (
     getset_load_or_build,
     getset_set,
     load_pending_mutation,
+    maybe_get_python_type,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
@@ -402,6 +403,7 @@ def _create_nested_fn(
     closure: tuple[CellType] | None,
     kwdefaults: dict[str, Any] | None,
     annotations: dict[str, Any] | None,
+    annotate: Callable[[int], dict[str, Any]] | None,
 ) -> types.FunctionType:
     from types import FunctionType
 
@@ -419,6 +421,7 @@ def _create_nested_fn(
             f"annotations must be None or a dict, got {type(annotations)}"
         )
     func.__annotations__ = annotations  # type: ignore[assignment]
+    func.__annotate__ = annotate  # type: ignore[attr-defined]
 
     return func
 
@@ -2229,6 +2232,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         # This is present when this function is created by
         # `functools.wrap(wrapped_fn)(this_fn)`.
         wrapped_fn: VariableTracker | None = None,
+        annotate: VariableTracker | None = None,
         **kwargs: Any,
     ) -> None:
         if kwargs.get("mutation_type") is None:
@@ -2252,6 +2256,8 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         self.closure = closure
         self.annotations = annotations
         self.wrapped_fn: VariableTracker | None = wrapped_fn
+        # func_annotate (3.14+); None is the NULL slot.
+        self.annotate = annotate
 
     def _set_defaults(
         self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
@@ -2292,6 +2298,14 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def _get_annotations(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         # func_get_annotations lazily creates and stores an empty dict. The dict
         # is a fresh value (ValueMutationNew), so it must carry no source.
+        if self.annotations is None and self.annotate is not None:
+            ann = self.annotate.call_function(tx, [ConstantVariable.create(1)], {})
+            if not issubclass(ann.python_type(), dict):
+                raise_type_error(
+                    tx,
+                    f"__annotate__ returned non-dict of type '{ann.python_type_name()}'",
+                )
+            self.annotations = ann
         if self.annotations is None:
             self.annotations = variables.ConstDictVariable(
                 {}, mutation_type=ValueMutationNew()
@@ -2309,10 +2323,33 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         if value is not None and not issubclass(value.python_type(), dict):
             raise_type_error(tx, "__annotations__ must be set to a dict object")
         self.annotations = value
+        # function___annotations___set_impl also clears func_annotate.
+        self.annotate = None
         return ConstantVariable.create(None)
 
     def _get_type_params(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return variables.TupleVariable([], mutation_type=ValueMutationNew())
+
+    def _get_annotate(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        a = self.annotate
+        return a if a is not None else ConstantVariable.create(None)
+
+    def _set_annotate(
+        self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
+    ) -> "VariableTracker":
+        # function___annotate___set_impl
+        from .object_protocol import pycallable_check
+
+        if value is None:
+            raise_type_error(tx, "__annotate__ cannot be deleted")
+        if value.is_constant_match(None):
+            self.annotate = None
+        elif pycallable_check(maybe_get_python_type(value)):
+            self.annotate = value
+            self.annotations = None
+        else:
+            raise_type_error(tx, "__annotate__ must be callable or None")
+        return ConstantVariable.create(None)
 
     def _set_type_params(
         self,
@@ -2361,6 +2398,9 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         "__annotations__": GetSet(_get_annotations, _set_annotations),
         "__type_params__": GetSet(_get_type_params, _set_type_params),
     }
+
+    if sys.version_info >= (3, 14):
+        tp_getset["__annotate__"] = GetSet(_get_annotate, _set_annotate)
 
     def self_args(self) -> list[VariableTracker]:
         return []
@@ -2632,7 +2672,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         else:
             codegen.extend_output([codegen.create_load_const(None)])
 
-        codegen.extend_output(create_call_function(7, False))
+        if self.annotate is not None:
+            codegen(self.annotate)
+        else:
+            codegen.extend_output([codegen.create_load_const(None)])
+
+        codegen.extend_output(create_call_function(8, False))
 
         if self.wrapped_fn:
             codegen.add_push_null(
@@ -2680,6 +2725,7 @@ class WrappedNestedUserFunctionVariable(NestedUserFunctionVariable):
             wrapped.wrapped_fn,
         )
         self.annotations = wrapped.annotations
+        self.annotate = wrapped.annotate
         self.wrapped = wrapped
         self.context = context
 
@@ -5574,7 +5620,7 @@ class PropertyVariable(VariableTracker):
         fn = getattr(self.descriptor, attr)
 
         if fn is None:
-            display_name = getattr(self.descriptor, "__name__", None)
+            display_name = getattr(self.descriptor.fget, "__name__", None)
             kind = "setter" if value is not None else "deleter"
             if sys.version_info >= (3, 11):
                 # property_descr_set formats %R of the owner's *type*, whose

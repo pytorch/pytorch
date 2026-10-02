@@ -593,6 +593,13 @@ def getset_set(name: str) -> Callable[..., None]:
     return lambda self, tx, val: store_attr_mutation(tx, self, name, val)
 
 
+def attr_getset(name: str, obj: Callable[[Any], Any]) -> GetSet:
+    """GetSet for a plain writable attribute: read via getattr(obj(self), name),
+    written through store_attr_mutation."""
+    getter = getset_load_or_build(lambda vt: getattr(obj(vt), name), name)
+    return GetSet(getter, getset_set(name))
+
+
 # This helps users of `as_python_constant` to catch unimplemented error with
 # more information; it inherits `NotImplementedError` for backward
 # compatibility reasons.
