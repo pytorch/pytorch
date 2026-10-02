@@ -18,6 +18,7 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.distributed.distributed_c10d import _World
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import (
     MultiThreadedTestCase,
     skip_if_lt_x_gpu,
@@ -26,6 +27,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     device_sleep,
     get_cycles_per_ms,
+    HardwareClassification,
     IS_SANDCASTLE,
     run_tests,
     TestCase,
@@ -37,12 +39,12 @@ from torch.testing._internal.distributed.multi_threaded_pg import (
 )
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-
 DEFAULT_WORLD_SIZE = 4
 
 
 class TestCollectivesWithWrapper(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @spawn_threads_and_init_comms(world_size=4)
     def test_broadcast_object_list(self):
         val = 99 if dist.get_rank() == 0 else None
@@ -148,6 +150,8 @@ class TestCollectivesWithWrapper(TestCase):
 
 
 class TestCollectivesWithBaseClass(MultiThreadedTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def world_size(self):
         return 4
@@ -313,47 +317,64 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
         self.assertEqual(t0, torch.ones(3, 3) * res_num)
         self.assertEqual(t1, torch.ones(3, 3) * (res_num * 2))
 
+
+class TestCollectivesWithBaseClassDevice(MultiThreadedTestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @property
+    def world_size(self):
+        return 4
+
+    def setUp(self):
+        os.environ["TORCH_DIST_INIT_BARRIER"] = "1"
+        super().setUp()
+        self._spawn_threads()
+
+    def tearDown(self):
+        super().tearDown()
+        os.environ["TORCH_DIST_INIT_BARRIER"] = "0"
+
     @skip_if_lt_x_gpu(1)
-    def test_collectives_issued_from_side_stream(self):
+    def test_collectives_issued_from_side_stream(self, device):
         # Threaded PG performs every rank's data movement on rank 0's stream, so
         # it must synchronize with the stream each rank issued the collective
         # from. FSDP2 relies on this: it all-gathers/reduce-scatters on private
         # side streams.
-        device_module = torch.get_device_module(device_type)
+        device_module = torch.get_device_module(device)
         # get_cycles_per_ms() is lru_cached and calibrates by timing a sleep
         # kernel, so let one rank measure it on an otherwise idle device rather
         # than have every rank contend and cache an under-measured value.
         if self.rank == 0:
-            get_cycles_per_ms(device_type)
+            get_cycles_per_ms(device)
         dist.barrier()
-        delay_cycles = int(200 * get_cycles_per_ms(device_type))
+        delay_cycles = int(200 * get_cycles_per_ms(device))
         side_stream = device_module.Stream()
         side_stream.wait_stream(device_module.current_stream())
         with device_module.stream(side_stream):
             if self.rank != 0:
                 # Rank 0 reads stale input unless it waits on this stream
-                device_sleep(device_type, delay_cycles)
-            inp = torch.full((8,), float(self.rank + 1), device=device_type)
-            all_gather_out = torch.empty((8 * self.world_size,), device=device_type)
+                device_sleep(device, delay_cycles)
+            inp = torch.full((8,), float(self.rank + 1), device=device)
+            all_gather_out = torch.empty((8 * self.world_size,), device=device)
             dist.all_gather_single(all_gather_out, inp)
-            reduce_scatter_out = torch.empty((8,), device=device_type)
+            reduce_scatter_out = torch.empty((8,), device=device)
             dist.reduce_scatter_single(reduce_scatter_out, all_gather_out)
         device_module.current_stream().wait_stream(side_stream)
 
         expected_all_gather = torch.cat(
             [
-                torch.full((8,), float(rank + 1), device=device_type)
+                torch.full((8,), float(rank + 1), device=device)
                 for rank in range(self.world_size)
             ]
         )
         expected_reduce_scatter = torch.full(
-            (8,), float(self.world_size * (self.rank + 1)), device=device_type
+            (8,), float(self.world_size * (self.rank + 1)), device=device
         )
         self.assertEqual(all_gather_out, expected_all_gather)
         self.assertEqual(reduce_scatter_out, expected_reduce_scatter)
 
     @skip_if_lt_x_gpu(1)
-    def test_bwd_sees_fwd_pg(self):
+    def test_bwd_sees_fwd_pg(self, device):
         fwd_tid = threading.current_thread().ident
 
         class MyFunc(torch.autograd.Function):
@@ -386,13 +407,18 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
                 return grad_output * result
 
         x = torch.tensor(
-            [dist.get_rank()], dtype=torch.float, device=device_type, requires_grad=True
+            [dist.get_rank()],
+            dtype=torch.float,
+            device=device,
+            requires_grad=True,
         )
         x = MyFunc.apply(x)
         x.sum().backward()
 
 
 class TestThreadLocalWorld(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_mirrors_world_state(self):
         # ThreadLocalWorld stands in for _World while a threaded PG is
         # installed, and distributed_c10d reaches for world state by name. A
@@ -419,6 +445,13 @@ class TestThreadLocalWorld(TestCase):
             self.assertEqual(len(world.pg_flight_recorder_hooks), 0)
         finally:
             _uninstall_threaded_pg()
+
+
+instantiate_device_type_tests(
+    TestCollectivesWithBaseClassDevice,
+    globals(),
+    except_for="cpu",
+)
 
 
 if __name__ == "__main__":
