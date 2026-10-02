@@ -3650,8 +3650,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
 
   // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevice(device);
-  auto ncclStream =
-      getNCCLStreamForCapture(ncclStreams_.at(key), ncclEvents_[key]);
+  auto ncclStream = ncclStreams_.at(key);
   auto opProfilerTitle = optype != OpType::COALESCED
       ? "nccl:" + opTypeToString(optype) + "_coalesced"
       : "nccl:coalesced";
@@ -3809,9 +3808,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   // in asyncOp=false [default] mode, we use currentStream as ncclStream
   // otherwise, we use separate ncclStream and let it sync on currentStream
-  auto ncclStream = asyncOp
-      ? getNCCLStreamForCapture(ncclStreams_.at(key), ncclEvents_[key])
-      : at::cuda::getCurrentCUDAStream(device.index());
+  auto ncclStream = asyncOp ? ncclStreams_.at(key)
+                            : at::cuda::getCurrentCUDAStream(device.index());
   if (asyncOp) {
     // First let NCCL streams wait for input tensors allocation streams
     syncStream(device, ncclEvents_[key], ncclStream);
@@ -4008,9 +4006,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 
   // in asyncOp=false [default] mode, we use currentStream as ncclStream
   // otherwise, we use separate ncclStream and let it sync on currentStream
-  auto ncclStream = asyncOp
-      ? getNCCLStreamForCapture(ncclStreams_.at(key), ncclEvents_[key])
-      : at::cuda::getCurrentCUDAStream(device.index());
+  auto ncclStream = asyncOp ? ncclStreams_.at(key)
+                            : at::cuda::getCurrentCUDAStream(device.index());
   if (asyncOp) {
     // First let NCCL streams wait for input tensors allocation streams
     syncStream(device, ncclEvents_[key], ncclStream);
@@ -4268,8 +4265,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 
   // Used many times below, so we stash the unordered_map lookup
-  auto ncclStream =
-      getNCCLStreamForCapture(ncclStreams_.at(key), ncclEvents_[key]);
+  auto ncclStream = ncclStreams_.at(key);
   // First let NCCL streams wait for input tensors allocation streams
   syncStream(device, ncclEvents_[key], ncclStream);
 
