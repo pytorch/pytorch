@@ -489,6 +489,11 @@ test_python_smoke_b200() {
   local PYTHON_TEST_EXTRA_OPTION="${EXCLUDE_CLAUSE:-} ${PYTHON_TEST_EXTRA_OPTION:-}"
   install_flash_attn_cute
   install_cutlass_operators
+  if [[ -n "${TESTS_TO_INCLUDE:-}" ]]; then
+    time python test/run_test.py $INCLUDE_CLAUSE $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+    assert_git_not_dirty
+    return
+  fi
   time python test/run_test.py \
     --include \
       test_matmul_cuda \

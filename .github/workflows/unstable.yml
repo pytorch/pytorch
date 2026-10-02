@@ -97,8 +97,8 @@ jobs:
       python-version: "3.12"
       rootless-setup: true
       test-matrix: ${{ needs.linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build.outputs.test-matrix }}
-      tests-to-exclude: inductor/test_nv_universal_gemm python_native/test_native_aot
-      timeout-minutes: 360
+      tests-to-include: inductor/test_nv_universal_gemm python_native/test_native_aot
+      timeout-minutes: 120
       compiler: gcc13
       cuda-version: "13.2"
     secrets: inherit
