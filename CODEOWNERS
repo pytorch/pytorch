@@ -1172,6 +1172,7 @@
 # /torch/nativert/
 #
 # [ai_agent_tooling]
+# /.agents/
 # /.claude/
 # /.github/copilot-instructions.md
 # /.github/workflows/claude-autorevert-advisor.yml
