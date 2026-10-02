@@ -1752,6 +1752,12 @@ TEST_ONEDNN = torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_availab
 TEST_ACL = torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_acl_supported()
 TEST_MPS = torch.backends.mps.is_available()
 MACOS_VERSION = float('.'.join(platform.mac_ver()[0].split('.')[:2]) or -1)
+
+# The CI fleet runs M1 (Apple7, 16 GB) and M2 Pro (Apple8, 32 GB) on the same
+# macOS release, so MACOS_VERSION on its own no longer tells the two apart.
+# Tests that need the memory or the Metal feature set have to say so.
+# Covers M1 Pro/Max/Ultra too: all are Apple7 and share the feature set.
+IS_APPLE_M1 = TEST_MPS and torch.backends.mps.get_name().startswith("Apple M1")
 TEST_XPU = torch.xpu.is_available()
 TEST_HPU = bool(hasattr(torch, "hpu") and torch.hpu.is_available())
 TEST_MTIA = LazyVal(lambda: hasattr(torch, "mtia") and torch.mtia.is_available())  # type: ignore[call-arg]
@@ -6029,14 +6035,17 @@ def disable_gc():
 
 
 def find_library_location(lib_name: str) -> Path:
-    # return the shared library file in the installed folder if exist,
-    # else the file in the build folder
+    # return the shared library file in the installed folder if it exists,
+    # otherwise the file in the build folder
     torch_root = Path(torch.__file__).resolve().parent
     path = torch_root / 'lib' / lib_name
     if os.path.exists(path):
         return path
     torch_root = Path(__file__).resolve().parents[2]
-    return torch_root / 'build' / 'lib' / lib_name
+    path = torch_root.parent / 'build' / 'lib' / lib_name
+    if os.path.exists(path):
+        return path
+    raise FileNotFoundError(f"Could not find library '{lib_name}' in installed or build paths")
 
 def skip_but_pass_in_sandcastle(reason):
     """

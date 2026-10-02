@@ -42,7 +42,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor-pallas-gpu", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
+          { config: "inductor-pallas-gpu", shard: 1, num_shards: 1, runner: "mt-l-x86iamx-22-225-h100" },
         ]}
       python-version: "3.12"
       compiler: gcc11

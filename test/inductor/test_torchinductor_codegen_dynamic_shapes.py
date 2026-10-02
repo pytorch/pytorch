@@ -115,6 +115,8 @@ def check_codegen(
 
 # xfail by default, set is_skip=True to skip
 test_failures = {
+    # histogramdd remains an external ATen call, so it emits no dynamic loop.
+    "test_kwargs_dynamic_shapes": TestFailure(("cpu",)),
     #
     # PDL tests are CUDA SM90+ only, skip on CPU (generates Triton, not C++ code)
     #

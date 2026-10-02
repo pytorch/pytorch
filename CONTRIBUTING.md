@@ -19,6 +19,7 @@ aspects of contributing to PyTorch.
   - [Building](#building)
   - [Linting](#linting)
     - [default lint](#default-lint)
+  - [Testing](#testing)
   - [Regenerating](#regenerating)
 - [Unit testing](#unit-testing)
   - [Python Unit Testing](#python-unit-testing)
@@ -349,6 +350,12 @@ Since some linters take a long time to run, we categorize all linters as either
 fast or slow. In the default lint, only the fast linters are run on all files;
 the slow linters are run on the changed files only.
 
+### Testing
+
+|command||
+|-|-|
+|`test`|run tests with pytest; all arguments are forwarded, e.g. `spin test test/test_nn.py -k Linear`. `spin test --ci ARGS` forwards to `test/run_test.py`, the orchestrator CI uses, instead|
+
 ### Regenerating
 
 PyTorch makes use of a number of code generations, which range from the version
@@ -386,7 +393,8 @@ suite with
 python test/run_test.py
 ```
 
-or run individual test suites using the command `python test/FILENAME.py`,
+(`spin test --ci ARGS` forwards `ARGS` to the same runner), or run individual
+test suites using the command `python test/FILENAME.py`,
 where `FILENAME` represents the file containing the test suite you wish
 to run.
 
@@ -416,7 +424,9 @@ python test/test_jit.py TestJit.test_Sequential
 
 We don't officially support `pytest`, but it works well with our
 `unittest` tests and offers a number of useful features for local
-developing. Install it via `pip install pytest`.
+developing. Install it via `pip install pytest` (`pip install --group dev`
+includes it). `spin test ARGS` runs `pytest ARGS` with the same interpreter
+that has torch installed, editable or not.
 
 If you want to just run tests that contain a specific substring, you can
 use the `-k` flag:
