@@ -1128,6 +1128,13 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             for x in inputs
         ]
 
+    def records_profiling_args(self) -> bool:
+        # An ArrayRefTensor is not an AtenTensorHandle, so the ivalue
+        # conversion the metadata is built from cannot be called on one. The
+        # record is emitted without it, and nothing is built here -- deriving
+        # it would make a reinterpret view mint a handle with no owner.
+        return False
+
     def generate_index_put_fallback(self, node: ir.IndexPutFallback) -> None:
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
