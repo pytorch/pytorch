@@ -2174,8 +2174,9 @@ class CTCLoss(_Loss):
           where :math:`T = \text{input length}`,
           :math:`N = \text{batch size}`, and
           :math:`C = \text{number of classes (including blank)}`.
-          The logarithmized probabilities of the outputs (e.g. obtained with
-          :func:`torch.nn.functional.log_softmax`).
+          The logarithmized probabilities of the outputs, which must be the
+          result of applying :func:`torch.nn.functional.log_softmax` to
+          unnormalized logits. See the gradient correctness note below.
         - Targets: Tensor of size :math:`(N, S)` or
           :math:`(\operatorname{sum}(\text{target\_lengths}))`,
           where :math:`N = \text{batch size}` and
@@ -2279,6 +2280,15 @@ class CTCLoss(_Loss):
         A. Graves et al.: Connectionist Temporal Classification:
         Labelling Unsegmented Sequence Data with Recurrent Neural Networks:
         https://www.cs.toronto.edu/~graves/icml_2006.pdf
+
+    Note:
+        The backward pass computes gradients with respect to the unnormalized
+        logits that precede :func:`~torch.nn.functional.log_softmax`, not with
+        respect to :attr:`log_probs` directly. For correct gradients,
+        :attr:`log_probs` must be the output of
+        :func:`~torch.nn.functional.log_softmax` and remain part of the autograd
+        graph. Passing other values will produce correct loss but incorrect
+        gradients.
 
     Note:
         In order to use CuDNN, the following must be satisfied: the :attr:`targets` must be
