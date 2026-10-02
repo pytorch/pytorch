@@ -1,0 +1,55 @@
+{
+  "description": "Bedrock model IDs that callers may pass to this action. Add an ID only after the pi-bedrock-smoke.yml workflow in pytorch/ciforge passes for it under gha_workflow_claude_code in us-east-1. See README.md#models next to this file for the naming rules.",
+  "models": [
+    {
+      "id": "global.anthropic.claude-sonnet-5",
+      "family": "anthropic",
+      "use": "Issue triage (same model as the Claude Code triage)"
+    },
+    {
+      "id": "global.anthropic.claude-opus-5",
+      "family": "anthropic",
+      "use": "@claude mention bot model"
+    },
+    {
+      "id": "global.anthropic.claude-sonnet-4-6",
+      "family": "anthropic",
+      "use": "AI lint"
+    },
+    {
+      "id": "global.anthropic.claude-opus-4-6-v1",
+      "family": "anthropic",
+      "use": "Autorevert advisor"
+    },
+    {
+      "id": "global.openai.gpt-6.1-sol",
+      "family": "openai",
+      "use": "Strongest verified OpenAI model per dollar"
+    },
+    {
+      "id": "us.openai.gpt-6.1-sol",
+      "family": "openai",
+      "use": "GPT-6.1 Sol pinned to US regions"
+    },
+    {
+      "id": "global.openai.gpt-6-astra",
+      "family": "openai",
+      "use": "Largest OpenAI model; about 5x the cost of 6.1 Sol"
+    },
+    {
+      "id": "global.openai.gpt-5.6-sol",
+      "family": "openai",
+      "use": "Previous-generation comparison"
+    },
+    {
+      "id": "global.openai.gpt-5.6-terra",
+      "family": "openai",
+      "use": "Mid-tier, low cost"
+    },
+    {
+      "id": "global.openai.gpt-5.6-luna",
+      "family": "openai",
+      "use": "Cheapest OpenAI model; simple classification"
+    }
+  ]
+}
