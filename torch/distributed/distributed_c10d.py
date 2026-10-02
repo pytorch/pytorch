@@ -1033,10 +1033,20 @@ def _register_builtin_gloo_backend() -> None:
 
 
 def _register_builtin_nccl_backend() -> None:
+    _register_nccl_backend(use_nccl2=os.environ.get("TORCH_DIST_USE_NCCL2") != "0")
+
+
+def _register_builtin_nccl_opt_in_backend() -> None:
+    """Register ``nccl`` as stock ProcessGroupNCCL unless ``TORCH_DIST_USE_NCCL2=1``.
+
+    For staged rollouts of nccl2 where unset must keep the legacy backend.
+    """
+    _register_nccl_backend(use_nccl2=os.environ.get("TORCH_DIST_USE_NCCL2") == "1")
+
+
+def _register_nccl_backend(use_nccl2: bool) -> None:
     creator_fn = (
-        _create_nccl_process_group
-        if os.environ.get("TORCH_DIST_USE_NCCL2") == "0"
-        else _create_nccl2_process_group
+        _create_nccl2_process_group if use_nccl2 else _create_nccl_process_group
     )
     # Record what "nccl" actually resolved to for _maybe_attach_flight_recorder,
     # which must skip a group only if every one of its backends feeds a
@@ -1068,14 +1078,7 @@ def _register_builtin_nccl_legacy_backend() -> None:
 
 
 def _register_builtin_nccl_as_legacy() -> None:
-    _FR_SELF_RECORDING_BACKENDS.add(Backend.NCCL)
-    Backend.register_backend(
-        Backend.NCCL,
-        _create_nccl_process_group,
-        extended_api=True,
-        devices=Backend.backend_capability[Backend.NCCL],
-        _backend_type=ProcessGroup.BackendType.NCCL,
-    )
+    _register_nccl_backend(use_nccl2=False)
 
 
 def _register_builtin_nccl2_backend() -> None:

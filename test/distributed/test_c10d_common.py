@@ -395,6 +395,30 @@ class BackendEntryPointTest(TestCase):
             dist.ProcessGroup.BackendType.NCCL,
         )
 
+    @parametrize("nccl2_override", [None, "0", "1"])
+    def test_nccl_opt_in_backend_registration(self, nccl2_override):
+        with unittest.mock.patch.dict(os.environ):
+            if nccl2_override is None:
+                os.environ.pop("TORCH_DIST_USE_NCCL2", None)
+            else:
+                os.environ["TORCH_DIST_USE_NCCL2"] = nccl2_override
+            c10d._register_builtin_nccl_opt_in_backend()
+
+        use_nccl2 = nccl2_override == "1"
+        self.assertIs(
+            dist.Backend._plugins["NCCL"].creator_fn,
+            c10d._create_nccl2_process_group
+            if use_nccl2
+            else c10d._create_nccl_process_group,
+        )
+        self.assertEqual(
+            dist.Backend.NCCL in c10d._FR_SELF_RECORDING_BACKENDS, not use_nccl2
+        )
+        self.assertEqual(
+            dist.Backend.backend_type_map["nccl"],
+            dist.ProcessGroup.BackendType.NCCL,
+        )
+
     def test_nccl2_device_uses_rank_without_local_rank(self):
         opts = c10d._DistributedBackendOptions()
         opts.enable_reconfigure = False
