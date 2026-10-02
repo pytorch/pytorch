@@ -10,10 +10,12 @@ progress." marked ready.
 Reads the main session transcript (sub-agent turns live in separate sidechain
 files) and compares the position of the reviewer's last Write to the findings
 file with the last sub-agent result. Only a Write whose result came back
-without error counts: a failed rewrite leaves the draft in place. Exit 0 when
+without error counts (a failed rewrite leaves the draft in place), and it counts
+at the position it was ISSUED: a Write sent in the same message as an Agent call
+was composed before the report, whenever its result arrives. Exit 0 when
 the write is the later of the two, or no sub-agent ran; exit 1 when a sub-agent
 reported after it, or nothing was ever written after one ran; exit 2 when the
-transcript cannot be read (the Stop hook logs that and does not block).
+transcript cannot be read, which the Stop hook treats as stale.
 
 Sub-agents must run in the foreground (the workflow disables background tasks),
 so an Agent tool_result is the sub-agent's report. The findings path is matched
@@ -29,10 +31,10 @@ import sys
 
 
 def last_positions(lines, findings: str) -> tuple[int, int]:
-    """(index of the last successful findings Write result, of the last sub-agent
-    result); -1 if none."""
+    """(index where the last successful findings Write was issued, index of the
+    last sub-agent result); -1 if none."""
     agent_ids: set[str] = set()
-    write_ids: set[str] = set()
+    write_ids: dict[str, int] = {}
     last_write = last_agent = -1
     for i, line in enumerate(lines):
         try:
@@ -54,13 +56,13 @@ def last_positions(lines, findings: str) -> tuple[int, int]:
                 if name in ("Agent", "Task"):
                     agent_ids.add(item.get("id"))
                 elif name == "Write" and args.get("file_path") == findings:
-                    write_ids.add(item.get("id"))
+                    write_ids[item.get("id")] = i
             elif item.get("type") == "tool_result":
                 tool_id = item.get("tool_use_id")
                 if tool_id in agent_ids:
                     last_agent = i
                 elif tool_id in write_ids and not item.get("is_error"):
-                    last_write = i
+                    last_write = max(last_write, write_ids[tool_id])
     return last_write, last_agent
 
 

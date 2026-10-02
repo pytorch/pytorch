@@ -20,16 +20,14 @@ LOG="${PR_REVIEW_HOOK_LOG:-/dev/null}"
 # review. The model gets one chance to rewrite it; if the session still ends on
 # the draft, the marker below makes the publish step record a failed run
 # instead of publishing it.
+# Fails closed: a transcript that is missing or unreadable counts as stale,
+# since the check cannot show the file is the final verdict.
 transcript=$(printf '%s' "$input" | jq -r '.transcript_path // empty' 2>/dev/null || true)
-stale=0
-if [[ -n "$transcript" ]]; then
-  python3 "$(dirname "$0")/../../../scripts/pr_review/verdict_after_subagents.py" \
-    "$transcript" "${PR_REVIEW_FINDINGS_FILE:-}"
-  case $? in
-    0) ;;
-    1) stale=1 ;;
-    *) printf 'STALE_CHECK_UNAVAILABLE\n' >> "$LOG" 2>/dev/null || true ;;
-  esac
+stale=1
+if [[ -n "$transcript" ]] && python3 \
+    "$(dirname "$0")/../../../scripts/pr_review/verdict_after_subagents.py" \
+    "$transcript" "${PR_REVIEW_FINDINGS_FILE:-}"; then
+  stale=0
 fi
 
 if [[ "$active" == "true" ]]; then

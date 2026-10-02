@@ -6447,6 +6447,47 @@ class TestADraftWrittenBeforeSubAgentsIsNotPublished(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("STALE_VERDICT", log)
 
+    def test_a_write_issued_with_the_agent_call_is_a_draft(self):
+        proc, log = self._stop(
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [
+                            _use("a1", "Agent", prompt="p")["message"]["content"][0],
+                            self.WRITE("w1")["message"]["content"][0],
+                        ]
+                    },
+                },
+                _result("a1"),
+                _result("w1"),
+            ],
+            active=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("STALE_VERDICT", log)
+
+    def test_an_unreadable_transcript_fails_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "hooks.log"
+            payload = {
+                "stop_hook_active": True,
+                "transcript_path": str(Path(td) / "missing.jsonl"),
+            }
+            subprocess.run(
+                ["bash", str(STOP_HOOK)],
+                input=json.dumps(payload),
+                text=True,
+                capture_output=True,
+                env={
+                    **os.environ,
+                    "PR_REVIEW_HOOK_LOG": str(log),
+                    "PR_REVIEW_FINDINGS_FILE": self.FINDINGS,
+                },
+                check=False,
+            )
+            self.assertIn("STALE_VERDICT", log.read_text())
+
     def test_a_write_after_the_reports_is_final(self):
         proc, log = self._stop(
             [
