@@ -65,7 +65,7 @@ __all__ = [
     "CUDAPluggableAllocator",
     "change_current_allocator",
     "MemPool",
-    "LocalizedMemPool",
+    "LocalizedAllocator",
     "use_mem_pool",
 ]
 
@@ -1363,6 +1363,13 @@ def _make_device_access_desc(device_id: int) -> Any:
 
 
 class _BaseLocalityAllocator:
+    """Python callbacks require serialized allocator activity across all threads.
+
+    The native allocator can hold its mutex while acquiring the GIL for these
+    callbacks. Another thread holding the GIL in an allocator-state query can
+    therefore deadlock; a Python lock here cannot fix that lock inversion.
+    """
+
     def __init__(self, device_id: int | None = None) -> None:
         # Initialize CUDA so support is checked through the driver, not NVML.
         _lazy_init()
@@ -1394,7 +1401,7 @@ class _BaseLocalityAllocator:
         self, ptr: int | None, size: int, device: int, stream: int | None
     ) -> None:
         try:
-            self.free(_as_ptr_int(ptr))
+            self.free(_as_ptr_int(ptr), stream)
         except Exception as e:
             # Module globals may already be cleared during interpreter shutdown.
             # The CUDA driver will release any remaining allocations at exit.
@@ -1404,7 +1411,7 @@ class _BaseLocalityAllocator:
     def allocate(self, size: int, device: int, stream: int | None) -> int:
         raise NotImplementedError
 
-    def free(self, ptr: int) -> None:
+    def free(self, ptr: int, stream: int | None) -> None:
         raise NotImplementedError
 
     def cuda_allocator(self) -> _cuda_CUDAAllocator:
@@ -1413,6 +1420,10 @@ class _BaseLocalityAllocator:
 
 class _DomainLocalityAllocator(_BaseLocalityAllocator):
     def __init__(self, locality_domain_id: int, device_id: int | None = None) -> None:
+        if isinstance(locality_domain_id, bool) or not isinstance(
+            locality_domain_id, int
+        ):
+            raise ValueError("locality_domain_id must be an integer")
         super().__init__(device_id)
         num_domains = get_num_locality_domains(self.device_id)
         if locality_domain_id < 0 or locality_domain_id >= num_domains:
@@ -1473,19 +1484,24 @@ class _DomainLocalityAllocator(_BaseLocalityAllocator):
                 _check_cuda_bindings(_drv.cuMemRelease(handle))
             raise
 
-    def free(self, ptr: int) -> None:
+    def free(self, ptr: int, stream: int | None) -> None:
         if ptr == 0:
             return
-        record = self._records.pop(ptr, None)
+        record = self._records.get(ptr)
         if record is None:
             return
         padded_size, handle = record
-        # pyrefly: ignore [missing-attribute]
-        _check_cuda_bindings(_drv.cuMemUnmap(ptr, padded_size))
-        # pyrefly: ignore [missing-attribute]
-        _check_cuda_bindings(_drv.cuMemAddressFree(ptr, padded_size))
-        # pyrefly: ignore [missing-attribute]
-        _check_cuda_bindings(_drv.cuMemRelease(handle))
+        # Unlike cudaFree, unmapping does not wait for queued stream work.
+        with torch.cuda.device(self.device_id):
+            # pyrefly: ignore [missing-attribute]
+            _check_cuda_bindings(_drv.cuStreamSynchronize(stream or 0))
+            # pyrefly: ignore [missing-attribute]
+            _check_cuda_bindings(_drv.cuMemUnmap(ptr, padded_size))
+            # pyrefly: ignore [missing-attribute]
+            _check_cuda_bindings(_drv.cuMemAddressFree(ptr, padded_size))
+            # pyrefly: ignore [missing-attribute]
+            _check_cuda_bindings(_drv.cuMemRelease(handle))
+        del self._records[ptr]
 
 
 class _CUDAAllocator:
@@ -1610,54 +1626,63 @@ class MemPool(_MemPool):
         return snapshot
 
 
-class LocalizedMemPool(MemPool):
-    r"""A caching memory pool backed by one CUDA locality domain.
+# Native pools retain only callback addresses, not the Python callback owners.
+# Reuse one owner per device/domain and keep it alive like _UVM_ALLOCATOR.
+_LOCALITY_ALLOCATORS: dict[tuple[int, int], _DomainLocalityAllocator] = {}
 
-    Requires CUDA driver and cuda.bindings 13.4+ and a multi-domain GPU.
-    Construction initializes CUDA to validate the actual device topology.
-    The native caching allocator caches and suballocates localized physical
-    allocations. This does not change the device on which kernels execute.
+
+class LocalizedAllocator(_CUDAAllocator):
+    r"""Allocate physical CUDA memory on one locality domain.
+
+    Use ``MemPool(allocator=allocator.allocator())`` to cache and suballocate
+    this memory. Requires CUDA driver and cuda.bindings 13.4+ and a multi-domain
+    GPU. Construction initializes CUDA to validate the actual device topology.
+    Kernel execution is not localized by this allocator.
 
     Args:
-        locality_domain_id (int): Locality domain to allocate from.
+        locality_domain_id (int): Locality domain to allocate from, excluding bool.
         device (torch.device or int, optional): Owning CUDA device.
             Defaults to the current device.
-        use_on_oom (bool): Allow the caching allocator to reuse this pool's
-            memory as a last resort on out-of-memory errors. Default: False.
-        no_split (bool): Do not split cached segments. Default: False.
 
-    Use :func:`use_mem_pool` on the owning device to route allocations here.
-    Access from other devices is not supported. Keep this pool alive until
-    its tensors have been released and their CUDA work has completed.
+    .. warning::
+        Concurrent allocator activity is unsupported. Allocation, freeing, and
+        allocator-state queries (including ``MemPool.use_count()``) from other
+        threads must not overlap use of this allocator. Native allocator
+        callbacks acquire the GIL while holding the allocator mutex, which can
+        deadlock with a thread holding the GIL while waiting for that mutex.
+
+    .. note::
+        Use this allocator only on its owning device; access from other devices
+        is not supported. Callback owners are retained for the process lifetime,
+        so tensors may outlive the Python allocator and pool objects.
+        Releasing physical memory waits for its allocation stream.
     """
 
-    def __init__(
-        self,
-        locality_domain_id: int,
-        *,
-        device: "Device" = None,
-        use_on_oom: bool = False,
-        no_split: bool = False,
-    ) -> None:
-        self._localized_allocator = _DomainLocalityAllocator(
-            locality_domain_id,
-            _get_device_index(device, optional=True),
-        )
-        self._locality_domain_id = self._localized_allocator.locality_domain_id
-        self._device_id = self._localized_allocator.device_id
-        allocator = self._localized_allocator.cuda_allocator()
-        with torch.cuda.device(self._device_id):
-            super().__init__(allocator, use_on_oom, no_split)
+    def __init__(self, locality_domain_id: int, *, device: "Device" = None) -> None:
+        if isinstance(locality_domain_id, bool) or not isinstance(
+            locality_domain_id, int
+        ):
+            raise ValueError("locality_domain_id must be an integer")
+        # Initialize CUDA before resolving the device and checking its topology.
+        _lazy_init()
+        device_id = _get_device_index(device, optional=True)
+        key = (device_id, locality_domain_id)
+        if key not in _LOCALITY_ALLOCATORS:
+            _LOCALITY_ALLOCATORS[key] = _DomainLocalityAllocator(
+                locality_domain_id, device_id
+            )
+        self._localized_allocator = _LOCALITY_ALLOCATORS[key]
+        super().__init__(self._localized_allocator.cuda_allocator())
 
     @property
     def locality_domain_id(self) -> int:
-        r"""Return the locality domain ID associated with this pool."""
-        return self._locality_domain_id
+        r"""Return the locality domain ID associated with this allocator."""
+        return self._localized_allocator.locality_domain_id
 
     @property
     def device_id(self) -> int:
-        r"""Return the CUDA device index associated with this pool."""
-        return self._device_id
+        r"""Return the CUDA device index associated with this allocator."""
+        return self._localized_allocator.device_id
 
 
 @contextlib.contextmanager
