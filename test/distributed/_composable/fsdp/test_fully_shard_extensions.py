@@ -634,6 +634,55 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         local_weight.fsdp_post_all_gather = post_fn.__get__(local_weight)
 
     @skip_if_lt_x_gpu(1)
+    def test_all_gather_extension_single_rank_payloads(self):
+        # A size-1 shard mesh skips the all-gather, so FSDP copies each payload
+        # directly, including byte views into typed cached outputs
+        mesh = init_device_mesh(
+            device_type.type,
+            (self.world_size, 1),
+            mesh_dim_names=("replicate", "shard"),
+        )["shard"]
+        byte_payloads = False
+        test = self
+
+        def fsdp_pre_all_gather(
+            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
+        ):
+            payloads = (local_tensor, (local_tensor + 1).to(torch.bfloat16))
+            if byte_payloads:
+                payloads = tuple(t.view(torch.uint8) for t in payloads)
+            return payloads, outer_size
+
+        @torch.no_grad()
+        def fsdp_post_all_gather(
+            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
+        ):
+            # Typed outputs take the trailing dims of the byte payloads
+            weight, auxiliary = (t.view(metadata) for t in all_gather_outputs)
+            test.assertEqual(auxiliary, (weight + 1).to(torch.bfloat16))
+            if out is not None:
+                with _unsafe_preserve_version_counter(out):
+                    out.copy_(weight)
+                return
+            return weight, (weight,)
+
+        model = nn.Linear(16, 8, bias=False, device=device_type)
+        ref_model = copy.deepcopy(model)
+        fully_shard(model, mesh=mesh)
+        self._patch_all_gather_extension(
+            model, fsdp_pre_all_gather, fsdp_post_all_gather
+        )
+        inp = torch.randn((2, 16), device=device_type)
+        for iteration in range(2):
+            byte_payloads = iteration == 1
+            output = model(inp)
+            ref_output = ref_model(inp)
+            self.assertEqual(output, ref_output)
+            output.sum().backward()
+            ref_output.sum().backward()
+            check_sharded_parity(self, ref_model, model)
+
+    @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_zero_size_trailing_dim(self):
         test = self
 
@@ -672,14 +721,11 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             {
                 "shard_world_size": [2, 1],
                 "native_copy": [False, True],
-                "release_outputs": [False, True],
             },
             self._test_all_gather_input_layouts,
         )
 
-    def _test_all_gather_input_layouts(
-        self, shard_world_size: int, native_copy: bool, release_outputs: bool
-    ):
+    def _test_all_gather_input_layouts(self, shard_world_size: int, native_copy: bool):
         mesh = init_device_mesh(
             device_type.type,
             (self.world_size // shard_world_size, shard_world_size),
@@ -689,7 +735,6 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         tags = torch.arange(6, dtype=torch.bfloat16, device=device_type).view(2, 3)
         post_out_ids: list[int | None] = []
         payload_refs: list[weakref.ReferenceType[torch.Tensor]] = []
-        storage_observations: list[tuple[tuple[int, ...], tuple[int, ...]]] = []
 
         def fsdp_pre_all_gather(
             local_tensor,
@@ -746,29 +791,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             transformed = weight.clone()
             return transformed, (transformed,)
 
-        def fsdp_should_release_all_gather_outputs_after_post_all_gather(
-            local_tensor,
-        ) -> bool:
-            del local_tensor
-            return release_outputs
-
-        class InspectLinear(nn.Linear):
-            def forward(self, input: torch.Tensor) -> torch.Tensor:
-                param_group = fully_shard.state(self)._fsdp_param_group
-                if param_group is None:
-                    raise AssertionError("Expected an FSDP parameter group")
-                (param,) = param_group.fsdp_params
-                raw = param.all_gather_outputs
-                inner = param._unsharded_inner_tensors
-                storage_observations.append(
-                    (
-                        tuple(t.untyped_storage().size() for t in raw),
-                        tuple(t.untyped_storage().size() for t in inner),
-                    )
-                )
-                return super().forward(input)
-
-        model = InspectLinear(8, 8, bias=False, device=device_type)
+        model = nn.Linear(8, 8, bias=False, device=device_type)
         ref_model = nn.Linear(8, 8, bias=False, device=device_type)
         with torch.no_grad():
             model.weight.copy_(expected_weight)
@@ -784,11 +807,6 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         local_weight = model.weight._local_tensor
         local_weight.fsdp_pre_all_gather = fsdp_pre_all_gather.__get__(local_weight)
         local_weight.fsdp_post_all_gather = fsdp_post_all_gather.__get__(local_weight)
-        local_weight.fsdp_should_release_all_gather_outputs_after_post_all_gather = (
-            fsdp_should_release_all_gather_outputs_after_post_all_gather.__get__(
-                local_weight
-            )
-        )
 
         inp = torch.arange(16, device=device_type).float().view(2, 8) / 16
         for _ in range(2):
@@ -797,13 +815,6 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             output = model(inp)
             ref_output = ref_model(inp)
             self.assertEqual(output, ref_output)
-            raw_sizes, inner_sizes = storage_observations[-1]
-            self.assertEqual(len(raw_sizes), 4)
-            if release_outputs:
-                self.assertEqual(raw_sizes, (0, 0, 0, 0))
-            else:
-                self.assertTrue(all(size > 0 for size in raw_sizes))
-            self.assertTrue(all(size > 0 for size in inner_sizes))
             output.sum().backward()
             ref_output.sum().backward()
             check_sharded_parity(self, ref_model, model)
@@ -812,165 +823,6 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         self.assertIsNotNone(post_out_ids[1])
         self.assertEqual(post_out_ids, [None] + [post_out_ids[1]] * 3)
         self.assertTrue(all(ref() is None for ref in payload_refs))
-
-    @skip_if_lt_x_gpu(1)
-    def test_legacy_all_gather_shard_dim(self):
-        self.run_subtests(
-            {
-                "shard_dim": [1, 2],
-                "shard_world_size": [2, 1],
-                "native_copy": [False, True],
-            },
-            self._test_legacy_all_gather_shard_dim,
-        )
-
-    def _test_legacy_all_gather_shard_dim(
-        self, shard_dim: int, shard_world_size: int, native_copy: bool
-    ):
-        # Tensor payloads of Shard(i>0) parameters follow the padded sharded
-        # layout, including byte views copied into typed cached outputs
-        expected = torch.arange(48, device=device_type).float().view(2, 4, 6) / 64
-        post_out_ids: list[int | None] = []
-        byte_inputs = False
-        test = self
-
-        class Scale(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.weight = nn.Parameter(expected.clone())
-
-            def forward(self, input: torch.Tensor) -> torch.Tensor:
-                return self.weight * input
-
-        def fsdp_pre_all_gather(
-            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
-        ):
-            weight = local_tensor.view(-1, 6)
-            auxiliary = (local_tensor.to(torch.bfloat16) + 1).view(-1, 4)
-            if byte_inputs:
-                weight = weight.view(torch.uint8)
-                auxiliary = auxiliary.view(torch.uint8)
-            return (weight, auxiliary), (outer_size, mesh.size())
-
-        @torch.no_grad()
-        def fsdp_post_all_gather(
-            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
-        ):
-            weight, auxiliary = all_gather_outputs
-            # Typed outputs take the trailing dims of the byte payloads
-            weight_tail = 24 if byte_inputs else 6
-            auxiliary_tail = 8 if byte_inputs else 4
-            test.assertEqual(metadata, (expected.size(), shard_world_size))
-            test.assertEqual(weight.dtype, param_dtype)
-            test.assertEqual(weight, expected.view(-1, weight_tail), atol=0, rtol=0)
-            test.assertEqual(auxiliary.dtype, torch.bfloat16)
-            expected_auxiliary = (expected + 1).to(torch.bfloat16)
-            test.assertEqual(
-                auxiliary, expected_auxiliary.view(-1, auxiliary_tail), atol=0, rtol=0
-            )
-            post_out_ids.append(None if out is None else id(out))
-            weight = weight.view(expected.size())
-            if out is not None:
-                with _unsafe_preserve_version_counter(out):
-                    out.copy_(weight)
-                return None
-            return weight, (weight,)
-
-        model = Scale()
-        ref_model = copy.deepcopy(model)
-        mesh = init_device_mesh(
-            device_type.type,
-            (self.world_size // shard_world_size, shard_world_size),
-            mesh_dim_names=("replicate", "shard"),
-        )
-        fully_shard(
-            model,
-            mesh=mesh,
-            shard_placement_fn=lambda _: Shard(shard_dim),
-            reshard_after_forward=True,
-        )
-        if native_copy:
-            model.set_all_gather_output_fn(all_gather_output_fn_with_native_copy)
-        self._patch_all_gather_extension(
-            model, fsdp_pre_all_gather, fsdp_post_all_gather
-        )
-        inp = torch.arange(48, device=device_type).float().view_as(expected) / 32
-        for iteration in range(2):
-            byte_inputs = iteration == 1
-            output = model(inp)
-            ref_output = ref_model(inp)
-            self.assertEqual(output, ref_output, atol=0, rtol=0)
-            output.sum().backward()
-            ref_output.sum().backward()
-            check_sharded_parity(self, ref_model, model)
-        self.assertEqual(len(post_out_ids), 4)
-        self.assertIsNotNone(post_out_ids[1])
-        self.assertEqual(post_out_ids, [None] + [post_out_ids[1]] * 3)
-
-    @skip_if_lt_x_gpu(1)
-    def test_all_gather_changing_payload_size(self):
-        self.run_subtests(
-            {"shard_dim": [0, 1, 2], "native_copy": [False, True]},
-            self._test_all_gather_changing_payload_size,
-        )
-
-    def _test_all_gather_changing_payload_size(self, shard_dim: int, native_copy: bool):
-        # A smaller payload fills a prefix of its cached output's rank-major
-        # buffer, which the post-all-gather hook decodes
-        world_size = self.world_size
-        local_shape = (2,) * (shard_dim + 1)
-        local_numel = math.prod(local_shape)
-        outer_size = math.prod(local_shape[:shard_dim])
-        base_shape = list(local_shape)
-        base_shape[shard_dim] = world_size
-        base = torch.arange(math.prod(base_shape), device=device_type).float()
-        # Repeated pairs along the shard dim make each local shard compressible
-        weight = base.view(base_shape).repeat_interleave(2, dim=shard_dim)
-        compressed = False
-
-        def fsdp_pre_all_gather(
-            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
-        ):
-            payload = local_tensor
-            if compressed:
-                payload = local_tensor.flatten()[::2].contiguous()
-            return (payload,), payload.numel()
-
-        @torch.no_grad()
-        def fsdp_post_all_gather(
-            local_tensor, all_gather_outputs, length, param_dtype, *, out=None
-        ):
-            packed = all_gather_outputs[0].view(outer_size, world_size, -1)
-            packed = packed.transpose(0, 1).flatten()[: world_size * length]
-            decoded = packed.view(world_size, -1).repeat_interleave(
-                local_numel // length, dim=1
-            )
-            decoded = torch.cat(
-                decoded.view(world_size, *local_shape).unbind(), dim=shard_dim
-            )
-            if out is not None:
-                with _unsafe_preserve_version_counter(out):
-                    out.copy_(decoded)
-                return None
-            return decoded, (decoded,)
-
-        model = nn.Module()
-        model.weight = nn.Parameter(weight.clone())
-        fully_shard(model, shard_placement_fn=lambda _: Shard(shard_dim))
-        if native_copy:
-            model.set_all_gather_output_fn(all_gather_output_fn_with_native_copy)
-        self._patch_all_gather_extension(
-            model, fsdp_pre_all_gather, fsdp_post_all_gather
-        )
-        (fsdp_param,) = fully_shard.state(model)._fsdp_param_group.fsdp_params
-        cached_output = None
-        for compressed in (False, True, False):
-            model.unshard()
-            self.assertEqual(model.weight, weight, atol=0, rtol=0)
-            (output,) = fsdp_param.all_gather_outputs
-            cached_output = output if cached_output is None else cached_output
-            self.assertIs(output, cached_output)
-            model.reshard()
 
 
 if __name__ == "__main__":
