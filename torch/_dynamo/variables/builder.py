@@ -5487,11 +5487,10 @@ class SourcelessBuilder:
             try:
                 if value.runtime_format:
                     # Validate the scalar type without specializing its value.
-                    value.fmt_var.as_python_constant().format(
-                        value.sym_node_var.python_type()()
-                    )
-                else:
-                    return ConstantVariable.create(str(value))
+                    fmt = value.fmt_var.as_python_constant()
+                    fmt.format(value.sym_node_var.python_type()())
+                    return StringFormatVariable(fmt, [value.sym_node_var], {})
+                return ConstantVariable.create(str(value))
             except ValueError as e:
                 raise_observed_exception(ValueError, tx, args=list(e.args))
             # If we cannot create due to error in str() call, we should
@@ -5500,12 +5499,11 @@ class SourcelessBuilder:
                 torch._dynamo.exc.UserError,
                 torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
             ):
-                pass
-            return StringFormatVariable.create(
-                value.fmt_var.as_python_constant(),
-                [value.sym_node_var],
-                {},
-            )
+                return StringFormatVariable.create(
+                    value.fmt_var.as_python_constant(),
+                    [value.sym_node_var],
+                    {},
+                )
         elif isinstance(value, type(torch._higher_order_ops.flex_attention_backward)):
             return torch._dynamo.variables.higher_order_ops.FlexAttentionBackwardHighOrderVariable(
                 value
