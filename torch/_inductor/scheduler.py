@@ -1487,7 +1487,7 @@ class NestedReduction:
     @classmethod
     def _sub_parent_affine_relation_is_admissible(
         cls,
-        access_stride: int,
+        parent_r_stride: int,
         base_offset: sympy.Expr,
         extent: sympy.Expr,
         parent_rnumel: sympy.Expr,
@@ -1495,18 +1495,18 @@ class NestedReduction:
     ) -> bool:
         """Check mapped bounds and the supported lane or dense geometry."""
         sizevars = V.graph.sizevars
-        if access_stride <= 0 or not sizevars.statically_known_gt(extent, 0):
+        if parent_r_stride <= 0 or not sizevars.statically_known_gt(extent, 0):
             return False
         base_offset = sizevars.simplify(base_offset)
         if not sizevars.statically_known_geq(base_offset, 0):
             return False
-        last_parent_r = sizevars.simplify(base_offset + access_stride * (extent - 1))
+        last_parent_r = sizevars.simplify(base_offset + parent_r_stride * (extent - 1))
         if not sizevars.statically_known_lt(last_parent_r, parent_rnumel):
             return False
 
-        if access_stride == sub_parent_factor:
+        if parent_r_stride == sub_parent_factor:
             return sizevars.statically_known_lt(base_offset, sub_parent_factor)
-        if access_stride != 1:
+        if parent_r_stride != 1:
             return False
 
         # Dense projection is currently emitted only for the existing CUDA /
@@ -1690,7 +1690,7 @@ class NestedReduction:
                             SubParentAccessRelation(
                                 source_accesses=source_deps,
                                 consumer_access=dep,
-                                access_stride=sub_parent_factor,
+                                parent_r_stride=sub_parent_factor,
                                 base_offset=sympy.Integer(lane_value),
                                 extent=sympy_subs(child_rnumel, extent_subs),
                                 requires_live_source=requires_live_source,
@@ -1744,7 +1744,7 @@ class NestedReduction:
                     SubParentAccessRelation(
                         source_accesses=source_deps,
                         consumer_access=dep,
-                        access_stride=1,
+                        parent_r_stride=1,
                         base_offset=proof.translation[1],
                         extent=dense_extent,
                         requires_live_source=requires_live_source,
@@ -1960,7 +1960,7 @@ class NestedReduction:
                 SubParentAccessRelation(
                     source_accesses=(source,),
                     consumer_access=output_access,
-                    access_stride=1,
+                    parent_r_stride=1,
                     base_offset=proof.translation[1],
                     extent=output_extent,
                     requires_live_source=False,
@@ -2064,7 +2064,7 @@ class NestedReduction:
             FloorDiv(parent_rnumel, sub_parent_factor)
         )
         for relation in relations:
-            if relation.access_stride != 1:
+            if relation.parent_r_stride != 1:
                 continue
             group_index = relation.output_group
             if group_index is None or not 0 <= group_index < len(output_groups):
@@ -2517,11 +2517,11 @@ class NestedReduction:
         Returns:
             True if all relations use compatible replay forms.
         """
-        has_dense_mapping = any(relation.access_stride == 1 for relation in relations)
+        has_dense_mapping = any(relation.parent_r_stride == 1 for relation in relations)
         # Dense replay closes the parent body; live lane sources cannot cross it.
         if has_dense_mapping and any(
-            relation.access_stride is not None
-            and relation.access_stride != 1
+            relation.parent_r_stride is not None
+            and relation.parent_r_stride != 1
             and relation.requires_live_source
             for relation in relations
         ):
@@ -2545,14 +2545,14 @@ class NestedReduction:
             affine_relations = [
                 relation
                 for relation in name_relations
-                if relation.access_stride is not None
+                if relation.parent_r_stride is not None
             ]
             if affine_relations and len(affine_relations) != len(name_relations):
                 return False
             if not affine_relations:
                 continue
             strides = OrderedSet(
-                relation.access_stride for relation in affine_relations
+                relation.parent_r_stride for relation in affine_relations
             )
             if len(strides) != 1:
                 return False
@@ -3092,7 +3092,7 @@ class SubParentAccessRelation:
     accesses into a common frame before invoking the pure proof; codegen validates
     their per-name replay consequences. The optional
     affine fields identify the parent R coordinate for each child R coordinate:
-    ``parent_r = access_stride * child_r + base_offset`` over ``extent`` values.
+    ``parent_r = parent_r_stride * child_r + base_offset`` over ``extent`` values.
     Dense replay records its output group and consuming nodes; their current
     reads are revalidated after loop transformations. Sharing a buffer name
     alone does not establish this relation.
@@ -3105,7 +3105,7 @@ class SubParentAccessRelation:
 
     source_accesses: tuple[MemoryDep, ...]
     consumer_access: MemoryDep
-    access_stride: int | None = None
+    parent_r_stride: int | None = None
     requires_live_source: bool
     base_offset: sympy.Expr | None = None
     extent: sympy.Expr | None = None
@@ -3118,7 +3118,7 @@ class SubParentAccessRelation:
         """Validate a current read against the proved dense child frame."""
         from .utils import sympy_index_symbol
 
-        if self.access_stride != 1 or self.extent is None:
+        if self.parent_r_stride != 1 or self.extent is None:
             return False
         if (
             read.name != self.consumer_access.name
@@ -3146,14 +3146,14 @@ class SubParentAccessRelation:
             raise AssertionError("sub-parent accesses must share one buffer name")
         has_affine_field = any(
             field is not None
-            for field in (self.access_stride, self.base_offset, self.extent)
+            for field in (self.parent_r_stride, self.base_offset, self.extent)
         )
         if has_affine_field and any(
             field is None
-            for field in (self.access_stride, self.base_offset, self.extent)
+            for field in (self.parent_r_stride, self.base_offset, self.extent)
         ):
             raise AssertionError("sub-parent affine relation must be complete")
-        if self.access_stride is not None and self.access_stride <= 0:
+        if self.parent_r_stride is not None and self.parent_r_stride <= 0:
             raise ValueError("sub-parent affine access stride must be positive")
         if (
             self.base_offset is not None
@@ -10935,7 +10935,7 @@ class Scheduler:
             affine_relations = tuple(
                 relation
                 for relation in stage.access_relations
-                if relation.access_stride is not None
+                if relation.parent_r_stride is not None
             )
             if not affine_relations:
                 continue
@@ -10961,7 +10961,7 @@ class Scheduler:
             if (
                 plan.allow_translation
                 and plan.nested_stage is None
-                and any(relation.access_stride == 1 for relation in affine_relations)
+                and any(relation.parent_r_stride == 1 for relation in affine_relations)
             ):
                 if not NestedReduction._sub_parent_dense_relations_are_admitted(
                     affine_relations,
@@ -10990,7 +10990,7 @@ class Scheduler:
                 if (
                     plan.allow_translation
                     and plan.nested_stage is None
-                    and relation.access_stride == 1
+                    and relation.parent_r_stride == 1
                 ):
                     consumer_frame = (
                         child_frame[0],
@@ -11014,7 +11014,7 @@ class Scheduler:
                 if (
                     plan.allow_translation
                     and not NestedReduction._sub_parent_affine_relation_is_admissible(
-                        typing.cast(int, relation.access_stride),
+                        typing.cast(int, relation.parent_r_stride),
                         typing.cast("sympy.Expr", relation.base_offset),
                         typing.cast("sympy.Expr", relation.extent),
                         mapped_parent_rnumel,

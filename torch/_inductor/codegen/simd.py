@@ -2132,7 +2132,7 @@ class _GroupedReductionLayout:
         family: _DerivedIterationFamily,
         value: CSEVariable,
         *,
-        access_stride: int,
+        parent_r_stride: int,
         base_offset: sympy.Expr,
         extent: sympy.Expr,
         parent_shape: tuple[sympy.Expr, sympy.Expr],
@@ -2150,7 +2150,7 @@ class _GroupedReductionLayout:
             parent_shape[0], child_shape[0]
         ):
             raise AssertionError("affine projection changed the parent row extent")
-        if access_stride != 1:
+        if parent_r_stride != 1:
             raise AssertionError("contiguous projection requires affine stride one")
         if output_lanes <= 0 or not 0 <= output_lane < output_lanes:
             raise AssertionError("invalid affine output-lane metadata")
@@ -2562,7 +2562,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         self._sub_parent_family = sub_parent_family
         self._sub_parent_factor = sub_parent_factor
         has_dense_mappings = any(
-            relation.access_stride == 1 for relation in access_relations
+            relation.parent_r_stride == 1 for relation in access_relations
         )
         if has_dense_mappings and (parent_numel is None or parent_rnumel is None):
             raise AssertionError("dense affine replay requires parent extents")
@@ -2577,7 +2577,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         )
         consumer_lanes: dict[MemoryDep, int] = {}
         for relation in access_relations:
-            if relation.access_stride == sub_parent_factor:
+            if relation.parent_r_stride == sub_parent_factor:
                 consumer = relation.consumer_access.normalize()
                 lane = V.graph.sizevars.guard_int(
                     cast("sympy.Expr", relation.base_offset)
@@ -2593,14 +2593,14 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             list
         )
         for relation in access_relations:
-            access_stride = relation.access_stride
-            if access_stride is None:
+            parent_r_stride = relation.parent_r_stride
+            if parent_r_stride is None:
                 continue
-            if access_stride not in (1, sub_parent_factor):
+            if parent_r_stride not in (1, sub_parent_factor):
                 raise AssertionError(
-                    f"unsupported sub-parent affine stride {access_stride}"
+                    f"unsupported sub-parent affine stride {parent_r_stride}"
                 )
-            if access_stride == sub_parent_factor:
+            if parent_r_stride == sub_parent_factor:
                 continue
             extent = cast("sympy.Expr", relation.extent)
             if parent_numel is None or parent_rnumel is None:
@@ -2664,8 +2664,8 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             mapping_kinds = OrderedSet(
                 [
                     "direct"
-                    if relation.access_stride is None
-                    else ("dense" if relation.access_stride == 1 else "interleaved")
+                    if relation.parent_r_stride is None
+                    else ("dense" if relation.parent_r_stride == 1 else "interleaved")
                     for relation in relations
                 ]
             )
@@ -2681,7 +2681,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
             parent_lanes = OrderedSet(
                 [
                     None
-                    if relation.access_stride is None or relation.access_stride == 1
+                    if relation.parent_r_stride is None or relation.parent_r_stride == 1
                     else V.graph.sizevars.guard_int(
                         cast("sympy.Expr", relation.base_offset)
                     )
@@ -2949,13 +2949,13 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         if key in self._dense_materialized:
             return self._dense_materialized[key]
         relation = descriptor.relation
-        if relation.access_stride != 1:
+        if relation.parent_r_stride != 1:
             raise AssertionError("dense descriptor lost its stride-one mapping")
         value = self._layout.project_parent_value(
             self._kernel,
             self._sub_parent_family,
             source,
-            access_stride=relation.access_stride,
+            parent_r_stride=relation.parent_r_stride,
             base_offset=cast("sympy.Expr", relation.base_offset),
             extent=cast("sympy.Expr", relation.extent),
             parent_shape=descriptor.parent_shape,
@@ -3002,7 +3002,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
         for name in OrderedSet(
             relation.consumer_access.name
             for relation in required_relations
-            if relation.access_stride != 1
+            if relation.parent_r_stride != 1
         ):
             if not self._contracts[name].source_is_internal:
                 continue
@@ -3019,7 +3019,7 @@ class _SubParentValueResolver(WrapperHandler):  # type: ignore[type-arg]
                 relation not in required_relations
                 or not relation.requires_live_source
                 or descriptor.output_group is None
-                or relation.access_stride != 1
+                or relation.parent_r_stride != 1
             ):
                 continue
             materialized = any(
@@ -3491,7 +3491,7 @@ class SIMDScheduling(BaseScheduling):
         if not self._sub_parent_tiling_is_2d(nodes, parent_numel, parent_rnumel):
             return None
         has_dense_mappings = plan.allow_translation and any(
-            relation.access_stride == 1
+            relation.parent_r_stride == 1
             for stage in plan.sub_parent_stages
             for relation in stage.access_relations
         )
@@ -4259,7 +4259,7 @@ class SIMDScheduling(BaseScheduling):
                     value_resolver.materialize_sources(
                         relation
                         for relation in sub_parent_stage.access_relations
-                        if relation.access_stride is not None
+                        if relation.parent_r_stride is not None
                     )
                     self._codegen_sub_parent_output_groups(
                         kernel,
@@ -4607,7 +4607,7 @@ class SIMDScheduling(BaseScheduling):
             raise AssertionError("expected one standalone sub-parent stage")
         stage = plan.sub_parent_stages[0]
         has_dense_mappings = any(
-            relation.access_stride == 1 for relation in stage.access_relations
+            relation.parent_r_stride == 1 for relation in stage.access_relations
         )
         numel = plan.parent_numel
         rnumel = plan.parent_rnumel
@@ -4620,13 +4620,13 @@ class SIMDScheduling(BaseScheduling):
         required_replay_relations = tuple(
             relation
             for relation in stage.access_relations
-            if relation.access_stride is not None
+            if relation.parent_r_stride is not None
         )
         required_live_lane_relations = tuple(
             relation
             for relation in required_replay_relations
             if relation.requires_live_source
-            and relation.access_stride == sub_parent_factor
+            and relation.parent_r_stride == sub_parent_factor
         )
         parent_schedule = self.generate_node_schedule(
             parent_nodes,

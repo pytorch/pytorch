@@ -364,7 +364,7 @@ class TestScheduler(TestCase):
                 source_accesses=(source,),
                 consumer_access=consumer,
                 requires_live_source=False,
-                access_stride=1,
+                parent_r_stride=1,
                 base_offset=64,
                 extent=consumer_extent,
                 output_group=0,
@@ -1055,14 +1055,14 @@ class TestScheduler(TestCase):
         lane = SubParentAccessRelation(
             source_accesses=(access,),
             consumer_access=access,
-            access_stride=2,
+            parent_r_stride=2,
             requires_live_source=False,
             base_offset=0,
             extent=8,
         )
         if variant == "mapping_kind":
             other = dataclasses.replace(
-                lane, access_stride=None, base_offset=None, extent=None
+                lane, parent_r_stride=None, base_offset=None, extent=None
             )
         else:
             other_source = MemoryDep("buf0", d0 + 1, (d0,), (sympy.Integer(16),))
@@ -1092,7 +1092,7 @@ class TestScheduler(TestCase):
                 consumer_access=MemoryDep(
                     name, 128 * row + stride * feature + offset, (row, feature), (4, 32)
                 ),
-                access_stride=stride,
+                parent_r_stride=stride,
                 requires_live_source=live,
                 base_offset=offset,
                 extent=32,
@@ -1108,8 +1108,8 @@ class TestScheduler(TestCase):
             expected,
         )
 
-    @parametrize("access_stride", [None, 1, 4])
-    def test_sub_parent_replay_rejects_mixed_source_roles(self, access_stride):
+    @parametrize("parent_r_stride", [None, 1, 4])
+    def test_sub_parent_replay_rejects_mixed_source_roles(self, parent_r_stride):
         row, feature = sympy.symbols("row feature", integer=True, nonnegative=True)
         source = MemoryDep("buf0", 128 * row + feature, (row, feature), (4, 128))
         read = MemoryDep("buf0", 128 * row + feature, (row, feature), (4, 32))
@@ -1117,12 +1117,12 @@ class TestScheduler(TestCase):
             source_accesses=(source,),
             consumer_access=read,
             requires_live_source=False,
-            access_stride=access_stride,
-            base_offset=0 if access_stride is not None else None,
-            extent=32 if access_stride is not None else None,
+            parent_r_stride=parent_r_stride,
+            base_offset=0 if parent_r_stride is not None else None,
+            extent=32 if parent_r_stride is not None else None,
         )
         groups = ()
-        if access_stride == 1:
+        if parent_r_stride == 1:
             node = Mock(
                 read_writes=ReadWrites(OrderedSet([read]), OrderedSet(), OrderedSet())
             )
@@ -1153,7 +1153,7 @@ class TestScheduler(TestCase):
                 consumer_access=MemoryDep(
                     "buf0", 4 * d0 + lane, (d0,), (sympy.Integer(4),)
                 ),
-                access_stride=4,
+                parent_r_stride=4,
                 requires_live_source=True,
                 base_offset=lane,
                 extent=4,
@@ -1163,7 +1163,7 @@ class TestScheduler(TestCase):
         self.assertEqual(
             tuple(
                 (
-                    relation.access_stride,
+                    relation.parent_r_stride,
                     relation.base_offset,
                     relation.extent,
                 )
@@ -1199,13 +1199,13 @@ class TestScheduler(TestCase):
             SubParentAccessRelation(
                 source_accesses=(external,),
                 consumer_access=external,
-                access_stride=None,
+                parent_r_stride=None,
                 requires_live_source=False,
             ),
             SubParentAccessRelation(
                 source_accesses=(internal,),
                 consumer_access=internal,
-                access_stride=None,
+                parent_r_stride=None,
                 requires_live_source=True,
             ),
         )
@@ -1253,7 +1253,7 @@ class TestScheduler(TestCase):
         relation = SubParentAccessRelation(
             source_accesses=(access,),
             consumer_access=access,
-            access_stride=None,
+            parent_r_stride=None,
             requires_live_source=True,
         )
         kernel = Mock(_load_mask=None, _load_other=None)
@@ -1289,7 +1289,7 @@ class TestScheduler(TestCase):
         relation = SubParentAccessRelation(
             source_accesses=(source,),
             consumer_access=consumer,
-            access_stride=1,
+            parent_r_stride=1,
             requires_live_source=live_source,
             base_offset=0,
             extent=8,
@@ -1349,7 +1349,7 @@ class TestScheduler(TestCase):
         relation = SubParentAccessRelation(
             source_accesses=(access,),
             consumer_access=access,
-            access_stride=None,
+            parent_r_stride=None,
             requires_live_source=False,
         )
         value = Mock()
@@ -1891,7 +1891,7 @@ class TestScheduler(TestCase):
         relation = SubParentAccessRelation(
             source_accesses=(planned_write,),
             consumer_access=planned_read,
-            access_stride=None,
+            parent_r_stride=None,
             requires_live_source=True,
         )
         plan = Mock(
