@@ -22,6 +22,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed._composable import checkpoint
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.distributed_c10d import get_default_backend_for_device
 from torch.distributed.fsdp import (
     CPUOffload,
     fully_shard,
@@ -62,32 +63,25 @@ from torch.testing._internal.common_utils import (
     set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
-    TEST_WITH_ROCM,
     TEST_XPU,
 )
 from torch.utils._triton import has_triton
 
 
-if TEST_WITH_ROCM:
-    DEVICE_COUNT = min(4, max(2, torch.cuda.device_count()))
-else:
-    DEVICE_COUNT = 4
-
-if TEST_CUDA:
-    DEVICE_TYPE = "cuda"
-    DISTRIBUTED_BACKEND = "nccl"
-    DEVICE_COUNT = torch.cuda.device_count()
-elif TEST_HPU:
-    DEVICE_TYPE = "hpu:0"
-    DISTRIBUTED_BACKEND = "hccl"
-elif TEST_XPU:
-    DEVICE_TYPE = "xpu"
-    DISTRIBUTED_BACKEND = "xccl"
-    DEVICE_COUNT = torch.xpu.device_count()
-else:
-    DEVICE_TYPE = "cpu"
-    DISTRIBUTED_BACKEND = "gloo"
-    DEVICE_COUNT = 1
+# CPU defaults; machines without an accelerator and MPS fall back to them.
+DEVICE_TYPE = "cpu"
+DISTRIBUTED_BACKEND = "gloo"
+DEVICE_COUNT = 1
+if torch.accelerator.is_available():
+    acc = torch.accelerator.current_accelerator()
+    # gloo does not support MPS tensors; for backward compatibility.
+    if acc.type != "mps":
+        DEVICE_TYPE = acc.type
+        # The accelerator's backend must be registered in
+        # Backend.default_device_backend_map before this module is imported.
+        DISTRIBUTED_BACKEND = get_default_backend_for_device(acc)
+        DEVICE_COUNT = torch.accelerator.device_count()
+    del acc  # avoid exposing a module-level temporary
 
 
 class FSDPInitMode(Enum):
@@ -1245,7 +1239,7 @@ class FSDPTestMixin:
 
         device_ids = None
         device_id = self.rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
+        if torch.accelerator.is_available():
             torch.accelerator.set_device_index(device_id)
         device_ids = [device_id]
 
@@ -1392,21 +1386,30 @@ class FSDPTestMixin:
             raise AssertionError("Expects an FSDP init mode that wraps with FSDP")
         if init_kwargs is None:
             init_kwargs = {}
+        offload_params = cpu_offload is not None and cpu_offload.offload_params
+        expects_device_error = (
+            offload_params and device_init_mode == DEVICEInitMode.DEVICE_AFTER
+        )
         lr = 1e-2
         rank = self.process_group.rank()
+        # Delays exercise FSDP stream ordering, not reference numerics.
+        ref_init_kwargs = init_kwargs.copy()
+        if "delay_after_loss_ms" in ref_init_kwargs:
+            ref_init_kwargs["delay_after_loss_ms"] = 0
         # Establish reference behavior with DDP
         model = model_class.init(
             self.process_group,
             FSDPInitMode.NO_FSDP,
             DEVICEInitMode.DEVICE_BEFORE,
             deterministic=True,
-            **init_kwargs,
+            **ref_init_kwargs,
         )
         if ref_init_fn is None:
             if TEST_HPU:
-                ref_model = DDP(
-                    model, device_ids=[DEVICE_TYPE], output_device=DEVICE_TYPE
-                )
+                # _get_device_index cannot resolve bare "hpu" to an index;
+                # re-add ":0" for backward compatibility.
+                hpu = f"{DEVICE_TYPE}:0"
+                ref_model = DDP(model, device_ids=[hpu], output_device=hpu)
             elif DEVICE_TYPE == "cpu":
                 ref_model = DDP(model)
             else:
@@ -1415,17 +1418,18 @@ class FSDPTestMixin:
             ref_model = ref_init_fn(model)
         if use_pure_fp16:
             ref_model = ref_model.half()
-        ref_loss = self._train_for_several_steps(
-            ref_model,
-            num_iters,
-            autocast=mixed_precision is not None,
-            lr=lr,
-            fsdp_cpu_offload=cpu_offload,
-            mixed_precision=mixed_precision,
-            enable_sharded_grad_scaler=enable_sharded_grad_scaler,
-            use_pure_fp16=use_pure_fp16,
-            sharded_grad_scaler_kwargs=sharded_grad_scaler_kwargs,
-        )
+        if not expects_device_error:
+            ref_loss = self._train_for_several_steps(
+                ref_model,
+                num_iters,
+                autocast=mixed_precision is not None,
+                lr=lr,
+                fsdp_cpu_offload=cpu_offload,
+                mixed_precision=mixed_precision,
+                enable_sharded_grad_scaler=enable_sharded_grad_scaler,
+                use_pure_fp16=use_pure_fp16,
+                sharded_grad_scaler_kwargs=sharded_grad_scaler_kwargs,
+            )
         ddp_params = list(ref_model.parameters())
         # Check against FSDP behavior
         fsdp_kwargs.update(
@@ -1459,13 +1463,9 @@ class FSDPTestMixin:
             fsdp_model = fsdp_model.half()
         if device_init_mode == DEVICEInitMode.DEVICE_AFTER:
             fsdp_model = fsdp_model.to(DEVICE_TYPE)
-        offload_params = cpu_offload is not None and cpu_offload.offload_params
         # Offloading parameters with `DEVICE_AFTER` should raise an error during
         # lazy initialization due to the parameter devices not being CPU;
         # otherwise, all parameter devices should be CPU
-        expects_device_error = (
-            offload_params and device_init_mode == DEVICEInitMode.DEVICE_AFTER
-        )
         expects_cpu_device = (
             offload_params and device_init_mode != DEVICEInitMode.DEVICE_AFTER
         )
@@ -1588,7 +1588,7 @@ class FSDPTest(FSDPTestMixin, MultiProcessTestCase):
 
         device_ids = None
         device_id = self.rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
+        if torch.accelerator.is_available():
             torch.accelerator.set_device_index(device_id)
         device_ids = [device_id]
 
@@ -1635,7 +1635,7 @@ class FSDPTestContinuous(FSDPTestMixin, MultiProcContinuousTest):
             sys.exit(TEST_SKIPS[f"multi-device-{world_size}"].exit_code)
 
         device_id = rank % DEVICE_COUNT
-        if TEST_CUDA or TEST_XPU:
+        if torch.accelerator.is_available():
             torch.accelerator.set_device_index(device_id)
 
         super()._init_pg(rank, world_size, rdvz_file)

@@ -544,7 +544,7 @@ class OptimizedModule(torch.nn.Module):
             # Invoke hooks outside of dynamo then pickup the inner frame
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
 
-        if inspect.getattr_static(self._orig_mod, "_initialize_hook", None) is not None:
+        if _static_getattr(self._orig_mod, "_initialize_hook") is not None:
             self._forward = self.forward
             self.forward = self._call_lazy_check
 
@@ -671,9 +671,8 @@ class OptimizedModule(torch.nn.Module):
 
     def _call_lazy_check(self, *args: Any, **kwargs: Any) -> Any:
         if (
-            inspect.getattr_static(self._orig_mod, "_initialize_hook", None) is not None
-            and inspect.getattr_static(self._orig_mod, "_infer_parameters", None)
-            is not None
+            _static_getattr(self._orig_mod, "_initialize_hook") is not None
+            and _static_getattr(self._orig_mod, "_infer_parameters") is not None
             and callable(self._orig_mod._infer_parameters)
         ):
             # In the case of a lazy module, we want to run
@@ -1065,7 +1064,7 @@ class _TorchDynamoContext:
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
             # check mod, not new_mod: OptimizedModule.__getattr__ delegates to mod
-            if inspect.getattr_static(mod, "get_compiler_config", None) is not None:
+            if _static_getattr(mod, "get_compiler_config") is not None:
                 raise AssertionError(
                     "new_mod already has a get_compiler_config attribute"
                 )
@@ -1742,8 +1741,8 @@ def argument_names(
 
 
 def check_if_dynamo_supported() -> None:
-    if sys.version_info >= (3, 15):
-        raise RuntimeError("Python 3.15+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 16):
+        raise RuntimeError("Python 3.16+ not yet supported for torch.compile")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
