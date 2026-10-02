@@ -13435,6 +13435,37 @@ class TestLocalizedAllocator(TestCase):
                 torch.cuda.LocalizedAllocator(domain, device=device)
 
     @serialTest()
+    def test_shutdown_with_localized_pool_cycle(self, device: str) -> None:
+        self._require_localization(device)
+        code = """
+import gc
+import sys
+import torch
+
+device = sys.argv[1]
+allocator = torch.cuda.LocalizedAllocator(0, device=device)
+pool = torch.cuda.MemPool(allocator.allocator())
+with torch.cuda.use_mem_pool(pool, device=device):
+    value = torch.empty(1024, device=device)
+torch.cuda.synchronize(device)
+gc.disable()
+cycle = [pool, value]
+cycle.append(cycle)
+torch.cuda.memory._LOCALITY_ALLOCATORS.clear()
+del allocator, pool, value, cycle
+raise RuntimeError("localized pool shutdown")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", code, device],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("RuntimeError: localized pool shutdown", result.stderr)
+        self.assertNotIn("Exception ignored", result.stderr)
+
+    @serialTest()
     def test_tensor_outlives_pool_and_allocator(self, device: str) -> None:
         self._require_localization(device)
         allocator = torch.cuda.LocalizedAllocator(0, device=device)
@@ -13523,9 +13554,8 @@ class TestLocalizedAllocatorCallbacks(TestCase):
         from torch.cuda import memory
 
         with patch.object(memory, "_lazy_init") as init:
-            for cls in (memory.LocalizedAllocator, memory._DomainLocalityAllocator):
-                with self.assertRaisesRegex(ValueError, "must be an integer"):
-                    cls(domain)  # pyrefly: ignore [bad-argument-type]
+            with self.assertRaisesRegex(ValueError, "must be an integer"):
+                memory.LocalizedAllocator(domain)  # pyrefly: ignore [bad-argument-type]
             init.assert_not_called()
 
     def test_initialization_before_support_check(self) -> None:
@@ -13543,8 +13573,13 @@ class TestLocalizedAllocatorCallbacks(TestCase):
                 side_effect=lambda device: order.append("query") or True,
             ),
             patch.object(memory, "get_num_locality_domains", return_value=2),
+            patch.dict(memory._LOCALITY_ALLOCATORS, clear=True),
+            patch.object(memory._LocalizedAllocatorOwner, "cuda_allocator"),
+            patch.object(memory, "_drv"),
+            patch.object(memory, "_check_cuda_bindings", side_effect=lambda x: x),
+            patch.object(memory.ctypes.pythonapi, "Py_IncRef"),
         ):
-            allocator = memory._DomainLocalityAllocator(1, 0)
+            allocator = memory.LocalizedAllocator(1, device=0)
         self.assertEqual(order, ["init", "query"])
         self.assertEqual(allocator.locality_domain_id, 1)
 
@@ -13555,17 +13590,15 @@ class TestLocalizedAllocatorCallbacks(TestCase):
     def test_allocation_cleanup(self, fail_at: str | None) -> None:
         from torch.cuda import memory
 
-        allocator = object.__new__(memory._DomainLocalityAllocator)
-        allocator.device_id = 0
-        allocator.locality_domain_id = 1
-        allocator._records = {}
         with (
             patch.object(memory, "_drv") as driver,
-            patch("torch.cuda.device"),
+            patch.object(memory, "is_localization_supported", return_value=True),
+            patch.object(memory, "get_num_locality_domains", return_value=2),
             patch.object(
                 memory, "_check_cuda_bindings", side_effect=lambda result: result
             ),
         ):
+            allocator = memory._LocalizedAllocatorOwner(1, 0)
             driver.cuMemGetAllocationGranularity.return_value = 64
             driver.cuMemCreate.return_value = 11
             driver.cuMemAddressReserve.return_value = 1024
@@ -13607,7 +13640,7 @@ class TestLocalizedAllocatorCallbacks(TestCase):
     def test_wrong_device_and_empty_allocation(self) -> None:
         from torch.cuda import memory
 
-        allocator = object.__new__(memory._DomainLocalityAllocator)
+        allocator = object.__new__(memory._LocalizedAllocatorOwner)
         allocator.device_id = 0
         with patch.object(memory, "_drv") as driver:
             self.assertEqual(allocator.allocate(0, 0, None), 0)

@@ -5,10 +5,12 @@ import collections
 import contextlib
 import ctypes
 import json
+import logging
 import pickle
 import sys
 import threading
 import warnings
+from collections.abc import Callable
 from inspect import signature
 from typing import Any, Literal, TYPE_CHECKING
 from typing_extensions import deprecated
@@ -1337,32 +1339,28 @@ def _as_ptr_int(ptr: Any) -> int:
     return int(value)
 
 
-def _make_locality_allocation_prop(device_id: int, locality_domain_id: int) -> Any:
-    # pyrefly: ignore [missing-attribute]
-    prop = _drv.CUmemAllocationProp()
-    # pyrefly: ignore [missing-attribute]
-    prop.type = _drv.CUmemAllocationType.CU_MEM_ALLOCATION_TYPE_PINNED
+def _make_locality_allocation_prop(
+    driver: Any, device_id: int, locality_domain_id: int
+) -> Any:
+    prop = driver.CUmemAllocationProp()
+    prop.type = driver.CUmemAllocationType.CU_MEM_ALLOCATION_TYPE_PINNED
     prop.location.type = (
-        # pyrefly: ignore [missing-attribute]
-        _drv.CUmemLocationType.CU_MEM_LOCATION_TYPE_DEVICE_LOCALITY_DOMAIN
+        driver.CUmemLocationType.CU_MEM_LOCATION_TYPE_DEVICE_LOCALITY_DOMAIN
     )
     prop.location.localized.deviceId = device_id
     prop.location.localized.localityDomainId = locality_domain_id
     return prop
 
 
-def _make_device_access_desc(device_id: int) -> Any:
-    # pyrefly: ignore [missing-attribute]
-    desc = _drv.CUmemAccessDesc()
-    # pyrefly: ignore [missing-attribute]
-    desc.location.type = _drv.CUmemLocationType.CU_MEM_LOCATION_TYPE_DEVICE
+def _make_device_access_desc(driver: Any, device_id: int) -> Any:
+    desc = driver.CUmemAccessDesc()
+    desc.location.type = driver.CUmemLocationType.CU_MEM_LOCATION_TYPE_DEVICE
     desc.location.id = device_id
-    # pyrefly: ignore [missing-attribute]
-    desc.flags = _drv.CUmemAccess_flags.CU_MEM_ACCESS_FLAGS_PROT_READWRITE
+    desc.flags = driver.CUmemAccess_flags.CU_MEM_ACCESS_FLAGS_PROT_READWRITE
     return desc
 
 
-class _BaseLocalityAllocator:
+class _LocalizedAllocatorOwner:
     """Python callbacks require serialized allocator activity across all threads.
 
     The native allocator can hold its mutex while acquiring the GIL for these
@@ -1370,17 +1368,27 @@ class _BaseLocalityAllocator:
     therefore deadlock; a Python lock here cannot fix that lock inversion.
     """
 
-    def __init__(self, device_id: int | None = None) -> None:
-        # Initialize CUDA so support is checked through the driver, not NVML.
-        _lazy_init()
-        self.device_id = _get_device_index(device_id, optional=True)
+    def __init__(self, locality_domain_id: int, device_id: int) -> None:
+        self.device_id = device_id
         if not is_localization_supported(self.device_id):
             raise RuntimeError(
                 "Green Context localization must be supported on this device "
                 "for localized allocation"
             )
-        self._records: dict[int, Any] = {}
+        num_domains = get_num_locality_domains(self.device_id)
+        if locality_domain_id < 0 or locality_domain_id >= num_domains:
+            raise ValueError(
+                "Invalid locality_domain_id: "
+                f"{locality_domain_id} (device has {num_domains})"
+            )
+        self.locality_domain_id = locality_domain_id
+        self._records: dict[int, tuple[int, Any]] = {}
         self._is_finalizing = sys.is_finalizing
+        self._driver = _drv
+        self._check_result = _check_cuda_bindings
+        self._make_allocation_prop = _make_locality_allocation_prop
+        self._make_access_desc = _make_device_access_desc
+        self._log_error = logging.getLogger(__name__).error
         self._alloc_cb = _ALLOC_FN(self._alloc_callback)
         self._free_cb = _FREE_FN(self._free_callback)
         alloc_ptr = ctypes.cast(self._alloc_cb, ctypes.c_void_p).value
@@ -1389,49 +1397,59 @@ class _BaseLocalityAllocator:
             raise RuntimeError("Failed to create localized allocator callbacks")
         self.alloc_ptr = alloc_ptr
         self.free_ptr = free_ptr
+        self._context = self._check_result(
+            # pyrefly: ignore [missing-attribute]
+            self._driver.cuDevicePrimaryCtxRetain(device_id)
+        )
 
     def _alloc_callback(self, size: int, device: int, stream: int | None) -> int:
         try:
+            if self._is_finalizing():
+                return 0
             return self.allocate(size, device, stream)
-        except Exception as e:
-            warnings.warn(f"Localized CUDA allocation failed: {e}")
+        except BaseException as error:
+            self._report_errors([("allocation", error)])
             return 0
 
     def _free_callback(
         self, ptr: int | None, size: int, device: int, stream: int | None
     ) -> None:
         try:
-            self.free(_as_ptr_int(ptr), stream)
-        except Exception as e:
-            # Module globals may already be cleared during interpreter shutdown.
-            # The CUDA driver will release any remaining allocations at exit.
-            if not self._is_finalizing():
-                warnings.warn(f"Localized CUDA free failed: {e}")
+            self.free(ptr or 0, stream)
+        except BaseException as error:
+            self._report_errors([("free", error)])
 
-    def allocate(self, size: int, device: int, stream: int | None) -> int:
-        raise NotImplementedError
+    def _report_errors(self, errors: list[tuple[str, BaseException]]) -> None:
+        try:
+            if self._is_finalizing():
+                return
+            for operation, error in errors:
+                # Interrupts and other control-flow exceptions are not CUDA errors.
+                if isinstance(error, Exception):
+                    self._log_error(
+                        "Localized CUDA %s failed",
+                        operation,
+                        exc_info=(type(error), error, error.__traceback__),
+                    )
+        except BaseException:
+            # No exception, including one from logging, may cross the C callback.
+            pass
 
-    def free(self, ptr: int, stream: int | None) -> None:
-        raise NotImplementedError
+    def _try_cleanup(
+        self,
+        operation: Callable[..., Any],
+        errors: list[tuple[str, BaseException]],
+        *args: Any,
+    ) -> bool:
+        try:
+            self._check_result(operation(*args))
+            return True
+        except BaseException as error:
+            errors.append((operation.__name__, error))
+            return False
 
     def cuda_allocator(self) -> _cuda_CUDAAllocator:
         return torch._C._cuda_customAllocator(self.alloc_ptr, self.free_ptr)
-
-
-class _DomainLocalityAllocator(_BaseLocalityAllocator):
-    def __init__(self, locality_domain_id: int, device_id: int | None = None) -> None:
-        if isinstance(locality_domain_id, bool) or not isinstance(
-            locality_domain_id, int
-        ):
-            raise ValueError("locality_domain_id must be an integer")
-        super().__init__(device_id)
-        num_domains = get_num_locality_domains(self.device_id)
-        if locality_domain_id < 0 or locality_domain_id >= num_domains:
-            raise ValueError(
-                "Invalid locality_domain_id: "
-                f"{locality_domain_id} (device has {num_domains})"
-            )
-        self.locality_domain_id = locality_domain_id
 
     def allocate(self, size: int, device_id: int, stream: int | None) -> int:
         if size == 0:
@@ -1442,13 +1460,15 @@ class _DomainLocalityAllocator(_BaseLocalityAllocator):
                 f"locality device: {self.device_id}"
             )
 
-        prop = _make_locality_allocation_prop(device_id, self.locality_domain_id)
-        granularity = _check_cuda_bindings(
+        drv = self._driver
+        check = self._check_result
+        prop = self._make_allocation_prop(drv, device_id, self.locality_domain_id)
+        granularity = check(
             # pyrefly: ignore [missing-attribute]
-            _drv.cuMemGetAllocationGranularity(
+            drv.cuMemGetAllocationGranularity(
                 prop,
                 # pyrefly: ignore [missing-attribute]
-                _drv.CUmemAllocationGranularity_flags.CU_MEM_ALLOC_GRANULARITY_MINIMUM,
+                drv.CUmemAllocationGranularity_flags.CU_MEM_ALLOC_GRANULARITY_MINIMUM,
             )
         )
         padded_size = ((size + granularity - 1) // granularity) * granularity
@@ -1457,51 +1477,69 @@ class _DomainLocalityAllocator(_BaseLocalityAllocator):
         mapped = False
         try:
             # pyrefly: ignore [missing-attribute]
-            handle = _check_cuda_bindings(_drv.cuMemCreate(padded_size, prop, 0))
+            handle = check(drv.cuMemCreate(padded_size, prop, 0))
             ptr = int(
-                _check_cuda_bindings(
+                check(
                     # pyrefly: ignore [missing-attribute]
-                    _drv.cuMemAddressReserve(padded_size, granularity, 0, 0)
+                    drv.cuMemAddressReserve(padded_size, granularity, 0, 0)
                 )
             )
             # pyrefly: ignore [missing-attribute]
-            _check_cuda_bindings(_drv.cuMemMap(ptr, padded_size, 0, handle, 0))
+            check(drv.cuMemMap(ptr, padded_size, 0, handle, 0))
             mapped = True
-            desc = _make_device_access_desc(device_id)
+            desc = self._make_access_desc(drv, device_id)
             # pyrefly: ignore [missing-attribute]
-            _check_cuda_bindings(_drv.cuMemSetAccess(ptr, padded_size, [desc], 1))
+            check(drv.cuMemSetAccess(ptr, padded_size, [desc], 1))
             self._records[ptr] = (padded_size, handle)
             return ptr
-        except Exception:
+        except BaseException:
+            errors: list[tuple[str, BaseException]] = []
+            unmapped = True
             if mapped:
                 # pyrefly: ignore [missing-attribute]
-                _check_cuda_bindings(_drv.cuMemUnmap(ptr, padded_size))
-            if ptr:
+                unmapped = self._try_cleanup(drv.cuMemUnmap, errors, ptr, padded_size)
+            if ptr and unmapped:
                 # pyrefly: ignore [missing-attribute]
-                _check_cuda_bindings(_drv.cuMemAddressFree(ptr, padded_size))
+                self._try_cleanup(drv.cuMemAddressFree, errors, ptr, padded_size)
             if handle is not None:
                 # pyrefly: ignore [missing-attribute]
-                _check_cuda_bindings(_drv.cuMemRelease(handle))
+                self._try_cleanup(drv.cuMemRelease, errors, handle)
+            self._report_errors(errors)
             raise
 
     def free(self, ptr: int, stream: int | None) -> None:
-        if ptr == 0:
-            return
-        record = self._records.get(ptr)
-        if record is None:
-            return
-        padded_size, handle = record
-        # Unlike cudaFree, unmapping does not wait for queued stream work.
-        with torch.cuda.device(self.device_id):
+        errors: list[tuple[str, BaseException]] = []
+        try:
+            # Native allocator bookkeeping is already gone; this cannot be retried.
+            record = self._records.pop(ptr, None)
+            if record is None or self._is_finalizing():
+                # Avoid cleared module globals at shutdown; the driver reclaims memory.
+                return
+            padded_size, handle = record
+            drv = self._driver
             # pyrefly: ignore [missing-attribute]
-            _check_cuda_bindings(_drv.cuStreamSynchronize(stream or 0))
-            # pyrefly: ignore [missing-attribute]
-            _check_cuda_bindings(_drv.cuMemUnmap(ptr, padded_size))
-            # pyrefly: ignore [missing-attribute]
-            _check_cuda_bindings(_drv.cuMemAddressFree(ptr, padded_size))
-            # pyrefly: ignore [missing-attribute]
-            _check_cuda_bindings(_drv.cuMemRelease(handle))
-        del self._records[ptr]
+            if not self._try_cleanup(drv.cuCtxPushCurrent, errors, self._context):
+                return
+            try:
+                # Unlike cudaFree, unmapping does not wait for queued stream work.
+                # If waiting fails, leak rather than free memory still in use.
+                # pyrefly: ignore [missing-attribute]
+                if not self._try_cleanup(drv.cuStreamSynchronize, errors, stream or 0):
+                    return
+                # pyrefly: ignore [missing-attribute]
+                if self._try_cleanup(drv.cuMemUnmap, errors, ptr, padded_size):
+                    # pyrefly: ignore [missing-attribute]
+                    self._try_cleanup(drv.cuMemAddressFree, errors, ptr, padded_size)
+                # Releasing the handle is safe even if a mapping remains.
+                # pyrefly: ignore [missing-attribute]
+                self._try_cleanup(drv.cuMemRelease, errors, handle)
+            finally:
+                # pyrefly: ignore [missing-attribute]
+                self._try_cleanup(drv.cuCtxPopCurrent, errors)
+        except BaseException as error:
+            errors.append(("free", error))
+        finally:
+            self._report_errors(errors)
 
 
 class _CUDAAllocator:
@@ -1627,8 +1665,8 @@ class MemPool(_MemPool):
 
 
 # Native pools retain only callback addresses, not the Python callback owners.
-# Reuse one owner per device/domain and keep it alive like _UVM_ALLOCATOR.
-_LOCALITY_ALLOCATORS: dict[tuple[int, int], _DomainLocalityAllocator] = {}
+# Reuse one owner per device/domain; a native reference also pins it through shutdown.
+_LOCALITY_ALLOCATORS: dict[tuple[int, int], _LocalizedAllocatorOwner] = {}
 
 
 class LocalizedAllocator(_CUDAAllocator):
@@ -1655,7 +1693,11 @@ class LocalizedAllocator(_CUDAAllocator):
         Use this allocator only on its owning device; access from other devices
         is not supported. Callback owners are retained for the process lifetime,
         so tensors may outlive the Python allocator and pool objects.
+        One owner and primary-context reference per device/domain are deliberately
+        retained, including during interpreter shutdown.
         Releasing physical memory waits for its allocation stream.
+        Freeing is best-effort: failures are logged, not raised. Memory that
+        cannot safely be unmapped is left for the driver to reclaim at exit.
     """
 
     def __init__(self, locality_domain_id: int, *, device: "Device" = None) -> None:
@@ -1668,9 +1710,14 @@ class LocalizedAllocator(_CUDAAllocator):
         device_id = _get_device_index(device, optional=True)
         key = (device_id, locality_domain_id)
         if key not in _LOCALITY_ALLOCATORS:
-            _LOCALITY_ALLOCATORS[key] = _DomainLocalityAllocator(
-                locality_domain_id, device_id
-            )
+            owner = _LocalizedAllocatorOwner(locality_domain_id, device_id)
+            # Deliberately retain one owner/context per device/domain until process exit.
+            # A Python cache alone can be cleared before the last native pool teardown.
+            incref = ctypes.pythonapi.Py_IncRef
+            incref.argtypes = [ctypes.py_object]
+            incref.restype = None
+            incref(owner)
+            _LOCALITY_ALLOCATORS[key] = owner
         self._localized_allocator = _LOCALITY_ALLOCATORS[key]
         super().__init__(self._localized_allocator.cuda_allocator())
 
