@@ -8959,6 +8959,7 @@
   variants: method, function
   dispatch:
     QuantizedCPU: ne_quantized_cpu
+    Meta: ne_Scalar_meta
   tags: [core, pointwise]
 
 - func: ne.Tensor_out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
