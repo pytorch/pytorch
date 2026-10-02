@@ -2604,9 +2604,9 @@ class TestPublishHonoursALateOptOut(unittest.TestCase):
 
     def _run(self, labels):
         with tempfile.TemporaryDirectory() as td:
-            (Path(td) / "out").mkdir()
-            (Path(td) / "out" / "verdict.json").write_text(
-                json.dumps({"verdict": "ready_for_human_review"})
+            # The label step reads the verdict back from the row it follows.
+            (Path(td) / "terminal.json").write_text(
+                json.dumps({"status": "succeeded", "verdict": "ready_for_human_review"})
             )
             argv = Path(td) / "gh_calls"
             argv.write_text("")
