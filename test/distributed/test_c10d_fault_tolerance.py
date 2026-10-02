@@ -425,10 +425,10 @@ def _make_fault_tolerance_test_class(backend):
             not TEST_CUDA or torch.cuda.device_count() < 3,
             "fault tolerance CUDA tests require at least 3 GPUs",
         )(cls)
-    if backend.name == "nccl2":
+    if backend.name == "nccl2" and TEST_WITH_ROCM and dist.is_nccl_available():
         cls = unittest.skipIf(
-            TEST_WITH_ROCM,
-            "nccl2 reconfigure is not supported with RCCL",
+            torch.cuda.nccl.version() < (2, 30, 7),
+            "nccl2 reconfigure requires RCCL 2.30.7 or later",
         )(cls)
     return cls
 
