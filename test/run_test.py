@@ -979,6 +979,15 @@ def run_common_test(test_module, test_directory, options):
     )
 
 
+def run_nccl_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module,
+        test_directory,
+        options,
+        ("DistributedDataParallelTest", "CommTest", "NCCLTraceTest", "WorkHookTest"),
+    )
+
+
 def run_pg_wrapper_test(test_module, test_directory, options):
     return run_test_with_class_supervisors(
         test_module, test_directory, options, ("ProcessGroupGlooWrapperTest",)
@@ -1470,7 +1479,7 @@ CUSTOM_HANDLERS = {
     "test_cpp_extensions_aot_ninja": test_cpp_extensions_aot_ninja,
     "distributed/test_distributed_spawn": test_distributed,
     "distributed/algorithms/quantization/test_quantization": test_distributed,
-    "distributed/test_c10d_nccl": run_test_with_subprocess,
+    "distributed/test_c10d_nccl": run_nccl_test,
     "distributed/test_c10d_gloo": run_gloo_test,
     "distributed/test_c10d_ucc": run_test_with_subprocess,
     "distributed/test_c10d_common": run_common_test,
