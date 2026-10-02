@@ -6076,6 +6076,7 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(fn())
 
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_dynamic_class_attribute_raw_descriptor(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
