@@ -3109,6 +3109,37 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if isinstance(self.wrapper_obj, torch.jit.ScriptFunction):
+            schema = cast(torch._C.FunctionSchema, self.wrapper_obj.schema)
+            schema_types = [
+                arg.type for arg in itertools.chain(schema.arguments, schema.returns)
+            ]
+            while schema_types:
+                schema_type = schema_types.pop()
+                if isinstance(
+                    schema_type,
+                    (
+                        torch.ListType,
+                        torch.DictType,
+                        torch.AnyType,
+                        torch.ClassType,
+                        torch.InterfaceType,
+                    ),
+                ):
+                    unimplemented(
+                        gb_type="ScriptFunction with mutable-capable schema",
+                        context=f"schema: {schema}",
+                        explanation="Dynamo cannot safely inline a torch.jit.ScriptFunction whose schema contains List, Dict, Any, Class, or Interface because TorchScript may copy mutable containers or class instances at the Python call boundary.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                if isinstance(
+                    schema_type,
+                    (torch.TupleType, torch.OptionalType, torch.UnionType),
+                ):
+                    schema_types.extend(
+                        cast(torch._C.Type, schema_type).containedTypes()
+                    )
+
         if hasattr(self.wrapper_obj, "cache_info"):
             target_fn = getattr(self.wrapper_obj, self.attr_to_trace, None)
             module_name = getattr(target_fn, "__module__", "") or ""
