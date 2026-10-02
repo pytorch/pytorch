@@ -2986,8 +2986,10 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         def fn(x, z, source_stream, mutation_stream):
             with torch.cuda.stream(source_stream):
                 value = z + 1
-            with torch.cuda.stream(mutation_stream):
-                x.add_(value.to(x.device))
+                # The cross-device copy also reads value on CUDA:0, so keep
+                # its producer stream current until the copy is enqueued.
+                with torch.cuda.stream(mutation_stream):
+                    x.add_(value.to(x.device))
             source_stream.synchronize()
             return z + 2
 
