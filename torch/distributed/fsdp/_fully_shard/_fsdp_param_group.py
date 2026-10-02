@@ -492,6 +492,7 @@ class FSDPParamGroup:
                 param_all_gather_input_dtypes=[],
                 param_all_gather_input_numels=[],
                 all_gather_input_split_sizes=[],
+                all_gather_input_outer_sizes=[],
             )
 
             return
