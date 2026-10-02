@@ -330,7 +330,10 @@ class _PipelineSchedule(ABC):
     def _maybe_get_loss(self, stage, mb_index):
         valid_index = 0 <= mb_index < len(self._internal_losses)
         if stage.is_last and self._loss_fn is not None and valid_index:
-            return self._internal_losses[mb_index]
+            backward_loss = self._internal_losses[mb_index]
+            # Keep a detached reporting value while the caller owns the loss graph.
+            self._internal_losses[mb_index] = backward_loss.detach()
+            return backward_loss
         elif len(self._internal_losses) != 0 and not valid_index:
             raise RuntimeError(
                 f"Loss for microbatch {mb_index} is not available. "
