@@ -1312,19 +1312,17 @@ static void apply_syevd_batched_rocsolver(const Tensor& values, const Tensor& ve
       rocblas_status_to_string(query_status),
       " when querying workspace for rocsolver syevd");
 
-  // size_unchanged means the workspace already installed on the handle is
-  // large enough. set_workspace would free that rocBLAS-managed buffer.
-  const bool replace_workspace =
-      query_status == rocblas_status_size_increased && workspace_size > 0;
+  // The query accumulator starts at 0, so size_increased does not mean the
+  // installed workspace is too small. Bind whenever this call needs memory.
   c10::DataPtr workspace;
-  if (replace_workspace) {
+  if (workspace_size > 0) {
     workspace = allocator.allocate(workspace_size);
     TORCH_ROCBLAS_CHECK(
         rocblas_set_workspace(handle, workspace.get(), workspace_size));
   }
   auto status = run_syevd();
   rocblas_status reset_status = rocblas_status_success;
-  if (replace_workspace) {
+  if (workspace_size > 0) {
     // Drop the user pointer before its DataPtr is freed.
     reset_status = rocblas_set_workspace(handle, nullptr, 0);
   }
