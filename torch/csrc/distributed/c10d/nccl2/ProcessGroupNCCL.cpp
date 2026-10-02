@@ -523,6 +523,7 @@ void ProcessGroupNCCL::finalize() {
   // timeout, which is a teardown result to report to the caller, not a reason
   // to terminate the process.
   stopWatchdog();
+  drainRetiredGraphWork();
 
   // Wait for all pending work objects to complete and get final status
   auto work_status = workq_.finalize();

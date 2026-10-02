@@ -884,6 +884,7 @@ class TpRichcompareTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
 
         # After registration: works
+        self.addCleanup(torch._dynamo.decorators._disallow_c_slot, sqlite3.Row)
         torch._dynamo.allow_c_slot(sqlite3.Row)
         self._assert_cmp_equals(row1, row1, operator.eq)
         self._assert_cmp_equals(row1, row2, operator.eq)

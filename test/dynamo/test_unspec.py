@@ -63,7 +63,10 @@ _TIME_FUNCTION_TEST_CASES = tuple(
 )
 
 
-@torch._dynamo.config.patch(assume_static_by_default=False)
+UNSPEC_CONFIG = {"assume_static_by_default": False}
+
+
+@torch._dynamo.config.patch(**UNSPEC_CONFIG)
 @instantiate_parametrized_tests
 class UnspecTests(torch._dynamo.test_case.TestCase):
     def test_time_function_names(self):
@@ -568,6 +571,7 @@ else:
         # if Dynamo calls random methods.
 
         exit_stack = contextlib.ExitStack()
+        self.addCleanup(exit_stack.close)
 
         def patch_fn_with_rng_burn(name):
             orig_fn = eval(name)
