@@ -441,7 +441,9 @@ class DeviceTypeTestBase(TestCase):
 
     @property
     def precision(self):
-        return self._tls.precision
+        # Per-thread storage: non-importing threads (e.g. the autograd
+        # engine thread running backward hooks) see an empty local.
+        return getattr(self._tls, "precision", TestCase._precision)
 
     @precision.setter
     def precision(self, prec):
@@ -449,7 +451,7 @@ class DeviceTypeTestBase(TestCase):
 
     @property
     def rel_tol(self):
-        return self._tls.rel_tol
+        return getattr(self._tls, "rel_tol", TestCase._rel_tol)
 
     @rel_tol.setter
     def rel_tol(self, prec):
