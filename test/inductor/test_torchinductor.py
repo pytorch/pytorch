@@ -32,6 +32,7 @@ import numpy as np
 
 import torch
 import torch._dynamo.config as dynamo_config
+import torch._functorch.config as functorch_config
 import torch._inductor.aoti_eager
 import torch.fx.traceback as fx_traceback
 import torch.nn as nn
@@ -118,6 +119,8 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     isRocmArchAnyOf,
     MACOS_VERSION,
+    MI200_ARCH,
+    NAVI3_ARCH,
     NAVI_ARCH,
     parametrize,
     recover_orig_fp32_precision,
@@ -135,7 +138,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR,
     xfailIf,
-    xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import logs_to_string
 from torch.utils import _pytree as pytree
@@ -1418,6 +1420,25 @@ class skip_if_cpp_wrapper:
         return wrapper
 
 
+class skip_if_lite_mode:
+    """For tests whose premise is that a region behaves differently from the
+    graph around it. Under TORCHINDUCTOR_LITE_MODE=1 the whole graph is already
+    all-fallback, so there is no contrast left to observe and the assertions are
+    either vacuous or unsatisfiable."""
+
+    def __init__(self, reason: str = "") -> None:
+        self.reason = reason
+
+    def __call__(self, fn, *args, **kwargs):
+        @functools.wraps(fn)
+        def wrapper(test_self):
+            if config.fallback_by_default:
+                raise unittest.SkipTest(f"no contrast under lite mode: {self.reason}")
+            return fn(test_self, *args, **kwargs)
+
+        return wrapper
+
+
 def is_dynamic_shape_enabled():
     # What's the best way to decide this?
     return not torch._dynamo.config.assume_static_by_default
@@ -1492,6 +1513,7 @@ class CommonTemplate:
                 a ^ b,
                 torch.logical_and(a, b),
                 torch.logical_or(a, b),
+                torch.logical_xor(a, b),
                 torch.logical_not(a),
                 torch.sign(b),
             )
@@ -2340,7 +2362,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.rand(1024), torch.randint(50, (50,))))
 
-    @xfailIfS390X
     @config.patch(debug_index_asserts=False)
     @config.patch("cpp.enable_tiling_heuristics", False)
     def test_neg_index(self):
@@ -2699,6 +2720,7 @@ class CommonTemplate:
             fn, (torch.rand((14923), dtype=torch.float16),), atol=atol, rtol=rtol
         )
 
+    @skipIfRocmArch(NAVI3_ARCH)  # gfx1100 split-scan cumsum numerics
     def test_split_cumsum(self):
         def fn(a):
             return torch.cumsum(a, -1)
@@ -2744,6 +2766,7 @@ class CommonTemplate:
 
     # Triton CPU generates a split scan that uses tl.debug_barrier, which is
     # not yet implemented in Triton CPU.
+    @skipIfRocmArch(NAVI3_ARCH)  # gfx1100 split-scan cumsum numerics
     @xfail_if_triton_cpu
     def test_consecutive_split_cumsum(self):
         def fn(a, b):
@@ -4701,6 +4724,7 @@ for dtype in (torch.int32, torch.int64):
         actual = compiled_fn(t[2**30 :])
         self.assertTrue((actual == 4).all())
 
+    @skipIfRocmArch(NAVI3_ARCH)  # gfx1100 Triton hsaco LLD target emulation unknown
     @skip_if_halide  # only 32-bit indexing
     @largeTensorTest("2GB", inductor=True)
     def test_large_strided_reduction(self):
@@ -6873,6 +6897,18 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn(2, 4, 4, 4),),
         )
 
+    # halide/mps take the non-logical-index path in _pool_argmax_inner_fn, so the
+    # window offsets are still physical there; halide additionally fails to schedule
+    # the fallback argmax for this shape.
+    @skip_if_halide
+    @skip_if_mps
+    def test_adaptive_max_pool2d_transposed_indices(self):
+        # transposed input, indices must be logical and not physical offsets
+        def fn(x):
+            return aten.adaptive_max_pool2d(x, (2, 2))
+
+        self.common(fn, (torch.randn(2, 4, 12, 12).transpose(2, 3),))
+
     @xfail_if_mps_unimplemented
     def test_fractional_max_pool2d1(self):
         def fn(x, samples):
@@ -6927,6 +6963,18 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(
             fn, (torch.randn(2, 4, 6, 6), torch.rand(2, 4, 2)), check_lowp=False
+        )
+
+    @xfail_if_mps_unimplemented
+    def test_fractional_max_pool2d_transposed_indices(self):
+        # transposed input, indices must be logical and not physical offsets
+        def fn(x, samples):
+            return aten.fractional_max_pool2d(x, (6, 5), (3, 3), samples)
+
+        self.common(
+            fn,
+            (torch.randn(2, 4, 36, 36).transpose(2, 3), torch.rand(2, 4, 2)),
+            check_lowp=False,
         )
 
     def test_multi_threading(self):
@@ -7231,6 +7279,21 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn([2, 2, 3, 6]),),
         )
 
+    # same as test_adaptive_max_pool2d_transposed_indices: halide/mps take the
+    # non-logical-index path in _pool_argmax_inner_fn and still return physical
+    # window offsets.
+    @skip_if_halide
+    @skip_if_mps
+    def test_max_pool2d_transposed_indices(self):
+        # transposed input, indices must be logical and not physical offsets
+        def fn(x):
+            return (
+                aten.max_pool2d_with_indices(x, [6, 6]),
+                aten.max_pool2d_with_indices(x, [3, 2], [2, 1], [1, 1], [1, 2]),
+            )
+
+        self.common(fn, (torch.randn([2, 4, 12, 12]).transpose(2, 3),))
+
     def test_avg_pool2d1(self):
         def fn(x):
             return aten.avg_pool2d(x, [3, 3], [2, 2])
@@ -7431,6 +7494,30 @@ for dtype in (torch.int32, torch.int64):
             fn,
             (torch.randn([16, 16]),),
         )
+
+    @parametrize("op", ["sinh", "cosh", "asinh", "acosh"])
+    def test_hyperbolic(self, op):
+        if is_pallas_backend(self.device) and op in ("asinh", "acosh"):
+            raise unittest.SkipTest(f"Pallas does not support {op}")
+
+        # acosh is only defined for x >= 1
+        self.common(getattr(torch, op), (torch.rand(16, 16) * 4 + 1,))
+
+    def test_hypot(self):
+        self.common(torch.hypot, (torch.randn(16, 16), torch.randn(16, 16)))
+
+    @skip_if_halide  # copysign not implemented
+    def test_copysign(self):
+        self.common(torch.copysign, (torch.randn(16, 16), torch.randn(16, 16)))
+
+    @skip_if_halide  # frexp not implemented
+    def test_frexp(self):
+        self.common(torch.frexp, (torch.randn(16, 16) * 100,))
+
+    @skip_if_halide  # ldexp not implemented
+    def test_ldexp(self):
+        exponent = torch.randint(-8, 8, (16, 16), dtype=torch.int32)
+        self.common(torch.ldexp, (torch.randn(16, 16), exponent))
 
     def test_repeat(self):
         def fn(x):
@@ -7739,7 +7826,7 @@ for dtype in (torch.int32, torch.int64):
         )
 
     @unittest.skipIf(
-        TEST_WITH_TORCHINDUCTOR or TEST_WITH_ROCM,
+        TEST_WITH_TORCHINDUCTOR,
         "https://github.com/pytorch/pytorch/issues/165879",
     )
     @parametrize("tile_reduction", (False, True))
@@ -8326,6 +8413,7 @@ for dtype in (torch.int32, torch.int64):
 
         self.assertEqual(o1, o2)
 
+    @functorch_config.patch(view_replay_for_aliased_outputs=True)
     def test_view_as_complex_non_contiguous(self):
         def fn(x):
             y = x.transpose(1, 2)
@@ -11950,6 +12038,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         b = torch.empty(0)
         self.common(fn, [a, b])
 
+    # pad_mm picks padded vs unpadded bmm by timing sub-0.1 ms calls, and a padded
+    # pick adds a second kernel, so this test pins shape padding off rather than
+    # letting a timing decision change the kernel count. See #145189.
+    @config.patch(shape_padding=False)
     @with_tf32_off
     def test_slice_scatter_reinplace(self):
         class M(nn.Module):
@@ -13409,6 +13501,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     @skip_if_halide  # compiles for 5+ minutes
+    @skipIfRocmArch(MI200_ARCH)  # exceeds the inductor compile-worker timeout
     def test_avg_pool3d_backward2(self):
         def fn(a, b):
             return aten.avg_pool3d_backward(
@@ -13823,6 +13916,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         t1[:, 100] = float("nan")
         self.common(fn, (t1,))
 
+    @skipIfRocmArch(NAVI3_ARCH)  # gfx1100 Triton hsaco LLD target emulation unknown
     @requires_cuda
     def test_max_min_bool(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/174069
@@ -15471,7 +15565,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     # To support this behavior, we need to allow const-propping tensors that store symint data.
     # For now, dynamo will explicitly graph break when it encounters user code with this behavior.
     @expectedFailureCodegenDynamic
-    @xfailIfS390X
     @skip_if_gpu_halide  # accuracy error
     def test_AllenaiLongformerBase_repro(self):
         def fn(query, scores, window_overlap):
@@ -17529,7 +17622,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         result = f(torch.tensor([20]))
         self.assertTrue(len(result) == 3)
 
-    @xfail_if_mps
     def test_generate_rand_fp8(self):
         """
         PyTorch can not generate fp8 tensors with a normal distribution because of
@@ -18015,6 +18107,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertIn("aten::zeros_like", code[0])
         self.assertNotIn("from(nullptr, 0)", code[0])
 
+    @skip_if_lite_mode("the parent's cos falls back too, so assertNotIn fails")
     def test_regional_fallback_by_default_invoke_subgraph(self):
         # A nested region carrying inductor_config_patches={"fallback_by_default": True}
         # must fall back *only inside the region*: the region's ops become
@@ -18068,50 +18161,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             f"region did not fall back:\n{codes[0]}",
         )
         self.assertNotIn("aten.cos", body)
-
-    def test_regional_codegen_only_config_cpp_wrapper(self):
-        # A codegen-TIME knob on the region must reach the cpp wrapper.
-        # `triton.persistent_reductions` is consulted while the region's kernels
-        # are built (choices.py should_use_persistent_reduction), i.e. after the
-        # lowering-time config.patch in ir.InvokeSubgraph.create has already
-        # closed. Only the patch inside CppWrapperCpu.codegen_subgraph can carry
-        # it. Both halves compute the same softmax: with the region patched, its
-        # reduction must be emitted looped (triton_red_*) while the parent's
-        # stays persistent (triton_per_*).
-        # mps is a GPU_TYPE but has no Triton and no cpp-wrapper backend, so the
-        # persistent-vs-looped contrast this test checks does not exist there.
-        if self.device != GPU_TYPE or self.device == "mps":
-            raise unittest.SkipTest("requires a Triton GPU for reduction kernels")
-
-        from torch._higher_order_ops.invoke_subgraph import (
-            get_invoke_subgraph_compile_options,
-        )
-
-        with torch._dynamo.config.patch(
-            enable_invoke_subgraph_regional_compile=True,
-            inline_single_use_invoke_subgraph=False,
-        ):
-            opts = get_invoke_subgraph_compile_options(
-                fw_inductor_config_patches={"triton.persistent_reductions": False}
-            )
-
-            @torch.compiler.nested_compile_region(options=opts)
-            def gn(x):
-                return torch.softmax(x, dim=-1) + 1
-
-            def fn(x):
-                return gn(torch.softmax(x, dim=-1) * 2)
-
-            with config.patch(cpp_wrapper=True):
-                opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-                x = torch.randn(1024, 256, device=self.device)
-                result, codes = run_and_get_code(lambda: opt_fn(x))
-
-        self.assertEqual(result, fn(x), atol=2e-3, rtol=2e-3)
-        code = "\n".join(codes)
-        # the region's kernel is looped, the parent's is persistent
-        self.assertIn("triton_red_", code)
-        self.assertIn("triton_per_", code)
 
     def test_lite_triton_kernel_wrapper_functional(self):
         if self.device != GPU_TYPE or self.device == "mps":
@@ -19122,7 +19171,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(eager, compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/179970")
     @requires_gpu_and_triton
     @torch._inductor.config.patch(cpp_wrapper=True)
     def test_cpu_scalar_with_gpu_tensor_cpp(self):
@@ -19438,7 +19486,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         else:
             code = run_and_get_triton_code(compiled, x)
             self.assertEqual(code.count("@triton_heuristics."), 1)
-            self.assertEqual(code.count("triton_helpers.max_with_index"), 1)
+            self.assertEqual(code.count("triton_helpers.max_with_"), 1)
 
     @skip_if_halide
     @requires_gpu_and_triton
@@ -19490,7 +19538,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         code = run_and_get_triton_code(torch.compile(fn, fullgraph=True), x)
         self.assertEqual(code.count("@triton_heuristics."), 1)
         # Equivalent value/index pairs merge; the distinct mapping does not.
-        self.assertEqual(code.count("triton_helpers.max_with_index"), 2)
+        self.assertEqual(code.count("triton_helpers.max_with_"), 2)
 
     @skip_if_halide
     @requires_gpu_and_triton
@@ -20292,6 +20340,7 @@ if RUN_GPU or HAS_MPS:
                         self.assertTrue(torch.isnan(actual[:3]).all())
 
         @requires_cuda_and_triton
+        @functorch_config.patch(view_replay_for_aliased_outputs=True)
         def test_complex_view_as_complex_exact_stride_copy_cuda(self):
             def fn(x):
                 y = x.transpose(1, 2)

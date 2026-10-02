@@ -327,6 +327,15 @@ MPSStream* getStreamFromPool() {
   return stream_pool[stream_pool_counter++ % kMPSStreamsPerPool];
 }
 
+MPSStream* getStreamByID(int64_t stream_id) {
+  if (stream_id == 0) {
+    return at::mps::getDefaultMPSStream();
+  }
+  TORCH_CHECK(stream_id >= 1 && stream_id <= kMPSStreamsPerPool, "stream_id=", stream_id, " not found");
+  c10::call_once(stream_pool_flag, initStreamPool);
+  return stream_pool[stream_id - 1];
+}
+
 void synchronizeAllMPSStreams(SyncType syncType) {
   auto sync = [syncType](MPSStream* stream) {
     dispatch_sync_with_rethrow(stream->queue(), ^() {

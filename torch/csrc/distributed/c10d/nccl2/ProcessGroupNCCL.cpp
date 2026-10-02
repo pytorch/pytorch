@@ -400,6 +400,8 @@ c10::intrusive_ptr<::c10d::Backend> ProcessGroupNCCL::split(
   auto childOpts = Options::create(ncclOpts->is_high_priority_stream);
   childOpts->timeout = ncclOpts->timeout;
   childOpts->config = config;
+  // Do not inherit enable_reconfigure: reconfigure() performs blocking
+  // rendezvous on this shared Store connection.
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
   // commName above borrows `name`, which belongs to the Options handed to
   // split() -- a clone that dies with the caller's frame. Every consumer of a
