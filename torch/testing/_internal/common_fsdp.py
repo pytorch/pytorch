@@ -5,6 +5,7 @@ import contextlib
 import os
 import re
 import sys
+import threading
 import time
 import warnings
 from abc import ABC, abstractmethod
@@ -1172,7 +1173,15 @@ class FSDPTestMultiThread(MultiThreadedTestCase):
 
     def setUp(self):
         super().setUp()
+        from torch.distributed.tensor._sharding_prop import ShardingPropagator
+        self._orig_fake_mode_lock = ShardingPropagator._fake_mode_lock
+        ShardingPropagator._fake_mode_lock = threading.Lock()
         self._spawn_threads()
+
+    def tearDown(self):
+        from torch.distributed.tensor._sharding_prop import ShardingPropagator
+        ShardingPropagator._fake_mode_lock = self._orig_fake_mode_lock
+        super().tearDown()
 
     def run_subtests(self, *args, **kwargs):
         return run_subtests(self, *args, **kwargs)
@@ -1742,3 +1751,4 @@ class SkipModel(nn.Module):
         x = self.linear_skip(x)
         x = self.nested_linear(x)
         return x
+
