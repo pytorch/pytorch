@@ -98,6 +98,48 @@ if triton is not None:
         class IntelGPUError(Exception):  # type: ignore[no-redef]
             pass
 
+    def _patch_triton_intel_launcher(intel_driver: Any | None = None) -> None:
+        if intel_driver is None:
+            try:
+                import triton.backends.intel.driver as intel_driver  # type: ignore[import-not-found]
+            except ImportError:
+                return
+
+        make_launcher = getattr(intel_driver, "make_launcher", None)
+        if make_launcher is None or getattr(
+            make_launcher, "_torch_patched_global_scratch", False
+        ):
+            return
+
+        try:
+            make_launcher_source = inspect.getsource(make_launcher)
+        except (OSError, TypeError):
+            make_launcher_source = ""
+
+        scratch_binding = (
+            "    set_scalar_arg<void*>(cgh, num_params - 1, &global_scratch);\n"
+        )
+        scratch_binding_line = scratch_binding.strip()
+        if scratch_binding_line in make_launcher_source:
+            return
+
+        marker = "    if (shared_memory) {"
+        if make_launcher_source and marker not in make_launcher_source:
+            return
+
+        def patched_make_launcher(constants: Any, signature: Any) -> str:
+            src = make_launcher(constants, signature)
+            if scratch_binding_line in src:
+                return src
+            if marker not in src:
+                return src
+            return src.replace(marker, scratch_binding + marker, 1)
+
+        patched_make_launcher._torch_patched_global_scratch = True  # type: ignore[attr-defined]
+        intel_driver.make_launcher = patched_make_launcher
+
+    _patch_triton_intel_launcher()
+
     builtins_use_semantic_kwarg = (
         "_semantic" in inspect.signature(triton.language.core.view).parameters
     )
