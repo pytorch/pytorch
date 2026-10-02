@@ -90,12 +90,7 @@ from .functions import (
     UserMethodVariable,
 )
 from .object_protocol import generic_getattr, mro_attr_source
-from .user_defined import (
-    call_random_fn,
-    is_data_descriptor,
-    is_standard_setattr,
-    UserDefinedObjectVariable,
-)
+from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
@@ -163,49 +158,11 @@ class SuperVariable(VariableTracker):
             ) or type.__subclasscheck__(type_arg, obj_type)
             if not valid:
                 try:
-                    if isinstance(objvar, UserDefinedObjectVariable):
-                        class_attr = objvar.lookup_class_mro_attr("__class__")
-                        if objvar._object_has_getattribute:
-                            getattribute = objvar.lookup_class_mro_attr(
-                                "__getattribute__"
-                            )
-                            getter = objvar.resolve_type_attr(
-                                tx, "__getattribute__", getattribute, None
-                            )
-                            classvar = getter.call_function(
-                                tx, [ConstantVariable.create("__class__")], {}
-                            )
-                        elif class_attr is object.__dict__["__class__"]:
-                            classvar = objvar.tp_getattro_impl(tx, "__class__")
-                        else:
-                            attr_source = (
-                                objvar.get_source_by_walking_mro(tx, "__class__")
-                                if objvar.cls_source is not None
-                                else None
-                            )
-                            if is_data_descriptor(class_attr):
-                                classvar = objvar.resolve_data_descriptor(
-                                    tx, "__class__", class_attr, attr_source
-                                )
-                            else:
-                                classvar = objvar.lookup_instance_dict(tx, "__class__")
-                                if classvar is None:
-                                    classvar = objvar.resolve_type_attr(
-                                        tx, "__class__", class_attr, attr_source
-                                    )
-                    else:
-                        classvar = generic_getattr(
-                            tx, objvar, "__class__", ConstantVariable.create(None)
-                        )
+                    classvar = generic_getattr(tx, objvar, "__class__")
                     class_type = classvar.get_real_python_backed_value()
                 except ObservedAttributeError:
                     handle_observed_exception(tx)
-                    classvar = objvar.call_getattr_fallback(tx, "__class__")
-                    class_type = (
-                        classvar.get_real_python_backed_value()
-                        if classvar is not None
-                        else None
-                    )
+                    class_type = None
                 valid = isinstance(class_type, type) and type.__subclasscheck__(
                     type_arg, class_type
                 )
