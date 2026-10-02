@@ -28,16 +28,26 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import (
+    assert_never,
+    Never,
+    override,
+    ParamSpec,
+    Self,
+    TypedDict,
+    TypeIs,
+)
 from unittest.mock import patch
 
 import sympy
+from sympy import Expr, Integer, Symbol
+
 import torch._export.serde.schema as export_schema
 import torch._library.custom_ops as custom_ops
 import torch._library.utils as library_utils
 import torch._logging
 import torch.fx
 import torch.utils._pytree as pytree
-from sympy import Expr, Integer, Symbol
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
@@ -80,15 +90,6 @@ from torch.utils._sympy.functions import (
     ModularIndexing,
 )
 from torch.utils._sympy.symbol import SymT
-from typing_extensions import (
-    assert_never,
-    Never,
-    override,
-    ParamSpec,
-    Self,
-    TypedDict,
-    TypeIs,
-)
 
 from . import config, dependencies
 from .codegen.common import (
@@ -8638,8 +8639,9 @@ class UserDefinedTritonKernel(ExternKernel):
     """
 
     def get_kernel_and_metadata(self) -> tuple[Kernel, Any, list[str], list[str]]:
-        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from triton.runtime.autotuner import Autotuner
+
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
         kernel = kernel_side_table.get_kernel(self.kernel_idx)
         configs = []

@@ -5,6 +5,7 @@ from unittest import skipIf
 from unittest.mock import Mock, patch, PropertyMock
 
 import sympy
+
 import torch
 import torch._inductor.config as inductor_config
 import torch._inductor.ir as ir
@@ -29,6 +30,7 @@ from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
     _producer_fusion_enabled_inputs,
+    _template_choice_supports_producer_fusion,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
@@ -2233,6 +2235,52 @@ class TestScheduler(TestCase):
 
         template._render_caller = object()
         self.assertEqual(_producer_fusion_enabled_inputs(template_node), OrderedSet())
+
+    def test_template_choice_supports_required_producer_inputs(self):
+        template = Mock()
+        template.allow_prologue_fusion = True
+        template.allow_epilogue_fusion = True
+        template_node = Mock()
+        template_node.get_template_node.return_value = template
+
+        def make_choice(*inputs: str):
+            choice = Mock()
+            choice.load_input_fusion_allowed_inputs = OrderedSet(inputs)
+            choice.store_output_fusion_allowed_inputs = OrderedSet()
+            return choice
+
+        choice_a = make_choice("A")
+        choice_b = make_choice("B")
+        choice_ab = make_choice("A", "B")
+
+        required_a = OrderedSet(("A",))
+        self.assertTrue(
+            _template_choice_supports_producer_fusion(
+                template_node, choice_a, required_a
+            )
+        )
+        self.assertFalse(
+            _template_choice_supports_producer_fusion(
+                template_node, choice_b, required_a
+            )
+        )
+
+        required_ab = OrderedSet(("A", "B"))
+        self.assertFalse(
+            _template_choice_supports_producer_fusion(
+                template_node, choice_a, required_ab
+            )
+        )
+        self.assertFalse(
+            _template_choice_supports_producer_fusion(
+                template_node, choice_b, required_ab
+            )
+        )
+        self.assertTrue(
+            _template_choice_supports_producer_fusion(
+                template_node, choice_ab, required_ab
+            )
+        )
 
     def test_prologue_fusion_uses_template_aliasing_hook(self):
         def make_prologue_and_template(hook_blocks: bool):
