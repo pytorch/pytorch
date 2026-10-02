@@ -83,7 +83,10 @@ def build_flex_attn_bwd_module(
     mask_program_output = int(mask_program_output)
     mask_buffer_shapes = tuple((tuple(shape) for shape in mask_buffer_shapes))
     mask_buffer_strides = tuple((tuple(stride) for stride in mask_buffer_strides))
-    mask_traversal, direct_range_kind = classify_mask_traversal(mask_program, mask_program_output, mask_buffer_shapes)
+    mask_traversal, direct_range_kind = classify_mask_traversal(
+        mask_program, mask_program_output, mask_buffer_shapes,
+        sequence_length=sequence_length,
+    )
     mask_buffer_count = len(mask_buffer_shapes)
     if mask_traversal not in (
         MASK_TRAVERSAL_UNMASKED,
@@ -156,8 +159,16 @@ def build_flex_attn_bwd_module(
         delta_shuffle_offsets.append(_s)
         _s *= 2
 
+    @fx.struct
+    class MaskFlags:
+        flags: fx.Array[fx.Int32, num_sparse_blocks, 16]
+
     @flyc.kernel
-    def delta_kernel(attention_output: fx.Tensor, grad_output: fx.Tensor, delta: fx.Tensor, grad_query: fx.Tensor):
+    def delta_kernel(
+        attention_output: fx.Tensor, grad_output: fx.Tensor, delta: fx.Tensor, grad_query: fx.Tensor,
+        kv_num_blocks: fx.Tensor, kv_indices: fx.Tensor, full_kv_num_blocks: fx.Tensor, full_kv_indices: fx.Tensor,
+        partial_counts: fx.Tensor, partial_indices: fx.Tensor, full_counts: fx.Tensor, full_indices: fx.Tensor,
+    ):
         tid = fx.Int32(fx.thread_idx.x)
         bid = fx.Int32(fx.block_idx.x)
         if const_expr(heads_are_inner):
@@ -213,65 +224,47 @@ def build_flex_attn_bwd_module(
             if pack < fx.Int32(qk_head_dim // 8):
                 fx.copy(atom, zeros, fx.slice(zero_packs, (None, row * fx.Int32(qk_head_dim // 8) + pack)))
 
-    @fx.struct
-    class MaskFlags:
-        flags: fx.Array[fx.Int32, num_sparse_blocks, 16]
-
-    @flyc.kernel
-    def transpose_mask(
-        kv_num_blocks: fx.Tensor,
-        kv_indices: fx.Tensor,
-        full_kv_num_blocks: fx.Tensor,
-        full_kv_indices: fx.Tensor,
-        partial_counts: fx.Tensor,
-        partial_indices: fx.Tensor,
-        full_counts: fx.Tensor,
-        full_indices: fx.Tensor,
-    ):
-        # Each KV owner builds its query lists directly from BlockMask.
-        # Only lists consumed by the shared compute pipeline are materialized.
-        tid = fx.Int32(fx.thread_idx.x)
-        owner = fx.Int32(fx.block_idx.x)
-        batch_head = fx.Int32(fx.block_idx.y)
-        batch = batch_head // fx.Int32(num_heads)
-        head = batch_head % fx.Int32(num_heads)
-        mask_batch = fx.Int32(0) if const_expr(block_mask_batch == 1) else batch
-        mask_head = fx.Int32(0) if const_expr(block_mask_heads == 1) else head
-        mask_group = fx.Int64(mask_batch) * fx.Int64(block_mask_heads) + fx.Int64(mask_head)
-        sparse_key = owner // fx.Int32(sparse_kv_block_size // key_rows)
-        flags = fx.SharedAllocator().allocate(MaskFlags).peek().flags.ptr
-        for step in fx.range_constexpr((num_sparse_blocks + 63) // 64):
-            query_block = tid + fx.Int32(step * 64)
-            if query_block < fx.Int32(num_sparse_blocks):
-                count_index = mask_group * fx.Int64(num_sparse_blocks) + fx.Int64(query_block)
-                partial_count = fx.Int32(fx.get_iter(kv_num_blocks)[count_index])
-                full_count = fx.Int32(fx.get_iter(full_kv_num_blocks)[count_index])
-                flag = fx.Int32(0)
-                for item in range(partial_count):
-                    index = count_index * fx.Int64(max_partial_blocks_limit) + fx.Int64(item)
-                    if fx.Int32(fx.get_iter(kv_indices)[index]) == sparse_key:
-                        flag = fx.Int32(1)
-                for item in range(full_count):
-                    index = count_index * fx.Int64(max_full_blocks_limit) + fx.Int64(item)
-                    if fx.Int32(fx.get_iter(full_kv_indices)[index]) == sparse_key:
-                        flag = fx.Int32(2)
-                flags[query_block] = flag
-        fx.gpu.barrier()
-        if tid == fx.Int32(0):
-            num_partial = fx.Int32(0)
-            num_full = fx.Int32(0)
-            owner_index = fx.Int64(batch_head) * fx.Int64(metadata_chunks) + fx.Int64(owner)
-            list_offset = owner_index * fx.Int64(metadata_chunks)
-            for compact_query in range(fx.Int32(num_sparse_blocks)):
-                compact_flag = fx.Int32(flags[compact_query])
-                if compact_flag == fx.Int32(1):
-                    fx.get_iter(partial_indices)[list_offset + fx.Int64(num_partial)] = compact_query
-                    num_partial = num_partial + fx.Int32(1)
-                elif compact_flag == fx.Int32(2):
-                    fx.get_iter(full_indices)[list_offset + fx.Int64(num_full)] = compact_query
-                    num_full = num_full + fx.Int32(1)
-            fx.get_iter(partial_counts)[owner_index] = num_partial
-            fx.get_iter(full_counts)[owner_index] = num_full
+        # Reuse the first delta CTAs in each head for the reverse query lists.
+        if const_expr(block_list_traversal):
+            if row_tile < fx.Int32((sequence_length + key_rows - 1) // key_rows):
+                owner = row_tile
+                mask_batch = fx.Int32(0) if const_expr(block_mask_batch == 1) else batch
+                mask_head = fx.Int32(0) if const_expr(block_mask_heads == 1) else head
+                mask_group = fx.Int64(mask_batch) * fx.Int64(block_mask_heads) + fx.Int64(mask_head)
+                sparse_key = owner // fx.Int32(sparse_kv_block_size // key_rows)
+                flags = fx.SharedAllocator().allocate(MaskFlags).peek().flags.ptr
+                for step in fx.range_constexpr((num_sparse_blocks + compute_threads - 1) // compute_threads):
+                    query_block = tid + fx.Int32(step * compute_threads)
+                    if query_block < fx.Int32(num_sparse_blocks):
+                        count_index = mask_group * fx.Int64(num_sparse_blocks) + fx.Int64(query_block)
+                        partial_count = fx.Int32(fx.get_iter(kv_num_blocks)[count_index])
+                        full_count = fx.Int32(fx.get_iter(full_kv_num_blocks)[count_index])
+                        flag = fx.Int32(0)
+                        for item in range(partial_count):
+                            index = count_index * fx.Int64(max_partial_blocks_limit) + fx.Int64(item)
+                            if fx.Int32(fx.get_iter(kv_indices)[index]) == sparse_key:
+                                flag = fx.Int32(1)
+                        for item in range(full_count):
+                            index = count_index * fx.Int64(max_full_blocks_limit) + fx.Int64(item)
+                            if fx.Int32(fx.get_iter(full_kv_indices)[index]) == sparse_key:
+                                flag = fx.Int32(2)
+                        flags[query_block] = flag
+                fx.gpu.barrier()
+                if tid == fx.Int32(0):
+                    num_partial = fx.Int32(0)
+                    num_full = fx.Int32(0)
+                    owner_index = fx.Int64(batch_head) * fx.Int64(metadata_chunks) + fx.Int64(owner)
+                    list_offset = owner_index * fx.Int64(metadata_chunks)
+                    for compact_query in range(fx.Int32(num_sparse_blocks)):
+                        compact_flag = fx.Int32(flags[compact_query])
+                        if compact_flag == fx.Int32(1):
+                            fx.get_iter(partial_indices)[list_offset + fx.Int64(num_partial)] = compact_query
+                            num_partial = num_partial + fx.Int32(1)
+                        elif compact_flag == fx.Int32(2):
+                            fx.get_iter(full_indices)[list_offset + fx.Int64(num_full)] = compact_query
+                            num_full = num_full + fx.Int32(1)
+                    fx.get_iter(partial_counts)[owner_index] = num_partial
+                    fx.get_iter(full_counts)[owner_index] = num_full
 
     fused_grid = (sequence_length + key_rows - 1) // key_rows
     compute_num_threads = num_waves * 64
@@ -360,22 +353,15 @@ def build_flex_attn_bwd_module(
         grad_query_workspace: fx.Tensor,
         stream: fx.Stream = fx.Stream(None),
     ):
-        delta_kernel(attention_output, grad_output, delta, grad_query_workspace).launch(
+        delta_kernel(
+            attention_output, grad_output, delta, grad_query_workspace,
+            kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices,
+            partial_kv_counts, partial_kv_indices, full_kv_counts, full_kv_indices_transposed,
+        ).launch(
             grid=(delta_grid * batch_heads, 1, 1),
             block=(compute_threads, 1, 1),
             stream=stream,
         )
-        if const_expr(block_list_traversal):
-            transpose_mask(
-                kv_num_blocks,
-                kv_indices,
-                full_kv_num_blocks,
-                full_kv_indices,
-                partial_kv_counts,
-                partial_kv_indices,
-                full_kv_counts,
-                full_kv_indices_transposed,
-            ).launch(grid=(fused_grid, batch_heads, 1), block=(64, 1, 1), stream=stream)
         compute_kernel(
             query,
             key,

@@ -530,6 +530,60 @@ class TestFlexFlyDSLMaskLowering(TestCase):
                 self.assertEqual(direct_range_kind, DIRECT_RANGE_CAUSAL)
 
 
+    @parametrize("sequence_length,window", [(128, 127), (128, 128), (128, 129), (512, 512), (1024, 512)])
+    def test_window_traversal_respects_sequence_bounds(self, sequence_length, window):
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils import (
+            DIRECT_RANGE_CAUSAL,
+            MASK_TRAVERSAL_BLOCK_LIST,
+            MASK_TRAVERSAL_DIRECT_RANGE,
+            classify_mask_traversal,
+        )
+
+        program, reason = lower_flydsl_mask_graph(
+            _mask_graph(lambda b, h, q, kv: (q >= kv) & (q - kv < window)), (),
+        )
+        self.assertIsNotNone(program, reason)
+        traversal, kind = classify_mask_traversal(
+            program.instructions, program.output, program.buffer_shapes,
+            sequence_length=sequence_length,
+        )
+        expected = MASK_TRAVERSAL_DIRECT_RANGE if window >= sequence_length else MASK_TRAVERSAL_BLOCK_LIST
+        self.assertEqual(traversal, expected)
+        self.assertEqual(kind, DIRECT_RANGE_CAUSAL if window >= sequence_length else None)
+
+    @parametrize("operation,bound", [("ge", 0), ("gt", -1), ("lt", 512), ("le", 511)])
+    def test_constant_coordinate_bounds_are_unmasked(self, operation, bound):
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils import (
+            MASK_TRAVERSAL_UNMASKED,
+            classify_mask_traversal,
+        )
+
+        instructions = (("const_i32", bound), (operation, 2, 4))
+        self.assertEqual(
+            classify_mask_traversal(instructions, 5, sequence_length=512),
+            (MASK_TRAVERSAL_UNMASKED, None),
+        )
+
+    @parametrize(
+        "instructions,output",
+        [
+            ((("const_i32", 1 << 30), ("mul", 2, 4), ("const_i32", 0), ("ge", 5, 6)), 7),
+            ((("load_i32", 0, (2,)), ("ge", 2, 4)), 5),
+            ((("const_i32", 2), ("floordiv", 2, 4), ("ge", 5, 3)), 6),
+        ],
+    )
+    def test_uncertain_coordinate_bounds_keep_block_lists(self, instructions, output):
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils import (
+            MASK_TRAVERSAL_BLOCK_LIST,
+            classify_mask_traversal,
+        )
+
+        self.assertEqual(
+            classify_mask_traversal(instructions, output, sequence_length=512),
+            (MASK_TRAVERSAL_BLOCK_LIST, None),
+        )
+
+
 
 class TestFlexFlyDSLRuntime(TestCase):
     def _require_runtime(self):

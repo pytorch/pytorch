@@ -589,7 +589,7 @@ def create_flydsl_flex_attention_backward_kernel(
 
     traversal, _ = classify_mask_traversal(
         config["MASK_PROGRAM"], config["MASK_PROGRAM_OUTPUT"],
-        config["MASK_BUFFER_SHAPES"],
+        config["MASK_BUFFER_SHAPES"], sequence_length=s,
     )
     if traversal != MASK_TRAVERSAL_BLOCK_LIST:
         kv_chunks = q_chunks = 1

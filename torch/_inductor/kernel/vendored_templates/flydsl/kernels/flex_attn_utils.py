@@ -10,7 +10,7 @@ MASK_TRAVERSAL_BLOCK_LIST = "block_list"
 DIRECT_RANGE_CAUSAL = "causal"
 
 
-def _canonical_mask_expression(mask_program, mask_program_output):
+def _canonical_mask_expression(mask_program, mask_program_output, sequence_length=None):
     """Build a small canonical expression tree for mask-shape recognition.
 
     Mask bytecode value ids are an implementation detail of lowering.  Keeping
@@ -25,7 +25,43 @@ def _canonical_mask_expression(mask_program, mask_program_output):
         ("var", "key"),
     ]
 
+    # Unknown loads or possible int32 overflow must retain BlockMask traversal.
+    def interval(expression):
+        op = expression[0]
+        if op == "int":
+            value = expression[1]
+            return (value, value) if -(1 << 31) <= value < (1 << 31) else None
+        if op == "var" and expression[1] in ("query", "key"):
+            if sequence_length is not None and 0 < sequence_length <= (1 << 31):
+                return (0, sequence_length - 1)
+            return None
+        if op not in ("add", "sub", "mul"):
+            return None
+        left, right = interval(expression[1]), interval(expression[2])
+        if left is None or right is None:
+            return None
+        if op == "add":
+            bounds = (left[0] + right[0], left[1] + right[1])
+        elif op == "sub":
+            bounds = (left[0] - right[1], left[1] - right[0])
+        else:
+            products = [x * y for x in left for y in right]
+            bounds = (min(products), max(products))
+        return bounds if -(1 << 31) <= bounds[0] <= bounds[1] < (1 << 31) else None
+
     def binary(op, lhs, rhs):
+        if op in ("lt", "le", "gt", "ge"):
+            left, right = interval(lhs), interval(rhs)
+            if left is not None and right is not None:
+                if op in ("gt", "ge"):
+                    left, right = right, left
+                strict = op in ("lt", "gt")
+                always_true = left[1] < right[0] if strict else left[1] <= right[0]
+                always_false = left[0] >= right[1] if strict else left[0] > right[1]
+                if always_true:
+                    return ("bool", True)
+                if always_false:
+                    return ("bool", False)
         if op == "and":
             if lhs == ("bool", True):
                 return rhs
@@ -91,6 +127,8 @@ def classify_mask_traversal(
     mask_program,
     mask_program_output,
     mask_buffer_shapes=(),
+    *,
+    sequence_length=None,
 ):
     """Return ``(traversal, direct_range_kind)`` for a lowered mask.
 
@@ -103,7 +141,9 @@ def classify_mask_traversal(
     if not mask_program and not mask_buffer_shapes:
         return MASK_TRAVERSAL_UNMASKED, None
 
-    expression = _canonical_mask_expression(mask_program, mask_program_output)
+    expression = _canonical_mask_expression(mask_program, mask_program_output, sequence_length)
+    if expression == ("bool", True):
+        return MASK_TRAVERSAL_UNMASKED, None
     query = ("var", "query")
     key = ("var", "key")
     if expression in (("ge", query, key), ("le", key, query)):
