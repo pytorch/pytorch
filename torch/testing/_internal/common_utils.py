@@ -270,6 +270,11 @@ class TestEnvironment:
     # Specifically, this includes env vars that are set to non-default values and
     # are not implied. Maps from env var name -> value (int)
     repro_env_vars: dict = {}
+    # Every env var registered below with include_in_repro, mapped to the value in
+    # effect: "1" or "0" for flags (implied ones included), the parsed value for
+    # settings ("" when unset). The test report stores these as the environment's
+    # flags (torch/testing/_internal/test_report.py).
+    env_var_values: dict = {}
 
     # Defines a flag usable throughout the test suite, determining its value by querying
     # the specified environment variable.
@@ -314,8 +319,10 @@ class TestEnvironment:
         if env_var_val is None:
             implied = implied_by_fn()
             enabled = enabled or implied
-        if include_in_repro and (env_var is not None) and (enabled != default) and not implied:
-            TestEnvironment.repro_env_vars[env_var] = env_var_val
+        if include_in_repro and (env_var is not None):
+            TestEnvironment.env_var_values[env_var] = "1" if enabled else "0"
+            if (enabled != default) and not implied:
+                TestEnvironment.repro_env_vars[env_var] = env_var_val
 
         # export flag globally for convenience
         if name in globals():
@@ -350,6 +357,8 @@ class TestEnvironment:
     ):
         value = default if env_var is None else os.getenv(env_var)
         value = parse_fn(value)
+        if include_in_repro and (env_var is not None):
+            TestEnvironment.env_var_values[env_var] = "" if value is None else str(value)
         if include_in_repro and (value != default):
             TestEnvironment.repro_env_vars[env_var] = value
 
@@ -1119,13 +1128,15 @@ def prof_meth_call(*args, **kwargs):
 torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[method-assign]
 torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[method-assign]
 
+TEST_REPORTS_DIR = 'test-reports'
+
 def _get_test_report_path():
     # allow users to override the test file location. We need this
     # because the distributed tests run the same test file multiple
     # times with different configurations.
     override = os.environ.get('TEST_REPORT_SOURCE_OVERRIDE')
     test_source = override if override is not None else 'python-unittest'
-    return os.path.join('test-reports', test_source)
+    return os.path.join(TEST_REPORTS_DIR, test_source)
 
 def parse_cmd_line_args():
     global DISABLED_TESTS_FILE
@@ -1226,18 +1237,13 @@ def wait_for_process(p, timeout=None):
             p.kill()
             raise
     except subprocess.TimeoutExpired:
-        # send SIGINT to give pytest a chance to make xml
+        # Send SIGINT so pytest can write its reports, then report the timeout
+        # whatever pytest exited with: the caller logs it and run_test.py records
+        # the in-flight test as timed out.
         p.send_signal(signal.SIGINT)
-        exit_status = None
         try:
-            exit_status = p.wait(timeout=5)
-        # try to handle the case where p.wait(timeout=5) times out as well as
-        # otherwise the wait() call in the finally block can potentially hang
+            p.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            pass
-        if exit_status is not None:
-            return exit_status
-        else:
             p.kill()
         raise
     except:
@@ -1592,6 +1598,10 @@ def run_tests(argv=None):
             test_report_path = get_report_path(pytest=True)
             print(f'Test results will be stored in {test_report_path}')
             pytest_args.append(f'--junit-xml-reruns={test_report_path}')
+            # run_test.py passes the directory itself; a direct run gets the default.
+            if not any(arg.startswith('--report-dir') for arg in pytest_args):
+                report_dir = os.path.join(TEST_REPORTS_DIR, sanitize_test_filename(argv[0]))
+                pytest_args += ['-p', 'torch.testing._internal.test_report', f'--report-dir={report_dir}']
         if PYTEST_SINGLE_TEST:
             pytest_args = PYTEST_SINGLE_TEST + pytest_args[1:]
 

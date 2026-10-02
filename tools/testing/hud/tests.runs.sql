@@ -20,7 +20,8 @@ CREATE TABLE tests.runs
     -- where it ran; everything else about the job is in default.workflow_job -----
 
     -- What: the CI job.
-    -- Derived: the JOB_ID the job exports, written as a testsuite property.
+    -- Derived: the JOB_ID the job exports, the report's github_workflow_job_id
+    --   attribute (report.xml).
     -- Used: join to default.workflow_job for commit, branch (and so trunk versus
     --   PR, section 4.4), runner, conclusion and URL, and through its run id to
     --   default.workflow_run for the workflow's path and name; the by_job
@@ -31,8 +32,8 @@ CREATE TABLE tests.runs
 
     -- What: 0 for the first execution of this test in this process, then 1, 2, ...
     --   for each rerun after it (or each repeat in rerun-disabled-tests mode).
-    -- Derived: document order in the report: the <rerun> elements, then the
-    --   <testcase>.
+    -- Derived: the attempt's rerun_number attribute, counted by the writer per
+    --   test and process (report.xml).
     -- Used: rerun counts; a restart at 0 marks a new process, and a process that
     --   follows a failed one for the same test is a retry (section 4.1); orders
     --   attempts that share started_at; last sort key, so that ReplacingMergeTree
@@ -43,8 +44,8 @@ CREATE TABLE tests.runs
 
     -- What: what happened, appendix B. crashed and timed_out are always synthetic
     --   rows written by run_test.py, so no separate source flag exists.
-    -- Derived: the JUnit children (failure, error, skipped with its type) for
-    --   report rows; run_test.py's exit handling for synthetic rows.
+    -- Derived: the attempt's outcome attribute; the writer maps pytest's phase
+    --   results to it, run_test.py writes the synthetic rows (report.xml).
     -- Used: every count in the rollups; the verdict of a job.
     outcome                Enum8('passed' = 1, 'failed' = 2, 'error' = 3, 'skipped' = 4,
                                  'xfailed' = 5, 'xpassed' = 6, 'crashed' = 7,
@@ -53,8 +54,8 @@ CREATE TABLE tests.runs
     -- time ------------------------------------------------------------------------
 
     -- What: when the attempt started and ended; the duration is the difference.
-    -- Derived: pytest TestReport.start and .stop, written as attributes of
-    --   <testcase> and of each <rerun>; gtest timestamp plus time.
+    -- Derived: the attempt's started_at and ended_at attributes, pytest's
+    --   TestReport.start of the setup phase and .stop of the last phase.
     -- Used: ordering of attempts and verdicts, durations, partitioning, TTL.
     started_at             DateTime64(3, 'UTC'),
     ended_at               DateTime64(3, 'UTC'),

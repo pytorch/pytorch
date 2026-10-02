@@ -148,6 +148,8 @@ def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> list[dict[str,
         test_cases = []
         mp = Pool(cpu_count())
         for xml_report in Path(".").glob("**/*.xml"):
+            if xml_report.name.endswith(".report.xml"):
+                continue  # the tests.* report, not junit
             test_cases.append(
                 mp.apply_async(
                     parse_xml_report,
@@ -200,6 +202,8 @@ def backfill_test_jsons_while_running(
 
         for unzipped_dir in unzipped_xml_dirs:
             for xml in unzipped_dir.glob("**/*.xml"):
+                if xml.name.endswith(".report.xml"):
+                    continue  # the tests.* report, not junit
                 # Some jobs (e.g. ROCm) upload reports under <dir>/test-reports
                 # instead of <dir>/test/test-reports; key off the nearest one.
                 reports_root = next(

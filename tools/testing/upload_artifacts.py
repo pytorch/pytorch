@@ -65,7 +65,11 @@ def upload_to_s3_artifacts(failed: bool) -> None:
     test_reports_zip_path = f"{REPO_ROOT}/test-reports-{file_suffix}.zip"
     zip_artifact(
         test_reports_zip_path,
-        ["test/test-reports/**/*.xml", "test/test-reports/**/*.csv"],
+        [
+            "test/test-reports/**/*.xml",
+            "test/test-reports/**/*.csv",
+            "test-reports/**/*.report.xml",
+        ],
     )
     test_logs_zip_path = f"{REPO_ROOT}/logs-{file_suffix}.zip"
     zip_artifact(test_logs_zip_path, ["test/test-reports/**/*.log"])

@@ -62,7 +62,7 @@ runs:
         uv run --no-project python -c "$ZIP_CMD" \
           test/test-reports "test-jsons-${FILE_SUFFIX}.zip" '**/*.json'
         uv run --no-project python -c "$ZIP_CMD" \
-          . "test-reports-${FILE_SUFFIX}.zip" 'test/test-reports/**/*.xml' 'test/test-reports/**/*.csv'
+          . "test-reports-${FILE_SUFFIX}.zip" 'test/test-reports/**/*.xml' 'test/test-reports/**/*.csv' 'test-reports/**/*.report.xml'
         uv run --no-project python -c "$ZIP_CMD" \
           . "logs-${FILE_SUFFIX}.zip" 'usage_log.txt' 'test/test-reports/**/*.log'
         if [ -d 'test/debug' ]; then
@@ -95,7 +95,7 @@ runs:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         # -ir => recursive include all files in pattern
-        7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\test-reports\*.xml' -ir'!test\test-reports\*.csv'
+        7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\test-reports\*.xml' -ir'!test\test-reports\*.csv' -ir'!test-reports\*.report.xml'
 
     - name: Zip usage log for upload
       if: runner.os == 'Windows'

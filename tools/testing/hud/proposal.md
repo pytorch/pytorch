@@ -31,7 +31,7 @@ The three design rules:
    still expressible.
 2. The environment is what the process observed, not what CI called it.
    `build_environment` and `TEST_CONFIG` are recorded in the report
-   properties, not stored as identity or attributes. Harness flags come from `TestEnvironment.repro_env_vars`,
+   properties, not stored as identity or attributes. Harness flags are every setting the harness registers, with its effective value (`TestEnvironment.env_var_values`),
    the same list printed in every repro command, instead of a hand-kept
    "mode" registry.
 3. `tests.runs` is a compact fact table for aggregation: one row per attempt,
@@ -155,7 +155,7 @@ proposal accepts.
 | History across an environment change | `identity_id` cannot decompose; `env_family_id` precomputed on every row | stable until a job is renamed | (`test_id`, `env_id`) decomposes; a version bump starts a new `env_id`, so hub views group by environment columns |
 | Attempts and retries | `attempt_ordinal` restarts per invocation; lineage through `parent_invocation_id` | `run_attempt`, `report_idx`, `rerun_idx`, `is_final` | one row per attempt with `rerun_number`, order by time; retries and verdict computed |
 | "Did not run" versus "lost" | invocation rows with `termination` | `job_runs` manifest columns | not covered; the job conclusion and the log classifier report it (section 3.6) |
-| Write path | launcher writes invocation rows at launch and exit, plus reports | reports plus a job table | reports only; testsuite properties carry the environment |
+| Write path | launcher writes invocation rows at launch and exit, plus reports | reports plus a job table | reports only; the report's `<environment>` element carries the environment |
 | Row cost | seven id-like columns and ten copied environment columns per attempt | two strings per row | three ids, an outcome, a rerun number, two timestamps |
 | Hub per-test reads | projection over a job-ordered table | job-ordered table; per-test history from `health` only | primary key is (test, env, time); per-job reads use a projection |
 | Rollout | needs the probe and the launcher protocol before any row is correct | works on existing reports today | needs the producer change; reports from branches without it are not ingested |
@@ -178,7 +178,7 @@ is addressed at the end of this section.
 | `tests.jobs` | dropped | duplicates `default.workflow_job`; static probe facts belong to `environments`; `runs` carries the job id and joins the rest |
 | `tests.invocations` | dropped, including the container role (section 3.6) | the process environment is `env_id`; lineage is `rerun_number` and time order; crash accounting is a synthetic row; the rest of a process is in its report |
 | fused `identity_id = hash(test, mode, env)` | dropped | composite (`test_id`, `env_id`) instead; see findings |
-| "mode" registry resolved from `test.sh` | dropped | `TestEnvironment.repro_env_vars` already is that registry, maintained where the flags are defined |
+| "mode" registry resolved from `test.sh` | dropped | `TestEnvironment.env_var_values` already is that registry, maintained where the flags are defined |
 | `build_env` / `config` in identity | dropped | CI naming; recorded in the report properties only; see the note on design B below |
 | stored `duration` / `elapsed_us` | dropped | `started_at` and `ended_at`; duration is a subtraction |
 | `is_final` | dropped | the verdict is the latest attempt; storing a flag invites disagreement with the rows |
@@ -259,9 +259,8 @@ drops whole objects under part-rejection bursts (about 7M rows in the week of
 2026-09-06, appendix D); a second path from every runner into the database
 multiplies the ways rows and their context can disagree. This proposal
 also adds producer work (timestamps, synthetic rows), but all of it rides
-the existing artifact path: `<testsuite><properties>` through
-pytest's `add_global_property` and xmlrunner's `properties`, per-testcase
-attributes the uploader already preserves, and one insert per report.
+the existing artifact path: a second XML file next to the junit one
+(section 5), in the same zip, and one insert per report.
 
 **3. It stores the same facts three times and pays for it on every row.**
 An attempt row in the one-pager carries `test_id`, `env_id`,
@@ -286,19 +285,18 @@ environment changes; the composite (`test_id`, `env_id`) decomposes.
 **4. Its identity registry is a second source of truth that drifts from the
 harness.** Mode comes from a new `TEST_MODES` dictionary with hand-written
 rules such as "inductor implies dynamo; report only the backend". The
-harness already has that registry. `def_flag` records every flag set to a
-non-default value in `TestEnvironment.repro_env_vars`, and
-`TEST_WITH_TORCHDYNAMO` is declared with `implied_by_fn` on inductor and
-aot_eager, so implied flags are left out: an inductor process records
-`PYTORCH_TEST_WITH_INDUCTOR=1` and nothing else, which is the one-pager's
-rule, implemented where the flag is defined. The registry has edges of its
-own: flags declared with `include_in_repro=False` never enter identity,
-implied flags are left out even when they change what runs, and an edit to
-a `def_flag` default moves identity silently, with no schema change. Those are
-listed as risks in section 8; they are at least visible in code review of
-the harness, which a schema-side registry is not. A gap in `repro_env_vars` is
-also a gap in the repro command engineers see, so it is found and fixed for
-its own sake; a gap in a schema-only registry is found by the next audit,
+harness already has that registry. `def_flag` and `def_setting` record every
+registered setting with the value in effect in
+`TestEnvironment.env_var_values`, implications applied: an inductor process
+records `PYTORCH_TEST_WITH_INDUCTOR=1` and `PYTORCH_TEST_WITH_DYNAMO=1`,
+because `TEST_WITH_TORCHDYNAMO` is declared with `implied_by_fn` on inductor
+and aot_eager, implemented where the flag is defined. The registry has edges
+of its own: flags declared with `include_in_repro=False` never enter
+identity, and a new registration or an edit to a default moves identity
+with no schema change. Those are listed as risks in section 8; they are at
+least visible in code review of the harness, which a schema-side registry is
+not. A setting missing from the registry is also missing from the repro
+command engineers see, so it is found and fixed for its own sake; a gap in a schema-only registry is found by the next audit,
 and reason 1 shows how the first audit went.
 
 **5. It keeps job facts in two tables with two writers.** `tests.jobs`
@@ -776,10 +774,13 @@ sipHash64(os, os_version, cpu_architecture, cpu_capability, python_version,
 Rules: values are cast to the column types before hashing, because integer
 width changes the hash (`device_count` is a `UInt8`; `LowCardinality` makes
 no difference); `flags` is sorted, because maps hash in order; `flags` is
-`TestEnvironment.repro_env_vars` unchanged, so sanitizer and debug builds
-appear there as `PYTORCH_TEST_WITH_ASAN`, `_UBSAN`, `_TSAN` and
-`_DEBUG_BUILD`, and ROCm jobs also carry `PYTORCH_TEST_WITH_ROCM`, which CI
-sets for every ROCm build. Changing
+`TestEnvironment.env_var_values` unchanged: every registered flag as `1` or
+`0`, implied ones included, and every registered setting with its value, so
+sanitizer and debug builds appear there as `PYTORCH_TEST_WITH_ASAN=1`,
+`_UBSAN=1`, `_TSAN=1` and `_DEBUG_BUILD=1` while every other environment
+carries them as `0`, and ROCm jobs carry `PYTORCH_TEST_WITH_ROCM=1`, which CI
+sets for every ROCm build. Registering a new flag changes every map, and so
+every `env_id`, the same re-key as adding an identity field. Changing
 the expression, including adding an identity field, gives every environment
 a new id, because every argument changes the hash, even an empty one; that
 is a deliberate, documented re-key. No serialized key is stored: every
@@ -797,14 +798,14 @@ are not ingested (section 6).
 | `cc_compiler`, `cc_compiler_version` | gcc 11, clang 21, msvc 19 (major) | concurrent distinct builds; patch versions are attributes |
 | `accelerator`, `accelerator_version` | cpu, cuda 13.2, rocm 7.1, xpu, mps, tpu | what torch was built for; a CUDA build on a CPU runner (`nogpu_*`) is still `cuda` with `device_count = 0`; split so `accelerator = 'cuda'` is a predicate |
 | `device_name`, `device_count` | a10g, l4, h100, b200, mi300x, mi350x, m1, m2; count visible to the process | model implies memory, SM count and per-model gates; count drives multi-GPU and distributed paths |
-| `flags` | `repro_env_vars` | the harness's own definition of "settings that change what a test does", including sanitizer and debug builds |
+| `flags` | every registered setting with its effective value | the harness's own definition of "settings that change what a test does", including sanitizer and debug builds |
 
-Nothing else is stored on the environment. The runner label and host size,
-the CI names (`build_environment`, `TEST_CONFIG`), GPU memory, the driver and
-the patch-level compiler, accelerator and OS versions are captured and
-written into the report's testsuite properties, but they are derivable from
-the job row or the device model, and as environment-level values they could
-not be tied to a specific run. Host size is the concrete case: last week the
+Nothing else is stored on the environment. The CI names (`build_environment`,
+`TEST_CONFIG`), host and GPU memory, the driver and the patch-level compiler,
+accelerator and OS versions are captured and written into the report's
+`<properties>` element, and the runner label comes from the job row, but they
+are derivable from the job row or the device model, and as environment-level
+values they could not be tied to a specific run. Host size is the concrete case: last week the
 same job definition ran on 41 GB and 113 GB L4 hosts, so keying on it would
 split history on every capacity fallback, while storing it as a set would
 not say which host a failing run had. Because memory is not recorded,
@@ -820,7 +821,7 @@ sets `ATEN_CPU_CAPABILITY` for it). Only the process knows what it ran on.
 
 Why `flags` instead of a mode registry: `def_flag` and `def_setting` in
 `torch/testing/_internal/common_utils.py` already record every registered
-setting that differs from its default (`TEST_WITH_TORCHDYNAMO`,
+setting with the value in effect (`TEST_WITH_TORCHDYNAMO`,
 `TEST_WITH_TORCHINDUCTOR`, `TEST_WITH_AOT_EAGER`, `TEST_WITH_CROSSREF`,
 `TEST_WITH_SLOW_GRADCHECK`, `TEST_CUDA_MEM_LEAK_CHECK`, `TEST_WITH_SLOW`,
 `OPINFO_RESTRICT_TO_DSL`, ...). Settings that matter but are read with a bare
@@ -850,8 +851,8 @@ lineage is on the row or follows from it; appendix E shows every level of it:
   then 1, 2, ... for each execution after it: the pytest-rerunfailures
   reruns (up to `PYTORCH_NUM_PYTEST_RERUNS = 2`), or flakefinder repeats in
   rerun-disabled-tests mode, which has its own flag.
-  In a report, the `<rerun>` elements are the earlier failed executions and
-  the `<testcase>` element is the last one.
+  In a report, every execution is its own `<attempt>` element with its
+  `rerun_number`.
 - Process retries are inferred, not stored. One test's attempts in a job
   (same environment), in time order, split into processes
   where `rerun_number` restarts at 0, and a process that starts right
@@ -925,7 +926,7 @@ row. Facts that vary per run but are not identity are derivable or already
 kept elsewhere: the runner label and its host size come from the job row,
 GPU memory follows from `device_name`, and the driver and the patch-level
 compiler, accelerator and OS versions are written into every report's
-testsuite properties, in the report file. An environment-level set of
+`<properties>` element. An environment-level set of
 observed values would not say which value a given run had, so it explains
 nothing that the report does not explain better.
 
@@ -1098,83 +1099,103 @@ while carrying six times the 30-day window that `tests.health` reads.
 
 ### 5.1 Runtime environment capture
 
-Two layers, both inside the test container:
+Everything is captured once per test process, at pytest session start,
+inside the test container, by `capture_environment()` in
+`torch/testing/_internal/test_report.py`:
 
-- Once per job (cached in a JSON file under `$RUNNER_TEMP`, path passed in an
-  env var, written by the first process that needs it): the static facts.
-- Once per test process, at startup: the cheap facts and everything that can
-  differ between processes in one job.
+| Field | Source |
+|---|---|
+| `os`, `os_version` (release name to the report only) | `platform.system()`, `platform.freedesktop_os_release()`, `platform.mac_ver()`, `platform.version()` |
+| `cpu_architecture` | `platform.machine()` (`arm64` and `AMD64` normalized) |
+| `python_version` | `sys.version_info`, plus `t` when `sysconfig.get_config_var("Py_GIL_DISABLED")` is set |
+| `cc_compiler`, `cc_compiler_version` (full version to the report only) | the `clang`, `MSVC` or `GCC` line of `torch.__config__.show()`, tried in that order because clang defines `__GNUC__` and prints a GCC line too |
+| `accelerator`, `accelerator_version` (full version to the report only) | `torch.version.cuda` / `torch.version.hip` / `torch.version.xpu`, `torch.backends.mps.is_built()` |
+| `cpu_capability` | `torch.backends.cpu.get_cpu_capability()`, lower-cased; `avx512` becomes `amx` when `torch.cpu._is_amx_tile_supported()`; honors `ATEN_CPU_CAPABILITY` |
+| `device_count` | `torch.accelerator.device_count()` (NVML or amdsmi, no device context) |
+| `device_name` (raw string, device memory and driver to the report only) | the first visible device through NVML (ctypes), amdsmi, `xpu-smi discovery -j` or `sysctl machdep.cpu.brand_string`, never a `torch.cuda` call, which would initialize CUDA before tests fork; `normalize_device_name()` maps the vendor string to the model (`NVIDIA H100 80GB HBM3` is `h100`, `AMD Instinct MI300X` is `mi300x`, `Apple M1 Pro` is `m1`) and keeps unknown strings whole; empty when `device_count` is 0 |
+| host memory (report only) | cgroup v2 `memory.max`, else `os.sysconf` |
+| `flags` | `TestEnvironment.env_var_values`: every registered flag as `1` or `0`, every registered setting with its value |
+| `torch_version`, `build_environment`, `test_config` (report only) | `torch.__version__`, the existing `BUILD_ENVIRONMENT` and `TEST_CONFIG` variables |
 
-| Field | Source | Layer | Cost |
-|---|---|---|---|
-| `os`, `os_version` (full version to the report only) | `platform.system()`, `platform.freedesktop_os_release()`, `platform.mac_ver()`, `platform.win32_ver()` | job | ms |
-| `cpu_architecture` | `platform.machine()` (`arm64` normalized to `aarch64`) | job | ms |
-| `python_version` | `sys.version_info`, plus `t` when `sysconfig.get_config_var("Py_GIL_DISABLED")` is set | process | ms |
-| `cc_compiler`, `cc_compiler_version` (full version to the report only) | `torch.__config__.show()` (the `CXX compiler` line) | job | ms |
-| `accelerator`, `accelerator_version` (full version to the report only) | `torch.version.cuda` / `torch.version.hip` / `torch.version.xpu`, `torch.backends.mps.is_built()`, TPU from the harness env | job | ms |
-| `cpu_capability` | `torch.backends.cpu.get_cpu_capability()`, lower-cased; `avx512` becomes `amx` when `torch.cpu._is_amx_tile_supported()`; honors `ATEN_CPU_CAPABILITY` | process | ms |
-| `device_count` | `torch.accelerator.device_count()` (NVML or amdsmi, no CUDA context) | process | ms |
-| `device_name` (device arch, GPU memory and driver to the report only) | `nvidia-smi --query-gpu=name,memory.total,compute_cap,driver_version`, `amd-smi static`, `sysctl` on macOS, in a subprocess; normalized by a small versioned map, raw string kept | job | about 1 s |
-| host memory (report only) | cgroup v2 `memory.max`, else `os.sysconf` | job | ms |
-| `flags` | `TestEnvironment.repro_env_vars` after `common_utils` import | process | free |
-| `runner_label`, `build_environment`, `github_actions_config` (report only) | new `RUNNER_LABEL` env (from `matrix.runner`), existing `BUILD_ENVIRONMENT`, `TEST_CONFIG` | job | free |
+Identity fields feed `env_id`. The rows marked report only go to the report's
+`<properties>` element for debugging and never reach `tests.environments`;
+the runner label comes from the job row. The device probe is the only call
+that leaves the process, and it takes milliseconds, so there is no job-level
+cache.
 
-Identity fields feed `env_id`. The rows marked report only are written to
-the report's testsuite properties for debugging and never reach
-`tests.environments`.
+The process writes the identity fields as the attributes of the report's
+`<environment>` element and the flags as its children
+([`report.xml`](report.xml)), and the ingester hashes them into `env_id`.
+The report is a new file that `torch/testing/_internal/test_report.py`, a
+pytest plugin, writes as
+`test-reports/<launched file>/<launched file>-<random>.report.xml` at the
+repository root, one directory per test file whatever launched it
+(`test_torch`, `distributed.test_c10d_nccl`, `cpp.test_api`), apart from the
+junit tree under `test/test-reports` and without its launcher level
+(`python-pytest`, `dist-*`); `run_test.py` passes the directory and the
+writer names the file, so `--subprocess` children each write their own: `common_utils.run_tests`
+registers it for every Python test file that saves XML, and
+`test/run_test.py --cpp` registers it for gtest binaries, which pytest-cpp
+runs. The junit branch for those binaries in `run_test.py` has
+been dead since the harness stopped parsing arguments at import
+(pytorch/pytorch#156703): it tests `TEST_SAVE_XML`, which stays empty in
+`run_test.py`'s process, so C++ tests get a report for the first time. The
+unittest runner, `xmlrunner`, is not covered; CI runs every file through
+pytest. C++ binaries in CI run through `run_test.py --cpp`;
+`.ci/pytorch/test.sh` launched `test_api` directly on ASAN and
+slow-gradcheck builds, which was the only C++ junit XML the old tables
+received, and now runs it through `run_test.py` too.
 
-`torch.utils.collect_env.get_env_info()` already gathers most of the
-job-level facts; the once-per-job capture reuses it and adds the missing
-fields. Never call `torch.cuda.get_device_name()` in the test process
-before tests fork: it creates a CUDA context. The `runtime_probe.py` draft
-in pytorch PR 198586 is the starting point for the job layer.
+### 5.2 Per-attempt data
 
-The process writes every field as `<testsuite><properties>` and the ingester
-hashes them into `env_id`:
-pytest through `LogXML.add_global_property()` in the `LogXMLReruns` plugin
-in `test/conftest.py`, unittest through the `properties` argument of
-`xmlrunner.XMLTestRunner` in `common_utils.run_tests`. For gtest binaries
-launched by `test/run_test.py --cpp`, `run_test.py` writes the same JSON as
-a sidecar next to the XML. C++ binaries in CI run through
-`run_test.py --cpp`; `.ci/pytorch/test.sh` launched `test_api` directly on
-ASAN and slow-gradcheck builds and now runs it through `run_test.py` too.
+Each execution of a test is one `<attempt>` element, appended to the report
+as it finishes; [`report.xml`](report.xml) documents every attribute.
 
-### 5.2 Per-testcase data
-
-- `started_at`, `ended_at`: pytest `TestReport.start` and `TestReport.stop`
-  (present in the pinned pytest 7.3.2), written as `start` / `stop`
-  attributes on `<testcase>` and on each `<rerun>` by `LogXMLReruns`; gtest
-  already emits `timestamp` and `time`. The uploader keeps every attribute,
-  so the JSON side changes only in the ingester.
-- `file`, `suite`, `case_name`: from `item.nodeid`, whose file part is the
-  launched file even for a class defined in another module (`item.location`
-  would give that module instead). C++ tests run through pytest the same
-  way; their file is the test binary, normalized to `run_test.py`'s name for
-  it (`cpp/test_api`).
-- `rerun_number`: the ingester numbers the executions of each test in a
-  report in document order, from 0: the `<rerun>` elements, then the
-  `<testcase>`.
-- Synthetic rows: when a process exits non-zero or times out (exit code 124)
-  `run_test_retries` already knows the in-flight test from stepcurrent; it
-  writes a one-row report with `outcome = crashed` or `timed_out`. The
-  `made_failing_xml` cache flag it already consults becomes the guard.
-  Timeouts need a fix first: at the deadline, `wait_for_process` in
-  `common_utils.py` sends SIGINT so pytest can write its XML, and if pytest
-  exits within 5 seconds, `retry_shell` returns its exit code 2 instead of
-  124. Then neither the synthetic row nor
-  the "Command took" line that the log classifier matches is written, and
-  the test that hung has no entry in the partial report; `retry_shell` has
-  to report that the deadline passed.
-- Run context: `JOB_ID` is already exported to the test step in
-  `.github/workflows/_linux-test.yml`; the process writes it as a testsuite
-  property, and the ingester keeps it as `github_workflow_job_id`.
-  Everything else about the job, including its branch and workflow, is read
-  from `default.workflow_job` and `default.workflow_run` by id. `job_id` is
-  never reconstructed from an artifact name and never 0. The new ingester
-  reads the XML reports straight from the job's zip, where report-level
-  properties survive, so no uploader change is needed
-  (`tools/stats/upload_test_stats.py`, which keeps only `<testcase>`
-  elements, is not in the path).
+- `started_at`, `ended_at`: pytest `TestReport.start` of the setup phase and
+  `.stop` of the attempt's last phase, so reruns carry their own times.
+- `file`, `suite`, `case_name`: from the node id, whose file part is the
+  launched file even for a class defined in another module
+  (`item.location` would give that module instead); `identity()` in the
+  writer is the one parser, and `run_test.py` reuses it for synthetic rows.
+  pytest-cpp node ids name the binary, normalized to `run_test.py`'s name for
+  it (`cpp/test_api`), then the gtest suite and test.
+- `rerun_number`: counted by the writer per test and process;
+  pytest-rerunfailures reruns and flakefinder repeats both advance it, and
+  the ingester copies it.
+- `outcome`: the writer folds the phase reports of one attempt: a failing
+  setup or teardown is `error` (the `phase` attribute says which), a failing
+  call is `failed`, a strict xfail that passes included, a skip is `skipped`
+  or `xfailed`, a pass is `passed` or `xpassed`. pytest-rerunfailures logs
+  the failing phase of a rerun attempt as `rerun` and skips its teardown, so
+  that attempt ends there with its real outcome.
+- `message` and the element text: the exception as pytest summarizes it and
+  its full representation, or the skip reason. They stay in the report;
+  `tests.runs` has no text (section 4.4).
+- Synthetic rows: the writer publishes its path and the running test (node
+  id, rerun number, start time) in the stepcurrent cache that
+  `run_test_retries` already reads. When a process exits non-zero,
+  `run_test.py` closes the report and, if a test was running, appends it as
+  `crashed`, or `timed_out` when the exit code is 124. `wait_for_process` now
+  always reports a timeout as 124 after its SIGINT grace period, instead of
+  returning pytest's exit code when pytest manages to exit, so the "Command
+  took" line that the log classifier matches and the synthetic row are both
+  written; the test still in flight when pytest closed its report is the
+  one that hung. `--subprocess` files and C++ tests do not go through
+  `run_test_retries`; a crash there leaves the report without its closing
+  tag (section 6.2).
+- Run context: `GITHUB_REPOSITORY` and the `JOB_ID` every test workflow
+  exports are the `repo` and `github_workflow_job_id` attributes of
+  `<report>`. Everything else about the job, including its branch and
+  workflow, is read from `default.workflow_job` and `default.workflow_run`
+  by id. `job_id` is never reconstructed from an artifact name and never 0.
+- Migration: the report tree is `test-reports/` at the repository root. The
+  upload action (Linux and Windows zips), the in-run uploader
+  (`tools/testing/upload_artifacts.py`) and the XPU workflow's copy out of
+  its container include it in the job's test-reports zip next to the junit
+  files, and the junit pipeline ignores it: it has no `<testcase>` element,
+  and `tools/stats/upload_test_stats.py` skips `*.report.xml` when it unzips. Both files are
+  written side by side until the new ingester is the only consumer; then the
+  junit option, `LogXMLReruns`, `sanitize_pytest_xml` and the uploader go.
 
 ### 5.3 Reports that never reach the table
 
@@ -1281,8 +1302,11 @@ open decision.
 - Finding a report needs no stored location: the job id gives the
   repository, run id and attempt in `default.workflow_job`, and so the
   job's zip in that attempt's `artifact/` folder. The test's file names the
-  report's directory inside it, which holds one to a few reports to search
-  for the test.
+  report's directory inside it, which holds one to a few `*.report.xml`
+  files to search for the test.
+- A report without its closing `</report>` tag is a process that died before
+  `run_test.py` could close it (a `--subprocess` child, or `run_test.py`
+  itself killed); its complete attempts count and nothing else does.
 - The same batch feeds the two catalogs insert-only: `INSERT INTO
   tests.tests SELECT ... WHERE id NOT IN (SELECT id FROM tests.tests)`,
   and the same for `tests.environments` by `id`. Two concurrent batches
@@ -1293,9 +1317,9 @@ open decision.
   is never logged as success.
 - `test_id` and `env_id` are computed in the `INSERT ... SELECT` with
   `sipHash64`, so producers never need a portable hash.
-- Rollout order: the producer change ships first; the current ingester
-  skips the new JSON fields (ClickHouse's `input_format_skip_unknown_fields`
-  is on), so nothing changes for it. The new ingester ships second, so trunk
+- Rollout order: the producer change ships first; the junit pipeline never
+  sees the new file (it has no `<testcase>` element and the uploaders skip
+  the suffix), so nothing changes for it. The new ingester ships second, so trunk
   rows in the new tables carry measured environments from the start. There
   is no backfill: the new tables start empty, and history before the
   cut-over stays in the old tables. Reports without a captured
@@ -1468,8 +1492,9 @@ Trade-offs accepted:
   by `env_id`; a family grouping on `tests.environments` is the first thing
   to add if that is not enough.
 - Identity follows the harness registry. Whatever `def_flag` records is
-  identity; edits to defaults, implied flags and `include_in_repro` move it
-  without a schema change. The gain is one registry with a feedback loop;
+  identity; a new registration, an edit to a default or to `include_in_repro`
+  moves it without a schema change, and a new registration re-keys every
+  environment. The gain is one registry with a feedback loop;
   the cost is that identity changes arrive through code review of the
   harness, not of the schema.
 - No completeness ledger. Process deaths before the first test, and "did
@@ -1518,7 +1543,7 @@ Risks:
   passed means a missing flag registration, or a known gap such as the
   einops versions; a daily query alarms on it.
 - Registry edges. Flags declared with `include_in_repro=False` never enter
-  identity, implied flags are excluded, and settings that are not env vars
+  identity, and settings that are not env vars
   (the `--jit-executor` option) need a registration path, for example
   `def_setting` on a synthetic env var that `run_test.py` exports.
 - Flag fragmentation. Selection gates in `flags` split environments (slow,
@@ -1570,7 +1595,9 @@ Open decisions:
 | `slow` | `flags['PYTORCH_TEST_WITH_SLOW'] = '1'` |
 
 These are the twelve keys `check_if_enable` in `common_utils.py` accepts
-today, so the mapping is exhaustive until a new token is added.
+today, so the mapping is exhaustive until a new token is added. Implied
+flags are recorded, so `dynamo` also matches inductor and aot_eager
+processes.
 
 ## Appendix B. Outcome vocabulary
 
@@ -1581,10 +1608,8 @@ today, so the mapping is exhaustive until a new token is added.
 | `skipped`, `xfailed`, `xpassed` | `<skipped>` with its `type` (`pytest.skip`, `pytest.xfail`) |
 | `crashed`, `timed_out` | synthetic row from `run_test.py` for the in-flight test |
 
-`rerun` is not an outcome: a `<rerun>` element is an earlier attempt with
-its real outcome (`failed` or `error`). The executions of a test in one
-process are numbered by `rerun_number`, the `<rerun>` elements first and
-the final `<testcase>` last.
+`rerun` is not an outcome: an earlier execution is its own `<attempt>` with
+its real outcome (`failed` or `error`) and a lower `rerun_number`.
 
 ## Appendix C. One-pager elements mapped to this design
 
@@ -1596,7 +1621,7 @@ its invocation table, with its counterpart in this proposal.
 | `tests.jobs` | `default.workflow_job` | reason 5 |
 | `tests.invocations` | `rerun_number` on the attempt, one `env_id` per process, synthetic rows for deaths | reasons 1 and 2; mapping below |
 | `identity_id = hash(test, mode, env)` | composite (`test_id`, `env_id`) | reason 3; two coordinates instead of three because `flags` fold into the environment |
-| `TEST_MODES` registry | `repro_env_vars` as `flags` | reason 4 |
+| `TEST_MODES` registry | `env_var_values` as `flags` | reason 4 |
 | environment columns copied onto `test_runs` | ids only; see section 4.4 | reason 3 |
 | `env_family_id` on every row | `GROUP BY` over `tests.environments` | one grouping precomputed onto billions of rows locks that definition in |
 | `backend` = name plus version (`cuda13.2`) | `accelerator`, `accelerator_version` | "all cuda" must be a predicate, not a `LIKE` |
@@ -1681,8 +1706,8 @@ Where a test can run more than once:
 | attempt | re-run of failed or all jobs | a person, or test-infra's retry bot (`torchci/lib/bot/retryBot.ts`) when a run finishes | the same run id, `run_attempt` plus one, new job ids | a different `github_workflow_job_id` |
 | process | `run_test_retries` in `test/run_test.py` | a failing test | a new process and a new report | `rerun_number` restarts at 0 right after a failed process |
 | process, `--subprocess` files | `retry_shell` in `common_utils.run_tests`, once | a failing test in a file that runs each test in its own process | a new process and a new report | `rerun_number` restarts at 0 right after a failed process |
-| in process | pytest-rerunfailures, `--reruns=2` (`PYTORCH_NUM_PYTEST_RERUNS`) | a failing test; off for distributed tests | `<rerun>` elements in the same report | the same process; `rerun_number > 0` |
-| repeats | pytest-flakefinder, `--flake-runs=50` (15 under ASAN) | rerun-disabled-tests mode (`PYTORCH_TEST_RERUN_DISABLED_TESTS=1`) | one `<testcase>` per repeat in the same report | the same process; `rerun_number > 0`; the mode's flag tells repeats from reruns |
+| in process | pytest-rerunfailures, `--reruns=2` (`PYTORCH_NUM_PYTEST_RERUNS`) | a failing test; off for distributed tests | `<attempt>` elements with `rerun_number` 1 and 2 in the same report | the same process; `rerun_number > 0` |
+| repeats | pytest-flakefinder, `--flake-runs=50` (15 under ASAN) | rerun-disabled-tests mode (`PYTORCH_TEST_RERUN_DISABLED_TESTS=1`) | one `<attempt>` per repeat in the same report | the same process; `rerun_number > 0`; the mode's flag tells repeats from reruns |
 | inside a test | `retry` and `retry_on_connect_failures` in `common_utils.py` | the test body raising a listed exception | nothing visible | a single result |
 
 The retry bot re-runs failed jobs that look like infrastructure failures,
@@ -1708,17 +1733,16 @@ Retry types, from the outermost in:
 | first launch | `run_test.py` | a test file's first process (`--sc`) | each test's first process in the job |
 | retry launch | `run_test.py` | a new process that runs only the failed test (`--rs`), up to `PYTORCH_NUM_PROCESS_RETRIES = 2` more times; for `--subprocess` files, `common_utils.run_tests` retries a failing test's process once | a process that follows one where the test failed; `rerun_number` restarts at 0 |
 | continuation launch | `run_test.py` | a new process that runs the rest of the file after the failed test (`--scs`) | the first process for each test in it; not a retry of any of them |
-| in-process rerun | pytest-rerunfailures | the failed test runs again in the same process, up to `PYTORCH_NUM_PYTEST_RERUNS = 2` more times | `rerun_number > 0`; the earlier failures are `<rerun>` entries, which get start and end times from the producer change |
-| repeat | pytest-flakefinder | in rerun-disabled-tests mode, every selected test runs 50 times (15 under ASAN) whatever the outcome | `rerun_number > 0`; one `<testcase>` per repeat |
+| in-process rerun | pytest-rerunfailures | the failed test runs again in the same process, up to `PYTORCH_NUM_PYTEST_RERUNS = 2` more times | `rerun_number > 0`; every attempt has its own start and end time |
+| repeat | pytest-flakefinder | in rerun-disabled-tests mode, every selected test runs 50 times (15 under ASAN) whatever the outcome | `rerun_number > 0`; one `<attempt>` per repeat |
 | in-test retry | `retry` decorator | the test body runs again on a listed exception | nothing; one result |
 
 What the data can infer and what it cannot:
 
 - Several executions of one test in one report are in-process reruns, or
   repeats when the environment's flags show rerun-disabled-tests mode;
-  `rerun_number = 0` is the original run. The ingester numbers them in
-  the order of the entries in the report, because today's `<rerun>` entries
-  carry no timestamps.
+  `rerun_number = 0` is the original run; the writer numbers them as they
+  finish.
 - One test in several reports of the same job is not necessarily a retry.
   `test_einops` runs the same tests in five first launches, one per einops
   version, and `test_distributed_spawn` runs once per distributed backend.

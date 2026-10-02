@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+The test report: one file per test process, everything the ingester needs for
+tests.tests, tests.environments and tests.runs. See proposal.md section 5.
+
+Written by torch/testing/_internal/test_report.py, a pytest plugin that
+common_utils.run_tests and test/run_test.py register with "-p
+torch.testing._internal.test_report" and name the directory with the report-dir
+option (XML comments cannot spell the flag). Every report, whatever launched
+it, is <repo>/test-reports/<launched file>/<launched file>-<random>.report.xml,
+with the file's path separators as dots (test_torch, distributed.test_c10d_nccl,
+cpp.test_api): a tree at the repository root, apart from the junit files under
+test/test-reports. The upload action and the in-run uploader add it to the
+job's test-reports zip. Nothing in the junit pipeline reads it: it has no
+<testcase> element, and the stats uploader skips the suffix.
+
+Attempts are appended as they finish. A file without the closing </report>
+tag is a process that died; its attempts still count. run_test.py closes such
+a file and adds the test that was running as a crashed or timed_out attempt.
+
+This example is the real output for test/junit_xml_testdata/pytest_suite.py,
+cut to one attempt per outcome.
+-->
+
+<!--
+What: the process's run context.
+  repo:                   GITHUB_REPOSITORY; tests.tests.repo, part of test identity.
+  github_workflow_job_id: JOB_ID, which every test workflow exports;
+                          tests.runs.github_workflow_job_id. Everything else
+                          about the job is read from default.workflow_job.
+Both are absent outside CI, and the ingester skips reports without them.
+-->
+<report repo="pytorch/pytorch" github_workflow_job_id="109621633955">
+
+  <!--
+  What: the tests.environments identity fields (section 4.1), in the DDL's
+    column order, measured in the process; the ingester hashes them into env_id.
+    Values are what the process saw, never CI names.
+  Derived: platform and sys for os, os_version, cpu_architecture and
+    python_version; torch.__config__.show() for the compiler; torch.version for
+    the accelerator; torch.backends.cpu.get_cpu_capability() plus the AMX probe;
+    torch.accelerator.device_count(); NVML, amdsmi, xpu-smi or sysctl for the
+    device model, normalized by normalize_device_name(), and empty when
+    device_count is 0.
+  flag: every setting the harness registers for repro (TestEnvironment
+    .env_var_values), with the value in effect: 1 or 0 for flags, implied ones
+    included, the setting's value otherwise and empty when unset; sorted by
+    name; tests.environments.flags.
+  -->
+  <environment os="linux" os_version="22.04" cpu_architecture="x86_64" cpu_capability="avx512" python_version="3.10" cc_compiler="gcc" cc_compiler_version="11" accelerator="cuda" accelerator_version="13.2" device_name="h100" device_count="1">
+    <flag name="OPINFO_RESTRICT_TO_DSL" value="" />
+    <flag name="PYTORCH_CUDA_ALLOC_CONF" value="0" />
+    <flag name="PYTORCH_TEST_CUDA_MEM_LEAK_CHECK" value="0" />
+    <flag name="PYTORCH_TEST_SKIP_CUDAGRAPH" value="0" />
+    <flag name="PYTORCH_TEST_SKIP_FAST" value="0" />
+    <flag name="PYTORCH_TEST_WITHOUT_COMPILED_AUTOGRAD" value="0" />
+    <flag name="PYTORCH_TEST_WITH_AOT_EAGER" value="0" />
+    <flag name="PYTORCH_TEST_WITH_ASAN" value="0" />
+    <flag name="PYTORCH_TEST_WITH_CROSSREF" value="0" />
+    <flag name="PYTORCH_TEST_WITH_DEBUG_BUILD" value="0" />
+    <flag name="PYTORCH_TEST_WITH_DEV_DBG_ASAN" value="0" />
+    <flag name="PYTORCH_TEST_WITH_DYNAMO" value="1" />
+    <flag name="PYTORCH_TEST_WITH_INDUCTOR" value="1" />
+    <flag name="PYTORCH_TEST_WITH_MTIA" value="0" />
+    <flag name="PYTORCH_TEST_WITH_PERIODIC" value="0" />
+    <flag name="PYTORCH_TEST_WITH_ROCM" value="0" />
+    <flag name="PYTORCH_TEST_WITH_SLOW" value="0" />
+    <flag name="PYTORCH_TEST_WITH_SLOW_GRADCHECK" value="0" />
+    <flag name="PYTORCH_TEST_WITH_TSAN" value="0" />
+    <flag name="PYTORCH_TEST_WITH_UBSAN" value="0" />
+  </environment>
+
+  <!--
+  What: report-only facts for reading a failure, never identity and never
+    stored in a table: the full versions behind the environment's major.minor
+    ones, the raw device string, device and host memory, the driver, and the
+    CI names BUILD_ENVIRONMENT and TEST_CONFIG. Empty values are omitted.
+  -->
+  <properties>
+    <property name="torch_version" value="2.15.0a0+gitf822ebf" />
+    <property name="os_release" value="Ubuntu 22.04.5 LTS" />
+    <property name="cc_compiler_version_full" value="11.4" />
+    <property name="accelerator_version_full" value="13.2" />
+    <property name="device_name_raw" value="NVIDIA H100 80GB HBM3" />
+    <property name="device_memory_mib" value="81559" />
+    <property name="driver_version" value="580.82.07" />
+    <property name="host_memory_mib" value="245760" />
+    <property name="build_environment" value="linux-jammy-cuda13.2-py3.10-gcc11" />
+    <property name="test_config" value="default" />
+  </properties>
+
+  <!--
+  What: one execution of one test, one row of tests.runs, in execution order.
+    file, suite, case_name: tests.tests identity (section 4.1), taken from the
+      pytest node id: the launched file as a rootdir-relative path, the
+      innermost class, and the test name with its parameters. For pytest-cpp
+      items the file is the binary as run_test.py names it (cpp/test_api), the
+      suite and case_name the gtest suite and test.
+    rerun_number: 0 for the test's first execution in this process, then 1, 2,
+      ... for pytest-rerunfailures reruns and flakefinder repeats.
+    outcome: passed, failed, error, skipped, xfailed, xpassed (appendix B);
+      crashed and timed_out only on the synthetic attempt run_test.py adds.
+      failed is a failing call phase, including a strict xfail that passes;
+      error is a failing setup or teardown, named by the phase attribute.
+    started_at, ended_at: pytest's TestReport.start of the setup phase and
+      .stop of the last phase, UTC with milliseconds; tests.runs.started_at and
+      ended_at.
+    message: the exception as pytest summarizes it, the skip or xfail reason,
+      or the exit code for a synthetic attempt. The text is pytest's full
+      failure representation. Both stay in the report; tests.runs has no text.
+  -->
+  <attempt file="test/junit_xml_testdata/pytest_suite.py" suite="TestJunitOutcomes" case_name="test_pass" rerun_number="0" outcome="passed" started_at="2026-10-02T02:06:39.315+00:00" ended_at="2026-10-02T02:06:39.315+00:00" />
+  <attempt file="test/junit_xml_testdata/pytest_suite.py" suite="TestJunitOutcomes" case_name="test_assert_failure" rerun_number="0" outcome="failed" started_at="2026-10-02T02:06:39.316+00:00" ended_at="2026-10-02T02:06:39.317+00:00" message="AssertionError: values differ">Traceback (most recent call last):
+  File "/home/jathu/pytorch/test/junit_xml_testdata/pytest_suite.py", line 27, in test_assert_failure
+    raise AssertionError("values differ")
+AssertionError: values differ</attempt>
+  <attempt file="test/junit_xml_testdata/pytest_suite.py" suite="TestJunitOutcomes" case_name="test_error_in_setup" rerun_number="0" outcome="error" started_at="2026-10-02T02:06:39.318+00:00" ended_at="2026-10-02T02:06:39.319+00:00" phase="setup" message="RuntimeError: setup error">Traceback (most recent call last):
+  File "/home/jathu/pytorch/test/junit_xml_testdata/pytest_suite.py", line 13, in broken_setup
+    raise RuntimeError("setup error")
+RuntimeError: setup error</attempt>
+  <attempt file="test/junit_xml_testdata/pytest_suite.py" suite="TestJunitOutcomes" case_name="test_skipped" rerun_number="0" outcome="skipped" started_at="2026-10-02T02:06:39.320+00:00" ended_at="2026-10-02T02:06:39.320+00:00" message="skipped unconditionally" />
+  <attempt file="test/junit_xml_testdata/pytest_suite.py" suite="TestJunitOutcomes" case_name="test_xfail" rerun_number="0" outcome="xfailed" started_at="2026-10-02T02:06:39.321+00:00" ended_at="2026-10-02T02:06:39.321+00:00" message="known bad" />
+  <attempt file="test/junit_xml_testdata/pytest_suite.py" suite="TestJunitOutcomes" case_name="test_xpass_non_strict" rerun_number="0" outcome="xpassed" started_at="2026-10-02T02:06:39.322+00:00" ended_at="2026-10-02T02:06:39.322+00:00" />
+  <attempt file="test/junit_xml_testdata/pytest_suite.py" suite="TestJunitOutcomes" case_name="test_rerun_then_pass" rerun_number="0" outcome="failed" started_at="2026-10-02T02:06:39.322+00:00" ended_at="2026-10-02T02:06:39.322+00:00" message="AssertionError: attempt 1 fails">Traceback (most recent call last):
+  File "/home/jathu/pytorch/test/junit_xml_testdata/pytest_suite.py", line 63, in test_rerun_then_pass
+    raise AssertionError(f"attempt {_ATTEMPTS['rerun_then_pass']} fails")
+AssertionError: attempt 1 fails</attempt>
+  <attempt file="test/junit_xml_testdata/pytest_suite.py" suite="TestJunitOutcomes" case_name="test_rerun_then_pass" rerun_number="1" outcome="passed" started_at="2026-10-02T02:06:39.324+00:00" ended_at="2026-10-02T02:06:39.324+00:00" />
+
+  <!--
+  A synthetic attempt, appended by run_test.py when the process died while this
+  test ran: outcome crashed, or timed_out when run_test.py's deadline passed.
+  -->
+  <attempt file="test/junit_xml_testdata/pytest_suite.py" suite="TestJunitOutcomes" case_name="test_no_rerun_needed" rerun_number="0" outcome="crashed" started_at="2026-10-02T02:06:39.327+00:00" ended_at="2026-10-02T02:06:40.912+00:00" message="the test process exited with code -11 (SIGSEGV)" />
+</report>

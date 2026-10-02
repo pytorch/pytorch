@@ -10,7 +10,7 @@ CREATE TABLE tests.tests
     id            UInt64,
 
     -- What: repository the test lives in, e.g. pytorch/pytorch.
-    -- Derived: GITHUB_REPOSITORY, written by the producer as a testsuite property.
+    -- Derived: GITHUB_REPOSITORY, the report's repo attribute (report.xml).
     -- Used: scopes the catalog when other pytorch org repos join; part of the hash;
     --   with file, the join key to tests.owners.
     repo          LowCardinality(String),

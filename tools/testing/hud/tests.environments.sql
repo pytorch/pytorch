@@ -81,15 +81,17 @@ CREATE TABLE tests.environments
     -- Used: single-GPU versus multi-GPU and distributed behavior.
     device_count              UInt8,
 
-    -- What: the harness flags set to non-default values in this process, e.g.
-    --   {'PYTORCH_TEST_WITH_INDUCTOR': '1', 'PYTORCH_TEST_WITH_SLOW': '1'}.
-    --   Sanitizer and debug builds show up here as PYTORCH_TEST_WITH_ASAN, _UBSAN,
-    --   _TSAN and _DEBUG_BUILD.
-    -- Derived: TestEnvironment.repro_env_vars, unchanged, read after common_utils is
-    --   imported. Implied flags are absent by construction (an inductor process
-    --   records only the inductor flag).
+    -- What: every harness flag and setting registered for repro, with the value
+    --   in effect in this process: 1 or 0 for flags, implied ones included, the
+    --   setting's value otherwise (empty when unset), e.g.
+    --   {'PYTORCH_TEST_WITH_INDUCTOR': '1', 'PYTORCH_TEST_WITH_DYNAMO': '1',
+    --    'PYTORCH_TEST_WITH_SLOW': '0', ...}. Sanitizer and debug builds show up
+    --   as PYTORCH_TEST_WITH_ASAN, _UBSAN, _TSAN and _DEBUG_BUILD.
+    -- Derived: TestEnvironment.env_var_values, unchanged, read after common_utils
+    --   is imported; def_flag and def_setting fill it as they run.
     -- Used: the disable-issue tokens asan, dynamo, inductor and slow; the repro
-    --   command of any run; separates modes that share one CI config.
+    --   command of any run; separates modes that share one CI config. Registering
+    --   a new flag changes every environment's map, and so every env_id.
     flags                     Map(LowCardinality(String), String),
 
     -- bookkeeping ---------------------------------------------------------------
