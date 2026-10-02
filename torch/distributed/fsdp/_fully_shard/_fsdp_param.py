@@ -952,14 +952,8 @@ class FSDPParam:
             self.free_all_gather_outputs()
 
     def _unflatten_all_gather_outputs(self) -> tuple[torch.Tensor, ...]:
-        world_size = (
-            self.mesh_info.shard_mesh_size
-            if isinstance(self.mesh_info, FSDPMeshInfo)
-            else 1
-        )
         return tuple(
-            # -1 cannot be inferred when a trailing dim is zero
-            t.view(s[0] * world_size if 0 in s[1:] else -1, *s[1:])
+            t.view(-1, *s[1:])
             for t, s in zip(
                 self.all_gather_outputs, self._extensions_data.all_gather_input_sizes
             )

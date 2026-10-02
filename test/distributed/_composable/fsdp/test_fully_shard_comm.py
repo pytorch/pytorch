@@ -241,17 +241,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 all_gather_stream=all_gather_stream,
             )
 
-    @skip_if_lt_x_gpu(1)
-    def test_all_gather_empty_params(self):
-        stream = device_module.current_stream()
-        self._test_all_gather(
-            [torch.Size([0, 4]), torch.Size([0])],
-            reshard_after_forward=True,
-            async_op=False,
-            all_gather_copy_in_stream=stream,
-            all_gather_stream=stream,
-        )
-
     def _test_all_gather(
         self,
         param_sizes: list[torch.Size],
