@@ -405,6 +405,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 orig_arg_names,
                 mod._in_spec,
                 out_spec,
+                mod.graph._codegen.pytree_info.is_args_kwargs,
             )
         )
 
