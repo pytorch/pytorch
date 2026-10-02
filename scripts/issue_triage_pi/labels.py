@@ -10,6 +10,7 @@ from pathlib import Path
 SKILLS = Path(__file__).resolve().parents[2] / ".agents/skills"
 TRIAGE_SKILL = SKILLS / "triaging-issues"
 DISTRIBUTED_SKILL = SKILLS / "distributed-triage"
+DISTRIBUTED = "oncall: distributed"
 
 # Labels the triage bot must never add: CI controls, release notes, severity,
 # and decisions reserved for human reviewers.
@@ -41,6 +42,11 @@ def is_forbidden(label: str) -> bool:
     return lowered in FORBIDDEN_EXACT or any(
         re.search(pattern, lowered) for pattern in FORBIDDEN_PATTERNS
     )
+
+
+def is_sub_queue(label: str) -> bool:
+    """`oncall: distributed <team>`, picked by distributed triage only."""
+    return label.startswith(DISTRIBUTED + " ")
 
 
 def load_labels(path: Path) -> set[str]:

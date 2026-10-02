@@ -48,7 +48,7 @@ the `templates` to post, and your `reasoning`. The apply step enforces it:
 - An issue keeps at most one sub-oncall label: an existing one is never replaced, and a plan with two goes to `triage review`.
 - `triaged` is dropped whenever the issue would also carry `triage review` or `needs reproduction`.
 - `templates` are [templates.json](templates.json) keys posted verbatim; a template the bot already posted is not posted again.
-- `bot-triaged` is added automatically (except for `high_priority`); do not list it.
+- `ptd-bot-triaged` is added automatically (except for `high_priority`); do not list it.
 - Nothing is ever closed.
 
 ---
@@ -99,7 +99,7 @@ If no sub-oncall is present, apply exactly one based on the routing rules in [di
 Use the routing decision tree and edge cases in [distributed-rubric.md](distributed-rubric.md) Section 1 to determine the correct sub-oncall.
 
 **After routing to `oncall: distributed infra` or `oncall: distributed checkpointing`:**
-- `decision: "route"` with that sub-oncall (the routing is a confident, complete outcome)
+- `decision: "route"` with that sub-oncall and `triaged` (the routing is a confident, complete outcome)
 - **STOP** — the sub-oncall team owns further triage
 
 **After routing to `oncall: distributed parallelisms`:**
@@ -132,7 +132,7 @@ Most distributed issues are bug reports — do not add a type label for bugs. If
 ### 5) High Priority — REQUIRES HUMAN REVIEW
 
 **CRITICAL:** If you believe an issue is high priority, you MUST:
-1. Use `decision: "high_priority"` with `triage review` (the apply step leaves off `bot-triaged`)
+1. Use `decision: "high_priority"` with `triage review` (the apply step leaves off `ptd-bot-triaged`, so the daily sweep re-surfaces it)
 
 Do NOT directly add `high priority` without human confirmation.
 
@@ -159,10 +159,6 @@ If the issue lacks a minimal reproduction script:
 ---
 
 ## Constraints
-
-The apply step enforces the mechanical rules (see [Tools and Output](#tools-and-output)):
-add-only labels from the allowlist, one sub-oncall, no `triaged` beside `triage review` or
-`needs reproduction`, template-only comments without repeats, and no closing.
 
 **DO NOT:**
 - Ask for `triaged` when you are NOT confident in the classification — i.e. any time the plan also adds `triage review` or `needs reproduction`, or in the §5 high-priority flow

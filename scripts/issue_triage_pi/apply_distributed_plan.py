@@ -16,32 +16,33 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
 from apply_plan import (
     apply_effects,
     BOT_TRIAGED,
-    DISTRIBUTED,
     Effects,
-    gh_api,
+    fetch_issue,
+    publish,
     summary_markdown,
-    TRIAGE_BOT,
+    template_comment,
     TRIAGE_REVIEW,
 )
-from labels import DISTRIBUTED_SKILL, load_labels, load_templates
+from labels import (
+    DISTRIBUTED,
+    DISTRIBUTED_SKILL,
+    is_sub_queue,
+    load_labels,
+    load_templates,
+)
 
 
 TRIAGED = "triaged"
+# Distributed-bot marker; `bot-triaged` belongs to issue triage, which adds it
+# before handing off.
+PTD_TRIAGED = "ptd-bot-triaged"
 NEEDS_REPRODUCTION = "needs reproduction"
-# Decisions after which a human must look; the skill omits the bot marker for
-# high-priority issues so the daily sweep re-surfaces them.
-NO_MARKER_DECISIONS = {"high_priority"}
-
-
-def is_sub_queue(label: str) -> bool:
-    return label.startswith(DISTRIBUTED + " ")
 
 
 def plan_effects(
@@ -58,7 +59,11 @@ def plan_effects(
         effects.notes.append(f"issue is not labeled {DISTRIBUTED!r}; skipping")
         return effects
 
-    requested = [label for label in plan.get("labels", []) if label != BOT_TRIAGED]
+    requested = [
+        label
+        for label in plan.get("labels", [])
+        if label not in (BOT_TRIAGED, PTD_TRIAGED)
+    ]
     unknown = [label for label in requested if label not in valid_labels]
     if unknown:
         effects.notes.append(
@@ -84,6 +89,12 @@ def plan_effects(
 
     if decision == "high_priority" and TRIAGE_REVIEW not in labels:
         labels.append(TRIAGE_REVIEW)
+    # A classification is only confident if a module label survived the allowlist.
+    if decision == "classify" and not any(
+        label.startswith("module: ") for label in existing_labels | set(labels)
+    ):
+        effects.notes.append("no allowlisted module label; flagging for review")
+        labels.append(TRIAGE_REVIEW)
     resulting = existing_labels | set(labels)
     if TRIAGED in labels and resulting & {TRIAGE_REVIEW, NEEDS_REPRODUCTION}:
         effects.notes.append(
@@ -91,31 +102,19 @@ def plan_effects(
         )
         labels.remove(TRIAGED)
 
-    keys = list(dict.fromkeys(plan.get("templates", [])))
-    unknown_templates = [key for key in keys if key not in templates]
-    if unknown_templates:
-        effects.notes.append(f"dropped unknown templates {unknown_templates}")
-    posted = [
-        key
-        for key in keys
-        if key in templates
-        and any(templates[key]["comment"] in body for body in bot_comments)
-    ]
-    if posted:
-        effects.notes.append(f"already posted {posted}")
-    effects.comment = "\n\n---\n\n".join(
-        templates[key]["comment"]
-        for key in keys
-        if key in templates and key not in posted
+    effects.comment, posted = template_comment(
+        list(dict.fromkeys(plan.get("templates", []))),
+        templates,
+        bot_comments,
+        effects.notes,
     )
 
     effects.add_labels = [label for label in labels if label not in existing_labels]
-    if (
-        decision not in NO_MARKER_DECISIONS
-        and (effects.mutates or posted)
-        and BOT_TRIAGED not in existing_labels
-    ):
-        effects.add_labels.append(BOT_TRIAGED)
+    # The marker records that the distributed bot processed the issue, even when
+    # nothing else changed, so the daily sweep skips it. High-priority issues get
+    # none, so the sweep re-surfaces them.
+    if decision != "high_priority" and PTD_TRIAGED not in existing_labels:
+        effects.add_labels.append(PTD_TRIAGED)
     return effects
 
 
@@ -130,14 +129,8 @@ def main() -> int:
     args = parser.parse_args()
 
     plan = json.loads(args.plan.read_text())
-    issue = json.loads(gh_api([f"repos/{args.repo}/issues/{args.issue}"]))
+    issue, bot_comments = fetch_issue(args.repo, args.issue)
     existing = {label["name"] for label in issue["labels"]}
-    comments = json.loads(
-        gh_api([f"repos/{args.repo}/issues/{args.issue}/comments?per_page=100"])
-    )
-    bot_comments = [
-        c["body"] or "" for c in comments if c["user"]["login"] == TRIAGE_BOT
-    ]
 
     effects = plan_effects(
         plan,
@@ -164,10 +157,7 @@ def main() -> int:
     summary = summary_markdown(
         args.repo, args.issue, plan, effects, outcome, args.apply, None
     )
-    print(summary)
-    if path := os.environ.get("GITHUB_STEP_SUMMARY"):
-        with open(path, "a") as f:
-            f.write(summary + "\n")
+    publish(summary)
     if outcome == "no_action":
         print(f"::error::distributed triage plan for #{args.issue} produced no action")
         return 1

@@ -10,6 +10,8 @@ self-contained; the same action lives in `pytorch/ciforge`.
 | `action.yml`, `run.sh` | Install pi from the lockfile, run the session, write the step summary |
 | `package.json`, `package-lock.json` | pi version and integrity-pinned dependencies |
 | `allowed-models.json` | Model IDs callers may use |
+| `models.json` | Pinned definitions missing from pi's bundled model catalog |
+| `claude-execution.jq` | Converts pi events to the Claude-compatible execution file |
 | `extensions/tool-guard.ts` | Per-call tool allowlist; path tools confined to the working directory |
 | `extensions/submit-result.ts` | Schema-validated `submit_result` tool for structured output |
 
@@ -76,18 +78,14 @@ For a job that reads untrusted input, combine the action with:
 
 ## Models
 
-Callers may only pass IDs in `allowed-models.json`. Bedrock IDs are
-`[<geo>.]<vendor>.<model>[-<version>]`:
+Use an exact ID from `allowed-models.json`, including its inference-profile prefix and
+version suffix: `global.` routes worldwide; `us.` stays in US regions. Bare IDs may fail
+with "on-demand throughput isn't supported". Some models need a one-time AWS Marketplace
+subscription by an account admin.
 
-| Part | Meaning | Examples |
-|---|---|---|
-| `<geo>.` | Cross-region inference profile: `global.` routes worldwide; `us.`, `eu.`, … stay in that geography | `global.`, `us.` |
-| `<vendor>.<model>` | Foundation model | `openai.gpt-6.1-sol`, `anthropic.claude-sonnet-5` |
-| `-v1`, `-1:0`, date | Version suffix; some models require it | `anthropic.claude-opus-4-6-v1` |
-
-Observed under `gha_workflow_claude_code` in us-east-1 (October 2026): Claude and GPT-5.6/6.x
-need the `global.` (or `us.`) prefix; the bare ID fails with "on-demand throughput isn't
-supported". Some models need a one-time AWS Marketplace subscription by an account admin.
+Before adding an ID, verify it with `pi-bedrock-smoke.yml` in `pytorch/ciforge`. That trusted
+probing workflow uses `allow-unlisted-model: "true"`; normal callers keep the allowlist.
+`models.json` supplies definitions missing from the pinned pi catalog for offline runs.
 
 ## Issue triage
 
@@ -95,7 +93,8 @@ supported". Some models need a one-time AWS Marketplace subscription by an accou
 `issue-triage.yml` captures the opened issue. It uses the `triaging-issues` skill with
 `global.openai.gpt-6.1-sol` at medium thinking (the Claude Code stage 2 used Sonnet 5):
 
-1. **plan** (Bedrock, `issues: read`, egress blocked): the model reads the issue through
+1. **plan** (`pi-triage-plan.yml`, shared with distributed triage; Bedrock, `issues: read`,
+   egress blocked): the model reads the issue through
    read-only `gh` tools (`.github/pi/extensions/github-issue-tools.ts`: `get_issue`,
    `get_issue_comments`, `search_issues`, fixed to this repository) and submits a plan
    matching `.github/pi/schemas/issue-triage-plan.json`.
@@ -115,9 +114,8 @@ transfer becomes `triage review`, and download links stay in the body.
 
 `.github/workflows/distributed-triage-pi.yml` runs the `distributed-triage` skill on issues
 in the `oncall: distributed` queue: after `issue-triage-pi.yml` hands one off, and when the
-daily sweep (`claude-distributed-triage-cron.yml`) dispatches it. The plan job has the same
-lockdown; `scripts/issue_triage_pi/apply_distributed_plan.py` adds only labels from
-`distributed-labels.json`, keeps at most one sub-oncall label, never pairs `triaged` with
-`triage review` or `needs reproduction`, posts only the skill's templates, and never closes.
-A model-free `record` job appends the result to the daily manifest. Dispatch with
-`mode: dry-run` to see the effects without writing.
+daily sweep (`claude-distributed-triage-cron.yml`) dispatches it. It uses the same
+`pi-triage-plan.yml` model job; `scripts/issue_triage_pi/apply_distributed_plan.py` applies
+the plan and adds the `ptd-bot-triaged` marker that the sweep checks. A model-free `record`
+job appends the result to the daily manifest. Dispatch with `mode: dry-run` to see the
+effects without writing.

@@ -44,9 +44,6 @@ outputs:
   structured_output:
     description: Compact JSON from submit_result (empty when no result-schema)
     value: ${{ steps.run.outputs.structured_output }}
-  usage:
-    description: JSON token and cost totals for the session
-    value: ${{ steps.run.outputs.usage }}
   execution-file:
     description: >
       The session in claude-code-action's execution-file shape, for the review log

@@ -12,8 +12,15 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
-WORKFLOWS = {
-    name: yaml.safe_load((ROOT / ".github/workflows" / name).read_text())["jobs"]
+
+
+def load_jobs(name: str) -> dict:
+    return yaml.safe_load((ROOT / ".github/workflows" / name).read_text())["jobs"]
+
+
+PLAN = load_jobs("pi-triage-plan.yml")["plan"]
+CALLERS = {
+    name: load_jobs(name)
     for name in ("issue-triage-pi.yml", "distributed-triage-pi.yml")
 }
 ACTION = yaml.safe_load((ROOT / ".github/actions/pi-agent/action.yml").read_text())
@@ -28,124 +35,105 @@ READ_ONLY_TOOLS = {
     "get_issue_comments",
     "search_issues",
 }
+PLAN_PERMISSIONS = {"contents": "read", "issues": "read", "id-token": "write"}
 
 
 def steps(job: dict) -> list[dict]:
     return job.get("steps", [])
 
 
+def step(job: dict, predicate) -> dict:
+    (match,) = [s for s in steps(job) if predicate(s)]
+    return match
+
+
 def all_steps() -> list[dict]:
-    return [
-        step
-        for jobs in WORKFLOWS.values()
-        for job in jobs.values()
-        for step in steps(job)
-    ] + ACTION["runs"]["steps"]
+    jobs = [PLAN] + [job for jobs in CALLERS.values() for job in jobs.values()]
+    return [s for job in jobs for s in steps(job)] + ACTION["runs"]["steps"]
 
 
 class TriageWorkflowContract(unittest.TestCase):
-    def setUp(self):
-        self.workflows = list(WORKFLOWS.items())
+    def test_every_model_job_is_the_shared_plan_workflow(self):
+        for workflow, jobs in CALLERS.items():
+            with self.subTest(workflow=workflow):
+                self.assertEqual(
+                    jobs["plan"]["uses"], "./.github/workflows/pi-triage-plan.yml"
+                )
+                self.assertEqual(jobs["plan"]["permissions"], PLAN_PERMISSIONS)
+                agents = [
+                    s
+                    for job in jobs.values()
+                    for s in steps(job)
+                    if "pi-agent" in s.get("uses", "")
+                ]
+                self.assertEqual(agents, [])
 
     def test_model_job_blocks_egress_before_anything_runs(self):
-        for workflow, jobs in self.workflows:
-            with self.subTest(workflow=workflow):
-                first = steps(jobs["plan"])[0]
-                self.assertTrue(
-                    first["uses"].startswith("step-security/harden-runner@")
-                )
-                self.assertEqual(first["with"]["egress-policy"], "block")
-                self.assertTrue(first["with"]["disable-sudo"])
-                endpoints = set(first["with"]["allowed-endpoints"].split())
-                self.assertEqual(
-                    endpoints,
-                    {
-                        "sts.us-east-1.amazonaws.com:443",
-                        "bedrock-runtime.us-east-1.amazonaws.com:443",
-                        "api.github.com:443",
-                        "github.com:443",
-                        "codeload.github.com:443",
-                        "objects.githubusercontent.com:443",
-                        "registry.npmjs.org:443",
-                        "ossci-raw-job-status.s3.us-east-1.amazonaws.com:443",
-                        "ossci-raw-job-status.s3.amazonaws.com:443",
-                    },
-                )
+        first = steps(PLAN)[0]
+        self.assertTrue(first["uses"].startswith("step-security/harden-runner@"))
+        self.assertEqual(first["with"]["egress-policy"], "block")
+        self.assertTrue(first["with"]["disable-sudo"])
+        self.assertEqual(
+            set(first["with"]["allowed-endpoints"].split()),
+            {
+                "sts.us-east-1.amazonaws.com:443",
+                "bedrock-runtime.us-east-1.amazonaws.com:443",
+                "api.github.com:443",
+                "github.com:443",
+                "codeload.github.com:443",
+                "objects.githubusercontent.com:443",
+                "registry.npmjs.org:443",
+                "ossci-raw-job-status.s3.us-east-1.amazonaws.com:443",
+                "ossci-raw-job-status.s3.amazonaws.com:443",
+            },
+        )
 
     def test_model_job_holds_no_write_scope(self):
-        for workflow, jobs in self.workflows:
-            with self.subTest(workflow=workflow):
-                self.assertEqual(
-                    jobs["plan"]["permissions"],
-                    {"contents": "read", "issues": "read", "id-token": "write"},
-                )
+        self.assertEqual(PLAN["permissions"], PLAN_PERMISSIONS)
 
-    def test_write_job_has_no_model_credentials(self):
-        for workflow, jobs in self.workflows:
+    def test_model_gets_only_read_only_tools(self):
+        agent = step(PLAN, lambda s: s.get("uses") == "./.github/actions/pi-agent")
+        self.assertLessEqual(set(agent["with"]["tools"].split(",")), READ_ONLY_TOOLS)
+
+    def test_model_credentials_are_short_lived(self):
+        aws = step(PLAN, lambda s: "configure-aws-credentials" in s.get("uses", ""))
+        self.assertEqual(aws["with"]["role-duration-seconds"], 900)
+
+    def test_write_jobs_have_no_model_credentials(self):
+        for workflow, jobs in CALLERS.items():
             with self.subTest(workflow=workflow):
                 apply = jobs["apply"]
                 self.assertNotIn("id-token", apply["permissions"])
                 self.assertNotIn("environment", apply)
-                self.assertFalse(
-                    any("pi-agent" in step.get("uses", "") for step in steps(apply))
-                )
 
-    def test_model_gets_only_read_only_tools(self):
-        for workflow, jobs in self.workflows:
+    def test_only_applied_triage_in_pytorch_writes_the_execution_log(self):
+        # Replays and dry runs share the issue's S3 key; they must not overwrite
+        # the log of the run that actually triaged it.
+        for workflow, jobs in CALLERS.items():
             with self.subTest(workflow=workflow):
-                (agent,) = [
-                    step
-                    for step in steps(jobs["plan"])
-                    if step.get("uses") == "./.github/actions/pi-agent"
-                ]
-                self.assertLessEqual(
-                    set(agent["with"]["tools"].split(",")), READ_ONLY_TOOLS
-                )
+                log_prefix = jobs["plan"]["with"]["log-prefix"]
+                self.assertIn("needs.prepare.outputs.mode == 'apply'", log_prefix)
+                self.assertIn("github.repository == 'pytorch/pytorch'", log_prefix)
 
     def test_every_action_is_pinned_to_a_commit(self):
-        for step in all_steps():
-            uses = step.get("uses", "")
+        for s in all_steps():
+            uses = s.get("uses", "")
             if uses and not uses.startswith("./"):
                 self.assertRegex(uses, PINNED)
 
     def test_checkouts_do_not_persist_the_token(self):
-        for step in all_steps():
-            if step.get("uses", "").startswith("actions/checkout@"):
-                self.assertIs(step.get("with", {}).get("persist-credentials"), False)
-
-    def test_only_applied_triage_writes_the_issue_execution_log(self):
-        for workflow, jobs in self.workflows:
-            with self.subTest(workflow=workflow):
-                # Replays and dry runs share the issue's S3 key; they must not overwrite
-                # the log of the run that actually triaged it.
-                (upload,) = [
-                    step
-                    for step in steps(jobs["plan"])
-                    if step.get("name") == "Upload execution log to S3"
-                ]
-                self.assertIn("needs.prepare.outputs.mode == 'apply'", upload["if"])
-                self.assertIn("github.repository == 'pytorch/pytorch'", upload["if"])
-
-    def test_model_credentials_are_short_lived(self):
-        for workflow, jobs in self.workflows:
-            with self.subTest(workflow=workflow):
-                (aws,) = [
-                    step
-                    for step in steps(jobs["plan"])
-                    if "configure-aws-credentials" in step.get("uses", "")
-                ]
-                self.assertEqual(aws["with"]["role-duration-seconds"], 900)
+        for s in all_steps():
+            if s.get("uses", "").startswith("actions/checkout@"):
+                self.assertIs(s.get("with", {}).get("persist-credentials"), False)
 
     def test_no_workflow_runs_claude_code(self):
-        for step in all_steps():
-            self.assertNotIn("claude-code-action", step.get("uses", ""))
+        for s in all_steps():
+            self.assertNotIn("claude-code-action", s.get("uses", ""))
 
     def test_manifest_job_runs_no_model_and_cannot_write_issues(self):
-        record = WORKFLOWS["distributed-triage-pi.yml"]["record"]
+        record = CALLERS["distributed-triage-pi.yml"]["record"]
         self.assertEqual(record["permissions"].get("issues"), "read")
-        self.assertFalse(
-            any("pi-agent" in step.get("uses", "") for step in steps(record))
-        )
+        self.assertFalse(any("pi-agent" in s.get("uses", "") for s in steps(record)))
 
 
 class PiAgentActionContract(unittest.TestCase):

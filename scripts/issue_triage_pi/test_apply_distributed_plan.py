@@ -1,14 +1,24 @@
 """Behavior of the trusted plan-to-effects mapping for pi distributed triage."""
 
+import json
 import unittest
+from pathlib import Path
 
 from apply_distributed_plan import plan_effects
 from labels import DISTRIBUTED_SKILL, load_labels, load_templates
 
 
 TEMPLATES = load_templates(DISTRIBUTED_SKILL)
+SCHEMA = json.loads(
+    (
+        Path(__file__).resolve().parents[2]
+        / ".github/pi/schemas/distributed-triage-plan.json"
+    ).read_text()
+)["properties"]
 VALID = load_labels(DISTRIBUTED_SKILL / "distributed-labels.json")
+# Issue triage adds `bot-triaged` when it hands an issue off.
 ROUTED = {"oncall: distributed", "bot-triaged"}
+MARKER = "ptd-bot-triaged"
 
 
 def effects(decision, labels=(), templates=(), existing=ROUTED, bot_comments=()):
@@ -34,7 +44,7 @@ class DistributedPlanEffectsTest(unittest.TestCase):
                 "oncall: distributed parallelisms",
                 "module: dtensor",
                 "triaged",
-                "bot-triaged",
+                MARKER,
             ],
         )
 
@@ -48,20 +58,21 @@ class DistributedPlanEffectsTest(unittest.TestCase):
         result = effects(
             "classify", ["module: fsdp", "high priority", "module: inductor"]
         )
-        self.assertEqual(result.add_labels, ["module: fsdp"])
+        self.assertEqual(result.add_labels, ["module: fsdp", MARKER])
 
     def test_an_existing_sub_queue_is_kept(self):
         existing = ROUTED | {"oncall: distributed infra"}
         result = effects(
             "route", ["oncall: distributed checkpointing"], existing=existing
         )
-        self.assertFalse(result.mutates)
+        # Only the marker, so the daily sweep does not re-dispatch the issue.
+        self.assertEqual(result.add_labels, [MARKER])
 
     def test_two_requested_sub_queues_go_to_review(self):
         result = effects(
             "route", ["oncall: distributed infra", "oncall: distributed checkpointing"]
         )
-        self.assertEqual(result.add_labels, ["triage review"])
+        self.assertEqual(result.add_labels, ["triage review", MARKER])
 
     def test_triaged_never_pairs_with_review_or_reproduction(self):
         review = effects(
@@ -74,7 +85,7 @@ class DistributedPlanEffectsTest(unittest.TestCase):
             ["needs reproduction", "triaged"],
             ["needs_distributed_reproduction"],
         )
-        self.assertEqual(repro.add_labels, ["needs reproduction"])
+        self.assertEqual(repro.add_labels, ["needs reproduction", MARKER])
         self.assertEqual(
             repro.comment, TEMPLATES["needs_distributed_reproduction"]["comment"]
         )
@@ -91,10 +102,18 @@ class DistributedPlanEffectsTest(unittest.TestCase):
             "not_distributed",
             ["triage review"],
             ["not_distributed"],
-            existing=ROUTED | {"triage review"},
+            existing=ROUTED | {"triage review", MARKER},
             bot_comments=[posted],
         )
         self.assertFalse(result.mutates)
+
+    def test_classification_without_an_allowlisted_module_goes_to_review(self):
+        result = effects("classify", ["module: typo", "triaged"])
+        self.assertEqual(result.add_labels, ["triage review", MARKER])
+
+    def test_schema_matches_the_templates_and_the_high_priority_decision(self):
+        self.assertEqual(set(SCHEMA["templates"]["items"]["enum"]), set(TEMPLATES))
+        self.assertIn("high_priority", SCHEMA["decision"]["enum"])
 
     def test_nothing_is_ever_closed(self):
         self.assertFalse(
