@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: distributed checkpointing"]
 
+import os
 import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import torch
@@ -279,6 +281,93 @@ class TestQuantizedHfStorage(TestCase):
         expected_result[2:4, 3:4] = 2.0 * 4.0  # Block (1,1) intersection
 
         torch.testing.assert_close(committed_tensor, expected_result)
+
+    def _read_with_scale_file(self, scale_file_name, mock_safetensors):
+        """Read a quantized weight whose scale tensor is stored in scale_file_name."""
+        reader = QuantizedHuggingFaceStorageReader(self.path, thread_count=1)
+
+        weight_fqn = "model.layers.0.mlp.down_proj.weight"
+        scale_fqn = "model.layers.0.mlp.down_proj.weight_scale_inv"
+        reader._weight_scale_mapping = {weight_fqn: scale_fqn}
+        reader._weight_map = {
+            weight_fqn: "model-00001-of-00002.safetensors",
+            scale_fqn: scale_file_name,
+        }
+        reader._tensor_full_shapes = {weight_fqn: torch.Size([4, 4])}
+
+        mock_weight_file = MagicMock()
+        mock_weight_file.get_slice.return_value.__getitem__.return_value = torch.ones(
+            4, 4, dtype=torch.float32
+        )
+
+        mock_scale_file = MagicMock()
+        mock_scale_file.get_tensor.return_value = torch.tensor(
+            [[2.0]], dtype=torch.float32
+        )
+        mock_safe_open = mock_safetensors.safe_open
+        mock_safe_open.return_value.__enter__.return_value = mock_scale_file
+        mock_safe_open.return_value.__exit__.return_value = False
+
+        read_item = ReadItem(
+            type=LoadItemType.TENSOR,
+            storage_index=MetadataIndex(fqn=weight_fqn, offset=torch.Size([0, 0])),
+            dest_index=MetadataIndex(fqn=weight_fqn, offset=torch.Size([0, 0])),
+            storage_offsets=[0, 0],
+            dest_offsets=[0, 0],
+            lengths=[4, 4],
+        )
+        mock_planner = MagicMock()
+        mock_planner.resolve_tensor.return_value = torch.zeros(
+            4, 4, dtype=torch.float32
+        )
+
+        with patch.dict("sys.modules", {"safetensors": mock_safetensors}):
+            reader._process_read_request(mock_weight_file, read_item, mock_planner)
+
+        return mock_planner
+
+    def test_scale_file_in_subdirectory(self):
+        """Scale files in a subdirectory of the checkpoint are still loaded."""
+        scale_file_name = "shards/model-00002-of-00002.safetensors"
+        mock_safetensors = MagicMock()
+
+        mock_planner = self._read_with_scale_file(scale_file_name, mock_safetensors)
+
+        mock_safetensors.safe_open.assert_called_once()
+        self.assertEqual(
+            str(mock_safetensors.safe_open.call_args[0][0]),
+            str(Path(self.path) / scale_file_name),
+        )
+        committed_tensor = mock_planner.commit_tensor.call_args[0][1]
+        torch.testing.assert_close(
+            committed_tensor, torch.full((4, 4), 2.0, dtype=torch.float32)
+        )
+
+    def test_scale_file_parent_traversal_rejected(self):
+        """weight_map entries with '..' components cannot escape the checkpoint."""
+        for scale_file_name in (
+            "../secret.safetensors",
+            "shards/../../secret.safetensors",
+        ):
+            with self.subTest(scale_file_name=scale_file_name):
+                mock_safetensors = MagicMock()
+                with self.assertRaisesRegex(
+                    ValueError, "must be a relative path inside the checkpoint"
+                ):
+                    self._read_with_scale_file(scale_file_name, mock_safetensors)
+                mock_safetensors.safe_open.assert_not_called()
+
+    def test_scale_file_absolute_path_rejected(self):
+        """weight_map entries with absolute paths cannot escape the checkpoint."""
+        scale_file_name = os.path.abspath(
+            os.path.join(self.path, os.pardir, "secret.safetensors")
+        )
+        mock_safetensors = MagicMock()
+        with self.assertRaisesRegex(
+            ValueError, "must be a relative path inside the checkpoint"
+        ):
+            self._read_with_scale_file(scale_file_name, mock_safetensors)
+        mock_safetensors.safe_open.assert_not_called()
 
 
 if __name__ == "__main__":
