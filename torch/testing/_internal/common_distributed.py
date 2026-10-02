@@ -2189,8 +2189,15 @@ class MultiProcContinuousTest(TestCase):
         for task_queue in cls.task_queues:
             task_queue.put(None)
 
-        # Wait for all workers to exit
-        for process in cls.processes:
+        # Wait for all workers to exit; kill any that hang on shutdown so the
+        # class reports an error instead of blocking the job.
+        hung = []
+        for rank, process in enumerate(cls.processes):
+            process.join(TIMEOUT_DEFAULT)
+            if not process.is_alive():
+                continue
+            hung.append(rank)
+            process.kill()
             process.join()
 
         # Clear up the rendezvous file
@@ -2201,6 +2208,10 @@ class MultiProcContinuousTest(TestCase):
 
         logger.info(f"Class {cls.__name__} finished")  # noqa: G004
         super().tearDownClass()
+        if hung:
+            raise RuntimeError(
+                f"{cls.__name__}: ranks {hung} did not exit within {TIMEOUT_DEFAULT}s"
+            )
 
     def setUp(self) -> None:
         """
@@ -2242,6 +2253,10 @@ class MultiProcContinuousTest(TestCase):
                     if isinstance(rv, unittest.SkipTest):
                         skip = skip or rv
                         continue
+                    if not isinstance(rv, BaseException) and rv != self.id():
+                        rv = AssertionError(
+                            f"Expected rv == self.id(), got {rv} != {self.id()}"
+                        )
                     if isinstance(rv, BaseException):
                         if failure is None:
                             logger.warning(
@@ -2252,11 +2267,6 @@ class MultiProcContinuousTest(TestCase):
                             failure = rv
                         continue
 
-                    # Success
-                    if rv != self.id():
-                        raise AssertionError(
-                            f"Expected rv == self.id(), got {rv} != {self.id()}"
-                        )
                     logger.debug(
                         f"Main proc detected rank {i} finished {self.id()}"  # noqa: G004
                     )
