@@ -778,7 +778,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            sm_vt = variables.StaticMethodVariable(cls_attr, source=descriptor_source)
+            sm_vt = variables.StaticMethodVariable.from_descriptor(
+                tx, cls_attr, source=descriptor_source
+            )
             return sm_vt.tp_descr_get_impl(tx, self, self)
 
         if isinstance(cls_attr, classmethod):
@@ -793,7 +795,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 if self.source is not None
                 else None
             )
-            cm_vt = variables.ClassMethodVariable(cls_attr, source=descriptor_source)
+            cm_vt = variables.ClassMethodVariable.from_descriptor(
+                tx, cls_attr, name, source=descriptor_source
+            )
             return cm_vt.tp_descr_get_impl(tx, self, self)
 
         if isinstance(cls_attr, types.ClassMethodDescriptorType):
@@ -1765,12 +1769,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                             "compile_on_one_rank for this region."
                         )
 
-                var_kwargs = ConstDictVariable(
-                    {VariableTracker.build(tx, k): v for k, v in kwargs.items()}
-                )
-                var_args = TupleVariable(list(args))
-                # Use the tracing rank for the example stream, but retain the
-                # CurrentDeviceVariable for rank-relative reconstruction.
                 example_args: list[Any] = [
                     arg.value
                     if isinstance(arg, CurrentDeviceVariable)
@@ -1789,6 +1787,48 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     *example_args,
                     **example_kwargs,
                 )
+                current_device = next(
+                    (
+                        arg
+                        for arg in (*args, *kwargs.values())
+                        if isinstance(arg, CurrentDeviceVariable)
+                    ),
+                    None,
+                )
+                has_public_device_arg = len(args) < 3 and "device_index" not in kwargs
+                if current_device is None and has_public_device_arg:
+                    from torch.fx.experimental.proxy_tensor import (
+                        _coor_device_index_is_current,
+                    )
+
+                    device_arg = args[0] if args else kwargs.get("device")
+                    device_value = (
+                        None if device_arg is None else device_arg.as_python_constant()
+                    )
+                    uses_current_device = device_value is None or (
+                        isinstance(device_value, (str, torch.device))
+                        and torch.device(device_value).index is None
+                    )
+                    if uses_current_device and _coor_device_index_is_current(
+                        stream.device
+                    ):
+                        current_device = CurrentDeviceVariable(
+                            torch.device(stream.device.type)
+                        )
+                reconstruct_args = list(args)
+                reconstruct_kwargs = dict(kwargs)
+                if current_device is not None and has_public_device_arg:
+                    if args:
+                        reconstruct_args[0] = current_device
+                    elif "device" in kwargs:
+                        reconstruct_kwargs["device"] = current_device
+                var_args = TupleVariable(reconstruct_args)
+                var_kwargs = ConstDictVariable(
+                    {
+                        VariableTracker.build(tx, key): value
+                        for key, value in reconstruct_kwargs.items()
+                    }
+                )
                 from ..graph_bytecode_inputs import register_graph_created_object
                 from .streams import StreamVariable
 
@@ -1803,6 +1843,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     proxy=tx.output.create_proxy(
                         "call_function", get_external_object_by_index, (ind,), {}
                     ),
+                    current_device=current_device,
                 )
             elif issubclass(self.value, torch.Event):
                 from .lists import TupleVariable
@@ -3948,7 +3989,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # descriptor protocol and skip past the staticmethod wrapper.
             if can_use_mro_source:
                 source = self.get_source_by_walking_mro(tx, name)
-            sm_vt = variables.StaticMethodVariable(type_attr, source=source)
+            sm_vt = variables.StaticMethodVariable.from_descriptor(
+                tx, type_attr, source=source
+            )
             return sm_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )
@@ -3958,7 +4001,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # descriptor protocol and skip past the classmethod wrapper.
             if can_use_mro_source:
                 source = self.get_source_by_walking_mro(tx, name)
-            cm_vt = variables.ClassMethodVariable(type_attr, source=source)
+            cm_vt = variables.ClassMethodVariable.from_descriptor(
+                tx, type_attr, name, source=source
+            )
             return cm_vt.tp_descr_get_impl(
                 tx, self, self.tp_getattro_impl(tx, "__class__")
             )

@@ -30,7 +30,7 @@ def _storage_setup(
             FileSystemWriter,
         ]
     try:
-        from .fsspec_filesystem import FsspecReader, FsspecWriter
+        from ._fsspec_filesystem import FsspecReader, FsspecWriter
 
         targets.append(FsspecReader if reader else FsspecWriter)
     except Exception:

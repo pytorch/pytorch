@@ -452,21 +452,21 @@ function test_context_for_id_free_without_alloc() {
 }
 
 // ============================================================
-// Post-PR#177717 tests: trace events carry segment_pool_id directly
+// Post-PR#177717 tests: trace events carry pool_id directly
 // ============================================================
 
 function test_post177717_pool_id_from_trace_event() {
   console.log('test_post177717_pool_id_from_trace_event');
-  // After PR#177717, trace events include segment_pool_id. The code should
+  // After PR#177717, trace events include pool_id. The code should
   // use it directly instead of falling back to find_pool_id from segments.
   // Here the addr is OUTSIDE any segment, but pool_id is on the event itself.
   const poolId = [3, 15];
   const snapshot = makeSnapshot({
     traces: [
       { action: 'alloc', addr: 0xff0000, size: 1024, frames: [], stream: 0,
-        segment_pool_id: poolId },
+        pool_id: poolId },
       { action: 'free_completed', addr: 0xff0000, size: 1024, frames: [], stream: 0,
-        segment_pool_id: poolId },
+        pool_id: poolId },
     ],
     // No segment covers 0xff0000 — pool_id comes from the trace event
     segments: [],
@@ -481,13 +481,13 @@ function test_post177717_pool_id_from_trace_event() {
 
 function test_post177717_pool_free_without_alloc_no_segment() {
   console.log('test_post177717_pool_free_without_alloc_no_segment');
-  // Post-177717: free_completed has segment_pool_id on the event.
+  // Post-177717: free_completed has pool_id on the event.
   // The segment was unmapped (not in segments list), but pool_id is still known.
   const poolId = [1, 42];
   const snapshot = makeSnapshot({
     traces: [
       { action: 'free_completed', addr: 0xdead00, size: 2048, frames: [], stream: 0,
-        segment_pool_id: poolId },
+        pool_id: poolId },
     ],
     // Segment was unmapped — not present. Pool resolved from event.
     segments: [],
@@ -505,19 +505,19 @@ function test_post177717_pool_free_without_alloc_no_segment() {
 
 function test_post177717_mixed_events_with_and_without_pool_id() {
   console.log('test_post177717_mixed_events_with_and_without_pool_id');
-  // Some events have segment_pool_id (post-177717), others don't (pre-177717
+  // Some events have pool_id (post-177717), others don't (pre-177717
   // or default pool). Verify both paths work together.
   const poolId = [2, 8];
   const snapshot = makeSnapshot({
     traces: [
-      // Default pool alloc — no segment_pool_id on event, resolved via segment
+      // Default pool alloc -- no pool_id on event, resolved via segment
       { action: 'alloc', addr: 100, size: 300, frames: [], stream: 0 },
-      // Private pool alloc — segment_pool_id on the event
+      // Private pool alloc -- pool_id on the event
       { action: 'alloc', addr: 0xf000, size: 500, frames: [], stream: 0,
-        segment_pool_id: poolId },
+        pool_id: poolId },
       { action: 'free_completed', addr: 100, size: 300, frames: [], stream: 0 },
       { action: 'free_completed', addr: 0xf000, size: 500, frames: [], stream: 0,
-        segment_pool_id: poolId },
+        pool_id: poolId },
     ],
     segments: [
       // Only covers addr=100 (default pool). addr=0xf000 has no segment.
@@ -534,9 +534,50 @@ function test_post177717_mixed_events_with_and_without_pool_id() {
   assertContains(ctx0, 'pool_id (0, 0)', 'default pool resolved from segment');
 
   const ctx1 = result.context_for_id(1);
-  assertContains(ctx1, 'pool_id (2, 8)', 'private pool from event-level segment_pool_id');
+  assertContains(ctx1, 'pool_id (2, 8)', 'private pool from event-level pool_id');
 }
 
+function test_reused_address_keeps_historical_pool_id() {
+  console.log('test_reused_address_keeps_historical_pool_id');
+  const defaultPoolId = [0, 0];
+  const privatePoolId = [1, 7];
+  const addr = 0x1000;
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'segment_map', addr, size: 800, frames: [], stream: 0,
+        pool_id: defaultPoolId },
+      { action: 'alloc', addr, size: 400, frames: [], stream: 0,
+        pool_id: defaultPoolId },
+      { action: 'free_completed', addr, size: 400, frames: [], stream: 0,
+        pool_id: defaultPoolId },
+      { action: 'segment_unmap', addr, size: 800, frames: [], stream: 0,
+        pool_id: defaultPoolId },
+      { action: 'segment_map', addr, size: 800, frames: [], stream: 0,
+        pool_id: privatePoolId },
+      { action: 'alloc', addr, size: 400, frames: [], stream: 0,
+        pool_id: privatePoolId },
+      { action: 'free_completed', addr, size: 400, frames: [], stream: 0,
+        pool_id: privatePoolId },
+    ],
+    segments: [{
+      device: 0, address: addr, total_size: 800,
+      segment_pool_id: privatePoolId, stream: 0, blocks: [],
+    }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 15000, true);
+  assertContains(result.context_for_id(0), 'pool_id (0, 0)',
+    'warmup allocation keeps its recorded default pool');
+  assertContains(result.context_for_id(1), 'pool_id (1, 7)',
+    'capture allocation keeps its recorded private pool');
+
+  const envelopes = result.allocations_over_time.filter(
+    d => typeof d.elem === 'string' && d.elem.startsWith('pool:'));
+  assertEqual(envelopes.length, 1, 'should have one private pool envelope');
+  assertEqual(envelopes[0].elem, 'pool:1,7,s0', 'envelope uses the private pool');
+  assert(Math.min(...envelopes[0].timesteps) > 0,
+    'private pool envelope starts after the warmup allocation');
+}
 
 // ============================================================
 // Pool grouping by (pool_id, stream) tests
@@ -1560,6 +1601,7 @@ test_context_for_id_free_without_alloc();
 test_post177717_pool_id_from_trace_event();
 test_post177717_pool_free_without_alloc_no_segment();
 test_post177717_mixed_events_with_and_without_pool_id();
+test_reused_address_keeps_historical_pool_id();
 test_pool_grouped_by_stream();
 test_segment_snapshot_with_trace_history();
 test_segment_snapshot_no_trace();
