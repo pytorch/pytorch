@@ -1654,10 +1654,10 @@ def forward(self, pred_1, x_1):
                 normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
                 """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[4, 5]", arg1_1: "i64[1]"):
-        clamp: "i64[1]" = torch.ops.aten.clamp.default(arg1_1, 0, 1);  arg1_1 = None
+    def forward(self, arg0_1: "i64[1]", arg1_1: "f32[4, 5]"):
+        clamp: "i64[1]" = torch.ops.aten.clamp.default(arg0_1, 0, 1);  arg0_1 = None
 
-        clone: "f32[4, 5]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+        clone: "f32[4, 5]" = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
 
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
@@ -7299,9 +7299,9 @@ class TestControlFlowTraced(TestCase):
         self.assertExpectedInline(
             gm.code.strip(),
             """\
-def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor):
-    l_inp_x_ = L_inp_x_
+def forward(self, L_idx_ : torch.Tensor, L_inp_x_ : torch.Tensor):
     l_idx_ = L_idx_
+    l_inp_x_ = L_inp_x_
     clamp = l_idx_.clamp(0, 2);  l_idx_ = None
     switch_branch0_0 = self.switch_branch0_0
     switch_branch1_0 = self.switch_branch1_0
@@ -7369,12 +7369,12 @@ def forward(self, l_inp_x_):
         self.assertExpectedInline(
             gm.code.strip(),
             """\
-def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_branch0_closure_0_cell_contents : torch.Tensor, L_branch1_closure_0_cell_contents : torch.Tensor, L_branch2_closure_0_cell_contents : torch.Tensor):
-    l_inp_x_ = L_inp_x_
-    l_idx_ = L_idx_
+def forward(self, L_branch0_closure_0_cell_contents : torch.Tensor, L_branch1_closure_0_cell_contents : torch.Tensor, L_branch2_closure_0_cell_contents : torch.Tensor, L_idx_ : torch.Tensor, L_inp_x_ : torch.Tensor):
     l_branch0_closure_0_cell_contents = L_branch0_closure_0_cell_contents
     l_branch1_closure_0_cell_contents = L_branch1_closure_0_cell_contents
     l_branch2_closure_0_cell_contents = L_branch2_closure_0_cell_contents
+    l_idx_ = L_idx_
+    l_inp_x_ = L_inp_x_
     clamp = l_idx_.clamp(0, 2);  l_idx_ = None
     switch_branch0_0 = self.switch_branch0_0
     switch_branch1_0 = self.switch_branch1_0
@@ -7445,12 +7445,12 @@ def forward(self, l_inp_x_, l_branch0_closure_0_cell_contents_branch0, l_branch1
         self.assertExpectedInline(
             gm.code.strip(),
             """\
-def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_branch0_closure_0_cell_contents : torch.Tensor, L_branch0_closure_1_cell_contents : torch.Tensor, L_branch1_closure_2_cell_contents : torch.Tensor):
-    l_inp_x_ = L_inp_x_
-    l_idx_ = L_idx_
+def forward(self, L_branch0_closure_0_cell_contents : torch.Tensor, L_branch0_closure_1_cell_contents : torch.Tensor, L_branch1_closure_2_cell_contents : torch.Tensor, L_idx_ : torch.Tensor, L_inp_x_ : torch.Tensor):
     l_branch0_closure_0_cell_contents = L_branch0_closure_0_cell_contents
     l_branch0_closure_1_cell_contents = L_branch0_closure_1_cell_contents
     l_branch1_closure_2_cell_contents = L_branch1_closure_2_cell_contents
+    l_idx_ = L_idx_
+    l_inp_x_ = L_inp_x_
     clamp = l_idx_.clamp(0, 2);  l_idx_ = None
     switch_branch0_0 = self.switch_branch0_0
     switch_branch1_0 = self.switch_branch1_0
@@ -7617,13 +7617,13 @@ def forward(self, L_inp_x_ : torch.Tensor):
         self.assertExpectedInline(
             gm.code.strip(),
             """\
-def forward(self, L_inp_x_ : torch.Tensor, L_idx_ : torch.Tensor, L_linear0_parameters_weight_ : torch.nn.parameter.Parameter, L_linear0_parameters_bias_ : torch.nn.parameter.Parameter, L_linear1_parameters_weight_ : torch.nn.parameter.Parameter, L_linear1_parameters_bias_ : torch.nn.parameter.Parameter):
-    l_inp_x_ = L_inp_x_
+def forward(self, L_idx_ : torch.Tensor, L_inp_x_ : torch.Tensor, L_linear0_parameters_bias_ : torch.nn.parameter.Parameter, L_linear0_parameters_weight_ : torch.nn.parameter.Parameter, L_linear1_parameters_bias_ : torch.nn.parameter.Parameter, L_linear1_parameters_weight_ : torch.nn.parameter.Parameter):
     l_idx_ = L_idx_
-    l_linear0_parameters_weight_ = L_linear0_parameters_weight_
+    l_inp_x_ = L_inp_x_
     l_linear0_parameters_bias_ = L_linear0_parameters_bias_
-    l_linear1_parameters_weight_ = L_linear1_parameters_weight_
+    l_linear0_parameters_weight_ = L_linear0_parameters_weight_
     l_linear1_parameters_bias_ = L_linear1_parameters_bias_
+    l_linear1_parameters_weight_ = L_linear1_parameters_weight_
     clamp = l_idx_.clamp(0, 1);  l_idx_ = None
     switch_branch0_0 = self.switch_branch0_0
     switch_branch1_0 = self.switch_branch1_0
@@ -8315,12 +8315,12 @@ def forward(self, arg0_1):
             normalize_gm(gm.print_readable(print_output=False)),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_iter_: "i64[]", L_x_: "f32[2, 2]", L_self_buffers_dec_: "i64[]", L_self_modules_linear_parameters_weight_: "f32[2, 2]", L_self_modules_linear_parameters_bias_: "f32[2]"):
+    def forward(self, L_iter_: "i64[]", L_self_buffers_dec_: "i64[]", L_self_modules_linear_parameters_bias_: "f32[2]", L_self_modules_linear_parameters_weight_: "f32[2, 2]", L_x_: "f32[2, 2]"):
         l_iter_ = L_iter_
-        l_x_ = L_x_
         l_self_buffers_dec_ = L_self_buffers_dec_
-        l_self_modules_linear_parameters_weight_ = L_self_modules_linear_parameters_weight_
         l_self_modules_linear_parameters_bias_ = L_self_modules_linear_parameters_bias_
+        l_self_modules_linear_parameters_weight_ = L_self_modules_linear_parameters_weight_
+        l_x_ = L_x_
 
         body_fn_0 = self.body_fn_0
         cond_fn_0 = self.cond_fn_0
@@ -10516,7 +10516,7 @@ def forward(self, l_inp_, l_tmp_):
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
             """\
-def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
+def forward(self, L_a_ : torch.Tensor, s97 : torch.SymInt, L_b_ : torch.Tensor):
     l_a_ = L_a_
     l_b_ = L_b_
     tensor = torch.tensor([True])
@@ -10693,11 +10693,11 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_
             self.assertExpectedInline(
                 backend.graphs[0].code.strip(),
                 """\
-def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor, L_add_closure_0_cell_contents_0_param_ : torch.Tensor, L_add_closure_0_cell_contents_1_0_ : torch.Tensor):
-    l_init_ = L_init_
-    l_xs_ = L_xs_
+def forward(self, L_add_closure_0_cell_contents_0_param_ : torch.Tensor, L_add_closure_0_cell_contents_1_0_ : torch.Tensor, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
     l_add_closure_0_cell_contents_0_param_ = L_add_closure_0_cell_contents_0_param_
     l_add_closure_0_cell_contents_1_0_ = L_add_closure_0_cell_contents_1_0_
+    l_init_ = L_init_
+    l_xs_ = L_xs_
     scan_combine_fn_0 = self.scan_combine_fn_0
     scan = torch.ops.higher_order.scan(scan_combine_fn_0, [l_init_], [l_xs_], [l_add_closure_0_cell_contents_0_param_, l_add_closure_0_cell_contents_1_0_]);  scan_combine_fn_0 = l_init_ = l_xs_ = l_add_closure_0_cell_contents_0_param_ = l_add_closure_0_cell_contents_1_0_ = None
     getitem = scan[0]
@@ -11037,7 +11037,7 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", s27: "Sym(s27)", L_x_: "f32[s77, s27]"):
+    def forward(self, L_x_: "f32[s77, s27]", s77: "Sym(s77)", s27: "Sym(s27)"):
         l_x_ = L_x_
 
         body_fn_0 = self.body_fn_0
@@ -11363,7 +11363,7 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s77: "Sym(s77)", s27: "Sym(s27)", L_x_: "f32[s77, s27]"):
+    def forward(self, L_x_: "f32[s77, s27]", s77: "Sym(s77)", s27: "Sym(s27)"):
         l_x_ = L_x_
 
         sin: "f32[s77, s27]" = l_x_.sin();  l_x_ = None
@@ -11517,17 +11517,17 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[3, 3]", primals_2: "f32[3, 3]", primals_3: "f32[3]"):
+    def forward(self, primals_1: "f32[3]", primals_2: "f32[3, 3]", primals_3: "f32[3, 3]"):
         while_loop_cond_graph_0 = self.while_loop_cond_graph_0
         while_loop_body_graph_0 = self.while_loop_body_graph_0
-        while_loop_stack_output = torch.ops.higher_order.while_loop_stack_output(while_loop_cond_graph_0, while_loop_body_graph_0, (primals_1,), (primals_3, primals_2));  while_loop_cond_graph_0 = while_loop_body_graph_0 = None
+        while_loop_stack_output = torch.ops.higher_order.while_loop_stack_output(while_loop_cond_graph_0, while_loop_body_graph_0, (primals_3,), (primals_1, primals_2));  while_loop_cond_graph_0 = while_loop_body_graph_0 = None
         getitem: "f32[u2, 3, 3]" = while_loop_stack_output[0];  while_loop_stack_output = None
         select: "f32[3, 3]" = torch.ops.aten.select.int(getitem, 0, -1)
 
-        unsqueeze: "f32[1, 3, 3]" = torch.ops.aten.unsqueeze.default(primals_1, 0);  primals_1 = None
+        unsqueeze: "f32[1, 3, 3]" = torch.ops.aten.unsqueeze.default(primals_3, 0);  primals_3 = None
         slice_1: "f32[u2 - 1, 3, 3]" = torch.ops.aten.slice.Tensor(getitem, 0, 0, -1);  getitem = None
         cat: "f32[u2, 3, 3]" = torch.ops.aten.cat.default([unsqueeze, slice_1]);  unsqueeze = slice_1 = None
-        return (select, primals_2, primals_3, cat)
+        return (select, primals_1, primals_2, cat)
 
     class while_loop_cond_graph_0(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3]", arg2_1: "f32[3, 3]"):
@@ -11550,18 +11550,18 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_2: "f32[3, 3]", primals_3: "f32[3]", cat: "f32[u2, 3, 3]", tangents_1: "f32[3, 3]"):
+    def forward(self, primals_1: "f32[3]", primals_2: "f32[3, 3]", cat: "f32[u2, 3, 3]", tangents_1: "f32[3, 3]"):
         clone: "f32[3, 3]" = torch.ops.aten.clone.default(tangents_1, memory_format = torch.contiguous_format);  tangents_1 = None
-        zeros_like: "f32[3]" = torch.ops.aten.zeros_like.default(primals_3, pin_memory = False)
+        zeros_like: "f32[3]" = torch.ops.aten.zeros_like.default(primals_1, pin_memory = False)
         zeros_like_1: "f32[3, 3]" = torch.ops.aten.zeros_like.default(primals_2, pin_memory = False)
         while_loop_cond_graph_1 = self.while_loop_cond_graph_1
         while_loop_body_graph_1 = self.while_loop_body_graph_1
         zeros: "i64[]" = torch.ops.aten.zeros.default([], dtype = torch.int64, device = device(type='cpu'), pin_memory = False)
-        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_1, while_loop_body_graph_1, (zeros, clone, zeros_like, zeros_like_1), (cat, primals_3, primals_2));  while_loop_cond_graph_1 = while_loop_body_graph_1 = zeros = clone = zeros_like = zeros_like_1 = cat = primals_3 = primals_2 = None
+        while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_1, while_loop_body_graph_1, (zeros, clone, zeros_like, zeros_like_1), (cat, primals_1, primals_2));  while_loop_cond_graph_1 = while_loop_body_graph_1 = zeros = clone = zeros_like = zeros_like_1 = cat = primals_1 = primals_2 = None
         getitem_2: "f32[3, 3]" = while_loop[1]
         getitem_3: "f32[3]" = while_loop[2]
         getitem_4: "f32[3, 3]" = while_loop[3];  while_loop = None
-        return (getitem_2, getitem_4, getitem_3)
+        return (getitem_3, getitem_4, getitem_2)
 
     class while_loop_cond_graph_1(torch.nn.Module):
         def forward(self, arg0_1: "i64[]", arg1_1: "f32[3, 3]", arg2_1: "f32[3]", arg3_1: "f32[3, 3]", arg4_1: "f32[u2, 3, 3]", arg5_1: "f32[3]", arg6_1: "f32[3, 3]"):
@@ -12012,10 +12012,10 @@ class GraphModule(torch.nn.Module):
                 normalize_gm(bk.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s17: "Sym(s17)", s94: "Sym(s94)", L_y_: "f32[s17, s94]", L_z_: "f32[s17, s94]", L_x_: "f32[s17, s94]"):
+    def forward(self, L_x_: "f32[s17, s94]", L_y_: "f32[s17, s94]", s17: "Sym(s17)", s94: "Sym(s94)", L_z_: "f32[s17, s94]"):
+        l_x_ = L_x_
         l_y_ = L_y_
         l_z_ = L_z_
-        l_x_ = L_x_
 
         sum_1: "f32[]" = l_x_.sum()
         gt: "b8[]" = sum_1 > 0;  sum_1 = None
@@ -12207,16 +12207,16 @@ class <lambda>(torch.nn.Module):
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[1]", arg1_1: "b8[]", arg2_1: "f32[8]"):
-        clone: "f32[1]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    def forward(self, arg0_1: "b8[]", arg1_1: "f32[8]", arg2_1: "f32[1]"):
+        clone: "f32[1]" = torch.ops.aten.clone.default(arg2_1);  arg2_1 = None
 
-        _to_copy: "i64[]" = torch.ops.aten._to_copy.default(arg1_1, dtype = torch.int64);  arg1_1 = None
+        _to_copy: "i64[]" = torch.ops.aten._to_copy.default(arg0_1, dtype = torch.int64);  arg0_1 = None
 
         clamp: "i64[]" = torch.ops.aten.clamp.default(_to_copy, 0, 1);  _to_copy = None
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
         _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg2_1, clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg1_1, clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
         getitem: "f32[8]" = auto_functionalized_v2[0]
         getitem_1: "f32[8]" = auto_functionalized_v2[1]
         getitem_2: "f32[1]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
@@ -12224,7 +12224,7 @@ class <lambda>(torch.nn.Module):
         add: "f32[8]" = torch.ops.aten.add.Tensor(getitem_2, getitem_1);  getitem_2 = None
         add_1: "f32[8]" = torch.ops.aten.add.Tensor(add, getitem);  add = getitem = None
 
-        copy_: "f32[8]" = torch.ops.aten.copy_.default(arg2_1, getitem_1);  arg2_1 = getitem_1 = copy_ = None
+        copy_: "f32[8]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
         return (add_1,)
 
     class auto_functionalized_subgraph_0(torch.nn.Module):
@@ -12281,8 +12281,8 @@ class <lambda>(torch.nn.Module):
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[4, 3]", arg2_1: "f32[1]"):
-        clone: "f32[3, 4]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    def forward(self, arg0_1: "f32[4, 3]", arg1_1: "f32[3, 4]", arg2_1: "f32[1]"):
+        clone: "f32[3, 4]" = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
 
         sum_1: "f32[]" = torch.ops.aten.sum.default(clone)
         gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
@@ -12292,7 +12292,7 @@ class <lambda>(torch.nn.Module):
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
         _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg1_1, clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.switch, index = clamp, branch0_fn = auto_functionalized_subgraph_0, branch1_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg0_1, clone], _op_schema = _tree_spec_constant0);  clamp = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
         getitem: "f32[3, 3]" = auto_functionalized_v2[0]
         getitem_1: "f32[4, 3]" = auto_functionalized_v2[1]
         getitem_2: "f32[3, 4]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
@@ -12303,7 +12303,7 @@ class <lambda>(torch.nn.Module):
         add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, sum_3);  add = sum_3 = None
         add_2: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_1, sum_2);  add_1 = sum_2 = None
 
-        copy_: "f32[4, 3]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
+        copy_: "f32[4, 3]" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
         return (add_2,)
 
     class auto_functionalized_subgraph_0(torch.nn.Module):
@@ -12836,15 +12836,15 @@ class <lambda>(torch.nn.Module):
                 normalize_gm(fw_gm.print_readable(print_output=False)),
                 """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[4, 3]", arg2_1: "f32[1]"):
-        clone: "f32[3, 4]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    def forward(self, arg0_1: "f32[4, 3]", arg1_1: "f32[3, 4]", arg2_1: "f32[1]"):
+        clone: "f32[3, 4]" = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
 
         sum_1: "f32[]" = torch.ops.aten.sum.default(clone)
         gt: "b8[]" = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
         auto_functionalized_subgraph_0 = self.auto_functionalized_subgraph_0
         auto_functionalized_subgraph_1 = self.auto_functionalized_subgraph_1
         _tree_spec_constant0 = self._tree_spec_constant0
-        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.cond, pred = gt, true_fn = auto_functionalized_subgraph_0, false_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg1_1, clone], _op_schema = _tree_spec_constant0);  gt = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
+        auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops.higher_order.cond, pred = gt, true_fn = auto_functionalized_subgraph_0, false_fn = auto_functionalized_subgraph_1, _operand0_base_index = 0, _operand1_base_index = 1, _all_bases = [arg0_1, clone], _op_schema = _tree_spec_constant0);  gt = auto_functionalized_subgraph_0 = auto_functionalized_subgraph_1 = clone = _tree_spec_constant0 = None
         getitem: "f32[3, 3]" = auto_functionalized_v2[0]
         getitem_1: "f32[4, 3]" = auto_functionalized_v2[1]
         getitem_2: "f32[3, 4]" = auto_functionalized_v2[2];  auto_functionalized_v2 = None
@@ -12855,7 +12855,7 @@ class <lambda>(torch.nn.Module):
         add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, sum_3);  add = sum_3 = None
         add_2: "f32[3, 3]" = torch.ops.aten.add.Tensor(add_1, sum_2);  add_1 = sum_2 = None
 
-        copy_: "f32[4, 3]" = torch.ops.aten.copy_.default(arg1_1, getitem_1);  arg1_1 = getitem_1 = copy_ = None
+        copy_: "f32[4, 3]" = torch.ops.aten.copy_.default(arg0_1, getitem_1);  arg0_1 = getitem_1 = copy_ = None
         return (add_2,)
 
     class auto_functionalized_subgraph_0(torch.nn.Module):

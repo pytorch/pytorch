@@ -280,16 +280,16 @@ class TestLocalMap(TestCase):
                 normalize_gm(backend.graphs[0].print_readable(print_output=False)),
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_self_modules_wq_parameters_weight_: "f32[96, 96]", L_x_: "f32[8, 16, 96]", L_self_modules_wk_parameters_weight_: "f32[96, 96]", L_self_modules_wv_parameters_weight_: "f32[96, 96]", L_self_modules_wo_parameters_weight_: "f32[96, 96]", L_self_modules_w1_parameters_weight_: "f32[384, 96]", L_self_modules_w2_parameters_weight_: "f32[96, 384]"):
-        l_self_modules_wq_parameters_weight_ = L_self_modules_wq_parameters_weight_
-        l_x_ = L_x_
-        l_self_modules_wk_parameters_weight_ = L_self_modules_wk_parameters_weight_
-        l_self_modules_wv_parameters_weight_ = L_self_modules_wv_parameters_weight_
-        l_self_modules_wo_parameters_weight_ = L_self_modules_wo_parameters_weight_
+    def forward(self, L_self_modules_w1_parameters_weight_: "f32[384, 96]", L_self_modules_w2_parameters_weight_: "f32[96, 384]", L_self_modules_wk_parameters_weight_: "f32[96, 96]", L_self_modules_wo_parameters_weight_: "f32[96, 96]", L_self_modules_wq_parameters_weight_: "f32[96, 96]", L_self_modules_wv_parameters_weight_: "f32[96, 96]", L_x_: "f32[8, 16, 96]"):
         l_self_modules_w1_parameters_weight_ = L_self_modules_w1_parameters_weight_
         l_self_modules_w2_parameters_weight_ = L_self_modules_w2_parameters_weight_
-        linear: "f32[8, 16, 96]" = torch._C._nn.linear(l_x_, l_self_modules_wq_parameters_weight_, None);  l_self_modules_wq_parameters_weight_ = None
-        linear_1: "f32[8, 16, 96]" = torch._C._nn.linear(l_x_, l_self_modules_wk_parameters_weight_, None);  l_self_modules_wk_parameters_weight_ = None
+        l_self_modules_wk_parameters_weight_ = L_self_modules_wk_parameters_weight_
+        l_self_modules_wo_parameters_weight_ = L_self_modules_wo_parameters_weight_
+        l_self_modules_wq_parameters_weight_ = L_self_modules_wq_parameters_weight_
+        l_self_modules_wv_parameters_weight_ = L_self_modules_wv_parameters_weight_
+        l_x_ = L_x_
+        linear: "f32[8, 16, 96]" = torch._C._nn.linear(l_x_, l_self_modules_wk_parameters_weight_, None);  l_self_modules_wk_parameters_weight_ = None
+        linear_1: "f32[8, 16, 96]" = torch._C._nn.linear(l_x_, l_self_modules_wq_parameters_weight_, None);  l_self_modules_wq_parameters_weight_ = None
         linear_2: "f32[8, 16, 96]" = torch._C._nn.linear(l_x_, l_self_modules_wv_parameters_weight_, None);  l_self_modules_wv_parameters_weight_ = None
         unflatten: "f32[8, 16, 16, 6]" = linear.unflatten(-1, (16, -1));  linear = None
         permute: "f32[8, 16, 16, 6]" = unflatten.permute(0, 2, 1, 3);  unflatten = None
@@ -298,7 +298,7 @@ class GraphModule(torch.nn.Module):
         unflatten_2: "f32[8, 16, 16, 6]" = linear_2.unflatten(-1, (16, -1));  linear_2 = None
         permute_2: "f32[8, 16, 16, 6]" = unflatten_2.permute(0, 2, 1, 3);  unflatten_2 = None
         subgraph_0 = self.subgraph_0
-        local_map_hop = torch.ops.higher_order.local_map_hop(subgraph_0, permute, permute_1, permute_2);  subgraph_0 = permute = permute_1 = permute_2 = None
+        local_map_hop = torch.ops.higher_order.local_map_hop(subgraph_0, permute_1, permute, permute_2);  subgraph_0 = permute_1 = permute = permute_2 = None
         getitem: "f32[8, 16, 16, 6]" = local_map_hop[0];  local_map_hop = None
         permute_3: "f32[8, 16, 16, 6]" = getitem.permute(0, 2, 1, 3);  getitem = None
         flatten: "f32[8, 16, 96]" = permute_3.flatten(-2);  permute_3 = None
