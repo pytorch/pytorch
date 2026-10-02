@@ -5842,8 +5842,10 @@ def max_pool_checks(
 def _pool_argmax_inner_fn(x, kernel_size, inner_fn):
     # Loop reordering runs after lowering and may permute the reduction ranges, so
     # the offset is returned as an explicit row-major index into the window.
-    supports_logical_index_argreduce = is_triton(x) or (
-        ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+    supports_logical_index_argreduce = (
+        is_triton(x)
+        or ir.get_device_type(x) == "mps"
+        or (ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp")
     )
     if len(kernel_size) == 1 or not supports_logical_index_argreduce:
         return inner_fn
@@ -7344,8 +7346,10 @@ def _make_reduction_inner(
 
     # Loop reordering happens after lowering, so the input IR cannot reliably predict
     # when the physical reduction order will differ from the logical order.
-    supports_logical_index_argreduce = is_triton(x) or (
-        ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+    supports_logical_index_argreduce = (
+        is_triton(x)
+        or ir.get_device_type(x) == "mps"
+        or (ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp")
     )
     should_compute_logical_index = (
         reduction_type
@@ -7733,7 +7737,7 @@ def pow(a, b):
     return pow_native(a, b)
 
 
-def mutate_to(changed, val, unsafe_alias=False):
+def mutate_to(changed, val, unsafe_alias=False, share_value=True):
     if isinstance(changed, TensorBox):
         changed_data = changed.data
     else:
@@ -7741,8 +7745,34 @@ def mutate_to(changed, val, unsafe_alias=False):
     if isinstance(val, TensorBox):
         val = val.data
 
-    if not isinstance(val, ir.StorageBox):
-        # introduce a copy to handle views
+    # Fast path, just swing the data pointer. Not for a realized StorageBox
+    # (inputs and module buffers included): it may already be referenced by
+    # name (views, extern kernel inputs), so its data can't be replaced.
+    # Except an empty buffer nothing has written yet: it holds no data, and
+    # its views only need the new value in its layout.
+    swing: ir.StorageBox | None = None
+    empty: ir.ComputedBuffer | None = None
+    if isinstance(changed_data, ir.StorageBox):
+        target = changed_data.data
+        if (
+            not unsafe_alias
+            and isinstance(target, ir.ComputedBuffer)
+            and target.is_no_op()
+            and changed_data.get_name() not in V.graph.mutated_buffers
+        ):
+            empty = target
+        if empty is not None or not IRNode.is_realized_node(target):
+            swing = changed_data
+
+    # Introduce a copy to handle views, and on the fast path to lay the value
+    # out as the empty buffer is, or when val is another tensor's (the copy_
+    # lowerings pass share_value=False): if changed took its buffer, an
+    # in-place write to either would change both.
+    if (
+        not isinstance(val, ir.StorageBox)
+        or empty is not None
+        or (swing is not None and not share_value)
+    ):
         node = Pointwise.create(
             device=changed.get_device(),
             dtype=changed.get_dtype(),
@@ -7755,15 +7785,13 @@ def mutate_to(changed, val, unsafe_alias=False):
         if not (isinstance(val, ir.StorageBox)):
             raise AssertionError("expected: isinstance(val, ir.StorageBox)")
 
-    if isinstance(changed_data, ir.StorageBox) and not (
-        changed_data.is_input_buffer()
-        # In AOTI, module parameters and buffers are not lifted as graph inputs
-        or changed_data.is_module_buffer()
-        or isinstance(changed_data.data, ir.NopKernel)
-    ):
-        # Fast path, just swing the data pointer
+    if swing is not None:
         val.realize()
-        changed_data.data = val.data
+        if empty is not None:
+            if not isinstance(val.data, ir.ComputedBuffer):
+                raise AssertionError("expected: isinstance(val.data, ComputedBuffer)")
+            val.data.layout = empty.layout
+        swing.data = val.data
         return changed
 
     ir.MutationLayoutSHOULDREMOVE.realize_into(
@@ -7785,7 +7813,7 @@ def copy_(dst, src, non_blocking=False):
     src = to_device(src, dst.get_device())
     src = to_dtype(src, dst.get_dtype())
     src = expand(src, dst.get_size())
-    return mutate_to(dst, src)
+    return mutate_to(dst, src, share_value=False)
 
 
 @make_pointwise
@@ -9164,7 +9192,7 @@ if hasattr(torch.ops.fsdp, "copy_"):
         src = to_device(src, dst.get_device())
         src = to_dtype(src, dst.get_dtype())
         src = expand(src, dst.get_size())
-        return mutate_to(dst, src)
+        return mutate_to(dst, src, share_value=False)
 
 
 @register_lowering(torch.ops.aten.resize)

@@ -1651,6 +1651,7 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             ".claude/skills/pr-review/SKILL.md",
             ".claude/skills/pr-review/review-checklist.md",
             ".claude/skills/pr-review/bc-guidelines.md",
+            ".claude/skills/pr-review/ci-runner-naming.md",
         } | {
             f".claude/hooks/pr_review/{n}"
             for n in (
@@ -5073,8 +5074,8 @@ def rubric_delegates() -> set[Path]:
     """Every file the rubric sends the model to, TRANSITIVELY.
 
     Derived from the rubric rather than listed, so a delegate added tomorrow is
-    covered. Transitive because `pr-review/SKILL.md` delegates onward to its own
-    checklist and BC guidelines.
+    covered. Transitive because pr-review's own files link onward to further
+    delegates.
 
     Only inline `[text](target)` links are seen; a reference-style link or a
     file named in prose is invisible, which UNDERSTATES the set. The hash is
@@ -5160,7 +5161,7 @@ class TestTheRubricIsAWrapperOverPrReview(unittest.TestCase):
         self.assertTrue(
             self.delegates,
             "the rubric links to no other skill file — it is standalone again, "
-            "so the pr-review Read grant and its three prompt-hash entries are "
+            "so the pr-review Read grant and its prompt-hash entries are "
             "now unearned and should be removed with it.",
         )
 
@@ -5182,8 +5183,9 @@ class TestTheRubricIsAWrapperOverPrReview(unittest.TestCase):
         # constant is that it is VERBATIM.
         "Read and apply [pr-review/SKILL.md](../pr-review/SKILL.md), all nine "  # @lint-ignore
         "Review Philosophy points, and its full "
-        "[review-checklist.md](../pr-review/review-checklist.md) and "  # @lint-ignore
-        "[bc-guidelines.md](../pr-review/bc-guidelines.md)."  # @lint-ignore
+        "[review-checklist.md](../pr-review/review-checklist.md), "  # @lint-ignore
+        "[bc-guidelines.md](../pr-review/bc-guidelines.md) and "  # @lint-ignore
+        "[ci-runner-naming.md](../pr-review/ci-runner-naming.md)."  # @lint-ignore
     )
 
     def test_the_rubric_tells_the_model_to_apply_what_it_links(self):
