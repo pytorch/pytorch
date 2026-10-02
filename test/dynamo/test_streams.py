@@ -2913,6 +2913,22 @@ instantiate_parametrized_tests(TestStreamsCPUSpecific)
 
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
+    def test_eager_backend_allows_input_mutation_stream_join(self) -> None:
+        def fn(x, small):
+            side = torch.cuda.Stream()
+            with side:
+                x.add_(1)
+            torch.cuda.current_stream().wait_stream(side)
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize()
+        result = torch.compile(fn, backend="eager", fullgraph=True)(x, small)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(result, torch.ones_like(result))
+
     @parametrize("backend", ("aot_eager", "inductor"))
     @parametrize("first_mutation", ("add", "zero", "fill", "copy"))
     def test_earlier_input_mutation_before_join_errors(

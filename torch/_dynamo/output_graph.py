@@ -1381,8 +1381,22 @@ class OutputGraph(OutputGraphCommon):
                 self._last_checked_input_versions[input_idx] = cur_version
             input_idx += 1
 
+    def _has_deferred_input_writeback(self) -> bool:
+        from .backends.debugging import eager
+        from .eval_frame import innermost_backend
+
+        if self.compiler_fn is None:
+            return True
+        backend = innermost_backend(self.compiler_fn)
+        if isinstance(backend, torch._TorchCompileWrapper):
+            backend = backend.compiler_fn
+        return backend is not eager
+
     def check_stream_barrier_after_input_mutation(self, stream: torch.Stream) -> None:
-        if _stream_identity(stream) in self._input_mutation_stream_handles:
+        if (
+            _stream_identity(stream) in self._input_mutation_stream_handles
+            and self._has_deferred_input_writeback()
+        ):
             raise RuntimeError(
                 "Cannot safely place an input mutation write-back after a user "
                 "stream barrier inside torch.compile. Move the join after "
@@ -1390,10 +1404,13 @@ class OutputGraph(OutputGraphCommon):
             )
 
     def check_device_barrier_after_input_mutation(self, device: torch.device) -> None:
-        if any(
-            mutated.type == device.type
-            and (device.index is None or mutated.index == device.index)
-            for mutated, _ in self._input_mutation_stream_handles
+        if (
+            any(
+                mutated.type == device.type
+                and (device.index is None or mutated.index == device.index)
+                for mutated, _ in self._input_mutation_stream_handles
+            )
+            and self._has_deferred_input_writeback()
         ):
             raise RuntimeError(
                 "Cannot safely place an input mutation write-back after a user "
