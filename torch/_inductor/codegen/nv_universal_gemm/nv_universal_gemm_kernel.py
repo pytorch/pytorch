@@ -293,8 +293,10 @@ def _compile_nvgemm(
     if fallback_fn is not None:
         artifact = fallback_fn(kernel)
     if artifact is None:
+        if cc is None:
+            cc = _current_target_sm(input_tensors[0].device.index or 0).cc
         with CUTEDSL_COMPILE_LOCK:
-            artifact = kernel.compile(args)
+            artifact = kernel.compile(args, target_sm=f"{cc}a")
         was_compiled = True
 
     return artifact, args, kernel, was_compiled
@@ -1232,7 +1234,7 @@ def _nvgemm_precompile(
     from torch._inductor.runtime.cutedsl_cache import disk_cache_set
     from torch._subclasses.fake_tensor import FakeTensorMode
 
-    if max_active_clusters is None:
+    if max_active_clusters is None or device_capability is None:
         return
 
     # cutlass.operators queries device occupancy while compiling. In async-compile
