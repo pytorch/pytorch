@@ -3147,10 +3147,9 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
                     dynamo_logger.debug(user_stack_trace)
 
         all_args = self.self_args() + list(args)
-        # Inner torch.compile wrapper: disable nested graph breaks to
-        # preserve the inner compile's semantics (e.g. fullgraph=True).
-        # Graph breaks inside the inner function should raise Unsupported
-        # so they're handled by the outer frame, not as nested breaks.
+        # Do not resume inside _torchdynamo_inline when the wrapper changes call
+        # semantics. Inner torch.compile preserves options such as fullgraph,
+        # while ScriptFunction must preserve TorchScript semantics.
         # Skip this for recursive calls to the same compiled function
         # (the wrapper's original callable matches the root frame's code).
         is_inner_torch_compile = (
@@ -3167,7 +3166,10 @@ class WrapperUserFunctionVariable(BaseUserFunctionVariable):
         )
         polyfill = (
             polyfills.getattr_and_trace_no_nested_graph_breaks
-            if is_inner_torch_compile
+            if (
+                is_inner_torch_compile
+                or isinstance(self.wrapper_obj, torch.jit.ScriptFunction)
+            )
             else polyfills.getattr_and_trace
         )
         return VariableTracker.build(
