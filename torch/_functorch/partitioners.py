@@ -3771,136 +3771,17 @@ def choose_saved_values_set(
     )[0]
 
 
-def _stable_target_str(target: Any) -> str:
-    """Stringify a node target stably across processes.
-
-    ``str()`` on a plain Python-function target (e.g. ``torch.sym_not``) renders
-    its ``repr`` including the object's memory address (``<function sym_not at
-    0x...>``), which differs per process. That poisons cross-rank graph hashing.
-    Use FX's qualified name for callables so equal graphs hash equally.
-    """
-    from torch.fx.node import _get_qualified_name
-
-    if callable(target):
-        try:
-            return _get_qualified_name(target)
-        except Exception:
-            return str(target)
-    return str(target)
-
-
-def _cone_hashes(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
-    """Compute a forward-looking structural hash for each node.
-
-    Each node's hash captures its "role" in the graph toward the output:
-    hash(self_key, sorted(cone_hash(user) for user in users)).
-
-    For placeholders, self_key uses tensor metadata instead of the node name
-    (which varies across ranks). This makes the hash invariant to the original
-    node naming and ordering.
-    """
-    hashes: dict[torch.fx.Node, str] = {}
-    for node in reversed(list(graph.nodes)):
-        if node.op == "placeholder":
-            val = node.meta.get("val")
-            if isinstance(val, torch.Tensor):
-                # Exclude shape: different ranks may have different input
-                # shapes (e.g., shard sizes) for structurally identical graphs.
-                self_key: tuple[Any, ...] = (
-                    "placeholder",
-                    str(val.dtype),
-                    val.requires_grad,
-                )
-            elif isinstance(val, torch.SymInt):
-                self_key = ("placeholder", "symint")
-            else:
-                self_key = ("placeholder",)
-        elif node.op == "output":
-            self_key = ("output",)
-        else:
-            self_key = (node.op, _stable_target_str(node.target))
-
-        user_hashes = tuple(sorted(hashes[u] for u in node.users))
-        hashes[node] = hashlib.sha256(
-            str((self_key, user_hashes)).encode("utf-8")
-        ).hexdigest()
-
-    return hashes
-
-
-def _canonical_node_names(graph: torch.fx.Graph) -> dict[torch.fx.Node, str]:
-    """Build a canonical name mapping for graph nodes using Kahn's algorithm.
-
-    Returns a dict mapping each node to a deterministic name like "node_0",
-    "node_1", etc. The mapping is invariant to the original node ordering and
-    naming, so structurally equivalent graphs (e.g., traced with different dict
-    iteration orders across distributed ranks) produce identical mappings.
-
-    Does NOT modify the graph.
-    """
-    cone = _cone_hashes(graph)
-
-    indeg: dict[torch.fx.Node, int] = dict.fromkeys(graph.nodes, 0)
-    for node in graph.nodes:
-        for user in node.users:
-            indeg[user] += 1
-
-    canonical_idx: dict[torch.fx.Node, int] = {}
-
-    def _canonical_key(node: torch.fx.Node) -> tuple[Any, ...]:
-        if node.op == "placeholder":
-            val = node.meta.get("val")
-            if isinstance(val, torch.Tensor):
-                # Exclude shape: different ranks may have different input
-                # shapes (e.g., shard sizes) for structurally identical graphs.
-                meta_key: tuple[Any, ...] = (
-                    str(val.dtype),
-                    val.requires_grad,
-                )
-            elif isinstance(val, torch.SymInt):
-                meta_key = ("symint",)
-            else:
-                meta_key = ()
-            return (0, meta_key, cone[node])
-        elif node.op == "get_attr":
-            return (1, str(node.target))
-        elif node.op == "output":
-            return (3,)
-        else:
-            input_indices = tuple(canonical_idx[n] for n in node.all_input_nodes)
-            return (2, _stable_target_str(node.target), input_indices)
-
-    # Seed the heap with nodes that have no dependencies.
-    # The counter ensures deterministic ordering when keys are equal.
-    counter = 0
-    ready: list[tuple[tuple[Any, ...], int, fx.Node]] = []
-    for node in graph.nodes:
-        if indeg[node] == 0:
-            heapq.heappush(ready, (_canonical_key(node), counter, node))
-            counter += 1
-
-    canonical_order: list[fx.Node] = []
-
-    while ready:
-        _, _, cur = heapq.heappop(ready)
-        canonical_order.append(cur)
-        canonical_idx[cur] = len(canonical_idx)
-
-        for user in cur.users:
-            indeg[user] -= 1
-            if indeg[user] == 0:
-                heapq.heappush(ready, (_canonical_key(user), counter, user))
-                counter += 1
-
-    return {node: f"node_{i}" for i, node in enumerate(canonical_order)}
-
-
 def _sync_decision_cross_ranks(
     joint_graph: torch.fx.Graph, saved_values: list[torch.fx.Node]
 ) -> list[torch.fx.Node]:
     # use the same policy across different GPUs
     from torch._dynamo.distributed import get_compile_sync_pg
+    from torch._functorch._aot_autograd.graph_compile import (
+        _maybe_canonicalize_joint_graph_for_sync,
+    )
     from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+    _maybe_canonicalize_joint_graph_for_sync(joint_graph)
 
     def has_collectives(joint_graph: torch.fx.Graph) -> bool:
         for node in joint_graph.nodes:
@@ -3914,7 +3795,6 @@ def _sync_decision_cross_ranks(
         torch.distributed.is_available()
         and torch.distributed.is_initialized()
         and torch.distributed.get_world_size() > 1
-        and has_collectives(joint_graph)
     ):
         return saved_values
 
@@ -3923,84 +3803,132 @@ def _sync_decision_cross_ranks(
         raise AssertionError("Compile sync process group must be available here")
     coll_device = torch.distributed.distributed_c10d._get_object_coll_device(pg)
 
-    canonical = _canonical_node_names(joint_graph)
-    reverse_canonical = {v: k for k, v in canonical.items()}
+    from torch.fx.passes.canonicalize import (
+        _arg_has_stable_identity,
+        _is_safe_to_reorder,
+        _stable_arg_key,
+        _stable_kwarg_key,
+        _stable_target_str,
+        _target_has_stable_identity,
+    )
 
-    def has_same_nodes(joint_graph: torch.fx.Graph) -> bool:
-        # Use canonical names for a hash that is invariant to node ordering
-        # and naming. This correctly identifies structurally equivalent graphs
-        # even when different ranks trace with different dict iteration orders.
-        def _node_hash_str(n: torch.fx.Node) -> str:
-            # For placeholders, n.target is the rank-local name (e.g.,
-            # primals_1) which may refer to different inputs on different
-            # ranks. Use only the canonical name and op for these.
-            if n.op == "placeholder":
-                return f"{canonical[n]}:{n.op}"
-            return f"{canonical[n]}:{n.op}:{_stable_target_str(n.target)}"
-
-        node_str = "/".join(
-            _node_hash_str(n)
-            for n in sorted(joint_graph.nodes, key=lambda n: canonical[n])
+    signature_is_stable = all(
+        _target_has_stable_identity(node.target)
+        and _arg_has_stable_identity(node.args)
+        and _arg_has_stable_identity(node.kwargs)
+        for node in joint_graph.nodes
+    )
+    with no_dispatch(), unset_fake_temporarily():
+        can_sync_tensor = torch.tensor(
+            has_collectives(joint_graph) and signature_is_stable,
+            dtype=torch.int64,
+            device=coll_device,
         )
-        inputs = hashlib.sha256(node_str.encode("utf-8")).hexdigest()
-        all_inputs = [None for _ in range(pg.size())]
-        with no_dispatch(), unset_fake_temporarily():
-            torch.distributed.all_gather_object(all_inputs, inputs, group=pg)
-            for rank, x in enumerate(all_inputs):
-                if all_inputs[0] != x:
-                    log.debug(
-                        "Skipping sync decision cross rank due to different inputs between rank 0 and rank %s",
-                        rank,
-                    )
-                    return False
-        return True
+        torch.distributed.all_reduce(
+            can_sync_tensor,
+            op=torch.distributed.distributed_c10d.ReduceOp.MIN,
+            group=pg,
+        )
+        all_ranks_can_sync = bool(can_sync_tensor.item())
+    if not all_ranks_can_sync:
+        return saved_values
 
-    if has_same_nodes(joint_graph):
-        with no_dispatch(), unset_fake_temporarily():
-            # Communicate saved values using canonical names so that
-            # node names (which may differ across ranks) don't matter.
-            objects = [[canonical[x] for x in saved_values]]
-            saved_ops_names_all_ranks: list[list[str]] = [[] for _ in range(pg.size())]
-            torch.distributed.all_gather_object(
-                saved_ops_names_all_ranks, objects[0], group=pg
+    def _node_signature(node: torch.fx.Node) -> tuple[Any, ...]:
+        def node_key(input_node: torch.fx.Node) -> object:
+            return ("node", input_node.name)
+
+        return (
+            node.name,
+            node.op,
+            _stable_target_str(node.target),
+            _stable_arg_key(node.args, node_key),
+            _stable_kwarg_key(node.kwargs, node_key),
+        )
+
+    node_signatures = tuple(
+        _node_signature(node)
+        for node in sorted(joint_graph.nodes, key=lambda n: n.name)
+    )
+    barrier_order = tuple(
+        node.name
+        for node in joint_graph.nodes
+        if node.op not in {"placeholder", "get_attr", "output"}
+        and not _is_safe_to_reorder(node)
+    )
+    graph_hash = hashlib.sha256(
+        repr((node_signatures, barrier_order)).encode("utf-8")
+    ).hexdigest()
+    graph_hashes = ["" for _ in range(pg.size())]
+    with no_dispatch(), unset_fake_temporarily():
+        torch.distributed.all_gather_object(graph_hashes, graph_hash, group=pg)
+
+    for rank, other_hash in enumerate(graph_hashes[1:], 1):
+        if other_hash != graph_hashes[0]:
+            log.debug(
+                "Skipping sync decision cross rank due to different inputs between rank 0 and rank %s",
+                rank,
             )
-            saved_sizes: list[int] = []
-            saved_ops_with_sizes: dict[str, int] = {}
+            return saved_values
 
-            for idx, saved_ops_names in enumerate(saved_ops_names_all_ranks):
-                saved_nodes = [
-                    reverse_canonical[op_name] for op_name in saved_ops_names
-                ]
-                saved_size = 0
-                for node in saved_nodes:
-                    size_of_node = _size_of(node)
-                    saved_size += size_of_node
-                    if idx == pg.rank():
-                        saved_ops_with_sizes[node.name] = size_of_node
-                saved_ops_with_sizes["total size"] = saved_size
-                saved_sizes.append(saved_size)
+    name_to_node = get_name_to_node(joint_graph)
 
-            saved_sizes_tensor = torch.tensor(saved_sizes, device=coll_device)
-            torch.distributed.all_reduce(
-                saved_sizes_tensor,
-                op=torch.distributed.distributed_c10d.ReduceOp.MAX,
-                group=pg,
-            )
+    with no_dispatch(), unset_fake_temporarily():
+        objects = [[node.name for node in saved_values]]
+        saved_ops_names_all_ranks: list[list[str]] = [[] for _ in range(pg.size())]
+        torch.distributed.all_gather_object(
+            saved_ops_names_all_ranks, objects[0], group=pg
+        )
+        names_are_valid = all(
+            name in name_to_node
+            for saved_names in saved_ops_names_all_ranks
+            for name in saved_names
+        )
+        names_are_valid_tensor = torch.tensor(
+            names_are_valid, dtype=torch.int64, device=coll_device
+        )
+        torch.distributed.all_reduce(
+            names_are_valid_tensor,
+            op=torch.distributed.distributed_c10d.ReduceOp.MIN,
+            group=pg,
+        )
+        if not names_are_valid_tensor.item():
+            return saved_values
 
-            picked_rank_idx = int(torch.argmin(saved_sizes_tensor).item())
-            sync_decision_cross_ranks_str = f"picked_rank_idx={picked_rank_idx}, saved_nodes of current rank={saved_ops_with_sizes}"
-            trace_structured(
-                "artifact",
-                metadata_fn=lambda: {
-                    "name": "aot_joint_graph_sync_decision_cross_ranks",
-                    "encoding": "string",
-                },
-                payload_fn=lambda: sync_decision_cross_ranks_str,
-            )
+        saved_sizes: list[int] = []
+        saved_ops_with_sizes: dict[str, int] = {}
 
-            saved_values = [
-                reverse_canonical[n] for n in saved_ops_names_all_ranks[picked_rank_idx]
-            ]
+        for idx, saved_ops_names in enumerate(saved_ops_names_all_ranks):
+            saved_nodes = [name_to_node[name] for name in saved_ops_names]
+            saved_size = 0
+            for node in saved_nodes:
+                size_of_node = _size_of(node)
+                saved_size += size_of_node
+                if idx == pg.rank():
+                    saved_ops_with_sizes[node.name] = size_of_node
+            saved_ops_with_sizes["total size"] = saved_size
+            saved_sizes.append(saved_size)
+
+        saved_sizes_tensor = torch.tensor(saved_sizes, device=coll_device)
+        torch.distributed.all_reduce(
+            saved_sizes_tensor,
+            op=torch.distributed.distributed_c10d.ReduceOp.MAX,
+            group=pg,
+        )
+
+        picked_rank_idx = int(torch.argmin(saved_sizes_tensor).item())
+        sync_decision_cross_ranks_str = f"picked_rank_idx={picked_rank_idx}, saved_nodes of current rank={saved_ops_with_sizes}"
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "aot_joint_graph_sync_decision_cross_ranks",
+                "encoding": "string",
+            },
+            payload_fn=lambda: sync_decision_cross_ranks_str,
+        )
+
+        saved_values = [
+            name_to_node[name] for name in saved_ops_names_all_ranks[picked_rank_idx]
+        ]
 
     return saved_values
 

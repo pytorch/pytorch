@@ -954,6 +954,12 @@ invalidate_compile_context_weakrefs: bool | None = None
 # Reorder and rename output graph nodes into a canonical topological order so
 # that structurally equivalent graphs (e.g., same model traced with different
 # dict iteration orders across distributed ranks) produce identical FX graphs.
+#
+# Source-backed placeholders are ordered by source together with their attached
+# GraphArgs, so backend example inputs and generated runtime arguments follow the
+# same calling convention. Nodes whose order is load-bearing are left in place
+# (in-place ops, functional collectives, unbacked-symbol binders); see
+# `_is_safe_to_reorder` in torch/fx/passes/canonicalize.py.
 canonicalize_output_graph_node_order: bool = False
 
 if TYPE_CHECKING:

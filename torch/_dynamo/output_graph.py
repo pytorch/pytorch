@@ -560,33 +560,52 @@ class ExportMetaData:
     ] = dc_field(default_factory=dict)
 
 
-def _canonical_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> object:
-    """Canonical heap key for Dynamo output graph nodes.
-
-    Placeholders are sorted by grapharg source name; all other ops delegate
-    to the shared ``_canonical_node_key``.
-    """
-    if node.op == "placeholder":
-        grapharg = node.meta.get("grapharg")
-        if grapharg is not None and grapharg.source is not None:
-            source_name = grapharg.source.name
-        else:
-            source_name = ""
-        return (0, source_name)
-    from torch.fx.passes.canonicalize import _canonical_node_key
-
-    return _canonical_node_key(node, canonical_idx)
-
-
-def _canonicalize_graph(graph: fx.Graph) -> None:
+def _canonicalize_graph(
+    graph: fx.Graph, *, owning_module: torch.nn.Module | None = None
+) -> None:
     """Canonicalize a Dynamo output graph's node order and names.
 
-    Delegates to ``torch.fx.passes.canonicalize.canonicalize_graph`` with
-    Dynamo-specific key generation and barrier detection.
+    Placeholders with unique source names are ordered by source. Since GraphArg
+    stays attached to its node, graphargs, example inputs, and runtime argument
+    reconstruction all observe the same reordered calling convention. If any
+    source is missing or ambiguous, placeholders retain their original order and
+    names while the rest of the graph is still canonicalized. ``owning_module``
+    resolves HOP subgraphs before ``graph`` is wrapped in a GraphModule.
     """
-    from torch.fx.passes.canonicalize import _is_safe_to_reorder, canonicalize_graph
+    from torch.fx.passes.canonicalize import (
+        _canonical_node_key,
+        _is_safe_to_reorder,
+        canonicalize_graph,
+    )
 
-    canonicalize_graph(graph, _canonical_key, _is_safe_to_reorder)
+    placeholders = graph.find_nodes(op="placeholder")
+    source_names: list[str | None] = []
+    for node in placeholders:
+        grapharg = node.meta.get("grapharg")
+        source = grapharg.source if grapharg is not None else None
+        source_names.append(source.name if source is not None else None)
+
+    can_reorder_placeholders = None not in source_names and len(source_names) == len(
+        set(source_names)
+    )
+    placeholder_keys = {
+        node: (0, source_names[i] if can_reorder_placeholders else i)
+        for i, node in enumerate(placeholders)
+    }
+
+    def _key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> object:
+        if node.op == "placeholder":
+            return placeholder_keys[node]
+        return _canonical_node_key(node, canonical_idx)
+
+    canonicalize_graph(
+        graph,
+        _key,
+        lambda node: _is_safe_to_reorder(node, owning_module=owning_module),
+        skip_rename_ops=(
+            frozenset() if can_reorder_placeholders else frozenset({"placeholder"})
+        ),
+    )
 
 
 def get_builtins_dict(global_scope: Scope) -> dict[str, Any]:
@@ -2941,7 +2960,7 @@ class OutputGraph(OutputGraphCommon):
                 and not torch.compiler.is_exporting()
                 and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
             ):
-                _canonicalize_graph(self.graph)
+                _canonicalize_graph(self.graph, owning_module=root)
 
             gm = _make_graph_module(root, self.graph)
 

@@ -8,9 +8,11 @@ An aot_dispatch_* function:
 - Returns the wrapped callable and metadata.
 """
 
+import contextvars
 import copy
 import dataclasses
 import functools
+import hashlib
 import itertools
 import logging
 import operator
@@ -1028,12 +1030,16 @@ def run_joint_graph_passes_on_hops(
 
         # Step 2) and 3) - Run joint graph passes and partitioner
         try:
-            new_fw_hop_gm, new_bw_hop_gm = partition_fn(
-                joint_hop_gm,
-                [],
-                num_fwd_outputs=num_fw_outputs,
-                static_lifetime_input_indices=static_lifetime_input_indices,
-            )
+            canonicalize_names = _has_source_canonicalized_dynamo_inputs(aot_config)
+            if canonicalize_names:
+                _canonicalize_joint_graph(joint_hop_gm)
+            with _enable_joint_graph_name_canonicalization(canonicalize_names):
+                new_fw_hop_gm, new_bw_hop_gm = partition_fn(
+                    joint_hop_gm,
+                    [],
+                    num_fwd_outputs=num_fw_outputs,
+                    static_lifetime_input_indices=static_lifetime_input_indices,
+                )
         except Exception as e:
             if used_hop_custom_partition:
                 raise RuntimeError(
@@ -2013,12 +2019,17 @@ def _partition_joint_graph_into_fw_bw(
         ):
             node.meta["aot_runtime_epilogue_input_mutation"] = True
 
-    fw_module, bw_module = partition_fn(
-        fx_g,
-        joint_inputs,
-        num_fwd_outputs=num_inner_fwd_outputs,
-        static_lifetime_input_indices=fw_metadata.static_input_indices,
-    )
+    canonicalize_names = _has_source_canonicalized_dynamo_inputs(aot_config)
+    if canonicalize_names:
+        _canonicalize_joint_graph(fx_g)
+
+    with _enable_joint_graph_name_canonicalization(canonicalize_names):
+        fw_module, bw_module = partition_fn(
+            fx_g,
+            joint_inputs,
+            num_fwd_outputs=num_inner_fwd_outputs,
+            static_lifetime_input_indices=fw_metadata.static_input_indices,
+        )
 
     rng_states = [
         n
@@ -2032,6 +2043,153 @@ def _partition_joint_graph_into_fw_bw(
         fw_metadata.graphsafe_rng_device = rng_device
 
     return fw_module, bw_module, num_inner_fwd_outputs
+
+
+def _joint_graph_downstream_hashes(
+    graph: torch.fx.Graph,
+) -> dict[torch.fx.Node, str]:
+    from torch.fx.passes.canonicalize import (
+        _stable_arg_key,
+        _stable_kwarg_key,
+        _stable_target_str,
+    )
+
+    hashes: dict[torch.fx.Node, str] = {}
+    for node in reversed(list(graph.nodes)):
+        users = []
+        for user in node.users:
+
+            def node_key(input_node: torch.fx.Node) -> object:
+                return ("self",) if input_node is node else ("other_node",)
+
+            users.append(
+                (
+                    user.op,
+                    _stable_target_str(user.target),
+                    _stable_arg_key(user.args, node_key),
+                    _stable_kwarg_key(user.kwargs, node_key),
+                    hashes[user],
+                )
+            )
+        hashes[node] = hashlib.sha256(
+            repr(tuple(sorted(users))).encode("utf-8")
+        ).hexdigest()
+    return hashes
+
+
+_joint_graph_name_canonicalization_enabled = contextvars.ContextVar(
+    "joint_graph_name_canonicalization_enabled", default=False
+)
+
+
+@contextmanager
+def _enable_joint_graph_name_canonicalization(
+    enabled: bool,
+) -> Generator[None, None, None]:
+    token = _joint_graph_name_canonicalization_enabled.set(enabled)
+    try:
+        yield
+    finally:
+        _joint_graph_name_canonicalization_enabled.reset(token)
+
+
+def _is_joint_graph_name_canonicalization_enabled() -> bool:
+    return _joint_graph_name_canonicalization_enabled.get()
+
+
+def _maybe_canonicalize_joint_graph_for_sync(graph: torch.fx.Graph) -> None:
+    if not _is_joint_graph_name_canonicalization_enabled():
+        return
+    owning_module = graph.owning_module
+    if not isinstance(owning_module, torch.fx.GraphModule):
+        raise AssertionError("expected the joint graph to have an owning GraphModule")
+    _canonicalize_joint_graph(owning_module)
+
+
+def _canonicalize_joint_graph(fx_g: torch.fx.GraphModule) -> None:
+    """Canonicalize final joint-graph order and raw node identity.
+
+    A name-only pass uses the unconstrained dataflow order so independent
+    compute on opposite sides of a barrier receives the same identity on every
+    rank. Physical order remains untouched because it carries partitioning,
+    side-effect, and scheduling information.
+    """
+    from torch.fx.passes.canonicalize import (
+        _canonicalize_graph_node_names,
+        _is_safe_to_reorder,
+        _stable_arg_key,
+        _stable_kwarg_key,
+        _stable_target_str,
+    )
+
+    graph = fx_g.graph
+    downstream_hashes = _joint_graph_downstream_hashes(graph)
+    placeholder_ordinals = {
+        node: ordinal for ordinal, node in enumerate(graph.find_nodes(op="placeholder"))
+    }
+    barrier_ordinals = {
+        node: ordinal
+        for ordinal, node in enumerate(
+            node
+            for node in graph.nodes
+            if node.op not in {"placeholder", "get_attr", "output"}
+            and not _is_safe_to_reorder(node)
+        )
+    }
+
+    def canonical_key(
+        node: torch.fx.Node, canonical_idx: dict[torch.fx.Node, int]
+    ) -> object:
+        if node.op == "placeholder":
+            return (0, placeholder_ordinals[node])
+
+        def node_key(input_node: torch.fx.Node) -> object:
+            return ("node", canonical_idx[input_node])
+
+        if node.op == "get_attr":
+            return (1, _stable_target_str(node.target), downstream_hashes[node])
+        if node.op == "output":
+            return (
+                3,
+                _stable_arg_key(node.args, node_key),
+                _stable_kwarg_key(node.kwargs, node_key),
+            )
+        return (
+            2,
+            node.op,
+            _stable_target_str(node.target),
+            _stable_arg_key(node.args, node_key),
+            _stable_kwarg_key(node.kwargs, node_key),
+            ((1, barrier_ordinals[node]) if node in barrier_ordinals else (0, 0)),
+            downstream_hashes[node],
+        )
+
+    skip_placeholders = frozenset({"placeholder"})
+    _canonicalize_graph_node_names(
+        graph, canonical_key, skip_rename_ops=skip_placeholders
+    )
+    fx_g.recompile()
+
+
+def _has_source_canonicalized_dynamo_inputs(aot_config: AOTConfig) -> bool:
+    sources = aot_config.aot_autograd_arg_pos_to_source
+    if (
+        not torch._dynamo.config.canonicalize_output_graph_node_order
+        or not torch._functorch.config._sync_decision_cross_ranks
+        or torch._dynamo.compiled_autograd.in_compiled_autograd_region
+        or aot_config.is_export
+        or sources is None
+    ):
+        return False
+    if not 0 <= aot_config.num_params_buffers <= len(sources):
+        return False
+    dynamo_sources = sources[aot_config.num_params_buffers :]
+    if any(source is None for source in dynamo_sources):
+        return False
+    source_names = [source.name for source in dynamo_sources]
+    return len(source_names) == len(set(source_names)) and source_names == sorted(
+        source_names
+    )
 
 
 def _joint_inputs_for_forward(
