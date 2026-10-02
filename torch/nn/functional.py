@@ -7448,6 +7448,9 @@ def scaled_grouped_mm(
     Applies a grouped scaled matrix-multiply, grouped_mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
     scale_recipe_a and scale_recipe_b respectively.
 
+    For TensorWise scaling, each float32 scale contains either a single value shared by all groups
+    or one value per group in a contiguous 1D tensor. Both inputs must use the same scale layout.
+
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
         scale_recipe_a: Enum describing how mat_a has been scaled
