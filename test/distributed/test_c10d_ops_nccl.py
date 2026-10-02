@@ -12,6 +12,8 @@ import math
 import os
 import sys
 import unittest
+from datetime import timedelta
+from unittest import mock
 
 import torch
 import torch.distributed as c10d
@@ -27,6 +29,7 @@ from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, TEST_MULT
 from torch.testing._internal.common_distributed import (
     init_multigpu_helper,
     MultiProcContinuousTest,
+    MultiProcessTestCase,
     requires_nccl,
     requires_nccl_version,
 )
@@ -34,6 +37,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     run_tests,
     skip_but_pass_in_sandcastle_if,
+    TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
@@ -1250,6 +1254,180 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
 
         # Like other ReduceOps, PREMUL_SUM should have a unique integer value.
         self.assertEqual(c10d.ReduceOp.PREMUL_SUM, 8)
+
+
+@unittest.skipIf(
+    not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
+    "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
+)
+@unittest.skipIf(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+class ProcessGroupNCCLConditionalGraphTest(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 2
+
+    def setUp(self):
+        super().setUp()
+        # NCCL caches this setting. Each test needs fresh workers that inherit it
+        # before NCCL initializes, rather than MultiProcContinuousTest workers.
+        with mock.patch.dict(os.environ, {"NCCL_GRAPH_MIXING_SUPPORT": "0"}):
+            self._spawn_processes()
+
+    def _test_nested_capture(self, num_cond_nodes):
+        from torch._higher_order_ops.cudagraph_conditional_nodes import (
+            CUDAGraphCaptureControlFlowOpDispatchMode,
+        )
+
+        self.assertEqual(os.environ["NCCL_GRAPH_MIXING_SUPPORT"], "0")
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            "nccl-legacy",
+            store=c10d.FileStore(self.file_name, self.world_size),
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=60),
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+        group_name = pg.group_name
+
+        def all_reduce(tensor):
+            result = torch.ops._c10d_functional.all_reduce(tensor, "sum", group_name)
+            return torch.ops._c10d_functional.wait_tensor(result)
+
+        def true_branch(tensor):
+            # Keep values bounded through all 40 conditional nodes.
+            return all_reduce(tensor + 1) / self.world_size
+
+        def false_branch(tensor):
+            return tensor - 1
+
+        tensor = torch.full((4,), self.rank + 1, dtype=torch.float32, device=self.rank)
+        predicate = torch.tensor(True, device=self.rank)
+        capture_stream = torch.cuda.Stream(device=self.rank)
+        capture_stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(capture_stream):
+            all_reduce(tensor)
+            true_branch(tensor)
+            false_branch(tensor)
+        torch.cuda.synchronize()
+
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        try:
+            with (
+                torch.cuda.graph(graph, stream=capture_stream),
+                CUDAGraphCaptureControlFlowOpDispatchMode(),
+            ):
+                output = all_reduce(tensor)
+                for _ in range(num_cond_nodes):
+                    output = torch.cond(predicate, true_branch, false_branch, (output,))
+
+            graph.instantiate()
+            for offset, pred in ((0, True), (2, False), (4, True)):
+                tensor.fill_(self.rank + 1 + offset)
+                predicate.fill_(pred)
+                graph.replay()
+                torch.cuda.synchronize()
+                expected = self.world_size * (self.world_size + 1) // 2
+                expected += self.world_size * offset
+                expected += num_cond_nodes if pred else -num_cond_nodes
+                self.assertEqual(output, torch.full_like(output, expected))
+        finally:
+            # Release NCCL graph resources before destroying the process group.
+            graph.reset()
+
+    @requires_nccl()
+    def test_nccl_cudagraph_nested_capture(self):
+        """Replay NCCL in a parent capture and a conditional-node body."""
+        self._test_nested_capture(num_cond_nodes=1)
+
+    @requires_nccl()
+    def test_nccl_cudagraph_many_nested_captures(self):
+        """Replay more conditional nodes than the 32-stream pool can hold."""
+        self._test_nested_capture(num_cond_nodes=40)
+
+    @requires_nccl()
+    def test_nccl_cudagraph_nested_conditionals(self):
+        """Replay NCCL with more than 32 simultaneously active child captures."""
+        from torch._higher_order_ops.cudagraph_conditional_nodes import (
+            CUDAGraphCaptureControlFlowOpDispatchMode,
+        )
+
+        self.assertEqual(os.environ["NCCL_GRAPH_MIXING_SUPPORT"], "0")
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            "nccl-legacy",
+            store=c10d.FileStore(self.file_name, self.world_size),
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=60),
+        )
+        group_name = c10d.distributed_c10d._get_default_group().group_name
+        world_size = self.world_size
+        num_cond_nodes = 40
+        levels = torch.arange(num_cond_nodes, device=self.rank)
+        predicates = torch.ones(num_cond_nodes, dtype=torch.bool, device=self.rank)
+
+        def all_reduce(tensor):
+            result = torch.ops._c10d_functional.all_reduce(tensor, "sum", group_name)
+            return torch.ops._c10d_functional.wait_tensor(result)
+
+        def leaf(tensor):
+            return all_reduce(tensor + 1) / world_size
+
+        def false_branch(tensor):
+            return all_reduce(tensor - 1) / world_size
+
+        def make_branch(next_branch, level):
+            def branch(tensor):
+                tensor = all_reduce(tensor + 1) / world_size
+                # Use torch.cond's HOP directly to avoid recursive Dynamo tracing.
+                tensor = torch.ops.higher_order.cond(
+                    predicates[level], next_branch, false_branch, (tensor,)
+                )
+                return all_reduce(tensor + 1) / world_size
+
+            return branch
+
+        nested = leaf
+        for level in reversed(range(num_cond_nodes)):
+            nested = make_branch(nested, level)
+
+        def forward(tensor):
+            tensor = all_reduce(tensor)
+            tensor = nested(tensor)
+            return all_reduce(tensor) / world_size
+
+        tensor = torch.full((4,), self.rank + 1, dtype=torch.float32, device=self.rank)
+        depths = (40, 0, 1, 20, 39, 40)
+        capture_stream = torch.cuda.Stream(device=self.rank)
+        capture_stream.wait_stream(torch.cuda.current_stream())
+        graph = torch.cuda.CUDAGraph(keep_graph=True)
+        python_recursion_limit = sys.getrecursionlimit()
+        try:
+            # Capturing 40 nested HOPs needs a deeper Python dispatch stack.
+            sys.setrecursionlimit(10000)
+            with torch.cuda.stream(capture_stream):
+                leaf(tensor)
+                false_branch(tensor)
+            torch.cuda.synchronize()
+            with (
+                torch.cuda.graph(graph, stream=capture_stream),
+                CUDAGraphCaptureControlFlowOpDispatchMode(),
+            ):
+                output = forward(tensor)
+
+            graph.instantiate()
+            for offset, depth in enumerate(depths):
+                tensor.fill_(self.rank + 1 + offset)
+                predicates.copy_(levels < depth)
+                graph.replay()
+                torch.cuda.synchronize()
+                expected = world_size * (world_size + 1) // 2 + world_size * offset
+                expected += 2 * depth + 1
+                self.assertEqual(output, torch.full_like(output, expected))
+        finally:
+            graph.reset()
+            sys.setrecursionlimit(python_recursion_limit)
 
 
 if __name__ == "__main__":
