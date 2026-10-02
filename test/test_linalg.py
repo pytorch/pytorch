@@ -6046,7 +6046,7 @@ class TestLinalg(TestCase):
         if not pivot:
             # strictly diagonally dominant systems for stability
             diag = buffer.abs().sum(-2)
-            buffer.diagonal(dim1=-2, dim2=-1).copy_(diag)
+            buffer.diagonal(dim1=-2, dim2=-1).zero_().copy_(diag)
 
         for i in range(1, r):
             A = buffer[..., :n + i, :n + i]
