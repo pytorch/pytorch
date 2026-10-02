@@ -41,7 +41,7 @@ from .graphs import (
     make_graphed_callables,
 )
 from .green_contexts import GreenContext
-from .streams import Event, ExternalStream, Stream
+from .streams import Event, execute_on_streams, ExternalStream, Stream
 
 
 try:
@@ -2171,6 +2171,7 @@ __all__ = [
     "DeferredCudaCallError",
     "Event",
     "ExternalStream",
+    "execute_on_streams",
     "Stream",
     "StreamContext",
     "GreenContext",
@@ -2244,7 +2245,7 @@ __all__ = [
     "memory_summary",
     "memory_usage",
     "MemPool",
-    "LocalizedMemPool",
+    "LocalizedAllocator",
     "use_mem_pool",
     "temperature",
     "power_draw",
