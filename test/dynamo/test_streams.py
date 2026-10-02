@@ -2913,8 +2913,8 @@ instantiate_parametrized_tests(TestStreamsCPUSpecific)
 
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
-    def test_aot_rejects_input_writeback_after_device_sync(self) -> None:
-        """The AOT-only check must still reject a join if tracing did not."""
+    def test_aot_allows_precomputed_value_mutated_after_device_sync(self) -> None:
+        """A tensor dependency before the barrier is not an input mutation."""
         from torch._functorch._aot_autograd.streams import assign_epilogue_copy_streams
 
         graph = torch.fx.Graph()
@@ -2928,8 +2928,30 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         graph.output(writeback)
         gm = torch.fx.GraphModule({}, graph)
 
+        assign_epilogue_copy_streams(gm)
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("mutation", ("out", "aten_inplace"))
+    def test_function_input_mutation_before_join_errors(
+        self, backend, mutation
+    ) -> None:
+        def fn(x, small, side):
+            with torch.cuda.stream(side):
+                if mutation == "out":
+                    torch.add(x, 1, out=x)
+                else:
+                    torch.ops.aten.add_.Tensor(x, 1)
+            side.synchronize()
+            return small + 1
+
+        x = torch.ones(8, device="cuda")
+        small = torch.zeros_like(x)
+        side = torch.cuda.Stream()
+        torch.cuda.synchronize()
         with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
-            assign_epilogue_copy_streams(gm)
+            torch.compile(fn, backend=backend, fullgraph=True)(x, small, side)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
 
     @parametrize("backend", ("aot_eager", "inductor"))
     def test_cross_device_operand_sync_does_not_join_input_mutation(

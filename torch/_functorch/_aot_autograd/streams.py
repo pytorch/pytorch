@@ -6,12 +6,7 @@ import torch.fx
 import torch.fx.traceback
 import torch.utils._pytree as pytree
 from torch._dynamo.graph_utils import _get_flat_args
-from torch._dynamo.variables.streams import (
-    _get_stream_by_index,
-    _stream_identity,
-    get_current_stream,
-    new_event,
-)
+from torch._dynamo.variables.streams import get_current_stream, new_event
 from torch.fx.node import map_arg
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._runtime_estimation import (
@@ -334,133 +329,11 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
 
 
 def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
-    nodes = list(gm.graph.nodes)
-    positions = {node: pos for pos, node in enumerate(nodes)}
-    first_barrier_position = next(
-        (
-            pos
-            for pos, node in enumerate(nodes)
-            if node.op == "call_function"
-            and node.target
-            in (
-                torch.ops.streams.wait_stream.default,
-                torch.ops.streams.synchronize_stream.default,
-                torch.ops.streams.synchronize_device.default,
-            )
-        ),
-        len(nodes),
-    )
     for epi_copy in gm.graph.find_nodes(op="call_function", target=aten.copy_.default):
         arg_stream = get_stream(epi_copy.args[1])
         copy_stream = get_stream(epi_copy)
         if arg_stream != copy_stream:
             set_stream(epi_copy, get_stream_or_current_stream(epi_copy.args[1]))
-
-        if (
-            epi_copy.args[0].op != "placeholder"
-            or get_device(epi_copy.args[0]).type == "cpu"
-        ):
-            continue
-        input_device = get_device(epi_copy.args[0])
-        # Without any preceding observable barrier, there is no ordering to
-        # reject and no reason to traverse this input's mutation ancestors.
-        if first_barrier_position >= positions[epi_copy]:
-            continue
-        # Functionalization erases earlier in-place writes. Conservatively
-        # consider all ancestors of the deferred copy's value: an input
-        # mutation like zero_() may become full() with no dependency on the
-        # original input, followed by another mutation after a user join.
-        source: Node = epi_copy.args[1]
-        ancestors: set[Node] = {source}
-        for node in reversed(nodes[: positions[source] + 1]):
-            if node in ancestors:
-                ancestors.update(node.all_input_nodes)
-        source_values: list[Node] = []
-        for node in nodes[: positions[source] + 1]:
-            node_value = node.meta.get("val")
-            if (
-                node in ancestors
-                and node.op == "call_function"
-                and node.target not in _SYNC_OPS
-                and isinstance(node_value, torch.Tensor)
-                and node_value.device == input_device
-            ):
-                source_values.append(node)
-        first_source_value = (
-            positions[source_values[0]] if source_values else positions[source]
-        )
-        for barrier in nodes[first_source_value + 1 : positions[epi_copy]]:
-            if barrier.op != "call_function":
-                continue
-            if barrier.target is torch.ops.streams.synchronize_device.default:
-                device = get_device(epi_copy.args[0])
-                joined = barrier.args[0] == device.type and barrier.args[1] in (
-                    None,
-                    device.index,
-                )
-            elif barrier.target in (
-                torch.ops.streams.wait_stream.default,
-                torch.ops.streams.synchronize_stream.default,
-            ):
-                barrier_stream = barrier.args[-1]
-                joined = False
-                for value in source_values:
-                    if positions[value] >= positions[barrier]:
-                        break
-                    value_stream = get_stream(value)
-                    if value_stream is not None:
-                        try:
-                            annotated_stream = _get_stream_by_index(value_stream)
-                        except AssertionError:
-                            joined = True
-                            break
-                        if annotated_stream.device != input_device:
-                            # A CUDA:0 context does not change where a CUDA:1
-                            # tensor op runs; it uses CUDA:1's current stream.
-                            value_stream = None
-                    if value_stream is not None and barrier_stream == value_stream:
-                        joined = True
-                        break
-                    if not isinstance(barrier_stream, int):
-                        joined = True
-                        break
-                    try:
-                        observed = _get_stream_by_index(barrier_stream)
-                        mutated = (
-                            _get_stream_by_index(value_stream)
-                            if value_stream is not None
-                            else torch.accelerator.current_stream(
-                                get_device(epi_copy.args[0])
-                            )
-                        )
-                    except AssertionError:
-                        joined = True
-                        break
-                    if _stream_identity(observed) == _stream_identity(mutated):
-                        joined = True
-                        break
-            else:
-                continue
-            if joined and barrier.target is torch.ops.streams.wait_stream.default:
-                waiting_index = barrier.args[0]
-                waited_index = barrier.args[1]
-                if waiting_index == waited_index:
-                    continue
-                if isinstance(waiting_index, int) and isinstance(waited_index, int):
-                    try:
-                        waiting = _get_stream_by_index(waiting_index)
-                        waited_on = _get_stream_by_index(waited_index)
-                    except AssertionError:
-                        pass
-                    else:
-                        if _stream_identity(waiting) == _stream_identity(waited_on):
-                            continue
-            if joined:
-                raise RuntimeError(
-                    "Cannot safely place an input mutation write-back after a user "
-                    "stream barrier inside torch.compile. Move the join after "
-                    "the compiled call or avoid side-stream input mutation."
-                )
 
 
 def populate_fw_metadata_with_stream_indices(

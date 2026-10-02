@@ -3899,6 +3899,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ),
             )
 
+        # Function variants such as torch.add(..., out=input) can mutate a
+        # graph input without going through TensorVariable's method handler.
+        # Record their fake-tensor version changes on the stream that executed
+        # the call, before a later user barrier can leave that stream context.
+        tx.output.check_input_mutation_on_current_stream(tx)
+
         # Handle e.g., `torch.ones(10, requires_grad=True)`
         if (
             tensor_variable.is_tensor()
