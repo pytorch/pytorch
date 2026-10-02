@@ -8911,16 +8911,45 @@ def _meta_grouped_mm_common(
                     if offs is not None and (mat_a_is_2d or mat_b_is_2d)
                     else mat_a.shape[0]
                 )
-                groupwise = scale.numel() != 1 and scale.numel() == batch_count
-                torch._check(
-                    scale.numel() == 1 or groupwise,
-                    lambda: f"Expected {scale_name} to have either one element or one element per group ({batch_count}), got {scale.numel()} elements.",
-                )
-                if groupwise:
+                if is_mxfp8:
                     torch._check(
-                        scale.dim() == 1 and scale.is_contiguous(),
-                        lambda: f"Expected groupwise {scale_name} to be 1D and contiguous, got {scale.dim()}D with stride {scale.stride()}.",
+                        scale.is_contiguous(),
+                        lambda: f"Expected {scale_name} to be contiguous.",
                     )
+                    is_a = scaled_dim == 0
+                    inner = mat.shape[-1] if is_a else mat.shape[-2]
+                    outer = mat.shape[-2] if is_a else mat.shape[-1]
+                    # See cublas_grouped_scale_size_bytes in CublasGroupedScaleUtils.cuh.
+                    scale_cols = ((inner + 127) // 128) * 4
+                    scale_rows = ((outer + 127) // 128) * 128
+                    scale_size = scale_rows * scale_cols
+                    if mat.dim() == 3:
+                        torch._check(
+                            scale.dim() == 2
+                            and scale.shape[0] == batch_count
+                            and scale.shape[1] == scale_size,
+                            lambda: f"Expected {scale_name} to have shape ({batch_count}, {scale_size}), got {scale.shape}.",
+                        )
+                    else:
+                        # 2D inputs have data-dependent per-group extents along the
+                        # jagged dim, so the exact concatenated blocked-scale size is
+                        # unknown here. The per-group padded sizes sum to at
+                        # least the size computed from the total dimensions.
+                        torch._check(
+                            scale.numel() >= scale_size,
+                            lambda: f"Expected {scale_name} to have at least {scale_size} elements, got {scale.numel()}.",
+                        )
+                else:
+                    groupwise = scale.numel() != 1 and scale.numel() == batch_count
+                    torch._check(
+                        scale.numel() == 1 or groupwise,
+                        lambda: f"Expected {scale_name} to have either one element or one element per group ({batch_count}), got {scale.numel()} elements.",
+                    )
+                    if groupwise:
+                        torch._check(
+                            scale.dim() == 1 and scale.is_contiguous(),
+                            lambda: f"Expected groupwise {scale_name} to be 1D and contiguous, got {scale.dim()}D with stride {scale.stride()}.",
+                        )
                 return
             if mat.dim() == 2:
                 torch._check(
@@ -9097,6 +9126,8 @@ def _should_use_scaled_cublaslt_grouped_gemm(
                 return "TensorWise"
             if scale.dim() == 1 and scale.numel() == batch_count:
                 return "TensorWise"
+        elif scale.dtype == torch.float8_e8m0fnu:
+            return "BlockWise1x32"
         return None
 
     scaling_a = scaling_type(scale_a)
@@ -9113,6 +9144,11 @@ def _should_use_scaled_cublaslt_grouped_gemm(
             scale_a.numel() == scale_b.numel(),
             lambda: "cuBLASLt grouped GEMM requires matching scale layouts: both scales must be single values or both must have one value per group",
         )
+    if scaling_a == "BlockWise1x32":
+        if not torch.backends.cuda.matmul.prefer_cublaslt_grouped_gemm:
+            return False
+        if torch.cuda.get_device_capability()[0] == 9:
+            return False
 
     fp8_dtypes = (torch.float8_e4m3fn, torch.float8_e5m2)
     if not (
