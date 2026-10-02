@@ -23,6 +23,7 @@ from torch._dynamo.testing import extract_graph, remove_trailing_space
 from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_LINUX,
     IS_MACOS,
     IS_WINDOWS,
@@ -2895,6 +2896,81 @@ instantiate_device_type_tests(
 
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("barrier", ("wait_stream", "stream_sync", "device_sync"))
+    def test_input_mutation_writeback_after_user_join_errors(
+        self, backend, barrier
+    ) -> None:
+        def fn(x, small):
+            side = torch.cuda.Stream()
+            with side:
+                x.add_(1)
+            if barrier == "wait_stream":
+                torch.cuda.current_stream().wait_stream(side)
+            elif barrier == "stream_sync":
+                side.synchronize()
+            else:
+                torch.cuda.synchronize()
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros(8, device="cuda")
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input mutation write-back after a user stream barrier",
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(x, small)
+        self.assertEqual(x, torch.zeros_like(x))
+
+    def test_input_mutation_writeback_errors_without_fullgraph(self) -> None:
+        def fn(x, small):
+            side = torch.cuda.Stream()
+            with side:
+                x.add_(1)
+            torch.cuda.current_stream().wait_stream(side)
+            return small + 1
+
+        x = torch.zeros(8, device="cuda")
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "input mutation write-back after a user stream barrier",
+        ):
+            torch.compile(fn, backend="inductor")(x, torch.zeros_like(x))
+        self.assertEqual(x, torch.zeros_like(x))
+
+    def test_side_stream_join_without_input_mutation(self) -> None:
+        def fn(x):
+            side = torch.cuda.Stream()
+            with side:
+                y = x + 1
+            torch.cuda.current_stream().wait_stream(side)
+            return y * 2
+
+        x = torch.zeros(8, device="cuda")
+        torch.cuda.synchronize()
+        result = torch.compile(fn, backend="inductor", fullgraph=True)(x)
+        self.assertEqual(result, torch.full_like(x, 2))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_unrelated_stream_join_after_input_mutation(self, backend) -> None:
+        def fn(x, small):
+            mutated = torch.cuda.Stream()
+            unrelated = torch.cuda.Stream()
+            with mutated:
+                x.add_(1)
+            with unrelated:
+                result = small + 1
+            torch.cuda.current_stream().wait_stream(unrelated)
+            return result
+
+        x = torch.zeros(8, device="cuda")
+        small = torch.zeros_like(x)
+        torch.cuda.synchronize()
+        result = torch.compile(fn, backend=backend, fullgraph=True)(x, small)
+        torch.cuda.synchronize()
+        self.assertEqual(x, torch.ones_like(x))
+        self.assertEqual(result, torch.ones_like(result))
+
     @torch.compiler.config.patch(compile_on_one_rank=True)
     def test_synchronize_preserves_indexless_device_under_coor(self) -> None:
         def f(x):
@@ -3187,6 +3263,9 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(actual_s1, expected_s1)
         self.assertEqual(actual_s2, expected_s2)
         self.assertEqual(actual_default, default_s.cuda_stream)
+
+
+instantiate_parametrized_tests(TestStreamsCUDASpecific)
 
 
 @requires_xpu

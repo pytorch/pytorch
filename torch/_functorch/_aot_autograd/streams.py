@@ -6,7 +6,11 @@ import torch.fx
 import torch.fx.traceback
 import torch.utils._pytree as pytree
 from torch._dynamo.graph_utils import _get_flat_args
-from torch._dynamo.variables.streams import get_current_stream, new_event
+from torch._dynamo.variables.streams import (
+    _get_stream_by_index,
+    get_current_stream,
+    new_event,
+)
 from torch.fx.node import map_arg
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._runtime_estimation import (
@@ -329,11 +333,56 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
 
 
 def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
+    nodes = list(gm.graph.nodes)
+    positions = {node: pos for pos, node in enumerate(nodes)}
     for epi_copy in gm.graph.find_nodes(op="call_function", target=aten.copy_.default):
         arg_stream = get_stream(epi_copy.args[1])
         copy_stream = get_stream(epi_copy)
         if arg_stream != copy_stream:
             set_stream(epi_copy, get_stream_or_current_stream(epi_copy.args[1]))
+
+        if (
+            epi_copy.args[0].op != "placeholder"
+            or arg_stream is None
+            or get_device(epi_copy.args[0]).type == "cpu"
+        ):
+            continue
+        for barrier in nodes[positions[epi_copy.args[1]] + 1 : positions[epi_copy]]:
+            if barrier.op != "call_function":
+                continue
+            if barrier.target is torch.ops.streams.synchronize_device.default:
+                device = get_device(epi_copy.args[0])
+                joined = barrier.args[0] == device.type and barrier.args[1] in (
+                    None,
+                    device.index,
+                )
+            elif barrier.target in (
+                torch.ops.streams.wait_stream.default,
+                torch.ops.streams.synchronize_stream.default,
+            ):
+                barrier_stream = barrier.args[-1]
+                joined = barrier_stream == arg_stream
+                if not joined and not isinstance(barrier_stream, int):
+                    joined = True
+                elif not joined:
+                    try:
+                        observed = _get_stream_by_index(barrier_stream)
+                        mutated = _get_stream_by_index(arg_stream)
+                    except AssertionError:
+                        joined = True
+                    else:
+                        joined = (
+                            observed.device == mutated.device
+                            and observed.native_handle == mutated.native_handle
+                        )
+            else:
+                continue
+            if joined:
+                raise RuntimeError(
+                    "Cannot safely place an input mutation write-back after a user "
+                    "stream barrier inside torch.compile. Move the join after "
+                    "the compiled call or avoid side-stream input mutation."
+                )
 
 
 def populate_fw_metadata_with_stream_indices(
