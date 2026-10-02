@@ -6502,6 +6502,35 @@ Done""",
         self.assertIn("Error detected in PowBackward0", str(cm.exception))
         self.assertIn("Traceback of forward", str(cm.exception))
 
+    def test_anomaly_preserves_fake_tensor_exception_type(self):
+        # AOT joint tracing enables detect_anomaly and matches FakeTensor
+        # exception types. Wrapping would turn DataDependentOutputException
+        # into a generic RuntimeError and break tracing.
+        from torch._subclasses.fake_tensor import (
+            DataDependentOutputException,
+            FakeTensorMode,
+        )
+
+        unique = torch.ops.aten._unique.default
+
+        def fail(_g):
+            raise DataDependentOutputException(unique)
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", "Anomaly Detection has been enabled."
+            )
+            with FakeTensorMode(), detect_anomaly(check_nan=False):
+                a = torch.randn(2, 2, requires_grad=True)
+                b = a * 2
+                b.register_hook(fail)
+                with self.assertRaises(DataDependentOutputException) as cm:
+                    b.sum().backward()
+        self.assertNotIn(
+            "Traceback of forward call that caused the error",
+            str(cm.exception),
+        )
+
     def test_anomaly_assign_parent_cleanup(self):
         # Test that python objects created are properly cleaned up when assign_parent is called
 

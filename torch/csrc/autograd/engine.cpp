@@ -23,6 +23,7 @@
 #include <c10/core/Stream.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Exception.h>
 #include <c10/util/ScopeExit.h>
@@ -924,10 +925,17 @@ void GraphTask::set_exception(
   if (!future_completed_.exchange(true)) {
     if (AnomalyMode::is_enabled() && fn) {
       try {
-        // FakeTensor/AOT tracing turns on detect_anomaly and matches on exact
-        // exception types and messages (e.g. "aten._unique.default"). Keep the
-        // original exception there and emit the forward traceback as a warning.
-        if (c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Fake)) {
+        // Python FakeTensorMode (AOT tracing) is a TorchDispatchMode. It does
+        // not include DispatchKey::Fake; that key is for unused C++ FakeTensor
+        // mode. AOT matches FakeTensor exception types (e.g.
+        // DataDependentOutputException / "aten._unique.default"), so keep the
+        // original exception and emit the traceback as a warning.
+        const bool in_fake_tensor_mode =
+            c10::impl::tls_is_dispatch_key_included(c10::DispatchKey::Fake) ||
+            c10::impl::TorchDispatchModeTLS::get_mode(
+                c10::impl::TorchDispatchModeKey::FAKE)
+                .has_value();
+        if (in_fake_tensor_mode) {
           fn->metadata()->print_stack(fn->name());
         } else {
           eptr = wrap_exception_with_anomaly_trace(
