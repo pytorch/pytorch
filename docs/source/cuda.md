@@ -97,7 +97,27 @@
     Stream
     ExternalStream
     Event
+    execute_on_streams
 ```
+
+### Fork/join execution
+
+`torch.cuda.execute_on_streams(streams, fn)` calls `fn(index)` for each supplied
+stream. Ordinary streams, green-context streams, and mixtures are supported.
+Callbacks run sequentially on the host, but their CUDA work can run concurrently.
+Each stream waits for work already queued on the caller's current stream;
+subsequent caller-stream work waits for all work queued by the callbacks.
+This also applies to a single stream and to work queued before a callback raises.
+
+On the caller's device, the helper switches directly between streams and restores
+the caller once. Cross-device execution uses `torch.cuda.stream` to restore
+per-device stream state. Neither path synchronizes the host. After an exception,
+remaining callbacks are not invoked. Callbacks must enqueue work on the supplied
+stream or explicitly join other streams they use. The caller stream is the
+fork/join point, not every device's current stream.
+
+Keep tensors and any owning green contexts alive until their work completes;
+the usual cross-stream tensor lifetime rules still apply.
 
 ## Graphs (beta)
 
@@ -588,6 +608,28 @@ propagate. The predicate does not initialize the driver or a context, so calling
 it does not poison subsequent forks.
 Actual splitting and context creation always use CUDA, independently of this
 capability check.
+
+### Fork/join execution with green contexts
+
+Use `torch.cuda.execute_on_streams` with green-context streams to localize the
+execution of each callback's CUDA work:
+
+```python
+from torch.cuda.green_contexts import GreenContext
+
+contexts = GreenContext.split(num_sms=(24, 24), device_id=0)
+streams = [ctx.Stream() for ctx in contexts]
+inputs = [torch.randn(1024, device="cuda:0") for _ in streams]
+outputs = [torch.empty_like(x) for x in inputs]
+
+def compute(index: int) -> None:
+    torch.mul(inputs[index], 2, out=outputs[index])
+
+with torch.cuda.device(0):
+    torch.cuda.execute_on_streams(streams, compute)
+    result = outputs[0] + outputs[1]
+    torch.cuda.current_stream().synchronize()
+```
 
 ### Localized allocations
 

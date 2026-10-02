@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import ctypes
+from typing import TYPE_CHECKING
 
 import torch
 from torch._utils import _dummy_type
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
 
 
 if not hasattr(torch._C, "_CudaStreamBase"):
@@ -269,3 +274,64 @@ class Event(torch._C._CudaEventBase):
             return f"<torch.cuda.Event {self._as_parameter_.value:#x}>"
         else:
             return "<torch.cuda.Event uninitialized>"
+
+
+def execute_on_streams(
+    streams: Sequence[Stream],
+    fn: Callable[[int], None],
+) -> None:
+    r"""Enqueue a callback on each stream and join its work to the caller stream.
+
+    Calls ``fn(index)`` in order with the corresponding stream made current.
+    Python callbacks run sequentially; their CUDA work may execute concurrently.
+    Each stream waits for work previously submitted to the caller's current
+    stream. Subsequent work on the caller stream waits for every callback's
+    queued work, including work queued before a callback raises. These waits
+    are asynchronous and do not synchronize the host.
+
+    The caller's current stream and device are restored on success or failure.
+    After a callback raises, remaining callbacks are not invoked. Callbacks
+    must enqueue their work on the supplied stream or join other work to it.
+
+    Streams may belong to different devices. Keep the tensors and any owning
+    green contexts alive until their work completes; normal cross-stream
+    tensor lifetime rules still apply.
+
+    Args:
+        streams: Nonempty sequence of ordinary or green-context CUDA streams.
+        fn: Callback receiving the index of the current stream.
+    """
+    if not streams:
+        raise ValueError("Need at least one CUDA stream to execute on")
+
+    caller_stream = torch.cuda.current_stream()
+    events = [torch.cuda.Event() for _ in streams]
+    start = torch.cuda.Event()
+    start.record(caller_stream)
+    completed = 0
+    try:
+        if all(stream.device == caller_stream.device for stream in streams):
+            # Restoring the caller stream between launches increases overheads.
+            try:
+                for index, (stream, done) in enumerate(zip(streams, events)):
+                    torch.cuda.set_stream(stream)
+                    stream.wait_event(start)
+                    try:
+                        fn(index)
+                    finally:
+                        done.record(stream)
+                        completed += 1
+            finally:
+                torch.cuda.set_stream(caller_stream)
+        else:
+            for index, (stream, done) in enumerate(zip(streams, events)):
+                with torch.cuda.stream(stream):
+                    stream.wait_event(start)
+                    try:
+                        fn(index)
+                    finally:
+                        done.record(stream)
+                        completed += 1
+    finally:
+        for done in events[:completed]:
+            caller_stream.wait_event(done)
