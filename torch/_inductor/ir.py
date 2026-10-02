@@ -4240,6 +4240,9 @@ class ReinterpretView(BaseView):
     def get_name(self) -> str:
         return self.data.get_name()
 
+    def get_read_names(self) -> OrderedSet[str]:
+        return OrderedSet([self.get_name()])
+
     def get_device(self) -> torch.device | None:
         return self.layout.device
 
@@ -4259,7 +4262,10 @@ class ReinterpretView(BaseView):
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         def loader(index: Sequence[Expr]) -> OpsValue:
             indexer = self.layout.make_indexer()
-            tmp_loader = ops.load(self.get_name(), indexer(index))
+            name = self.get_name()
+            if name in V.graph.constants:
+                name = V.graph.constant_name(name, ConstantBuffer.override_device)
+            tmp_loader = ops.load(name, indexer(index))
             if self.layout.dtype != self.data.dtype:
                 return ops.to_dtype_bitcast(tmp_loader, self.dtype, self.data.dtype)
             else:
@@ -10356,13 +10362,23 @@ class FallbackKernel(ExternKernelAlloc):
 
         def maybe_wrap(value: Any, arg_info: torch._C.Argument) -> Any:
             # bool is a subclass of int; SymInt/SymFloat/SymBool are not int/float/complex.
-            if not isinstance(value, (int, float, complex)):
+            if not isinstance(value, (int, float, complex, sympy.Expr)):
                 return value
             if not is_tensor_slot(arg_info):
                 return value
             alias = arg_info.alias_info
             if alias is not None and alias.is_write:
                 return value
+            if isinstance(value, sympy.Expr):
+                # A symbolic scalar is only known at runtime, so build the 0-d tensor
+                # at runtime; the proxy executor passes a SymInt in a Scalar slot.
+                dtype = scalar_dtype(0 if value.is_integer else 0.0)
+                return pytree.tree_map(
+                    lambda x: x.wrap_for_lowering() if isinstance(x, IRNode) else x,
+                    cls.create(
+                        aten.scalar_tensor.default, value, dtype=dtype, device=device
+                    ),
+                )
             with torch.utils._python_dispatch._disable_current_modes():
                 const = torch.tensor(value, dtype=scalar_dtype(value), device=device)
             materialized.append(True)
