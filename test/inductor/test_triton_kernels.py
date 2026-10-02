@@ -81,7 +81,8 @@ def _dump_launch_params(value: str):
 
 if HAS_GPU:
     import triton
-    import triton.language as alisa_tl
+    import triton as alias_triton
+    import triton.language as alias_tl
     from triton import language as tl
 
     if HAS_CUDA_AND_TRITON:
@@ -2098,12 +2099,12 @@ def forward(self, x_1, output_1):
             n_elements,
             BLOCK_SIZE: "tl.constexpr",
         ):
-            pid = triton.language.program_id(axis=0)
-            offsets = pid * BLOCK_SIZE + alisa_tl.arange(0, BLOCK_SIZE)
+            pid = alias_triton.language.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + alias_tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
-            x = alisa_tl.load(in_ptr0 + offsets, mask=mask)
-            y = alisa_tl.load(in_ptr1 + offsets, mask=mask)
-            alisa_tl.store(out_ptr + offsets, x + y, mask=mask)
+            x = alias_tl.load(in_ptr0 + offsets, mask=mask)
+            y = alias_tl.load(in_ptr1 + offsets, mask=mask)
+            alias_tl.store(out_ptr + offsets, x + y, mask=mask)
 
         def f(x, y):
             out = torch.empty_like(x)
@@ -2156,15 +2157,18 @@ def forward(self, x_1, output_1):
         self.assertEqual(eager_out, x / 3.14)
         self.assertEqual(compiled_out, eager_out)
 
-    @requires_gpu
-    def test_triton_kernel_ignores_unrelated_module(self):
+    @unittest.skipIf(not has_triton_package(), "requires triton")
+    def test_triton_kernel_source_ignores_unrelated_module(self):
+        import triton
+
         from torch._inductor.codegen.wrapper import (
             user_defined_triton_kernel_transitive_closure_source_code,
         )
 
+        # This synthetic fixture is only inspected, never compiled or launched.
         @triton.jit
-        def kernel(out_ptr):
-            tl.store(out_ptr, sys.maxsize)
+        def kernel():
+            return sys.maxsize
 
         source = user_defined_triton_kernel_transitive_closure_source_code(kernel)
         self.assertNotIn("import sys", source)
