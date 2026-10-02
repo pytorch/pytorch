@@ -2192,8 +2192,9 @@ class MultiProcContinuousTest(TestCase):
         # Wait for all workers to exit; kill any that hang on shutdown so the
         # class reports an error instead of blocking the job.
         hung = []
+        deadline = time.monotonic() + TIMEOUT_DEFAULT
         for rank, process in enumerate(cls.processes):
-            process.join(TIMEOUT_DEFAULT)
+            process.join(max(0, deadline - time.monotonic()))
             if not process.is_alive():
                 continue
             hung.append(rank)
