@@ -3207,8 +3207,12 @@ class TritonTemplate(KernelTemplate):
         mod = PyCodeCache.load(code, extra, set_sys_modules=False)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
-        load_input_fusion_allowed_inputs = kernel.load_input_fusion_allowed_inputs
-        store_output_fusion_allowed_inputs = kernel.store_output_fusion_allowed_inputs
+        load_input_fusion_allowed_inputs = (
+            kernel.load_input_fusion_allowed_inputs.copy()
+        )
+        store_output_fusion_allowed_inputs = (
+            kernel.store_output_fusion_allowed_inputs.copy()
+        )
         kernel_args_sizevars_keys = tuple(kernel.args.sizevars.keys())
 
         if cache_hit:
