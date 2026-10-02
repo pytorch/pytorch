@@ -44,25 +44,14 @@ logger = logging.getLogger(__name__)
 # Registering a hook id replaces its hook, so stay clear of user ids.
 _HOOK_ID = 1 << 62
 
-# Names the NCCL backend passes to record_param_comms.
+# Names the default NCCL backend passes to record_param_comms.
 _COLLECTIVE_NAMES = {
-    HookOpName.SEND: "send",
-    HookOpName.RECV: "recv",
-    HookOpName.BROADCAST: "broadcast",
-    HookOpName.ALLREDUCE: "allreduce",
-    HookOpName.REDUCE: "reduce",
+    HookOpName.ALLREDUCE: "all_reduce",
     HookOpName.ALLGATHER: "all_gather",
-    HookOpName.REDUCE_SCATTER: "reduce_scatter",
     HookOpName.ALLTOALL: "all_to_all",
-    HookOpName.BARRIER: "barrier",
-    HookOpName.SCATTER: "scatter",
-    HookOpName.GATHER: "gather",
-    HookOpName.ALLREDUCE_COALESCED: "allreduce_coalesced",
-    HookOpName.ALLGATHER_BASE: "_allgather_base",
-    HookOpName.ALLGATHER_INTO_TENSOR_COALESCED: "allgather_into_tensor_coalesced",
-    HookOpName.REDUCE_SCATTER_BASE: "_reduce_scatter_base",
-    HookOpName.REDUCE_SCATTER_TENSOR_COALESCED: "reduce_scatter_tensor_coalesced",
-    HookOpName.ALLTOALL_BASE: "all_to_allv",
+    HookOpName.ALLGATHER_BASE: "all_gather_single",
+    HookOpName.REDUCE_SCATTER_BASE: "reduce_scatter_single",
+    HookOpName.ALLTOALL_BASE: "all_to_all_single",
 }
 _IN_PLACE_OPS = {
     HookOpName.BROADCAST,

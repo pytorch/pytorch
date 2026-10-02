@@ -109,7 +109,7 @@ class TestCollectiveMetadata(MultiProcContinuousTest):
         self.assertEqual(
             allreduce,
             {
-                "Collective name": "allreduce",
+                "Collective name": "all_reduce",
                 "In msg nelems": 3,
                 "Out msg nelems": 3,
                 "Group size": ws,
@@ -122,7 +122,7 @@ class TestCollectiveMetadata(MultiProcContinuousTest):
                 "Seq": seq + 1,
             },
         )
-        self.assertEqual(allgather["Collective name"], "_allgather_base")
+        self.assertEqual(allgather["Collective name"], "all_gather_single")
         self.assertEqual(allgather["In msg nelems"], 2)
         self.assertEqual(allgather["Out msg nelems"], 2 * ws)
         self.assertEqual(allgather["Seq"], seq + 2)
@@ -191,7 +191,7 @@ class TestCollectiveMetadata(MultiProcContinuousTest):
             return mock.MagicMock()
 
         self._annotate(annotate, lambda: dist.all_reduce(torch.ones(1)))
-        self.assertEqual(recorded, ["allreduce"])
+        self.assertEqual(recorded, ["all_reduce"])
 
     def test_custom_annotate_outside_capture(self):
         recorded = []
@@ -203,7 +203,7 @@ class TestCollectiveMetadata(MultiProcContinuousTest):
         self._annotate(
             annotate, lambda: dist.all_reduce(torch.ones(1)), capturing=False
         )
-        self.assertEqual(recorded, ["allreduce"])
+        self.assertEqual(recorded, ["all_reduce"])
 
     def test_same_annotator_entered_once(self):
         recorded = []
@@ -220,7 +220,7 @@ class TestCollectiveMetadata(MultiProcContinuousTest):
             dist.all_reduce(torch.ones(1))
             outer.close()
             dist.all_reduce(torch.ones(1))
-        self.assertEqual(recorded, ["allreduce", "allreduce"])
+        self.assertEqual(recorded, ["all_reduce", "all_reduce"])
 
     def test_annotate_error_does_not_fail_collective(self):
         def annotate(metadata):
@@ -309,7 +309,7 @@ class TestCollectiveGraphAnnotations(MultiProcContinuousTest):
         annotations = self._capture()
         self.assertTrue(annotations, "no kernel carries collective metadata")
         for annotation in annotations:
-            self.assertEqual(annotation["Collective name"], "allreduce")
+            self.assertEqual(annotation["Collective name"], "all_reduce")
             self.assertEqual(annotation["Process Group Name"], pg.group_name)
             self.assertEqual(annotation["Group size"], self.world_size)
 
@@ -328,7 +328,7 @@ class TestCollectiveGraphAnnotations(MultiProcContinuousTest):
     @skip_if_lt_x_gpu(2)
     def test_hooks_scoped_to_capture(self):
         recorded = self._record_during_capture()
-        self.assertEqual([a["Collective name"] for a in recorded], ["allreduce"])
+        self.assertEqual([a["Collective name"] for a in recorded], ["all_reduce"])
         self.assertEqual(recorded[0]["In msg nelems"], 1024)
 
     @skipIfRocm
@@ -395,7 +395,7 @@ class TestCollectiveCuspyAnnotations(MultiProcContinuousTest):
         kernels = self._profile_all_reduce()
         self.assertTrue(kernels, "no NCCL kernel in the trace")
         for kernel in kernels:
-            self.assertEqual(kernel["args"]["Collective name"], "allreduce")
+            self.assertEqual(kernel["args"]["Collective name"], "all_reduce")
             self.assertEqual(kernel["args"]["Process Group Name"], pg.group_name)
             self.assertEqual(kernel["args"]["In msg nelems"], 1024)
 
@@ -412,7 +412,7 @@ class TestCollectiveCuspyAnnotations(MultiProcContinuousTest):
             if e.get("cat") == "gpu_user_annotation" and e["name"] == "outer_region"
         ]
         for kernel in kernels:
-            self.assertEqual(kernel["args"]["Collective name"], "allreduce")
+            self.assertEqual(kernel["args"]["Collective name"], "all_reduce")
             self.assertTrue(
                 any(
                     r["tid"] == kernel["tid"]
