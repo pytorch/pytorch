@@ -9529,6 +9529,55 @@ for args in ((a, b), (a, b, False)):
         called_dummy_free.value = 0
         called_dummy_alloc.value = 0
 
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    @parametrize("limit_before_allocator", [False, True])
+    @serialTest()
+    def test_mempool_allocator_failure_message(self, limit_before_allocator):
+        alloc_calls = 0
+
+        @ctypes.CFUNCTYPE(
+            ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+        )
+        def alloc(size, device, stream):
+            nonlocal alloc_calls
+            alloc_calls += 1
+            return None
+
+        @ctypes.CFUNCTYPE(
+            None, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+        )
+        def free(ptr, size, device, stream):
+            pass
+
+        allocator = torch._C._cuda_customAllocator(
+            ctypes.cast(alloc, ctypes.c_void_p).value,
+            ctypes.cast(free, ctypes.c_void_p).value,
+        )
+        pool = torch.cuda.MemPool(allocator)
+        device = torch.cuda.current_device()
+        initial_fraction = torch.cuda.get_per_process_memory_fraction(device)
+        _, total_memory = torch.cuda.mem_get_info(device)
+        try:
+            fraction = 1.0 / total_memory if limit_before_allocator else 1.0
+            torch.cuda.set_per_process_memory_fraction(fraction, device)
+            with torch.cuda.use_mem_pool(pool, device=device):
+                with self.assertRaises(torch.OutOfMemoryError) as error:
+                    torch.empty(1, dtype=torch.uint8, device=device)
+
+            message = str(error.exception)
+            if limit_before_allocator:
+                self.assertEqual(alloc_calls, 0)
+                self.assertNotIn("custom allocator", message)
+            else:
+                self.assertGreater(alloc_calls, 0)
+                self.assertIn(
+                    "The custom allocator backing this MemPool returned nullptr.",
+                    message,
+                )
+                self.assertIn("Check preceding allocator warnings or logs", message)
+        finally:
+            torch.cuda.set_per_process_memory_fraction(initial_fraction, device)
+
     @serialTest()
     def test_tensor_delete_after_allocator_delete(self):
         allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
@@ -12656,6 +12705,28 @@ class TestFXMemoryProfiler(TestCase):
                 self.assertIn("e = self.relu(d)", frame["fx_original_trace"])
 
 
+class TestCudaGreenContextsPlatformCheck(TestCase):
+    # Not gated on PLATFORM_SUPPORTS_GREEN_CONTEXT: this checks that evaluating it on
+    # a machine without libcuda (the nogpu CI configs) does not raise.
+    def test_missing_driver_library(self):
+        from torch.cuda import green_contexts
+        from torch.testing._internal.common_cuda import (
+            evaluate_platform_supports_green_context,
+        )
+
+        green_contexts._get_driver_version.cache_clear()
+        try:
+            with (
+                patch.object(green_contexts, "_HAS_CUDA_BINDINGS", True),
+                patch.object(
+                    green_contexts, "_get_cuda_library", side_effect=OSError("missing")
+                ),
+            ):
+                self.assertFalse(evaluate_platform_supports_green_context())
+        finally:
+            green_contexts._get_driver_version.cache_clear()
+
+
 @unittest.skipIf(
     not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported"
 )
@@ -13322,6 +13393,7 @@ class TestCudaArchList(TestCase):
 
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaAllocator)
+instantiate_parametrized_tests(TestMemPool)
 instantiate_parametrized_tests(TestCompileKernel)
 instantiate_parametrized_tests(TestCachingHostAllocatorCudaGraph)
 instantiate_parametrized_tests(TestCachingHostAllocatorConfig)
