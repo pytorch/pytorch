@@ -18,7 +18,9 @@ TRITON_MAX_BLOCK = {
     "Z": 1024,
     "R0_": 4096 * 16,  # * 16 is multi-kernel only
     "R1_": 2048 * 16,  # * 16 is multi-kernel only
+    "R2_": 2048 * 16,  # * 16 is multi-kernel only
 }
+TRITON_MAX_MIX_ORDER_XBLOCK = 16
 TRITON_MAX_RSPLIT = 64
 TRITON_MAX_TENSOR_NUMEL = 1 << 20
 TRITON_DOT_MIN_BLOCK = 16
@@ -30,6 +32,52 @@ TRITON_DEFAULT_BLOCK_SIZES = {
 }
 TRITON_DEFAULT_RSPLIT = 1
 TRITON_DEFAULT_RSPLIT_SIZE = 1
+
+
+def mix_order_reduction_max_num_stages(
+    rnumel_hint: int | None, inductor_meta: typing.Mapping[str, typing.Any]
+) -> int:
+    if not inductor_meta.get("mix_order_reduction_allow_multi_stages", True):
+        return 1
+    # tl.range pipelining cannot predicate device-side tensor-map creation.
+    if inductor_meta.get("uses_device_tma"):
+        return 1
+    return 2 if rnumel_hint is not None and rnumel_hint > 8192 else 3
+
+
+def is_valid_mix_order_reduction_xblock(
+    xblock: typing.Any, rsplit_size: int, max_xblock: int | None = None
+) -> bool:
+    return (
+        type(xblock) is int
+        and xblock > 0
+        and xblock & (xblock - 1) == 0
+        and (max_xblock is None or xblock <= max_xblock)
+        and rsplit_size % xblock == 0
+    )
+
+
+def is_valid_mix_order_reduction_config(
+    config: typing.Mapping[str, typing.Any],
+    rsplit_size: int,
+    rnumel_hint: int | None,
+    inductor_meta: typing.Mapping[str, typing.Any],
+) -> bool:
+    xblock = config.get("XBLOCK")
+    min_xblock = inductor_meta.get("tma_min_block_sizes", {}).get("XBLOCK", 1)
+    num_stages = config.get("NUM_STAGES")
+    if type(xblock) is not int or type(num_stages) is not int:
+        return False
+    xblock = typing.cast(int, xblock)
+    num_stages = typing.cast(int, num_stages)
+    max_num_stages = mix_order_reduction_max_num_stages(rnumel_hint, inductor_meta)
+    return (
+        is_valid_mix_order_reduction_xblock(
+            xblock, rsplit_size, TRITON_MAX_MIX_ORDER_XBLOCK
+        )
+        and xblock >= min_xblock
+        and 1 <= num_stages <= max_num_stages
+    )
 
 
 def native_matmul_block_numel(
@@ -157,6 +205,7 @@ class HeuristicType(Enum):
 
 class AutotuneHint(Enum):
     ONE_ELEMENT_PER_THREAD = 0
+    SCALAR_ACCUMULATORS = 1
 
     # Triton codegen tries to codegen set of AutotuneHints.
     # Enum.__repr__ looks like "<AutotuneHint.ELEMENTS_PER_WARP_32: 0>""
@@ -169,7 +218,9 @@ class DeviceProperties(typing.NamedTuple):
     """Copy device properties into a data structure not requiring torch to be imported"""
 
     type: str  # type: ignore[assignment]
-    index: int  # type: ignore[assignment]
+    # None is a sentinel, not "unknown": it marks a device-agnostic kernel whose real
+    # device is resolved at load time (see _resolve_load_device in triton_heuristics.py).
+    index: int | None  # type: ignore[assignment]
     multi_processor_count: int
     cc: int
     major: int | None = None
@@ -233,9 +284,10 @@ class TritonMeta(typing.TypedDict, total=False):
     (signature/device/constants/configs first, then backend/ROCm/tlx extras)
     and the whole bag is forwarded verbatim to external Triton APIs, which
     tolerate and ignore keys they do not recognize. `device` is typed as the
-    codegen-time DeviceProperties; CachingAutotuner rewrites it to the integer
-    device index before reaching Triton, and the runtime read sites that expect
-    that int narrow it with an explicit cast.
+    codegen-time DeviceProperties; CachingAutotuner rewrites it to
+    DeviceProperties.index before reaching Triton -- an int, or None for a
+    device-agnostic kernel -- and the runtime read sites that expect an int
+    narrow it with an explicit cast.
     """
 
     signature: dict[str, typing.Any]

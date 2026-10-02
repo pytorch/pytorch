@@ -1,24 +1,46 @@
 import ctypes
+import re
 import sys
 from typing import Any
 
 import torch
+from torch._vendor.packaging.version import Version
 
 
 try:
     from cuda.bindings import (  # pyrefly: ignore[missing-import]
+        __version__ as _cuda_bindings_version,
         driver as _cuda_bindings_driver,
         runtime as _cuda_bindings_runtime,
     )
 
     _HAS_CUDA_BINDINGS = True
 except ImportError:
+    _cuda_bindings_version = None
+    _cuda_bindings_driver = None  # type: ignore[assignment]
+    _cuda_bindings_runtime = None  # type: ignore[assignment]
+    _HAS_CUDA_BINDINGS = False
+
+if _HAS_CUDA_BINDINGS and torch.version.hip is not None:
+    # cuda.bindings drives NVIDIA's CUDA runtime, so it is useless in a ROCm build --
+    # but it is an ordinary pip package that installs and imports perfectly well on a
+    # ROCm box, and only fails at the first actual call (cudaErrorInsufficientDriver).
+    # Report it as absent here so every caller degrades the way it already does when the
+    # package is missing, rather than each one having to recognize that failure.
     _cuda_bindings_driver = None  # type: ignore[assignment]
     _cuda_bindings_runtime = None  # type: ignore[assignment]
     _HAS_CUDA_BINDINGS = False
 
 # The _get_device_index has been moved to torch.utils._get_device_index
 from torch._utils import _get_device_index as _torch_get_device_index
+
+
+def _ensure_cuda_bindings_version(version: int, message: str) -> None:
+    if _cuda_bindings_version is None:
+        raise RuntimeError(message)
+    release = Version(_cuda_bindings_version).release
+    if release[:2] < (version // 1000, version % 1000 // 10):
+        raise RuntimeError(message)
 
 
 def _get_hip_runtime_library() -> ctypes.CDLL:
@@ -318,13 +340,17 @@ def _nvrtc_compile(
     num_options = len(options)
     options_array = (ctypes.c_char_p * num_options)(*options)
 
+    # Template expressions in kernel_name are not valid filenames on Windows,
+    # where HIPRTC then fails with an empty log (ROCm/TheRock#8216).
+    source_name = re.sub(r"[^\w.-]", "_", kernel_name) + ".cu"
+
     # Create program
     prog = ctypes.c_void_p()
     check_nvrtc(
         libnvrtc.nvrtcCreateProgram(
             ctypes.byref(prog),
             source_bytes,
-            f"{kernel_name}.cu".encode(),
+            source_name.encode(),
             0,
             None,
             None,

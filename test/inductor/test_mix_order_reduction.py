@@ -10,13 +10,18 @@ import torch.nn.functional as F
 from torch import nn
 from torch._dynamo.utils import same
 from torch._inductor import metrics, utils
-from torch._inductor.codegen.triton import TritonKernel
+from torch._inductor.choices import InductorChoices
+from torch._inductor.codegen.triton import FixedTritonConfig
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import persistent_reduction
 from torch._inductor.scheduler import MixOrderReduction
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.virtualized import V
 from torch.testing import FileCheck
-from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -26,7 +31,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.common_xpu import PLATFORM_SUPPORTS_FLASH_ATTENTION_XPU
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.utils._triton import has_triton_tma_device
+from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
 
 class TestBase(TestCase):
@@ -39,6 +44,27 @@ class TestBase(TestCase):
         ref = f(*args)
         act = torch.compile(f)(*args)
         self.assertTrue(same(ref, act, tol=tol))
+
+
+def _supports_tensor_descriptors(device):
+    device_type = torch.device(device).type
+    return has_triton_stable_tma_api() and (
+        device_type == "xpu"
+        or (device_type == "cuda" and torch.cuda.get_device_capability()[0] >= 9)
+    )
+
+
+class _FixedMixOrderChoices(InductorChoices):
+    def __init__(self, fixed_config):
+        self.fixed_config = fixed_config
+
+    def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+        if kernel_kwargs.get("mix_order_reduction"):
+            return {
+                **kernel_kwargs,
+                "fixed_config": FixedTritonConfig(self.fixed_config),
+            }
+        return kernel_kwargs
 
 
 class SkipPatternTest(TestBase):
@@ -125,6 +151,76 @@ class MixOrderReductionTest(TestBase):
         self.assertEqual(
             inductor_config.triton.mix_order_reduction,
             metrics.codegen_mix_order_reduction,
+        )
+
+    @parametrize("shape", ((4096, 8192), (4096, 16384), (8192, 16384)))
+    def test_wide_reduction_fuses_in_strict_mode(self, shape):
+        """Wide reductions (large ncol, nrow < ncol*2) should use mix-order
+        fusion in the default (strict) mode, now that the `nrow >= ncol*2`
+        gate is removed."""
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        M, N = shape
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        x = torch.randn(M, N, device=GPU_TYPE, dtype=torch.bfloat16)
+        ref = f(x)
+        act = torch.compile(f)(x)
+
+        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            1,
+            metrics.codegen_mix_order_reduction,
+            f"wide reduction {shape} should use mix-order fusion in strict mode",
+        )
+
+    @parametrize("shape", ((6144, 4000), (8192, 6144)))
+    def test_flat_reduction_fuses_in_strict_mode(self, shape):
+        """A relatively flat reduction (nrow >= 4096, nrow < ncol*2) should use
+        mix-order fusion in the default (strict) mode, now that the
+        `nrow >= ncol*2` gate is removed."""
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        M, N = shape
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        x = torch.randn(M, N, device=GPU_TYPE, dtype=torch.bfloat16)
+        ref = f(x)
+        act = torch.compile(f)(x)
+
+        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            1,
+            metrics.codegen_mix_order_reduction,
+            f"flat reduction {shape} should use mix-order fusion in strict mode",
+        )
+
+    def test_wide_reduction_respects_row_floor(self):
+        """Strict mode still requires nrow >= 4096: with too few rows there is
+        not enough parallelism to split the other reduction across, so the
+        shape is left unfused (guards against over-fusing 2048x8192)."""
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        # ncol=8192 is wide, but nrow=2048 < 4096 -> conservatively not fused.
+        x = torch.randn(2048, 8192, device=GPU_TYPE, dtype=torch.bfloat16)
+        ref = f(x)
+        act = torch.compile(f)(x)
+
+        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            0,
+            metrics.codegen_mix_order_reduction,
+            "wide reduction with too few rows should not fuse in strict mode",
         )
 
     @inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True})
@@ -251,6 +347,47 @@ class MixOrderReductionTest(TestBase):
         # Large, asymmetric shape encourages mix-order reduction heuristics.
         x = torch.randn(32768, 768, dtype=torch.float, device=GPU_TYPE)
         self.check_numeric(f, (x,))
+
+    @parametrize("reduction_type", ("amax", "amin"))
+    @inductor_config.patch(
+        {
+            "benchmark_fusion": False,
+            "split_reductions": False,
+        }
+    )
+    def test_later_fusion_rejects_unsupported_reduction(self, reduction_type):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        reduction = getattr(torch, reduction_type)
+
+        def f(x):
+            x = x.float()
+            return x.sum(dim=1), x.sum(dim=0), reduction(x, dim=0)
+
+        x = torch.randint(0, 10, (32768, 768), dtype=torch.uint8, device=GPU_TYPE)
+        self.check_numeric(f, (x,))
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+
+    @inductor_config.patch(
+        {
+            "benchmark_fusion": False,
+            "split_reductions": False,
+        }
+    )
+    def test_integer_noncontiguous_reduction_is_not_mix_order(self):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x):
+            return x.sum(dim=1), x.sum(dim=0)
+
+        x = torch.full((131073, 129), 255, dtype=torch.uint8, device=GPU_TYPE)
+        expected = f(x)
+        actual = torch.compile(f)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 0)
 
     @inductor_config.patch(coordinate_descent_tuning=True)
     def test_XBLOCK_coordest_tuning(self):
@@ -1533,24 +1670,205 @@ class OverFusionTest(TestBase):
         self.assertGreater(metrics.rejected_mix_order_reduction_fusion, 0)
 
 
+class MixOrderReductionNumericTest(TestBase):
+    @parametrize("use_tensor_descriptor", (False, True))
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+            "triton.mix_order_reduction": True,
+            "triton.mix_order_reduction_split_size": 18,
+        }
+    )
+    def test_split_column_reduction_masks_padded_rows(
+        self, device, use_tensor_descriptor
+    ):
+        if use_tensor_descriptor and not _supports_tensor_descriptors(device):
+            self.skipTest("requires tensor descriptor support")
+
+        def f(x):
+            y = x * 2 + 0.25
+            return y.max(dim=-1).values, y.float().sum(dim=0)
+
+        x = torch.zeros((40961, 129), dtype=torch.bfloat16, device=device)
+        expected = f(x)
+        with inductor_config.patch(
+            {
+                "triton.use_tensor_descriptor": use_tensor_descriptor,
+                "assume_aligned_inputs": use_tensor_descriptor,
+            }
+        ):
+            actual = torch.compile(f)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+            "triton.mix_order_reduction": True,
+            "triton.mix_order_reduction_autotune_split_size": True,
+        }
+    )
+    @parametrize("use_tensor_descriptor", (False, True))
+    def test_fixed_config_skips_split_autotuning(self, device, use_tensor_descriptor):
+        if use_tensor_descriptor and not _supports_tensor_descriptors(device):
+            self.skipTest("requires tensor descriptor support")
+
+        rows = 40961
+
+        def f(x):
+            y = x * 2 + 0.25
+            return y.max(dim=-1).values, y.float().sum(dim=0)
+
+        x = torch.zeros((rows, 129), dtype=torch.bfloat16, device=device)
+        expected = f(x)
+        with (
+            V.set_choices_handler(
+                _FixedMixOrderChoices({"XBLOCK": 1, "NUM_STAGES": 1})
+            ),
+            inductor_config.patch(
+                {
+                    "triton.use_tensor_descriptor": use_tensor_descriptor,
+                    "assume_aligned_inputs": use_tensor_descriptor,
+                }
+            ),
+        ):
+            actual = torch.compile(f)(x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+            "triton.mix_order_reduction": True,
+            "triton.mix_order_reduction_autotune_split_size": True,
+            "triton.use_tensor_descriptor": True,
+            "assume_aligned_inputs": True,
+        }
+    )
+    @parametrize("enable_host_side_tma", (False, True))
+    @parametrize("num_stages", (1, 2))
+    def test_fixed_config_tma_requires_single_stage(
+        self, device, num_stages, enable_host_side_tma
+    ):
+        if not _supports_tensor_descriptors(device):
+            self.skipTest("requires tensor descriptor support")
+
+        def f(x, y):
+            return x.sum(dim=1), (x + y).float().sum(dim=0)
+
+        x = torch.zeros((40960, 128), dtype=torch.bfloat16, device=device)
+        y = torch.ones_like(x)
+        expected = f(x, y)
+        with (
+            V.set_choices_handler(
+                _FixedMixOrderChoices({"XBLOCK": 8, "NUM_STAGES": num_stages})
+            ),
+            inductor_config.patch("triton.enable_host_side_tma", enable_host_side_tma),
+        ):
+            actual, (wrapper,) = utils.run_and_get_code(torch.compile(f), x, y)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+        if enable_host_side_tma:
+            self.assertIn("host_tma_descriptor_args", wrapper)
+            if num_stages == 1:
+                self.assertIn("'uses_device_tma': True", wrapper)
+            else:
+                self.assertNotIn("'uses_device_tma': True", wrapper)
+        elif num_stages == 1:
+            FileCheck().check("'uses_device_tma': True").run(wrapper)
+        else:
+            FileCheck().check_not("'uses_tma': True").run(wrapper)
+
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+            "triton.mix_order_reduction": True,
+            "triton.mix_order_reduction_autotune_split_size": True,
+            "triton.use_tensor_descriptor": True,
+            "triton.enable_host_side_tma": True,
+            "assume_aligned_inputs": True,
+        }
+    )
+    def test_fixed_multistage_host_tma_reduction_store(self, device):
+        if not _supports_tensor_descriptors(device):
+            self.skipTest("requires tensor descriptor support")
+
+        def f(x):
+            y = x.float()
+            return y.sum(dim=1), y.sum(dim=0)
+
+        x = torch.ones((40960, 128), dtype=torch.bool, device=device)
+        expected = f(x)
+        with V.set_choices_handler(
+            _FixedMixOrderChoices({"XBLOCK": 8, "NUM_STAGES": 2})
+        ):
+            actual, (wrapper,) = utils.run_and_get_code(torch.compile(f), x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+        self.assertIn("host_tma_descriptor_args", wrapper)
+        self.assertNotIn("tl.make_tensor_descriptor", wrapper)
+        self.assertNotIn("'uses_device_tma': True", wrapper)
+
+    @inductor_config.patch(
+        {
+            "split_reductions": False,
+            "triton.cooperative_reductions": False,
+            "triton.force_cooperative_reductions": False,
+            "triton.mix_order_reduction": True,
+            "triton.use_tensor_descriptor": True,
+            "assume_aligned_inputs": True,
+        }
+    )
+    @parametrize("enable_host_side_tma", (False, True))
+    def test_removed_reduction_store_drops_tma_metadata(
+        self, device, enable_host_side_tma
+    ):
+        if not _supports_tensor_descriptors(device):
+            self.skipTest("requires tensor descriptor support")
+
+        def f(x):
+            y = x.float()
+            return y.sum(dim=1) > 0, y.sum(dim=0)
+
+        x = torch.ones((40960, 128), dtype=torch.bool, device=device)
+        expected = f(x)
+        with inductor_config.patch("triton.enable_host_side_tma", enable_host_side_tma):
+            actual, (wrapper,) = utils.run_and_get_code(torch.compile(f), x)
+
+        self.assertEqual(actual, expected)
+        self.assertEqual(metrics.codegen_mix_order_reduction, 1)
+        self.assertNotIn("tl.make_tensor_descriptor", wrapper)
+        self.assertNotIn("'uses_tma': True", wrapper)
+        self.assertNotIn("'tma_min_block_sizes':", wrapper)
+        self.assertNotIn("host_tma_descriptor_args", wrapper)
+
+
+instantiate_device_type_tests(
+    MixOrderReductionNumericTest,
+    globals(),
+    only_for=("cuda", "xpu"),
+    allow_xpu=True,
+)
+
+
 class MixOrderReductionHeuristicTest(TestBase):
     """
     CPU-runnable unit tests for the mix-order persistent_reduction autotuning
     heuristic. These exercise the config generation logic directly (via
     ``return_configs=True``) without needing a GPU.
     """
-
-    def test_uses_tma_tracks_emitted_descriptors(self):
-        for source in (None, "host", "device"):
-            with self.subTest(source=source):
-                kernel = object.__new__(TritonKernel)
-                host_descriptors = {}
-                if source == "host":
-                    host_descriptors["arg"] = mock.sentinel.descriptor
-                kernel.host_tma_descriptor_args = host_descriptors
-                kernel._emitted_device_tma = source == "device"
-                self.assertEqual(kernel.uses_tma, source is not None)
-                self.assertEqual(kernel.uses_device_tma, source == "device")
 
     def _gen_num_stages(
         self, *, tma, allow_multi_stages, device_tma=False, rsplit_size=256, rnumel=256
