@@ -198,6 +198,9 @@ buffer is overwritten, and one barrier per iteration suffices. The running write
 every thread; it is identical across the block, which keeps the phase 2 early exit block-uniform.
 */
 
+// Upper bound on warps per block; sizes the per-warp count buffer and the shuffle scan over it.
+constexpr int kMaxWarps = 1024 / C10_WARP_SIZE_LOWER_BOUND;
+
 // Returns the exclusive prefix of matches in warps before this one for the current iteration, the iteration's
 // total over the block, and this lane's offset within its warp. All threads of the block must call it.
 template <typename IndexType>
@@ -214,8 +217,7 @@ __device__ __forceinline__ IndexType orderedWarpOffset(bool hasTopK,
   }
   __syncthreads();
   // Lane w of every warp loads warp w's count; an inclusive shuffle scan across lanes then gives
-  // every warp's prefix. num_warps <= 1024 / C10_WARP_SIZE_LOWER_BOUND <= 32, so it fits in one warp.
-  constexpr int kMaxWarps = 1024 / C10_WARP_SIZE_LOWER_BOUND;
+  // every warp's prefix. num_warps <= kMaxWarps <= warp size, so it fits in one warp.
   IndexType c = (lane_id < num_warps) ? warpCounts[lane_id] : 0;
   IndexType incl = c;
   #pragma unroll
@@ -225,8 +227,7 @@ __device__ __forceinline__ IndexType orderedWarpOffset(bool hasTopK,
   }
   total = __shfl(incl, num_warps - 1);
   IndexType prefix = __shfl(incl, warp_id) - __shfl(c, warp_id);
-  uint64_t mask = (1ULL << lane_id) - 1;
-  my_offset = __popcll(ballot & mask);
+  my_offset = __popcll(ballot & at::cuda::getLaneMaskLt());
   return prefix;
 }
 
@@ -272,8 +273,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // HIP workgroups have at most 1024 threads. Warp size is at least 32 (can be 64 on some
   // architectures), so we use 32 for safety: 2 buffers * (1024/32) warps * 4 radix bins = 256.
   __shared__ IndexType smem[256];
-  // Per-warp match counts for the ordered compaction, double buffered; sized for wave32.
-  __shared__ IndexType warpCounts[2][1024 / 32];
+  // Per-warp match counts for the ordered compaction, double buffered.
+  __shared__ IndexType warpCounts[2][kMaxWarps];
 
   IndexType slice = getLinearBlockId<IndexType>();
   if (slice >= numInputSlices) {
