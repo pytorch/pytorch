@@ -9,6 +9,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/native/ElementwiseRefMeta.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1654,6 +1655,123 @@ Tensor special_xlogy(const Scalar& x, const Tensor& y) {
 
 Tensor special_xlogy(const Tensor& x, const Scalar& y) {
   return at::xlogy(x, y);
+}
+
+// add.Tensor meta kernel
+Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other) || alpha.isSymInt();
+  if (symbolic) {
+    if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
+      return out;
+    }
+  }
+  // A default alpha is dropped before reaching Python, so the ref sees None.
+  const bool default_alpha = !alpha.isSymbolic() && alpha.type() == kLong && alpha.toLong() == 1;
+  return binary_ref_meta(
+      self,
+      other,
+      ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT,
+      symbolic,
+      default_alpha ? std::nullopt : std::optional<Scalar>(alpha));
+}
+
+// sub.Tensor meta kernel
+Tensor sub_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other) || alpha.isSymInt();
+  if (symbolic) {
+    if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
+      return out;
+    }
+  }
+  // refs.sub applies alpha only when alpha != 1. Python evaluates SymBool != 1
+  // to True without guarding.
+  bool apply_alpha = true;
+  if (alpha.isSymInt()) {
+    apply_alpha = alpha.toSymInt().sym_ne(1).guard_bool(__FILE__, __LINE__);
+  } else if (alpha.isSymFloat()) {
+    apply_alpha = alpha.toSymFloat().sym_ne(1.0).guard_bool(__FILE__, __LINE__);
+  } else if (alpha.isComplex()) {
+    apply_alpha = alpha.toComplexDouble() != c10::complex<double>(1, 0);
+  } else if (!alpha.isSymBool()) {
+    apply_alpha = alpha.toDouble() != 1;
+  }
+  return binary_ref_meta(
+      self,
+      other,
+      ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT,
+      symbolic,
+      apply_alpha ? std::optional<Scalar>(alpha) : std::nullopt,
+      /*is_sub=*/true);
+}
+
+// mul.Tensor meta kernel
+Tensor mul_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
+  if (symbolic) {
+    if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
+      return out;
+    }
+  }
+  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic);
+}
+
+// div.Tensor meta kernel
+Tensor div_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
+  if (symbolic) {
+    if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::INT_TO_FLOAT); out.defined()) {
+      return out;
+    }
+  }
+  return binary_ref_meta(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::INT_TO_FLOAT, symbolic);
+}
+
+// Mirrors meta_binop_inplace_alpha, which ignores alpha. A wrapped number's
+// dtype matches the Python type the checks see there.
+Tensor& add__Tensor_meta(Tensor& self, const Tensor& other, const Scalar& /*alpha*/) {
+  const auto self_dtype = self.scalar_type();
+  const auto other_dtype = other.scalar_type();
+  TORCH_CHECK(
+      !(isIntegralType(self_dtype, /*includeBool=*/false) && isFloatingType(other_dtype)),
+      "Promotion of int.add/sub_(float) in in-place ops are not possible due to element size change.");
+  TORCH_CHECK(
+      self_dtype != kBool || other_dtype == kBool,
+      "Promotion of bool.add/sub_(others) in in-place ops are not possible due to element size change.");
+  if (!other.unsafeGetTensorImpl()->is_wrapped_number()) {
+    check_inplace_broadcast(self.sym_sizes(), other.sym_sizes());
+  }
+  return self;
+}
+
+// Python fake runs the refs for the ops below, under FakeTensorMode for
+// symbolic inputs and as the Meta kernel otherwise.
+Tensor bitwise_and_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
+  return elementwise_binary_ref_meta("bitwise_and", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic);
+}
+
+Tensor le_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
+  return elementwise_binary_ref_meta(
+      "le", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+}
+
+Tensor le_Scalar_meta(const Tensor& self, const Scalar& other) {
+  const bool symbolic = is_symbolic_operand(self) || other.isSymInt();
+  return elementwise_binary_ref_meta(
+      "le", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+}
+
+Tensor eq_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
+  return elementwise_binary_ref_meta(
+      "eq", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
+}
+
+Tensor ne_Scalar_meta(const Tensor& self, const Scalar& other) {
+  const bool symbolic = is_symbolic_operand(self) || other.isSymInt();
+  return elementwise_binary_ref_meta(
+      "ne", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::ALWAYS_BOOL, symbolic, /*supports_lhs_python_scalar=*/false);
 }
 
 } // namespace at::native

@@ -235,9 +235,17 @@ struct C10_API BackendMeta : intrusive_ptr_target {
 struct C10_API FakeTensorMode {
   std::shared_ptr<c10::SafePyObject> shape_env_;
   std::shared_ptr<c10::SafePyObject> fake_tensor_converter_;
+  // Python wrapper used by callback dispatch.
+  std::shared_ptr<c10::SafePyObject> fake_mode_pyobj_;
 
   // when false, disallow a fake tensor from having a 'meta' device
   bool allow_meta_ = true;
+
+  // When true, real tensor inputs to an op are converted to fakes instead of
+  // raising. A non-None fake_tensor_tls.allow_non_fake_inputs_override, a
+  // thread-local override used by dynamo's nonstrict_trace, takes precedence,
+  // so read this through PyInterpreterVTable::allow_non_fake_inputs().
+  bool allow_non_fake_inputs_ = false;
 
   FakeTensorMode(
       std::shared_ptr<c10::SafePyObject> shape_env,
@@ -281,9 +289,13 @@ struct C10_API ExtraMeta {
   std::optional<std::string> custom_storage_error_msg_ = std::nullopt;
   std::optional<c10::Device> fake_device_ = std::nullopt;
   std::shared_ptr<FakeTensorMode> fake_tensor_mode_ = nullptr;
+  // The real tensor this fake shadows, when propagate_real_tensors is on.
+  c10::intrusive_ptr<c10::TensorImpl> real_tensor_ = nullptr;
   // The real constant this fake was created from (via
   // FakeTensorMode::set_constant), or null.
   c10::intrusive_ptr<c10::TensorImpl> fake_constant_ = nullptr;
+  // See TensorImpl::symbolic_wrapped_number.
+  c10::SymNode symbolic_wrapped_number_ = nullptr;
 
   ExtraMeta() = default;
   ~ExtraMeta();
@@ -299,6 +311,8 @@ struct C10_API ExtraMeta {
     custom_storage_error_msg_ = other.custom_storage_error_msg_;
     fake_device_ = other.fake_device_;
     fake_tensor_mode_ = other.fake_tensor_mode_;
+    real_tensor_ = other.real_tensor_;
+    symbolic_wrapped_number_ = other.symbolic_wrapped_number_;
   }
   ExtraMeta& operator=(const ExtraMeta& other) = delete;
   ExtraMeta(ExtraMeta&& other) = delete;
@@ -1410,6 +1424,24 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   /**
+   * The SymInt, SymFloat or SymBool node a wrapped number stands for, or null.
+   * The wrapped number's value is a placeholder; Python also keeps the
+   * symbolic number as the `_wrapped_number` attribute.
+   */
+  c10::SymNodeImpl* symbolic_wrapped_number() const {
+    return extra_meta_ ? extra_meta_->symbolic_wrapped_number_.get() : nullptr;
+  }
+
+  bool is_symbolic_wrapped_number() const {
+    return symbolic_wrapped_number() != nullptr;
+  }
+
+  void set_symbolic_wrapped_number(c10::SymNode node) {
+    TORCH_INTERNAL_ASSERT(is_wrapped_number_);
+    get_extra_meta().symbolic_wrapped_number_ = std::move(node);
+  }
+
+  /**
    * Returns true if Tensor supports as_strided and as_strided_backward.
    * This is used in autograd to perform inplace update on view Tensors.
    * See Note [View + Inplace update for base tensor] and
@@ -1506,6 +1538,18 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
       return nullptr;
     }
     return extra_meta_->fake_tensor_mode_;
+  }
+
+  // The real tensor this fake shadows under propagate_real_tensors, or nullptr.
+  void set_real_tensor(c10::intrusive_ptr<c10::TensorImpl> real) {
+    get_extra_meta().real_tensor_ = std::move(real);
+  }
+
+  c10::intrusive_ptr<c10::TensorImpl> real_tensor() const {
+    if (!extra_meta_) {
+      return nullptr;
+    }
+    return extra_meta_->real_tensor_;
   }
 
   // the ExtraMeta backing this tensor, or nullptr if none; does not allocate.

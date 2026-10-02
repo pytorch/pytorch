@@ -60,6 +60,7 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
+    expectedIfCppFakeTensor,
     HardwareClassification,
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -1506,7 +1507,32 @@ def forward(self, L_nested_queue_q : {fx_class}, L_x_ : torch.Tensor):
         # inputs: (token, nested_queue.q, x)
         self.assertExpectedInline(
             backend.fw_graphs[0].code.strip(),
-            """\
+            expectedIfCppFakeTensor(
+                """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    tan = torch.ops.aten.tan.default(arg2_1)
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, tan);  arg0_1 = tan = None
+    getitem = with_effects[0];  with_effects = None
+    cos = torch.ops.aten.cos.default(arg2_1);  arg2_1 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, cos);  getitem = cos = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_2 = None
+    getitem_4 = with_effects_2[0]
+    getitem_5 = with_effects_2[1];  with_effects_2 = None
+    sym_size_int = torch.ops.aten.sym_size.int(getitem_5, 0)
+    ge = sym_size_int >= 0
+    _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
+    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_4 = arg1_1 = None
+    getitem_6 = with_effects_3[0]
+    getitem_7 = with_effects_3[1];  with_effects_3 = None
+    sym_size_int_1 = torch.ops.aten.sym_size.int(getitem_7, 0)
+    ge_1 = sym_size_int_1 >= 0
+    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+    eq_2 = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
+    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(u0, u1) on node 'eq'");  eq_2 = _assert_scalar_2 = None
+    add_4 = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
+    return (getitem_6, add_4)""",
+                """\
 def forward(self, arg0_1, arg1_1, arg2_1):
     tan = torch.ops.aten.tan.default(arg2_1)
     with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, tan);  arg0_1 = tan = None
@@ -1530,6 +1556,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq, "Runtime assertion failed for expression Eq(u0, u1) on node 'eq'");  eq = _assert_scalar_2 = None
     add = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
     return (getitem_6, add)""",
+            ),
         )
 
     def test_compile_global(self):
@@ -1773,16 +1800,19 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         with ExitStack() as stack:
             with FakeTensorMode(shape_env=ShapeEnv()):
                 joint = aot_export_joint_with_descriptors(stack, M(), inp)
-                self.assertExpectedInline(
-                    joint.graph_module.code.strip(),
-                    """\
+                cpp_expected = """\
 def forward(self, primals, tangents):
     primals_1, primals_2, tangents_1, = fx_pytree.tree_flatten_spec([primals, tangents], self._in_spec)
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(primals_2);  primals_2 = None
     _opaque_obj0 = self._opaque_obj0
     module_mul = torch.ops._TestOpaqueObject.module_mul.default(_opaque_obj0, primals_1, _local_scalar_dense);  _opaque_obj0 = primals_1 = None
-    mul = torch.ops.aten.mul.Tensor(tangents_1, _local_scalar_dense);  tangents_1 = _local_scalar_dense = None
-    return pytree.tree_unflatten([module_mul, mul, None], self._out_spec)""",
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, _local_scalar_dense);  tangents_1 = _local_scalar_dense = None
+    return pytree.tree_unflatten([module_mul, mul_1, None], self._out_spec)"""
+                self.assertExpectedInline(
+                    joint.graph_module.code.strip(),
+                    expectedIfCppFakeTensor(
+                        cpp_expected, cpp_expected.replace("mul_1", "mul")
+                    ),
                 )
                 compiled_fn = aot_compile_joint_with_descriptors(joint)
 
