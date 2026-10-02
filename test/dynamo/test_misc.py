@@ -4329,6 +4329,78 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             )
             torch._dynamo.reset()
 
+    def test_numpy_operator_with_default_device_context(self):
+        def fn(input_image):
+            rounded = np.round(input_image)
+            return rounded * 64.0, 64.0 * rounded, None
+
+        x = np.ones((2, 3, 4), dtype=np.uint8)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        # CPU is sufficient to exercise DeviceContext/TorchFunctionMode handling.
+        with torch.device("cpu"):
+            result = opt_fn(x)
+
+        expected = fn(x)
+        self.assertEqual(type(result[0]), np.ndarray)
+        self.assertEqual(type(result[1]), np.ndarray)
+        self.assertEqual(result, expected)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_operator_ignores_torch_function_mode(self):
+        class RewriteMultiply(torch.overrides.TorchFunctionMode):
+            def __init__(self):
+                self.multiply_count = 0
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if func in (torch.mul, torch.multiply):
+                    self.multiply_count += 1
+                    return args[0]
+                return func(*args, **(kwargs or {}))
+
+        def fn(x):
+            return x * 4.0
+
+        x = np.arange(4, dtype=np.float32)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        mode = RewriteMultiply()
+
+        with mode:
+            result = opt_fn(x)
+
+        self.assertEqual(result, fn(x))
+        self.assertEqual(mode.multiply_count, 0)
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_numpy_operator_with_tensor_subclass(self):
+        class DisabledTorchFunctionTensor(torch.Tensor):
+            __torch_function__ = torch._C._disabled_torch_function_impl
+
+        def fn(array, tensor):
+            # ndarray on the left defers to the tensor's reflected method.
+            return tensor * array, array / tensor
+
+        array = np.arange(4, dtype=np.float32)
+        for tensor in (
+            torch.arange(1, 5, dtype=torch.float32),
+            torch.arange(1, 5, dtype=torch.float32).as_subclass(
+                DisabledTorchFunctionTensor
+            ),
+        ):
+            cnts = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+            with torch.device("cpu"):
+                expected = fn(array, tensor)
+                result = opt_fn(array, tensor)
+
+            for got, want in zip(result, expected):
+                self.assertIs(type(got), type(want))
+            self.assertEqual(result, expected)
+            self.assertEqual(cnts.frame_count, 1)
+
     def test_numpy_ndarray_graph_break(self):
         def fn(x):
             a = x.numpy()
@@ -11574,9 +11646,9 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             get_instruction_source_311(f.__code__, insts[op_offset]),
             """\
             a = ("🔥🔥🔥" +
-                ~~~~~~~~
+                ~~~~~~~~~~~
                 + "🔥🔥") + b
-                ~~~~~~~~^~~
+                ~~~~~~~~~~^~~
 """,
         )
 
@@ -16541,6 +16613,7 @@ fn
         with self.assertRaises(ImportError):
             fn(x)
 
+    @torch._dynamo.testing.lru_cache_reordering(True)
     def test_dynamo_cache_move_to_front(self):
         def fn(x, const):
             return x + const
@@ -17624,6 +17697,35 @@ fn
         ref = fn(x)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_property_isabstractmethod_raises(self):
+        class NotBool:
+            def __bool__(self):
+                raise ValueError("truth-test failure")
+
+        def accessor(*args):
+            pass
+
+        accessor.__isabstractmethod__ = NotBool()
+
+        def fn(t, prop):
+            try:
+                prop.__isabstractmethod__
+            except ValueError:
+                return t + 1
+            return t - 1
+
+        for accessor_index in range(3):
+            with self.subTest(accessor_index=accessor_index):
+                accessors = [None, None, None]
+                accessors[accessor_index] = accessor
+                prop = property(*accessors)
+                compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+                for value in (0.0, 2.0):
+                    t = torch.tensor(value)
+                    self.assertEqual(fn(t, prop), t + 1)
+                    self.assertEqual(compiled_fn(t, prop), t + 1)
 
     def test_assert_size_stride(self):
         x = torch.randn(2, 3, 4)
