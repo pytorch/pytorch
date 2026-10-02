@@ -1142,6 +1142,8 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
         return expected
 
 class _TestMetaBase(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # Copies inputs to inplace operations to avoid inplace modifications
     #   to leaves requiring gradient
     def _get_safe_inplace(self, inplace_variant):
@@ -1722,7 +1724,7 @@ class TestMetaCore(TestCase):
     # Device-agnostic meta tests. Tests here may use the CPU eager kernel as the
     # reference; CPU is treated as the baseline device, not a hardware-specific
     # accelerator, so a CPU reference does not couple these tests to hardware.
-    # CUDA-referenced tests live in TestMeta instead.
+    # CUDA-referenced tests live in TestMetaCudaRef instead.
     hw_classification = HardwareClassification.GENERIC
 
     def test_empty_quantized(self):
