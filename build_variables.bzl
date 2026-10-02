@@ -943,6 +943,7 @@ libtorch_python_core_sources = [
     "torch/csrc/Dtype.cpp",
     "torch/csrc/DynamicTypes.cpp",
     "torch/csrc/Exceptions.cpp",
+    "torch/csrc/FakeTensorMode.cpp",
     "torch/csrc/Generator.cpp",
     "torch/csrc/Layout.cpp",
     "torch/csrc/MemoryFormat.cpp",
