@@ -461,6 +461,62 @@ class ProcessGroupNCCL2ConfigTest(_ProcessGroupNCCL2OptionsTest):
         self._check_all_reduce()
 
 
+class ProcessGroupNCCL2CommNameTest(_ProcessGroupNCCL2OptionsTest):
+    # NCCLX telemetry joins on commName, so nccl2 must keep a user-supplied one
+    # and otherwise default to stock ProcessGroupNCCL's "<desc>:<name>".
+    @classmethod
+    def _init_pg(cls, rank, world_size, rdvz_file) -> None:
+        # NCCL logs each config field it is handed under NCCL_DEBUG_SUBSYS=ENV.
+        cls.nccl_debug_file = f"{rdvz_file}.nccl_debug.{rank}"
+        os.environ["NCCL_DEBUG"] = "INFO"
+        os.environ["NCCL_DEBUG_SUBSYS"] = "ENV"
+        os.environ["NCCL_DEBUG_FILE"] = cls.nccl_debug_file
+        super()._init_pg(rank, world_size, rdvz_file)
+
+    def _logged_comm_names(self) -> list[str]:
+        prefix = "Comm config Comm name set to "
+        with open(self.nccl_debug_file) as f:
+            return [line.split(prefix, 1)[1].strip() for line in f if prefix in line]
+
+    @requires_nccl()
+    @requires_nccl_version((2, 27), "Need NCCL 2.27+ for commName")
+    @skip_if_lt_x_gpu(2)
+    def test_comm_name(self) -> None:
+        self._check_all_reduce()
+        ranks = list(range(self.world_size))
+        opts = dist.ProcessGroupNCCL.Options()
+        opts.config.comm_name = "zzz_user"
+        user = dist.new_group(ranks, pg_options=opts)
+        named = dist.new_group(ranks, group_desc="zzz_new")
+        default_child = self.pg.split_group(
+            ranks, group_name="zzz_split", group_desc="zzz_desc"
+        )
+        user_child = self.pg.split_group(ranks, opts=opts, group_name="zzz_user_split")
+        for group in (user, named, default_child, user_child):
+            dist.all_reduce(torch.ones(1, device=self.device), group=group)
+
+        self.assertCountEqual(
+            self._logged_comm_names(),
+            [
+                "default_pg:0",
+                "zzz_user",
+                f"zzz_new:{named.group_name}",
+                "zzz_desc:zzz_split",
+                "zzz_user",
+            ],
+        )
+        self.assertEqual(
+            default_child._get_backend(self.device).options.config.comm_name,
+            "zzz_desc:zzz_split",
+        )
+        self.assertEqual(
+            user_child._get_backend(self.device).options.config.comm_name,
+            "zzz_user",
+        )
+        dist.destroy_process_group(user)
+        dist.destroy_process_group(named)
+
+
 class ProcessGroupNCCL2NonblockingTest(_ProcessGroupNCCL2OptionsTest):
     @classmethod
     def opts(cls, high_priority_stream=False):
@@ -1317,10 +1373,12 @@ class ProcessGroupNCCL2ObservabilityTest(MultiProcContinuousTest):
         child_options = child._get_backend(self.device).options
         self.assertEqual(child_options.global_ranks_in_group, halves)
         if hasattr(child_options.config, "comm_name"):
-            # split() points config.commName at the group_name string for the
-            # ncclCommSplit call; storing that pointer left the child holding
-            # one that outlives its string.
-            self.assertIsNone(child_options.config.comm_name)
+            # split() used to store a commName pointer into the caller's
+            # group_name string, which the child outlived.
+            self.assertEqual(
+                child_options.config.comm_name,
+                f"{child.group_desc}:{child.group_name}",
+            )
 
         # Splitting the child again must map its ranks through the parent's map
         # rather than treating them as world ranks.

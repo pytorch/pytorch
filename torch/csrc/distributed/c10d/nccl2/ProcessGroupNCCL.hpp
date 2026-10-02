@@ -490,6 +490,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // validate the same device.
   void ensureInitialized(at::Device device);
   void init(at::Device device);
+  // options_c10d_->config with commName resolved for a new communicator.
+  ncclConfig_t commConfig();
   void finalize();
   void initNcclResources();
   // Adopt a child communicator and bring this backend to the INITIALIZED state,
@@ -665,6 +667,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   bool is_high_priority_stream_{false};
   std::string name_;
+  // Backs the default commName; NCCL keeps the pointer for the comm's lifetime.
+  std::string comm_name_;
 
   const ::c10d::ErrorHandlingMode async_error_handling_;
   const bool blocking_wait_;
