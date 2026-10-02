@@ -12,7 +12,11 @@ import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config
-from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
+from torch._inductor.comm_analysis import (
+    _get_device_type_str,
+    estimate_fx_collective_memory_footprint,
+    has_collective_cost_model,
+)
 from torch._inductor.fx_passes.bucketing import (
     _default_bucket_mode,
     _get_collective_node_from_wait,
@@ -25,7 +29,7 @@ from torch._inductor.fx_passes.bucketing import (
 )
 from torch._inductor.fx_passes.memory_estimator import MemoryTracker
 from torch._inductor.fx_passes.utils import BitsetAncestors
-from torch._logging import trace_structured
+from torch._logging import trace_structured, warning_once
 from torch.fx.experimental.symbolic_shapes import optimization_hint
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
@@ -144,8 +148,13 @@ def estimate_collective_time(
     custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
     | None = None,
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
-) -> float:
-    """Estimate the runtime of a collective operation, optionally with an overridden size."""
+) -> float | None:
+    """Estimate the runtime of a collective operation, optionally with an overridden size.
+
+    Returns None when no cost model is available: a non-CUDA device type
+    without a registered collective cost estimator (and no working
+    benchmark or custom estimator).
+    """
     if (
         est := get_custom_estimation(n, custom_runtime_estimation, override_size)
     ) is not None:
@@ -1236,7 +1245,8 @@ class OverlapScheduler:
             latency = estimate_collective_time(
                 node, 0, custom_runtime_estimation=self.custom_runtime_estimation
             )
-            info.exposed_time_ms = max(0, info.exposed_time_ms - latency)
+            if latency is not None:
+                info.exposed_time_ms = max(0, info.exposed_time_ms - latency)
 
         self.in_flight[node] = info
         self.in_flight_bytes += info.size_bytes
@@ -1796,11 +1806,16 @@ def gather_node_runtime_estimations(
                 raise AssertionError("wait node has no associated collective")
             if start in estimations:
                 continue
-            estimations[start] = estimate_collective_time(
+            est = estimate_collective_time(
                 start,
                 custom_runtime_estimation=custom_runtime_estimation,
                 collective_estimator=collective_estimator,
             )
+            # Collectives without any available cost model are simply not
+            # estimated (the pass-level availability check in
+            # schedule_overlap_bucketing keeps this rare).
+            if est is not None:
+                estimations[start] = est
             collective_nodes.append(start)
 
     # Compute nodes (matmul, bmm, etc.) — analytical estimates only.
@@ -1951,6 +1966,20 @@ def schedule_overlap_bucketing(
         op="call_function",
         target=torch.ops._c10d_functional.wait_tensor.default,
     ):
+        return gm
+
+    if custom_runtime_estimation is None and not has_collective_cost_model():
+        # No calibrated collective cost model for this backend and no
+        # user-provided estimations: the cost-based optimizations would
+        # consume invalid values, so disable the pass instead.
+        warning_once(
+            log,
+            "Skipping overlap scheduling: no collective cost model is "
+            "available for device type %r. Register a backend-specific "
+            "estimator via torch._inductor.comm_analysis."
+            "register_collective_cost_estimator() to enable it.",
+            _get_device_type_str(),
+        )
         return gm
 
     if pre_bucketing_fsdp_collectives:
