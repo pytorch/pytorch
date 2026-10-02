@@ -203,6 +203,9 @@ def json_schema(*, hint: Any, bounds: dict[str, Any] | None = None) -> dict[str,
 
 MAX_HANDOFF_REVIEWERS = 3
 MAX_PART_OF_ISSUES = 5
+# Labels that make an issue actionable. Maintainers apply `good first issue` to
+# issues they want contributors to fix, so it counts just like `actionable`.
+ACTIONABLE_LABELS = frozenset({"actionable", "good first issue"})
 
 
 def are_canonical_logins(logins: list[str] | tuple[str, ...]) -> bool:
@@ -923,7 +926,8 @@ class RequestReviewers(_Action):
     """Request users who share one reason.
 
     - supporter: named as a supporter in the PR description and verified.
-    - actionable_labeler: labeled a linked or related issue `actionable`.
+    - actionable_labeler: labeled a linked or related issue `actionable` or
+      `good first issue`.
     - owner_roster: picked from a team owner's roster.
 
     Codepath owners are never requested here: GitHub requests them through

@@ -80,8 +80,8 @@ uncoordinated race-closing reads to apply.
   Issue numbers and logins parsed from the PR body reach read-only API paths
   and the supporter request only after pattern validation.
 - New reviewer requests come from trusted configuration, a verified supporter
-  claim, or the actor who applied `actionable` to an admitting issue; the last
-  two must have current triage-or-higher access.
+  claim, or the actor who applied `actionable` or `good first issue` to an
+  admitting issue; the last two must have current triage-or-higher access.
 - LLM output can keep a PR from being marked as missing an actionable issue,
   through a bypass match, but can never cause the mark. A prompt injection in the PR text can at worst keep a PR open and route it to
   a team that configured `bypass_intake_criteria`, bounded to that team's

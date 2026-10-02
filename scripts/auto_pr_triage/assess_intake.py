@@ -25,6 +25,7 @@ from github_api import (
 )
 from identifiers import TARGET_BASE_REF
 from schemas import (
+    ACTIONABLE_LABELS,
     IntakeFacts,
     IntakeResult,
     MAX_HANDOFF_REVIEWERS,
@@ -301,20 +302,21 @@ def fetch_actionable_labelers(
     author_login: str,
     limit: int = MAX_HANDOFF_REVIEWERS,
 ) -> list[str]:
-    """Return triage-or-higher users who labeled any of the issues actionable."""
+    """Return triage-or-higher users who applied an actionable label to the issues."""
 
     labelers: dict[str, str] = {}
     for issue in issues:
-        labeler: str | None = None
+        # The latest labeler of each actionable label, or None once it is removed.
+        labeler_by_label: dict[str, str | None] = {}
         for event in fetch_timeline(github=github, repo=repo, number=issue):
             label = event.get("label")
             if (
                 event.get("event") in {"labeled", "unlabeled"}
                 and isinstance(label, dict)
                 and isinstance(label.get("name"), str)
-                and label["name"].casefold() == "actionable"
+                and label["name"].casefold() in ACTIONABLE_LABELS
             ):
-                labeler = (
+                labeler_by_label[label["name"].casefold()] = (
                     _human_login(
                         value=event.get("actor"),
                         context="issue labeler",
@@ -323,8 +325,9 @@ def fetch_actionable_labelers(
                     if event["event"] == "labeled"
                     else None
                 )
-        if labeler is not None:
-            labelers.setdefault(labeler.casefold(), labeler)
+        for labeler in labeler_by_label.values():
+            if labeler is not None:
+                labelers.setdefault(labeler.casefold(), labeler)
 
     return [
         login
@@ -376,7 +379,7 @@ def fetch_issue_labels(
 
 
 def fetch_actionable_linked_issues(pr: PullRequestRef, /) -> list[int]:
-    """Return same-repository closing references labeled actionable."""
+    """Return same-repository closing references with an actionable label."""
 
     owner, name = pr.repo.split("/", 1)
     data = pr.github.graphql(
@@ -400,7 +403,7 @@ def fetch_actionable_linked_issues(pr: PullRequestRef, /) -> list[int]:
             if issue["repository"]["nameWithOwner"].casefold() != pr.repo.casefold():
                 continue
             names = {label["name"].casefold() for label in labels["nodes"]}
-            if "actionable" in names:
+            if names & ACTIONABLE_LABELS:
                 actionable.append(issue["number"])
     except (KeyError, TypeError, AttributeError) as exc:
         raise RuntimeError("linked issue response is incomplete") from exc
@@ -444,8 +447,8 @@ def verify_description_claims(
     actionable_issues = [
         number
         for number in issues
-        if "actionable"
-        in (fetch_issue_labels(github=github, repo=repo, number=number) or ())
+        if (fetch_issue_labels(github=github, repo=repo, number=number) or frozenset())
+        & ACTIONABLE_LABELS
     ]
     return sorted(supporters, key=str.casefold), actionable_issues
 

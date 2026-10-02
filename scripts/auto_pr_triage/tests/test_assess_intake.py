@@ -563,6 +563,67 @@ class HandoffReviewerTest(unittest.TestCase):
 
         self.assertEqual(labelers, ["Latest"])
 
+    def test_good_first_issue_counts_as_actionable(self) -> None:
+        def issue(number: int, *labels: str) -> dict:
+            return {
+                "number": number,
+                "repository": {"nameWithOwner": REPOSITORY},
+                "labels": {
+                    "nodes": [{"name": name} for name in labels],
+                    "pageInfo": {"hasNextPage": False},
+                },
+            }
+
+        github = mock.Mock()
+        github.graphql.return_value = {
+            "repository": {
+                "pullRequest": {
+                    "closingIssuesReferences": {
+                        "nodes": [issue(7, "Good First Issue"), issue(8, "triaged")],
+                        "pageInfo": {"hasNextPage": False},
+                    },
+                }
+            }
+        }
+        linked = fetch_actionable_linked_issues(
+            PullRequestRef(github=github, repo=REPOSITORY, number=999)
+        )
+        self.assertEqual(linked, [7])
+
+        def label(*, event: str, actor: str, name: str) -> dict:
+            return {
+                "event": event,
+                "actor": {"login": actor, "type": "User"},
+                "label": {"name": name},
+            }
+
+        # Removing one actionable label keeps the other label's labeler.
+        timeline = [
+            label(event="labeled", actor="gfi-labeler", name="good first issue"),
+            label(event="labeled", actor="removed", name="actionable"),
+            label(event="unlabeled", actor="removed", name="actionable"),
+        ]
+        with (
+            mock.patch("assess_intake.fetch_timeline", return_value=timeline),
+            mock.patch(
+                "assess_intake.fetch_user_has_triage_permission", return_value=True
+            ),
+        ):
+            labelers = fetch_actionable_labelers(
+                github=mock.Mock(), repo=REPOSITORY, issues=[7], author_login="author"
+            )
+        self.assertEqual(labelers, ["gfi-labeler"])
+
+        labels = {34: frozenset({"good first issue"}), 35: frozenset({"triaged"})}
+        with mock.patch(
+            "assess_intake.fetch_issue_labels",
+            side_effect=lambda number, **_: labels[number],
+        ):
+            _, claimed = verify_description_claims(
+                github=mock.Mock(), repo=REPOSITORY, logins=[], issues=[34, 35]
+            )
+        self.assertEqual(claimed, [34])
+
 
 def external_pr(**updates: object) -> dict[str, object]:
     pr = {

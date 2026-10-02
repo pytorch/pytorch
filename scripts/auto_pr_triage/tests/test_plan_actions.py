@@ -313,7 +313,7 @@ class PlanOnlyTest(unittest.TestCase):
         self.assertNotIn("@soulitzer", summary_text)
         self.assertIn(
             "### Why this PR was admitted\n\n"
-            "Admitted because it fixes an issue labeled `actionable`.\n",
+            "Admitted because it fixes an issue labeled `actionable` or `good first issue`.\n",
             summary_text,
         )
         self.assertIn(
@@ -1144,7 +1144,7 @@ class EngagedReviewerApplyTest(unittest.TestCase):
         routing = printed_reviewer_routing(output)
         self.assertIn(
             "Why this reviewer: The PR description names @Maintainer as a verified "
-            "supporter. @Maintainer labeled a linked or related issue `actionable`.",
+            "supporter. @Maintainer labeled a linked or related issue `actionable` or `good first issue`.",
             routing,
         )
         self.assertIn(
