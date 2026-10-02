@@ -412,7 +412,7 @@ class ApplyMainTest(unittest.TestCase):
             workflow,
         )
         self.assertIn(
-            "  apply:\n    needs: analyze\n    if: >-\n"
+            "  apply:\n    name: apply${{ '' }}\n    needs: analyze\n    if: >-\n"
             "      needs.analyze.result == 'success' &&\n"
             "      needs.analyze.outputs.mode == 'live' &&",
             workflow,
@@ -427,7 +427,7 @@ class ApplyMainTest(unittest.TestCase):
         self.assertNotIn("expected-head-sha", action)
         self.assertIn("types: [labeled, ready_for_review]", workflow)
         self.assertIn(
-            "  analyze:\n    if: >-\n      github.repository_owner == 'pytorch' &&",
+            "  analyze:\n    name: analyze${{ '' }}\n    if: >-\n      github.repository_owner == 'pytorch' &&",
             workflow,
         )
         self.assertIn("github.event.pull_request.state == 'open'", workflow)
@@ -466,6 +466,9 @@ class ApplyMainTest(unittest.TestCase):
         self.assertIn("WORKFLOW_SHA: ${{ github.sha }}", workflow)
         self.assertIn("  record-error:\n", workflow)
         self.assertIn("needs: [analyze, apply]", workflow)
+        # A skipped job keeps this raw name, so it cannot replace a real check.
+        for job in ("analyze", "apply", "record-error"):
+            self.assertIn(f"    name: {job}${{{{ '' }}}}\n", workflow)
         self.assertNotIn("  admit:\n", workflow)
         self.assertIn("needs.analyze.outputs.should-run == 'true'", workflow)
         self.assertIn("needs.analyze.result == 'failure'", workflow)
