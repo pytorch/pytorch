@@ -1802,6 +1802,18 @@ class TestSymbolicFull(TestCase):
             x = torch.tensor(value, dtype=torch.uint64, device=device)
             self.assertEqual(compiled_f(x), f(x), rtol=0, atol=0)
 
+    @onlyOn(["cuda", "xpu"])
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_full_symbolic_uint64_large_fill_accelerator_cpp_wrapper(self, device):
+        def f(x):
+            return torch.full((2,), x.item(), dtype=torch.uint64, device=device)
+
+        compiled_f = torch.compile(f, fullgraph=True)
+        for value in (1 << 63, torch.iinfo(torch.uint64).max):
+            x = torch.tensor(value, dtype=torch.uint64, device=device)
+            self.assertEqual(compiled_f(x), f(x), rtol=0, atol=0)
+
     @onlyOn(["cpu"])
     @torch._inductor.config.patch(cpp_wrapper=True)
     @torch._dynamo.config.patch(capture_scalar_outputs=True)

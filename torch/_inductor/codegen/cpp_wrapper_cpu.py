@@ -2340,7 +2340,10 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.codegen_tensor_item(node.inputs[0].get_dtype(), data, f"{node.sym}_raw")
 
         if len(node.keypath) == 0:
-            if symbol_is_type(node.sym, SymT.UNBACKED_INT):
+            if (
+                symbol_is_type(node.sym, SymT.UNBACKED_INT)
+                and V.graph.device_type == "cpu"
+            ):
                 if node.inputs[0].get_dtype() == torch.uint64:
                     self.writeline(
                         f"if ({node.sym}_raw > std::numeric_limits<int64_t>::max()) "
