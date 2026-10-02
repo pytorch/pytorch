@@ -2270,14 +2270,15 @@ not that the remote application consumed or acknowledged the data. Asyncio calle
 can use ``read_async``, ``write_async``, or ``wait_all``. Registration remains valid
 until unregistration or close, and tensors must not be resized or have their storage replaced.
 
-CUDA stream semantics, graph capture, tracing, batching, remote slicing, and
-rank-based bootstrap helpers are outside this initial API. Rank-to-endpoint
-lookup belongs in a separate control-plane adapter. Descriptor classes define explicit ``serialize()``/``deserialize()`` methods.
+Ordinary reads and writes are not ordered on CUDA streams. The API does not
+provide tracing, batching, or remote slicing. Descriptor classes define explicit
+``serialize()``/``deserialize()`` methods.
 The built-in backends declare their fields in a versioned JSON envelope; binary
 metadata is base64-encoded. Unknown fields, versions, backends, and invalid field
 types are rejected. Tensor contents and native handles are never serialized.
 
 .. autofunction:: torch.distributed._transport.new_transport
+.. autofunction:: torch.distributed._transport.new_transport_rank
 .. autoclass:: torch.distributed._transport.Transport
    :members:
 .. autoclass:: torch.distributed._transport.Memory
@@ -2289,6 +2290,42 @@ types are rejected. Tensor contents and native handles are never serialized.
 .. autofunction:: torch.distributed._transport.wait_all
 .. autofunction:: torch.distributed._transport.available_transports
 .. autofunction:: torch.distributed._transport.register_transport
+
+CUDA streams
+~~~~~~~~~~~~
+
+``read_stream`` and ``write_stream`` order a transfer on ``stream``, or the
+current CUDA stream if ``None``. The transfer starts after prior work on the
+stream; later work waits for it to complete. Calls return after enqueueing and
+no kernel runs while the transfer is in flight.
+
+.. code-block:: python
+
+    with torch.cuda.stream(stream):
+        source.copy_(producer)
+        transport.write_stream(source_view, remote_destination)
+        transport.read_stream(destination_view, remote_source)
+        consume(destination)
+
+Stream transfers can be captured with ``torch.cuda.graph``; each replay submits
+a new transfer. Register buffers and warm up transfers before capture. Captured
+buffers stay registered until ``close``; replaying after ``close`` terminates
+the process.
+
+.. code-block:: python
+
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        source.copy_(producer)
+        transport.write_stream(source_view, remote_destination)
+    graph.replay()
+
+The default implementation awaits ``write_async``/``read_async`` on a shared
+asyncio loop thread and gates the stream with a CUDA stream memory wait. It requires Linux
+and GPUDirect RDMA write ordering, and allows 64 outstanding transfers per
+stream; captured transfers hold their slot until ``close``. Since consumers may
+already be enqueued, a failed transfer terminates the process. Backends with
+native stream support may override these methods.
 
 NIXL backend
 ~~~~~~~~~~~~
