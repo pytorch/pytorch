@@ -98,6 +98,8 @@ tool=$(printf '%s' "$input" | jq -r '.tool_name // "?"' 2>/dev/null || echo '?')
 # Only the top-level reviewer writes the verdict. Claude Code puts `agent_id`
 # on a sub-agent's hook payload and leaves it off the main session's, so a
 # sub-agent steered by PR content cannot write or overwrite the findings file.
+# This check FAILS OPEN if a Claude Code release stops sending `agent_id`:
+# re-verify that the field is still emitted whenever the action pin moves.
 agent_id=$(printf '%s' "$input" | jq -r '.agent_id // empty') \
   || die_closed "jq failed reading .agent_id"
 if [ -n "$agent_id" ]; then

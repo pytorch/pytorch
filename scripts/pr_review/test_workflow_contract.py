@@ -6369,6 +6369,24 @@ def _result(tool_id: str) -> dict:
     }
 
 
+class TestSubAgentEnvironmentIsPinned(unittest.TestCase):
+    """The sub-agent settings change nothing another test can see if removed."""
+
+    EXPECTED = {
+        # Without it a backgrounded sub-agent lets the session end on a draft.
+        "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": '"1"',
+        # emit_row.py records one model per row; sub-agents must use it too.
+        "CLAUDE_CODE_SUBAGENT_MODEL": "${{ env.REVIEW_MODEL }}",
+        "CLAUDE_CODE_SUBAGENT_MODEL_FORCE": '"1"',
+    }
+
+    def test_the_review_step_sets_each_value(self):
+        review = strip_comments(job_block(STAGE2.read_text(), "review"))
+        for name, value in self.EXPECTED.items():
+            found = re.findall(rf"(?m)^\s*{name}:\s*(.+?)\s*$", review)
+            self.assertEqual(found, [value], f"{name} is {found!r}, expected {value!r}")
+
+
 class TestADraftWrittenBeforeSubAgentsIsNotPublished(unittest.TestCase):
     """A findings file older than the last sub-agent report is a draft."""
 
