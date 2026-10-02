@@ -27,6 +27,10 @@ inputs:
     description: Checkout mode passed to checkout-pytorch (one of "normal", "blobless", "treeless").
     required: false
     default: 'treeless'
+  skip-checkout:
+    description: Skip checkout when the repository is already available.
+    required: false
+    default: 'false'
   github-token:
     description: GITHUB_TOKEN, needed to retrieve the workflow job id.
     required: false
@@ -60,7 +64,12 @@ runs:
         # In the meantime, this is a quick fix to ensure that CI has the permission
         # to use the GITHUB_WORKSPACE while still allowing the GH hook (uid 1001,
         # gid 1001) to clean up the directory after the job
-        sudo chmod -R 777 "$GITHUB_WORKSPACE"
+        if sudo -n true 2>/dev/null; then
+          sudo chmod -R 777 "$GITHUB_WORKSPACE"
+        elif [[ ! -w "$GITHUB_WORKSPACE" ]]; then
+          echo "Workspace is not writable and sudo is unavailable" >&2
+          exit 1
+        fi
 
     - name: Ack Git cache ownership
       if: ${{ inputs.use-arc == 'true' }}
@@ -70,6 +79,7 @@ runs:
 
     # ── Common steps (shared) ────────────────────────────────────────
     - name: Checkout PyTorch
+      if: ${{ inputs.skip-checkout != 'true' }}
       uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
       with:
         no-sudo: true

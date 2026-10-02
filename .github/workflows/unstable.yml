@@ -74,7 +74,7 @@ jobs:
       max-jobs: "8"
       test-matrix: |
         { include: [
-          { config: "smoke_b200", shard: 1, num_shards: 1, runner: "nvidia-oss-pytorch-gb300-1gpu" },
+          { config: "smoke_b200", shard: 1, num_shards: 1, runner: "nv-l-arm64grace-16-200-gb300" },
         ]}
       python-version: "3.12"
       compiler: gcc13
