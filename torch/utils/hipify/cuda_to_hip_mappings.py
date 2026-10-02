@@ -2445,7 +2445,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict([
     ("CUBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F", "HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F"),
     ("CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0", "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0"),
     ("CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3", "HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3"),
-    ("CUBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT", "HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT"),
     ("CUBLASLT_POINTER_MODE_DEVICE", "HIPBLASLT_POINTER_MODE_DEVICE"),
     ("CUBLASLT_POINTER_MODE_HOST", "HIPBLASLT_POINTER_MODE_HOST"),
     ("cublasLtMatrixLayout_t", "hipblasLtMatrixLayout_t"),
@@ -3443,6 +3442,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("nvshmem_malloc", "rocshmem::rocshmem_malloc"),
     ("nvshmem_free", "rocshmem::rocshmem_free"),
     ("nvshmem_ptr", "rocshmem::rocshmem_ptr"),
+    ("nvshmem_barrier_all", "rocshmem::rocshmem_barrier_all"),
     ("nvshmem_team_t", "rocshmem::rocshmem_team_t"),
     ("nvshmem_team_split_strided", "rocshmem::rocshmem_team_split_strided"),
 

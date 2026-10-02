@@ -86,6 +86,9 @@ class ConfigThatCannotPickle:
     scale = 2.0
 
     def __reduce__(self):
+        # AttributeError was the one exception the bypass mapped to a
+        # PackageError before #196470 widened it; UnpicklableConfig covers the
+        # rest.
         raise AttributeError("config cannot pickle")
 
 
@@ -98,6 +101,12 @@ class StaticParamModule(torch.nn.Module):
         if use_w:
             return (x * self.w).sin()
         return x.sin()
+
+
+# A dynamic dim on a module-level tensor is what makes a SHAPE_ENV guard read a
+# global -- as a literal G['PKG_DYN_ROWS'] inside a Python lambda by default.
+PKG_DYN_ROWS = torch.randn(4, 3)
+torch._dynamo.mark_dynamic(PKG_DYN_ROWS, 0)
 
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -216,6 +225,7 @@ class TestPackage(torch._inductor.test_case.TestCase):
         self.assertTrue(any("config cannot pickle" in line for line in logs.output))
         # The bypassed compile's backend id is referenced by no entry, so the
         # written cache entry carries exactly the surviving compile's backend.
+        compiles = torch._dynamo.utils.counters["frames"]["total"]
         info = PrecompileContext.save_to_dynamo_cache()
         (entry,) = info["dynamo"]
         self.assertEqual(len(entry["backend_ids"]), 1)
@@ -229,10 +239,14 @@ class TestPackage(torch._inductor.test_case.TestCase):
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled(x), fn(x))
         # Deliberate: re-triggers the bypass in the loading process against an
-        # entry that already holds one installed guarded code.
+        # entry that already holds one installed guarded code. The installed
+        # variant served the first call; only this one compiled (counted by
+        # actual compiles, since FRAME_COUNTER also advances for an installed
+        # entry and is zeroed by reset()).
         with self.assertLogs("torch._dynamo", level="WARNING") as logs:
             self.assertEqual(compiled(x, cfg), fn(x, cfg))
         self.assertTrue(any("config cannot pickle" in line for line in logs.output))
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], compiles + 1)
 
     @torch._dynamo.config.patch(
         caching_precompile=True, strict_precompile=False, prepare_freezing=True
@@ -482,6 +496,45 @@ class TestPackage(torch._inductor.test_case.TestCase):
                 "Detected recompile when torch.compile stance is 'fail_on_recompile'",
             ):
                 compiled_fn(*args2)
+
+    def test_installed_shape_guard_on_a_global_reads_the_live_module_dict(self):
+        # install() roots the guards at sys.modules[...].__dict__, and a package
+        # keeps every guard, so the serialized scope holds the global as a
+        # FakeTensor with the traced sizes. A SHAPE_ENV lambda over that scope
+        # agreed with the artifact whatever the module bound: a one-row global
+        # was served the graph built for 2 <= rows. The lambda has to read the
+        # same dict the C++ tree does. Fresh tensors on both arms, since the
+        # loaded TENSOR_MATCH rejects the marked original.
+        ctx = DiskDynamoStore()
+
+        def fn(x):
+            return x * 2 + PKG_DYN_ROWS.sum(0)
+
+        x = torch.randn(3)
+        module_dict = sys.modules[__name__].__dict__
+        self.addCleanup(module_dict.__setitem__, "PKG_DYN_ROWS", PKG_DYN_ROWS)
+
+        package = CompilePackage(fn)
+        compiled_fn = torch._dynamo.optimize(backend="eager", package=package)(fn)
+        compiled_fn(x)
+        for backend_id, backend in package.cached_backends.items():
+            ctx.record_eager_backend(backend_id, backend)
+        ctx.save_package(package, self.path())
+
+        torch._dynamo.reset()
+        package, backends = ctx.load_package(fn, self.path())
+        compiled_fn = torch._dynamo.optimize(package=package)(fn)
+        package.install(backends)
+        with torch.compiler.set_stance("fail_on_recompile"):
+            module_dict["PKG_DYN_ROWS"] = torch.randn(7, 3)
+            self.assertEqual(fn(x), compiled_fn(x))
+
+            module_dict["PKG_DYN_ROWS"] = torch.randn(1, 3)
+            # The stance message dumps the whole tree, LAMBDA_GUARD line included;
+            # only the failed parts follow verbose_code_parts=.
+            failed_part = r"verbose_code_parts=\[\"2 <= G\['PKG_DYN_ROWS'\]"
+            with self.assertRaisesRegex(RuntimeError, failed_part):
+                compiled_fn(x)
 
     def test_install_survives_stale_cleanup_hooks(self):
         # The first compile installs its generated functions -- and, on every
@@ -943,6 +996,63 @@ def add(x, y):
             expected2.sum().backward()
 
         self.assertEqual(torch._dynamo.convert_frame.FRAME_COUNTER, total_frames)
+
+    @torch._dynamo.config.patch(caching_precompile=True)
+    def test_a_poisoned_entry_is_reset_on_load_instead_of_growing(self):
+        # A resume frame whose backend artifact is missing at save time is
+        # written bypassed. install() skips it and the frame is traced fresh;
+        # that compile used to append its guarded code to the stale one and
+        # re-register the missing backend id, so every reload/save cycle
+        # re-poisoned the entry and grew it. Loading a bypassed entry now drops
+        # its stale codes and ids: the entry stops growing and the next save is
+        # installable, so the third process hits without a recompile.
+        def fn(x):
+            y = x.sin()
+            torch._dynamo.graph_break()
+            return x.sin() + y
+
+        x = torch.randn(3, 2)
+        expected = torch.compile(fn)(x)  # noqa: UNSPECIFIED_BACKEND
+        dynamo_entry = next(iter(PrecompileContext._dynamo_cache_entries.values()))
+        for code in dynamo_entry.codes:
+            if any("resume" in name for name in code.function_names):
+                (backend,) = code.backend_ids
+                del PrecompileContext._backend_artifacts_by_key[backend]
+        self._save_and_reload(expected_backends=1, expected_dynamo=1)
+
+        def resume_of(entry):
+            (code,) = [
+                c for c in entry.codes if any("resume" in n for n in c.function_names)
+            ]
+            return code
+
+        def resume_entry():
+            return resume_of(DynamoCache.load(fn).dynamo)
+
+        self.assertTrue(resume_entry().bypassed)
+        self.assertEqual(len(resume_entry().guarded_codes), 1)
+        # Loading resets the package's copy, not the caller's entry.
+        loaded = DynamoCache.load(fn).dynamo
+        package = CompilePackage(fn, dynamo=loaded)
+        self.assertEqual(len(resume_of(loaded).guarded_codes), 1)
+        reset = resume_of(package.cache_entry())
+        self.assertEqual(reset.guarded_codes, [])
+        self.assertEqual(reset.backend_ids, [])
+        # The containers the fresh compile writes to are detached as well.
+        self.assertIsNot(reset.import_sources, resume_of(loaded).import_sources)
+        self.assertIsNot(reset.function_names, resume_of(loaded).function_names)
+        self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+        self._save_and_reload(expected_backends=2, expected_dynamo=1)
+        # One guarded code and one backend id, not two of each; and installable:
+        # the third process compiles nothing (FRAME_COUNTER also advances for
+        # installed entries, so count actual compiles).
+        self.assertFalse(resume_entry().bypassed)
+        self.assertEqual(len(resume_entry().guarded_codes), 1)
+        self.assertEqual(len(resume_entry().backend_ids), 1)
+        compiles = torch._dynamo.utils.counters["frames"]["total"]
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(torch.compile(fn)(x), expected)  # noqa: UNSPECIFIED_BACKEND
+        self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], compiles)
 
     @parametrize("device", ("cpu", "cuda", "xpu"))
     @torch._dynamo.config.patch(caching_precompile=True)

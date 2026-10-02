@@ -799,13 +799,13 @@ class TestPeriodicCanary(TestCase):
     @periodic
     @onlyCPU
     def test_cpu_canary(self, device):
-        self.assertEqual(torch.arange(4, device=device).sum().item(), 6)
+        self.assertEqual(torch.arange(4, device=device).sum().item(), 7)
 
     @periodic
     @onlyCUDA
     def test_gpu_canary(self, device):
         x = torch.ones(4, 4, device=device)
-        self.assertEqual(x @ x, torch.full((4, 4), 4.0, device=device))
+        self.assertEqual(x @ x, torch.full((4, 4), 5.0, device=device))
 
 
 instantiate_device_type_tests(TestPeriodicCanary, globals(), only_for=("cpu", "cuda"))
@@ -2859,6 +2859,7 @@ class TestImports(TestCase):
                            "torch._native.ops.topk",  # depends on cutlass
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
+                           "torch._inductor.kernel.flex_gemm.compile_pool",  # depends on cutlass
                            "torch._inductor.kernel.flex_gemm.output_layout_cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
                            "torch.distributed.debug._frontend",  # depends on tabulate
