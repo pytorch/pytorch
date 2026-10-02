@@ -34,6 +34,7 @@ from validate_labels import is_forbidden, load_valid_labels, strip_redundant
 
 BOT_TRIAGED = "bot-triaged"
 TRIAGE_REVIEW = "triage review"
+DISTRIBUTED = "oncall: distributed"
 TRIAGE_BOT = "github-actions[bot]"
 LABELING_DECISIONS = {"label", "redirect_oncall", "triage_review"}
 # Decisions that close the issue, and the template each must post.
@@ -109,6 +110,14 @@ def plan_effects(
         return effects
 
     requested = [label for label in plan.get("labels", []) if label != BOT_TRIAGED]
+    # Stage 2 routes to the parent queue only. The distributed triage picks the
+    # sub-queue, and it stops early on an issue that already has one.
+    sub_queues = [label for label in requested if label.startswith(DISTRIBUTED + " ")]
+    if sub_queues:
+        effects.notes.append(f"mapped {sub_queues} to {DISTRIBUTED!r}")
+        requested = [
+            DISTRIBUTED if label in sub_queues else label for label in requested
+        ]
     if decision == "transfer":
         effects.notes.append(
             f"transfer to {plan.get('transfer_repo', '?')} is not supported; flagging for review"

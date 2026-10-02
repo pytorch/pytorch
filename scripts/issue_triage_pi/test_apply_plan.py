@@ -35,6 +35,10 @@ class PlanEffectsTest(unittest.TestCase):
         result = effects("label", ["module: nn"], existing={"oncall: pt2"})
         self.assertFalse(result.mutates)
 
+    def test_a_distributed_sub_queue_becomes_the_parent_queue(self):
+        result = effects("redirect_oncall", ["oncall: distributed checkpointing"])
+        self.assertEqual(result.add_labels, ["oncall: distributed", "bot-triaged"])
+
     def test_forbidden_labels_become_triage_review(self):
         result = effects("label", ["sev1", "ciflow/trunk", "module: nn"])
         self.assertEqual(

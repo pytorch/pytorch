@@ -185,7 +185,9 @@ The sub-oncall team will handle their own triage. Your job is only to route it t
 - **CI/releng → `module: ci`.** Do not use `oncall: releng`. Use `module: ci` for CI infrastructure issues.
 - **torch.compile + distributed.** When `torch.compile` mishandles a distributed op (e.g., `dist.all_reduce`), the issue typically needs BOTH `oncall: pt2` and `oncall: distributed` since the fix may span both codebases.
 
-**Note:** `oncall: cpu inductor` is a sub-queue of PT2. For general triage, just use `oncall: pt2`.
+**Note:** `oncall: cpu inductor` is the PT2 sub-queue for Inductor issues that reproduce only on CPU (see "CPU Inductor Routing" in [pt2-triage-rubric.md](pt2-triage-rubric.md)). Redirect those to it instead of `oncall: pt2` and stop; every other PT2 issue gets `oncall: pt2`.
+
+**Distributed sub-queues:** apply only `oncall: distributed`, never `oncall: distributed parallelisms`, `oncall: distributed infra`, or `oncall: distributed checkpointing`. The distributed triage picks the sub-queue, and it stops early on an issue that already has one, so a sub-queue applied here skips its second-level triage. The apply step replaces any sub-queue with `oncall: distributed`.
 
 ### 4) Label the issue (if NOT transferred/redirected)
 
