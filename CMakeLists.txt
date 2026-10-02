@@ -974,8 +974,17 @@ if(USE_LLVM_BOLT)
   # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
   set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
   file(REMOVE_RECURSE "${LLVM_BOLT_PROFILES_DIR}")
-  file(ARCHIVE_EXTRACT INPUT "${CMAKE_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
+  file(ARCHIVE_EXTRACT INPUT "${PROJECT_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
        DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
+
+  add_custom_target(bolt_profile_quality_summary ALL
+    COMMAND "${Python_EXECUTABLE}"
+      "${PROJECT_SOURCE_DIR}/tools/bolt_profile_quality.py"
+      "${CMAKE_BINARY_DIR}/logs"
+    COMMENT "Summarizing BOLT profile quality"
+    VERBATIM
+    USES_TERMINAL
+  )
 endif()
 
 # Build libtorch mobile library, which contains ATen/TH ops and native support
