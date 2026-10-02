@@ -34,7 +34,7 @@ on:
         options: ["replay", "dry-run", "apply"]
       model:
         description: "Bedrock model ID from .github/actions/pi-agent/allowed-models.json"
-        default: global.anthropic.claude-sonnet-5
+        default: global.openai.gpt-6.1-sol
         type: string
 
 jobs:
@@ -93,7 +93,7 @@ jobs:
           EVENT: ${{ github.event_name }}
           ISSUES: ${{ inputs.issues }}
           MODE: ${{ inputs.mode || 'apply' }}
-          MODEL: ${{ inputs.model || 'global.anthropic.claude-sonnet-5' }}
+          MODEL: ${{ inputs.model || 'global.openai.gpt-6.1-sol' }}
         run: |
           [[ "$EVENT" != "workflow_run" ]] || ISSUES=$(cat issue_number.txt)
           [[ "$ISSUES" =~ ^[[:space:]]*[1-9][0-9]*([[:space:]]+[1-9][0-9]*)*[[:space:]]*$ ]] \

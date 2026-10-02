@@ -92,8 +92,8 @@ supported". Some models need a one-time AWS Marketplace subscription by an accou
 ## Issue triage
 
 `.github/workflows/issue-triage-pi.yml` is stage 2 of issue triage, after
-`issue-triage.yml` captures the opened issue. It uses the `triaging-issues` skill and
-`global.anthropic.claude-sonnet-5`, as the Claude Code stage 2 did:
+`issue-triage.yml` captures the opened issue. It uses the `triaging-issues` skill with
+`global.openai.gpt-6.1-sol` at medium thinking (the Claude Code stage 2 used Sonnet 5):
 
 1. **plan** (Bedrock, `issues: read`, egress blocked): the model reads the issue through
    read-only `gh` tools (`.github/pi/extensions/github-issue-tools.ts`: `get_issue`,
