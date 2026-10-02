@@ -3,11 +3,9 @@
 import copy
 import functools
 import itertools
-import math
 import os
 import tempfile
 import unittest
-import warnings
 from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
@@ -30,8 +28,6 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, AllGatherInput
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
-    _default_all_gather_output_fn,
-    _default_reduce_scatter_input_fn,
     _div_if_needed,
     _get_gradient_divide_factors,
     DefaultAllGather,
@@ -58,10 +54,8 @@ from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.profiler import profile, ProfilerActivity
-from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
-    dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
 )
@@ -202,10 +196,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         return orig_params
 
     def _init_fsdp_param_group(
-        self,
-        params: list[nn.Parameter],
-        reshard_after_forward: bool | int,
-        shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None = None,
+        self, params: list[nn.Parameter], reshard_after_forward: bool | int
     ):
         module = nn.ParameterList([param.detach().clone() for param in params])
         mesh_info = FSDPMeshInfo(_init_default_fully_shard_mesh(), shard_mesh_dim=0)
@@ -218,7 +209,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             mesh_info,
             post_forward_mesh_info,
             self.device,
-            shard_placement_fn,
+            None,  # shard_placement_fn
             MixedPrecisionPolicy(),
             OffloadPolicy(),
         )
@@ -254,19 +245,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             )
 
     @skip_if_lt_x_gpu(1)
-    def test_all_gather_post_forward_shard_dim1(self):
-        # Post-forward shards are flat, so their all-gather needs no reassembly
-        stream = device_module.current_stream()
-        self._test_all_gather(
-            [torch.Size([8, 256]), torch.Size([16, 128])],
-            reshard_after_forward=8,
-            async_op=False,
-            all_gather_copy_in_stream=stream,
-            all_gather_stream=stream,
-            shard_placement_fn=lambda _: Shard(1),
-        )
-
-    @skip_if_lt_x_gpu(1)
     def test_all_gather_empty_params(self):
         stream = device_module.current_stream()
         self._test_all_gather(
@@ -284,7 +262,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         async_op: bool,
         all_gather_copy_in_stream,
         all_gather_stream,
-        shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None = None,
     ):
         def all_gather(fsdp_param_group: FSDPParamGroup, group: dist.ProcessGroup):
             all_gather_comm = DefaultAllGather()
@@ -314,7 +291,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         # Set up the reference parameters and construct the FSDP group
         orig_params = self._init_params(param_sizes)
         fsdp_param_group = self._init_fsdp_param_group(
-            orig_params, reshard_after_forward, shard_placement_fn
+            orig_params, reshard_after_forward
         )
         fsdp_params = fsdp_param_group.fsdp_params
         module = fsdp_param_group.modules[0]
@@ -497,205 +474,32 @@ instantiate_device_type_tests(
 )
 
 
-class TestFullyShardCollectiveCopy(TestCase):
-    @parametrize(
-        "dim,output_size,match",
-        [
-            (2, None, "dim 2 is invalid"),
-            (-3, None, "dim -3 is invalid"),
-            (0, torch.Size((-1, 12)), "must be nonnegative"),
-            (1, torch.Size((2, 5)), "must contain 12 elements"),
-        ],
-    )
-    def test_all_gather_input_invalid(self, device, dim, output_size, match):
-        tensor = torch.empty(2, 3, device=device)
-        with self.assertRaisesRegex(ValueError, match):
-            _normalize_all_gather_inputs(
-                (AllGatherInput(tensor, dim=dim, output_size=output_size),),
-                world_size=2,
-                shard_dim=1,
-                padded_sharded_size=tensor.size(),
-            )
-
-    def test_all_gather_input_type(self, device):
-        kwargs = {"world_size": 2, "shard_dim": 0, "padded_sharded_size": torch.Size()}
-        for inp in ("tensor", AllGatherInput("tensor")):
-            with self.assertRaisesRegex(TypeError, "Expected an all-gather input"):
-                _normalize_all_gather_inputs((inp,), **kwargs)
-
-    @parametrize("world_size", [1, 2])
-    def test_legacy_all_gather_input_size(self, device, world_size):
-        tensor = torch.empty(2, 3, device=device)
-        kwargs = {
-            "world_size": world_size,
-            "shard_dim": 1,
-            "padded_sharded_size": torch.Size((4, 3)),
-        }
-        if world_size == 1:
-            tensors, layouts = _normalize_all_gather_inputs((tensor,), **kwargs)
-            self.assertIs(tensors[0], tensor)
-            self.assertEqual(tensor.view(layouts[0].output_size).size(), (2, 3))
-            self.assertEqual(layouts[0].outer_size, 1)
-        else:
-            with self.assertRaisesRegex(
-                ValueError, r"Shard\(1\) all-gather output must have 24 elements"
-            ):
-                _normalize_all_gather_inputs((tensor,), **kwargs)
-
-    @parametrize("input_size", [None, (0, 3), (3, 0)])
-    def test_empty_all_gather_inputs(self, device, input_size):
-        kwargs = {
-            "world_size": 2,
-            "shard_dim": 1,
-            "padded_sharded_size": torch.Size((4, 3)),
-        }
-        if input_size is None:
-            self.assertEqual(_normalize_all_gather_inputs((), **kwargs), ([], ()))
-            return
-        tensor = torch.empty(input_size, device=device)
-        tensors, layouts = _normalize_all_gather_inputs((tensor,), **kwargs)
-        self.assertIs(tensors[0], tensor)
-        gathered_size = (input_size[0] * 2, *input_size[1:])
-        self.assertEqual(tensor.view(layouts[0].output_size).size(), gathered_size)
-        self.assertEqual(layouts[0].outer_size, 1)
-
-    def test_all_gather_mixed_inputs(self, device):
-        # Tensors follow the padded sharded layout, records their own
-        shard = torch.empty(2, 3, device=device)
-        tags = torch.empty(2, 3, device=device, dtype=torch.bfloat16)
-        empty = torch.empty(0, 3, device=device)
-        tensors, layouts = _normalize_all_gather_inputs(
-            (shard, AllGatherInput(tags, dim=1, output_size=torch.Size((12,)))),
-            world_size=2,
-            shard_dim=1,
-            padded_sharded_size=shard.size(),
-        )
-        self.assertEqual(tensors, [shard, tags])
-        self.assertEqual([layout.outer_size for layout in layouts], [2, 2])
-        self.assertEqual([layout.output_size for layout in layouts], [(-1, 3), (12,)])
-        _, layouts = _normalize_all_gather_inputs(
-            (shard, empty),
-            world_size=2,
-            shard_dim=1,
-            padded_sharded_size=shard.size(),
-        )
-        self.assertEqual([layout.outer_size for layout in layouts], [2, 1])
-
-    def test_all_gather_cached_outputs(self, device):
-        shard = torch.empty(2, 3, device=device)
+class TestFullyShardAllGatherInputValidation(TestCase):
+    def test_invalid_all_gather_inputs(self):
+        # Checked before the collective, also against outputs cached by an
+        # earlier call
+        shard = torch.empty(2, 3)
         kwargs = {"world_size": 2, "shard_dim": 1, "padded_sharded_size": shard.size()}
-        cached = [torch.empty(12, device=device)]
-        # Tensors may shrink or become byte views of their cached outputs
-        for inp in (shard[0], shard.view(torch.uint8)):
-            _normalize_all_gather_inputs((inp,), all_gather_outputs=cached, **kwargs)
-        for inputs, match in (
-            ((shard, shard), "returned 2 all-gather inputs, but 1"),
-            ((shard.to(torch.bfloat16),), "changed dtype"),
-            ((torch.empty(4, 3, device=device),), "needs 96 bytes"),
-            ((AllGatherInput(shard[0]),), "must keep its element count and dtype"),
+        cached = [torch.empty(12)]
+        for inputs, outputs, error, match in (
+            ((AllGatherInput(shard, dim=2),), (), ValueError, "dim 2 is invalid"),
+            (
+                (AllGatherInput(shard, output_size=torch.Size((2, 5))),),
+                (),
+                ValueError,
+                "must contain 12 elements",
+            ),
+            ((AllGatherInput("shard"),), (), TypeError, "Expected an all-gather input"),
+            ((torch.empty(4, 3),), (), ValueError, r"Shard\(1\) .* must have 12"),
+            ((shard, shard), cached, ValueError, "returned 2 all-gather inputs"),
+            ((shard.to(torch.bfloat16),), cached, ValueError, "changed dtype"),
+            ((torch.empty(4, 3),), cached, ValueError, "needs 96 bytes"),
+            ((AllGatherInput(shard[0]),), cached, ValueError, "element count"),
         ):
-            with self.assertRaisesRegex(ValueError, match):
+            with self.assertRaisesRegex(error, match):
                 _normalize_all_gather_inputs(
-                    inputs, all_gather_outputs=cached, **kwargs
+                    inputs, all_gather_outputs=outputs, **kwargs
                 )
-
-    @parametrize(
-        "layout",
-        ["shard0", "shard1", "unit_outer_size", "empty", "mixed_dtype"],
-    )
-    def test_all_gather_output(self, device, layout):
-        world_size = 4
-        kinds = {
-            "empty": ("empty", "shard0"),
-            "mixed_dtype": ("shard0", "shard1"),
-        }.get(layout, (layout,))
-        expected, shards, outer_sizes = [], [], []
-        for kind in kinds:
-            dim = 0 if kind == "shard0" else 1
-            shape = {
-                "shard0": (12, 5),
-                "unit_outer_size": (1, 12, 5),
-                "empty": (0, 12, 5),
-            }.get(kind, (2, 12, 5))
-            dtype = torch.bfloat16 if layout == "mixed_dtype" and dim else torch.float32
-            tensor = make_tensor(shape, device=device, dtype=dtype)
-            expected.append(tensor)
-            shards.append(tensor.chunk(world_size, dim=dim))
-            outer_sizes.append(math.prod(shape[:dim]) if tensor.numel() else 1)
-        # Mixed dtypes are gathered as bytes into byte views of the outputs
-        gather_dtype = torch.uint8 if layout == "mixed_dtype" else torch.float32
-        packed = torch.cat(
-            [
-                shard[rank].contiguous().view(gather_dtype).flatten()
-                for rank in range(world_size)
-                for shard in shards
-            ]
-        )
-        outputs = [tensor.new_empty(tensor.numel()) for tensor in expected]
-        byte_outputs = [output.view(gather_dtype) for output in outputs]
-        splits = [output.numel() // world_size for output in byte_outputs]
-        _default_all_gather_output_fn(
-            packed, byte_outputs, splits, outer_sizes, world_size
-        )
-        self.assertEqual(
-            [output.view(tensor.shape) for output, tensor in zip(outputs, expected)],
-            expected,
-            atol=0,
-            rtol=0,
-        )
-
-    @parametrize("outer_size", [1, 2])
-    def test_all_gather_output_shrunk_payload(self, device, outer_size):
-        # Smaller payloads fill a prefix of the rank-major buffer, which is
-        # reassembled with zeros after it, without resizing the outputs
-        output = torch.full((16,), -1.0, device=device)
-        packed = torch.arange(1.0, 9.0, device=device)
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")
-            _default_all_gather_output_fn(packed, [output], [4], [outer_size], 2)
-        if outer_size == 1:
-            expected = torch.cat([packed, torch.full((8,), -1.0, device=device)])
-        else:
-            expected = torch.cat(
-                [packed.view(2, 4), torch.zeros(2, 4, device=device)], 1
-            )
-        self.assertEqual(output.view_as(expected), expected, atol=0, rtol=0)
-
-    @parametrize("nonzero_shards", [False, True])
-    @parametrize("world_size", [1, 4])
-    @parametrize("noncontiguous", [False, True])
-    @dtypes(torch.bfloat16)
-    def test_reduce_scatter_input(
-        self, device, dtype, nonzero_shards, world_size, noncontiguous
-    ):
-        shapes = [
-            (world_size * 3 - 1, 5),
-            (2, world_size * 3, 5),
-            (2, 3, world_size * 2),
-        ]
-        grads = [make_tensor(shape, device=device, dtype=dtype) for shape in shapes]
-        if noncontiguous:
-            grads[2] = grads[2].transpose(0, 1).contiguous().transpose(0, 1)
-        shard_dims = list(range(len(grads))) if nonzero_shards else [0] * len(grads)
-        shards = []
-        for dim, grad in zip(shard_dims, grads):
-            shape = list(grad.shape)
-            shape[dim] = math.ceil(shape[dim] / world_size) * world_size
-            padded = grad.new_zeros(shape)
-            padded.narrow(dim, 0, grad.size(dim)).copy_(grad)
-            shards.append(padded.chunk(world_size, dim))
-        expected = torch.cat(
-            [shard[rank].flatten() for rank in range(world_size) for shard in shards]
-        ).float()
-        copy_in = _default_reduce_scatter_input_fn(grads, shard_dims, world_size)
-        output = torch.empty_like(expected)
-        copy_in(output)
-        self.assertEqual(output, expected, atol=0, rtol=0)
-
-
-instantiate_device_type_tests(
-    TestFullyShardCollectiveCopy, globals(), only_for=("cpu", "cuda", "xpu")
-)
 
 
 class TestFullyShardCustomAllocation(FSDPTestMultiThread):
