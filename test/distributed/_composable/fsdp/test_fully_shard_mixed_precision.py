@@ -17,7 +17,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _get_gradient_divide_factors,
     foreach_reduce_scatter_copy_in,
 )
-from torch.distributed.tensor import DTensor, Shard
+from torch.distributed.tensor import distribute_tensor, DTensor, Replicate, Shard
 from torch.testing._internal.common_distributed import (
     requires_nccl_version,
     SaveForwardInputsModel,
@@ -539,6 +539,40 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
         self.assertEqual(model.weight.grad.full_tensor(), torch.ones_like(inp))
 
     @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_upcasts_before_tp_all_reduce(self):
+        mesh = init_device_mesh(
+            device_type.type, (self.world_size // 2, 2), mesh_dim_names=("dp", "tp")
+        )
+        tp_mesh = mesh["tp"]
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                weight = torch.ones(8, device=device_type)
+                self.weight = nn.Parameter(
+                    distribute_tensor(weight, tp_mesh, [Replicate()])
+                )
+
+            def forward(self, inp):
+                return (self.weight * inp).sum()
+
+        model = Model()
+        fully_shard(
+            model,
+            mesh=mesh["dp"],
+            mp_policy=MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+            ),
+        )
+        # The weight's gradient is Partial over TP, and 256 + 1 is 256 in bf16
+        value = 256.0 if tp_mesh.get_local_rank() == 0 else 1.0
+        local_inp = torch.full((1, 8), value, device=device_type, dtype=torch.bfloat16)
+        model(DTensor.from_local(local_inp, tp_mesh, [Shard(0)])).backward()
+        self.assertEqual(
+            model.weight.grad.full_tensor(), torch.full((8,), 257.0, device=device_type)
+        )
+
+    @skip_if_lt_x_gpu(2)
     def test_grad_dtype_restored_after_deferred_upcast(self):
         model = nn.Linear(8, 8, bias=False, device=device_type)
         fully_shard(model, mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16))
@@ -796,6 +830,29 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             for param in model.parameters()
         }
         self.assertEqual(len(grad_storages), 2)
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_mixed_group_frees_reduce_output(self):
+        for fp32_param_name in ("bias", "weight"):
+            model = nn.Linear(16, 16, device=device_type, dtype=torch.bfloat16)
+            getattr(model, fp32_param_name).grad_dtype = torch.float32
+            fully_shard(model)
+            model(
+                torch.ones(2, 16, device=device_type, dtype=torch.bfloat16)
+            ).sum().backward()
+            for param in model.parameters():
+                actual = param.grad.full_tensor()
+                self.assertEqual(actual, torch.full_like(actual, 2.0))
+            # The group reduces in fp32 and casts the bf16 gradient into its
+            # own buffer. The fp32 bias gradient is copied out so it does not
+            # keep the weight's fp32 region alive; the larger fp32 weight
+            # gradient keeps viewing the reduce-scatter output instead.
+            local_grad = getattr(model, fp32_param_name).grad.to_local()
+            storage_nbytes = local_grad.untyped_storage().nbytes()
+            if fp32_param_name == "bias":
+                self.assertEqual(storage_nbytes, local_grad.nbytes)
+            else:
+                self.assertGreater(storage_nbytes, local_grad.nbytes)
 
     @skip_if_lt_x_gpu(2)
     def test_structured_input_output(self):

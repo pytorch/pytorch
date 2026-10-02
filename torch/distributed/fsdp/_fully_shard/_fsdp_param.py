@@ -1175,6 +1175,7 @@ class FSDPParam:
     def unsharded_accumulated_grad(self) -> torch.Tensor | None:
         # The autograd leaf owns accumulation even while its parameter data is
         # resharded. Never fold reduced history into this native-dtype buffer.
+        # Unused within FSDP; kept to avoid breaking potential external callers.
         param = getattr(self, "_unsharded_param", None)
         return param.grad if param is not None else None
 
@@ -1184,6 +1185,29 @@ class FSDPParam:
         param = self.unsharded_param
         return self._get_grad_inner_tensor(
             torch.zeros_like(param, dtype=param.grad_dtype)
+        )
+
+    @property
+    def may_reduce_grad_outside_dp(self) -> bool:
+        """Whether ``_get_grad_inner_tensor`` may reduce the gradient over a
+        non-DP mesh dim, e.g. the TP all-reduce of a SequenceParallel norm
+        weight's ``Partial`` gradient, which runs in the gradient's dtype."""
+        spec = self._unsharded_dtensor_spec
+        if spec is None:
+            return False
+        dp_dims = self._dp_dim_indices if self.mesh_info.is_spmd_mesh else ()
+        if self.is_spmd_types:
+            return any(
+                placement.is_partial()
+                for i, placement in enumerate(self._spmd_grad_placements)
+                if i not in dp_dims
+            )
+        # A replicated parameter's gradient is only known at runtime, and it
+        # can be Partial
+        return any(
+            isinstance(placement, Replicate)
+            for i, placement in enumerate(spec.placements)
+            if i not in dp_dims
         )
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:

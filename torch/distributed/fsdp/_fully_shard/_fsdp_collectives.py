@@ -100,7 +100,7 @@ class SymmMemAllocMixin:
         # Leverage MemPool to reuse the symmetric buffer, avoiding allocation
         # and rendezvous overhead
         mempool = symm_mem.get_mem_pool(device)
-        with torch.cuda.use_mem_pool(mempool):
+        with torch.get_device_module(device).use_mem_pool(mempool):
             return torch.empty(size, dtype=dtype, device=device)
 
 
@@ -296,6 +296,8 @@ def split_with_sizes_copy(
     )
 
 
+# Unused within FSDP since the reduce-scatter copy-in moved to
+# fsdp::chunk_cat_mixed_dtype; kept to avoid breaking potential external callers.
 lib.define(
     "chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> ()"
 )
@@ -315,6 +317,34 @@ def chunk_cat(
     out: torch.Tensor,
 ) -> None:
     torch._chunk_cat(tensors, dim, num_chunks, out=out)
+
+
+lib.define(
+    "record_grad_output_stream(Tensor buffer, int stream_id, int device_index, int device_type) -> ()"
+)
+
+
+@torch.library.impl(lib, "record_grad_output_stream", "CompositeExplicitAutograd")
+def _record_grad_output_stream_default(
+    buffer: torch.Tensor,
+    stream_id: int,
+    device_index: int,
+    device_type: int,
+) -> None:
+    # No-op default. Where free is host-side bookkeeping (e.g. CUDA) the block
+    # stays mapped, so no read-before-free edge is needed. A backend whose free
+    # releases device memory registers its own impl. See foreach_reduce.
+    return
+
+
+def record_grad_output_stream(buffer: torch.Tensor, stream: torch.Stream) -> None:
+    # A CPU buffer has no device free to order against and no stream to record,
+    # so skip the op to avoid crashing on a CPU stream.
+    if buffer.device.type == "cpu":
+        return
+    torch.ops.fsdp.record_grad_output_stream(
+        buffer, stream.stream_id, stream.device_index, stream.device_type
+    )
 
 
 @torch.no_grad()
@@ -712,6 +742,11 @@ def foreach_reduce(
         all_reduce_stream.wait_stream(reduce_scatter_stream)
         with device_handle.stream(all_reduce_stream):
             all_reduce_hook(reduce_output)
+            # The hook and the post-reduce ops below read the RS output off
+            # the RS stream. Without native HSDP nothing else holds it, so
+            # hold it the same way as the HSDP AR buffer (see AllReduceState).
+            all_reduce_input = reduce_output
+            all_reduce_event = all_reduce_stream.record_event()
     # -- END: ops post reduce_scatter
 
     with device_handle.stream(post_reduce_stream):
@@ -724,8 +759,18 @@ def foreach_reduce(
         # AR to finish. The reduce-dtype buffer is held across layers by
         # FSDPParamGroup._all_reduce_state (captured above) to prevent
         # this. See PR #140044, regression test PR #180900.
+        # reduce_output backs the sharded gradients (via the views below):
+        # produced on the reduce-scatter / all-reduce stream but consumed on the
+        # caller's stream. The op is a no-op by default; a backend whose free is
+        # a device op that releases the memory registers an impl that records
+        # the consumer stream, so the free is ordered behind that read.
+        record_grad_output_stream(reduce_output, current_stream)
         sharded_grads = _cast_and_view_sharded_grads(
-            reduce_output, fsdp_params, padded_unsharded_sizes, world_size
+            reduce_output,
+            fsdp_params,
+            padded_unsharded_sizes,
+            world_size,
+            current_stream,
         )
 
         # Accumulate the reduced gradients in each parameter's sharded dtype.
@@ -801,6 +846,7 @@ def _cast_and_view_sharded_grads(
     fsdp_params: list[FSDPParam],
     padded_unsharded_sizes: Sequence[torch.Size],
     world_size: int,
+    consumer_stream: torch.Stream,
 ) -> list[torch.Tensor]:
     # Inputs follow the sharded gradient dtype order cached at lazy init.
     # Each contiguous region needs at most one flat cast/allocation after
@@ -810,17 +856,35 @@ def _cast_and_view_sharded_grads(
     # cast-before-add rounding.
     sharded_grads: list[torch.Tensor] = []
     reduce_output_numel = reduce_output.numel()
+    runs = [
+        (grad_dtype, list(group))
+        for grad_dtype, group in groupby(
+            zip(fsdp_params, padded_unsharded_sizes),
+            key=lambda param_and_size: param_and_size[0].sharded_grad_dtype,
+        )
+    ]
+    cast_numel = sum(
+        sum(size.numel() for _, size in param_group) // world_size
+        for grad_dtype, param_group in runs
+        if grad_dtype is not None and grad_dtype != reduce_output.dtype
+    )
+    # Views of an uncast run keep all of reduce_output alive, including the
+    # regions of runs cast into their own buffers, so copy the uncast runs when
+    # those regions are larger.
+    copy_uncast = cast_numel > reduce_output_numel - cast_numel
     flat_grad_offset = 0  # [0, reduce_output_numel - 1]
-    for grad_dtype, group in groupby(
-        zip(fsdp_params, padded_unsharded_sizes),
-        key=lambda param_and_size: param_and_size[0].sharded_grad_dtype,
-    ):
-        param_group = list(group)
+    for grad_dtype, param_group in runs:
         group_numel = sum(size.numel() for _, size in param_group) // world_size
         group_output = reduce_output
         if group_numel != reduce_output_numel:
             group_output = group_output.narrow(0, flat_grad_offset, group_numel)
-        group_output = _to_dtype_if_needed(group_output, grad_dtype)
+        new_output = _to_dtype_if_needed(group_output, grad_dtype)
+        if new_output is group_output and copy_uncast:
+            new_output = group_output.clone()
+        if new_output is not group_output:
+            # These sharded gradients alias the new buffer instead
+            record_grad_output_stream(new_output, consumer_stream)
+        group_output = new_output
         group_offset = group_output.storage_offset()
         for fsdp_param, padded_unsharded_size in param_group:
             # Assume even sharding for Shard(i), i > 0; otherwise would
