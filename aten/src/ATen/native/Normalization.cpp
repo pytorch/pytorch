@@ -40,6 +40,7 @@
 #include <ATen/ops/cudnn_batch_norm_backward.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
+#include <ATen/ops/group_norm.h>
 #include <ATen/ops/instance_norm_native.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/mean.h>
@@ -54,9 +55,11 @@
 #include <ATen/ops/renorm_native.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/sqrt.h>
+#include <ATen/ops/var_mean.h>
 #endif
 
 #include <c10/core/SymIntArrayRef.h>
+#include <array>
 #include <utility>
 #include <vector>
 
@@ -748,6 +751,58 @@ Tensor instance_norm(
   const auto stats_dtype = weight.defined() ? weight.scalar_type() : input.scalar_type();
   const bool mixed_dtype_stats = running_mean.defined() &&
                                  running_mean.scalar_type() != stats_dtype;
+  const bool mixed_dtype_affine =
+      (weight.defined() && weight.scalar_type() != input.scalar_type()) ||
+      (bias.defined() && bias.scalar_type() != input.scalar_type());
+  const bool channels_last_3d_input =
+      input.is_cuda() && input.dim() == 5 &&
+      input.is_contiguous(MemoryFormat::ChannelsLast3d);
+
+  if (channels_last_3d_input && (!use_input_stats || !mixed_dtype_affine)) {
+    if (!use_input_stats) {
+      return at::batch_norm(
+          input,
+          weight,
+          bias,
+          running_mean,
+          running_var,
+          false,
+          momentum,
+          eps,
+          cudnn_enabled);
+    }
+
+    auto out = at::group_norm(
+        input,
+        c.guard_int(__FILE__, __LINE__),
+        weight_opt,
+        bias_opt,
+        eps,
+        cudnn_enabled);
+
+    if (running_mean.defined() || running_var.defined()) {
+      const auto stats_input = input.detach().to(stats_dtype);
+      constexpr std::array<int64_t, 3> spatial_dims = {2, 3, 4};
+      auto [instance_var, instance_mean] = at::var_mean(
+          stats_input,
+          spatial_dims,
+          /*correction=*/Scalar(1),
+          /*keepdim=*/false);
+      if (running_mean.defined()) {
+        auto running_mean_alias = at::alias(running_mean);
+        running_mean_alias.mul_(1 - momentum).add_(
+            instance_mean.mean(0, false).to(running_mean.scalar_type()),
+            momentum);
+      }
+      if (running_var.defined()) {
+        auto running_var_alias = at::alias(running_var);
+        running_var_alias.mul_(1 - momentum).add_(
+            instance_var.mean(0, false).to(running_var.scalar_type()),
+            momentum);
+      }
+    }
+    return out;
+  }
 
   Tensor weight_ = repeat_if_defined(weight, b);
   Tensor bias_ = repeat_if_defined(bias, b);
@@ -783,7 +838,10 @@ Tensor instance_norm(
     }
   }
 
-  return out.view_symint(input.sym_sizes());
+  const auto output = out.view_symint(input.sym_sizes());
+  return channels_last_3d_input
+      ? output.contiguous(MemoryFormat::ChannelsLast3d)
+      : output;
 }
 
 std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
