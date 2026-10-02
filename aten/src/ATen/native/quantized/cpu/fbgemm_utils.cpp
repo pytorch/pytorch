@@ -238,7 +238,7 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
               H,
               W,
               src_contig.const_data_ptr<scalar_t>(),
-              dst.data_ptr<scalar_t>());
+              dst.mutable_data_ptr<scalar_t>());
         });
   }
   return dst;
@@ -354,7 +354,7 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
               H,
               W,
               src_contig.const_data_ptr<scalar_t>(),
-              dst.data_ptr<scalar_t>());
+              dst.mutable_data_ptr<scalar_t>());
         });
     return dst;
   }
@@ -368,7 +368,7 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
 namespace {
   // This is really terrible, but couldn't figure out a better way to constexpr convert int to
   // string and then perform string concatenation on/with it
-  constexpr const char* _hack_int_to_class_name(int x) {
+  consteval const char* _hack_int_to_class_name(int x) {
     switch(x) {
       case 2:
         return "Conv2dPackedParamsBase";
@@ -441,7 +441,9 @@ int register_linear_params() {
 #endif
                   } else if (weight.scalar_type() == at::kFloat) {
                     // NB: fp16 weight is serialized as float
+#if !defined(__aarch64__) && !defined(_M_ARM64)
                     return std::apply(PackedLinearWeightFp16::prepack, std::move(state));
+#endif
                   } else {
                     TORCH_CHECK(
                         false,

@@ -1036,9 +1036,10 @@ class DistMatrixOpsTest(DTensorTestBase):
             },
             {
                 # Case that would have invalid strides on inp * mat1 when sharded
+                # Keep the local BF16 row stride unaligned on 2- and 4-rank meshes
                 "inp_shape": (64, 16),
-                "w1_shape": (2, 16, 16),
-                "w2_shape": (2, 16, 16),
+                "w1_shape": (2, 16, 8),
+                "w2_shape": (2, 8, 16),
                 "inp_placements": [Replicate()],
                 "w1_placements": [Shard(2)],
                 "w2_placements": [Shard(1)],

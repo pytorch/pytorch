@@ -544,7 +544,7 @@ class OptimizedModule(torch.nn.Module):
             # Invoke hooks outside of dynamo then pickup the inner frame
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
 
-        if inspect.getattr_static(self._orig_mod, "_initialize_hook", None) is not None:
+        if _static_getattr(self._orig_mod, "_initialize_hook") is not None:
             self._forward = self.forward
             self.forward = self._call_lazy_check
 
@@ -671,9 +671,8 @@ class OptimizedModule(torch.nn.Module):
 
     def _call_lazy_check(self, *args: Any, **kwargs: Any) -> Any:
         if (
-            inspect.getattr_static(self._orig_mod, "_initialize_hook", None) is not None
-            and inspect.getattr_static(self._orig_mod, "_infer_parameters", None)
-            is not None
+            _static_getattr(self._orig_mod, "_initialize_hook") is not None
+            and _static_getattr(self._orig_mod, "_infer_parameters") is not None
             and callable(self._orig_mod._infer_parameters)
         ):
             # In the case of a lazy module, we want to run
@@ -1065,7 +1064,7 @@ class _TorchDynamoContext:
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
             # check mod, not new_mod: OptimizedModule.__getattr__ delegates to mod
-            if inspect.getattr_static(mod, "get_compiler_config", None) is not None:
+            if _static_getattr(mod, "get_compiler_config") is not None:
                 raise AssertionError(
                     "new_mod already has a get_compiler_config attribute"
                 )
@@ -1275,7 +1274,7 @@ class _TorchDynamoContext:
                     except ShortenTraceback as e:
                         # Failures in the backend likely don't have useful
                         # data in the TorchDynamo frames, so we strip them out.
-                        raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+                        raise e.remove_dynamo_frames() from None
                     finally:
                         # Restore the dynamic layer stack depth if necessary.
                         set_eval_frame(None)
@@ -1612,6 +1611,16 @@ def _optimize_catch_errors(
     )
 
 
+def _maybe_fire_backend_init(backend: Callable[..., Any]) -> None:
+    # _TorchCompileWrapper and AotAutograd forward the attribute to the
+    # backend they wrap via a @property.
+    backend_init = getattr(backend, "_dynamo_backend_init", None)
+    if backend_init is not None:
+        # Fires on every resolution, before any invocation; backends that
+        # need one-time setup deduplicate themselves (e.g. functools.cache).
+        backend_init()
+
+
 def get_compiler_fn(
     compiler_fn: str | Callable[..., Any] | None,
 ) -> WrapBackendDebug:
@@ -1631,6 +1640,7 @@ def get_compiler_fn(
     else:
         compiler_str = None
     compiler_fn = lookup_backend(compiler_fn)  # type: ignore[arg-type]
+    _maybe_fire_backend_init(compiler_fn)
     return wrap_backend_debug(compiler_fn, compiler_str)
 
 
@@ -1731,8 +1741,8 @@ def argument_names(
 
 
 def check_if_dynamo_supported() -> None:
-    if sys.version_info >= (3, 15):
-        raise RuntimeError("Python 3.15+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 16):
+        raise RuntimeError("Python 3.16+ not yet supported for torch.compile")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
@@ -1816,7 +1826,10 @@ def _optimize(
             graph faster.
             One can also provide additional context for the backend, like
             torch.jit.fuser("fuser2"), by setting the backend_ctx_ctor attribute.
-            See AOTAutogradMemoryEfficientFusionWithContext for the usage.
+            Backends can also define a ``_dynamo_backend_init`` no-arg callable
+            for eager initialization; it fires every time the backend is
+            resolved, before any invocation. See the "Eager Backend
+            Initialization" section of torch.compiler_custom_backends.md.
             - Or, a string backend name in `torch._dynamo.list_backends()`
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.
