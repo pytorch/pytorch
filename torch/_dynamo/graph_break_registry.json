@@ -884,6 +884,26 @@
       ]
     }
   ],
+  "GB5023": [
+    {
+      "Gb_type": "Unresolved classmethod descriptor owner",
+      "Context": "{self.descriptor.__qualname__}.__get__",
+      "Explanation": "Dynamo cannot prove that the descriptor owner is a class.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5024": [
+    {
+      "Gb_type": "Unsupported descriptor source",
+      "Context": "class __dict__ source",
+      "Explanation": "Dynamo cannot safely guard a method descriptor returned by a custom metaclass __dict__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB7299": [
     {
       "Gb_type": "_autograd_grad with lost grad_fn linkage",
@@ -4720,6 +4740,14 @@
     }
   ],
   "GB0278": [
+    {
+      "Gb_type": "Unsupported dict type for fromkeys()",
+      "Context": "{user_cls_name}.fromkeys(): {args} {kwargs}",
+      "Explanation": "Failed to call {user_cls_name}.fromkeys() because {user_cls_name} is not any type of dict, OrderedDict, or defaultdict",
+      "Hints": [
+        "Ensure {user_cls_name} is a type of dict, OrderedDict, or defaultdict."
+      ]
+    },
     {
       "Gb_type": "Unsupported dict type for fromkeys()",
       "Context": "{user_cls.__name__}.fromkeys(): {args} {kwargs}",

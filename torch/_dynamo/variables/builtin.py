@@ -92,6 +92,7 @@ from .base import (
     Member,
     Method,
     readonly_setter,
+    type_name_no_user_code,
     unmodeled_setter,
     ValueMutationNew,
     VariableTracker,
@@ -3408,14 +3409,19 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
-        if user_cls not in {dict, OrderedDict, defaultdict}:
+        user_cls_name = type_name_no_user_code(user_cls)
+        if (
+            user_cls is not dict
+            and user_cls is not OrderedDict
+            and user_cls is not defaultdict
+        ):
             unimplemented(
                 gb_type="Unsupported dict type for fromkeys()",
-                context=f"{user_cls.__name__}.fromkeys(): {args} {kwargs}",
-                explanation=f"Failed to call {user_cls.__name__}.fromkeys() because "
-                f"{user_cls.__name__} is not any type of dict, OrderedDict, or defaultdict",
+                context=f"{user_cls_name}.fromkeys(): {args} {kwargs}",
+                explanation=f"Failed to call {user_cls_name}.fromkeys() because "
+                f"{user_cls_name} is not any type of dict, OrderedDict, or defaultdict",
                 hints=[
-                    f"Ensure {user_cls.__name__} is a type of dict, OrderedDict, or defaultdict.",
+                    f"Ensure {user_cls_name} is a type of dict, OrderedDict, or defaultdict.",
                 ],
             )
         if kwargs:
@@ -3428,7 +3434,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
             ):
                 raise_args_mismatch(
                     tx,
-                    f"{user_cls.__name__}.fromkeys",
+                    f"{user_cls_name}.fromkeys",
                     "1 args and 1 kwargs (`value`)",
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
@@ -3436,7 +3442,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if len(args) == 0:
             raise_args_mismatch(
                 tx,
-                f"{user_cls.__name__}.fromkeys",
+                f"{user_cls_name}.fromkeys",
                 "at least 1 args",
                 f"{len(args)} args",
             )
@@ -3445,7 +3451,7 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         if len(args) != 2:
             raise_args_mismatch(
                 tx,
-                f"{user_cls.__name__}.fromkeys",
+                f"{user_cls_name}.fromkeys",
                 "2 args",
                 f"{len(args)} args",
             )
@@ -3481,23 +3487,24 @@ class DictBuiltinVariable(BaseBuiltinVariable):
         # Reuse the operand's existing HashableTracker keys instead of
         # re-wrapping (and thus re-hashing) the underlying VTs, mirroring
         # CPython's do-not-rehash-dict-keys behavior when building a dict from
-        # an existing set/frozenset/dict.
-        if isinstance(
-            arg,
-            (
-                variables.SetVariable,
-                variables.FrozensetVariable,
-                variables.DictKeySetVariable,
-                variables.OrderedSetVariable,
-                ConstDictVariable,
-            ),
+        # an existing exact set/frozenset/dict.
+        if user_cls is dict and type(arg) in (
+            variables.SetVariable,
+            variables.FrozensetVariable,
+            ConstDictVariable,
         ):
             # HashableTracker keys are accepted by ConstDictVariable.__init__.
-            return _make_result(dict.fromkeys(arg.items.keys(), value))  # type: ignore[arg-type]
+            return _make_result(dict.fromkeys(arg.items.keys(), value))  # type: ignore[union-attr, arg-type]
         if isinstance(arg, dict):
             arg_list = [VariableTracker.build(tx, k) for k in arg]
             return _make_result(dict.fromkeys(arg_list, value))
-        elif iterator := generic_getiter(tx, arg):
+        elif not (
+            isinstance(arg, OrderedDictVariable)
+            or (
+                isinstance(arg, variables.UserDefinedDictVariable)
+                and isinstance(arg._base_vt, OrderedDictVariable)
+            )
+        ) and (iterator := generic_getiter(tx, arg)):
             keys = unpack_iterable(tx, iterator)
             if all(is_hashable(v) for v in keys):
                 return _make_result(dict.fromkeys(keys, value))
