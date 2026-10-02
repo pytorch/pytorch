@@ -8849,7 +8849,7 @@ class TritonScheduling(SIMDScheduling):
         ):
             return False
         m, n = template.get_size()
-        # Static shapes only: the Blackwell template specializes dynamic sizes.
+        # Dynamic sizes are untested: the Blackwell template specializes them.
         if not (isinstance(m, sympy.Integer) and isinstance(n, sympy.Integer)):
             return False
         if template.get_stride() != [n, 1]:
