@@ -7,6 +7,7 @@ from typing import Any
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.node import Node
+from torch.utils._ordered_set import OrderedSet
 
 
 __all__ = ["get_source_partitions", "check_subgraphs_connected", "SourcePartition"]
@@ -128,9 +129,15 @@ def get_source_partitions(
                 add_to_partition(source_fn[1], source_fn[0], node)
 
     def make_partition(nodes: list[Node], module_type: type) -> SourcePartition:
-        input_nodes = set()
-        output_nodes = set()
-        params = set()
+        # OrderedSet gives us deterministic, insertion-ordered iteration
+        # (it's dict-backed under the hood). A plain set() here is wrong
+        # because Node hashes by identity, so its iteration order depends
+        # on object memory addresses rather than the graph, which made
+        # get_source_partitions() return input_nodes/output_nodes/params
+        # in a different order across otherwise-identical runs.
+        input_nodes: OrderedSet[Node] = OrderedSet()
+        output_nodes: OrderedSet[Node] = OrderedSet()
+        params: OrderedSet[Node] = OrderedSet()
         for node in nodes:
             for arg in node.args:
                 if isinstance(arg, Node) and arg not in nodes and arg.op != "get_attr":
