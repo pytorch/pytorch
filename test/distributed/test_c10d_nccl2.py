@@ -385,6 +385,37 @@ class ProcessGroupNCCLLegacyCommPtrTest(ProcessGroupNCCL2CommPtrTest):
         return "nccl-legacy"
 
 
+class ProcessGroupNCCL2CompatBindingsTest(_ProcessGroupNCCL2OptionsTest):
+    """ProcessGroupNCCL pybind members that callers use without hasattr guards."""
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_set_default_timeout(self) -> None:
+        backend = dist.get_backend_impl(device=self.device)
+        timeout = backend.options._timeout
+        backend._set_default_timeout(timedelta(seconds=23))
+        self.assertEqual(backend.options._timeout, timedelta(seconds=23))
+        self._check_all_reduce()
+        backend._set_default_timeout(timeout)
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_is_initialized(self) -> None:
+        # Only the initialized state is shared: ProcessGroupNCCL2 creates its
+        # communicator in the constructor, ProcessGroupNCCL on first use.
+        pg = dist.new_group()
+        backend = dist.get_backend_impl(pg, device=self.device)
+        dist.all_reduce(torch.ones(4, device=self.device), group=pg)
+        self.assertTrue(backend._is_initialized())
+        dist.destroy_process_group(pg)
+
+
+class ProcessGroupNCCLLegacyCompatBindingsTest(ProcessGroupNCCL2CompatBindingsTest):
+    @classmethod
+    def backend_str(cls) -> str:
+        return "nccl-legacy"
+
+
 class ProcessGroupNCCL2EagerNewGroupTest(_ProcessGroupNCCL2OptionsTest):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file) -> None:

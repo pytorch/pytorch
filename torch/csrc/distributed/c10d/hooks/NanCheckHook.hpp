@@ -1,10 +1,10 @@
 // Copyright (c) Meta Platforms, Inc. and affiliates.
 //
 // NanCheckHook: backend-agnostic NaN checking built on the ProcessGroup
-// pre/post collective hooks (Hooks.hpp). ProcessGroupNCCL has a native NaN
+// pre/post collective hooks (Hooks.hpp). The NCCL backends have a native NaN
 // checker (TORCH_NCCL_NAN_CHECK); because the hooks fire from the dispatcher
 // kernels in Ops.cpp, this hook brings the same debug feature to any backend
-// routed through the c10d ops -- nccl2, nccl-lazy, gloo, custom backends.
+// routed through the c10d ops -- gloo, custom backends.
 
 #pragma once
 

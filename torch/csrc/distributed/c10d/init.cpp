@@ -4339,6 +4339,20 @@ Returns:
               &::c10d::nccl2::ProcessGroupNCCL::getError,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "_set_default_timeout",
+              &::c10d::nccl2::ProcessGroupNCCL::setTimeout,
+              py::arg("timeout"),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_is_initialized",
+              &::c10d::nccl2::ProcessGroupNCCL::isInitialized,
+              py::call_guard<py::gil_scoped_release>())
+          .def(
+              "_set_enable_nan_check",
+              &::c10d::nccl2::ProcessGroupNCCL::setEnableNanCheck,
+              py::arg("enable_nan_check"),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "register_mem_pool",
               &::c10d::nccl2::ProcessGroupNCCL::registerMemPool,
               py::arg("pool"),
