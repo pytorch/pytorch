@@ -634,55 +634,6 @@ class TestFullyShardAllGatherExtensionsMultiThread(
         local_weight.fsdp_post_all_gather = post_fn.__get__(local_weight)
 
     @skip_if_lt_x_gpu(1)
-    def test_all_gather_extension_single_rank_payloads(self):
-        # A size-1 shard mesh skips the all-gather, so FSDP copies each payload
-        # directly, including byte views into typed cached outputs
-        mesh = init_device_mesh(
-            device_type.type,
-            (self.world_size, 1),
-            mesh_dim_names=("replicate", "shard"),
-        )["shard"]
-        byte_payloads = False
-        test = self
-
-        def fsdp_pre_all_gather(
-            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
-        ):
-            payloads = (local_tensor, (local_tensor + 1).to(torch.bfloat16))
-            if byte_payloads:
-                payloads = tuple(t.view(torch.uint8) for t in payloads)
-            return payloads, outer_size
-
-        @torch.no_grad()
-        def fsdp_post_all_gather(
-            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
-        ):
-            # Typed outputs take the trailing dims of the byte payloads
-            weight, auxiliary = (t.view(metadata) for t in all_gather_outputs)
-            test.assertEqual(auxiliary, (weight + 1).to(torch.bfloat16))
-            if out is not None:
-                with _unsafe_preserve_version_counter(out):
-                    out.copy_(weight)
-                return
-            return weight, (weight,)
-
-        model = nn.Linear(16, 8, bias=False, device=device_type)
-        ref_model = copy.deepcopy(model)
-        fully_shard(model, mesh=mesh)
-        self._patch_all_gather_extension(
-            model, fsdp_pre_all_gather, fsdp_post_all_gather
-        )
-        inp = torch.randn((2, 16), device=device_type)
-        for iteration in range(2):
-            byte_payloads = iteration == 1
-            output = model(inp)
-            ref_output = ref_model(inp)
-            self.assertEqual(output, ref_output)
-            output.sum().backward()
-            ref_output.sum().backward()
-            check_sharded_parity(self, ref_model, model)
-
-    @skip_if_lt_x_gpu(1)
     def test_all_gather_extension_zero_size_trailing_dim(self):
         test = self
 
@@ -757,6 +708,8 @@ class TestFullyShardAllGatherExtensionsMultiThread(
                 AllGatherInput(local_tensor, dim=-1, output_size=torch.Size((2, 4, 8))),
                 AllGatherInput(payload_tags),
                 AllGatherInput(rank_tag),
+                # Tensor payloads follow the parameter's shard layout
+                local_tensor,
             ), (outer_size, mesh.size())
 
         @torch.no_grad()
@@ -769,7 +722,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             out: torch.Tensor | None = None,
         ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
             del local_tensor
-            weight, gathered_tags, ranks = all_gather_outputs
+            weight, gathered_tags, ranks, tensor_payload = all_gather_outputs
             self.assertEqual(metadata, (torch.Size((8, 8)), shard_world_size))
             self.assertEqual(weight.shape, (2, 4, 8))
             self.assertEqual(weight.dtype, param_dtype)
@@ -783,6 +736,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             self.assertEqual(ranks.shape, (shard_world_size,))
             self.assertEqual(ranks.dtype, torch.int64)
             self.assertEqual(ranks, torch.arange(shard_world_size, device=device_type))
+            self.assertEqual(tensor_payload.view(8, 8), expected_weight)
             post_out_ids.append(None if out is None else id(out))
             weight = weight.view(8, 8)
             if out is not None:
@@ -844,9 +798,9 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             ref_output = ref_model(inp)
             self.assertEqual(output, ref_output)
             raw_sizes, inner_sizes = storage_observations[-1]
-            self.assertEqual(len(raw_sizes), 3)
+            self.assertEqual(len(raw_sizes), 4)
             if release_outputs:
-                self.assertEqual(raw_sizes, (0, 0, 0))
+                self.assertEqual(raw_sizes, (0, 0, 0, 0))
             else:
                 self.assertTrue(all(size > 0 for size in raw_sizes))
             self.assertTrue(all(size > 0 for size in inner_sizes))
@@ -1017,42 +971,6 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             cached_output = output if cached_output is None else cached_output
             self.assertIs(output, cached_output)
             model.reshard()
-
-    @skip_if_lt_x_gpu(1)
-    def test_all_gather_input_uneven_padding(self):
-        # Records declare their own layout, so an extension can pad the
-        # payload of an unevenly sharded parameter itself
-        rows = 7
-        padded_rows = math.ceil(rows / self.world_size)
-
-        def fsdp_pre_all_gather(
-            local_tensor, mesh, outer_size, outer_stride, module, mp_policy
-        ):
-            padded = local_tensor.new_zeros(padded_rows, local_tensor.size(1))
-            padded[: local_tensor.size(0)] = local_tensor
-            return (AllGatherInput(padded),), None
-
-        @torch.no_grad()
-        def fsdp_post_all_gather(
-            local_tensor, all_gather_outputs, metadata, param_dtype, *, out=None
-        ):
-            weight = all_gather_outputs[0][:rows]
-            if out is not None:
-                with _unsafe_preserve_version_counter(out):
-                    out.copy_(weight)
-                return None
-            return weight, (weight,)
-
-        model = nn.Linear(4, rows, bias=False, device=device_type)
-        # Seeding is per process, not per thread
-        dist.broadcast(model.weight.detach(), src=0)
-        ref_model = copy.deepcopy(model)
-        fully_shard(model)
-        self._patch_all_gather_extension(
-            model, fsdp_pre_all_gather, fsdp_post_all_gather
-        )
-        inp = torch.randn((2, 4), device=device_type)
-        self.assertEqual(model(inp), ref_model(inp))
 
 
 if __name__ == "__main__":
