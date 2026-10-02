@@ -1526,13 +1526,12 @@ class TestMPS(TestCaseMPS):
 
     @xfailIf(MACOS_VERSION > 15.0)
     def test_conv_raises_error(self, device='mps', dtype=torch.float):
-        conv = nn.Conv1d(1, 65537, 3, padding=1).to('mps')
+        conv = nn.Conv2d(1, 65537, 3, padding=1).to('mps')
 
-        x = torch.ones([1, 1, 3])
+        x = torch.ones([1, 1, 3, 3])
         with self.assertRaises(NotImplementedError):
             y = conv(x.to("mps"))
 
-    @xfailIf(MACOS_VERSION < 15.1)
     def test_conv_high_channel_size(self):
         out_channels = 65537
         weight = torch.randn(out_channels, 1, 1)
