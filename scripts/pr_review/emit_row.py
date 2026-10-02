@@ -33,7 +33,10 @@ The row is deliberately keyed and versioned for reuse: the interim GitHub
 Actions harness and the credential-less sandbox that replaces it write the SAME
 shape, distinguished by ``harness``, so the two eras stay comparable. ``extra``
 is the escape hatch for anything we learn we need later without re-cutting the
-table.
+table. Two keys today, both only on a succeeded review: ``findings``, the
+sanitized findings as a JSON array, which Dr.CI renders under the verdict; and
+``findings_dropped_at_publish``, present only when the publish-side re-check
+dropped some, so ``findings_count`` can exceed the array's length.
 """
 
 from __future__ import annotations
@@ -44,6 +47,8 @@ import os
 import re
 import sys
 from pathlib import Path
+
+from extract_verdict import is_neutral_prose, MAX_SUMMARY, published_findings, VERDICTS
 
 
 SCHEMA_VERSION = 1
@@ -56,6 +61,13 @@ SCHEMA_VERSION = 1
 # worth less than the two lines it costs to bound. Out-of-charset or over-length
 # becomes empty rather than failing: telemetry never breaks a review.
 _MODEL_CHARS = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+
+# verdict.json reaches this job as an artifact of the job that read untrusted
+# PR code, so every string it puts in the row — verdict, summary, findings and
+# failure_detail — is re-checked here with extract_verdict.py's own predicates
+# rather than trusted to have come through that module. `build` holds its
+# output to the same predicates, so validate_findings.py sees what this drops.
+_DETAIL_REJECTED = "failure_detail failed the publish-side re-check"
 
 # Terminal statuses. Anything not in this set is a bug in the caller.
 TERMINAL = {
@@ -99,6 +111,13 @@ def safe_model(value: object) -> str:
     return text if _MODEL_CHARS.fullmatch(text) else ""
 
 
+def safe_detail(value: object) -> str:
+    """`failure_detail` if it is text the sanitizer could have written."""
+    if value in (None, ""):
+        return ""
+    return value if is_neutral_prose(value, MAX_SUMMARY) else _DETAIL_REJECTED
+
+
 def base_row(phase: str) -> dict:
     """Fields common to both rows — the identity of the attempt."""
     return {
@@ -136,6 +155,37 @@ def read_json(path: str) -> dict:
         print(f"warning: could not read {path}: {exc}", file=sys.stderr)
         return {}
     return loaded if isinstance(loaded, dict) else {}
+
+
+# (row column, modelUsage field) for each token count.
+_TOKEN_FIELDS = (
+    ("input_tokens", "inputTokens"),
+    ("output_tokens", "outputTokens"),
+    ("cache_read_input_tokens", "cacheReadInputTokens"),
+    ("cache_creation_input_tokens", "cacheCreationInputTokens"),
+)
+
+
+def token_counts(usage: dict, model_usage: object) -> dict:
+    """Token columns, summed over every model entry in `modelUsage`.
+
+    The result's `usage` covers only the top-level session; sub-agent tokens
+    appear only in `modelUsage`. Checked on Claude Code 2.1.280: with one
+    sub-agent, `usage` had 156 output tokens and `modelUsage` 2730, matching
+    `total_cost_usd`; without sub-agents the two agree, so rows stay comparable.
+    `usage` is the fallback when `modelUsage` carries no token fields.
+    """
+    entries = (
+        [e for e in model_usage.values() if isinstance(e, dict)]
+        if isinstance(model_usage, dict)
+        else []
+    )
+    if any(field in e for e in entries for _, field in _TOKEN_FIELDS):
+        return {
+            column: sum(as_int(str(e.get(field, 0))) for e in entries)
+            for column, field in _TOKEN_FIELDS
+        }
+    return {column: as_int(str(usage.get(column, 0))) for column, _ in _TOKEN_FIELDS}
 
 
 def usage_metrics(path: str) -> dict:
@@ -176,15 +226,10 @@ def usage_metrics(path: str) -> dict:
         # the "telemetry must never be the reason a review fails" promise in
         # this function's own docstring.
         "total_cost_usd": as_float(last.get("total_cost_usd")),
-        "input_tokens": as_int(str(usage.get("input_tokens", 0))),
-        "output_tokens": as_int(str(usage.get("output_tokens", 0))),
-        "cache_read_input_tokens": as_int(str(usage.get("cache_read_input_tokens", 0))),
-        "cache_creation_input_tokens": as_int(
-            str(usage.get("cache_creation_input_tokens", 0))
-        ),
+        **token_counts(usage, model_usage),
         # Alphabetically first when several models appear, which is arbitrary
-        # but deterministic. Practically there is one: the review makes a single
-        # model call. If sub-agents ever land, this needs a real rule.
+        # but deterministic. Practically there is one: the workflow forces
+        # sub-agents onto the review model (CLAUDE_CODE_SUBAGENT_MODEL_FORCE).
         "model": safe_model(
             sorted(model_usage)[0]
             if isinstance(model_usage, dict) and model_usage
@@ -211,6 +256,8 @@ def main() -> int:
     args = ap.parse_args()
 
     row = base_row(args.phase)
+    row["extra"] = {}
+    findings: list[dict] = []
 
     if args.phase == "started":
         row["status"] = "started"
@@ -227,15 +274,50 @@ def main() -> int:
         row["status"] = status
         # Only a succeeded review carries a verdict. A failed one must not look
         # like an objection to the change.
+        if status == "succeeded" and (
+            not isinstance(verdict.get("verdict"), str)
+            or verdict.get("verdict") not in VERDICTS
+            or not is_neutral_prose(verdict.get("summary"), MAX_SUMMARY)
+        ):
+            # A verdict extract_verdict.py could not have written. Record the
+            # run without publishing anything it says. The workflow reads the
+            # status and verdict back out of this row, so the label step
+            # follows this decision.
+            print(
+                "::warning::verdict.json failed the publish-side re-check",
+                file=sys.stderr,
+            )
+            status = "sanitizer_rejected"
+            row["status"] = status
+            verdict = {"failure_detail": "verdict failed the publish-side re-check"}
         row["verdict"] = verdict.get("verdict") if status == "succeeded" else None
         row["summary"] = verdict.get("summary", "") if status == "succeeded" else ""
-        row["findings_count"] = len(verdict.get("findings") or [])
+        raw_findings = verdict.get("findings")
+        row["findings_count"] = (
+            len(raw_findings) if isinstance(raw_findings, list) else 0
+        )
+        if status == "succeeded":
+            try:
+                findings = published_findings(verdict)
+            except Exception as exc:  # noqa: BLE001 - telemetry never breaks a review
+                print(f"warning: findings not recorded: {exc!r}", file=sys.stderr)
+            dropped_at_publish = row["findings_count"] - len(findings)
+            if dropped_at_publish:
+                print(
+                    f"::warning::{dropped_at_publish} finding(s) failed the"
+                    " publish-side re-check and were not recorded",
+                    file=sys.stderr,
+                )
+                row["extra"]["findings_dropped_at_publish"] = str(dropped_at_publish)
         row["findings_dropped"] = as_int(str(verdict.get("findings_dropped", 0)))
-        row["failure_detail"] = verdict.get("failure_detail", "")
+        row["failure_detail"] = safe_detail(verdict.get("failure_detail"))
         row["reasoning_uri"] = env("REASONING_URI")
         row.update(usage_metrics(args.usage_file))
 
-    row["extra"] = {}
+    if findings:
+        row["extra"]["findings"] = json.dumps(
+            findings, ensure_ascii=True, separators=(",", ":")
+        )
 
     Path(args.out).write_text(json.dumps(row, ensure_ascii=True) + "\n")
     print(
