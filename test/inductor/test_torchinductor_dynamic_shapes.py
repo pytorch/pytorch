@@ -1624,16 +1624,21 @@ class TestSymbolicFull(TestCase):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @parametrize(
         "dtype,fill_value,operation",
-        (
-            (torch.float32, 2**24 + 1, "square"),
-            (torch.int64, 2**62 + 1, "mul"),
-        ),
+        ((torch.float32, 2**24 + 1, "square"),),
     )
     def test_full_symbolic_fill_cast_precedes_consumer(
         self, device, dtype, fill_value, operation
     ):
         self._check_symbolic_fill_cast_precedes_consumer(
             device, dtype, fill_value, operation
+        )
+
+    # MPS overflowing int64 arithmetic is outside this dtype-cast regression.
+    @onlyOn(["cpu", "cuda", "xpu"])
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_full_symbolic_fill_cast_precedes_overflowing_int64_consumer(self, device):
+        self._check_symbolic_fill_cast_precedes_consumer(
+            device, torch.int64, 2**62 + 1, "mul"
         )
 
     @onlyOn(["cpu", "cuda", "xpu"])
