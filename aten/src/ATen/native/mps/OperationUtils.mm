@@ -381,8 +381,7 @@ static void check_mps_shape(MPSShape* shape) {
 }
 
 bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI, bool checkLinearOffset) {
-  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
-  if ((!tensor.is_contiguous() || tensor.storage_offset()) && useMPSStridedAPI && is_macOS_15_0_or_newer) {
+  if ((!tensor.is_contiguous() || tensor.storage_offset()) && useMPSStridedAPI) {
     auto storage_numel = tensor.storage().nbytes() / tensor.element_size() - tensor.storage_offset();
     if (storage_numel > std::numeric_limits<int32_t>::max()) {
       return true;
@@ -487,10 +486,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
   // extract the pointer to MTLBuffer from the Tensor's storage
   id<MTLBuffer> srcBuf = getMTLBufferStorage(src);
 
-  static const bool is_macOS_15_0_or_newer = is_macos_at_least(MacOSVersion::MACOS_15_0);
-  // Use gather kernel to solve strides for macOS < 15.0
-  // Starting with macOS 15.0, MPS supports native strides directly in the kernels
-  if (!is_macOS_15_0_or_newer || !useMPSStridedAPI) {
+  if (!useMPSStridedAPI) {
     if ((!src.is_contiguous() || src.storage_offset()) && gatherTensorData) {
       // Materialize the view; "_tensor" retains it for as long as other ops use it. Carrying src's
       // conj/neg bits over makes the copy a plain restride, so the bits stay lazy for the ops below
@@ -515,7 +511,7 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
 
   // Tensor is contiguous and has no storage offset.
   // Wrap it directly inside MPSGraphTensorData
-  if ((_tensor.is_contiguous() && !_tensor.storage_offset()) || !useMPSStridedAPI || !is_macOS_15_0_or_newer) {
+  if ((_tensor.is_contiguous() && !_tensor.storage_offset()) || !useMPSStridedAPI) {
     auto shape = mpsShape_ ? mpsShape_ : getMPSShape(_tensor);
     check_mps_shape(shape);
     if (!_tensor.storage_offset()) {
@@ -838,15 +834,9 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   if (!options) {
     options = [[MTLCompileOptions new] autorelease];
     [options setLanguageVersion:static_cast<MTLLanguageVersion>(metal_language_version())];
-    if (is_macos_at_least(MacOSVersion::MACOS_15_0)) {
-      options.mathMode = fast_math ? MTLMathModeFast : MTLMathModeSafe;
-      options.mathFloatingPointFunctions =
-          fast_math ? MTLMathFloatingPointFunctionsFast : MTLMathFloatingPointFunctionsPrecise;
-    } else {
-      C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
-      [options setFastMathEnabled:fast_math ? YES : NO];
-      C10_DIAGNOSTIC_POP()
-    }
+    options.mathMode = fast_math ? MTLMathModeFast : MTLMathModeSafe;
+    options.mathFloatingPointFunctions =
+        fast_math ? MTLMathFloatingPointFunctionsFast : MTLMathFloatingPointFunctionsPrecise;
   }
 
   const auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];
@@ -854,7 +844,7 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
   library = [device newLibraryWithSource:str options:options error:&error];
   if (library == nil) {
     if ([error domain] == MTLLibraryErrorDomain && [error code] == MTLLibraryErrorCompileFailure) {
-      throw c10::SyntaxError([[error localizedDescription] UTF8String]);
+      TORCH_CHECK_WITH(SyntaxError, false, [[error localizedDescription] UTF8String]);
     }
     TORCH_CHECK(false, "Failed to create metal library, error: ", [[error description] UTF8String]);
   }
@@ -903,9 +893,7 @@ bool MetalShaderLibrary::hasFunction(const std::string& fname) {
 std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
   {
     std::lock_guard guard(cache_mutex);
-    if (C10_UNLIKELY(!library && nparams > 0)) {
-      throw std::runtime_error("Library must be initialized first");
-    }
+    TORCH_CHECK(library || nparams == 0, "Library must be initialized first");
   }
   std::vector<std::string> rc;
   @autoreleasepool {
@@ -965,7 +953,7 @@ class BundledShaderLibrary : public MetalShaderLibrary {
   }
 
   id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params) override {
-    throw std::runtime_error("Should never be called");
+    TORCH_CHECK(false, "Should never be called");
   }
 
  private:
@@ -980,9 +968,7 @@ class BundledShaderLibrary : public MetalShaderLibrary {
     const auto* mach_header = reinterpret_cast<const struct mach_header_64*>(_dyld_get_image_header(idx));
     unsigned long mtl_lib_size = 0;
     const auto* mtl_lib_data = getsectiondata(mach_header, "__TEXT", name.c_str(), &mtl_lib_size);
-    if (mtl_lib_data == nullptr) {
-      throw std::runtime_error("Can't find metal library section " + name);
-    }
+    TORCH_CHECK(mtl_lib_data != nullptr, "Can't find metal library section ", name);
     return dispatch_data_create(mtl_lib_data,
                                 mtl_lib_size,
                                 dispatch_get_main_queue(),
@@ -1581,7 +1567,10 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   });
 }
 
-void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std::string& name) {
+void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
+                                             const std::string& name,
+                                             std::optional<c10::Scalar> alpha,
+                                             std::optional<c10::ScalarType> scalar_arg_type) {
   // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
   // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
   // double as common dtype (because Python floating point are always 64-bit values)
@@ -1597,7 +1586,7 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
   // names for the 3-input op and fail at pipeline creation.
   if (!iter.can_use_32bit_indexing()) {
     for (auto&& sub_iter : iter.with_32bit_indexing()) {
-      exec_ternary_kernel(sub_iter, name);
+      exec_ternary_kernel(sub_iter, name, alpha, scalar_arg_type);
     }
     return;
   }
@@ -1623,16 +1612,26 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
   convert_double_scalar(other2);
 
   MPSStream* mpsStream = getCurrentMPSStream();
-  // An out= dtype differing from the (matching) inputs also needs the cast
-  // kernel: non-cast names are only registered for matching in/out pairs, and
-  // the _cast_{out} instantiations read the runtime input types anyway.
-  const auto cast_needed = (input.scalar_type() != other1.scalar_type()) ||
-      (input.scalar_type() != other2.scalar_type()) || (input.scalar_type() != out.scalar_type());
+  // Cast kernels compute at the iterator's common dtype and load/store through
+  // each buffer's own dtype, which is what the iterator's
+  // promote_inputs_to_common_dtype/cast_common_dtype_to_outputs pair means on
+  // a backend that does not materialize the temporaries.
+  const auto compute_dtype = iter.maybe_common_dtype().value_or(out.scalar_type());
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
+  const auto alpha_type = scalar_arg_type.value_or(compute_dtype);
+  const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
   // TODO: Implicitly pass both input and output types to non-cast kernels
+  const auto direct_name = fmt::format(
+      "{}_{}_{}_{}{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input), alpha_suffix);
+  // Non-cast kernels are registered for other1/other2 matching the output, and
+  // `input` either matching it too or, like `where`'s bool condition, having a
+  // dedicated instantiation. Anything else, including an out= dtype differing
+  // from the inputs, goes through the cast kernel.
+  const auto cast_needed = other1.scalar_type() != out.scalar_type() || other2.scalar_type() != out.scalar_type() ||
+      (input.scalar_type() != out.scalar_type() && !hasFunction(direct_name));
   const auto kernel_name = cast_needed
-      ? fmt::format("{}_{}_cast_{}", name, suffix, scalarToMetalTypeString(out))
-      : fmt::format("{}_{}_{}_{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input));
+      ? fmt::format("{}_{}_cast_{}{}", name, suffix, scalarToMetalTypeString(compute_dtype), alpha_suffix)
+      : direct_name;
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();
@@ -1642,34 +1641,37 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std
       [computeEncoder setComputePipelineState:binaryPSO];
       // Set input and output tensors
       bind_iter_tensors(computeEncoder, iter);
+      // Alpha kernels bind the scalar right after the tensors, which pushes
+      // everything that follows one slot down, so keep the index runtime
+      unsigned idx = 4;
+      if (alpha) {
+        mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), idx++);
+      }
+      const std::array<int, 4> types = {static_cast<int>(input.scalar_type()),
+                                        static_cast<int>(other1.scalar_type()),
+                                        static_cast<int>(other2.scalar_type()),
+                                        static_cast<int>(out.scalar_type())};
       // Iterator is contiguous if all of its elements are dense in storage,
       // i.e. it's true for both row-first and column-first tensors
       if (iter.is_contiguous()) {
         if (cast_needed) {
-          std::array<int, 3> sizes = {static_cast<int>(c10::elementSize(input.scalar_type())),
-                                      static_cast<int>(c10::elementSize(other1.scalar_type())),
-                                      static_cast<int>(c10::elementSize(other2.scalar_type()))};
-          std::array<int, 3> types = {static_cast<int>(input.scalar_type()),
-                                      static_cast<int>(other1.scalar_type()),
-                                      static_cast<int>(other2.scalar_type())};
-          mtl_setArgs<4>(computeEncoder, sizes, types);
+          const std::array<int, 4> sizes = {static_cast<int>(c10::elementSize(input.scalar_type())),
+                                            static_cast<int>(c10::elementSize(other1.scalar_type())),
+                                            static_cast<int>(c10::elementSize(other2.scalar_type())),
+                                            static_cast<int>(c10::elementSize(out.scalar_type()))};
+          mtl_setBytes(computeEncoder, sizes, idx++);
+          mtl_setBytes(computeEncoder, types, idx++);
         }
       } else {
         // Please note that shapes and strides of the iterator might be
         // different than that of its operands, for example binary op
         // between 4x4 tensor and scalar will result in 1D 16 element iterator
-        std::array<int, 4> types = {static_cast<int>(input.scalar_type()),
-                                    static_cast<int>(other1.scalar_type()),
-                                    static_cast<int>(other2.scalar_type()),
-                                    static_cast<int>(out.scalar_type())};
-        mtl_setArgs<4>(computeEncoder,
-                       iter.shape(),
-                       iter.strides(0),
-                       iter.strides(1),
-                       iter.strides(2),
-                       iter.strides(3),
-                       iter.ndim(),
-                       types);
+        mtl_setBytes(computeEncoder, iter.shape(), idx++);
+        for (const auto i : c10::irange(4)) {
+          mtl_setBytes(computeEncoder, iter.strides(i), idx++);
+        }
+        mtl_setBytes(computeEncoder, iter.ndim(), idx++);
+        mtl_setBytes(computeEncoder, types, idx++);
       }
       if (iter.is_contiguous()) {
         mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());

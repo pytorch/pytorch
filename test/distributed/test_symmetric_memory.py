@@ -728,6 +728,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # Hangs at 4 ranks on gfx950 CI distributed runners (file timeout / SIGINT,
+    # no JUnit row). Same P2P/symm_mem family as the AsyncTPTest MI350 skip;
+    # not a min-gpus filter bug. Skipped until the runner P2P path is fixed.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_subgroup(self) -> None:
         self._init_process()
@@ -993,6 +997,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             t.fill_(self.rank + 10.0)
 
         torch.cuda.synchronize()
+        # The fill follows the last barrier, so nothing orders a peer's fill
+        # against this rank's read below. Local synchronize only covers this
+        # device.
+        dist.barrier()
         buf = hdl.get_buffer(peer, (64,), torch.float32)
         expected = torch.full((64,), peer + 10.0, device="cuda")
         self.assertEqual(buf, expected)
@@ -1035,6 +1043,10 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             t.fill_(self.rank + 100.0)
 
         torch.cuda.synchronize()
+        # wait_signal only shows that prev_peer sent its signal, which precedes
+        # its fill, so nothing orders that fill against this rank's read below.
+        # Local synchronize only covers this device.
+        dist.barrier()
         buf = hdl.get_buffer(prev_peer, (64,), torch.float32)
         expected = torch.full((64,), prev_peer + 100.0, device="cuda")
         self.assertEqual(buf, expected)
@@ -2355,6 +2367,10 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
+    # Hangs at 4 ranks on gfx950 CI distributed runners (recorded fail ~1201s).
+    # Same P2P/symm_mem family as the AsyncTPTest MI350 skip; not a min-gpus
+    # filter bug. Skipped until the runner P2P path is fixed.
+    @skip_if_rocm_arch_multiprocess(MI350_ARCH)
     @skip_if_lt_x_gpu(4)
     def test_reduce_scatter(self) -> None:
         self._init_process()

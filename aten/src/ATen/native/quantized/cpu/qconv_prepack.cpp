@@ -117,7 +117,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeight<
   const at::Tensor weight_nhwc =
       at::native::fbgemm_utils::ConvertConvWeightsToChannelLastTensor<kSpatialDim>(weight, groups, transpose);
   const int8_t* weight_data_int8 =
-          reinterpret_cast<int8_t*>(weight_nhwc.data_ptr<c10::qint8>());
+          reinterpret_cast<const int8_t*>(weight_nhwc.const_data_ptr<c10::qint8>());
   std::vector<int32_t> col_offsets(output_channels);
   // compute column offsets (Similar to
   // fbgemm::col_offsets_with_zero_pt_s8acc32_ref) please note that offsets
@@ -680,6 +680,7 @@ class QConvPackWeightInt8 final {
       bool transpose) {
     auto& ctx = at::globalContext();
 #ifdef USE_FBGEMM
+#if !defined(__aarch64__) && !defined(_M_ARM64)
   if (ctx.qEngine() == at::QEngine::X86) {
 #if AT_MKLDNN_ENABLED()
     bool use_onednn = onednn_utils::should_use_onednn_quant(
@@ -692,15 +693,14 @@ class QConvPackWeightInt8 final {
       return PackedConvWeight<kSpatialDim>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups, transpose);
   } // x86
-#endif // defined(USE_FBGEMM) || AT_MKLDNN_ENABLED()
-
-#ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedConvWeight<kSpatialDim>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups,
           transpose);
     }
-#endif
+#endif // !aarch64: on aarch64 the fbgemm kernels cannot run; the ONEDNN arm
+       // below serves the X86 engine instead (mirrors qlinear_prepack, #185232)
+#endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
@@ -711,7 +711,8 @@ class QConvPackWeightInt8 final {
 #endif
 
 #if AT_MKLDNN_ENABLED()
-    if (ctx.qEngine() == at::QEngine::ONEDNN) {
+    if (ctx.qEngine() == at::QEngine::ONEDNN ||
+        ctx.qEngine() == at::QEngine::X86) {
       return PackedConvWeightsOnednn<kSpatialDim>::prepack(
         weight, bias, stride, padding, output_padding, dilation, groups,
             transpose);
@@ -773,6 +774,7 @@ class QConv1dPackWeightInt8 final {
     dilation = quant_utils::MakeArgForConv1d(dilation, 1);
 
 #ifdef USE_FBGEMM
+#if !defined(__aarch64__) && !defined(_M_ARM64)
   if (ctx.qEngine() == at::QEngine::X86) {
 #if AT_MKLDNN_ENABLED()
     bool use_onednn = onednn_utils::should_use_onednn_quant(
@@ -788,15 +790,14 @@ class QConv1dPackWeightInt8 final {
         transpose);
 
   } // x86
-#endif
-
-#ifdef USE_FBGEMM
     if (ctx.qEngine() == at::QEngine::FBGEMM) {
       return PackedConvWeight<2>::prepack(
           std::move(weight), std::move(bias), stride, padding, output_padding, dilation, groups,
           transpose);
     }
-#endif
+#endif // !aarch64: on aarch64 the fbgemm kernels cannot run; the ONEDNN arm
+       // below serves the X86 engine instead (mirrors qlinear_prepack, #185232)
+#endif // USE_FBGEMM
 
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
@@ -807,7 +808,8 @@ class QConv1dPackWeightInt8 final {
 #endif
 
 #if AT_MKLDNN_ENABLED()
-    if (ctx.qEngine() == at::QEngine::ONEDNN) {
+    if (ctx.qEngine() == at::QEngine::ONEDNN ||
+        ctx.qEngine() == at::QEngine::X86) {
       return PackedConvWeightsOnednn<2>::prepack(
           weight, bias, stride, padding, output_padding, dilation, groups,
           transpose);

@@ -6,6 +6,7 @@ import collections.abc
 import contextlib
 import ctypes
 import hashlib
+import importlib.util
 import io
 import itertools
 import logging
@@ -52,6 +53,7 @@ from torch._C._distributed_c10d import (
     FlightRecorderHook,
     GatherOptions,
     get_debug_level,
+    HealthCheckHook,
     NanCheckHook,
     PrefixStore,
     ProcessGroup,
@@ -192,37 +194,88 @@ _GLOO_AVAILABLE = True
 _UCC_AVAILABLE = True
 _XCCL_AVAILABLE = True
 
-try:
-    try:
-        # pyrefly: ignore [missing-import]
-        from torchcomms._comms import (
-            _BackendWrapper,
-            _is_backend_registered as _torchcomms_is_backend_registered,
-        )
-    except ImportError:
-        # pyrefly: ignore [missing-import]
-        from torchcomms._backend_wrapper import _BackendWrapper
-
-        def _torchcomms_is_backend_registered(backend: str) -> bool:
-            return False
+# find_spec does not import the package. Importing torchcomms here would
+# dlopen the native extension whenever the wheel is installed, including CPU
+# doctests that share a venv with install_torchcomms.
+_TORCHCOMM_AVAILABLE = importlib.util.find_spec("torchcomms") is not None
+_torchcomms_loaded: dict[str, Callable[..., object]] | None = None
+if TYPE_CHECKING:
+    # Real types for checkers only. These imports are not executed, so they
+    # do not dlopen torchcomms.
+    # pyrefly: ignore [missing-import]
+    from torchcomms import new_comm
 
     # pyrefly: ignore [missing-import]
-    from torchcomms import is_backend_built as _torchcomms_is_backend_built, new_comm
+    from torchcomms._backend_wrapper import _BackendWrapper
 
-    # Aliased: the unqualified name is the c10d hook imported above, which is
-    # attached to a ProcessGroup rather than to a TorchComms comm.
     # pyrefly: ignore [missing-import]
     from torchcomms.hooks import FlightRecorderHook as _TorchCommsFlightRecorderHook
+else:
+    # None until torchcomms is used. Tests may patch these before that.
+    _BackendWrapper = None
+    new_comm = None
+    _TorchCommsFlightRecorderHook = None
 
-    _TORCHCOMM_AVAILABLE = True
-except ImportError:
-    _TORCHCOMM_AVAILABLE = False
 
-    def _torchcomms_is_backend_built(backend: str) -> bool:
+def _import_torchcomms() -> dict[str, Callable[..., object]]:
+    """Load torchcomms natives. Only call when torchcomms is actually used.
+
+    A name that is already set is left alone. Tests patch ``new_comm`` and
+    ``_BackendWrapper``; assigning unconditionally replaces those patches.
+    """
+    global _torchcomms_loaded
+    global _BackendWrapper, new_comm, _TorchCommsFlightRecorderHook
+    if _torchcomms_loaded is None:
+        try:
+            # pyrefly: ignore [missing-import]
+            from torchcomms._comms import (
+                _BackendWrapper as BackendWrapper,
+                _is_backend_registered as is_backend_registered,
+            )
+        except ImportError:
+            # pyrefly: ignore [missing-import]
+            from torchcomms._backend_wrapper import _BackendWrapper as BackendWrapper
+
+            def is_backend_registered(backend: str) -> bool:
+                return False
+
+        # pyrefly: ignore [missing-import]
+        from torchcomms import is_backend_built, new_comm as imported_new_comm
+
+        # Aliased: the unqualified name is the c10d hook imported above, which is
+        # attached to a ProcessGroup rather than to a TorchComms comm.
+        # pyrefly: ignore [missing-import]
+        from torchcomms.hooks import FlightRecorderHook as TorchCommsFlightRecorderHook
+
+        _torchcomms_loaded = {
+            "is_backend_built": is_backend_built,
+            "is_backend_registered": is_backend_registered,
+            "BackendWrapper": BackendWrapper,
+            "new_comm": imported_new_comm,
+            "FlightRecorderHook": TorchCommsFlightRecorderHook,
+        }
+    # Fill only unset slots, including after a cached import. mock.patch
+    # restores a name to None, and a later call must bind the real object
+    # without clobbering a patch that is currently installed.
+    if _BackendWrapper is None:
+        _BackendWrapper = _torchcomms_loaded["BackendWrapper"]
+    if new_comm is None:
+        new_comm = _torchcomms_loaded["new_comm"]
+    if _TorchCommsFlightRecorderHook is None:
+        _TorchCommsFlightRecorderHook = _torchcomms_loaded["FlightRecorderHook"]
+    return _torchcomms_loaded
+
+
+def _torchcomms_is_backend_built(backend: str) -> bool:
+    if not _TORCHCOMM_AVAILABLE:
         return False
+    return bool(_import_torchcomms()["is_backend_built"](backend))
 
-    def _torchcomms_is_backend_registered(backend: str) -> bool:
+
+def _torchcomms_is_backend_registered(backend: str) -> bool:
+    if not _TORCHCOMM_AVAILABLE:
         return False
+    return bool(_import_torchcomms()["is_backend_registered"](backend))
 
 
 def _use_torchcomms_enabled() -> bool:
@@ -230,7 +283,22 @@ def _use_torchcomms_enabled() -> bool:
     return _TORCHCOMM_AVAILABLE and dist_config.use_torchcomms
 
 
+def _resolve_torchcomms_backend(backend: str) -> str:
+    backend = backend.lower()
+    if (
+        backend == "nccl"
+        and torch.version.hip is not None
+        and (
+            _torchcomms_is_backend_registered("rccl")
+            or _torchcomms_is_backend_built("rccl")
+        )
+    ):
+        return "rccl"
+    return backend
+
+
 def _is_torchcomms_backend(backend: str) -> bool:
+    backend = _resolve_torchcomms_backend(backend)
     return _use_torchcomms_enabled() and (
         _torchcomms_is_backend_registered(backend)
         or _torchcomms_is_backend_built(backend)
@@ -262,6 +330,7 @@ def _torchcomms_handles_backend(backend) -> bool:
         name = part.split(":", 1)[1] if ":" in part else part
         if not name:
             continue
+        name = _resolve_torchcomms_backend(name)
         if not (
             _torchcomms_is_backend_registered(name)
             or _torchcomms_is_backend_built(name)
@@ -342,10 +411,19 @@ def _create_torchcomms_backend(
     store: Store,
     device_id: torch.device | None,
     backend_options: object | None,
+    timeout: timedelta | None = None,
+    enable_reconfigure: bool = False,
 ) -> C10DBackend:
     """Create a c10d BackendWrapper for one TorchComms backend instance."""
     if not _TORCHCOMM_AVAILABLE:
         raise RuntimeError("TorchComms is not available")
+    # Tests patch ``new_comm`` before this runs. Import fills only unset names.
+    if (
+        new_comm is None
+        or _BackendWrapper is None
+        or _TorchCommsFlightRecorderHook is None
+    ):
+        _import_torchcomms()
 
     torch_device = _resolve_torchcomms_device(device, device_id)
 
@@ -364,12 +442,18 @@ def _create_torchcomms_backend(
     os.environ["TORCHCOMM_RANK"] = str(group_rank)
     os.environ["TORCHCOMM_SIZE"] = str(group_size)
     try:
+        dynamic_options: dict[str, object] = {}
+        if enable_reconfigure:
+            dynamic_options["enable_reconfigure"] = True
+            if timeout is not None:
+                dynamic_options["timeout"] = timeout
         comm = new_comm(
-            backend,
+            _resolve_torchcomms_backend(backend),
             torch_device,
             name=group_name,
             store=store,
             hints=hints,
+            **dynamic_options,
         )
     finally:
         for key, value in zip(("TORCHCOMM_RANK", "TORCHCOMM_SIZE"), saved_rank_size):
@@ -378,14 +462,20 @@ def _create_torchcomms_backend(
             else:
                 os.environ[key] = value
 
+    # Local references retain ownership until publication, so setup failures
+    # release the communicator through C++ RAII.
+    backend_wrapper = _BackendWrapper(comm)
+
     buffer_size = os.environ.get(
         "TORCH_FR_BUFFER_SIZE",
         os.environ.get("TORCH_NCCL_TRACE_BUFFER_SIZE", "0"),
     )
     recorder = _TorchCommsFlightRecorderHook(max_entries=int(buffer_size))
     recorder.register_with_comm(comm)
+
+    # Publish only after hook registration and wrapper setup succeed.
     _world.comms.append(comm)
-    return _BackendWrapper(comm)
+    return backend_wrapper
 
 
 # Change __module__ of all imported types from torch._C._distributed_c10d that are public
@@ -2514,7 +2604,10 @@ def init_process_group(
             See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/types.html#ncclconfig-t
         device_id (torch.device | int, optional): a single, specific device
             this process will work on, allowing for backend-specific
-            optimizations.  Currently this has two effects, only under
+            optimizations. Both accelerator devices (e.g. ``cuda:0``) and
+            CPU devices (e.g. ``cpu:0``) are accepted; on CPU, this currently
+            only validates and records the device, without any of the NCCL-specific
+            optimizations described below. Currently this has two effects, only under
             NCCL: the communicator is immediately formed (calling
             ``ncclCommInit*`` immediately rather than the normal lazy
             call) and sub-groups will use ``ncclCommSplit`` when
@@ -2943,9 +3036,10 @@ def _new_process_group_helper(
             "created, please use a different group name"
         )
 
-    if device_id is not None and (device_id.index is None or device_id.type == "cpu"):
+    if device_id is not None and device_id.index is None:
         raise ValueError(
-            "init_process_group device_id parameter must be an accelerator with an index"
+            "init_process_group device_id parameter must be a device with a "
+            "valid index, e.g. cpu:0 or cuda:0"
         )
 
     # Note: _new_process_group_helper is only called from init_process_group, which always provides a timeout value
@@ -3043,7 +3137,7 @@ def _new_process_group_helper(
                 if os.environ.get("TORCH_DISTRIBUTED_USE_TORCHCOMMS")
                 else "dist_config.use_torchcomms",
                 _resolve_torchcomms_device(device, device_id),
-                backend_str,
+                _resolve_torchcomms_backend(backend_str),
             )
             backend_class = _create_torchcomms_backend(
                 backend_str,
@@ -3054,6 +3148,8 @@ def _new_process_group_helper(
                 store=backend_prefix_store,
                 device_id=device_id,
                 backend_options=backend_options,
+                timeout=timeout,
+                enable_reconfigure=enable_reconfigure,
             )
             # Use the underlying backend's BackendType so distinct torchcomms
             # backends (e.g. gloo vs nccl in a "cpu:gloo,cuda:nccl" PG) don't
@@ -3159,6 +3255,8 @@ def _new_process_group_helper(
     # hook, so there is no handle to keep alive here.
     if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
         NanCheckHook.attach(pg)
+
+    HealthCheckHook.attach(pg)
 
     # Backend-agnostic FlightRecorder recording, for backends with no native
     # integration. Attached here (rather than lazily) so a group is recorded
@@ -3270,11 +3368,15 @@ def destroy_process_group(
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
     else:
-        if _TORCHCOMM_AVAILABLE:
+        # Import only if a torchcomms comm exists, or tests already patched
+        # _BackendWrapper. An installed wheel alone must not dlopen here.
+        if _world.comms or _BackendWrapper is not None:
+            if _BackendWrapper is None:
+                _import_torchcomms()
             # A single comm may be shared across multiple device types (e.g. a
             # gloo group reports both 'cuda' and 'cpu' device types backed by the
             # same _BackendWrapper). Deduplicate by comm identity so we finalize
-            # each comm exactly once — finalize() is not idempotent and raises
+            # each comm exactly once. finalize() is not idempotent and raises
             # "already finalized" on a second call.
             finalized_comm_ids: set[int] = set()
             for device_type in pg._device_types:
@@ -4439,27 +4541,19 @@ def all_gather_object(
     object_sizes_tensor = torch.zeros(
         group_size, dtype=torch.long, device=current_device
     )
-    object_size_list = [
-        object_sizes_tensor[i].unsqueeze(dim=0) for i in range(group_size)
-    ]
     # Allgather tensor sizes
-    all_gather(object_size_list, local_size, group=group)
-    max_object_size = int(max(object_size_list).item())  # type: ignore[type-var]
+    all_gather_single(object_sizes_tensor, local_size, group=group)
+    max_object_size = int(object_sizes_tensor.max().item())
     # Resize tensor to max size across all ranks.
     input_tensor.resize_(max_object_size)
     coalesced_output_tensor = torch.empty(
         max_object_size * group_size, dtype=torch.uint8, device=current_device
     )
-    # Output tensors are nonoverlapping views of coalesced_output_tensor
-    output_tensors = [
-        coalesced_output_tensor[max_object_size * i : max_object_size * (i + 1)]
-        for i in range(group_size)
-    ]
-    all_gather(output_tensors, input_tensor, group=group)
+    # Allgather the object data into a single coalesced output tensor.
+    all_gather_single(coalesced_output_tensor, input_tensor, group=group)
     # Deserialize outputs back to object.
-    for i, tensor in enumerate(output_tensors):
-        tensor = tensor.type(torch.uint8)
-        tensor_size = object_size_list[i]
+    for i, tensor in enumerate(coalesced_output_tensor.chunk(group_size)):
+        tensor_size = object_sizes_tensor[i]
         object_list[i] = cast(
             _T, _tensor_to_object(tensor, tensor_size, group, weights_only)
         )
@@ -6998,6 +7092,7 @@ def split_group(
             f"group name should be set to {group_name} but got {split_pg.group_name}"
         )
 
+    HealthCheckHook.attach(split_pg)
     _maybe_attach_flight_recorder(split_pg, backend_config, global_ranks_in_my_group)
 
     # update global state
