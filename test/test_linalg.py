@@ -9522,6 +9522,38 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         with self.assertRaisesRegex(RuntimeError, r"\|pivot\| <= LD\.size\(-2\)"):
             torch.linalg.ldl_solve(LD, bad, B, hermitian=hermitian)
 
+    @skipCUDAIfNoMagmaAndNoLinalgsolver
+    @skipCPUIfNoLapack
+    @dtypes(*floating_and_complex_types())
+    def test_ldl_factor_errors(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/149724:
+        # a singular D reached _linalg_check_errors with no matching branch, so
+        # an ordinary singular input raised an internal assert telling the user
+        # to report a bug to PyTorch instead of naming the zero diagonal entry.
+        # hermitian=True for complex inputs on CUDA is supported only with MAGMA 2.5.4+
+        magma_254_available = self.device_type == 'cuda' and _get_magma_version() >= (2, 5, 4)
+        hermitian = dtype.is_complex and (self.device_type == 'cpu' or magma_254_available)
+        n = 3
+        A = torch.eye(n, dtype=dtype, device=device)
+        A[-1, -1] = 0
+
+        with self.assertRaisesRegex(RuntimeError, rf"D\[{n},{n}\] is zero"):
+            torch.linalg.ldl_factor(A, hermitian=hermitian)
+
+        with self.assertRaisesRegex(RuntimeError, rf"D\[{n},{n}\] is zero"):
+            torch.linalg.ldl_factor_ex(A, hermitian=hermitian, check_errors=True)
+
+        # check_errors=False must keep reporting through info rather than raising.
+        _, _, info = torch.linalg.ldl_factor_ex(A, hermitian=hermitian)
+        self.assertEqual(info, torch.tensor(n, dtype=torch.int32, device=device))
+
+        # A batch names the offending element and reports info per element.
+        batched = torch.stack((torch.eye(n, dtype=dtype, device=device), A))
+        with self.assertRaisesRegex(RuntimeError, rf"\(Batch element 1\): D\[{n},{n}\] is zero"):
+            torch.linalg.ldl_factor(batched, hermitian=hermitian)
+        _, _, info = torch.linalg.ldl_factor_ex(batched, hermitian=hermitian)
+        self.assertEqual(info, torch.tensor([0, n], dtype=torch.int32, device=device))
+
     def test_permute_matmul(self):
         a = torch.ones([2, 5, 24, 24])
         b = torch.ones([3, 2, 5, 24, 24])
