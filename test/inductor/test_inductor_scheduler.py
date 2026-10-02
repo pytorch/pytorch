@@ -29,7 +29,6 @@ from torch._inductor.ir import GraphPartitionSignature
 from torch._inductor.loop_body import MemoryEntry, MemoryUsageType
 from torch._inductor.scheduler import (
     _get_benchmarkable_extern_fn,
-    _template_choice_supports_prologue_fusion,
     BaseSchedulerNode,
     ExternKernelSchedulerNode,
     ForeachKernelSchedulerNode,
@@ -2180,36 +2179,6 @@ class TestScheduler(TestCase):
 
         node.read_writes = read_writes
         return node
-
-    def test_template_choice_supports_required_prologue_inputs(self):
-        def make_choice(*inputs: str):
-            choice = Mock()
-            choice.allowed_prologue_inps = OrderedSet(inputs)
-            return choice
-
-        choice_a = make_choice("A")
-        choice_b = make_choice("B")
-        choice_ab = make_choice("A", "B")
-
-        required_a = OrderedSet(("A",))
-        self.assertTrue(_template_choice_supports_prologue_fusion(choice_a, required_a))
-        self.assertTrue(
-            _template_choice_supports_prologue_fusion(choice_ab, required_a)
-        )
-        self.assertFalse(
-            _template_choice_supports_prologue_fusion(choice_b, required_a)
-        )
-
-        required_ab = OrderedSet(("A", "B"))
-        self.assertFalse(
-            _template_choice_supports_prologue_fusion(choice_a, required_ab)
-        )
-        self.assertFalse(
-            _template_choice_supports_prologue_fusion(choice_b, required_ab)
-        )
-        self.assertTrue(
-            _template_choice_supports_prologue_fusion(choice_ab, required_ab)
-        )
 
     def test_prologue_fusion_uses_template_aliasing_hook(self):
         def make_prologue_and_template(hook_blocks: bool):
