@@ -6765,9 +6765,14 @@ class TestTorchCUDA(TestCase):
                 base.zero_()
         torch.cuda.current_stream().wait_stream(stream)
 
+        # Warm up CUPTI outside the profiled region (early profiler
+        # iterations can drop events), then profile several replays.
+        graph.replay()
+        torch.cuda.synchronize()
         base.fill_(1)
         with torch.profiler.profile() as prof:
-            graph.replay()
+            for _ in range(3):
+                graph.replay()
             torch.cuda.synchronize()
         names = tuple(event.key for event in prof.key_averages())
         self.assertTrue(any("elementwise_kernel" in name for name in names), names)
