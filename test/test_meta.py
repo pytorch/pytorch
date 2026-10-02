@@ -2038,6 +2038,7 @@ class TestMetaCore(TestCase):
             self.assertEqual(ref_out.size(), meta_out.size())
             self.assertEqual(ref_out.stride(), meta_out.stride())
 
+
     def test_map_location_deserialize(self):
         import io
 
