@@ -7260,6 +7260,10 @@ def scaled_mm(
     Applies a scaled matrix-multiply, mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
     scale_recipe_a and scale_recipe_b respectively.
 
+    On CUDA, ``BlockWise1x32`` and ``BlockWise1x128`` also accept packed MNK4
+    scales: each int32 contains four UE8M0 values, and both swizzles must be
+    ``SwizzleType.NO_SWIZZLE``. These require SM10.x or SM11.0 and CUDA 13.4+.
+
     Args:
         scale_a: Tensor containing decoding scaling factors for mat_a
         scale_recipe_a: Enum describing how mat_a has been scaled

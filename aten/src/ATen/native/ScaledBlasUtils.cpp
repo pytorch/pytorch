@@ -246,6 +246,30 @@ bool check_mxfp4_recipe(
   return true;
 }
 
+bool is_mnk4_input_pair(c10::ScalarType type_a, c10::ScalarType type_b) {
+  return (type_a == ScalarType::Float8_e4m3fn || type_a == ScalarType::Float8_e5m2) &&
+      (type_b == ScalarType::Float8_e4m3fn || type_b == ScalarType::Float8_e5m2) &&
+      (type_a == ScalarType::Float8_e4m3fn || type_b == ScalarType::Float8_e4m3fn);
+}
+
+bool check_mnk4_recipe(
+    ScalingType expected_recipe,
+    c10::ScalarType type_a,
+    std::vector<ScalingType>& recipe_a,
+    ArrayRef<Tensor>& scales_a,
+    c10::ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    ArrayRef<Tensor>& scales_b) {
+  if (!is_mnk4_input_pair(type_a, type_b)) {
+    return false;
+  }
+  if (scales_a.size() != 1 || recipe_a.size() != 1 || scales_b.size() != 1 || recipe_b.size() != 1) {
+    return false;
+  }
+  return recipe_a[0] == expected_recipe && scales_a[0].scalar_type() == ScalarType::Int &&
+      recipe_b[0] == expected_recipe && scales_b[0].scalar_type() == ScalarType::Int;
+}
+
 namespace {
 
 bool is_fp8_or_fp4_type(ScalarType dtype) {
@@ -344,7 +368,14 @@ void validate_scaled_mm_v2_inputs(
       recipe_a, recipe_b, ScalingType::TensorWise, ScalingType::TensorWise);
   const bool is_rw = is_single_recipe(
       recipe_a, recipe_b, ScalingType::RowWise, ScalingType::RowWise);
-  const bool is_mx_1x32 = is_single_recipe(
+  const bool has_packed_scales =
+      (scale_a.size() == 1 && scale_a[0].scalar_type() == ScalarType::Int) ||
+      (scale_b.size() == 1 && scale_b[0].scalar_type() == ScalarType::Int);
+  const bool is_mnk4_1x32 = has_packed_scales && is_single_recipe(
+      recipe_a, recipe_b, ScalingType::BlockWise1x32, ScalingType::BlockWise1x32);
+  const bool is_mnk4_1x128 = has_packed_scales && is_single_recipe(
+      recipe_a, recipe_b, ScalingType::BlockWise1x128, ScalingType::BlockWise1x128);
+  const bool is_mx_1x32 = !is_mnk4_1x32 && is_single_recipe(
       recipe_a, recipe_b, ScalingType::BlockWise1x32, ScalingType::BlockWise1x32);
   // The 32x8-tiled layout pads differently, so it has its own element count.
   // Validate the pair before the sizes below, otherwise a mismatched pair is
@@ -388,6 +419,29 @@ void validate_scaled_mm_v2_inputs(
         scale_b.size() == 1 && scale_b[0].sym_numel() == 1 &&
             scale_b[0].scalar_type() == ScalarType::Float,
         "scale_b must have 1 Float element");
+  } else if (is_mnk4_1x32 || is_mnk4_1x128) {
+    TORCH_CHECK_VALUE(
+        is_mnk4_input_pair(mat_a.scalar_type(), mat_b.scalar_type()),
+        "Invalid scaling configuration: packed MNxK4 inputs must be float8_e4m3fn or float8_e5m2, with at least one float8_e4m3fn input");
+    TORCH_CHECK_VALUE(
+        swizzle_a.size() == 1 && swizzle_b.size() == 1 &&
+            swizzle_a[0] == SwizzleType::NO_SWIZZLE && swizzle_b[0] == SwizzleType::NO_SWIZZLE,
+        "For packed MNxK4 scaling swizzle_a and swizzle_b must each be NO_SWIZZLE");
+    const auto packed_k = is_mnk4_1x32 ? 128 : 512;
+    const auto expected_a_elems = sym_round_up(M, 4) * sym_ceil_div(K_unpacked, packed_k);
+    const auto expected_b_elems = sym_round_up(N, 4) * sym_ceil_div(K_unpacked, packed_k);
+    TORCH_CHECK_VALUE(
+        scale_a.size() == 1 && scale_a[0].sym_numel() == expected_a_elems &&
+            scale_a[0].scalar_type() == ScalarType::Int && scale_a[0].is_contiguous(),
+        "For packed MNxK4 scaling scale_a should be a contiguous int32 tensor with ",
+        expected_a_elems, " elements, got ",
+        scale_a.empty() ? c10::SymInt(0) : scale_a[0].sym_numel());
+    TORCH_CHECK_VALUE(
+        scale_b.size() == 1 && scale_b[0].sym_numel() == expected_b_elems &&
+            scale_b[0].scalar_type() == ScalarType::Int && scale_b[0].is_contiguous(),
+        "For packed MNxK4 scaling scale_b should be a contiguous int32 tensor with ",
+        expected_b_elems, " elements, got ",
+        scale_b.empty() ? c10::SymInt(0) : scale_b[0].sym_numel());
   } else if (is_rw) {
     // Match the kernel's per-tensor RowWise wording exactly. We don't check
     // dim()/contiguity here -- the kernel has specific, more actionable
