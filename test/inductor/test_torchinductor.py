@@ -428,6 +428,7 @@ class TestCase(InductorTestCase):
             if elapsed >= 120:
                 raise AssertionError(f"Test took too long: {elapsed:.1f}s >= 120s")
 
+
 class ToTuple(torch.nn.Module):
     def forward(self, x):
         return (x,)
