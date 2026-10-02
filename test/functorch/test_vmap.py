@@ -1528,6 +1528,16 @@ class TestVmapOperators(Namespace.TestVmapBase):
     def _vmap_view_test(self, *args, **kwargs):
         self._vmap_test(*args, **kwargs, check_view=True)
 
+    def test_grid_sample_different_in_dims(self):
+        batch_size, image_batch_size = 3, 2
+        input = torch.randn(batch_size, image_batch_size, 2, 5, 6)
+        grid = torch.randn(image_batch_size, batch_size, 3, 4, 2)
+
+        def sample(input, grid):
+            return F.grid_sample(input, grid, align_corners=False)
+
+        self._vmap_test(sample, (input, grid), in_dims=(0, 1))
+
     def _test_unary(self, op, getter, device, *args, **kwargs):
         test = functools.partial(self._vmap_test, *args, **kwargs)
         B0, B1 = 7, 11
