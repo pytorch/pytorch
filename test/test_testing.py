@@ -35,7 +35,8 @@ from torch.testing._internal.common_cuda import _get_torch_rocm_version, has_dev
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
      get_device_type_test_bases, instantiate_device_type_tests, onlyCPU, onlyCUDA, onlyNativeDeviceTypes,
-     deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes)
+     deviceCountAtLeast, ops, expectedFailureMeta, OpDTypes,
+     Capability, DeviceTypeTestBase)
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_dtype import all_types_and_complex_and, floating_types
@@ -631,6 +632,139 @@ if __name__ == '__main__':
         env[PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY] = 'cpu'
         _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
         self.assertNotIn('OK', stderr.decode('ascii'))
+
+    class _FakeCapabilityDevice(DeviceTypeTestBase):
+        """Fake device test base with predefined capabilities."""
+
+        device_type = "fake"
+
+        # Records the capabilities whose support fn was actually called.
+        evaluated: list[str] = []
+
+        @classmethod
+        def _capabilities(cls):
+            def probe(capability, supported):
+                def supports():
+                    cls.evaluated.append(capability)
+                    return supported
+
+                return supports
+
+            return {
+                Capability.dtype.fp8: probe(Capability.dtype.fp8, True),
+                Capability.dtype.bf16: probe(Capability.dtype.bf16, False),
+                Capability.attention.flash_attention: probe(
+                    Capability.attention.flash_attention, True
+                ),
+                Capability.attention.mem_efficient_attention: probe(
+                    Capability.attention.mem_efficient_attention, False
+                ),
+            }
+
+    def test_get_capabilities_category_filter(self):
+        fake = type(self)._FakeCapabilityDevice
+        fake.evaluated.clear()
+
+        # Only the requested category is evaluated and returned; capabilities of the
+        # other category are filtered out rather than reported as unsupported.
+        self.assertEqual(
+            fake.get_capabilities(Capability.dtype),
+            {Capability.dtype.fp8: True, Capability.dtype.bf16: False},
+        )
+        self.assertEqual(fake.evaluated, [Capability.dtype.fp8, Capability.dtype.bf16])
+
+        self.assertEqual(
+            fake.get_capabilities(Capability.attention),
+            {
+                Capability.attention.flash_attention: True,
+                Capability.attention.mem_efficient_attention: False,
+            },
+        )
+        self.assertEqual(
+            fake.evaluated,
+            [
+                Capability.dtype.fp8,
+                Capability.dtype.bf16,
+                Capability.attention.flash_attention,
+                Capability.attention.mem_efficient_attention,
+            ],
+        )
+
+        self.assertEqual(
+            fake.get_capabilities(),
+            {
+                Capability.dtype.fp8: True,
+                Capability.dtype.bf16: False,
+                Capability.attention.flash_attention: True,
+                Capability.attention.mem_efficient_attention: False,
+            },
+        )
+        with self.assertRaisesRegex(ValueError, "Unknown capability category"):
+            fake.get_capabilities(Capability)
+        # 2 (dtype query) + 2 (attention query) + 4 (unfiltered query); the rejected
+        # category evaluates nothing.
+        self.assertEqual(len(fake.evaluated), 8)
+
+    def test_capability_constants_are_prefixed_by_their_category(self):
+        # get_capabilities() selects constants by the "<Category>." prefix, so a constant
+        # whose prefix does not match its inner class name would be silently dropped.
+        categories = [v for v in vars(Capability).values() if isinstance(v, type)]
+        if not categories:
+            raise AssertionError("Capability does not declare any category classes")
+
+        for category in categories:
+            with self.subTest(category=category.__name__):
+                constants = [
+                    v
+                    for k, v in vars(category).items()
+                    if isinstance(v, str) and not k.startswith("__")
+                ]
+                if not constants:
+                    raise AssertionError(
+                        f"Capability.{category.__name__} declares no constants"
+                    )
+                for constant in constants:
+                    if not constant.startswith(f"{category.__name__}."):
+                        raise AssertionError(
+                            f"Capability.{category.__name__} constant {constant!r} does "
+                            f"not start with '{category.__name__}.', so "
+                            "get_capabilities() would filter it out"
+                        )
+
+    def test_parametrize_callable_derives_values_from_capabilities(self):
+        # The motivating composition: a callable arg_values that reads the device's
+        # capabilities to decide what to parametrize over.
+        def test_foo(self, device, backend):
+            pass
+
+        # Use _parametrize_test directly because instantiate_device_type_tests()
+        # cannot inject a custom device base.
+        generated = [
+            (suffix, param_kwargs)
+            for _, suffix, param_kwargs, _ in parametrize(
+                "backend",
+                lambda device_cls: [
+                    name
+                    for name, supported in device_cls.get_capabilities(
+                        Capability.attention
+                    ).items()
+                    if supported
+                ],
+            )._parametrize_test(
+                test_foo,
+                generic_cls=None,
+                device_cls=type(self)._FakeCapabilityDevice,
+            )
+        ]
+
+        # mem_efficient_attention is filtered out by the capability map.
+        self.assertEqual(
+            generated,
+            [(
+                "backend_attention_flash_attention",
+                {"backend": Capability.attention.flash_attention},
+            )],
+        )
 
 
 # Golden-file tests for the junit XML that CI uploads (tools/stats/upload_test_stats.py).
@@ -2945,6 +3079,116 @@ class TestTestParametrizationDeviceType(TestCase):
         if x == 1 or y == 6:
             raise RuntimeError('Boom')
 
+    def test_parametrize_callable_device_independent(self, device):
+        # The callable receives the device test class, but is free to ignore it.
+        class TestParametrized(TestCase):
+            @parametrize("arg_name", lambda _: ["a", "b", "c"])
+            def test_foo(self, device, arg_name):
+                pass
+
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(
+            TestParametrized,
+            locals_dict,
+            only_for=self.device_type,
+        )
+
+        device_cls = locals_dict[f"TestParametrized{self.device_type.upper()}"]
+
+        self.assertEqual(
+            _get_test_names_for_test_class(device_cls),
+            [
+                f"{device_cls.__name__}.test_foo_arg_name_a_{self.device_type}",
+                f"{device_cls.__name__}.test_foo_arg_name_b_{self.device_type}",
+                f"{device_cls.__name__}.test_foo_arg_name_c_{self.device_type}",
+            ],
+        )
+
+    def test_parametrize_callable_requires_device_cls(self, device):
+        # A callable arg_values is only meaningful for device-type tests, where the
+        # callable receives the instantiated device test class.
+
+        class TestParametrized(TestCase):
+            @parametrize("arg_name", lambda _: ["a"])
+            def test_foo(self, arg_name):
+                pass
+
+        with self.assertRaisesRegex(
+            RuntimeError, "requires instantiate_device_type_tests"
+        ):
+            instantiate_parametrized_tests(TestParametrized)
+
+    def test_parametrize_callable_empty_list(self, device):
+        # A callable that yields no values is reported like any other empty arg_values.
+        class TestParametrized(TestCase):
+            @parametrize("arg_name", lambda device_cls: [])
+            def test_foo(self, device, arg_name):
+                pass
+
+        with self.assertRaisesRegex(ValueError, "An empty arg_values was passed"):
+            instantiate_device_type_tests(
+                TestParametrized, dict(locals()), only_for=self.device_type
+            )
+
+    def test_parametrize_callable_subtest(self, device):
+        # Values returned by the callable go through the same subtest handling
+        # (explicit names and per-value decorators) as inline values.
+        def test_dec(func):
+            func._decorator_applied = True
+            return func
+
+        class TestParametrized(TestCase):
+            @parametrize(
+                "arg_name",
+                lambda device_cls: [
+                    subtest("a", name="alpha"),
+                    subtest("b", name="beta", decorators=[test_dec]),
+                ],
+            )
+            def test_foo(self, device, arg_name):
+                pass
+
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(
+            TestParametrized, locals_dict, only_for=self.device_type
+        )
+        device_cls = locals_dict[f"TestParametrized{self.device_type.upper()}"]
+
+        self.assertEqual(
+            _get_test_names_for_test_class(device_cls),
+            [
+                f"{device_cls.__name__}.test_foo_alpha_{self.device_type}",
+                f"{device_cls.__name__}.test_foo_beta_{self.device_type}",
+            ],
+        )
+        decorated = [
+            name
+            for func, name in _get_test_funcs_for_test_class(device_cls)
+            if getattr(func, "_decorator_applied", False)
+        ]
+        self.assertEqual(decorated, [f"test_foo_beta_{self.device_type}"])
+
+    def test_parametrize_callable_with_dtypes(self, device):
+        # A callable arg_values composes with other parametrizers like @dtypes.
+        class TestParametrized(TestCase):
+            @dtypes(torch.float32, torch.float64)
+            @parametrize("arg_name", lambda device_cls: ["a"])
+            def test_foo(self, device, dtype, arg_name):
+                pass
+
+        locals_dict = dict(locals())
+        instantiate_device_type_tests(
+            TestParametrized, locals_dict, only_for=self.device_type
+        )
+        device_cls = locals_dict[f"TestParametrized{self.device_type.upper()}"]
+
+        self.assertEqual(
+            _get_test_names_for_test_class(device_cls),
+            [
+                f"{device_cls.__name__}.test_foo_arg_name_a_{self.device_type}_float32",
+                f"{device_cls.__name__}.test_foo_arg_name_a_{self.device_type}_float64",
+            ],
+        )
 
 instantiate_parametrized_tests(TestTestParametrization)
 instantiate_device_type_tests(TestTestParametrizationDeviceType, globals())
