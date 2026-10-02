@@ -3,9 +3,13 @@
 
 #include <gtest/gtest.h>
 
+#include <ranges>
+
 namespace {
 
 class ListItem : public c10::IntrusiveListHook {};
+
+static_assert(std::ranges::bidirectional_range<c10::IntrusiveList<ListItem>>);
 
 template <typename TItem>
 void check_containers_equal(
