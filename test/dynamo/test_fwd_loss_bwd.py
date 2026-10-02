@@ -87,9 +87,9 @@ class TestForwardLossBackward(TestCase):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
         linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
@@ -114,9 +114,9 @@ class GraphModule(torch.nn.Module):
             fw_actual,
             """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[4, 4]", arg1_1: "f32[4]", arg2_1: "f32[2, 4]"):
-        t: "f32[4, 4]" = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
-        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(arg1_1, arg2_1, t);  arg1_1 = t = None
+    def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4, 4]", arg2_1: "f32[2, 4]"):
+        t: "f32[4, 4]" = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(arg0_1, arg2_1, t);  arg0_1 = t = None
 
         sum_1: "f32[]" = torch.ops.aten.sum.default(addmm);  addmm = None
 
@@ -229,9 +229,9 @@ class <lambda>(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
         linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
@@ -253,9 +253,9 @@ class GraphModule(torch.nn.Module):
             fw_actual,
             """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[4, 4]", arg1_1: "f32[4]", arg2_1: "f32[2, 4]"):
-        t: "f32[4, 4]" = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
-        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(arg1_1, arg2_1, t);  arg1_1 = arg2_1 = t = None
+    def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4, 4]", arg2_1: "f32[2, 4]"):
+        t: "f32[4, 4]" = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(arg0_1, arg2_1, t);  arg0_1 = arg2_1 = t = None
 
         sum_1: "f32[]" = torch.ops.aten.sum.default(addmm);  addmm = None
 
@@ -290,9 +290,9 @@ class <lambda>(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
         linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = l_mod_parameters_bias_ = None
@@ -316,9 +316,9 @@ class GraphModule(torch.nn.Module):
             fw_actual,
             """\
 class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[4, 4]", arg1_1: "f32[4]", arg2_1: "f32[2, 4]"):
-        t: "f32[4, 4]" = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
-        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(arg1_1, arg2_1, t);  arg1_1 = t = None
+    def forward(self, arg0_1: "f32[4]", arg1_1: "f32[4, 4]", arg2_1: "f32[2, 4]"):
+        t: "f32[4, 4]" = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(arg0_1, arg2_1, t);  arg0_1 = t = None
 
         sum_1: "f32[]" = torch.ops.aten.sum.default(addmm);  addmm = None
 
@@ -509,9 +509,9 @@ autograd.grad with external grad_fn
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
         linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_)
@@ -542,9 +542,9 @@ class GraphModule(torch.nn.Module):
             fw_actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[4, 4]", primals_2: "f32[4]", primals_3: "f32[2, 4]"):
-        t: "f32[4, 4]" = torch.ops.aten.t.default(primals_1);  primals_1 = None
-        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(primals_2, primals_3, t);  primals_2 = t = None
+    def forward(self, primals_1: "f32[4]", primals_2: "f32[4, 4]", primals_3: "f32[2, 4]"):
+        t: "f32[4, 4]" = torch.ops.aten.t.default(primals_2);  primals_2 = None
+        addmm: "f32[2, 4]" = torch.ops.aten.addmm.default(primals_1, primals_3, t);  primals_1 = t = None
 
         sin: "f32[2, 4]" = torch.ops.aten.sin.default(primals_3)
 
@@ -947,9 +947,9 @@ autograd.grad with external GradientEdge
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
         linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
@@ -991,9 +991,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
         linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
@@ -1037,9 +1037,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
         linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
@@ -1085,9 +1085,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
         l_x_ = L_x_
 
         linear: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
@@ -1213,9 +1213,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, SYNTHETIC_LOCAL_tmp_0_: "f32[4, 4]", L_x_: "f32[2, 4]"):
-        synthetic_local_tmp_0_ = SYNTHETIC_LOCAL_tmp_0_
+    def forward(self, L_x_: "f32[2, 4]", SYNTHETIC_LOCAL_tmp_0_: "f32[4, 4]"):
         l_x_ = L_x_
+        synthetic_local_tmp_0_ = SYNTHETIC_LOCAL_tmp_0_
 
         ones: "f32[4, 4]" = torch.ones(4, 4)
         tracable_create_parameter: "f32[4, 4]" = torch__dynamo_create_parameter_op_tracable_create_parameter(ones, synthetic_local_tmp_0_);  ones = synthetic_local_tmp_0_ = None
@@ -1427,10 +1427,10 @@ backward() with non-leaf tensor
             ),
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[2, 4]", L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]"):
-        l_x_ = L_x_
-        l_mod_parameters_weight_ = L_mod_parameters_weight_
+    def forward(self, L_mod_parameters_bias_: "f32[4]", L_mod_parameters_weight_: "f32[4, 4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
+        l_x_ = L_x_
         detach: "f32[2, 4]" = l_x_.detach();  l_x_ = None
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
         requires_grad_ = detach.requires_grad_();  requires_grad_ = None

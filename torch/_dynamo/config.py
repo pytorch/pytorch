@@ -955,16 +955,11 @@ invalidate_compile_context_weakrefs: bool | None = None
 # that structurally equivalent graphs (e.g., same model traced with different
 # dict iteration orders across distributed ranks) produce identical FX graphs.
 #
-# Scope: this covers INTERIOR nodes only. Placeholders keep their trace-order
-# position and names, because that layout is the graph's positional calling
-# convention (see `_canonicalize_graph` in output_graph.py). So two graphs that
-# differ only in the order their inputs were traced still canonicalize to the
-# same interior nodes but keep different placeholder layouts - do not rely on
-# whole-graph identity (e.g. graph hashing) across ranks.
-#
-# Nodes whose order is load-bearing are also left in place (in-place ops,
-# functional collectives, unbacked-symbol binders); see `_is_safe_to_reorder` in
-# torch/fx/passes/canonicalize.py.
+# Source-backed placeholders are ordered by source together with their attached
+# GraphArgs, so backend example inputs and generated runtime arguments follow the
+# same calling convention. Nodes whose order is load-bearing are left in place
+# (in-place ops, functional collectives, unbacked-symbol binders); see
+# `_is_safe_to_reorder` in torch/fx/passes/canonicalize.py.
 #
 # Enabled in OSS; gated by the justknob in fbcode so internal tests that depend
 # on the old node names can be migrated first. Tests force it on regardless (a

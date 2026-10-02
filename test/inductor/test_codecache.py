@@ -3056,8 +3056,8 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
         x = torch.ones(3)
         torch._dynamo.mark_dynamic(x, 0)
         with fresh_cache():
-            # captured graph is x * s0; placeholder order follows the traced
-            # graph, so build the call args from `args` rather than assuming it
+            # Build the call args from the captured examples so invocation
+            # follows the graph's placeholder order.
             gm, args, kwargs = self.capture(f)(x)
             if kwargs:
                 raise AssertionError

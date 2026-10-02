@@ -548,25 +548,11 @@ class ExportMetaData:
 def _canonicalize_graph(graph: fx.Graph) -> None:
     """Canonicalize a Dynamo output graph's node order and names.
 
-    Delegates to ``torch.fx.passes.canonicalize.canonicalize_graph`` with
-    Dynamo-specific key generation and barrier detection.
-
-    Placeholders keep their original insertion order and names: the placeholder
-    layout is the graph's positional calling convention, relied on by codegen,
-    AOTAutograd, and graph-break resume functions. Reordering them corrupts
-    those callers (e.g. a runtime-assert on a symint input receiving a tensor,
-    or a version-counter bump landing on the wrong local). Only interior
-    computation nodes are reordered/renamed. This mirrors the export path in
-    ``torch.export._trace._canonicalize_export_graph``.
-
-    Consequence - placeholder layout is deliberately OUT OF SCOPE of the
-    determinism guarantee. Two ranks that trace the same model but discover
-    inputs in different orders (rank-dependent dict/set iteration, differing
-    graph-break points) still get identical interior nodes but different
-    placeholder layouts, so callers must not assume whole-graph identity across
-    ranks (e.g. hashing the printed graph). Canonicalizing within the
-    symint/tensor placeholder partitions would tighten this, at the cost of
-    reordering ``graphargs``/``example_inputs`` coherently.
+    Placeholders with unique source names are ordered by source. Since GraphArg
+    stays attached to its node, graphargs, example inputs, and runtime argument
+    reconstruction all observe the same reordered calling convention. If any
+    source is missing or ambiguous, placeholders retain their original order and
+    names while the rest of the graph is still canonicalized.
     """
     from torch.fx.passes.canonicalize import (
         _canonical_node_key,
@@ -574,18 +560,33 @@ def _canonicalize_graph(graph: fx.Graph) -> None:
         canonicalize_graph,
     )
 
-    placeholder_ord = itertools.count()
+    placeholders = graph.find_nodes(op="placeholder")
+    source_names: list[str | None] = []
+    for node in placeholders:
+        grapharg = node.meta.get("grapharg")
+        source = grapharg.source if grapharg is not None else None
+        source_names.append(source.name if source is not None else None)
+
+    can_reorder_placeholders = None not in source_names and len(source_names) == len(
+        set(source_names)
+    )
+    placeholder_keys = {
+        node: (0, source_names[i] if can_reorder_placeholders else i)
+        for i, node in enumerate(placeholders)
+    }
 
     def _key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> object:
         if node.op == "placeholder":
-            return (0, next(placeholder_ord))
+            return placeholder_keys[node]
         return _canonical_node_key(node, canonical_idx)
 
     canonicalize_graph(
         graph,
         _key,
         _is_safe_to_reorder,
-        skip_rename_ops=frozenset({"placeholder"}),
+        skip_rename_ops=(
+            frozenset() if can_reorder_placeholders else frozenset({"placeholder"})
+        ),
     )
 
 

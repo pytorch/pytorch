@@ -313,9 +313,9 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_y_: "f32[2, 2]", L_x_: "f32[2, 2]"):
-        l_y_ = L_y_
+    def forward(self, L_x_: "f32[2, 2]", L_y_: "f32[2, 2]"):
         l_x_ = L_x_
+        l_y_ = L_y_
 
         _get_data_attr: "f32[2, 2]" = torch._C._autograd._get_data_attr(l_y_)
 
