@@ -64,11 +64,14 @@ from .codegen.common import (
     WorkspaceZeroMode,
 )
 from .codegen.simd import (
+    BATCH_AXIS,
     BATCH_COLUMN_AXIS,
+    batch_reduction_partials,
     codegen_reduced_buffer,
     DerivedIterationRangesRoot,
     finished_after_kernel,
     PARTIAL_REDUCTION_OPS,
+    reduction_output_name,
     template_output_matrix,
     template_reduction_axis,
 )
@@ -101,6 +104,7 @@ from .utils import (
     FakeIndentedBuffer,
     fp32_matmul_precision_key,
     get_dtype_size,
+    get_num_sms,
     is_gpu,
     Placeholder,
     restore_stdout_stderr,
@@ -696,6 +700,14 @@ class TritonTemplateKernel(TritonKernel):
         self.output_tiles: dict[
             int, tuple[list[sympy.Symbol], tuple[int, int, int], str | None]
         ] = {}
+        # Per store_output subgraph of a batched output: the template's batch
+        # loop (partial slot, last-tile condition) and value shape, and the
+        # per-dim index symbols of the stored value. See
+        # codegen_batch_reduction_epilogue.
+        self.batch_loops: dict[int, tuple[tuple[str, str], tuple[str, ...]]] = {}
+        self.output_index_symbols: dict[int, list[sympy.Symbol]] = {}
+        # Lines emitted before the template's persistent loop.
+        self.epilogue_loop_init_lines = IndentedBuffer()
         # Reductions fused into the epilogue as per-tile partials: (node, output
         # buffer, finish op, workspace byte offset of the fp32 partials, tiles,
         # partial size). The wrapper reduces the partials after the kernel.
@@ -1763,6 +1775,7 @@ class TritonTemplateKernel(TritonKernel):
         block_indexing: bool = False,
         subtile_loop: tuple[str, str] | None = None,
         tile_origin: tuple[str, ...] | None = None,
+        batch_loop: tuple[str, str] | None = None,
     ):
         """Stores the final output and appends any epilogue fusions if the buffer hasn't been optimized away.
 
@@ -1782,6 +1795,10 @@ class TritonTemplateKernel(TritonKernel):
             tile_origin (Optional[Tuple[str, ...]]): Scalar offsets of the output tile, one per
                 output dim, so reduction epilogues can fuse over the tile. For a batched output,
                 (batch, row, col): the tile is one batch's rows and columns.
+            batch_loop (Optional[Tuple[str, str]]): For a batched output whose persistent loop
+                gives each program the same (row, col) tile of a series of batches, the
+                program's partial-sum slot and the condition that this is its last tile, so
+                reductions over the batch dim can accumulate across the loop.
         """
         subgraph_idx = next(self.store_output_ctr)
         subgraph_name = self._get_store_output_subgraph_name(subgraph_idx)
@@ -1846,6 +1863,8 @@ class TritonTemplateKernel(TritonKernel):
                         (int(tile[0]), int(tile[1]), int(tile[2])),
                         subtile_loop[0] if subtile_loop else None,
                     )
+                    if batch_loop:
+                        self.batch_loops[subgraph_idx] = (batch_loop, val_shape)
             if block_indexing:
                 if not val_shape:
                     raise AssertionError(
@@ -1965,6 +1984,8 @@ class TritonTemplateKernel(TritonKernel):
                 output_index = self.rename_indexing(output_index)
                 if output_index == contiguous_index:
                     output_index = sympy.Symbol("xindex", integer=True)
+            if subgraph_idx in self.batch_loops:
+                self.output_index_symbols[subgraph_idx] = index_symbols
 
             self.template_out_shape = val_shape if val_shape else val
             acc_dtype = (
@@ -2029,6 +2050,17 @@ class TritonTemplateKernel(TritonKernel):
             subgraph_name, self._make_codegen_hook(subgraph_name, indent_width)
         )
 
+    def epilogue_loop_init(self, indent_width: int = 4) -> str:
+        """Placeholder for lines the epilogue needs before the template's
+        persistent loop, e.g. the accumulators of batch reductions."""
+
+        def hook() -> str:
+            return textwrap.indent(
+                self.epilogue_loop_init_lines.getvalue(), " " * indent_width
+            ).strip()
+
+        return self._register_hook("<EPILOGUE_LOOP_INIT>", hook)
+
     def _register_hook(
         self,
         hook_name: str,
@@ -2088,6 +2120,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.size,
                 self.stride,
                 self.store_output,
+                self.epilogue_loop_init,
                 self.load_input,
                 self.unfused_input,
                 self.make_load,
@@ -2367,15 +2400,23 @@ class TritonTemplateKernel(TritonKernel):
                         if node.is_reduction()
                     }
                     columns = [n for n in nodes if axes.get(n) == 1]
+                    batches = [n for n in nodes if axes.get(n) == BATCH_AXIS]
                     batch_columns = [
                         n for n in nodes if axes.get(n) == BATCH_COLUMN_AXIS
                     ]
-                    nodes = [n for n in nodes if n not in columns + batch_columns]
+                    nodes = [
+                        n for n in nodes if n not in columns + batches + batch_columns
+                    ]
                     first_red = next(
                         (j for j, n in enumerate(nodes) if n.is_reduction()), len(nodes)
                     )
                     for node in nodes[:first_red]:
                         node.codegen(self.split_and_set_ranges(node.get_ranges()))
+                    if batches:
+                        self.codegen_batch_reduction_epilogue(batches, i)
+                        # Its values have the template's symbolic shape, which
+                        # the passes below restate as the concrete tile.
+                        self.cse.invalidate(OrderedSet(self.cse.store_cache.values()))
                     row_loads = {}
                     if first_red < len(nodes):
                         row_loads = self.codegen_tile_reduction_epilogue(
@@ -2448,6 +2489,60 @@ class TritonTemplateKernel(TritonKernel):
             w for w in self.args.workspace_args if w.outer_name == ws_name
         )
         return ws_ptr, offset + pad
+
+    def codegen_batch_reduction_epilogue(self, nodes, subgraph_idx: int) -> None:
+        """Codegen sums over the batch dim of a (B, M, N) output. Each program of
+        the persistent template sees the same (row, col) tile of a series of
+        batches (see batch_reduction_partials), so it adds each one into an fp32
+        accumulator declared before the template's loop and, on its last tile,
+        stores the accumulator as its partial sum. The wrapper adds up the
+        partials after the kernel. Nodes run over the stored value with the
+        template's own indices and mask, like pointwise epilogues."""
+        (slot, last), val_shape = self.batch_loops[subgraph_idx]
+        tile = self.output_tiles[subgraph_idx][1]
+        partials = batch_reduction_partials(tile, self.output_node)
+        if partials is None or self.meta.get("NUM_SMS") != get_num_sms():
+            raise AssertionError("the template's batch loop can't host batch sums")
+        _, m, n = map(int, self.output_node.get_size())
+        batch, row, col = self.output_index_symbols[subgraph_idx]
+        stored: list[str] = []
+        for node in nodes:
+            unsplit = node.unsplit_reduction()
+            pointwise, _ = unsplit.get_ranges()
+            index_vars = [row * n + col] if len(pointwise) == 1 else [row, col]
+            acc = f"_batch_acc{len(self.partial_reductions)}"
+            self.epilogue_loop_init_lines.writeline(
+                f"{acc} = tl.zeros(({', '.join(val_shape)}), tl.float32)"
+            )
+
+            def reduction(dtype, src_dtype, reduction_type, value, acc=acc):
+                if reduction_type != "sum":
+                    raise AssertionError(reduction_type)
+                self.compute.writeline(f"{acc} = {acc} + {value}.to(tl.float32)")
+                return self.cse.namedvar(acc, dtype=torch.float32, shape=value.shape)
+
+            def store_reduction(name, index, value, node=node, acc=acc):
+                stored.append(name)
+                ws_ptr, offset = self._reduction_workspace(partials * m * n * 4)
+                self.partial_reductions.append(
+                    (node, reduction_output_name(node), "sum", offset, partials, m * n)
+                )
+                indexing = self.indexing(index, block_ptr=False)
+                mask = f"({last})"
+                if indexing.mask_str != "None":
+                    mask = f"{indexing.mask_str} & {mask}"
+                self.stores.writeline(
+                    f"tl.store(({ws_ptr} + {offset}).to(tl.pointer_type(tl.float32)) + "
+                    f"{m * n} * ({slot}) + {indexing.index_str}, {acc}, {mask})"
+                )
+
+            with patch.multiple(
+                self, reduction=reduction, store_reduction=store_reduction
+            ):
+                unsplit.codegen([index_vars, [batch]])
+        # The sums are only complete after the kernel.
+        for name in stored:
+            self.cse.store_cache.pop(name, None)
 
     def codegen_tile_reduction_epilogue(
         self,

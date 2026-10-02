@@ -55,6 +55,7 @@
     num_tiles_per_batch = grid_m * grid_n
     num_tiles = BATCH * num_tiles_per_batch
     num_pid_in_group = GROUP_M * grid_n
+    {{epilogue_loop_init(indent_width=4)}}
     {%- if USE_META_WS %}
     for tile_id in tl.range(
         start_pid,
@@ -163,6 +164,10 @@
                 block_indexing=True,
                 subtile_loop=("i", "EPILOGUE_SUBTILE"),
                 tile_origin=("batch", "offs_cm", "offs_cn_i"),
+                batch_loop=(
+                    "start_pid // num_tiles_per_batch",
+                    "tile_id + NUM_SMS >= num_tiles",
+                ),
             )}}
             {%- else %}
             rm = offs_cm + tl.arange(0, BLOCK_M)[:, None]
@@ -176,6 +181,10 @@
                 val_shape=("BLOCK_M", "BLOCK_N // EPILOGUE_SUBTILE"),
                 subtile_loop=("i", "EPILOGUE_SUBTILE"),
                 tile_origin=("batch", "offs_cm", "offs_cn_i"),
+                batch_loop=(
+                    "start_pid // num_tiles_per_batch",
+                    "tile_id + NUM_SMS >= num_tiles",
+                ),
             )}}
             {%- endif %}
 
