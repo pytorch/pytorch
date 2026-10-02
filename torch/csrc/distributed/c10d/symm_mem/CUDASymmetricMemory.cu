@@ -313,13 +313,15 @@ Block::Block(
     size_t block_size,
     size_t buffer_size,
     size_t buffer_offset,
-    const std::optional<std::string>& group_name)
+    const std::optional<std::string>& group_name,
+    int64_t alloc_id)
     : alloc_ref(std::move(alloc_ref)),
       device_idx(device_idx),
       block_size(block_size),
       buffer_size(buffer_size),
       buffer_offset(buffer_offset),
-      default_group_name(std::move(group_name)) {}
+      default_group_name(std::move(group_name)),
+      alloc_id(alloc_id) {}
 
 namespace {
 using Expandable_Segments_Handle_Type =
@@ -426,15 +428,18 @@ void* CUDASymmetricMemoryAllocator::alloc(
 
   auto alloc_ref = c10::make_intrusive<AllocationRef>(
       alloc_base, handle, block_size, device_idx);
-  auto block = c10::make_intrusive<Block>(
-      std::move(alloc_ref),
-      device_idx,
-      block_size,
-      size,
-      buffer_offset,
-      group_name);
   {
     std::unique_lock lock(mutex_);
+    // `alloc_id` is assigned under the same lock that publishes the block, so
+    // the ids reflect the order in which allocations become visible.
+    auto block = c10::make_intrusive<Block>(
+        std::move(alloc_ref),
+        device_idx,
+        block_size,
+        size,
+        buffer_offset,
+        group_name,
+        alloc_counter_++);
     // Key by the data pointer we return (that's what free()/rendezvous see).
     ptr_to_block_.emplace(buffer_ptr, std::move(block));
   }
@@ -463,8 +468,21 @@ struct RendezvousRequest {
   size_t buffer_offset;
   bool has_multicast_support;
   int clique_id;
+  // Rank-local ordinal of the allocation being rendezvous'd. Ranks that agree
+  // on the rendezvous order must also agree on this ordinal; see
+  // validate_rendezvous_requests().
+  int64_t alloc_id;
   char hostname[HOST_NAME_MAX + 1];
 };
+
+// Escape hatch for the allocation-ordinal agreement check in
+// validate_rendezvous_requests(), mirroring
+// TORCH_SYMM_MEM_ALLOW_OVERLAPPING_DEVICES.
+static bool allow_alloc_id_mismatch() {
+  static const bool allow =
+      c10::utils::check_env("TORCH_SYMM_MEM_ALLOW_ALLOC_ID_MISMATCH") == true;
+  return allow;
+}
 
 static std::string import_err_msg(
     int rank,
@@ -507,6 +525,39 @@ void validate_rendezvous_requests(
     TORCH_CHECK(reqs[r].block_size == reqs[0].block_size);
     TORCH_CHECK(reqs[r].buffer_size == reqs[0].buffer_size);
     TORCH_CHECK(reqs[r].buffer_offset == reqs[0].buffer_offset);
+  }
+
+  // Ranks are expected to allocate symmetric memory in the same order, so the
+  // n-th rendezvous must refer to the n-th allocation on every rank. When that
+  // does not hold, ranks can end up mapping different backing segments of the
+  // same MemPool -- the collectives still "succeed" but operate on mismatched
+  // windows, silently corrupting the result. Catch it here, where the request
+  // metadata has already been exchanged, rather than letting it through.
+  if (!allow_alloc_id_mismatch()) {
+    for (int r = 1; r < world_size; ++r) {
+      if (reqs[r].alloc_id == reqs[0].alloc_id) {
+        continue;
+      }
+      std::ostringstream oss;
+      oss << "CUDASymmetricMemory::rendezvous: detected mismatched symmetric "
+          << "memory allocations across ranks. Rank 0 is rendezvous'ing its "
+          << "allocation #" << reqs[0].alloc_id << " while rank " << r
+          << " is rendezvous'ing its allocation #" << reqs[r].alloc_id
+          << ". This means the ranks did not allocate symmetric memory in the "
+          << "same order, and they may map different segments of the same "
+          << "MemPool, which silently corrupts collectives. Make sure every "
+          << "rank performs the same sequence of symmetric memory "
+          << "allocations. Per-rank allocation ordinals: ";
+      for (int i = 0; i < world_size; ++i) {
+        if (i > 0) {
+          oss << ", ";
+        }
+        oss << "rank " << i << ": #" << reqs[i].alloc_id;
+      }
+      oss << ". Set TORCH_SYMM_MEM_ALLOW_ALLOC_ID_MISMATCH=1 to bypass this "
+          << "check.";
+      TORCH_CHECK(false, std::move(oss).str());
+    }
   }
 }
 
@@ -900,7 +951,8 @@ c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
       .buffer_size = block->buffer_size,
       .buffer_offset = block->buffer_offset,
       .has_multicast_support = device_has_multicast_support(block->device_idx),
-      .clique_id = at::cuda::get_fabric_clique_id(block->device_idx)};
+      .clique_id = at::cuda::get_fabric_clique_id(block->device_idx),
+      .alloc_id = block->alloc_id};
 
   // Populate hostname field for host identification
   gethostname(local_req.hostname, sizeof(local_req.hostname));
