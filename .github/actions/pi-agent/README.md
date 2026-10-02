@@ -46,7 +46,7 @@ steps:
 | `--json-schema` → `structured_output` | `result-schema` → `structured_output` |
 | `--setting-sources ""` | always: nothing discoverable from the checkout loads |
 | skills discovered from `.claude/skills` | `skills:` (explicit paths only) |
-| execution file | artifact with `transcript.html`, `events.jsonl`, `result.json`, `usage.json` |
+| execution file | `execution-file` output (same shape, for the review log inspector and `upload-claude-usage`), plus an artifact with `transcript.html`, `events.jsonl`, `result.json` |
 
 The step summary shows the outcome, token and cost totals, which tools were offered, used,
 and blocked, the result, and a link to the run artifact (open `transcript.html`).
