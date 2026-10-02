@@ -406,8 +406,10 @@ static void nllnd_loss_forward_impl(Tensor& output,
   TORCH_CHECK(output.is_mps(), "output must be an MPS tensor");
   TORCH_CHECK(total_weight.is_mps(), "total_weight must be an MPS tensor");
 
-  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(output.scalar_type()),
-                              "nll_loss for complex is not supported for MPS");
+  TORCH_CHECK_NOT_IMPLEMENTED(c10::isFloatingType(input_arg.scalar_type()),
+                              "nll_loss is not implemented for ",
+                              input_arg.scalar_type(),
+                              " on MPS");
 
   TORCH_CHECK(!weight_arg.defined() || input_arg.scalar_type() == weight_arg.scalar_type(),
               "expected scalar type ",

@@ -22715,9 +22715,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
     OpInfo(
         "nn.functional.nll_loss",
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=floating_types_and(
-            torch.float16, torch.bfloat16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.bool, torch.int8
-        ),
         supports_out=False,
         sample_inputs_func=sample_inputs_nll_loss,
         supports_forward_ad=True,
@@ -25104,21 +25101,6 @@ python_ref_db = [
             # RuntimeError: It appears that you're trying to get value out of a tracing tensor - erroring out!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type="cuda"
-            ),
-            # The following dtypes did not work in forward but are listed by the OpInfo: {torch.bool}.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            # AssertionError: Scalars are not equal!
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.bool,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
-                device_type='mps', dtypes=(torch.bool,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.bool,),
             ),
         ),
     ),
