@@ -343,18 +343,28 @@ class AbstractFaultToleranceTest:
 
     def test_reconfigure_with_pending_work(self):
         # Rank 1's unmatched collective is still in flight when reconfigure()
-        # starts; its timeout races the watchdog against the reconfigure
-        # teardown.
+        # starts: unexpired (i=0), already timed out and revoked by the
+        # watchdog (i=1, nccl2), or racing the watchdog (i=2).
+        from torch._C._distributed_c10d import ErrorType
+
         self._create_reconfigured_pg("ft_pending", 1400)
         # Connect the communicator so launching the unmatched collective does
         # not block on peer setup.
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
         for i in range(3):
-            self.backend.set_timeout(timedelta(milliseconds=100))
+            timeout = timedelta(seconds=30) if i == 0 else timedelta(milliseconds=100)
+            self.backend.set_timeout(timeout)
             work = None
             if self.rank == 1:
                 work = dist.all_reduce(torch.ones(4, device=self.device), async_op=True)
-                time.sleep(0.05 * i)
+            if self.rank == 1 and i == 1 and self.backend_name == "nccl2":
+                deadline = time.monotonic() + 10
+                while (
+                    self.backend.get_error() != ErrorType.TIMEOUT
+                    and time.monotonic() < deadline
+                ):
+                    time.sleep(0.05)
+                self.assertEqual(self.backend.get_error(), ErrorType.TIMEOUT)
             handles = self._collect_handles(f"ft_pending_{i}")
             self._reconfigure(1401 + i, handles)
             del work
