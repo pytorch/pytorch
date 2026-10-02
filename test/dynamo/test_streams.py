@@ -2895,6 +2895,22 @@ instantiate_device_type_tests(
 )
 
 
+class TestStreamsCPUSpecific(torch._dynamo.test_case.TestCase):
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_synchronize_cpu_stream(self, backend) -> None:
+        def fn(x):
+            stream = torch.Stream(device="cpu")
+            stream.synchronize()
+            return x + 1
+
+        x = torch.ones(8)
+        result = torch.compile(fn, backend=backend, fullgraph=True)(x)
+        self.assertEqual(result, torch.full_like(x, 2))
+
+
+instantiate_parametrized_tests(TestStreamsCPUSpecific)
+
+
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
     @parametrize("backend", ("aot_eager", "inductor"))

@@ -83,8 +83,11 @@ def _get_stream_by_index(index: int) -> torch.Stream:
 
 
 def _stream_identity(stream: torch.Stream) -> tuple[torch.device, int]:
-    # Native stream handles are available on CUDA and XPU streams, though the
-    # torch.Stream type stub does not yet declare them.
+    if stream.device.type == "cpu":
+        # The CPU has a single stream and no native accelerator handle.
+        return stream.device, 0
+    # Accelerator streams expose native handles; the base torch.Stream type
+    # stub does not yet declare the attribute.
     return stream.device, stream.native_handle  # pyrefly: ignore[missing-attribute]
 
 
