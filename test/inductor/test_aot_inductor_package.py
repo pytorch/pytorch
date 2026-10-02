@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import zipfile
 from collections.abc import Callable
 from pathlib import Path
@@ -30,7 +31,13 @@ from torch.export.pt2_archive._package import (
     load_weights_to_pt2_contents,
 )
 from torch.testing._internal.common_cuda import requires_triton_ptxas_compat
-from torch.testing._internal.common_utils import HardwareClassification, IS_FBCODE
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    IS_FBCODE,
+    parametrize,
+    subtest,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils import _pytree as pytree
 
@@ -1352,6 +1359,72 @@ model(torch.ones(2))
             "Failed to find a generated cpp file or so file for model 'forward' in the zip archive.",
         ):
             load_package(package_path, model_name="forward")
+
+
+class TestAOTInductorPackageExtraction(TestCase):
+    def setUp(self):
+        super().setUp()
+        tmp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_dir.cleanup)
+        self.root = Path(tmp_dir.name)
+        # The loader creates its extraction dir under $TMPDIR, so escaping
+        # entries land directly in self.root where we can detect them.
+        env_patch = unittest.mock.patch.dict(os.environ, {"TMPDIR": tmp_dir.name})
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+
+    def _make_package(self, entry_names: list[str]) -> str:
+        package_path = self.root / "evil.pt2"
+        with zipfile.ZipFile(package_path, "w") as zf:
+            for name in entry_names:
+                zf.writestr(name, b"")
+        return str(package_path)
+
+    def _assert_nothing_escaped(self):
+        escaped = [
+            p.name
+            for p in self.root.iterdir()
+            if p.name != "evil.pt2" and not p.name.startswith("aotinductor_")
+        ]
+        self.assertEqual(escaped, [])
+
+    @parametrize(
+        "entry_names",
+        [
+            subtest(
+                [
+                    "archive/data/aotinductor/model/../../../../../canary",
+                    "archive/data/aotinductor/model/model.so",
+                ],
+                name="model_dir",
+            ),
+            subtest(
+                ["../data/constants/canary", "../data/aotinductor/model/model.so"],
+                name="prefix",
+            ),
+        ],
+    )
+    def test_load_package_rejects_path_traversal(self, entry_names):
+        package_path = self._make_package(entry_names)
+        with self.assertRaisesRegex(RuntimeError, "escapes the extraction directory"):
+            load_package(package_path)
+        self._assert_nothing_escaped()
+
+    def test_load_metadata_rejects_path_traversal(self):
+        package_path = self._make_package(
+            [
+                "archive/data/aotinductor/model/../../../../../canary_wrapper_metadata.json",
+                "archive/data/aotinductor/model/model.so",
+            ]
+        )
+        with self.assertRaisesRegex(RuntimeError, "escapes the extraction directory"):
+            torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(
+                package_path, "model"
+            )
+        self._assert_nothing_escaped()
+
+
+instantiate_parametrized_tests(TestAOTInductorPackageExtraction)
 
 
 if __name__ == "__main__":
