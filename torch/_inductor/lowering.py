@@ -2917,6 +2917,28 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     if node.target is aten.view_as_complex.default:
         return False
 
+    if (
+        node.target is aten.full.default
+        and config.cpp_wrapper
+        and isinstance(node.meta.get("val"), torch.Tensor)
+        and node.meta["val"].device.type == "cpu"
+        and node.meta["val"].dtype in (torch.complex64, torch.complex128)
+    ):
+        fill_value = node.args[1]
+        if (
+            isinstance(fill_value, torch.fx.Node)
+            and fill_value.target is aten._local_scalar_dense.default
+        ):
+            source = fill_value.args[0].meta.get("val")
+            if (
+                isinstance(source, torch.Tensor)
+                and source.device.type == "cpu"
+                and source.dtype == torch.uint64
+            ):
+                # The proxy fallback cannot carry a uint64 item above INT64_MAX.
+                # This full can instead load the scalar tensor in its C++ kernel.
+                return False
+
     if node.op == "placeholder":
         return False
 
@@ -4462,6 +4484,8 @@ def _full(fill_value, device, dtype, size):
             torch.bfloat16,
             torch.float32,
             torch.float64,
+            torch.complex64,
+            torch.complex128,
         )
     ):
         # A uint64 item can exceed the range of the C++ wrapper's int64_t

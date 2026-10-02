@@ -1778,7 +1778,15 @@ class TestSymbolicFull(TestCase):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @parametrize(
         "dtype",
-        (torch.uint64, torch.bfloat16, torch.float32, torch.float64, torch.bool),
+        (
+            torch.uint64,
+            torch.bfloat16,
+            torch.float32,
+            torch.float64,
+            torch.bool,
+            torch.complex64,
+            torch.complex128,
+        ),
     )
     def test_full_symbolic_uint64_large_fill_cpp_wrapper(self, device, dtype):
         def f(x):
