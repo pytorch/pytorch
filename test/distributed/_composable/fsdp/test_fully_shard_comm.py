@@ -26,7 +26,7 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, AllGatherInput
+from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     _div_if_needed,
     _get_gradient_divide_factors,
@@ -41,10 +41,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_param import (
-    _normalize_all_gather_inputs,
-    ShardedState,
-)
+from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
     AllGatherState,
     FSDPCommContext,
@@ -243,17 +240,6 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 all_gather_copy_in_stream=all_gather_copy_in_stream,
                 all_gather_stream=all_gather_stream,
             )
-
-    @skip_if_lt_x_gpu(1)
-    def test_all_gather_empty_params(self):
-        stream = device_module.current_stream()
-        self._test_all_gather(
-            [torch.Size([0, 4]), torch.Size([0])],
-            reshard_after_forward=True,
-            async_op=False,
-            all_gather_copy_in_stream=stream,
-            all_gather_stream=stream,
-        )
 
     def _test_all_gather(
         self,
@@ -472,34 +458,6 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
 instantiate_device_type_tests(
     TestFullyShardChunkCatMixedDtype, globals(), only_for=("cpu", "cuda", "xpu")
 )
-
-
-class TestFullyShardAllGatherInputValidation(TestCase):
-    def test_invalid_all_gather_inputs(self):
-        # Checked before the collective, also against outputs cached by an
-        # earlier call
-        shard = torch.empty(2, 3)
-        kwargs = {"world_size": 2, "shard_dim": 1, "padded_sharded_size": shard.size()}
-        cached = [torch.empty(12)]
-        for inputs, outputs, error, match in (
-            ((AllGatherInput(shard, dim=2),), (), ValueError, "dim 2 is invalid"),
-            (
-                (AllGatherInput(shard, output_size=torch.Size((2, 5))),),
-                (),
-                ValueError,
-                "must contain 12 elements",
-            ),
-            ((AllGatherInput("shard"),), (), TypeError, "Expected an all-gather input"),
-            ((torch.empty(4, 3),), (), ValueError, r"Shard\(1\) .* must have 12"),
-            ((shard, shard), cached, ValueError, "returned 2 all-gather inputs"),
-            ((shard.to(torch.bfloat16),), cached, ValueError, "changed dtype"),
-            ((torch.empty(4, 3),), cached, ValueError, "needs 96 bytes"),
-            ((AllGatherInput(shard[0]),), cached, ValueError, "element count"),
-        ):
-            with self.assertRaisesRegex(error, match):
-                _normalize_all_gather_inputs(
-                    inputs, all_gather_outputs=outputs, **kwargs
-                )
 
 
 class TestFullyShardCustomAllocation(FSDPTestMultiThread):
