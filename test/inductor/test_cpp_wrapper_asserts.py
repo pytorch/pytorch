@@ -43,7 +43,8 @@ class CppWrapperPrinterTests(InductorTestCase):
 
         expr = sympy.Xor(unsigned < -1, floating > -1, evaluate=False)
         code = printer.doprint(expr, simplify=False)
-        FileCheck().check("f > -1L").check("c10::signs_differ(u, -1L)").run(code)
+        # SymPy prints long literals as L on Linux and LL on macOS.
+        FileCheck().check("f > -1L").check("c10::signs_differ(u, -1L").run(code)
         self.assertNotIn("signs_differ(f", code)
 
         code = printer.doprint(unsigned < 1 << 63, simplify=False)
