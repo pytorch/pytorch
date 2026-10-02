@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
-    OpDTypes, onlyCPU, onlyNativeDeviceTypes, expectedFailureMeta, expectedFailureXPU, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
+    OpDTypes, onlyCPU, onlyCUDA, onlyNativeDeviceTypes, expectedFailureMeta, expectedFailureXPU, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
     dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
     precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
@@ -1690,6 +1690,19 @@ class TestReductions(TestCase):
             test_dtype_bfloat16(True, False)
             test_dtype_bfloat16(False, True)
             test_dtype_bfloat16(True, True)
+
+    @onlyCUDA
+    @largeTensorTest("10GB", "cuda")
+    @serialTest()
+    def test_bucketization_int32_overflow(self, device):
+        # More than INT_MAX elements; the launch configuration must not
+        # narrow numel to int (it did on ROCm via hipify's ::min rewrite).
+        x = torch.zeros(2**31 + 1, dtype=torch.uint8, device=device)
+        x[-1] = 2
+        boundaries = torch.tensor([0, 1], dtype=torch.uint8, device=device)
+        out = torch.bucketize(x, boundaries, out_int32=True)
+        self.assertEqual(out[0].item(), 0)
+        self.assertEqual(out[-1].item(), 2)
 
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     @skipIfMPS
