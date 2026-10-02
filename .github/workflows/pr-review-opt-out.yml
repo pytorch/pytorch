@@ -1,0 +1,85 @@
+# Owner(s): ["module: ci"]
+name: PR review opt-out
+
+# `no automated review` stops the hardened PR review (hardened-pr-review.yml)
+# from running, but nothing moved the PR on: it kept `in progress`, the label
+# whose only exit is a clean automated review, so it never reached the human
+# review queue. This moves an opted-out PR from `in progress` to
+# `ready for review`, which is what the opt-out means for its lifecycle.
+#
+# It fires when either label arrives, so the order they are applied in does
+# not matter, and when a draft is marked ready, because drafts are left alone
+# (Stage 1 skips them too).
+#
+# `pull_request_target`, for the reason Stage 1 gives: it runs from the default
+# branch without CI approval. This file checks nothing out and runs no
+# pull-request content; the only event values it uses are the PR number and the
+# repository name.
+
+on:
+  pull_request_target:
+    types: [labeled, ready_for_review]
+
+permissions: {}
+
+jobs:
+  move-to-ready-for-review:
+    if: |
+      github.repository == 'pytorch/pytorch' &&
+      !github.event.pull_request.draft &&
+      (github.event.action == 'ready_for_review' ||
+       github.event.label.name == 'no automated review' ||
+       github.event.label.name == 'in progress') &&
+      contains(github.event.pull_request.labels.*.name, 'no automated review') &&
+      contains(github.event.pull_request.labels.*.name, 'in progress')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Labelling a pull request needs `pull-requests: write` as well as
+    # `issues: write`; see the publish job in hardened-pr-review-run.yml.
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Move the PR to ready for review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REVIEW_LABEL: "in progress"
+          DONE_LABEL: "ready for review"
+          OPT_OUT_LABEL: "no automated review"
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[0-9]+$ ]] || { echo "::error::bad pr_number: '$PR_NUMBER'"; exit 1; }
+
+          # Re-read the PR: the event payload is stale if the opt-out was
+          # removed or the PR went back to draft before this job started.
+          PR_JSON=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}")
+          has_label() {
+            jq -e --arg l "$1" 'any(.labels[]?.name; ascii_downcase == ($l | ascii_downcase))' \
+              <<<"$PR_JSON" >/dev/null
+          }
+          if [ "$(jq -r '.draft' <<<"$PR_JSON")" != "false" ]; then
+            echo "::notice::PR #${PR_NUMBER} is a draft; nothing to do"
+            exit 0
+          fi
+          if ! has_label "$OPT_OUT_LABEL" || ! has_label "$REVIEW_LABEL"; then
+            echo "::notice::PR #${PR_NUMBER} no longer carries both '${OPT_OUT_LABEL}' and '${REVIEW_LABEL}'; nothing to do"
+            exit 0
+          fi
+
+          # Add before remove, as in publish: a failure in between leaves the
+          # PR in a queue rather than in none.
+          gh api -X POST "repos/${REPO}/issues/${PR_NUMBER}/labels" \
+            -f "labels[]=${DONE_LABEL}" >/dev/null
+
+          # A 404 means someone else already removed it.
+          if ! err=$(gh api -X DELETE \
+                "repos/${REPO}/issues/${PR_NUMBER}/labels/$(jq -rn --arg l "$REVIEW_LABEL" '$l|@uri')" \
+                2>&1 >/dev/null); then
+            case "$err" in
+              *"HTTP 404"*|*"Label does not exist"*) ;;
+              *) echo "::error::could not remove '${REVIEW_LABEL}' from PR #${PR_NUMBER}: ${err}"; exit 1 ;;
+            esac
+          fi
+          echo "::notice::PR #${PR_NUMBER} opted out of automated review; moved to '${DONE_LABEL}'"

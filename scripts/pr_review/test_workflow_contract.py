@@ -69,6 +69,7 @@ WORKFLOWS = REPO / ".github" / "workflows"
 STAGE1 = WORKFLOWS / "hardened-pr-review.yml"
 STAGE2 = WORKFLOWS / "hardened-pr-review-run.yml"
 SUITE_CI = WORKFLOWS / "pr-review-scripts-test.yml"
+OPT_OUT = WORKFLOWS / "pr-review-opt-out.yml"
 # The guard module itself, copied into a synthesized tree by the preflight test.
 HERE_MANIFEST = Path(__file__).resolve().parent / "_suite_manifest.py"
 # Set by `test_the_real_entry_point_runs_this_suite_and_passes` in the child it
@@ -1840,6 +1841,7 @@ class TestTheSuiteActuallyRunsInCI(unittest.TestCase):
         # wiring is the one change that schedules no run of the suite checking
         # the wiring.
         ".github/workflows/pr-review-scripts-test.yml",
+        ".github/workflows/pr-review-opt-out.yml",
     )
 
     def setUp(self):
@@ -2658,6 +2660,186 @@ class TestPublishHonoursALateOptOut(unittest.TestCase):
     def test_pr_without_the_label_is_moved(self):
         _proc, calls = self._run(("in progress",))
         self.assertIn("DELETE", calls)
+
+
+_OPT_OUT_GH_STUB = """#!/bin/bash
+printf '%s\\n' "$*" >> "$GH_ARGV"
+case "$*" in
+  *"-X DELETE"*) if [ -n "$DELETE_ERR" ]; then echo "$DELETE_ERR" >&2; exit 1; fi ;;
+  *"/pulls/"*) printf '%s' "$PR_JSON" ;;
+  *) ;;
+esac
+"""
+
+
+class TestOptOutMovesThePrToReadyForReview(unittest.TestCase):
+    """An opted-out PR leaves `in progress` for the human review queue.
+
+    Without this, `no automated review` stopped the review but left the PR on
+    `in progress`, whose only exit is a clean automated review.
+    """
+
+    def _run(self, labels, delete_err="", draft=False):
+        with tempfile.TemporaryDirectory() as td:
+            argv = Path(td) / "gh_calls"
+            argv.write_text("")
+            proc, _out = run_step(
+                OPT_OUT.read_text(),
+                "Move the PR to ready for review",
+                td,
+                {
+                    "GH_ARGV": str(argv),
+                    "GH_TOKEN": "stub-token",
+                    "REPO": "o/r",
+                    "PR_NUMBER": "1",
+                    "PR_JSON": json.dumps(
+                        {"draft": draft, "labels": [{"name": n} for n in labels]}
+                    ),
+                    "DELETE_ERR": delete_err,
+                    "REVIEW_LABEL": "in progress",
+                    "DONE_LABEL": "ready for review",
+                    "OPT_OUT_LABEL": "no automated review",
+                },
+                {"gh": _OPT_OUT_GH_STUB},
+            )
+            calls = argv.read_text().splitlines()
+        return proc, calls
+
+    def test_adds_ready_for_review_then_removes_in_progress(self):
+        proc, calls = self._run(("in progress", "No Automated Review"))
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        writes = [c for c in calls if "-X" in c]
+        self.assertEqual(len(writes), 2, calls)
+        self.assertIn("POST", writes[0])
+        self.assertIn("labels[]=ready for review", writes[0])
+        self.assertIn("DELETE", writes[1])
+        self.assertIn("/labels/in%20progress", writes[1])
+
+    def test_leaves_labels_alone_when_either_label_is_gone(self):
+        for labels in (("in progress",), ("no automated review",)):
+            with self.subTest(labels=labels):
+                proc, calls = self._run(labels)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertFalse([c for c in calls if "-X" in c], calls)
+
+    def test_leaves_labels_alone_when_the_pr_went_back_to_draft(self):
+        proc, calls = self._run(("in progress", "no automated review"), draft=True)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+        self.assertFalse([c for c in calls if "-X" in c], calls)
+
+    def test_an_already_removed_label_is_not_an_error(self):
+        proc, _ = self._run(
+            ("in progress", "no automated review"), delete_err="HTTP 404: Not Found"
+        )
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_any_other_removal_failure_fails_the_job(self):
+        proc, _ = self._run(
+            ("in progress", "no automated review"), delete_err="HTTP 403: Forbidden"
+        )
+        self.assertNotEqual(proc.returncode, 0)
+
+    def test_label_literals_match_stage2(self):
+        stage2 = strip_comments(STAGE2.read_text())
+        text = strip_comments(OPT_OUT.read_text())
+        for name in ("REVIEW_LABEL", "DONE_LABEL", "OPT_OUT_LABEL"):
+            with self.subTest(env=name):
+                m = re.search(rf"^\s*{name}:\s*(.+?)\s*$", stage2, re.M)
+                self.assertIsNotNone(m, f"{name} not found in Stage 2")
+                self.assertEqual(env_values(text, name), [m.group(1).strip("\"'")])
+
+    def _fires(self, action, label, labels, draft=False):
+        expr = job_if(
+            job_block(strip_comments(OPT_OUT.read_text()), "move-to-ready-for-review")
+        )
+        tree = parse_bool_expr(expr)
+        env = {}
+        for atom in expr_atoms(tree):
+            if atom == "github.repository == 'pytorch/pytorch'":
+                env[atom] = True
+            elif atom == "github.event.pull_request.draft":
+                env[atom] = draft
+            elif m := re.fullmatch(r"github\.event\.action == '([^']+)'", atom):
+                env[atom] = action == m.group(1)
+            # GitHub compares strings case-insensitively, `contains` included.
+            elif m := re.fullmatch(r"github\.event\.label\.name == '([^']+)'", atom):
+                env[atom] = (label or "").casefold() == m.group(1).casefold()
+            elif m := re.fullmatch(
+                r"contains \( github\.event\.pull_request\.labels\.\*\.name , '([^']+)' \)",
+                atom,
+            ):
+                env[atom] = m.group(1).casefold() in {x.casefold() for x in labels}
+            else:
+                self.fail(f"unmodelled condition in the opt-out `if:`: {atom!r}")
+        return eval_expr(tree, env)
+
+    def test_job_gate(self):
+        both = {"in progress", "no automated review"}
+        cases = [
+            ("labeled", "no automated review", both, False, True),
+            ("labeled", "in progress", both, False, True),
+            ("ready_for_review", None, both, False, True),
+            ("labeled", "no automated review", both, True, False),
+            ("labeled", "no automated review", {"no automated review"}, False, False),
+            ("labeled", "in progress", {"in progress"}, False, False),
+            ("labeled", "cla signed", both | {"cla signed"}, False, False),
+            (
+                "labeled",
+                "No Automated Review",
+                {"In Progress", "No Automated Review"},
+                False,
+                True,
+            ),
+        ]
+        for action, label, labels, draft, expected in cases:
+            with self.subTest(action=action, label=label, labels=labels, draft=draft):
+                self.assertEqual(self._fires(action, label, labels, draft), expected)
+
+    def test_trigger_permissions_and_step_are_wired(self):
+        text = strip_comments(OPT_OUT.read_text())
+        self.assertIn(
+            "on:\n  pull_request_target:\n    types: [labeled, ready_for_review]\n",
+            text,
+        )
+        job = job_block(text, "move-to-ready-for-review")
+        self.assertIn(
+            "    permissions:\n      issues: write\n      pull-requests: write\n", job
+        )
+        # The only `if:` is the job gate; a step-level one could disable the move.
+        self.assertEqual(len(re.findall(r"(?m)^\s*if:", text)), 1)
+
+    def test_runs_no_pull_request_content(self):
+        text = strip_comments(OPT_OUT.read_text())
+        self.assertNotIn("uses:", text)
+        self.assertNotIn("actions/checkout", text)
+        self.assertRegex(text, r"(?m)^permissions: \{\}$")
+        refuse_unmodelled_spellings(self, text, OPT_OUT.name)
+        refuse_unsafe_env_keys(
+            self,
+            OPT_OUT.read_text(),
+            OPT_OUT.name,
+            frozenset(
+                (
+                    "GH_TOKEN",
+                    "REPO",
+                    "PR_NUMBER",
+                    "REVIEW_LABEL",
+                    "DONE_LABEL",
+                    "OPT_OUT_LABEL",
+                )
+            ),
+        )
+        # Only the PR number and repository come from the event. Read from the
+        # RAW text: GitHub substitutes `${{ }}` inside a shell comment too.
+        exprs = set(re.findall(r"\$\{\{\s*(.*?)\s*\}\}", OPT_OUT.read_text()))
+        self.assertEqual(
+            exprs,
+            {
+                "secrets.GITHUB_TOKEN",
+                "github.repository",
+                "github.event.pull_request.number",
+            },
+        )
 
 
 class TestCorroboratedValuesAreTheOnlyOnesOffered(unittest.TestCase):
