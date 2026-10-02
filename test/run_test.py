@@ -1442,14 +1442,12 @@ def get_pytest_args(options, test_file, is_cpp_test=False, is_distributed_test=F
         if IS_CI:
             # C++ tests don't go through common_utils.run_tests, which is what
             # sets TEST_SAVE_XML, so build the pytest report path here.
+            # The path is relative to the test directory pytest runs in.
             report_name = sanitize_test_filename(test_file)
-            report_dir = os.path.join(
+            report_path = os.path.join(
                 _get_test_report_path().replace("python-unittest", "python-pytest"),
                 report_name,
-            )
-            os.makedirs(report_dir, exist_ok=True)
-            report_path = os.path.join(
-                report_dir, f"{report_name}-{os.urandom(8).hex()}.xml"
+                f"{report_name}-{os.urandom(8).hex()}.xml",
             )
             pytest_args.extend(["--junit-xml-reruns", report_path])
 
