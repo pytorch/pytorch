@@ -1,19 +1,57 @@
 # Owner(s): ["module: dynamo"]
 
 import importlib.util
+import os
+import subprocess
 import sys
 import tempfile
+import unittest
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.utils import disable_cache_limit
+from torch.testing._internal import (
+    fake_config_module_with_implications as implied_config,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    instantiate_parametrized_tests,
+    IS_FBCODE,
+    parametrize,
+)
 
 
 # NB: do NOT include this test class in test_dynamic_shapes.py
 
 
+@instantiate_parametrized_tests
 class ConfigTests(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    @unittest.skipIf(IS_FBCODE, "the justknob controls the fbcode default")
+    def test_canonicalize_output_graph_node_order_default(self):
+        script = (
+            "import torch._dynamo.config as config; "
+            "print(config.canonicalize_output_graph_node_order)"
+        )
+        env = os.environ.copy()
+        env.pop("TORCH_DYNAMO_CANONICALIZE_GRAPH_NODE_ORDER", None)
+        self.assertEqual(
+            subprocess.check_output(
+                [sys.executable, "-c", script], env=env, text=True
+            ).strip(),
+            "True",
+        )
+
+        env["TORCH_DYNAMO_CANONICALIZE_GRAPH_NODE_ORDER"] = "0"
+        self.assertEqual(
+            subprocess.check_output(
+                [sys.executable, "-c", script], env=env, text=True
+            ).strip(),
+            "False",
+        )
+
     def _make_config_module(self, name: str):
         tmpdir = tempfile.TemporaryDirectory()
         self.addCleanup(tmpdir.cleanup)
@@ -200,6 +238,31 @@ class ConfigTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(fn(x), x + 2)
         self.assertEqual(cnt.frame_count, 1)
         self.assertTrue(config.flag)
+
+    @parametrize("nested", (False, True))
+    def test_config_implications_recompile(self, nested):
+        counter = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            flag = implied_config.nested.enabled if nested else implied_config.enabled
+            return (
+                x + 1 if flag else x + 2,
+                x + implied_config.unrelated + implied_config.downstream,
+            )
+
+        x = torch.randn(4)
+        with implied_config.patch(mode="default", enabled=False, unrelated=2):
+            self.assertEqual(fn(x), (x + 2, x + 2))
+            self.assertEqual(counter.frame_count, 1)
+            with implied_config.patch(mode="strict"):
+                self.assertEqual(fn(x), (x + 1, x + 3))
+                self.assertEqual(counter.frame_count, 2)
+                with implied_config.patch(mode="default"):
+                    self.assertEqual(fn(x), (x + 2, x + 2))
+                self.assertEqual(fn(x), (x + 1, x + 3))
+            self.assertEqual(fn(x), (x + 2, x + 2))
+            self.assertEqual(counter.frame_count, 2)
 
 
 if __name__ == "__main__":

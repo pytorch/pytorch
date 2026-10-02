@@ -339,7 +339,8 @@ def _is_safe_to_reorder(
     it doesn't cover: in-place call_method nodes, higher order operators with
     non-reorderable subgraph nodes, functional collectives, nodes binding
     unbacked symbols, and non-OpOverload state-changing functions detected by
-    no-node-arguments and no-tensor-or-symbolic-value heuristics.
+    no-node-arguments and no-tensor-or-symbolic-value heuristics, and opaque
+    Dynamo callables.
 
     Returning False is a graph-scale decision, not a node-scale one: barriers
     partition the graph into segments (see ``canonicalize_graph``) and pure nodes
@@ -388,6 +389,12 @@ def _is_safe_to_reorder(
     if collective_namespace in _ORDER_SENSITIVE_NAMESPACES:
         return False
     if not isinstance(node.target, torch._ops.OpOverload):
+        from torch._dynamo import trace_rules
+
+        # The allow_in_graph contract permits input mutation, but Dynamo does
+        # not inspect the callable to record its effects.
+        if trace_rules.is_callable_allowed(node.target):
+            return False
         name = getattr(node.target, "__name__", "")
         if (
             name == "flat_apply_capture"
