@@ -69,9 +69,7 @@ The apply step enforces it:
 | Any label containing "deprecated" | Obsolete |
 | `oncall: releng` | Not a triage redirect target. Use `module: ci` instead |
 
-**If unsure whether a label is allowed:** leave it out. The apply step drops forbidden labels and adds `triage review` in their place, so a human will look.
-
-These rules are enforced by the apply step, which validates every label against `labels.json` (`scripts/validate_labels.py`).
+**If unsure whether a label is allowed:** leave it out. The apply step (`scripts/issue_triage_pi/labels.py`) drops forbidden labels and adds `triage review` in their place, so a human will look.
 
 ### Never Override Human Labels
 
@@ -304,5 +302,3 @@ If not transferred/redirected and not flagged for review, add `triaged`.
 - Add `release triage` only when the issue is confirmed on the most recent released minor, or already carries `high priority` (step 5b); when unsure, leave it off
 - Apply type labels (`feature`, `enhancement`, `function request`) when confident
 - Add `triaged` label when classification is complete
-
-**Note:** the apply step adds `bot-triaged` automatically whenever the plan changes the issue.

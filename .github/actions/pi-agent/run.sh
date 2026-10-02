@@ -10,7 +10,7 @@ rm -rf "$out"
 mkdir -p "$out/session"
 export PATH="$RUNNER_TEMP/pi-install/node_modules/.bin:$PATH"
 
-# Hermetic config: no user/global settings, auth, telemetry, or network beyond the model.
+# Isolate pi's user configuration from the runner's home directory.
 export PI_CODING_AGENT_DIR="$RUNNER_TEMP/pi-agent-config"
 mkdir -p "$PI_CODING_AGENT_DIR"
 # Pinned definitions for allowlisted models newer than pi's bundled catalog, so
@@ -145,7 +145,6 @@ fi
 # The result is model-controlled: use an unguessable heredoc delimiter.
 delim="PI_EOF_$(openssl rand -hex 16)"
 {
-  echo "usage=$(jq -c . "$out/usage.json")"
   [[ ! -s "$out/execution.json" ]] || echo "execution-file=$out/execution.json"
   if [[ -s "$out/result.json" ]]; then
     echo "structured_output<<$delim"
