@@ -2793,9 +2793,6 @@ raise RuntimeError("device assert did not fire")
         counted = t.bincount(minlength=65536)
         self.assertEqual(torch.sum(counted), 10)
 
-    # gfx950 (MI350) SIGFPEs in histogram sizing at nbins > INT_MAX; the int32
-    # overflow fix is still exercised on CUDA and other ROCm archs.
-    @skipIfRocmArch(MI350_ARCH)
     @largeTensorTest("18GB", "cuda")
     @serialTest()
     def test_bincount_int32_overflow(self):
