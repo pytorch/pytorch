@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
+#include <torch/csrc/distributed/c10d/hooks/HealthCheckHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/NanCheckHook.hpp>
 #include <string_view>
 #include <utility>
@@ -5095,6 +5096,15 @@ a RuntimeError; on CUDA it triggers a device-side assert. The process group
 owns the hook, so the returned handle only has to be kept if the check should
 be removed again via remove().)")
       .def("remove", &::c10d::NanCheckHook::remove);
+
+  py::class_<::c10d::HealthCheckHook>(module, "HealthCheckHook")
+      .def_static(
+          "attach",
+          &::c10d::HealthCheckHook::attach,
+          py::arg("pg"),
+          R"(
+Attach health reporting to every backend in a process group that supports
+abort hooks. The backends own the registered hooks for their lifetimes.)");
 
   module.def(
       "_dump_fr_trace_json",
