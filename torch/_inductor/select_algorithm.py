@@ -65,8 +65,9 @@ from .codegen.common import (
 )
 from .codegen.simd import (
     codegen_reduced_buffer,
-    COLUMN_REDUCTION_OPS,
     DerivedIterationRangesRoot,
+    finished_after_kernel,
+    PARTIAL_REDUCTION_OPS,
     template_reduction_axis,
 )
 from .codegen.simd_kernel_features import SIMDKernelFeatures
@@ -693,10 +694,12 @@ class TritonTemplateKernel(TritonKernel):
         self.output_tiles: dict[
             int, tuple[list[sympy.Symbol], tuple[int, int, int]]
         ] = {}
-        # Column reductions fused into the epilogue: (node, output buffer, finish
-        # op, workspace byte offset of the fp32 per-tile partials, row tiles).
-        # The wrapper reduces the partials after the kernel.
-        self.column_reductions: list[tuple[Any, str, str, int, int]] = []
+        # Reductions fused into the epilogue as per-tile partials: (node, output
+        # buffer, finish op, workspace byte offset of the fp32 partials, tiles,
+        # partial size). The wrapper reduces the partials after the kernel.
+        self.partial_reductions: list[tuple[Any, str, str, int, int, int]] = []
+        # Epilogue nodes reading the finished partials, generated after them.
+        self._unfused_epilogues: list[Any] = []
 
         # When caching is enabled, the generated code is not dependent on the input nodes names, or
         # symbolic sizes names.
@@ -2018,37 +2021,61 @@ class TritonTemplateKernel(TritonKernel):
 
     def _emit_post_kernel_code(self, wrapper, kernel_name: str) -> None:
         """Hook for subclasses to emit code after kernel call, before workspace dealloc."""
-        if not self.column_reductions:
+        if not self.partial_reductions:
             return
         if self.workspace_arg is None:
-            raise AssertionError("column reduction partials need a workspace")
-        ws, n = self.workspace_arg.outer_name, self.output_node.get_size()[1]
-        for _, name, op, offset, row_tiles in self.column_reductions:
-            end = offset + row_tiles * n * 4
-            partials = (
-                f"{ws}[{offset}:{end}].view(torch.float32).view({row_tiles}, {n})"
-            )
+            raise AssertionError("reduction partials need a workspace")
+        ws = self.workspace_arg.outer_name
+        for _, name, op, offset, tiles, size in self.partial_reductions:
+            end = offset + tiles * size * 4
+            partials = f"{ws}[{offset}:{end}].view(torch.float32).view({tiles}, {size})"
             codegen_reduced_buffer(name, f"{partials}.{op}(dim=0)")
+        from .scheduler import FusedSchedulerNode
+
+        # Consecutive nodes over the same ranges run as one kernel.
+        scheduler = V.graph.scheduler
+        backend = scheduler.get_backend(self.output_node.get_device())
+        # The buffers the template's fused nodes last read are already queued
+        # for freeing, and each kernel below frees the queue when it finishes,
+        # so hold them until the last one has run.
+        to_free, scheduler.buffer_names_to_free = (
+            scheduler.buffer_names_to_free,
+            OrderedSet(),
+        )
+        try:
+            for _, group in itertools.groupby(
+                self._unfused_epilogues, lambda n: n.group
+            ):
+                nodes = list(group)
+                backend.codegen_node(
+                    nodes[0]
+                    if len(nodes) == 1
+                    else FusedSchedulerNode(scheduler, nodes)
+                )
+        finally:
+            scheduler.buffer_names_to_free |= to_free
+
+    def get_unfused_epilogues(self) -> list[Any]:
+        return self._unfused_epilogues
 
     def codegen_benchmark_post_call(self, result, call_args, signature) -> None:
         # Epilogue benchmarking should pay for the wrapper's finish of the
-        # column reduction partials, not just the kernel.
-        if not self.column_reductions:
+        # reduction partials, not just the kernel.
+        if not self.partial_reductions:
             return
         if self.workspace_arg is None:
-            raise AssertionError("column reduction partials need a workspace")
+            raise AssertionError("reduction partials need a workspace")
         idx = next(
             i
             for i, sig in enumerate(signature)
             if isinstance(sig, WorkspaceArg)
             and sig.outer_name == self.workspace_arg.outer_name
         )
-        n = self.output_node.get_size()[1]
-        for _, _, op, offset, row_tiles in self.column_reductions:
-            end = offset + row_tiles * n * 4
+        for _, _, op, offset, tiles, size in self.partial_reductions:
+            end = offset + tiles * size * 4
             result.writeline(
                 f"args[{idx}][{offset}:{end}].view(torch.float32)"
-                f".view({row_tiles}, {n}).{op}(dim=0)"
+                f".view({tiles}, {size}).{op}(dim=0)"
             )
 
     def kernel_benchmark_extra_args(self) -> list[str]:
@@ -2145,6 +2172,11 @@ class TritonTemplateKernel(TritonKernel):
                 subgraph_name = self._get_store_output_subgraph_name(i)
                 with self.set_subgraph_body(subgraph_name):
                     nodes = self._epilogue_nodes_by_subgraph[i]
+                    if any(node.is_reduction() for node in nodes):
+                        _, self._unfused_epilogues = finished_after_kernel(
+                            self.output_tiles[i][1], template_node.node, nodes
+                        )
+                        nodes = [n for n in nodes if n not in self._unfused_epilogues]
                     produced = template_node.get_buffer_names().union(
                         *(node.get_buffer_names() for node in nodes)
                     )
@@ -2226,13 +2258,15 @@ class TritonTemplateKernel(TritonKernel):
         Column reductions swap the roles (x spans columns, r0_ rows) and store
         fp32 partials per row tile to the workspace, which the wrapper reduces
         after the kernel (see _emit_post_kernel_code). Split column reductions
-        are generated whole.
+        are generated whole. Row reductions store partials per column tile
+        when the tile doesn't span the output's columns.
 
         A row pass returns its loads keyed by buffer and tile position; the
         column pass takes them as row_loads and reuses them transposed."""
         columns = row_loads is not None
         m, n = self.output_node.get_size()
         origin, (rows, cols, _) = self.output_tiles[subgraph_idx]
+        partial = columns or not V.graph.sizevars.statically_known_geq(cols, n)
         numels = {"x": m, "r0_": n}
         sizes, offsets = (rows, cols), origin
         if columns:
@@ -2264,13 +2298,17 @@ class TritonTemplateKernel(TritonKernel):
                     str(v), v.bounds, v.dtype, (str(rows), str(cols))
                 )
 
-        def store_partials(column_node, reduction_type, name, index, value):
-            if column_node.node._split_size is not None:
+        def store_partials(reduction_node, reduction_type, name, index, value):
+            if reduction_node.node._split_size is not None:
                 # The whole reduction replaces the split's second stage.
-                stage2 = column_node.get_outputs()[0].users[0].node
+                stage2 = reduction_node.get_outputs()[0].users[0].node
                 name = stage2.get_outputs()[0].node.get_name()
-            row_tiles = ceildiv(int(m), rows)
-            nbytes = row_tiles * int(n) * 4
+            # One partial per tile along the reduced dim.
+            if columns:
+                tiles, size, tile = ceildiv(int(m), rows), int(n), (origin[0], rows)
+            else:
+                tiles, size, tile = ceildiv(int(n), cols), int(m), (origin[1], cols)
+            nbytes = tiles * size * 4
             ws = next(
                 (w for w in self.args.workspace_args if w.inner_name == "ws_ptr"), None
             )
@@ -2280,19 +2318,20 @@ class TritonTemplateKernel(TritonKernel):
                 w for w in self.args.workspace_args if w.outer_name == ws_name
             )
             offset += pad
-            self.column_reductions.append(
+            self.partial_reductions.append(
                 (
-                    column_node,
+                    reduction_node,
                     name,
-                    COLUMN_REDUCTION_OPS[reduction_type],
+                    PARTIAL_REDUCTION_OPS[reduction_type],
                     offset,
-                    row_tiles,
+                    tiles,
+                    size,
                 )
             )
             indexing = self.indexing(index, block_ptr=False)
             self.post_loop_store.writeline(
                 f"tl.store(({ws_ptr} + {offset}).to(tl.pointer_type(tl.float32)) + "
-                f"{n} * ({origin[0]} // {rows}) + {indexing.index_str}, "
+                f"{size} * ({tile[0]} // {tile[1]}) + {indexing.index_str}, "
                 f"{value}, {indexing.mask_str})"
             )
 
@@ -2353,7 +2392,7 @@ class TritonTemplateKernel(TritonKernel):
                                 store_partials, original, node.node.get_reduction_type()
                             ),
                         )
-                        if columns
+                        if partial
                         else contextlib.nullcontext()
                     ),
                     patch.object(
@@ -2504,9 +2543,6 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
                 info.indexing_code = IndentedBuffer()
 
         return PartialRender(result.source, self.render_hooks)
-
-    def get_unfused_epilogues(self) -> list[Any]:
-        return self._unfused_epilogues
 
     def _compute_fusion_metadata(
         self, scheduling, epilogue_nodes, prologue_nodes, buf_name_to_prologue_group
