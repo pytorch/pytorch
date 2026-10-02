@@ -241,6 +241,7 @@ from .functions import (
     GetSetDescriptorVariable,
     LocalGeneratorFunctionVariable,
     MemberDescriptorVariable,
+    MethodDescriptorVariable,
     MethodWrapperVariable,
     PropertyVariable,
     SysFunctionVariable,
@@ -636,6 +637,14 @@ def lookup_spec_from_dynamo_source(
 
     current_spec: IntermediateSpec = params._named_args.get(root.name)
     return _walk_spec(current_spec, full_path=path, start_index=1)
+
+
+# The unbound C method descriptors CPython's copy._copy_dispatch hands out for
+# exact list/dict/set.  Reached as plain values (e.g. `copier =
+# _copy_dispatch.get(cls)`) they would otherwise go through trace_rules.lookup,
+# which skips an untraceable C method as a skipped builtin and graph breaks the
+# call.
+_COPY_DISPATCH_METHOD_DESCRIPTORS = (list.copy, dict.copy, set.copy)
 
 
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
@@ -1908,6 +1917,22 @@ class VariableBuilder:
                 BuiltinVariable(float, source=self.source),
                 value.__name__,
                 py_type=type(value),
+            )
+        elif (
+            isinstance(value, types.MethodDescriptorType)
+            and value in _COPY_DISPATCH_METHOD_DESCRIPTORS
+        ):
+            # e.g. `copier = list.copy`: the descriptor is called with an
+            # explicit instance, which the owner type's VT dispatches; without
+            # this the branch below turns it into a skipped function and the
+            # call graph breaks.  Its identity selects the semantics baked in at
+            # trace time, so guard it (a no-op for sources Dynamo already skips
+            # guards for, such as stdlib module contents).
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return MethodDescriptorVariable(
+                value,
+                owner=VariableTracker.build(self.tx, value.__objclass__),
+                source=self.source,
             )
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)

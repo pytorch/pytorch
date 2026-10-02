@@ -5426,6 +5426,42 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertIsNot(d.b, p.b)  # deep copy clones the list
         self.assertIs(type(d), Plain)
 
+    def test_copy_exact_container_methods(self):
+        # copy.copy dispatches exact list/dict/set through copy._copy_dispatch,
+        # whose entries are the unbound C method descriptors list.copy,
+        # dict.copy and set.copy.
+        def fn(x):
+            lst = copy.copy([1, 2, 3])
+            lst.append(4)
+            dct = copy.copy({1: 2})
+            dct[3] = 4
+            st = copy.copy({1, 2})
+            st.add(3)
+            return x + len(lst) + len(dct) + len(st)
+
+        x = torch.randn(4)
+        correct = fn(x)
+        result = torch.compile(fn, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
+    def test_unbound_container_copy_methods(self):
+        class OverridingList(list):
+            # list.copy runs list's C slot, not this override
+            def copy(self):
+                return "overridden"
+
+        def fn(x):
+            lst = list.copy([1, 2, 3])
+            dct = dict.copy({1: 2})
+            st = set.copy({1, 2})
+            sub = list.copy(OverridingList([1, 2]))
+            return x + len(lst) + len(dct) + len(st) + len(sub)
+
+        x = torch.randn(4)
+        correct = fn(x)
+        result = torch.compile(fn, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
     def test_deepcopy_set(self):
         MY_SET = {1, 2, 3}
 
