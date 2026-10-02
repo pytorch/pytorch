@@ -2526,25 +2526,13 @@ def _prove_translation_pair(
     if any(
         not sizevars.statically_known_equals(size, 1)
         and not sizevars.statically_known_equals(coefficient, expected)
-        for size, coefficient, expected in zip(
-            producer.size, producer_strides, expected_strides
+        for dep, strides in (
+            (producer, producer_strides),
+            (consumer, consumer_strides),
         )
+        for size, coefficient, expected in zip(dep.size, strides, expected_strides)
     ):
         return None
-    if any(
-        not sizevars.statically_known_equals(size, 1)
-        and not sizevars.statically_known_equals(expected, coefficient)
-        for size, expected, coefficient in zip(
-            consumer.size, expected_strides, consumer_strides
-        )
-    ):
-        return None
-    if any(
-        not sizevars.statically_known_geq(producer_extent, consumer_extent)
-        for producer_extent, consumer_extent in zip(producer.size, consumer.size)
-    ):
-        return None
-
     delta = sizevars.simplify(consumer.get_offset() - producer.get_offset())
     if not sizevars.statically_known_geq(delta, sympy.S.Zero):
         return None
@@ -2617,7 +2605,7 @@ class SubParentAccessRelation:
 
     @staticmethod
     def prove_translation(
-        source_accesses: MemoryDep | typing.Sequence[MemoryDep],
+        source_accesses: typing.Sequence[MemoryDep],
         consumer_access: MemoryDep,
         *,
         sizevars: SizeVarAllocator,
@@ -2636,17 +2624,12 @@ class SubParentAccessRelation:
         Returns:
             The proof, or None if the relation is invalid.
         """
-        sources = (
-            (source_accesses,)
-            if isinstance(source_accesses, MemoryDep)
-            else source_accesses
-        )
-        if not sources:
+        if not source_accesses:
             return None
 
         raw_proofs = tuple(
             _prove_translation_pair(source, consumer_access, sizevars)
-            for source in sources
+            for source in source_accesses
         )
         if any(proof is None for proof in raw_proofs):
             return None

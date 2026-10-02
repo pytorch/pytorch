@@ -134,7 +134,7 @@ class TestScheduler(TestCase):
         consumer = MemoryDep("normed", index + offset, variables, consumer_size)
         self.assertIsNone(
             SubParentAccessRelation.prove_translation(
-                producer, consumer, sizevars=SizeVarAllocator()
+                (producer,), consumer, sizevars=SizeVarAllocator()
             )
         )
 
@@ -152,7 +152,7 @@ class TestScheduler(TestCase):
         consumer = MemoryDep("normed", index, variables, (4, 128))
         self.assertIsNone(
             SubParentAccessRelation.prove_translation(
-                producer, consumer, sizevars=SizeVarAllocator()
+                (producer,), consumer, sizevars=SizeVarAllocator()
             )
         )
 
@@ -172,7 +172,7 @@ class TestScheduler(TestCase):
             consumer = MemoryDep("normed", index, variables, (4, 128))
         self.assertIsNone(
             SubParentAccessRelation.prove_translation(
-                producer, consumer, sizevars=SizeVarAllocator()
+                (producer,), consumer, sizevars=SizeVarAllocator()
             )
         )
 
@@ -213,7 +213,7 @@ class TestScheduler(TestCase):
         sizevars = SizeVarAllocator()
         sizevars.shape_env.var_to_range[width] = ValueRanges(minimum_width, 1024)
         proof = SubParentAccessRelation.prove_translation(
-            producer, consumer, sizevars=sizevars
+            (producer,), consumer, sizevars=sizevars
         )
         if expected_translation is None:
             self.assertIsNone(proof)
@@ -269,9 +269,7 @@ class TestScheduler(TestCase):
             self.assertIsNotNone(source)
             self.assertEqual(source.index, producer_index)
         proof = SubParentAccessRelation.prove_translation(
-            source_frames if multiple_sources else source_frames[0],
-            consumer,
-            sizevars=sizevars,
+            source_frames, consumer, sizevars=sizevars
         )
         self.assertIsNotNone(proof)
         self.assertEqual(proof.translation, translation)
@@ -318,7 +316,7 @@ class TestScheduler(TestCase):
         producer = MemoryDep("buf", producer_index, variables, producer_size)
         consumer = MemoryDep("buf", consumer_index, variables, consumer_size)
         proof = SubParentAccessRelation.prove_translation(
-            producer, consumer, sizevars=SizeVarAllocator()
+            (producer,), consumer, sizevars=SizeVarAllocator()
         )
         self.assertIsNotNone(proof)
         self.assertEqual(proof.translation, translation)
