@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 
+import warnings
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -36,8 +37,7 @@ flex_flydsl_backward_template = FlyDSLTemplate(
 )
 
 _MAX_BUFFER_BYTES = 1 << 32
-_BWD_Q_CHUNK_SIZE = 64
-_BWD_KV_CHUNK_SIZE = 64
+_BWD_METADATA_BLOCK_SIZE = 128
 
 
 def _contiguous_strides(shape):
@@ -54,7 +54,11 @@ def _get_supported_bhsd_stride(node, *, allow_strided: bool) -> tuple[int, ...] 
         return None
     if strides == _contiguous_strides(sizes):
         return tuple(strides)
-    if allow_strided and strides[-1] == 1 and all(stride > 0 for stride in strides):
+    # A zero stride is not a broadcast when the corresponding extent is one.
+    if allow_strided and strides[-1] == 1 and all(
+        stride > 0 or (size == 1 and stride == 0)
+        for size, stride in zip(sizes, strides)
+    ):
         return tuple(strides)
     return None
 
@@ -173,6 +177,18 @@ def _get_flydsl_flex_attention_backward_config(
 
     if torch.version.hip is None:
         return None, "FlyDSL flex bwd requires ROCm/gfx950"
+
+    if torch.are_deterministic_algorithms_enabled():
+        reason = (
+            "FlyDSL flex bwd uses atomic dQ accumulation "
+            "and has no deterministic implementation"
+        )
+        if not torch.is_deterministic_algorithms_warn_only_enabled():
+            return None, reason + "; use BACKEND='TRITON' for deterministic backward"
+        warnings.warn(
+            reason + "; running non-deterministic backward with warn_only=True",
+            stacklevel=2,
+        )
 
     device = query.get_device() if hasattr(query, "get_device") else None
     if device is not None and not _is_gfx950_device(device):
@@ -548,8 +564,8 @@ def create_flydsl_flex_attention_backward_kernel(
     b = config["BATCH_SIZE"]
     h = config["NUM_HEADS"]
     s = config["SEQ_LEN"]
-    q_chunks = s // _BWD_Q_CHUNK_SIZE
-    kv_chunks = s // _BWD_KV_CHUNK_SIZE
+    q_chunks = s // _BWD_METADATA_BLOCK_SIZE
+    kv_chunks = s // _BWD_METADATA_BLOCK_SIZE
     bh = b * h
 
     def make_scratch(numel: int, scratch_dtype: torch.dtype) -> TensorBox:
@@ -561,10 +577,22 @@ def create_flydsl_flex_attention_backward_kernel(
         )
 
     delta = make_scratch(bh * s, torch.float32)
-    partial_q_counts = make_scratch(bh * q_chunks, torch.int32)
-    partial_q_indices = make_scratch(bh * q_chunks * kv_chunks, torch.int32)
-    full_q_counts = make_scratch(bh * q_chunks, torch.int32)
-    full_q_indices_scratch = make_scratch(bh * q_chunks * kv_chunks, torch.int32)
+    grad_query_workspace = make_scratch(
+        bh * s * config["QK_HEAD_DIM"], torch.bfloat16
+    )
+    # Dense ranges need no reverse lists. Allocate minimal placeholders for
+    # the common ABI; sparse traversal uses one list per 128-row KV owner.
+    from ..vendored_templates.flydsl.kernels.flex_attn_utils import (
+        MASK_TRAVERSAL_BLOCK_LIST,
+        classify_mask_traversal,
+    )
+
+    traversal, _ = classify_mask_traversal(
+        config["MASK_PROGRAM"], config["MASK_PROGRAM_OUTPUT"],
+        config["MASK_BUFFER_SHAPES"],
+    )
+    if traversal != MASK_TRAVERSAL_BLOCK_LIST:
+        kv_chunks = q_chunks = 1
     partial_kv_counts = make_scratch(bh * kv_chunks, torch.int32)
     partial_kv_indices = make_scratch(bh * kv_chunks * q_chunks, torch.int32)
     full_kv_counts = make_scratch(bh * kv_chunks, torch.int32)
@@ -604,10 +632,7 @@ def create_flydsl_flex_attention_backward_kernel(
         full_kv_num_blocks,
         full_kv_indices,
         delta,
-        partial_q_counts,
-        partial_q_indices,
-        full_q_counts,
-        full_q_indices_scratch,
+        grad_query_workspace,
         partial_kv_counts,
         partial_kv_indices,
         full_kv_counts,
@@ -629,10 +654,7 @@ def create_flydsl_flex_attention_backward_kernel(
             grad_key,
             grad_value,
             delta,
-            partial_q_counts,
-            partial_q_indices,
-            full_q_counts,
-            full_q_indices_scratch,
+            grad_query_workspace,
             partial_kv_counts,
             partial_kv_indices,
             full_kv_counts,

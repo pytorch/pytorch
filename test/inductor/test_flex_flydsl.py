@@ -22,8 +22,12 @@ from torch.nn.attention.flex_attention import (
     create_block_mask,
     flex_attention,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    largeTensorTest,
+)
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -233,6 +237,20 @@ class TestFlexFlyDSLGates(TestCase):
 
 @instantiate_parametrized_tests
 class TestFlexFlyDSLConfig(TestCase):
+    @parametrize("mode", ("off", "strict", "warn_only"))
+    def test_deterministic_backward(self, mode):
+        with DeterministicGuard(mode != "off", warn_only=mode == "warn_only"):
+            if mode == "warn_only":
+                with self.assertWarnsRegex(UserWarning, "atomic dQ accumulation"):
+                    config, reason = _backward_config_result(_supported_fake_backward_inputs())
+            else:
+                config, reason = _backward_config_result(_supported_fake_backward_inputs())
+        if mode == "strict":
+            self.assertIsNone(config)
+            self.assertIn("no deterministic implementation", reason)
+        else:
+            self.assertIsNotNone(config, reason)
+
     @parametrize(
         "shape,stride,strict,metadata",
         [
@@ -260,6 +278,32 @@ class TestFlexFlyDSLConfig(TestCase):
                 stride if strict else None,
             )
             self.assertEqual(_is_contiguous_shape_stride(shape, stride), metadata)
+
+    @parametrize(
+        "shape,stride,supported",
+        [
+            subtest(
+                ((1, 128, 4096, 192), (0, 192, 24576, 1), True),
+                name="size_one_zero_stride",
+            ),
+            subtest(
+                ((2, 128, 4096, 192), (0, 192, 24576, 1), False),
+                name="broadcast_batch",
+            ),
+            subtest(
+                ((1, 128, 4096, 192), (-1, 192, 24576, 1), False),
+                name="negative_size_one_stride",
+            ),
+        ],
+    )
+    def test_strided_bhsd_zero_stride(self, shape, stride, supported):
+        with V.set_graph_handler(_fake_graph()):
+            self.assertEqual(
+                _get_supported_bhsd_stride(
+                    _FakeNode(shape, stride), allow_strided=True
+                ),
+                stride if supported else None,
+            )
 
     @parametrize(
         "metadata_name,replacement,expected_reason",
@@ -371,12 +415,10 @@ class TestFlexFlyDSLMaskLowering(TestCase):
         self.assertIn("scalar constant -0.5 is unsupported", reason)
 
     @parametrize("kind", ("document_start", "batched_document_end"))
-    def test_document_mask_program_matcher(self, kind):
-        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_gfx950 import (
-            _is_batched_causal_document_mask_program,
-        )
+    def test_document_mask_uses_block_list_traversal(self, kind):
         from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils import (
-            is_causal_document_mask_program,
+            MASK_TRAVERSAL_BLOCK_LIST,
+            classify_mask_traversal,
         )
 
         batch, sequence_length = 2, 256
@@ -436,27 +478,57 @@ class TestFlexFlyDSLMaskLowering(TestCase):
                 captures,
             )
         self.assertIsNotNone(program, reason)
-        if kind == "document_start":
-            self.assertTrue(
-                is_causal_document_mask_program(
-                    program.instructions,
-                    program.output,
-                    program.buffer_strides,
+        traversal, direct_range_kind = classify_mask_traversal(
+            program.instructions,
+            program.output,
+            program.buffer_shapes,
+        )
+        self.assertEqual(traversal, MASK_TRAVERSAL_BLOCK_LIST)
+        self.assertIsNone(direct_range_kind)
+
+    def test_causal_mask_uses_direct_range_traversal(self):
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils import (
+            DIRECT_RANGE_CAUSAL,
+            MASK_TRAVERSAL_DIRECT_RANGE,
+            classify_mask_traversal,
+        )
+
+        program, reason = lower_flydsl_mask_graph(
+            _mask_graph(lambda b, h, q, kv: q >= kv),
+            (),
+        )
+        self.assertIsNotNone(program, reason)
+        traversal, direct_range_kind = classify_mask_traversal(
+            program.instructions,
+            program.output,
+            program.buffer_shapes,
+        )
+        self.assertEqual(traversal, MASK_TRAVERSAL_DIRECT_RANGE)
+        self.assertEqual(direct_range_kind, DIRECT_RANGE_CAUSAL)
+
+    def test_equivalent_causal_programs_use_direct_range_traversal(self):
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils import (
+            DIRECT_RANGE_CAUSAL,
+            MASK_TRAVERSAL_DIRECT_RANGE,
+            classify_mask_traversal,
+        )
+
+        cases = (
+            ((("ge", 2, 3),), 4),
+            ((("le", 3, 2),), 4),
+            ((("const_bool", True), ("ge", 2, 3), ("and", 4, 5)), 6),
+            ((("const_i32", 0), ("add", 2, 4), ("ge", 5, 3)), 6),
+            ((("const_i32", 0), ("sub", 2, 4), ("ge", 5, 3)), 6),
+        )
+        for instructions, output in cases:
+            with self.subTest(instructions=instructions):
+                traversal, direct_range_kind = classify_mask_traversal(
+                    instructions,
+                    output,
                 )
-            )
-        else:
-            self.assertTrue(
-                _is_batched_causal_document_mask_program(
-                    program.instructions,
-                    program.output,
-                    program.buffer_shapes,
-                    program.buffer_strides,
-                    batch_size=batch,
-                    sequence_length=sequence_length,
-                    block_mask_batch=batch,
-                    block_mask_heads=1,
-                )
-            )
+                self.assertEqual(traversal, MASK_TRAVERSAL_DIRECT_RANGE)
+                self.assertEqual(direct_range_kind, DIRECT_RANGE_CAUSAL)
+
 
 
 class TestFlexFlyDSLRuntime(TestCase):
@@ -776,11 +848,9 @@ class TestFlexFlyDSLRuntime(TestCase):
     def test_document_mask_lowering(self, device, kind):
         self._require_runtime()
 
-        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_gfx950 import (
-            _is_batched_causal_document_mask_program,
-        )
         from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils import (
-            is_causal_document_mask_program,
+            MASK_TRAVERSAL_BLOCK_LIST,
+            classify_mask_traversal,
         )
 
         batch, heads, seq = 2, 2, 256
@@ -834,27 +904,13 @@ class TestFlexFlyDSLRuntime(TestCase):
         def check_document_lowering(*args, **kwargs):
             program, reason = lower_flydsl_mask_graph(*args, **kwargs)
             self.assertIsNotNone(program, reason)
-            if kind == "document_start":
-                self.assertTrue(
-                    is_causal_document_mask_program(
-                        program.instructions,
-                        program.output,
-                        program.buffer_strides,
-                    )
-                )
-            else:
-                self.assertTrue(
-                    _is_batched_causal_document_mask_program(
-                        program.instructions,
-                        program.output,
-                        program.buffer_shapes,
-                        program.buffer_strides,
-                        batch_size=batch,
-                        sequence_length=seq,
-                        block_mask_batch=mask_batch,
-                        block_mask_heads=1,
-                    )
-                )
+            traversal, direct_range_kind = classify_mask_traversal(
+                program.instructions,
+                program.output,
+                program.buffer_shapes,
+            )
+            self.assertEqual(traversal, MASK_TRAVERSAL_BLOCK_LIST)
+            self.assertIsNone(direct_range_kind)
             return program, reason
 
         torch._dynamo.reset()
@@ -913,7 +969,8 @@ class TestFlexFlyDSLRuntime(TestCase):
         with self.assertRaisesRegex(RuntimeError, "MHA with matching Q/K"):
             compiled(q, k, v).backward(grad_out)
 
-    def test_standalone_default_lse_compiles(self, device):
+    @largeTensorTest("24GB")
+    def test_standalone_four_gib_buffers(self, device):
         self._require_runtime()
 
         import flydsl.compiler as flyc
@@ -922,7 +979,39 @@ class TestFlexFlyDSLRuntime(TestCase):
             build_flex_attn_bwd_module,
         )
 
-        batch, heads, sequence_length, head_dim = 1, 1, 256, 128
+        batch, heads, seq, dim = 16, 64, 16384, 128
+        # Each tensor spans 4 GiB, while each head fits a buffer descriptor.
+        source = torch.zeros((batch, heads, seq, dim), device=device, dtype=torch.bfloat16)
+        grads = [torch.empty_like(source) for _ in range(3)]
+        workspace = torch.empty_like(source)
+        lse = torch.full((batch, heads, seq), 14.0, device=device, dtype=torch.float32)
+        delta = torch.empty_like(lse)
+        unused = torch.empty(1, device=device, dtype=torch.int32)
+        launcher = build_flex_attn_bwd_module(
+            batch, heads, seq, dim, dim, "bf16", 128, 128, lse_in_log2=True
+        )
+        args = (
+            source, source, source, source, lse, source, *grads,
+            unused, unused, unused, unused, delta,
+            unused, unused, unused, unused,
+            unused, unused, unused, unused, workspace,
+        )
+        stream = torch.cuda.current_stream(device).cuda_stream
+        flyc.compile(launcher, *(flyc.from_torch_tensor(arg) for arg in args), stream)
+        for grad in grads:
+            self.assertEqual(torch.count_nonzero(grad).item(), 0)
+
+    @parametrize("causal", [False, True])
+    def test_standalone_default_lse(self, device, causal):
+        self._require_runtime()
+
+        import flydsl.compiler as flyc
+
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_bwd_gfx950 import (
+            build_flex_attn_bwd_module,
+        )
+
+        batch, heads, sequence_length, head_dim = 1, 8, 256, 128
         query, key, value, grad_output = self._make_inputs(
             device=device,
             batch=batch,
@@ -934,10 +1023,20 @@ class TestFlexFlyDSLRuntime(TestCase):
         )
         scale = head_dim**-0.5
         scores = query.float() @ key.float().transpose(-2, -1) * scale
-        attention_output = (scores.softmax(dim=-1) @ value.float()).to(
-            torch.bfloat16
-        )
+        if causal:
+            positions = torch.arange(sequence_length, device=device)
+            scores.masked_fill_(positions[:, None] < positions[None, :], -torch.inf)
+        probabilities = scores.softmax(dim=-1)
+        attention_output = (probabilities @ value.float()).to(torch.bfloat16)
         logsumexp = scores.logsumexp(dim=-1)
+        grad_probabilities = grad_output.float() @ value.float().transpose(-2, -1)
+        delta_reference = (attention_output.float() * grad_output.float()).sum(dim=-1)
+        grad_scores = probabilities * (grad_probabilities - delta_reference.unsqueeze(-1))
+        expected_grads = (
+            (grad_scores @ key.float() * scale).to(torch.bfloat16),
+            (grad_scores.transpose(-2, -1) @ query.float() * scale).to(torch.bfloat16),
+            (probabilities.transpose(-2, -1) @ grad_output.float()).to(torch.bfloat16),
+        )
         grad_query = torch.empty_like(query)
         grad_key = torch.empty_like(key)
         grad_value = torch.empty_like(value)
@@ -946,28 +1045,14 @@ class TestFlexFlyDSLRuntime(TestCase):
             device=device,
             dtype=torch.float32,
         )
-        query_chunks = sequence_length // 32
-        kv_chunks = sequence_length // 32
-        partial_q_counts = torch.empty(
-            batch * heads * query_chunks, device=device, dtype=torch.int32
+        grad_query_workspace = torch.empty_like(
+            query, memory_format=torch.contiguous_format
         )
-        partial_q_indices = torch.empty(
-            batch * heads * query_chunks * kv_chunks,
-            device=device,
-            dtype=torch.int32,
-        )
-        full_q_counts = torch.empty_like(partial_q_counts)
-        full_q_indices = torch.empty_like(partial_q_indices)
-        partial_kv_counts = torch.empty(
-            batch * heads * kv_chunks, device=device, dtype=torch.int32
-        )
-        partial_kv_indices = torch.empty(
-            batch * heads * kv_chunks * query_chunks,
-            device=device,
-            dtype=torch.int32,
-        )
+        # Dense ranges do not read the reverse-list metadata.
+        partial_kv_counts = torch.empty(1, device=device, dtype=torch.int32)
+        partial_kv_indices = torch.empty_like(partial_kv_counts)
         full_kv_counts = torch.empty_like(partial_kv_counts)
-        full_kv_indices_transposed = torch.empty_like(partial_kv_indices)
+        full_kv_indices_transposed = torch.empty_like(partial_kv_counts)
         sparse_blocks = sequence_length // 128
         kv_num_blocks = torch.zeros(
             (1, 1, sparse_blocks), device=device, dtype=torch.int32
@@ -996,6 +1081,8 @@ class TestFlexFlyDSLRuntime(TestCase):
             scale=scale,
             max_partial_blocks=sparse_blocks,
             max_full_blocks=sparse_blocks,
+            mask_program=(("ge", 2, 3),) if causal else (),
+            mask_program_output=4 if causal else 0,
         )
         tensor_args = (
             query,
@@ -1012,10 +1099,6 @@ class TestFlexFlyDSLRuntime(TestCase):
             full_kv_num_blocks,
             full_kv_indices,
             delta,
-            partial_q_counts,
-            partial_q_indices,
-            full_q_counts,
-            full_q_indices,
             partial_kv_counts,
             partial_kv_indices,
             full_kv_counts,
@@ -1024,11 +1107,23 @@ class TestFlexFlyDSLRuntime(TestCase):
             kv_num_blocks,
             kv_num_blocks,
             kv_num_blocks,
+            grad_query_workspace,
         )
+        stream = torch.cuda.current_stream(device).cuda_stream
         compile_args = tuple(
             flyc.from_torch_tensor(arg) for arg in tensor_args
-        ) + (0,)
-        flyc.compile(launcher, *compile_args)
+        ) + (stream,)
+        compiled = flyc.compile(launcher, *compile_args)
+        # Repeated launches exercise dV reads before the double buffer is reused.
+        for _ in range(5):
+            compiled(*tensor_args, stream)
+            for name, actual, expected in zip(
+                ("dQ", "dK", "dV"),
+                (grad_query, grad_key, grad_value),
+                expected_grads,
+                strict=True,
+            ):
+                self.assertEqual(actual, expected, atol=0.02, rtol=0.02, msg=name)
 
 
 instantiate_device_type_tests(TestFlexFlyDSLRuntime, globals(), only_for=("cuda",))
