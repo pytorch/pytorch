@@ -2760,6 +2760,7 @@ class GeneratedCodeCache:
                 "transpose_discontiguous_tensor_descriptors_override": transpose_discontiguous_tensor_descriptors_override,
                 "kwargs": kwargs,
                 "hint_override": hint_override,
+                "emulate_precision_casts": config.emulate_precision_casts,
                 "triton_meta": triton_meta,
             }
         )
