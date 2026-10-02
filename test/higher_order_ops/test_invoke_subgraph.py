@@ -281,6 +281,46 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
+    def test_sync_canonicalizes_nested_joint_graphs(self):
+        from torch._functorch._aot_autograd import graph_compile
+
+        @nested_compile_region
+        def region(x, y):
+            return (x * y).sin()
+
+        def fn(x, y):
+            return region(x, y) + region(x, y)
+
+        canonicalized_graphs = []
+        canonicalize_joint_graph = graph_compile._canonicalize_joint_graph
+
+        def record_canonicalization(gm):
+            canonicalized_graphs.append(gm)
+            canonicalize_joint_graph(gm)
+
+        backend = AotEagerAndRecordGraphs()
+        x = torch.randn(8, requires_grad=True)
+        y = torch.randn(8, requires_grad=True)
+        with (
+            torch._functorch.config.patch(_sync_decision_cross_ranks=True),
+            mock.patch.object(
+                graph_compile,
+                "_canonicalize_joint_graph",
+                side_effect=record_canonicalization,
+            ),
+        ):
+            torch.compile(fn, backend=backend, fullgraph=True)(x, y).sum().backward()
+
+        def has_invoke_subgraph(gm):
+            return any(
+                node.op == "call_function"
+                and node.target is torch.ops.higher_order.invoke_subgraph
+                for node in gm.graph.nodes
+            )
+
+        self.assertTrue(any(map(has_invoke_subgraph, canonicalized_graphs)))
+        self.assertTrue(any(not has_invoke_subgraph(gm) for gm in canonicalized_graphs))
+
     @torch._functorch.config.patch("donated_buffer", True)
     @requires_cuda_and_triton
     def test_reused_subgraph_square_backward(self):
