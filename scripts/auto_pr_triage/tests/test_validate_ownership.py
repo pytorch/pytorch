@@ -22,6 +22,7 @@ from tests.stage_fixtures import (
 )
 from validate_ownership import (
     build_ownership_result,
+    is_excerpt_of_patch,
     load_action_execution,
     log_analysis_record,
     main as ownership_result_main,
@@ -454,6 +455,10 @@ class ActionExecutionTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "successful result"):
                 load_action_execution(path)
 
+    def test_action_execution_rejects_missing_log(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "no execution log"):
+            load_action_execution(Path(""))
+
     def test_log_output_exposes_reasoning_without_workflow_commands(self) -> None:
         record = {
             "ownership_result": make_ownership_result(
@@ -641,6 +646,36 @@ class ValidationTest(unittest.TestCase):
         evidence = result["additional_owner_concerns"][0]["concern"]["evidence"][0]
         evidence["diff_excerpt"] = "+++counter"
         self.assertEqual(validate(prepared=prepared, result=result), [])
+
+    def test_excerpt_may_skip_lines_and_stop_a_line_early(self) -> None:
+        patch = [
+            "@@ -1,4 +1,5 @@ int f(",
+            " int f() {",
+            "+  // why the guard is needed",
+            "+  guard();",
+            "-  return old(); // note",
+            "+  return g();",
+            "@@ -20,2 +21,2 @@",
+            "-  x = 1;",
+            "+  x = 2;",
+        ]
+        cases = [
+            ("whole lines", ["+  guard();", "-  return old(); // note"], True),
+            ("skipped comment", [" int f() {", "+  guard();"], True),
+            ("skipped changed line", ["+  guard();", "+  return g();"], True),
+            ("across hunks", ["+  return g();", "+  x = 2;"], True),
+            ("stopped early", ["-  return old();"], True),
+            ("reordered", ["+  return g();", "+  guard();"], False),
+            ("unchanged line as a change", ["- int f() {", "+ int f() {"], False),
+            ("added text", ["+  guard(); // new"], False),
+            ("marker only", ["-"], False),
+        ]
+        for name, excerpt, expected in cases:
+            with self.subTest(name=name):
+                self.assertEqual(
+                    is_excerpt_of_patch(excerpt_lines=excerpt, patch_lines=patch),
+                    expected,
+                )
 
     def test_codepath_owner_concern_must_name_codepath_owners(self) -> None:
         result = llm_result(
