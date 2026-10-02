@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.logging_utils import logs_to_string
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 TF32_ADVISORY = "TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled."
@@ -71,6 +72,7 @@ class InductorWarningTests(TestCase):
         self.assertIn("FLOAT32_PRECISION : tl.constexpr = 'ieee'", source)
         self.assertNotIn("FLOAT32_PRECISION : tl.constexpr = 'tf32'", source)
 
+    @requires_cuda_and_triton
     @unittest.skipIf(not _has_cuda_sm80(), "requires CUDA SM80")
     @recover_orig_fp32_precision
     def test_trivial_matmul_compile_no_user_warning(self):

@@ -54,7 +54,11 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
-from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu,
+    requires_gpu_and_triton,
+)
 
 
 nested_compile_region = torch.compiler.nested_compile_region
@@ -3481,6 +3485,7 @@ _reuse_test_global = None
 class TestInvokeSubgraphCompileDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @requires_gpu_and_triton
     @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/4819")
     @torch._dynamo.config.patch(canonicalize_output_graph_node_order=True)
     def test_return_none(self, device):
