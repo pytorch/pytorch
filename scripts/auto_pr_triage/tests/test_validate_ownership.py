@@ -454,6 +454,10 @@ class ActionExecutionTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "successful result"):
                 load_action_execution(path)
 
+    def test_action_execution_rejects_missing_log(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "no execution log"):
+            load_action_execution(Path(""))
+
     def test_log_output_exposes_reasoning_without_workflow_commands(self) -> None:
         record = {
             "ownership_result": make_ownership_result(

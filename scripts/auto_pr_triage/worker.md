@@ -104,10 +104,12 @@ useful set of changed files demonstrating it, and one to three strongest pieces
 of evidence from those files. Each evidence item must contain a
 `diff_excerpt` of one or more contiguous lines copied verbatim from the
 supplied patch, including at least one `+` or `-` changed line, plus a concise
-explanation of its relevance. Keep an excerpt short by choosing fewer lines,
-never by cutting a line: copy every line in full, including its leading `+`,
-`-`, or space and any trailing comment, however long. Do not reconstruct,
-normalize, or paraphrase an excerpt.
+explanation of its relevance. Keep an excerpt short by choosing a shorter run
+of adjacent lines, never by skipping lines inside it or cutting a line: copy
+every line in full, including its leading `+`, `-`, or space and any trailing
+comment, however long. Never turn an unchanged line, or text from an `@@` hunk
+header, into a `-`/`+` pair. Do not reconstruct, normalize, or paraphrase an
+excerpt.
 
 ## Bypass intake
 

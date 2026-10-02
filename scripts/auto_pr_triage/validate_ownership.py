@@ -30,6 +30,10 @@ from step_summary import summary_prose
 def load_action_execution(path: Path) -> tuple[LLMResult, dict[str, Any]]:
     """Extract the action-validated LLM result and bounded LLM metadata."""
 
+    # The action writes no log when the SDK errors, e.g. after running out of
+    # structured-output retries, and then leaves its execution_file output empty.
+    if not path.is_file():
+        raise RuntimeError("Claude action wrote no execution log")
     messages = json.loads(path.read_text())
     if not isinstance(messages, list):
         raise RuntimeError("Claude action execution log is not a JSON array")
