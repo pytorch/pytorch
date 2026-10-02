@@ -50,7 +50,7 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
                                                    bool is_causal,
                                                    const std::optional<Tensor>& dropout_mask,
                                                    std::optional<double> scale,
-                                                   const Tensor& orig_query,
+                                                   const Tensor& broadcast_query,
                                                    bool unsqueezed) {
   using namespace mps;
   // MPSGraph fallback path doesn't combine causal + attn_mask correctly
@@ -169,11 +169,11 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
   auto final_out = out;
   auto final_attn = attn;
   if (unsqueezed) {
-    if (orig_query.dim() == 3) {
+    if (broadcast_query.dim() == 3) {
       final_out = out.squeeze(0);
       final_attn = attn.squeeze(0);
     } else {
-      std::vector<int64_t> prefix_shape(orig_query.sizes().begin(), orig_query.sizes().end() - 3);
+      std::vector<int64_t> prefix_shape(broadcast_query.sizes().begin(), broadcast_query.sizes().end() - 3);
 
       auto out_shape = prefix_shape;
       auto attn_shape = prefix_shape;
@@ -202,7 +202,7 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
                                                        bool is_causal,
                                                        const std::optional<Tensor>& dropout_mask,
                                                        std::optional<double> scale,
-                                                       const Tensor& orig_query,
+                                                       const Tensor& broadcast_query,
                                                        bool unsqueezed) {
   TORCH_CHECK(q_.size(3) == k_.size(3) && q_.size(3) == v_.size(3),
               "sdpa_vector_fast_mps expects query, key, and value to have the same head dimension");
@@ -271,9 +271,9 @@ static std::tuple<Tensor, Tensor> sdpa_vector_fast_mps(const Tensor& q_,
     }
   });
   // reshape back to original dimension
-  auto final_out = unsqueezed ? out.view_as(orig_query) : out;
-  auto final_attn = unsqueezed ? (orig_query.dim() == 3 ? attn.squeeze(0) : [&]{
-    std::vector<int64_t> shape(orig_query.sizes().begin(), orig_query.sizes().end() - 3);
+  auto final_out = unsqueezed ? out.view_as(broadcast_query) : out;
+  auto final_attn = unsqueezed ? (broadcast_query.dim() == 3 ? attn.squeeze(0) : [&]{
+    std::vector<int64_t> shape(broadcast_query.sizes().begin(), broadcast_query.sizes().end() - 3);
     shape.insert(shape.end(), {attn.size(1), attn.size(2), attn.size(3)});
     return attn.view(shape);
   }()) : attn;
@@ -290,7 +290,7 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
                                                         bool is_causal,
                                                         const std::optional<Tensor>& dropout_mask,
                                                         std::optional<double> scale,
-                                                        const Tensor& orig_query,
+                                                        const Tensor& broadcast_query,
                                                         bool unsqueezed) {
   TORCH_CHECK(q_.size(3) == k_.size(3) && q_.size(3) == v_.size(3),
               "sdpa_vector_2pass_mps expects query, key, and value to have the same head dimension");
@@ -319,7 +319,7 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
   auto sums = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options().dtype(kFloat));
   auto maxs = at::empty({batchSize, num_heads, seq_len_q, blocks}, q_.options().dtype(kFloat));
 
-  auto scale_factor = sdp::calculate_scale(orig_query, scale).expect_float();
+  auto scale_factor = sdp::calculate_scale(broadcast_query, scale).expect_float();
   const bool has_mask = mask_.has_value();
 
   MPSStream* mpsStream = getCurrentMPSStream();
@@ -374,7 +374,7 @@ static std::tuple<Tensor, Tensor> sdpa_vector_2pass_mps(const Tensor& q_,
     }
   });
 
-  auto final_out = unsqueezed ? out.view_as(orig_query) : out;
+  auto final_out = unsqueezed ? out.view_as(broadcast_query) : out;
   return {std::move(final_out), std::move(intermediate)};
 }
 
@@ -588,7 +588,7 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
                                                    const std::optional<Tensor>& mask_,
                                                    bool is_causal,
                                                    std::optional<double> scale,
-                                                   const Tensor& orig_query,
+                                                   const Tensor& broadcast_query,
                                                    bool unsqueezed,
                                                    bool use_mpp = false) {
   using namespace mps;
@@ -615,7 +615,7 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
   params.qL = static_cast<int>(qL);
   params.kL = static_cast<int>(kL);
   params.gqa_factor = gqa_factor;
-  params.scale = sdp::calculate_scale(orig_query, scale).expect_float();
+  params.scale = sdp::calculate_scale(broadcast_query, scale).expect_float();
   params.softcapping = 1.0f;
   params.Q_strides[0] = q_.stride(0);
   params.Q_strides[1] = q_.stride(1);
@@ -735,7 +735,7 @@ static std::tuple<Tensor, Tensor> sdpa_prefill_mps(const Tensor& q_,
     }
   });
 
-  auto final_out = unsqueezed ? out.view_as(orig_query) : out;
+  auto final_out = unsqueezed ? out.view_as(broadcast_query) : out;
   return {std::move(final_out), std::move(final_out)};
 }
 
@@ -774,25 +774,18 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math_mps(const Tensor& 
               "For GQA, the query tensor's head dimension (" + std::to_string(q_heads) +
                   ") must be divisible by the key tensor's head dimension (" + std::to_string(k_heads) + ").");
 
-  auto batch_dims = [](const Tensor& t) { return t.sizes().slice(0, t.dim() - 3); };
-  auto batch_shape = at::infer_size_dimvector(batch_dims(query), batch_dims(key_));
-  batch_shape = at::infer_size_dimvector(batch_shape, batch_dims(value_));
+  auto batch_dims = [](const Tensor& t) { return t.sym_sizes().slice(0, t.dim() - 3); };
+  auto batch_shape = at::infer_size_symdimvector(batch_dims(query), batch_dims(key_));
+  batch_shape = at::infer_size_symdimvector(batch_shape, batch_dims(value_));
   auto expand_batch = [&](const Tensor& t) {
     auto shape = batch_shape;
-    shape.append(t.sizes().end() - 3, t.sizes().end());
-    return t.expand(shape);
+    shape.append(t.sym_sizes().end() - 3, t.sym_sizes().end());
+    return t.expand_symint(shape);
   };
   const auto q_bcast = expand_batch(query);
-
-  auto query_tuple = ensure_4d(q_bcast);
-  Tensor q_ = std::get<0>(query_tuple);
-  bool unsqueezed = std::get<1>(query_tuple);
-
-  auto key_tuple = ensure_4d(expand_batch(key_));
-  Tensor k_ = std::get<0>(key_tuple);
-
-  auto value_tuple = ensure_4d(expand_batch(value_));
-  Tensor v_ = std::get<0>(value_tuple);
+  auto [q_, unsqueezed] = ensure_4d(q_bcast);
+  auto k_ = std::get<0>(ensure_4d(expand_batch(key_)));
+  auto v_ = std::get<0>(ensure_4d(expand_batch(value_)));
 
   std::optional<Tensor> mask_;
   if (attn_mask) {
