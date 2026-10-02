@@ -2364,9 +2364,45 @@ class ByteArrayVariable(VariableTracker):
                 kwargs,
             )
 
+    def bytearray_hex(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            return None
+        try:
+            result = self.data.hex(*const_args, **const_kwargs)
+        except (OverflowError, TypeError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ConstantVariable.create(result)
+
+    def bytearray_decode(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker | None:
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except AsPythonConstantNotImplementedError:
+            return None
+        try:
+            result = self.data.decode(*const_args, **const_kwargs)
+        except (LookupError, TypeError, UnicodeError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return ConstantVariable.create(result)
+
     tp_methods = {
         "index": Method(bytearray_index),
         "count": Method(bytearray_count),
+        "hex": Method(bytearray_hex),
+        "decode": Method(bytearray_decode),
     }
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
