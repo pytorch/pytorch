@@ -263,4 +263,20 @@ TEST(SymIntTest, SetSymbolicSizesWithExistingExtraMeta) {
   EXPECT_EQ(impl->strides(), IntArrayRef(expected_strides));
   EXPECT_EQ(impl->get_backend_meta(), backend_meta.get());
 }
+
+TEST(SymIntTest, SetSymbolicContiguousSizesKeepsStorageOffset) {
+  Storage storage(
+      Storage::use_byte_size_t(), /*size_bytes=*/0, GetCPUAllocator());
+  auto impl = c10::make_intrusive<TensorImpl>(
+      std::move(storage),
+      DispatchKeySet(DispatchKey::CPU),
+      caffe2::TypeMeta::Make<float>());
+  impl->set_storage_offset(5);
+
+  std::vector<SymInt> sizes{
+      create_symbolic_symint(2), create_symbolic_symint(3)};
+  impl->generic_set_sizes_contiguous(sizes);
+
+  EXPECT_EQ(unwrap(impl->sym_storage_offset()), 5);
+}
 #endif
