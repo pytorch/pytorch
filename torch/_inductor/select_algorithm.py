@@ -947,8 +947,6 @@ class TritonTemplateKernel(TritonKernel):
             self.triton_meta = triton_meta
         else:
             self.triton_meta.update(triton_meta)
-        # Preserve the prior fusion default for templates during normal
-        # compilation, without changing precision-emulation mode or overrides.
         if not config.emulate_precision_casts:
             self.triton_meta.setdefault("enable_fp_fusion", True)
 
