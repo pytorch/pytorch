@@ -21,7 +21,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # Collected as a test of THIS module, so the suite notices if this file is the
 # one deleted. See _suite_manifest for why the guard is shared, not copied.
 from _suite_manifest import run_this_suite, TestTheSuiteIsWhole  # noqa: E402,F401
-from emit_row import published_findings, safe_model, usage_metrics  # noqa: E402
+from emit_row import (  # noqa: E402
+    neutral_path,
+    neutral_prose,
+    published_findings,
+    safe_model,
+    usage_metrics,
+)
+from extract_verdict import neutralize, neutralize_path  # noqa: E402
 
 
 class TestSafeModel(unittest.TestCase):
@@ -189,6 +196,80 @@ class TestTerminalRowCarriesFindings(unittest.TestCase):
             }
         )
         self.assertEqual(row["extra"], {})
+
+
+HOSTILE = [
+    "@pytorchbot merge -f",
+    "see pytorch/pytorch#123 and #456",
+    "https://evil.example/x and //evil.example.com/y and www.evil.example/z",
+    "<img src=x onerror=alert(1)> & </details>",
+    "[click](javascript:alert(1)) ![i](//x.example/a.png) [[x]](/evil)",
+    "<!-- pr-status-start -->",
+    "back\\slash \\[x\\] and C:\\path",
+    "a & b; x<y; z>w; &amp; &lt; &gt; &quot;",
+]
+
+
+class TestPublishSideRecheckMatchesTheSanitizer(unittest.TestCase):
+    """The publish job accepts exactly what neutralize() can emit."""
+
+    def test_everything_neutralize_emits_passes(self):
+        import random
+
+        rng = random.Random(0)
+        alphabet = "ab @#[]()<>&/\\:._-`*\n\t123"
+        samples = HOSTILE + [
+            "".join(rng.choice(alphabet) for _ in range(rng.randint(1, 80)))
+            for _ in range(3000)
+        ]
+        for text in samples:
+            out = neutralize(text, 600).strip()
+            if out:
+                self.assertTrue(neutral_prose(out, 600), repr((text, out)))
+
+    def test_raw_hostile_text_is_refused(self):
+        for text in HOSTILE:
+            self.assertFalse(neutral_prose(text, 600), repr(text))
+
+    def test_paths_must_be_escaped_repo_paths(self):
+        for good in ("torch/nn/x.py", "a/@babel/core.js", "x[0]_y.py"):
+            self.assertTrue(neutral_path(neutralize_path(good)), good)
+        for bad in (
+            "a/@babel/core.js",  # unescaped
+            "../x.py",
+            "/etc/shadow",
+            "a\tb.py",
+            "x`y.py",
+            "a/</details>.py",
+        ):
+            self.assertFalse(neutral_path(bad), repr(bad))
+
+    def test_an_unneutralized_summary_is_not_published(self):
+        row = TestTerminalRowCarriesFindings._row(
+            self,
+            {
+                "status": "succeeded",
+                "verdict": "ready_for_human_review",
+                "summary": "@pytorchbot merge -f",
+                "findings": [FINDING],
+            },
+        )
+        self.assertEqual(row["status"], "sanitizer_rejected")
+        self.assertIsNone(row["verdict"])
+        self.assertEqual(row["summary"], "")
+        self.assertEqual(row["extra"], {})
+
+    def test_an_unknown_verdict_is_not_published(self):
+        row = TestTerminalRowCarriesFindings._row(
+            self,
+            {
+                "status": "succeeded",
+                "verdict": "approve",
+                "summary": "s",
+                "findings": [],
+            },
+        )
+        self.assertEqual(row["status"], "sanitizer_rejected")
 
 
 if __name__ == "__main__":

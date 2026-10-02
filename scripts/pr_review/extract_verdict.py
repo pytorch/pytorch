@@ -365,10 +365,10 @@ def neutralize(text: str, cap: int = MAX_SUMMARY) -> str:
 
     NOT DONE HERE: markdown STRUCTURE the attacker writes is not escaped, so a
     summary can still forge a heading, a table, a horizontal rule or a fenced
-    block. The renderer has to contain it. Dr.CI does, by putting the summary
-    and findings inside a code fence longer than any backtick run they hold
-    (pytorch/test-infra torchci/lib/prReview/prReviewRender.ts). Any new
-    surface that renders these strings needs its own containment.
+    block. The renderer has to contain it. The Dr.CI renderer proposed in
+    pytorch/test-infra#8972 does, by putting the summary and findings inside a
+    code fence longer than any backtick run they hold. Any surface that renders
+    these strings needs its own containment.
     """
     text = "".join(c for c in text[:cap] if _ALLOWED_CHARS.match(c))
     text = text.replace("\\", "")

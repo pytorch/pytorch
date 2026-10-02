@@ -46,7 +46,21 @@ import re
 import sys
 from pathlib import Path
 
-from extract_verdict import MAX_FINDINGS, MAX_LINE, MAX_MESSAGE, MAX_PATH, SEVERITIES
+from extract_verdict import (
+    _is_repo_path,
+    _ISSUE_REF,
+    _MENTION,
+    _URL,
+    _XREF,
+    MAX_FINDINGS,
+    MAX_LINE,
+    MAX_MESSAGE,
+    MAX_PATH,
+    MAX_SUMMARY,
+    neutralize_path,
+    SEVERITIES,
+    VERDICTS,
+)
 
 
 SCHEMA_VERSION = 1
@@ -60,12 +74,18 @@ SCHEMA_VERSION = 1
 # becomes empty rather than failing: telemetry never breaks a review.
 _MODEL_CHARS = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 
-# What extract_verdict.py lets a published string contain. verdict.json reaches
-# this job as an artifact of the job that read untrusted PR code, so its
-# findings are re-checked here rather than trusted to have come through
-# extract_verdict.py.
+# verdict.json reaches this job as an artifact of the job that read untrusted
+# PR code, so the strings it publishes are re-checked here against what
+# extract_verdict.py's neutralize() and neutralize_path() can emit, rather than
+# trusted to have come through them.
 _PUBLISHED_CHARS = re.compile(r"[\x09\x0a\x20-\x7e]*")
 _FINDING_KEYS = ("path", "line", "severity", "message")
+# neutralize() strips every backslash, then adds them only before `[`, `]` and
+# the `#` of a defused reference; neutralize_path() only before `[]()@#*_`.
+_STRAY_BACKSLASH = re.compile(r"\\(?![\[\]#])")
+_UNESCAPED_BRACKET = re.compile(r"(?<!\\)[\[\]]")
+_BARE_AMPERSAND = re.compile(r"&(?!amp;|lt;|gt;)")
+_PATH_ESCAPE = re.compile(r"\\([\[\]()@#*_])")
 
 # Terminal statuses. Anything not in this set is a bug in the caller.
 TERMINAL = {
@@ -117,6 +137,27 @@ def _published_text(value: object, cap: int) -> bool:
     )
 
 
+def neutral_prose(value: object, cap: int) -> bool:
+    """Whether `value` is text neutralize() could have produced."""
+    return (
+        _published_text(value, cap)
+        and "<" not in value
+        and ">" not in value
+        and not _BARE_AMPERSAND.search(value)
+        and not _STRAY_BACKSLASH.search(value)
+        and not _UNESCAPED_BRACKET.search(value)
+        and not any(p.search(value) for p in (_URL, _XREF, _MENTION, _ISSUE_REF))
+    )
+
+
+def neutral_path(value: object) -> bool:
+    """Whether `value` is neutralize_path() of a valid repo-relative path."""
+    if not _published_text(value, MAX_PATH):
+        return False
+    raw = _PATH_ESCAPE.sub(r"\1", value)
+    return _is_repo_path(raw) and neutralize_path(raw) == value
+
+
 def published_findings(verdict: dict) -> list[dict]:
     """The findings Dr.CI may render, in extract_verdict.py's output shape.
 
@@ -134,9 +175,8 @@ def published_findings(verdict: dict) -> list[dict]:
             continue
         line = item["line"]
         if (
-            not _published_text(item["path"], MAX_PATH)
-            or "\n" in item["path"]
-            or not _published_text(item["message"], MAX_MESSAGE)
+            not neutral_path(item["path"])
+            or not neutral_prose(item["message"], MAX_MESSAGE)
             or not isinstance(item["severity"], str)
             or item["severity"] not in SEVERITIES
             or not isinstance(line, int)
@@ -277,6 +317,19 @@ def main() -> int:
         row["status"] = status
         # Only a succeeded review carries a verdict. A failed one must not look
         # like an objection to the change.
+        if status == "succeeded" and (
+            verdict.get("verdict") not in VERDICTS
+            or not neutral_prose(verdict.get("summary"), MAX_SUMMARY)
+        ):
+            # A verdict extract_verdict.py could not have written. Record the
+            # run without publishing anything it says.
+            print(
+                "::warning::verdict.json failed the publish-side re-check",
+                file=sys.stderr,
+            )
+            status = "sanitizer_rejected"
+            row["status"] = status
+            verdict = {"failure_detail": "verdict failed the publish-side re-check"}
         row["verdict"] = verdict.get("verdict") if status == "succeeded" else None
         row["summary"] = verdict.get("summary", "") if status == "succeeded" else ""
         row["findings_count"] = len(verdict.get("findings") or [])
@@ -285,6 +338,12 @@ def main() -> int:
                 findings = published_findings(verdict)
             except Exception as exc:  # noqa: BLE001 - telemetry never breaks a review
                 print(f"warning: findings not recorded: {exc!r}", file=sys.stderr)
+            if len(findings) != row["findings_count"]:
+                print(
+                    f"::warning::{row['findings_count'] - len(findings)} finding(s)"
+                    " failed the publish-side re-check and were not recorded",
+                    file=sys.stderr,
+                )
         row["findings_dropped"] = as_int(str(verdict.get("findings_dropped", 0)))
         row["failure_detail"] = verdict.get("failure_detail", "")
         row["reasoning_uri"] = env("REASONING_URI")
