@@ -53,6 +53,7 @@ _ORDER_SENSITIVE_NAMESPACES = frozenset(
     {
         "_c10d_functional",
         "_c10d_functional_autograd",
+        "c10d_functional",
         "symm_mem",
         "_dtensor",
     }
@@ -91,12 +92,20 @@ def _canonical_node_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> obj
 _SUBGRAPH_ONLY_EFFECT_HOPS = frozenset(
     {
         "cond",
+        "flex_attention_backward",
+        "flex_gemm",
+        "foreach_map",
+        "hints_wrapper",
+        "invoke_quant",
+        "invoke_quant_packed",
         "switch",
         "while_loop",
+        "while_loop_stack_output",
         "invoke_subgraph",
         "wrap",
         "tag_activation_checkpoint",
         "scan",
+        "strict_mode",
         "associative_scan",
         "map_impl",
         "flex_attention",
@@ -122,7 +131,7 @@ def _hop_effects_are_pure(node: fx.Node) -> bool:
         return False
     subgraphs = [
         arg
-        for arg in itertools.chain(node.args, node.kwargs.values())
+        for arg in pytree.tree_leaves((node.args, node.kwargs))
         if isinstance(arg, fx.Node) and arg.op == "get_attr"
     ]
     if not subgraphs:
@@ -133,6 +142,11 @@ def _hop_effects_are_pure(node: fx.Node) -> bool:
         except AttributeError:
             return False
         if not isinstance(submodule, fx.GraphModule):
+            return False
+        if (
+            name == "tag_activation_checkpoint"
+            and "_checkpoint_context_fn" in submodule.meta
+        ):
             return False
         # Placeholders/outputs are structural; recursion covers nested HOPs.
         if not all(
@@ -195,6 +209,12 @@ def _is_safe_to_reorder(node: fx.Node) -> bool:
         return False
     if not isinstance(node.target, torch._ops.OpOverload):
         name = getattr(node.target, "__name__", "")
+        if (
+            name == "flat_apply_capture"
+            and getattr(node.target, "__module__", "")
+            == "torch._dynamo.variables.torch"
+        ):
+            return False
         if name.endswith("_"):
             return False
         if (
