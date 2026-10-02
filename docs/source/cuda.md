@@ -97,7 +97,27 @@
     Stream
     ExternalStream
     Event
+    execute_on_streams
 ```
+
+### Fork/join execution
+
+`torch.cuda.execute_on_streams(streams, fn)` calls `fn(index)` for each supplied
+stream. Ordinary streams, green-context streams, and mixtures are supported.
+Callbacks run sequentially on the host, but their CUDA work can run concurrently.
+Each stream waits for work already queued on the caller's current stream;
+subsequent caller-stream work waits for all work queued by the callbacks.
+This also applies to a single stream and to work queued before a callback raises.
+
+On the caller's device, the helper switches directly between streams and restores
+the caller once. Cross-device execution uses `torch.cuda.stream` to restore
+per-device stream state. Neither path synchronizes the host. After an exception,
+remaining callbacks are not invoked. Callbacks must enqueue work on the supplied
+stream or explicitly join other streams they use. The caller stream is the
+fork/join point, not every device's current stream.
+
+Keep tensors and any owning green contexts alive until their work completes;
+the usual cross-stream tensor lifetime rules still apply.
 
 ## Graphs (beta)
 
@@ -335,7 +355,7 @@ Save after instantiation and before resetting or destroying the graph.
      CUDAPluggableAllocator
      change_current_allocator
      MemPool
-     LocalizedMemPool
+     LocalizedAllocator
 ```
 
 ```{eval-rst}
@@ -595,21 +615,13 @@ after attachment instead of reusing the earlier result. An already attached
 MPS client has initialized CUDA, so the query uses CUDA's actual device topology
 rather than NVML. The support result itself is not cached.
 
-### Fork/join execution
+### Fork/join execution with green contexts
 
-`execute_in_green_contexts` runs a Python callback for each supplied stream,
-passing its index. Callbacks run sequentially on the host, but their CUDA work
-can run concurrently. Every stream waits for work already queued on the caller's
-current stream, and subsequent work on the caller stream waits for the callbacks.
-This also applies to a single stream and to work queued before a callback raises.
-When all supplied streams are on the caller's device, the helper switches
-directly between them and restores the caller stream once at the end to reduce
-overheads. Cross-device execution uses the `torch.cuda.stream` context manager
-to restore the per-device stream state. Neither path synchronizes the host.
-After an exception, remaining callbacks are not invoked.
+Use `torch.cuda.execute_on_streams` with green-context streams to localize the
+execution of each callback's CUDA work:
 
 ```python
-from torch.cuda.green_contexts import execute_in_green_contexts
+from torch.cuda.green_contexts import GreenContext
 
 contexts = GreenContext.split(num_sms=(24, 24), device_id=0)
 streams = [ctx.Stream() for ctx in contexts]
@@ -620,33 +632,40 @@ def compute(index: int) -> None:
     torch.mul(inputs[index], 2, out=outputs[index])
 
 with torch.cuda.device(0):
-    execute_in_green_contexts(streams, compute)
+    torch.cuda.execute_on_streams(streams, compute)
     result = outputs[0] + outputs[1]
     torch.cuda.current_stream().synchronize()
 ```
 
-Keep the owning green contexts and tensors alive until their work completes.
-The usual cross-stream tensor lifetime rules still apply. Callbacks must enqueue
-work on the supplied stream, or explicitly join any other streams they use.
-Streams on different devices are supported; the caller stream is the fork/join
-point, not every device's current stream.
+### Localized allocations
 
-
-### Localized memory pools
-
-With CUDA driver and cuda.bindings 13.4+, `LocalizedMemPool` allocates physical
-memory on a specified locality domain.
-Using the MemPool does not localize kernel execution;
+With CUDA driver and cuda.bindings 13.4+, `LocalizedAllocator` allocates physical
+memory on a specified locality domain. Use it with the existing `MemPool` API
+to cache and suballocate that memory. Construction initializes CUDA so validation
+uses the actual CUDA-visible topology. Allocation does not localize execution;
 use a green-context stream separately when compute localization is also desired.
 
 ```python
-pool = torch.cuda.LocalizedMemPool(locality_domain_id=0, device="cuda:0")
+allocator = torch.cuda.LocalizedAllocator(locality_domain_id=0, device="cuda:0")
+pool = torch.cuda.MemPool(allocator=allocator.allocator())
 with torch.cuda.use_mem_pool(pool, device="cuda:0"):
     # x is allocated on locality domain 0
     # the randn kernel runs non-localized
     x = torch.randn(1024, device="cuda:0")
 ```
 
+Use the allocator only on its owning device; cross-device access is not supported.
+Callback owners are retained for the process lifetime, so tensors can outlive the
+Python allocator and pool objects. Reclaiming physical memory waits for the
+allocation stream.
+
+```{warning}
+Concurrent allocator activity is unsupported. Other threads must not allocate,
+free, or query allocator state (including `MemPool.use_count()`) concurrently
+with this allocator. The ctypes callbacks acquire the GIL while holding the
+native allocator mutex; an allocator-state query can acquire these locks in the
+opposite order and deadlock.
+```
 
 ```{eval-rst}
 .. currentmodule:: torch.cuda.green_contexts
@@ -659,7 +678,6 @@ with torch.cuda.use_mem_pool(pool, device="cuda:0"):
 
     GreenContext
     SMPartition
-    execute_in_green_contexts
     get_num_locality_domains
     is_localization_supported
 ```
