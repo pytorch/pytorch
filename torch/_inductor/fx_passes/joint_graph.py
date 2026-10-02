@@ -231,7 +231,7 @@ def remove_no_ops(
             if current.target in (
                 aten.is_set_to.default,
                 aten._has_same_storage_numel.default,
-                torch._C._is_alias_of,
+                vars(torch._C)["_is_alias_of"],
             ):
                 observed_inputs = current.all_input_nodes
             elif current.target in (
@@ -356,8 +356,9 @@ def remove_no_ops(
             node.replace_all_uses_with(replacement)
             replacement.meta.update(node.meta)
             graph.erase_node(node)
+            node_storage = storages.get(node)
             if output_roots[node] or (
-                storages.get(node) is not None and output_storages[storages[node]]
+                node_storage is not None and output_storages[node_storage]
             ):
                 output_index_dirty = True
 
