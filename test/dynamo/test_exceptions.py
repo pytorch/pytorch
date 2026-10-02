@@ -17,6 +17,7 @@ from torch._dynamo.bytecode_transformation import Instruction
 from torch._dynamo.exc import get_dynamo_observed_exception, Unsupported
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
 from torch._dynamo.testing import CompileCounter
+from torch._dynamo.utils import common_constant_types
 from torch.testing._internal.common_utils import (
     disable_gc,
     instantiate_parametrized_tests,
@@ -533,13 +534,21 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.equal(out, inp + 1))
 
     def test_observed_exception_with_non_string_args(self):
+        class NonStringArgs:
+            def __getitem__(self, key):
+                raise KeyError(1)
+
+        value = NonStringArgs()
+
         def fn(x):
             try:
-                type("A", (), {"__doc__": "x\udcdcy"})
-            except UnicodeEncodeError:
+                value[0]
+            except KeyError:
                 return x + 1
             return x
 
+        common_constant_types.add(NonStringArgs)
+        self.addCleanup(common_constant_types.discard, NonStringArgs)
         x = torch.ones(2)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))

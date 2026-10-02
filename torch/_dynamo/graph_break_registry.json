@@ -1764,6 +1764,16 @@
       ]
     }
   ],
+  "GB7494": [
+    {
+      "Gb_type": "Dynamic class creation with type",
+      "Context": "type(name, bases, namespace)",
+      "Explanation": "Dynamo does not support tracing class creation with type().",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB4778": [
     {
       "Gb_type": "nested function with non-constructible closure in output",
