@@ -771,10 +771,10 @@ class LoopOrderingTest(TestCase):
             return x, z
 
         def reorder_producer(nodes):
-            self.assertEqual(len(nodes), 3)
+            self.assertEqual(len(nodes), 4)
             scheduler = nodes[0].scheduler
             scheduler.prune_redundant_deps(nodes)
-            score = scheduler.shared_data_after_reordering_loop(nodes[0], nodes[1])
+            score = scheduler.shared_data_after_reordering_loop(nodes[1], nodes[2])
             self.assertGreaterEqual(score, 0)
             return nodes
 

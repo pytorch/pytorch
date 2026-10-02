@@ -8,8 +8,11 @@ import torch
 import torch._inductor
 from torch._higher_order_ops import foreach_map
 from torch._inductor import config
+from torch._inductor.compile_fx import compile_fx_inner
+from torch._inductor.fx_passes.joint_graph import constant_fold_uniform_value
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -264,6 +267,35 @@ class ForeachTests(TestCase):
         expected = fn(x.clone(), y.clone())
         actual = torch.compile(fn, fullgraph=True)(x.clone(), y.clone())
         self.assertEqual(actual, expected)
+
+    @parametrize("device", ("cpu", GPU_TYPE))
+    @parametrize("destination_kind", ("direct", "view"))
+    def test_foreach_copy_preserves_allocating_noop_sources(
+        self, device, destination_kind
+    ):
+        if device == GPU_TYPE and not HAS_GPU:
+            self.skipTest("requires GPU")
+
+        def fn(x, y):
+            destination = x if destination_kind == "direct" else x.view_as(x)
+            torch._foreach_copy_([destination, y], [y + x, x * 1.0])
+            return x, y
+
+        x = torch.tensor([1.0], device=device)
+        y = torch.tensor([2.0], device=device)
+        expected = fn(x.clone(), y.clone())
+        gm = make_fx(fn, tracing_mode="real")(x.clone(), y.clone())
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+        constant_fold_uniform_value(gm)
+        retained_mul_count = len(
+            gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)
+        )
+        compiled = compile_fx_inner(gm, [x, y])
+        actual = compiled([x.clone(), y.clone()])
+        self.assertEqual(actual, expected)
+        self.assertEqual(retained_mul_count, 1)
 
     def _test_single_list(self, op):
         if op in un_ops_under_test:
@@ -1585,6 +1617,481 @@ class ForeachTests(TestCase):
         expected = fn(*args)
         actual = torch.compile(fn)(*args_clone)
         self.assertEqual(actual, expected)
+
+
+@instantiate_parametrized_tests
+class NoOpFoldingTests(TestCase):
+    @parametrize("mutation_kind", ("view", "out_keyword"))
+    def test_noop_source_retained_through_alias_mutation(self, mutation_kind):
+        def fn(x, y):
+            value = x * 1.0
+            if mutation_kind == "view":
+                x.view(-1).add_(1)
+            else:
+                aten.add.out(y, y, out=x)
+            return (value,)
+
+        x = torch.tensor([1.0])
+        y = torch.tensor([2.0])
+        expected = fn(x.clone(), y.clone())
+        gm = make_fx(fn, tracing_mode="real")(x.clone(), y.clone())
+        constant_fold_uniform_value(gm)
+        retained_mul_count = len(
+            gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)
+        )
+        if mutation_kind == "view":
+            actual = compile_fx_inner(gm, [x, y])([x.clone(), y.clone()])
+        else:
+            # The FX transform is exercised directly; Inductor cannot lower aten.add.out.
+            gm.recompile()
+            actual = gm(x.clone(), y.clone())
+        self.assertEqual(actual, expected)
+        self.assertEqual(retained_mul_count, 1)
+
+    @parametrize("view_kind", ("split", "unbind"))
+    def test_noop_source_retained_through_multi_output_view(self, view_kind):
+        def fn(x):
+            value = x * 1.0
+            if view_kind == "split":
+                x.split(1)[0].add_(10)
+            else:
+                x.unbind(0)[0].add_(10)
+            return (value,)
+
+        x = torch.tensor([1.0, 2.0])
+        expected = fn(x.clone())
+        gm = make_fx(fn, tracing_mode="real")(x.clone())
+        constant_fold_uniform_value(gm)
+        retained_mul_count = len(
+            gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)
+        )
+        actual = compile_fx_inner(gm, [x])([x.clone()])
+        self.assertEqual(actual, expected)
+        self.assertEqual(retained_mul_count, 1)
+
+    def test_noop_result_mutation_keeps_input_unmodified(self):
+        def fn(x):
+            value = x * 1.0
+            value.add_(1)
+            return x, value
+
+        x = torch.tensor([1.0, 2.0])
+        expected = fn(x.clone())
+        gm = make_fx(fn, tracing_mode="real")(x.clone())
+        constant_fold_uniform_value(gm)
+        retained_mul_count = len(
+            gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)
+        )
+        actual = compile_fx_inner(gm, [x])([x.clone()])
+        self.assertEqual(actual, expected)
+        self.assertEqual(retained_mul_count, 1)
+
+    @parametrize("mutation_kind", ("base", "sibling_view", "split_base"))
+    def test_noop_source_retained_when_alias_base_mutates(self, mutation_kind):
+        def fn(x):
+            view = x.split(1)[0] if mutation_kind == "split_base" else x.view(-1)
+            value = view * 1.0
+            if mutation_kind == "sibling_view":
+                x.view(-1).add_(1)
+            else:
+                x.add_(1)
+            return (value,)
+
+        x = torch.tensor([1.0, 2.0])
+        expected = fn(x.clone())
+        gm = make_fx(fn, tracing_mode="real")(x.clone())
+        constant_fold_uniform_value(gm)
+        retained_mul_count = len(
+            gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)
+        )
+        actual = compile_fx_inner(gm, [x])([x.clone()])
+        self.assertEqual(actual, expected)
+        self.assertEqual(retained_mul_count, 1)
+
+    def test_noop_fold_handles_long_view_chain(self):
+        def fn(x):
+            value = x * 1.0
+            view = x
+            for _ in range(sys.getrecursionlimit() + 10):
+                view = view.view_as(view)
+            return value, view
+
+        x = torch.tensor([1.0])
+        gm = make_fx(fn, tracing_mode="real")(x.clone())
+        constant_fold_uniform_value(gm)
+        gm.recompile()
+        self.assertEqual(gm(x.clone()), fn(x.clone()))
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+
+    @parametrize("view_kind", ("permute", "unbind"))
+    def test_noop_source_retained_through_keyword_view(self, view_kind):
+        view_op = aten.permute.default if view_kind == "permute" else aten.unbind.int
+
+        def fn(x):
+            if view_kind == "permute":
+                view = view_op(x, [0])
+            else:
+                view = view_op(x, 0)[0]
+            value = view * 1.0
+            x.add_(1)
+            return (value,)
+
+        x = torch.tensor([1.0, 2.0])
+        expected = fn(x.clone())
+        gm = make_fx(fn, tracing_mode="real")(x.clone())
+        view_node = gm.graph.find_nodes(op="call_function", target=view_op)[0]
+        base = view_node.args[0]
+        view_node.args = ()
+        view_node.kwargs = {
+            "self": base,
+            **({"dims": [0]} if view_kind == "permute" else {"dim": 0}),
+        }
+        gm.graph.lint()
+        constant_fold_uniform_value(gm)
+        retained_mul_count = len(
+            gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)
+        )
+        # Inductor cannot lower keyword-form views yet; execute the real folded FX graph.
+        gm.recompile()
+        self.assertEqual(gm(x.clone()), expected)
+        self.assertEqual(retained_mul_count, 1)
+
+    @parametrize("device", ("cpu", GPU_TYPE))
+    @parametrize("result_kind", ("input", "input_view", "other_output", "output_view"))
+    def test_noop_output_retains_allocation(self, device, result_kind):
+        if device == GPU_TYPE and not HAS_GPU:
+            self.skipTest("requires GPU")
+
+        def fn(x):
+            if result_kind == "input":
+                return (x * 1.0,)
+            if result_kind == "input_view":
+                return (x.view(-1) * 1.0,)
+            y = x + 1.0
+            if result_kind == "other_output":
+                return y, y * 1.0
+            return y.view(-1), (y * 1.0).view(-1)
+
+        x = torch.tensor([1.0, 2.0], device=device)
+        expected_input = x.clone()
+        expected = fn(expected_input)
+        actual_input = x.clone()
+        with config.patch(joint_graph_constant_folding=True):
+            actual = torch.compile(fn, fullgraph=True)(actual_input)
+        self.assertEqual(actual, expected)
+        actual[-1].add_(5)
+        expected[-1].add_(5)
+        self.assertEqual(actual_input, expected_input)
+        self.assertEqual(actual, expected)
+
+    @parametrize("source_kind", ("buffer", "captured"))
+    def test_noop_output_does_not_alias_get_attr(self, source_kind):
+        source = torch.tensor([1.0, 2.0])
+
+        if source_kind == "buffer":
+
+            class Module(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("p", source)
+
+                def forward(self):
+                    return (self.p * 1.0,)
+
+            fn = Module()
+        else:
+
+            def fn():
+                return (source * 1.0,)
+
+        original = source.clone()
+        gm = make_fx(fn, tracing_mode="real")()
+        self.assertEqual(len(gm.graph.find_nodes(op="get_attr")), 1)
+        constant_fold_uniform_value(gm)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+        gm.recompile()
+        actual = gm()[0]
+        actual.add_(7)
+        self.assertEqual(source, original)
+        self.assertEqual(actual, original + 7)
+
+    @parametrize("layout_kind", ("storage_offset", "strides"))
+    def test_noop_fold_preserves_layout_sensitive_views(self, layout_kind):
+        def fn(base):
+            if layout_kind == "storage_offset":
+                value = base[1:5] * 1.0
+                return value.as_strided((1,), (1,), 0).sum()
+            value = base[::2] * 1.0
+            return value.as_strided((2,), (1,), 0).sum()
+
+        base = torch.tensor([11.0, 22.0, 33.0, 44.0, 55.0, 66.0])
+        expected = fn(base.clone())
+        gm = make_fx(fn, tracing_mode="real")(base.clone())
+        constant_fold_uniform_value(gm)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+        gm.recompile()
+        self.assertEqual(gm(base.clone()), expected)
+
+    def test_noop_fold_preserves_runtime_input_offset(self):
+        def fn(x):
+            value = x * 1.0
+            return value.as_strided((1,), (1,), 0).sum()
+
+        base = torch.tensor([11.0, 22.0, 33.0, 44.0, 55.0, 66.0])
+        gm = make_fx(fn, tracing_mode="real")(base[:5])
+        shifted = base[1:]
+        expected = fn(shifted)
+        self.assertEqual(gm(shifted), expected)
+        constant_fold_uniform_value(gm)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+        gm.recompile()
+        self.assertEqual(gm(shifted), expected)
+
+    @parametrize("view_kind", ("direct", "chained"))
+    def test_noop_fold_preserves_unsafe_view_alias(self, view_kind):
+        def fn(x):
+            value = aten._unsafe_view.default(x * 1.0, [2])
+            if view_kind == "chained":
+                value = value.view_as(value)
+            return value.as_strided((1,), (1,), 0).sum()
+
+        base = torch.tensor([11.0, 22.0, 33.0, 44.0])
+        gm = make_fx(fn, tracing_mode="real")(base[:2])
+        self.assertEqual(
+            len(
+                gm.graph.find_nodes(
+                    op="call_function", target=aten._unsafe_view.default
+                )
+            ),
+            1,
+        )
+        shifted = base[1:3]
+        expected = fn(shifted)
+        self.assertEqual(gm(shifted), expected)
+        constant_fold_uniform_value(gm)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+        gm.recompile()
+        self.assertEqual(gm(shifted), expected)
+
+    @parametrize("value_kind", ("direct", "view"))
+    @parametrize("dtype_op", ("view", "view_copy"))
+    def test_noop_fold_preserves_dtype_view_on_shifted_input(
+        self, value_kind, dtype_op
+    ):
+        def fn(x):
+            value = x * 1.0
+            if value_kind == "view":
+                value = value.view_as(value)
+            reinterpreted = (
+                value.view(torch.float64)
+                if dtype_op == "view"
+                else aten.view_copy.dtype(value, torch.float64)
+            )
+            return reinterpreted + 1
+
+        base = torch.tensor([11.0, 22.0, 33.0, 44.0])
+        gm = make_fx(fn, tracing_mode="real")(base[:2])
+        shifted = base[1:3]
+        expected = fn(shifted)
+        self.assertEqual(gm(shifted), expected)
+        constant_fold_uniform_value(gm)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+        gm.recompile()
+        self.assertEqual(gm(shifted), expected)
+
+    @parametrize("boundary_kind", ("add", "clone"))
+    def test_noop_fold_stops_layout_guard_at_allocation(self, boundary_kind):
+        def fn(x):
+            value = x * 1.0
+            fresh = value + 2.0 if boundary_kind == "add" else value.clone()
+            return fresh.as_strided((1,), (1,), 0)
+
+        base = torch.tensor([11.0, 22.0, 33.0, 44.0])
+        gm = make_fx(fn, tracing_mode="real")(base[:2])
+        shifted = base[1:3]
+        expected = fn(shifted)
+        self.assertEqual(gm(shifted), expected)
+        constant_fold_uniform_value(gm)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 0
+        )
+        gm.recompile()
+        self.assertEqual(gm(shifted), expected)
+
+    @parametrize("observer_kind", ("is_set_to", "is_alias_of"))
+    @parametrize("value_kind", ("direct", "view"))
+    def test_noop_fold_preserves_internal_storage_identity(
+        self, observer_kind, value_kind
+    ):
+        def fn(x):
+            value = x * 1.0
+            return value.view_as(x) if value_kind == "view" else value
+
+        x = torch.tensor([1.0, 2.0])
+        gm = make_fx(fn, tracing_mode="real")(x.clone())
+        inp = gm.graph.find_nodes(op="placeholder")[0]
+        output = gm.graph.find_nodes(op="output")[0]
+        source = output.args[0]
+        observer = (
+            aten.is_set_to.default
+            if observer_kind == "is_set_to"
+            else torch._C._is_alias_of
+        )
+        with gm.graph.inserting_before(output):
+            result = gm.graph.call_function(observer, args=(source, inp))
+        output.args = (result,)
+        gm.graph.lint()
+        gm.recompile()
+        self.assertFalse(gm(x.clone()))
+        constant_fold_uniform_value(gm)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+        gm.recompile()
+        self.assertFalse(gm(x.clone()))
+
+    @parametrize("value_kind", ("direct", "view"))
+    def test_noop_fold_preserves_storage_capacity(self, value_kind):
+        def fn(x, y):
+            value = x * 1.0
+            return value.view_as(value) if value_kind == "view" else value
+
+        x = torch.tensor([1.0, 2.0])
+        y = torch.tensor([3.0, 4.0])
+        gm = make_fx(fn, tracing_mode="real")(x, y)
+        output = gm.graph.find_nodes(op="output")[0]
+        other = gm.graph.find_nodes(op="placeholder")[1]
+        with gm.graph.inserting_before(output):
+            capacity = gm.graph.call_function(
+                aten._has_same_storage_numel.default, args=(output.args[0], other)
+            )
+        output.args = (capacity,)
+        gm.graph.lint()
+        gm.recompile()
+
+        shifted = torch.tensor([1.0, 2.0, 3.0, 4.0])[:2]
+        self.assertTrue(gm(shifted, y))
+        constant_fold_uniform_value(gm)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+        gm.recompile()
+        self.assertTrue(gm(shifted, y))
+
+    @parametrize("transfer_kind", ("tensor", "storage_offset"))
+    @parametrize("value_kind", ("direct", "view"))
+    def test_noop_fold_preserves_set_source_allocation(self, transfer_kind, value_kind):
+        def fn(x):
+            value = x * 1.0
+            if value_kind == "view":
+                value = value.view_as(value)
+            destination = torch.empty(0)
+            aten.set_.source_Tensor(destination, value)
+            destination.add_(1)
+            return x.clone(), destination.clone()
+
+        x = torch.tensor([1.0, 2.0])
+        expected = fn(x.clone())
+        gm = make_fx(fn, tracing_mode="real")(x.clone())
+        if transfer_kind == "storage_offset":
+            # This overload is a real FX operator, but make_fx attempts to
+            # trace its Storage argument rather than record its Tensor source.
+            set_node = gm.graph.find_nodes(
+                op="call_function", target=aten.set_.source_Tensor
+            )[0]
+            set_node.target = aten.set_.source_Tensor_storage_offset
+            set_node.args = (*set_node.args, 0, [2], [1])
+            gm.graph.lint()
+            gm.recompile()
+        self.assertEqual(gm(x.clone()), expected)
+        constant_fold_uniform_value(gm)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+        gm.recompile()
+        self.assertEqual(gm(x.clone()), expected)
+
+    @parametrize("observer_kind", ("offset", "sym_offset", "scatter", "copy"))
+    def test_noop_fold_preserves_layout_observers(self, observer_kind):
+        def fn(base):
+            value = base[1:5] * 1.0
+            if observer_kind == "scatter":
+                return aten.as_strided_scatter.default(
+                    value, torch.tensor([99.0]), [1], [1], 0
+                )
+            if observer_kind == "copy":
+                return aten.as_strided_copy.default(value, [1], [1], 0)
+            return (value,)
+
+        base = torch.tensor([11.0, 22.0, 33.0, 44.0, 55.0, 66.0])
+        gm = make_fx(fn, tracing_mode="real")(base.clone())
+        if observer_kind in ("scatter", "copy"):
+            expected = fn(base.clone())
+        else:
+            # make_fx constant-folds storage_offset; preserve its real FX op.
+            mul = gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)[0]
+            output = gm.graph.find_nodes(op="output")[0]
+            op = (
+                aten.storage_offset.default
+                if observer_kind == "offset"
+                else aten.sym_storage_offset.default
+            )
+            with gm.graph.inserting_before(output):
+                offset = gm.graph.call_function(op, args=(mul,))
+            output.args = (offset,)
+            gm.graph.lint()
+            gm.recompile()
+            expected = op(base[1:5] * 1.0)
+        self.assertEqual(gm(base.clone()), expected)
+        constant_fold_uniform_value(gm)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+        gm.recompile()
+        self.assertEqual(gm(base.clone()), expected)
+
+    @parametrize("view_kind", ("conj", "neg"))
+    def test_noop_fold_preserves_unresolved_view_bits(self, view_kind):
+        bit_op = aten._conj.default if view_kind == "conj" else aten._neg_view.default
+
+        def fn(x):
+            value = bit_op(x) * 1.0
+            return (
+                torch.view_as_real(value)
+                if view_kind == "conj"
+                else value.view(torch.float32)
+            ) + 1
+
+        x = torch.tensor([1.0 + 2.0j, 3.0 + 4.0j])
+        expected = fn(x.clone())
+        gm = make_fx(fn, tracing_mode="real")(x.clone())
+        # make_fx inserts a clone before multiply, but this graph also has a
+        # valid direct aten._conj/aten._neg_view -> aten.mul path.
+        clone = gm.graph.find_nodes(op="call_function", target=aten.clone.default)[0]
+        mul = gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)[0]
+        mul.args = (clone.args[0], 1.0)
+        gm.graph.erase_node(clone)
+        gm.graph.lint()
+        gm.recompile()
+        self.assertEqual(gm(x.clone()), expected)
+        constant_fold_uniform_value(gm)
+        self.assertEqual(
+            len(gm.graph.find_nodes(op="call_function", target=aten.mul.Tensor)), 1
+        )
+        gm.recompile()
+        self.assertEqual(gm(x.clone()), expected)
 
 
 if __name__ == "__main__":
