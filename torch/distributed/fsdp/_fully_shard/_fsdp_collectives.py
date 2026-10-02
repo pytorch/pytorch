@@ -481,7 +481,12 @@ def _default_all_gather_output_fn(
         )
         fsdp_param.alloc_all_gather_outputs()
         param_all_gather_outputs = fsdp_param.all_gather_outputs
-        if fsdp_param.fsdp_placement.dim != 0:
+        # Post-forward shards are flat chunks of the unsharded data, so their
+        # all-gather output is already in the final layout
+        if (
+            fsdp_param.fsdp_placement.dim != 0
+            and fsdp_param.sharded_state == ShardedState.SHARDED
+        ):
             # Copy to a temporary and then chunk-cat into the final all-gather
             # output tensors
             param_all_gather_outputs = [
@@ -557,13 +562,7 @@ def _reassemble_all_gather_outputs(
             for param_all_gather_output, target_all_gather_output in zip(
                 param_all_gather_outputs, fsdp_param.all_gather_outputs
             ):
-                padded_sharded_size = (
-                    fsdp_param.padded_sharded_param_size
-                    if fsdp_param.sharded_state == ShardedState.SHARDED
-                    else cast(
-                        torch.Tensor, fsdp_param._sharded_post_forward_param_data
-                    ).size()
-                )
+                padded_sharded_size = fsdp_param.padded_sharded_param_size
                 pre_param_size = list(padded_sharded_size)
                 pre_param_size[0] *= world_size
                 chunks = torch.chunk(

@@ -49,7 +49,7 @@ from ._fsdp_common import (
     ShardPlacementFnResult,
     TrainingState,
 )
-from ._fsdp_param import alloc_storage, FSDPParam, ParamModuleInfo, ShardedState
+from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
 
 
 if TYPE_CHECKING:
@@ -527,26 +527,27 @@ class FSDPParamGroup:
             for fsdp_param in self.fsdp_params:
                 # Use all_gather_inputs which already handles conversion to param_dtype
                 # This is consistent with the world_size > 1 path
-                all_gather_input = fsdp_param.all_gather_inputs[0]
-
-                # Make sure the all_gather_outputs has proper storage size before using it
-                # First ensure we have at least one tensor in all_gather_outputs
+                all_gather_inputs = fsdp_param.all_gather_inputs
                 fsdp_param.init_all_gather_outputs(
-                    [all_gather_input.numel()],
-                    [all_gather_input.dtype],
+                    [t.numel() for t in all_gather_inputs],
+                    [t.dtype for t in all_gather_inputs],
                     world_size,
                     self.device,
                 )
-
-                tensor = fsdp_param.all_gather_outputs[0]
-                alloc_storage(tensor)
-
-                with (
-                    torch.autograd._unsafe_preserve_version_counter(tensor)
-                    if not tensor.is_inference()
-                    else contextlib.nullcontext()
+                fsdp_param.alloc_all_gather_outputs()
+                for output, all_gather_input in zip(
+                    fsdp_param.all_gather_outputs, all_gather_inputs
                 ):
-                    tensor.copy_(all_gather_input)
+                    # Like the world_size > 1 path, copy byte payloads bytewise
+                    # into cached outputs of other dtypes
+                    if all_gather_input.dtype == torch.uint8:
+                        output = output.view(torch.uint8)
+                    with (
+                        torch.autograd._unsafe_preserve_version_counter(output)
+                        if not output.is_inference()
+                        else contextlib.nullcontext()
+                    ):
+                        output.copy_(all_gather_input)
 
         else:
             with record_function(self._with_fqn("FSDP::all_gather_copy_out")):
