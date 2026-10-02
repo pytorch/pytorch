@@ -276,6 +276,12 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   at::Tensor allocateTensor(long size, at::TensorOptions options) override;
   bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) override;
   void setTimeout(std::chrono::milliseconds timeout) override;
+  // Check floating point collective inputs for NaN before launch
+  // (::c10d::ProcessGroupNCCL::setEnableNanCheck parity). Defaults to
+  // TORCH_NCCL_NAN_CHECK.
+  void setEnableNanCheck(bool enable) {
+    enable_nan_check_ = enable;
+  }
   void addEphemeralTimeout(const std::chrono::milliseconds& timeout) override;
   void setBoundDeviceId(std::optional<at::Device> device) override;
   void eagerConnectSingleDevice(at::Device device) override;
@@ -612,6 +618,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void ensureTensorContiguous(const at::Tensor& tensor);
   void checkTensorDevice(const at::Tensor& tensor) const;
   void checkTensorsDevice(const std::vector<at::Tensor>& tensors) const;
+  void maybeCheckForNan(const at::Tensor& tensor) const;
+  void maybeCheckForNan(const std::vector<at::Tensor>& tensors) const;
   void runAbortHooks();
   // Whether anyone is listening, so a work that completes with no hook
   // registered does not pay for a duration measurement nobody reads.
@@ -668,6 +676,8 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   const ::c10d::ErrorHandlingMode async_error_handling_;
   const bool blocking_wait_;
+  std::atomic<bool> enable_nan_check_{
+      ::c10d::getCvarBool(::c10d::TORCH_NCCL_NAN_CHECK, false)};
 
   c10::intrusive_ptr<Options> options_c10d_;
 
