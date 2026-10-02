@@ -5754,7 +5754,7 @@ def is_producer_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     return (
         node2.is_template()
         and not node1.is_template()
-        and bool(_producer_fusion_enabled_inputs(node2))
+        and len(_producer_fusion_enabled_inputs(node2)) > 0
     )
 
 
@@ -7671,8 +7671,9 @@ class Scheduler:
                 if is_nvgemm and not choice.supports_epilogue_fusion:
                     continue
 
-                # NVGEMM doesn't support producer fusion. Skip NVGEMM choices
-                # when node1 is the input producer and node2 is the template.
+                # NVGEMM doesn't support producer fusion. Skip NVGEMM choices in
+                # the producer direction (consumer_fusion is False when node1 is
+                # the pointwise producer, node2 is the template).
                 if is_nvgemm and not consumer_fusion:
                     continue
 
@@ -7765,7 +7766,7 @@ class Scheduler:
                             res = None
 
                     # Ideally we would more narrowly catch Exceptions here but
-                    # Triton will unpredictably error with valid producer fusions.
+                    # triton  will unpredictably error with valid producer fusions
                     except Exception as e:
                         if fusion_log.isEnabledFor(logging.DEBUG):
                             fusion_log.debug(
@@ -10619,6 +10620,9 @@ class Scheduler:
                 why("template has no inputs enabled for producer fusion")
                 return False
 
+            # Reject if the producer writes a buffer that the template reads at an
+            # input that can't take a fused producer: that buffer must stay
+            # materialized because the template still loads it from memory.
             unsupported_producer_args = (
                 OrderedSet(inp.get_name() for inp in template.inputs)  # type: ignore[union-attr]
                 - enabled_producer_inputs

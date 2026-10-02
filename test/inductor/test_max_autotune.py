@@ -2470,8 +2470,14 @@ class TestMaxAutotune(TestCase):
             ).parameters
         )
 
-        # generate_with_caching controls use of the cache itself. The prefix fusion
-        # indices affect replayed metadata and kernel_options, not cached source.
+        # Parameters intentionally excluded from the cache key:
+        # - generate_with_caching: controls whether the cache is used at all; it
+        #   doesn't affect the generated code.
+        # - prefix_inputs_fusion_indices: no producers are fused at autotune time,
+        #   so the generated code doesn't depend on it. On a cache hit, def_kernel
+        #   is replayed on the new kernel, which rebuilds the store-output allowed
+        #   inputs from its own indices, and the scheduling-time render receives
+        #   the indices through kernel_options.
         self.assertEqual(
             generate_and_load_args
             - {"generate_with_caching", "prefix_inputs_fusion_indices"},
@@ -2785,13 +2791,13 @@ class TestMaxAutotune(TestCase):
         a = Buffer(name="buf_a", layout=make_layout())
         b = Buffer(name="buf_b", layout=make_layout())
 
-        def key(*input_nodes, prefix_args=0):
+        def key(*input_nodes):
             return GeneratedCodeCache().make_key(
                 input_nodes=input_nodes,
                 num_stages=1,
                 num_warps=4,
                 call_sizes=[8, 8],
-                prefix_args=prefix_args,
+                prefix_args=0,
                 suffix_args=0,
                 epilogue_fn=identity,
                 epilogue_fn_hash=None,
@@ -5061,19 +5067,6 @@ class TestPrologueFusion(TestCase):
             # upcast preserves zero mask
             FileCheck().check("a =").check_not("tl.where").check("tl.dot").run(code[0])
 
-    @config.patch({"prologue_fusion": False, "epilogue_fusion": True})
-    def test_upcast_prologue_fusion_disabled(self):
-        M, K, N = 64, 128, 256
-        x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
-        y = torch.rand([K, N], dtype=torch.float, device=GPU_TYPE)
-
-        def foo(x, y):
-            return x.to(y.dtype) @ y
-
-        out, code = run_and_get_code(torch.compile(foo), x, y)
-        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
-
     @unittest.skip("Triton bug in compilation")
     def test_gather_fusion(self):
         M, K, N = (64, 128, 256)
@@ -5180,13 +5173,15 @@ class TestPrologueFusion(TestCase):
 
     @config.patch(
         {
-            "prologue_fusion": False,
-            "epilogue_fusion": True,
             "benchmark_epilogue_fusion": True,
             "max_epilogue_benchmarked_choices": 3,
         }
     )
-    def test_addmm_store_output_producer_and_consumer_fusion(self):
+    @parametrize("prologue_fusion", (True, False))
+    @parametrize("epilogue_fusion", (True, False))
+    def test_addmm_store_output_producer_and_consumer_fusion(
+        self, prologue_fusion: bool, epilogue_fusion: bool
+    ):
         M, K, N = 63, 120, 190
 
         def foo(a, b, bias):
@@ -5197,22 +5192,34 @@ class TestPrologueFusion(TestCase):
         b = torch.randn(K, N, device=GPU_TYPE)
         bias = torch.randn(M, N, device=GPU_TYPE)
 
-        with self.force_template_fusion_benchmark():
+        with (
+            config.patch(
+                prologue_fusion=prologue_fusion, epilogue_fusion=epilogue_fusion
+            ),
+            self.force_template_fusion_benchmark(),
+        ):
             out, code = run_and_get_code(torch.compile(foo), a, b, bias)
 
         self.assertEqual(out, foo(a, b, bias), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
-        (
-            FileCheck()
-            .check("tl.dot")
-            .check("2.0")
-            .check("1.0")
-            .check("acc +")
-            .check("tl.maximum")
-            .check("0.5")
-            .check_count("tl.store", 1, exactly=True)
-            .run(code[0])
-        )
+        # Store-output producer fusion of the bias is controlled by epilogue_fusion
+        # only; prologue_fusion doesn't affect it.
+        if epilogue_fusion:
+            self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+        else:
+            self.check_code(code[0], num_kernels=3, num_allocs=None, num_deallocs=None)
+
+    @config.patch({"prologue_fusion": False, "epilogue_fusion": True})
+    def test_upcast_prologue_fusion_disabled(self):
+        M, K, N = 64, 128, 256
+        x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
+        y = torch.rand([K, N], dtype=torch.float, device=GPU_TYPE)
+
+        def foo(x, y):
+            return x.to(y.dtype) @ y
+
+        out, code = run_and_get_code(torch.compile(foo), x, y)
+        self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=2, num_allocs=None, num_deallocs=None)
 
     @config.patch(
         {
@@ -5247,32 +5254,6 @@ class TestPrologueFusion(TestCase):
             .check_count("tl.store", 1, exactly=True)
             .run(code[0])
         )
-
-    @config.patch(
-        {
-            "prologue_fusion": True,
-            "epilogue_fusion": False,
-            "benchmark_epilogue_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
-        }
-    )
-    def test_addmm_epilogue_fusion_disabled(self):
-        M, K, N = 63, 120, 190
-
-        def foo(a, b, bias):
-            computed_bias = bias * 2.0 - 1.0
-            return torch.relu(torch.addmm(computed_bias, a, b)) * 0.5
-
-        a = torch.randn(M, K, device=GPU_TYPE)
-        b = torch.randn(K, N, device=GPU_TYPE)
-        bias = torch.randn(M, N, device=GPU_TYPE)
-
-        with self.force_template_fusion_benchmark():
-            out, code = run_and_get_code(torch.compile(foo), a, b, bias)
-
-        self.assertEqual(out, foo(a, b, bias), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=3, num_allocs=None, num_deallocs=None)
-        FileCheck().check_count("tl.store", 3, exactly=True).run(code[0])
 
     @config.patch(
         {
