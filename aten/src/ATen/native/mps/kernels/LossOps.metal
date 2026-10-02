@@ -19,7 +19,7 @@ kernel void nllnd_loss_backward(
     uint thread_index [[thread_position_in_grid]]) {
   const long index =
       static_cast<long>(thread_index) + params.forward.tid_offset;
-  const long target_index = target[params.forward.target_offset + index];
+  const long target_index = target[index];
   if (target_index == params.forward.ignore_index) {
     return;
   }
@@ -29,26 +29,23 @@ kernel void nllnd_loss_backward(
     return;
   }
 
-  const long grad_output_index =
-      params.forward.input_offset + (params.is_reduction ? 0 : index);
-  T grad = -grad_output[grad_output_index];
+  T grad = -grad_output[params.is_reduction ? 0 : index];
   if (params.is_mean) {
-    const T total = total_weight[params.total_weight_offset];
+    const T total = total_weight[0];
     if (total == T(0)) {
       return;
     }
     grad = static_cast<T>(grad / total);
   }
   if (params.forward.has_weight) {
-    grad = static_cast<T>(
-        grad * weight[params.forward.weight_offset + target_index]);
+    grad = static_cast<T>(grad * weight[target_index]);
   }
 
   const long batch = index / params.forward.map_size;
   const long spatial = index % params.forward.map_size;
   const long output_index = batch * params.forward.batch_stride +
       target_index * params.forward.class_stride + spatial;
-  grad_input[params.forward.output_offset + output_index] = grad;
+  grad_input[output_index] = grad;
 }
 
 template <typename T>
@@ -62,9 +59,9 @@ kernel void nllnd_loss_forward(
     device ErrorMessages* error_buf [[buffer(6)]],
     uint thread_index [[thread_position_in_grid]]) {
   const long index = static_cast<long>(thread_index) + params.tid_offset;
-  const long target_index = target[params.target_offset + index];
+  const long target_index = target[index];
   if (target_index == params.ignore_index) {
-    output[params.output_offset + index] = T(0);
+    output[index] = T(0);
     sample_weights[index] = T(0);
     return;
   }
@@ -78,10 +75,8 @@ kernel void nllnd_loss_forward(
   const long spatial = index % params.map_size;
   const long input_index = batch * params.batch_stride +
       target_index * params.class_stride + spatial;
-  const T w = params.has_weight ?
-      weight[params.weight_offset + target_index] : T(1);
-  output[params.output_offset + index] =
-      -input[params.input_offset + input_index] * w;
+  const T w = params.has_weight ? weight[target_index] : T(1);
+  output[index] = -input[input_index] * w;
   sample_weights[index] = w;
 }
 
@@ -507,3 +502,9 @@ INSTANTIATE_NLLND_LOSS_BACKWARD(half);
 INSTANTIATE_NLLND_LOSS_FORWARD(float);
 INSTANTIATE_NLLND_LOSS_FORWARD(bfloat);
 INSTANTIATE_NLLND_LOSS_FORWARD(half);
+INSTANTIATE_NLLND_LOSS_FORWARD(long);
+INSTANTIATE_NLLND_LOSS_FORWARD(int);
+INSTANTIATE_NLLND_LOSS_FORWARD(short);
+INSTANTIATE_NLLND_LOSS_FORWARD(char);
+INSTANTIATE_NLLND_LOSS_FORWARD(uchar);
+INSTANTIATE_NLLND_LOSS_FORWARD(bool);

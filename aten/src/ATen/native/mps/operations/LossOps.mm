@@ -304,6 +304,20 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
 } // namespace BCELoss
 
 // NLLLoss
+// `t` is the tensor the kernel indexes by class: input for forward, grad_input for backward
+static NLLLossForwardParams<> nllnd_loss_params(const Tensor& t, int64_t ignore_index, bool has_weight, bool is2D) {
+  const auto class_dim = t.dim() == 1 ? 0 : 1;
+  return {
+      .n_classes = t.size(class_dim),
+      .map_size = is2D ? t.size(2) * t.size(3) : 1,
+      .batch_stride = t.dim() == 1 ? 0 : t.stride(0),
+      .class_stride = t.stride(class_dim),
+      .ignore_index = ignore_index,
+      .tid_offset = 0,
+      .has_weight = has_weight,
+  };
+}
+
 static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
                                      const Tensor& grad_output_arg,
                                      const Tensor& input_arg,
@@ -348,24 +362,8 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
       (total_weight.scalar_type() == input_arg.scalar_type() ? total_weight : total_weight.to(input_arg.scalar_type()))
           .contiguous();
 
-  const auto class_dim = input_arg.dim() == 1 ? 0 : 1;
-  const auto map_size = is2D ? input_arg.size(2) * input_arg.size(3) : 1;
   const NLLLossBackwardParams<> params{
-      .forward =
-          {
-              .n_classes = input_arg.size(class_dim),
-              .map_size = map_size,
-              .batch_stride = input_arg.dim() == 1 ? 0 : grad_input_arg.stride(0),
-              .class_stride = grad_input_arg.stride(class_dim),
-              .input_offset = grad_output.storage_offset(),
-              .output_offset = grad_input_arg.storage_offset(),
-              .target_offset = target.storage_offset(),
-              .weight_offset = has_weight ? weight.storage_offset() : 0,
-              .ignore_index = ignore_index,
-              .tid_offset = 0,
-              .has_weight = has_weight,
-          },
-      .total_weight_offset = total_weight_cast.storage_offset(),
+      .forward = nllnd_loss_params(grad_input_arg, ignore_index, has_weight, is2D),
       .is_reduction = reduction != Reduction::None,
       .is_mean = reduction == Reduction::Mean,
   };
@@ -376,12 +374,7 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
       auto pso = lib.getPipelineStateForFunc("nllnd_loss_backward_" + scalarToMetalTypeString(input_arg));
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder,
-                  getMTLBufferStorage(grad_input_arg),
-                  getMTLBufferStorage(grad_output),
-                  getMTLBufferStorage(target),
-                  getMTLBufferStorage(weight),
-                  getMTLBufferStorage(total_weight_cast));
+      mtl_setArgs(encoder, grad_input_arg, grad_output, target, weight, total_weight_cast);
       // For 1D (no batch dim) input the loss has a single element and only
       // target[0] is used; dispatching target.numel() threads would read
       // grad_output (a single element) out of bounds and scatter garbage into
@@ -449,8 +442,6 @@ static void nllnd_loss_forward_impl(Tensor& output,
   const Tensor weight = has_weight ? weight_arg.contiguous() : input;
 
   const int64_t num_outputs = input_arg.dim() == 1 ? 1 : target.numel();
-  const auto class_dim = input_arg.dim() == 1 ? 0 : 1;
-  const auto map_size = is2D ? input_arg.size(2) * input_arg.size(3) : 1;
 
   Tensor unreduced_loss;
   if (reduction == Reduction::None) {
@@ -461,19 +452,7 @@ static void nllnd_loss_forward_impl(Tensor& output,
 
   Tensor sample_weights = at::empty(target_arg.sizes(), input.options());
 
-  const NLLLossForwardParams<> params{
-      .n_classes = input_arg.size(class_dim),
-      .map_size = map_size,
-      .batch_stride = input_arg.dim() == 1 ? 0 : input.stride(0),
-      .class_stride = input.stride(class_dim),
-      .input_offset = input.storage_offset(),
-      .output_offset = unreduced_loss.storage_offset(),
-      .target_offset = target.storage_offset(),
-      .weight_offset = has_weight ? weight.storage_offset() : 0,
-      .ignore_index = ignore_index,
-      .tid_offset = 0,
-      .has_weight = has_weight,
-  };
+  const auto params = nllnd_loss_params(input, ignore_index, has_weight, is2D);
 
   MPSStream* stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {

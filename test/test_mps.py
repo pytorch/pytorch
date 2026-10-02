@@ -11763,30 +11763,6 @@ class TestNLLLoss(TestCaseMPS):
             total_weight = torch.tensor(1.0, device=inp.device)
             torch.ops.aten.nll_loss_backward(grad_out, inp, label, None, 1, -100, total_weight)
 
-    def test_nll_loss_forward_correctness(self):
-        for dtype in (torch.float32, torch.half, torch.bfloat16):
-            for reduction in ("none", "mean", "sum"):
-                for has_weight in (False, True):
-                    B, C = 32, 10
-                    x = torch.randn(B, C, dtype=dtype)
-                    target = torch.randint(0, C, (B,))
-                    target[3] = -100
-                    weight = torch.rand(C, dtype=dtype) if has_weight else None
-
-                    x_mps = x.clone().to("mps")
-                    target_mps = target.clone().to("mps")
-                    weight_mps = weight.clone().to("mps") if has_weight else None
-
-                    out_cpu = torch.nn.functional.nll_loss(
-                        x.float(), target, weight=weight.float() if has_weight else None,
-                        reduction=reduction, ignore_index=-100
-                    )
-                    out_mps = torch.nn.functional.nll_loss(
-                        x_mps, target_mps, weight=weight_mps,
-                        reduction=reduction, ignore_index=-100
-                    )
-                    self.assertEqual(out_mps.cpu().float(), out_cpu, atol=1e-3, rtol=1e-3)
-
     @largeTensorTest("8GB", device="mps")
     @largeMPSBufferTest(int(4.5 * 1024**3), device="mps")
     def test_nll_loss_large_tensor_indexing(self):

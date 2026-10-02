@@ -7,10 +7,6 @@ struct NLLLossForwardParams {
   index_t map_size;
   index_t batch_stride;
   index_t class_stride;
-  index_t input_offset;
-  index_t output_offset;
-  index_t target_offset;
-  index_t weight_offset;
   index_t ignore_index;
   index_t tid_offset;
   bool has_weight;
@@ -19,7 +15,6 @@ struct NLLLossForwardParams {
 template <typename index_t = int64_t>
 struct NLLLossBackwardParams {
   NLLLossForwardParams<index_t> forward;
-  index_t total_weight_offset;
   bool is_reduction;
   bool is_mean;
 };
