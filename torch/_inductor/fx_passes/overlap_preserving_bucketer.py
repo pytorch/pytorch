@@ -727,7 +727,7 @@ class OverlapPreservingBucketer:
         event.insert_between(prev_event, next_event)
         if prev_event:
             self.aug_graph.add_extra_dep(n=node, dep=prev_event.node)
-        if next_event and not prev_event:
+        if next_event:
             self.aug_graph.add_extra_dep(n=next_event.node, dep=node)
 
         # Remove bypass dependency
