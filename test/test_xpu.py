@@ -40,6 +40,7 @@ from torch.testing._internal.common_optimizers import (
 )
 from torch.testing._internal.common_utils import (
     find_library_location,
+    HardwareClassification,
     instantiate_parametrized_tests,
     IS_LINUX,
     IS_WINDOWS,
@@ -99,6 +100,7 @@ _xpu_computation_ops = [
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpu(TestCase):
+    hw_classification = HardwareClassification.XPU
     expandable_segments = False
 
     def test_device_behavior(self):
@@ -3167,6 +3169,8 @@ class TestBlockStateAbsorption(TestCase):
     "XPU IPC events require SYCL compiler 2026.2 or later",
 )
 class TestXPUMultiprocessing(TestCase):
+    hw_classification = HardwareClassification.XPU
+
     @staticmethod
     def _event_handle_importer_consumer(handle, p2c, c2p):
         e1 = torch.xpu.Event.from_ipc_handle(torch.xpu.current_device(), handle)
@@ -3291,6 +3295,8 @@ def caching_host_allocator_use_background_threads(use_background_threads: bool):
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestCachingHostAllocatorXpuGraph(TestCase):
+    hw_classification = HardwareClassification.XPU
+
     @parametrize("use_xpu_host_register", [True, False])
     def test_pin_memory_no_use(self, use_xpu_host_register):
         # A pinned host memory block cannot be reused if it is not deleted
@@ -3377,6 +3383,8 @@ class TestCachingHostAllocatorXpuGraph(TestCase):
 class TestXpuNativeMath(TestCase):
     """Test SYCL native fast math functions in NumericUtils.h on XPU."""
 
+    hw_classification = HardwareClassification.XPU
+
     def test_cauchy_sanity(self):
         """cauchy_() exercises at::tan -> sycl::native::tan via TransformationHelper."""
         for dtype in [torch.float32, torch.float16, torch.bfloat16]:
@@ -3429,6 +3437,8 @@ class TestXpuNativeMath(TestCase):
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestXpuOptims(TestCase):
+    hw_classification = HardwareClassification.XPU
+
     @optims(
         [optim for optim in optim_db if optim.has_capturable_arg],
         dtypes=[torch.float32],
@@ -3642,6 +3652,8 @@ class TestXpuOptims(TestCase):
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuOps(TestCase):
+    hw_classification = HardwareClassification.XPU
+
     @suppress_warnings
     @ops(_xpu_computation_ops, dtypes=any_common_cpu_xpu_one)
     def test_compare_cpu(self, device, dtype, op):
@@ -3768,6 +3780,7 @@ instantiate_device_type_tests(TestXpuOps, globals(), only_for="xpu", allow_xpu=T
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuAutocast(TestAutocast):
+    hw_classification = HardwareClassification.XPU
     # These operators are not implemented on XPU backend and we can NOT fall back
     # them to CPU. So we have to skip them at this moment.
     # TODO: remove these operators from skip list when they are implemented on XPU backend.
@@ -3876,6 +3889,8 @@ class TestXpuAutocast(TestAutocast):
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuTrace(TestCase):
+    hw_classification = HardwareClassification.XPU
+
     def setUp(self):
         super().setUp()
         torch._C._activate_gpu_trace()
@@ -3939,6 +3954,8 @@ class TestXpuTrace(TestCase):
 
 
 class TestXPUAPISanity(TestCase):
+    hw_classification = HardwareClassification.XPU
+
     def test_is_bf16_supported(self):
         self.assertEqual(
             torch.xpu.is_bf16_supported(including_emulation=True),
@@ -3976,6 +3993,8 @@ class TestXPUAPISanity(TestCase):
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestMemPool(TestCase):
+    hw_classification = HardwareClassification.XPU
+
     def _alloc_record_free_sync(self, pool_ctx, stream, nbytes):
         """Allocate a block, record it on a second stream, free, synchronize,
         then try to reallocate. Returns (original_ptr, new_ptr)."""
@@ -4236,7 +4255,7 @@ class TestMemPool(TestCase):
 
 instantiate_parametrized_tests(TestXpu)
 instantiate_parametrized_tests(TestCachingHostAllocatorXpuGraph)
-instantiate_device_type_tests(TestXpuOptims, globals())
+instantiate_device_type_tests(TestXpuOptims, globals(), only_for="xpu", allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
