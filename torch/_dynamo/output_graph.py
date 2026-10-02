@@ -3071,12 +3071,9 @@ class OutputGraph(OutputGraphCommon):
             # the backend may install its own modes while the graph runs.
             if self.torch_function_mode_stack:
                 mode_compiled_fn = compiled_fn
-                expected_num_modes = len(self.torch_function_mode_stack)
 
                 def _clear_modes_wrapper(*args, **kwargs):
-                    with temporarily_clear_torch_function_mode_stack(
-                        expected_num_modes
-                    ):
+                    with temporarily_clear_torch_function_mode_stack():
                         return mode_compiled_fn(*args, **kwargs)
 
                 compiled_fn = _clear_modes_wrapper
