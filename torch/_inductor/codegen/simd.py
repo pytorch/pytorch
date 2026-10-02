@@ -255,6 +255,10 @@ class IterationRangesRoot(IterationRanges):
     def has_custom_codegen_header(self) -> bool:
         return False
 
+    def mask_bound(self) -> sympy.Expr:
+        """The exclusive upper bound of in-range indices."""
+        return self.numel
+
     def named_constants(self) -> tuple[tuple[sympy.Symbol, sympy.Expr, bool], ...]:
         return ()
 
@@ -464,6 +468,17 @@ def codegen_reduced_buffer(buffer_name: str, reduced: str) -> None:
 # per-tile partials with these torch ops.
 PARTIAL_REDUCTION_OPS = {"sum": "sum", "max": "amax", "min": "amin"}
 
+# template_reduction_axis of a reduction over the M dim of a (B, M, N) template
+# output, i.e. each batch's columns.
+BATCH_COLUMN_AXIS = 3
+
+
+def template_output_matrix(template: ir.Buffer) -> tuple[sympy.Expr, sympy.Expr]:
+    """The row-major template output as an (M, N) matrix, with any batch dim
+    folded into M."""
+    *batch, n = template.get_size()
+    return sympy_product(batch), n
+
 
 def finishes_from_partials(
     node: scheduler.BaseSchedulerNode, m: sympy.Expr, n: sympy.Expr
@@ -488,9 +503,11 @@ def template_reduction_axis(
 ) -> int | None:
     """The dim of the row-major (M, N) template output that reduction node
     keeps: 0 for a row reduction, 1 for a column reduction (possibly split), or
-    None. produced are the template and epilogue buffers, which node must read
-    in place. See TritonTemplateKernel.codegen_tile_reduction_epilogue."""
-    m, n = template.get_size()
+    None. A batched (B, M, N) output is the (B * M, N) matrix here, and a
+    reduction over just its M dim is BATCH_COLUMN_AXIS. produced are the template and epilogue buffers, which
+    node must read in place. See
+    TritonTemplateKernel.codegen_tile_reduction_epilogue."""
+    m, n = template_output_matrix(template)
 
     def reads(node, is_valid):
         return all(
@@ -504,9 +521,13 @@ def template_reduction_axis(
         dep = dep.normalize()
         return dep.is_contiguous() and dep.get_numel() == m * n
 
+    # Columns outermost, then rows in row-major order.
     def col_major(dep):
-        return len(dep.var_names) == 2 and dep.index == sympy_dot(
-            (1, dep.size[0]), dep.var_names
+        strides = ir.FlexibleLayout.contiguous_strides(dep.size[1:])
+        return (
+            len(dep.var_names) >= 2
+            and dep.size[0] == n
+            and dep.index == sympy_dot((1, *(n * s for s in strides)), dep.var_names)
         )
 
     if node.group[1] == (m, n) and reads(node, row_major):
@@ -525,6 +546,24 @@ def template_reduction_axis(
         and reads(unsplit, col_major)
     ):
         return 1
+    size = template.get_size()
+    if len(size) != 3:
+        return None
+    batch, rows = size[0], size[1]
+
+    # Batches outermost, then columns, then rows.
+    def batch_col_major(dep):
+        return tuple(dep.size) == (batch, n, rows) and dep.index == sympy_dot(
+            (rows * n, 1, n), dep.var_names
+        )
+
+    if (
+        unsplit.group[1] == (batch * n, rows)
+        and finishes_from_partials(unsplit, m, n)
+        and reads(unsplit, batch_col_major)
+    ):
+        return BATCH_COLUMN_AXIS
+
     return None
 
 
@@ -537,13 +576,13 @@ def finished_after_kernel(
     finishes after the kernel: column reductions, and row reductions when tile
     doesn't span the output's columns. Also the epilogue nodes that read their
     results, which run after that as separate kernels."""
-    m, n = template.get_size()
+    m, n = template_output_matrix(template)
     produced = OrderedSet([template.get_name()]).union(
         *(node.get_buffer_names() for node in epilogue_nodes)
     )
-    axes = (1,)
+    axes: tuple[int, ...] = (1, BATCH_COLUMN_AXIS)
     if not V.graph.sizevars.statically_known_geq(tile[1] * tile[2], n):
-        axes = (0, 1)
+        axes = (0, *axes)
     partials = [
         node
         for node in epilogue_nodes
@@ -571,7 +610,7 @@ def tile_fits_reduction_epilogue(
     See TritonTemplateKernel.codegen_tile_reduction_epilogue."""
     if tile is None:
         return False
-    m, n = template.get_size()
+    m, n = template_output_matrix(template)
     produced = OrderedSet([template.get_name()])
     for node in epilogue_nodes:
         produced |= node.get_buffer_names()
@@ -582,7 +621,7 @@ def tile_fits_reduction_epilogue(
     if reductions and tile[2] > 1 and meta_ws_enabled():
         return False
     axes = [template_reduction_axis(node, template, produced) for node in reductions]
-    if any(axis not in (0, 1) for axis in axes):
+    if any(axis not in (0, 1, BATCH_COLUMN_AXIS) for axis in axes):
         return False
     partials, after = finished_after_kernel(tile, template, epilogue_nodes)
     if any(node.is_reduction() for node in after) or not all(
@@ -590,7 +629,7 @@ def tile_fits_reduction_epilogue(
     ):
         return False
     epilogue_nodes = [node for node in epilogue_nodes if node not in after]
-    columns = [node for node, axis in zip(reductions, axes) if axis == 1]
+    columns = [node for node, axis in zip(reductions, axes) if axis != 0]
     if columns:
         epilogue_nodes = [node for node in epilogue_nodes if node not in columns]
         # Column reductions run after the row ones and read only the template
@@ -656,6 +695,7 @@ class DerivedIterationRangesRoot(IterationRangesRoot):
         block_offset: sympy.Expr,
         name_suffix: str = "reduced",
         named_constants: tuple[tuple[sympy.Symbol, sympy.Expr, bool], ...] = (),
+        mask_bound: sympy.Expr | None = None,
     ) -> None:
         super().__init__(
             name=f"{name_suffix}_{parent.name}",
@@ -677,6 +717,7 @@ class DerivedIterationRangesRoot(IterationRangesRoot):
         self._block_size = block_size
         self._block_offset = block_offset
         self._named_constants = named_constants
+        self._mask_bound = numel if mask_bound is None else mask_bound
 
     def block_size(self) -> sympy.Expr:
         return self._block_size
@@ -689,6 +730,9 @@ class DerivedIterationRangesRoot(IterationRangesRoot):
 
     def mask_name(self) -> str:
         return f"{self.name}_mask"
+
+    def mask_bound(self) -> sympy.Expr:
+        return self._mask_bound
 
     def supports_constant_mask(self) -> bool:
         # Derived roots use expressions like R0_BLOCK // G rather than
@@ -3060,11 +3104,12 @@ class SIMDScheduling(BaseScheduling):
             nodes = (*node1.get_nodes(), *node2.get_nodes())
             produced = OrderedSet().union(*(node.get_buffer_names() for node in nodes))
             # A column reduction of the template output, which the tiling
-            # checks below can't express. Its group can't identify it: a split
-            # column reduction's can equal the output's (M, N).
+            # checks below can't express. Its group can't identify it: a
+            # split column reduction's can equal the output's (M, N).
             if any(
                 node.is_reduction()
-                and template_reduction_axis(node, template, produced) == 1
+                and template_reduction_axis(node, template, produced)
+                in (1, BATCH_COLUMN_AXIS)
                 for node in nodes
             ) and self.can_fuse_template_reduction_epilogue(node1, node2):
                 return True
