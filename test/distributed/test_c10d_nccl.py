@@ -3990,17 +3990,18 @@ class WorkHookTest(MultiProcessTestCase):
     def _get_store(self):
         return dist.FileStore(self.file_name, self.world_size)
 
-    def _get_process_group(self):
+    def _get_process_group(self, backend):
         store = self._get_store()
         c10d.init_process_group(
-            NCCL_BACKEND, store=store, rank=self.rank, world_size=self.world_size
+            backend, store=store, rank=self.rank, world_size=self.world_size
         )
         return c10d.distributed_c10d._get_default_group()
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_on_completion_hook_broadcast(self):
-        pg = self._get_process_group()
+    @parametrize("backend", [NCCL_BACKEND, "nccl2"])
+    def test_on_completion_hook_broadcast(self, backend):
+        pg = self._get_process_group(backend)
         num_hook_fired = 0
         durations: list[float] = []
 
@@ -4027,8 +4028,9 @@ class WorkHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_on_completion_hook_mixed_ops(self):
-        pg = self._get_process_group()
+    @parametrize("backend", [NCCL_BACKEND, "nccl2"])
+    def test_on_completion_hook_mixed_ops(self, backend):
+        pg = self._get_process_group(backend)
         num_hook_fired = 0
         durations: list[float] = []
 
@@ -4069,8 +4071,9 @@ class WorkHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_on_completion_hook_with_ddp(self):
-        pg = self._get_process_group()
+    @parametrize("backend", [NCCL_BACKEND, "nccl2"])
+    def test_on_completion_hook_with_ddp(self, backend):
+        pg = self._get_process_group(backend)
         num_hook_fired: dict[int, int] = {}
         durations: dict[OpType, list[float]] = {}
 
@@ -4121,10 +4124,11 @@ class WorkHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_on_completion_hook_all_gather_object(self):
+    @parametrize("backend", [NCCL_BACKEND, "nccl2"])
+    def test_on_completion_hook_all_gather_object(self, backend):
         torch.cuda.set_device(self.rank)
 
-        pg = self._get_process_group()
+        pg = self._get_process_group(backend)
         num_hook_fired: dict[int, int] = {}
         durations: dict[OpType, list[float]] = {}
 
@@ -4162,8 +4166,9 @@ class WorkHookTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
-    def test_on_completion_hook_seq(self):
-        pg = self._get_process_group()
+    @parametrize("backend", [NCCL_BACKEND, "nccl2"])
+    def test_on_completion_hook_seq(self, backend):
+        pg = self._get_process_group(backend)
         num_hook_fired = 0
         seq: int = -1
         work: int = 0
@@ -4186,6 +4191,9 @@ class WorkHookTest(MultiProcessTestCase):
 
         self.assertEqual(num_hook_fired, work_count)
         self.assertEqual(work, seq)
+
+
+instantiate_parametrized_tests(WorkHookTest)
 
 
 class NcclErrorHandlingTest(MultiProcessTestCase):
