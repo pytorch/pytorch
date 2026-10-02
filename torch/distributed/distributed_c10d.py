@@ -4099,6 +4099,11 @@ def all_reduce(
 
     Complex tensors are supported.
 
+    .. note::
+        This function is not autograd-aware and does not propagate gradients.
+        If you need autograd support for this collective operation, use
+        :func:`torch.distributed.nn.functional.all_reduce` instead.
+
     Args:
         tensor (Tensor): Input and output of the collective. The function
             operates in-place.
