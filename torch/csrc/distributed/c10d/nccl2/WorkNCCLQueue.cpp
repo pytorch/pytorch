@@ -61,6 +61,7 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollect() {
   {
     std::lock_guard<std::mutex> lock(work_queues_mutex_);
     status = garbageCollectLocked(completed);
+    notifying_ += completed.size();
   }
   // Reported with no queue lock held on purpose: a completion hook may take a
   // lock of its own (c10d::FlightRecorderHook takes the recorder's, which a
@@ -70,7 +71,16 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollect() {
   for (const auto& state : completed) {
     state->notifyCompletion();
   }
+  if (!completed.empty()) {
+    std::lock_guard<std::mutex> lock(work_queues_mutex_);
+    notifying_ -= completed.size();
+  }
   return status;
+}
+
+bool WorkNCCLQueue::idle() {
+  std::lock_guard<std::mutex> lock(work_queues_mutex_);
+  return stream_work_queues_.empty() && notifying_ == 0;
 }
 
 WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
