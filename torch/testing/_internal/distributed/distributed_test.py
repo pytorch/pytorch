@@ -87,6 +87,7 @@ from torch.testing._internal.common_distributed import (
     with_nccl_blocking_wait,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     FILE_SCHEMA,
     instantiate_parametrized_tests,
     IS_FBCODE,
@@ -4855,9 +4856,15 @@ class DistributedTest:
                     model.parameters(), model_optim_in_bwd.parameters(), strict=True
                 ):
                     self.assertEqual(p1, p2, "Parameters not initially equal!")
-                # Enable determinism in cudnn operators
-                with torch.backends.cudnn.flags(
-                    enabled=True, deterministic=True, benchmark=False
+                # The loss diverges quickly, so any run-to-run nondeterminism
+                # (e.g. rocBLAS GEMMs using atomics) is amplified past the
+                # default tolerances. Enable determinism in cudnn and BLAS.
+                # ResNet50's adaptive average pool backward has no deterministic path.
+                with (
+                    torch.backends.cudnn.flags(
+                        enabled=True, deterministic=True, benchmark=False
+                    ),
+                    DeterministicGuard(True, warn_only=j == 2),
                 ):
                     for i in range(8):
                         inp = (

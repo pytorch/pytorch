@@ -13,7 +13,6 @@ import sympy
 from sympy.printing.precedence import PRECEDENCE
 
 import torch
-from torch._utils_internal import get_file_path
 from torch.utils._cpp_embed_headers import _embed_headers
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Min
@@ -839,13 +838,14 @@ class MetalKernel(SIMDKernel):
                 dtype=DTYPE_TO_COMPUTATION_DTYPE[dtype],
             )
         if reduction_type in ["argmin", "argmax"]:
+            value, logical_idx = value if isinstance(value, tuple) else (value, None)
             data_acc_buf = self._new_idxvar(src_dtype, shmem_buf_size)
             idx_acc_buf = self._new_idxvar(dtype, shmem_buf_size)
             src_metal_type = DTYPE_TO_METAL[src_dtype]
             cast_value = f"static_cast<{src_metal_type}>({value})"
             if not self.multistage_reduction_entry:
                 val = cast_value  # type: ignore[assignment]
-                idx_val = f"static_cast<{DTYPE_TO_METAL[dtype]}>({reduction_idx})"
+                idx_val = f"static_cast<{DTYPE_TO_METAL[dtype]}>({logical_idx or reduction_idx})"
             else:
                 op_struct = "MaxOp" if reduction_type == "argmax" else "MinOp"
                 limit_val = f"::c10::metal::{op_struct}<{src_metal_type}>::identity()"
@@ -853,13 +853,11 @@ class MetalKernel(SIMDKernel):
                     src_dtype, default_value=limit_val, is_threadgroup=False
                 )
                 idx_val = self._new_idxvar(dtype, default_value=0, is_threadgroup=False)  # type: ignore[assignment]
-                idx_var = next(
-                    t for t in self.range_tree_nodes.values() if t.is_reduction
-                )
+                idx_var = f"{self.multistage_reduction_entry[0].root.prefix}_linear_idx"
                 self.compute.splice(f"""
                 if (::c10::metal::{op_struct}<{src_metal_type}>::replace({cast_value}, {val})) {{
                     {val} = {cast_value};
-                    {idx_val} = {idx_var.name};
+                    {idx_val} = {logical_idx or idx_var};
                 }}
                 """)
             return self.cse.generate(
@@ -1050,7 +1048,7 @@ class MetalKernel(SIMDKernel):
                 ]
                 header_contents = _embed_headers(
                     headers,
-                    [Path(get_file_path("torch")) / "include"],
+                    [Path(__file__).parent.parent.parent / "include"],
                     OrderedSet(),  # type: ignore[arg-type]
                 )
                 code.writeline(header_contents)
