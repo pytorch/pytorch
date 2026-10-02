@@ -335,6 +335,7 @@ Save after instantiation and before resetting or destroying the graph.
      CUDAPluggableAllocator
      change_current_allocator
      MemPool
+     LocalizedAllocator
 ```
 
 ```{eval-rst}
@@ -587,6 +588,39 @@ propagate. The predicate does not initialize the driver or a context, so calling
 it does not poison subsequent forks.
 Actual splitting and context creation always use CUDA, independently of this
 capability check.
+
+### Localized allocations
+
+With CUDA driver and cuda.bindings 13.4+, `LocalizedAllocator` allocates physical
+memory on a specified locality domain. Use it with the existing `MemPool` API
+to cache and suballocate that memory. Construction initializes CUDA so validation
+uses the actual CUDA-visible topology. Allocation does not localize execution;
+use a green-context stream separately when compute localization is also desired.
+
+```python
+allocator = torch.cuda.LocalizedAllocator(locality_domain_id=0, device="cuda:0")
+pool = torch.cuda.MemPool(allocator=allocator.allocator())
+with torch.cuda.use_mem_pool(pool, device="cuda:0"):
+    # x is allocated on locality domain 0
+    # the randn kernel runs non-localized
+    x = torch.randn(1024, device="cuda:0")
+```
+
+Use the allocator only on its owning device; cross-device access is not supported.
+Callback owners are retained for the process lifetime, so tensors can outlive the
+Python allocator and pool objects. One owner and primary-context reference per
+device/domain are deliberately retained through interpreter shutdown. Reclaiming
+physical memory waits for the allocation stream. Cleanup failures are logged, not
+raised; memory still in use after a failed stream wait is left for process exit
+to reclaim. During interpreter shutdown, callbacks skip CUDA cleanup entirely.
+
+```{warning}
+Concurrent allocator activity is unsupported. Other threads must not allocate,
+free, or query allocator state (including `MemPool.use_count()`) concurrently
+with this allocator. The ctypes callbacks acquire the GIL while holding the
+native allocator mutex; an allocator-state query can acquire these locks in the
+opposite order and deadlock.
+```
 
 ```{eval-rst}
 .. currentmodule:: torch.cuda.green_contexts
