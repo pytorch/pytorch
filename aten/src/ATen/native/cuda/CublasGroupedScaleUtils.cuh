@@ -10,6 +10,7 @@ enum class CublasGroupedScaleLayout : uint8_t {
   Scalar,
   PerBatchScalar,
   Vec16UE4M3,
+  Vec32UE8M0,
   Vec128F32,
   Block128x128F32,
   Vec32MnK4UE8M0,
@@ -57,6 +58,9 @@ C10_HOST_DEVICE inline int64_t cublas_grouped_scale_size_bytes(
     case CublasGroupedScaleLayout::Vec16UE4M3:
       return cublas_grouped_round_up(outer, 128) *
           cublas_grouped_round_up(cublas_grouped_ceil_div(inner, 16), 4);
+    case CublasGroupedScaleLayout::Vec32UE8M0:
+      return cublas_grouped_round_up(outer, 128) *
+          cublas_grouped_round_up(cublas_grouped_ceil_div(inner, 32), 4);
     case CublasGroupedScaleLayout::Vec128F32:
       return outer * cublas_grouped_ceil_div(inner, 128) * sizeof(float);
     case CublasGroupedScaleLayout::Block128x128F32:
