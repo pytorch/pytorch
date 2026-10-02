@@ -922,6 +922,68 @@ def run_test_retries(
     return ret_code, any(x > 0 for x in num_failures.values())
 
 
+def run_test_with_class_supervisors(test_module, test_directory, options, classes):
+    """Run each of ``classes`` in one process; other tests keep --subprocess."""
+    args = options.additional_args
+    # Only split plain full-file runs; other modes keep per-test isolation.
+    if (
+        not options.pytest
+        or not test_module.test.is_full_file()
+        or options.pytest_k_expr
+        or options.pytest_xdist_workers is not None
+        or options.continue_through_error
+        or options.coverage
+        or options.dynamo
+        or options.inductor
+        or RERUN_DISABLED_TESTS
+        or (args and not (len(args) == 2 and args[0] == "-m"))
+    ):
+        return run_test_with_subprocess(test_module, test_directory, options)
+
+    def subset(expression):
+        subset_options = copy.copy(options)
+        subset_options.pytest_k_expr = expression
+        return subset_options
+
+    for name in classes:
+        if result := run_test(test_module, test_directory, subset(name)):
+            return result
+    rest = subset(f"not ({' or '.join(classes)})")
+    return run_test_with_subprocess(test_module, test_directory, rest)
+
+
+def run_gloo_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module,
+        test_directory,
+        options,
+        (
+            "ProcessGroupGlooTest",
+            "ProcessGroupGlooLazyInitTest",
+            "ProcessGroupGlooFRTest",
+        ),
+    )
+
+
+def run_common_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module,
+        test_directory,
+        options,
+        (
+            "PythonProcessGroupExtensionTest",
+            "ProcessGroupWithDispatchedCollectivesTests",
+            "LocalRankTest",
+        ),
+    )
+
+
+def run_pg_wrapper_test(test_module, test_directory, options):
+    return run_test_with_class_supervisors(
+        test_module, test_directory, options, ("ProcessGroupGlooWrapperTest",)
+    )
+
+
 def run_test_with_subprocess(test_module, test_directory, options):
     return run_test(
         test_module, test_directory, options, extra_unittest_args=["--subprocess"]
@@ -1094,70 +1156,64 @@ def test_distributed(test_module, test_directory, options):
             continue
         if backend == "mpi" and not mpi_available:
             continue
-        for with_init_file in {True, False}:
-            if sys.platform == "win32" and not with_init_file:
-                continue
-            tmp_dir = tempfile.mkdtemp()
-            init_method = "file" if with_init_file else "env"
-            if options.verbose:
-                with_init = f"with {init_method} init_method"
-                print_to_stderr(
-                    f"Running distributed tests for the {backend} backend {with_init}"
+        # Both suites use FileStore; changing the report label does not test env://.
+        tmp_dir = tempfile.mkdtemp()
+        init_method = "file"
+        if options.verbose:
+            with_init = f"with {init_method} init_method"
+            print_to_stderr(
+                f"Running distributed tests for the {backend} backend {with_init}"
+            )
+        old_environ = dict(os.environ)
+        os.environ["TEMP_DIR"] = tmp_dir
+        os.environ["BACKEND"] = backend
+        os.environ.update(env_vars)
+        report_tag = f"dist-{backend}" if backend != "test" else ""
+        report_tag += f"-init-{init_method}"
+        os.environ["TEST_REPORT_SOURCE_OVERRIDE"] = report_tag
+        try:
+            os.mkdir(os.path.join(tmp_dir, "barrier"))
+            os.mkdir(os.path.join(tmp_dir, "test_dir"))
+            if backend == "mpi":
+                # test mpiexec for --noprefix option
+                with open(os.devnull, "w") as devnull:
+                    allowrunasroot_opt = (
+                        "--allow-run-as-root"
+                        if subprocess.call(
+                            'mpiexec --allow-run-as-root -n 1 bash -c ""',
+                            shell=True,
+                            stdout=devnull,
+                            stderr=subprocess.STDOUT,
+                        )
+                        == 0
+                        else ""
+                    )
+                    noprefix_opt = (
+                        "--noprefix"
+                        if subprocess.call(
+                            f'mpiexec {allowrunasroot_opt} -n 1 --noprefix bash -c ""',
+                            shell=True,
+                            stdout=devnull,
+                            stderr=subprocess.STDOUT,
+                        )
+                        == 0
+                        else ""
+                    )
+
+                mpiexec = ["mpiexec", "-n", "3", noprefix_opt, allowrunasroot_opt]
+
+                return_code = run_test(
+                    test_module, test_directory, options, launcher_cmd=mpiexec
                 )
-            old_environ = dict(os.environ)
-            os.environ["TEMP_DIR"] = tmp_dir
-            os.environ["BACKEND"] = backend
-            os.environ.update(env_vars)
-            report_tag = f"dist-{backend}" if backend != "test" else ""
-            report_tag += f"-init-{init_method}"
-            os.environ["TEST_REPORT_SOURCE_OVERRIDE"] = report_tag
-            try:
-                os.mkdir(os.path.join(tmp_dir, "barrier"))
-                os.mkdir(os.path.join(tmp_dir, "test_dir"))
-                if backend == "mpi":
-                    # test mpiexec for --noprefix option
-                    with open(os.devnull, "w") as devnull:
-                        allowrunasroot_opt = (
-                            "--allow-run-as-root"
-                            if subprocess.call(
-                                'mpiexec --allow-run-as-root -n 1 bash -c ""',
-                                shell=True,
-                                stdout=devnull,
-                                stderr=subprocess.STDOUT,
-                            )
-                            == 0
-                            else ""
-                        )
-                        noprefix_opt = (
-                            "--noprefix"
-                            if subprocess.call(
-                                f'mpiexec {allowrunasroot_opt} -n 1 --noprefix bash -c ""',
-                                shell=True,
-                                stdout=devnull,
-                                stderr=subprocess.STDOUT,
-                            )
-                            == 0
-                            else ""
-                        )
-
-                    mpiexec = ["mpiexec", "-n", "3", noprefix_opt, allowrunasroot_opt]
-
-                    return_code = run_test(
-                        test_module, test_directory, options, launcher_cmd=mpiexec
-                    )
-                else:
-                    return_code = run_test(
-                        test_module,
-                        test_directory,
-                        options,
-                        extra_unittest_args=["--subprocess"],
-                    )
-                if return_code != 0:
-                    return return_code
-            finally:
-                shutil.rmtree(tmp_dir)
-                os.environ.clear()
-                os.environ.update(old_environ)
+            else:
+                # No --subprocess: each test already spawns fresh rank processes.
+                return_code = run_test(test_module, test_directory, options)
+            if return_code != 0:
+                return return_code
+        finally:
+            shutil.rmtree(tmp_dir)
+            os.environ.clear()
+            os.environ.update(old_environ)
     return 0
 
 
@@ -1414,17 +1470,13 @@ CUSTOM_HANDLERS = {
     "distributed/test_distributed_spawn": test_distributed,
     "distributed/algorithms/quantization/test_quantization": test_distributed,
     "distributed/test_c10d_nccl": run_test_with_subprocess,
-    "distributed/test_c10d_gloo": run_test_with_subprocess,
+    "distributed/test_c10d_gloo": run_gloo_test,
     "distributed/test_c10d_ucc": run_test_with_subprocess,
-    "distributed/test_c10d_common": run_test_with_subprocess,
+    "distributed/test_c10d_common": run_common_test,
     "distributed/test_c10d_spawn_gloo": run_test_with_subprocess,
-    "distributed/test_c10d_spawn_nccl": run_test_with_subprocess,
     "distributed/test_c10d_spawn_ucc": run_test_with_subprocess,
-    "distributed/test_pg_wrapper": run_test_with_subprocess,
-    "distributed/rpc/test_faulty_agent": run_test_with_subprocess,
-    "distributed/rpc/test_tensorpipe_agent": run_test_with_subprocess,
+    "distributed/test_pg_wrapper": run_pg_wrapper_test,
     "distributed/rpc/test_share_memory": run_test_with_subprocess,
-    "distributed/rpc/cuda/test_tensorpipe_agent": run_test_with_subprocess,
     "functorch/test_control_flow_cuda_initialization": run_test_with_subprocess,
     "doctests": run_doctests,
     "test_ci_sanity_check_fail": run_ci_sanity_check,
@@ -1472,6 +1524,17 @@ def parse_args():
         "GPUs; `not-multigpu` runs only single-GPU "
         "tests, which can run on a single-GPU runner. Combined (AND) with the "
         "existing serial/not-serial split.",
+    )
+    parser.add_argument(
+        "--multigpu-min-gpus",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Further restrict the `multigpu` tests to those needing at least N "
+        "GPUs (resolved at collection, see test/conftest.py); pass-through to "
+        "pytest's --multigpu-min-gpus. 0 (default) disables it. Use with "
+        "`--multigpu-filter multigpu` on a larger-than-2-GPU runner to run just "
+        "the >2-GPU distributed tests (e.g. N=3 on a 4-GPU runner).",
     )
     parser.add_argument(
         "--include-cpython-tests",
@@ -2174,11 +2237,17 @@ def run_tests(
     }.get(getattr(options, "multigpu_filter", None))
     periodic_marker = "periodic" if TEST_CONFIG == "periodic" else None
 
+    # Orthogonal min-GPU threshold on the `multigpu` tests, applied by a pytest
+    # plugin (see test/conftest.py). 0 disables it, so it is a no-op unless a
+    # larger-runner config passes --multigpu-min-gpus.
+    min_gpus = getattr(options, "multigpu_min_gpus", 0) or 0
+
     def marker_args(serial_expr: str | None) -> list[str]:
         exprs = [e for e in (serial_expr, multigpu_marker, periodic_marker) if e]
-        if not exprs:
-            return []
-        return ["-m", " and ".join(f"({e})" for e in exprs)]
+        args = ["-m", " and ".join(f"({e})" for e in exprs)] if exprs else []
+        if min_gpus > 0:
+            args += ["--multigpu-min-gpus", str(min_gpus)]
+        return args
 
     # NB: This is a hack to make conftest.py and files it depends on available
     # on CPP_TESTS_DIR. We should see if the file could be turned into a
