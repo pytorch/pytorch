@@ -19,7 +19,7 @@ concurrency:
 env:
   # Change only this value to enable the bounded live mutation path. Shadow
   # plans in the read-only analyze job and never runs a job that can write.
-  AUTO_PR_TRIAGE_MODE: shadow
+  AUTO_PR_TRIAGE_MODE: live
 
 jobs:
   analyze:
