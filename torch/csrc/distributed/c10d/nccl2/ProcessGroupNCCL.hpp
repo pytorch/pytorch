@@ -515,49 +515,59 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const std::vector<BatchSendRecv::P2POp>& ops,
       bool async_op,
       std::chrono::milliseconds timeout);
+  MaterializedCollectiveConfig materializeConfig(
+      const OptionalCollectiveConfig& config);
   c10::intrusive_ptr<WorkNCCL> broadcastImpl(
       at::Tensor& tensor,
       int root,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> all_reduce(
       at::Tensor& tensor,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> reduceImpl(
       const at::Tensor& tensor,
       int root,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> all_gather(
       const std::vector<at::Tensor>& tensor_list,
       const at::Tensor& tensor,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> allGatherSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> reduce_scatter(
       at::Tensor& output,
       const std::vector<at::Tensor>& input_list,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> reduceScatterSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       const ::c10d::ReduceOp& op,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> allToAllSingleImpl(
       at::Tensor& output,
       const at::Tensor& input,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      const MaterializedCollectiveConfig& config = {});
   c10::intrusive_ptr<WorkNCCL> all_to_all_v_single(
       at::Tensor& output,
       const at::Tensor& input,
@@ -584,7 +594,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       const at::Tensor& input_tensor,
       int root,
       bool async_op,
-      std::chrono::milliseconds timeout);
+      std::chrono::milliseconds timeout,
+      bool contiguous_output = false,
+      const MaterializedCollectiveConfig& config = {});
 
   // Resolve a c10d per-op timeout (kUnsetTimeout -> communicator default).
   std::chrono::milliseconds operationTimeout(
@@ -723,6 +735,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // startCoalescing() and endCoalescing(); send()/recv() append into it.
   std::optional<BatchSendRecv> coalescing_batch_;
   c10::intrusive_ptr<WorkNCCL> coalesced_work_;
+
+  // Configs issued between startTimeEstimate() and endTimeEstimate().
+  bool time_estimate_active_ = false;
+  std::vector<std::shared_ptr<const void>> time_estimate_configs_;
 
   std::unordered_map<
       unsigned long long,

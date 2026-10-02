@@ -3,6 +3,7 @@ import math
 import operator
 from collections.abc import Callable, Sequence
 from datetime import timedelta
+from typing import Any
 
 import torch
 from torch._C import ScriptObject
@@ -311,6 +312,7 @@ def _local_broadcast_(
     root_tensor: int,
     async_op: bool = True,
     timeout: int = -1,
+    config: dict[str, Any] | None = None,
 ) -> tuple[list[torch.Tensor], ScriptObject]:
     # "broadcast_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "int root_rank, int root_tensor, bool async_op=True, int timeout=-1) -> (Tensor[], __torch__.torch.classes.c10d.Work)"
@@ -403,6 +405,7 @@ def _local_all_reduce_(
     sparse_indices: torch.Tensor | None = None,
     async_op: bool = True,
     timeout: int = -1,
+    config: dict[str, Any] | None = None,
 ) -> tuple[list[torch.Tensor], ScriptObject]:
     # "allreduce_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "__torch__.torch.classes.c10d.ReduceOp reduce_op, Tensor? sparse_indices, bool async_op=True, "
@@ -449,6 +452,7 @@ def _local_allreduce_coalesced_(
     reduce_op_so: ScriptObject,
     async_op: bool = True,
     timeout: int = -1,
+    config: dict[str, Any] | None = None,
 ) -> ScriptObject:
     # "allreduce_coalesced_(Tensor[] tensors, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "__torch__.torch.classes.c10d.ReduceOp reduce_op, bool async_op=True, int timeout=-1) -> __torch__.torch.classes.c10d.Work"
@@ -492,6 +496,7 @@ def _local_reduce_scatter_tensor_coalesced_(
     reduce_op_so: ScriptObject,
     async_op: bool = True,
     timeout: int = -1,
+    config: dict[str, Any] | None = None,
 ) -> ScriptObject:
     # "reduce_scatter_tensor_coalesced_(Tensor[] outputs, Tensor[] inputs, "
     # "__torch__.torch.classes.c10d.ProcessGroup process_group, "
@@ -546,6 +551,7 @@ def _local_allgather_base_(
     process_group_so: ScriptObject,
     async_op: bool = True,
     timeout: int = -1,
+    config: dict[str, Any] | None = None,
 ) -> tuple[torch.Tensor, ScriptObject]:
     # "_allgather_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup
     # process_group, bool async_op=True, int timeout=-1) -> (Tensor, __torch__.torch.classes.c10d.Work)");
@@ -587,6 +593,7 @@ def _local_reduce_scatter_base_(  # type: ignore[no-untyped-def]
     reduce_op_so: ScriptObject,
     async_op: bool = True,
     timeout: int = -1,
+    config: dict[str, Any] | None = None,
 ) -> tuple[torch.Tensor, ScriptObject]:
     # "_reduce_scatter_base_(Tensor output_tensor, Tensor input_tensor,
     # __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op,
@@ -635,6 +642,7 @@ def _local_all_gather_(
     process_group_so: ScriptObject,
     async_op: bool = True,
     timeout: int = -1,
+    config: dict[str, Any] | None = None,
 ) -> tuple[list[list[torch.Tensor]], ScriptObject]:
     # "allgather_(Tensor[][] output_tensors, Tensor[] input_tensors, "
     # "__torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True, "
@@ -682,6 +690,7 @@ def _local_allgather_into_tensor_coalesced_(
     input_tensors: list[torch.Tensor],
     process_group_so: ScriptObject,
     async_op: bool = True,
+    config: dict[str, Any] | None = None,
 ) -> ScriptObject:
     # "allgather_into_tensor_coalesced_(Tensor[] outputs, Tensor[] inputs, "
     # "__torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True) "
@@ -739,6 +748,7 @@ def _local_gather_(
     root_rank: int,
     async_op: bool = True,
     timeout: int = -1,
+    config: dict[str, Any] | None = None,
 ) -> ScriptObject:
     # "gather_(Tensor[][] output_tensors, Tensor[] input_tensors, "
     # "__torch__.torch.classes.c10d.ProcessGroup process_group, int root_rank, "
@@ -805,6 +815,7 @@ def _local_alltoall_(
     process_group_so: ScriptObject,
     async_op: bool = True,
     timeout: int = -1,
+    config: dict[str, Any] | None = None,
 ) -> tuple[list[torch.Tensor], ScriptObject]:
     # "alltoall_(Tensor[] output_tensors, Tensor[] input_tensors, "
     # "__torch__.torch.classes.c10d.ProcessGroup process_group, bool async_op=True, "
@@ -859,6 +870,7 @@ def _local_alltoall_base_(
     input_split_sizes: list[int],
     async_op: bool = True,
     timeout: int = -1,
+    config: dict[str, Any] | None = None,
 ) -> ScriptObject:
     # "alltoall_base_(Tensor output, Tensor input, __torch__.torch.classes.c10d.ProcessGroup process_group, "
     # "int[] output_split_sizes, int[] input_split_sizes, bool async_op=True, int timeout=-1) -> __torch__.torch.classes.c10d.Work";

@@ -84,6 +84,13 @@ class PyBackend : public Backend {
     WORK_OVERRIDE(Backend, gather, outputTensors, inputTensors, opts);
   }
 
+  c10::intrusive_ptr<Work> gather_single(
+      at::Tensor& outputBuffer,
+      at::Tensor& inputBuffer,
+      const GatherOptions& opts = GatherOptions()) override {
+    WORK_OVERRIDE(Backend, gather_single, outputBuffer, inputBuffer, opts);
+  }
+
   c10::intrusive_ptr<Work> scatter(
       std::vector<at::Tensor>& outputTensors,
       std::vector<std::vector<at::Tensor>>& inputTensors,
