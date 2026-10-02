@@ -1174,6 +1174,7 @@
 # [ai_agent_tooling]
 # /.agents/
 # /.claude/
+# /.github/actions/pi-agent/
 # /.github/copilot-instructions.md
 # /.github/workflows/claude-autorevert-advisor.yml
 # /.github/workflows/claude-code.yml

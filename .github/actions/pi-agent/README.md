@@ -10,6 +10,8 @@ self-contained; the same action lives in `pytorch/ciforge`.
 | `action.yml`, `run.sh` | Install pi from the lockfile, run the session, write the step summary |
 | `package.json`, `package-lock.json` | pi version and integrity-pinned dependencies |
 | `allowed-models.json` | Model IDs callers may use |
+| `models.json` | Pinned definitions missing from pi's bundled model catalog |
+| `claude-execution.jq` | Converts pi events to the Claude-compatible execution file |
 | `extensions/tool-guard.ts` | Per-call tool allowlist; path tools confined to the working directory |
 | `extensions/submit-result.ts` | Schema-validated `submit_result` tool for structured output |
 
@@ -74,15 +76,11 @@ For a job that reads untrusted input, combine the action with:
 
 ## Models
 
-Callers may only pass IDs in `allowed-models.json`. Bedrock IDs are
-`[<geo>.]<vendor>.<model>[-<version>]`:
+Use an exact ID from `allowed-models.json`, including its inference-profile prefix and
+version suffix: `global.` routes worldwide; `us.` stays in US regions. Bare IDs may fail
+with "on-demand throughput isn't supported". Some models need a one-time AWS Marketplace
+subscription by an account admin.
 
-| Part | Meaning | Examples |
-|---|---|---|
-| `<geo>.` | Cross-region inference profile: `global.` routes worldwide; `us.`, `eu.`, … stay in that geography | `global.`, `us.` |
-| `<vendor>.<model>` | Foundation model | `openai.gpt-6.1-sol`, `anthropic.claude-sonnet-5` |
-| `-v1`, `-1:0`, date | Version suffix; some models require it | `anthropic.claude-opus-4-6-v1` |
-
-Observed under `gha_workflow_claude_code` in us-east-1 (October 2026): Claude and GPT-5.6/6.x
-need the `global.` (or `us.`) prefix; the bare ID fails with "on-demand throughput isn't
-supported". Some models need a one-time AWS Marketplace subscription by an account admin.
+Before adding an ID, verify it with `pi-bedrock-smoke.yml` in `pytorch/ciforge`. That trusted
+probing workflow uses `allow-unlisted-model: "true"`; normal callers keep the allowlist.
+`models.json` supplies definitions missing from the pinned pi catalog for offline runs.
