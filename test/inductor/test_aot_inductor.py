@@ -8278,6 +8278,29 @@ class AOTInductorTestsTemplate:
             )
         FileCheck().check_not(INFERRED_BOUND).run(code)
 
+    def test_unbacked_relation_assert_lite_mode(self):
+        # Lite mode retraces the graph (selective_decompose), re-allocating the
+        # unbacked symbols the deferred assert is keyed on.
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                shorter = torch.nonzero(a).size(0)
+                longer = torch.nonzero(b).size(0)
+                torch._check(shorter <= longer)
+                return a.new_ones([shorter]), b.new_ones([longer])
+
+        def mask(*bits):
+            return torch.tensor(bits, dtype=torch.float, device=self.device)
+
+        model = Model()
+        example_inputs = (mask(1, 1, 0, 0), mask(1, 1, 1, 0))
+        with config.patch(torch._inductor.lite_mode_options):
+            so_path = AOTIRunnerUtil.legacy_compile(model, example_inputs)
+        compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
+        self.assertEqual(compiled(*example_inputs), model(*example_inputs))
+        # Same sizes as the example, so only the relational assert can catch it.
+        with self.assertRaisesRegex(RuntimeError, r"Expected u\d+ <= u\d+"):
+            compiled(mask(1, 1, 1, 0), mask(1, 0, 0, 0))
+
     def test_multi_input_nonzero_slice_shared_dim(self):
         # Regression: when multiple inputs share a dynamic batch dim and are
         # sliced with the same nonzero result, the generated C++ guard code
@@ -10566,6 +10589,30 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, device=self.device),
         )
+        self.check_model(Model(), example_inputs, move_model_to_device=False)
+
+    @requires_gpu
+    def test_mixed_device_constant_view(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Mixed-device test requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("cpu_w", torch.arange(64.0).view(32, 2))
+                self.register_buffer(
+                    "gpu_w", torch.arange(64.0, device=GPU_TYPE).view(32, 2)
+                )
+
+            def forward(self, x):
+                return (
+                    self.cpu_w.t().to(x.device) + x,
+                    self.cpu_w[1:].to(x.device),
+                    self.gpu_w.t().to("cpu"),
+                    self.gpu_w[1:].to("cpu"),
+                )
+
+        example_inputs = (torch.randn(2, 32, device=self.device),)
         self.check_model(Model(), example_inputs, move_model_to_device=False)
 
     @requires_gpu

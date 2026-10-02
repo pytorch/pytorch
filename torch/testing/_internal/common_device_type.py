@@ -2431,15 +2431,6 @@ def skipCUDAIfNoMagmaAndNoCusolver(fn):
         return skipCUDAIfNoMagma(fn)
 
 
-# Skips a test if both cuSOLVER/hipSOLVER and MAGMA are not available
-def skipCUDAIfNoMagmaAndNoLinalgsolver(fn):
-    if has_cusolver() or has_hipsolver():
-        return fn
-    else:
-        # cuSolver is disabled on cuda < 10.1.243, tests depend on MAGMA
-        return skipCUDAIfNoMagma(fn)
-
-
 # Skips a test on CUDA when using ROCm.
 def skipCUDAIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
     def dec_fn(fn):
