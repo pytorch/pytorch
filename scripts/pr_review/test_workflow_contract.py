@@ -1221,7 +1221,10 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
         "Bash,Edit,NotebookEdit,WebFetch,WebSearch,"
         # Explicit denies for the credential paths, so they do not rest on
         # "no allow rule matches" alone, which was never tested for sub-agents.
-        "Read(//proc/**),Read(~/.aws/**)"
+        "Read(//proc/**),Read(~/.aws/**),"
+        # A reviewer that sleeps to wait for background sub-agents ends its
+        # headless session instead, publishing whatever draft it wrote.
+        "ScheduleWakeup"
     )
 
     def test_the_tool_policy_is_exactly_what_was_reviewed(self):
@@ -2829,6 +2832,7 @@ class TestNoWorkflowSetsAnUnmodelledEnvironmentName(unittest.TestCase):
         (
             "AWS_REGION",
             "BASE_SHA",
+            "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
             "CLAUDE_CODE_SUBAGENT_MODEL",
             "CLAUDE_CODE_SUBAGENT_MODEL_FORCE",
             "CLAUDE_OUTCOME",

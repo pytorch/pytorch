@@ -748,6 +748,11 @@ jobs:
           # model also keeps emit_row.py's single `model` column true.
           CLAUDE_CODE_SUBAGENT_MODEL: ${{ env.REVIEW_MODEL }}
           CLAUDE_CODE_SUBAGENT_MODEL_FORCE: "1"
+          # Sub-agents must finish inside the reviewer's turn. A backgrounded one
+          # reports after the headless session has already ended, and the
+          # reviewer's early draft verdict was published instead (seen in CI:
+          # "Draft; review in progress." marked ready, 6 of 6 fan-out runs).
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
         uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507 # Claude Code 2.1.280
         with:
           use_bedrock: "true"
@@ -840,7 +845,7 @@ jobs:
           claude_args: |
             --model ${{ env.REVIEW_MODEL }}
             --allowedTools "Read(/${{ github.workspace }}/pr/**),Grep(/${{ github.workspace }}/pr/**),Glob(/${{ github.workspace }}/pr/**),Read(/${{ github.workspace }}/trusted/.claude/skills/pr-review-readiness/**),Read(/${{ github.workspace }}/trusted/.claude/skills/pr-review/**),Read(//tmp/pr-diff.txt),Read(//tmp/pr-files.txt),Read(/${{ runner.temp }}/pr-review-findings.json),Write,Agent"
-            --disallowedTools "Bash,Edit,NotebookEdit,WebFetch,WebSearch,Read(//proc/**),Read(~/.aws/**)"
+            --disallowedTools "Bash,Edit,NotebookEdit,WebFetch,WebSearch,Read(//proc/**),Read(~/.aws/**),ScheduleWakeup"
             --setting-sources user
             --add-dir ${{ runner.temp }}
             --strict-mcp-config
