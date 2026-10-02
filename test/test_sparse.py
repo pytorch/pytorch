@@ -700,6 +700,22 @@ class TestSparse(TestSparseBase):
         sparse_matrix = torch.sparse_coo_tensor(indices, values, size=(N, N), dtype=torch.float32, device=device)
         sparse_matrix = sparse_matrix.coalesce()
 
+    @onlyAccelerator
+    @dtypes(torch.float32, torch.float16, torch.bool)
+    @dtypesIfMPS(torch.float32)
+    def test_coalesce_wide_dense_dims(self, device, dtype):
+        # Regression test for https://github.com/pytorch/pytorch/issues/199483
+        sparse_size = 50
+        for nnz, dense_size in itertools.product([2, 3, 8, 64, 1000], [(264,), (300,), (512,), (1024,), (3, 100)]):
+            indices = torch.randint(0, sparse_size, (1, nnz))
+            # Small integers keep the sums exact for every dtype.
+            values = torch.randint(-4, 5, (nnz, *dense_size)).to(dtype)
+            t = torch.sparse_coo_tensor(indices, values, (sparse_size, *dense_size))
+            expected = t.coalesce()
+            actual = t.to(device).coalesce()
+            self.assertEqual(actual._indices(), expected._indices())
+            self.assertEqual(actual._values(), expected._values())
+
     @dtypes(torch.float32)
     @expectedFailureMPS
     @skipIfCrossRef
