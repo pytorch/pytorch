@@ -5753,7 +5753,7 @@ class LargeCommTest(test_c10d_common.AbstractLargeCommTest, MultiProcessTestCase
     @parametrize("float8_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
     def test_broadcast_float8(self, float8_dtype):
         device = torch.device(f"cuda:{self.rank}")
-        if sm_is_or_higher_than(device, 9, 0):
+        if not sm_is_or_higher_than(device, 9, 0):
             self.skipTest("FP8 broadcast natively supported on sm90+")
         store = dist.FileStore(self.file_name, self.world_size)
         dist.init_process_group(
