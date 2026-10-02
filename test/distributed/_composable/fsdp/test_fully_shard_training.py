@@ -31,6 +31,7 @@ from torch.distributed.fsdp import (
 )
 from torch.distributed.fsdp._fully_shard._fsdp_api import ReduceScatter
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
     foreach_all_gather,
     foreach_reduce,
@@ -40,6 +41,10 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     HSDPMeshInfo,
     ShardPlacementResult,
     TrainingState,
+)
+from torch.distributed.fsdp.experimental import (
+    all_gather_output_fn_with_native_copy,
+    reduce_scatter_input_fn_with_native_copy,
 )
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
@@ -471,16 +476,240 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 # Sharding on nonzero dim requires even sharding
                 "lin_shapes": [[(32, 16), (16, 8)]],
                 "use_shard_placement_fn": [True],
+                # False tests Shard(1)-only weights; True adds Shard(0) biases.
+                "bias": [False, True],
             },
             self._test_train_parity_single_group,
         )
 
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_train_parity_native_copy_fns(self):
+        self.run_subtests(
+            {
+                "lin_shapes": [[(32, 16), (16, 8)]],
+                "use_shard_placement_fn": [True],
+                "bias": [False, True],
+                "copy_fns": [
+                    (all_gather_output_fn_with_native_copy, None),
+                    (None, reduce_scatter_input_fn_with_native_copy),
+                    (
+                        all_gather_output_fn_with_native_copy,
+                        reduce_scatter_input_fn_with_native_copy,
+                    ),
+                ],
+            },
+            self._test_train_parity_single_group,
+        )
+
+    @skip_if_lt_x_gpu(4, allow_cpu=True)
+    def test_train_parity_post_forward_shard_largest_dim(self):
+        self.run_subtests(
+            {
+                "lin_shapes": [[(32, 16), (16, 8)]],
+                "use_shard_placement_fn": [True],
+                "reshard_after_forward": [2],
+                "copy_fns": [
+                    (None, None),
+                    (all_gather_output_fn_with_native_copy, None),
+                ],
+            },
+            self._test_train_parity_single_group,
+        )
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_custom_reduce_scatter_copy_in(self):
+        torch.manual_seed(42)
+        model = nn.Sequential(nn.Linear(5, 3), nn.ReLU(), nn.Linear(3, 7))
+        ref_model = copy.deepcopy(model).to(device_type)
+        replicate(ref_model, device_ids=_get_device_ids(self.rank))
+        groups = (model[0], model[2])
+        expected_groups = {
+            tuple(param.numel() for param in group.parameters()) for group in groups
+        }
+        copy_calls: dict[tuple[int, ...], int] = defaultdict(int)
+
+        def prepare_inputs(grads, shard_dims, world_size):
+            self.assertEqual(shard_dims, [0] * len(grads))
+            group_sizes = tuple(grad.numel() for grad in grads)
+            copy_offsets = []
+            offset = 0
+            for grad in grads:
+                rows = (grad.size(0) + world_size - 1) // world_size
+                shard_numel = rows * grad[0].numel()
+                copy_offsets.append((offset, rows, shard_numel))
+                offset += shard_numel
+
+            def copy_in(output):
+                self.assertEqual(output.shape, (offset * world_size,))
+                self.assertEqual(output.dtype, torch.float64)
+                output.zero_()
+                rank_outputs = output.view(world_size, -1)
+                for grad, (start, rows, shard_numel) in zip(grads, copy_offsets):
+                    self.assertEqual(grad.dtype, torch.float32)
+                    for rank in range(world_size):
+                        shard = grad[rank * rows : (rank + 1) * rows].reshape(-1)
+                        rank_output = rank_outputs[rank].narrow(0, start, shard_numel)
+                        rank_output[: shard.numel()].copy_(shard)
+                copy_calls[group_sizes] += 1
+
+            return copy_in
+
+        mp_policy = MixedPrecisionPolicy(reduce_dtype=torch.float64)
+        for group in groups:
+            fully_shard(group, mp_policy=mp_policy)
+            group.set_reduce_scatter_input_fn(prepare_inputs)
+        fully_shard(model, mp_policy=mp_policy)
+        ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-2)
+        optim = torch.optim.SGD(model.parameters(), lr=1e-2)
+        torch.manual_seed(42 + self.rank + 1)
+        for iter_idx in range(4):
+            if iter_idx == 3:
+                model.set_reduce_scatter_input_fn(None)
+            inp = torch.randn((4, 5), device=device_type.type)
+            losses = []
+            for module, optimizer in ((ref_model, ref_optim), (model, optim)):
+                optimizer.zero_grad(set_to_none=True)
+                loss = module(inp).sum()
+                loss.backward()
+                optimizer.step()
+                losses.append(loss)
+            self.assertEqual(losses[0], losses[1])
+            check_sharded_parity(self, ref_model, model)
+            num_calls = min(iter_idx + 1, 3)
+            self.assertEqual(copy_calls, dict.fromkeys(expected_groups, num_calls))
+
+    @skip_if_lt_x_gpu(2, allow_cpu=True)
+    def test_custom_all_gather_copy_out(self):
+        torch.manual_seed(42)
+        model = nn.Sequential(nn.Linear(8, 16), nn.ReLU(), nn.Linear(16, 4))
+        ref_model = copy.deepcopy(model).to(device_type)
+        replicate(ref_model, device_ids=_get_device_ids(self.rank))
+        fully_shard(model[0])
+        fully_shard(model)  # root manages model[2]
+        calls = {"root": 0, "all": 0}
+
+        def make_copy_out(name):
+            def copy_out(
+                all_gather_output, outputs, split_sizes, outer_sizes, world_size
+            ):
+                self.assertEqual(world_size, self.world_size)
+                self.assertEqual(len(outputs), len(split_sizes))
+                self.assertEqual(
+                    all_gather_output.numel(), sum(split_sizes) * world_size
+                )
+                calls[name] += 1
+                _default_all_gather_output_fn(
+                    all_gather_output, outputs, split_sizes, outer_sizes, world_size
+                )
+
+            return copy_out
+
+        ref_optim = torch.optim.SGD(ref_model.parameters(), lr=1e-2)
+        optim = torch.optim.SGD(model.parameters(), lr=1e-2)
+        torch.manual_seed(42 + self.rank + 1)
+        # recurse=False only replaces the root's copy-out; None restores both
+        for fn, recurse in (
+            (make_copy_out("root"), False),
+            (make_copy_out("all"), True),
+            (None, True),
+        ):
+            model.set_all_gather_output_fn(fn, recurse=recurse)
+            prev_calls = dict(calls)
+            inner_group = fully_shard.state(model[0])._fsdp_param_group
+            self.assertIs(
+                inner_group._all_gather_output_fn,
+                fn if recurse and fn is not None else _default_all_gather_output_fn,
+            )
+            for _ in range(2):
+                inp = torch.randn((4, 8), device=device_type.type)
+                losses = []
+                for module, optimizer in ((ref_model, ref_optim), (model, optim)):
+                    optimizer.zero_grad(set_to_none=True)
+                    losses.append(module(inp).sum())
+                    losses[-1].backward()
+                    optimizer.step()
+                self.assertEqual(losses[0], losses[1])
+                check_sharded_parity(self, ref_model, model)
+            new_calls = {k: calls[k] - prev_calls[k] for k in calls}
+            if fn is None:
+                self.assertEqual(new_calls, {"root": 0, "all": 0})
+            else:
+                name = "all" if recurse else "root"
+                self.assertGreater(new_calls[name], 0)
+
+    @skip_if_lt_x_gpu(4)
+    def test_train_parity_native_copy_fns_policies(self):
+        self.run_subtests(
+            {"hsdp": [False, True], "offload": [False, True], "mp": [False, True]},
+            self._test_train_parity_native_copy_fns_policies,
+        )
+
+    def _test_train_parity_native_copy_fns_policies(
+        self, hsdp: bool, offload: bool, mp: bool
+    ):
+        # Native copies must match the default ones bitwise under each policy
+        torch.manual_seed(42)
+        model = nn.Sequential(nn.Linear(32, 16), nn.ReLU(), nn.Linear(16, 8))
+        if hsdp:
+            mesh = init_device_mesh(
+                device_type.type,
+                (2, self.world_size // 2),
+                mesh_dim_names=("replicate", "shard"),
+            )
+        else:
+            mesh = init_device_mesh(device_type.type, (self.world_size,))
+        mp_policy = MixedPrecisionPolicy()
+        if mp:
+            mp_policy = MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+            )
+        models, optims = [], []
+        for native in (False, True):
+            fsdp_model = copy.deepcopy(model)
+            fully_shard(
+                fsdp_model,
+                mesh=mesh,
+                shard_placement_fn=lambda p: Shard(p.shape.index(max(p.shape))),
+                mp_policy=mp_policy,
+                offload_policy=CPUOffloadPolicy() if offload else OffloadPolicy(),
+            )
+            if native:
+                fsdp_model.set_all_gather_output_fn(
+                    all_gather_output_fn_with_native_copy
+                )
+                fsdp_model.set_reduce_scatter_input_fn(
+                    reduce_scatter_input_fn_with_native_copy
+                )
+            models.append(fsdp_model)
+            optims.append(torch.optim.Adam(fsdp_model.parameters(), lr=1e-2))
+        torch.manual_seed(42 + self.rank + 1)
+        for _ in range(3):
+            inp = torch.randn((4, 32), device=device_type.type)
+            losses = []
+            for fsdp_model, optim in zip(models, optims):
+                optim.zero_grad(set_to_none=True)
+                losses.append(fsdp_model(inp).sum())
+                losses[-1].backward()
+                optim.step()
+            self.assertEqual(losses[0], losses[1], atol=0, rtol=0)
+            for param, native_param in zip(
+                models[0].parameters(), models[1].parameters()
+            ):
+                self.assertEqual(param, native_param, atol=0, rtol=0)
+
     def _test_train_parity_single_group(
-        self, lin_shapes: list[tuple[int, int]], use_shard_placement_fn: bool
+        self,
+        lin_shapes: list[tuple[int, int]],
+        use_shard_placement_fn: bool,
+        bias: bool = True,
+        copy_fns: tuple[Callable | None, Callable | None] = (None, None),
+        reshard_after_forward: bool | int | None = None,
     ):
         torch.manual_seed(42)
         model = nn.Sequential(
-            nn.Linear(*lin_shapes[0]), nn.ReLU(), nn.Linear(*lin_shapes[1])
+            nn.Linear(*lin_shapes[0], bias=bias),
+            nn.ReLU(),
+            nn.Linear(*lin_shapes[1], bias=bias),
         )
         ref_model = copy.deepcopy(model).to(device_type)
         replicate(ref_model, device_ids=_get_device_ids(self.rank))
@@ -490,18 +719,25 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             return Shard(param.shape.index(max(param.shape)))
 
         shard_placement_fn = _shard_placement_fn if use_shard_placement_fn else None
-        fully_shard(model, shard_placement_fn=shard_placement_fn)
+        fully_shard(
+            model,
+            shard_placement_fn=shard_placement_fn,
+            reshard_after_forward=reshard_after_forward,
+        )
+        model.set_all_gather_output_fn(copy_fns[0])
+        model.set_reduce_scatter_input_fn(copy_fns[1])
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.manual_seed(42 + self.rank + 1)
         inp = (torch.randn((4, lin_shapes[0][0]), device=device_type.type),)
         for iter_idx in range(10):
-            losses: list[torch.Tensor] = []
+            outputs: list[torch.Tensor] = []
             for _model, _optim in ((ref_model, ref_optim), (model, optim)):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-                losses.append(_model(*inp).sum())
-                losses[-1].backward()
+                outputs.append(_model(*inp))
+                outputs[-1].sum().backward()
                 _optim.step()
-            self.assertEqual(losses[0], losses[1])
+            self.assertEqual(outputs[0], outputs[1])
+            check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(
@@ -3337,10 +3573,21 @@ class TestFullyShardInference(FSDPTest):
         return 2
 
     def test_inference(self):
+        copy_fns = [None, all_gather_output_fn_with_native_copy]
+        self.run_subtests(
+            {"all_gather_output_fn": copy_fns},
+            self._test_inference,
+        )
+
+    def _test_inference(self, all_gather_output_fn: Callable | None):
+        torch.manual_seed(42)
         model = nn.Linear(8, 4, bias=False, device=device_type)
+        ref_model = copy.deepcopy(model)
         fully_shard(model, shard_placement_fn=lambda _: Shard(1))
+        model.set_all_gather_output_fn(all_gather_output_fn)
         with torch.inference_mode():
-            model(torch.ones((2, 8), device=device_type))
+            inp = torch.ones((2, 8), device=device_type)
+            self.assertEqual(model(inp), ref_model(inp))
 
 
 class TestFullyShardWorldSize1(FSDPTest):

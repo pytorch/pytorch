@@ -331,35 +331,38 @@ class TestFullyShardMemory(FSDPTest):
     def test_unsharded_grads_freed_after_copy_in(self):
         from torch.distributed.fsdp._fully_shard import _fsdp_collectives
 
-        model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 32)).to(device_type)
-        fully_shard(model)
-        copy_in = _fsdp_collectives.foreach_reduce_scatter_copy_in
         cast_and_view = _fsdp_collectives._cast_and_view_sharded_grads
+        default_prepare = _fsdp_collectives._default_reduce_scatter_input_fn
         grad_refs: list[weakref.ref] = []
         num_alive_grads: list[int] = []
-
-        def recording_copy_in(grads, *args):
-            grad_refs[:] = [weakref.ref(grad) for grad in grads]
-            copy_in(grads, *args)
 
         def counting_cast_and_view(*args):
             num_alive_grads.append(sum(ref() is not None for ref in grad_refs))
             return cast_and_view(*args)
 
-        with (
-            mock.patch.object(
-                _fsdp_collectives, "foreach_reduce_scatter_copy_in", recording_copy_in
-            ),
-            mock.patch.object(
+        def recording_prepare(unsharded_grads, shard_dims, world_size):
+            grad_refs[:] = [weakref.ref(grad) for grad in unsharded_grads]
+            return default_prepare(unsharded_grads, shard_dims, world_size)
+
+        def holding_prepare(unsharded_grads, shard_dims, world_size):
+            # The copy-in keeps its own list, so only dropping it frees grads
+            return recording_prepare(list(unsharded_grads), shard_dims, world_size)
+
+        for prepare in (recording_prepare, holding_prepare):
+            model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 32))
+            fully_shard(model.to(device_type))
+            param_group = fully_shard.state(model)._fsdp_param_group
+            param_group._prepare_reduce_scatter_inputs = prepare
+            num_alive_grads.clear()
+            with mock.patch.object(
                 _fsdp_collectives,
                 "_cast_and_view_sharded_grads",
                 counting_cast_and_view,
-            ),
-        ):
-            model(torch.randn(4, 16, device=device_type)).sum().backward()
-        # Clearing foreach_reduce's list after the copy-in must free the
-        # unsharded gradients before the reduce allocates its outputs
-        self.assertEqual(num_alive_grads, [0])
+            ):
+                model(torch.randn(4, 16, device=device_type)).sum().backward()
+            # foreach_reduce must free the unsharded gradients after the
+            # copy-in, before the reduce allocates its outputs
+            self.assertEqual(num_alive_grads, [0])
 
     def _get_peak_active_memory_mb(self) -> int:
         mem_stats = torch.get_device_module(device_type).memory_stats()

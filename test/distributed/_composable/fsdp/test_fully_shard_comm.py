@@ -3,9 +3,11 @@
 import copy
 import functools
 import itertools
+import math
 import os
 import tempfile
 import unittest
+import warnings
 from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
@@ -26,8 +28,10 @@ from torch.distributed.fsdp import (
     MixedPrecisionPolicy,
     OffloadPolicy,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather
+from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, AllGatherInput
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _default_all_gather_output_fn,
+    _default_reduce_scatter_input_fn,
     _div_if_needed,
     _get_gradient_divide_factors,
     DefaultAllGather,
@@ -41,18 +45,29 @@ from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
 )
-from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
+from torch.distributed.fsdp._fully_shard._fsdp_param import (
+    _normalize_all_gather_inputs,
+    ShardedState,
+)
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import (
     AllGatherState,
     FSDPCommContext,
     FSDPParamGroup,
 )
-from torch.distributed.tensor import DTensor
+from torch.distributed.fsdp.experimental import (
+    all_gather_output_fn_with_native_copy,
+    reduce_scatter_input_fn_with_native_copy,
+)
+from torch.distributed.tensor import DTensor, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.profiler import profile, ProfilerActivity
+from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
+    deviceCountAtLeast,
+    dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
 )
@@ -74,6 +89,7 @@ from torch.testing._internal.common_fsdp import (
     patch_unshard,
 )
 from torch.testing._internal.common_utils import (
+    DeterministicGuard,
     instantiate_parametrized_tests,
     parametrize,
     requires_cuda_p2p_access,
@@ -193,7 +209,10 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         return orig_params
 
     def _init_fsdp_param_group(
-        self, params: list[nn.Parameter], reshard_after_forward: bool | int
+        self,
+        params: list[nn.Parameter],
+        reshard_after_forward: bool | int,
+        shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None = None,
     ):
         module = nn.ParameterList([param.detach().clone() for param in params])
         mesh_info = FSDPMeshInfo(_init_default_fully_shard_mesh(), shard_mesh_dim=0)
@@ -206,7 +225,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             mesh_info,
             post_forward_mesh_info,
             self.device,
-            None,  # shard_placement_fn
+            shard_placement_fn,
             MixedPrecisionPolicy(),
             OffloadPolicy(),
         )
@@ -242,6 +261,19 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             )
 
     @skip_if_lt_x_gpu(1)
+    def test_all_gather_post_forward_shard_dim1(self):
+        # Post-forward shards are flat, so their all-gather needs no reassembly
+        stream = device_module.current_stream()
+        self._test_all_gather(
+            [torch.Size([8, 256]), torch.Size([16, 128])],
+            reshard_after_forward=8,
+            async_op=False,
+            all_gather_copy_in_stream=stream,
+            all_gather_stream=stream,
+            shard_placement_fn=lambda _: Shard(1),
+        )
+
+    @skip_if_lt_x_gpu(1)
     def test_all_gather_empty_params(self):
         stream = device_module.current_stream()
         self._test_all_gather(
@@ -259,6 +291,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         async_op: bool,
         all_gather_copy_in_stream,
         all_gather_stream,
+        shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None = None,
     ):
         def all_gather(fsdp_param_group: FSDPParamGroup, group: dist.ProcessGroup):
             all_gather_comm = DefaultAllGather()
@@ -288,7 +321,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         # Set up the reference parameters and construct the FSDP group
         orig_params = self._init_params(param_sizes)
         fsdp_param_group = self._init_fsdp_param_group(
-            orig_params, reshard_after_forward
+            orig_params, reshard_after_forward, shard_placement_fn
         )
         fsdp_params = fsdp_param_group.fsdp_params
         module = fsdp_param_group.modules[0]
@@ -468,6 +501,824 @@ class TestFullyShardChunkCatMixedDtype(TestCase):
 
 instantiate_device_type_tests(
     TestFullyShardChunkCatMixedDtype, globals(), only_for=("cpu", "cuda", "xpu")
+)
+
+
+class TestFullyShardCollectiveCopy(TestCase):
+    @parametrize(
+        "dim,output_size,match",
+        [
+            (2, None, "dim 2 is invalid"),
+            (-3, None, "dim -3 is invalid"),
+            (0, torch.Size((-1, 12)), "must be nonnegative"),
+            (1, torch.Size((2, 5)), "must contain 12 elements"),
+        ],
+    )
+    def test_all_gather_input_invalid(self, device, dim, output_size, match):
+        tensor = torch.empty(2, 3, device=device)
+        with self.assertRaisesRegex(ValueError, match):
+            _normalize_all_gather_inputs(
+                (AllGatherInput(tensor, dim=dim, output_size=output_size),),
+                world_size=2,
+                shard_dim=1,
+                padded_sharded_size=tensor.size(),
+            )
+
+    def test_all_gather_input_type(self, device):
+        kwargs = {"world_size": 2, "shard_dim": 0, "padded_sharded_size": torch.Size()}
+        for inp in ("tensor", AllGatherInput("tensor")):
+            with self.assertRaisesRegex(TypeError, "Expected an all-gather input"):
+                _normalize_all_gather_inputs((inp,), **kwargs)
+
+    @parametrize("world_size", [1, 2])
+    def test_legacy_all_gather_input_size(self, device, world_size):
+        tensor = torch.empty(2, 3, device=device)
+        kwargs = {
+            "world_size": world_size,
+            "shard_dim": 1,
+            "padded_sharded_size": torch.Size((4, 3)),
+        }
+        if world_size == 1:
+            tensors, layouts = _normalize_all_gather_inputs((tensor,), **kwargs)
+            self.assertIs(tensors[0], tensor)
+            self.assertEqual(tensor.view(layouts[0].output_size).size(), (2, 3))
+            self.assertEqual(layouts[0].outer_size, 1)
+        else:
+            with self.assertRaisesRegex(
+                ValueError, r"Shard\(1\) all-gather output must have 24 elements"
+            ):
+                _normalize_all_gather_inputs((tensor,), **kwargs)
+
+    @parametrize("input_size", [None, (0, 3), (3, 0)])
+    def test_empty_all_gather_inputs(self, device, input_size):
+        kwargs = {
+            "world_size": 2,
+            "shard_dim": 1,
+            "padded_sharded_size": torch.Size((4, 3)),
+        }
+        if input_size is None:
+            self.assertEqual(_normalize_all_gather_inputs((), **kwargs), ([], ()))
+            return
+        tensor = torch.empty(input_size, device=device)
+        tensors, layouts = _normalize_all_gather_inputs((tensor,), **kwargs)
+        self.assertIs(tensors[0], tensor)
+        gathered_size = (input_size[0] * 2, *input_size[1:])
+        self.assertEqual(tensor.view(layouts[0].output_size).size(), gathered_size)
+        self.assertEqual(layouts[0].outer_size, 1)
+
+    def test_all_gather_mixed_inputs(self, device):
+        # Tensors follow the padded sharded layout, records their own
+        shard = torch.empty(2, 3, device=device)
+        tags = torch.empty(2, 3, device=device, dtype=torch.bfloat16)
+        empty = torch.empty(0, 3, device=device)
+        tensors, layouts = _normalize_all_gather_inputs(
+            (shard, AllGatherInput(tags, dim=1, output_size=torch.Size((12,)))),
+            world_size=2,
+            shard_dim=1,
+            padded_sharded_size=shard.size(),
+        )
+        self.assertEqual(tensors, [shard, tags])
+        self.assertEqual([layout.outer_size for layout in layouts], [2, 2])
+        self.assertEqual([layout.output_size for layout in layouts], [(-1, 3), (12,)])
+        _, layouts = _normalize_all_gather_inputs(
+            (shard, empty),
+            world_size=2,
+            shard_dim=1,
+            padded_sharded_size=shard.size(),
+        )
+        self.assertEqual([layout.outer_size for layout in layouts], [2, 1])
+
+    def test_all_gather_cached_outputs(self, device):
+        shard = torch.empty(2, 3, device=device)
+        kwargs = {"world_size": 2, "shard_dim": 1, "padded_sharded_size": shard.size()}
+        cached = [torch.empty(12, device=device)]
+        # Tensors may shrink or become byte views of their cached outputs
+        for inp in (shard[0], shard.view(torch.uint8)):
+            _normalize_all_gather_inputs((inp,), all_gather_outputs=cached, **kwargs)
+        for inputs, match in (
+            ((shard, shard), "returned 2 all-gather inputs, but 1"),
+            ((shard.to(torch.bfloat16),), "changed dtype"),
+            ((torch.empty(4, 3, device=device),), "needs 96 bytes"),
+            ((AllGatherInput(shard[0]),), "must keep its element count and dtype"),
+        ):
+            with self.assertRaisesRegex(ValueError, match):
+                _normalize_all_gather_inputs(
+                    inputs, all_gather_outputs=cached, **kwargs
+                )
+
+    @parametrize("native_copy", [False, True])
+    @parametrize(
+        "layout",
+        ["shard0", "shard1", "unit_outer_size", "empty", "mixed_dtype"],
+    )
+    def test_all_gather_output(self, device, native_copy, layout):
+        world_size = 4
+        kinds = {
+            "empty": ("empty", "shard0"),
+            "mixed_dtype": ("shard0", "shard1"),
+        }.get(layout, (layout,))
+        expected, shards, outer_sizes = [], [], []
+        for kind in kinds:
+            dim = 0 if kind == "shard0" else 1
+            shape = {
+                "shard0": (12, 5),
+                "unit_outer_size": (1, 12, 5),
+                "empty": (0, 12, 5),
+            }.get(kind, (2, 12, 5))
+            dtype = torch.bfloat16 if layout == "mixed_dtype" and dim else torch.float32
+            tensor = make_tensor(shape, device=device, dtype=dtype)
+            expected.append(tensor)
+            shards.append(tensor.chunk(world_size, dim=dim))
+            outer_sizes.append(math.prod(shape[:dim]) if tensor.numel() else 1)
+        # Mixed dtypes are gathered as bytes into byte views of the outputs
+        gather_dtype = torch.uint8 if layout == "mixed_dtype" else torch.float32
+        packed = torch.cat(
+            [
+                shard[rank].contiguous().view(gather_dtype).flatten()
+                for rank in range(world_size)
+                for shard in shards
+            ]
+        )
+        outputs = [tensor.new_empty(tensor.numel()) for tensor in expected]
+        byte_outputs = [output.view(gather_dtype) for output in outputs]
+        splits = [output.numel() // world_size for output in byte_outputs]
+        copy_out = (
+            all_gather_output_fn_with_native_copy
+            if native_copy
+            else _default_all_gather_output_fn
+        )
+        copy_out(packed, byte_outputs, splits, outer_sizes, world_size)
+        self.assertEqual(
+            [output.view(tensor.shape) for output, tensor in zip(outputs, expected)],
+            expected,
+            atol=0,
+            rtol=0,
+        )
+
+    @parametrize("native_copy", [False, True])
+    @parametrize("outer_size", [1, 2])
+    def test_all_gather_output_shrunk_payload(self, device, native_copy, outer_size):
+        # Smaller payloads fill a prefix of the rank-major buffer, which is
+        # reassembled with zeros after it, without resizing the outputs
+        output = torch.full((16,), -1.0, device=device)
+        packed = torch.arange(1.0, 9.0, device=device)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            copy_out = (
+                all_gather_output_fn_with_native_copy
+                if native_copy
+                else _default_all_gather_output_fn
+            )
+            copy_out(packed, [output], [4], [outer_size], 2)
+        if outer_size == 1:
+            expected = torch.cat([packed, torch.full((8,), -1.0, device=device)])
+        else:
+            expected = torch.cat(
+                [packed.view(2, 4), torch.zeros(2, 4, device=device)], 1
+            )
+        self.assertEqual(output.view_as(expected), expected, atol=0, rtol=0)
+
+    @parametrize("native_copy", [False, True])
+    @parametrize("nonzero_shards", [False, True])
+    @parametrize("world_size", [1, 4])
+    @parametrize("noncontiguous", [False, True])
+    @parametrize("mixed_dtype", [False, True])
+    @dtypes(torch.bfloat16)
+    def test_reduce_scatter_input(
+        self,
+        device,
+        dtype,
+        native_copy,
+        nonzero_shards,
+        world_size,
+        noncontiguous,
+        mixed_dtype,
+    ):
+        shapes = [
+            (world_size * 3 - 1, 5),
+            (2, world_size * 3, 5),
+            (2, 3, world_size * 2),
+        ]
+        grads = [make_tensor(shape, device=device, dtype=dtype) for shape in shapes]
+        if mixed_dtype:
+            # The native copy-in falls back to the default for mixed dtypes
+            grads[1] = grads[1].float()
+        if noncontiguous:
+            grads[2] = grads[2].transpose(0, 1).contiguous().transpose(0, 1)
+        shard_dims = list(range(len(grads))) if nonzero_shards else [0] * len(grads)
+        shards = []
+        for dim, grad in zip(shard_dims, grads):
+            shape = list(grad.shape)
+            shape[dim] = math.ceil(shape[dim] / world_size) * world_size
+            padded = grad.new_zeros(shape)
+            padded.narrow(dim, 0, grad.size(dim)).copy_(grad)
+            shards.append(padded.chunk(world_size, dim))
+        expected = torch.cat(
+            [shard[rank].flatten() for rank in range(world_size) for shard in shards]
+        ).float()
+        prepare = (
+            reduce_scatter_input_fn_with_native_copy
+            if native_copy
+            else _default_reduce_scatter_input_fn
+        )
+        copy_in = prepare(grads, shard_dims, world_size)
+        output = torch.empty_like(expected)
+        copy_in(output)
+        self.assertEqual(output, expected, atol=0, rtol=0)
+
+
+instantiate_device_type_tests(
+    TestFullyShardCollectiveCopy, globals(), only_for=("cpu", "cuda", "xpu")
+)
+
+
+class TestFullyShardNativeCollectiveCopy(TestCase):
+    @parametrize("num_chunks", [1, 4])
+    @parametrize("outer_size", [1, 128])
+    @parametrize("inference", [False, True])
+    @dtypes(torch.bfloat16, torch.float32, torch.int64)
+    def test_all_gather_copy_out(
+        self, device, dtype, num_chunks, outer_size, inference
+    ):
+        with torch.inference_mode(inference):
+            shapes = [
+                (num_chunks * 3, 5),
+                (outer_size, num_chunks * 3, 5),
+                (2, 3, num_chunks * 2, 5),
+            ]
+            expected = [make_tensor(s, device=device, dtype=dtype) for s in shapes]
+            shards = [torch.chunk(t, num_chunks, dim) for dim, t in enumerate(expected)]
+            packed = torch.cat(
+                [s[rank].flatten() for rank in range(num_chunks) for s in shards]
+            )
+            # Misaligned input and outputs
+            source = torch.cat([packed.new_zeros(3), packed, packed.new_zeros(3)])[3:-3]
+            buffers = [t.new_full((t.numel() + 10,), 7) for t in expected]
+            outputs = [b[5:-5].view(s) for b, s in zip(buffers, shapes)]
+            splits = [t.numel() // num_chunks for t in expected]
+            outer_sizes = [math.prod(s[:dim]) for dim, s in enumerate(shapes)]
+            versions = None if inference else [t._version for t in outputs]
+            result = torch.ops.fsdp._all_gather_copy_out_(
+                outputs, source, splits, outer_sizes, num_chunks
+            )
+            self.assertIsNone(result)
+            self.assertEqual(outputs, expected, atol=0, rtol=0)
+            self.assertEqual(source, packed, atol=0, rtol=0)
+            for index, buffer in enumerate(buffers):
+                self.assertEqual(buffer[:5], buffer.new_full((5,), 7))
+                self.assertEqual(buffer[-5:], buffer.new_full((5,), 7))
+                if versions is not None:
+                    self.assertGreater(outputs[index]._version, versions[index])
+
+    def test_all_gather_copy_out_byte_views(self, device):
+        num_chunks = 4
+        shapes = [(12, 5), (2, 12, 5), (2, 3, 8, 5)]
+        dtypes = [torch.bfloat16, torch.float32, torch.int64]
+        expected = [
+            make_tensor(shape, device=device, dtype=dtype)
+            for shape, dtype in zip(shapes, dtypes)
+        ]
+        shards = [torch.chunk(t, num_chunks, dim) for dim, t in enumerate(expected)]
+        packed = torch.cat(
+            [
+                shard[rank].contiguous().view(torch.uint8).flatten()
+                for rank in range(num_chunks)
+                for shard in shards
+            ]
+        )
+        outputs = [torch.empty_like(t) for t in expected]
+        torch.ops.fsdp._all_gather_copy_out_(
+            [t.view(torch.uint8) for t in outputs],
+            packed,
+            [t.nbytes // num_chunks for t in expected],
+            [1, 2, 6],
+            num_chunks,
+        )
+        self.assertEqual(outputs, expected, atol=0, rtol=0)
+
+    @parametrize("byte_input", [False, True])
+    def test_all_gather_copy_out_strided_input(self, device, byte_input):
+        expected = [
+            torch.arange(16, device=device, dtype=torch.float32).view(4, 4),
+            torch.arange(16, device=device, dtype=torch.bfloat16).view(2, 8),
+        ]
+        if not byte_input:
+            expected[1] = expected[1].float()
+        dtype = torch.uint8 if byte_input else torch.float32
+        parts = [
+            torch.stack(
+                [shard.contiguous().view(dtype).flatten() for shard in t.chunk(2, dim)]
+            )
+            for dim, t in enumerate(expected)
+        ]
+        packed = torch.cat(parts, dim=1).flatten()
+        buffer = packed.new_full((packed.numel(), 2), 7)
+        source = buffer[:, 0]
+        source.copy_(packed)
+        outputs = [torch.empty_like(t) for t in expected]
+        torch.ops.fsdp._all_gather_copy_out_(
+            [t.view(-1).view(dtype) for t in outputs],
+            source,
+            [part.size(1) for part in parts],
+            [1, 2],
+            2,
+        )
+        self.assertEqual(outputs, expected, atol=0, rtol=0)
+        self.assertEqual(buffer[:, 1], buffer.new_full((packed.numel(),), 7))
+
+    @parametrize("count", [65, 129])
+    def test_all_gather_copy_out_many_outputs(self, device, count):
+        num_chunks = 8
+        inner_sizes = (1, 15, 16, 17, 31, 32, 4097)
+        outer_sizes = [2 + i % 3 for i in range(count)]
+        splits = [
+            outer_size * inner_sizes[i % len(inner_sizes)]
+            for i, outer_size in enumerate(outer_sizes)
+        ]
+        offsets = [1 + i % 17 for i in range(count)]
+        buffers = [
+            torch.full((num_chunks * split + offset + 3,), 7, device=device).byte()
+            for split, offset in zip(splits, offsets)
+        ]
+        outputs = [buffer[offset:-3] for buffer, offset in zip(buffers, offsets)]
+        source = torch.arange(num_chunks * sum(splits), device=device)
+        source = source.remainder(127).to(torch.uint8)
+        parts = source.view(num_chunks, -1).split(splits, dim=1)
+        torch.ops.fsdp._all_gather_copy_out_(
+            outputs, source, splits, outer_sizes, num_chunks
+        )
+        for output, part, outer_size, buffer, offset in zip(
+            outputs, parts, outer_sizes, buffers, offsets
+        ):
+            chunks = part.reshape(num_chunks, outer_size, -1).unbind(0)
+            self.assertEqual(output, torch.cat(chunks, dim=1).flatten())
+            self.assertEqual(buffer[:offset], buffer.new_full((offset,), 7))
+            self.assertEqual(buffer[-3:], buffer.new_full((3,), 7))
+
+    @parametrize("dlpack", [False, True])
+    def test_all_gather_copy_out_overlapping_outputs(self, device, dlpack):
+        # Overlapping outputs are written in order
+        num_chunks = 8
+        size = num_chunks * 4 * 17
+        buffer = torch.full((size + 22,), 7, device=device, dtype=torch.uint8)
+        offsets = [3, 19]
+        outputs = [buffer[offset : offset + size] for offset in offsets]
+        if dlpack:
+            outputs[1] = torch.from_dlpack(outputs[1])
+        outer_sizes, splits = [2, 4], [size // num_chunks] * 2
+        source = torch.arange(num_chunks * sum(splits), device=device)
+        source = source.remainder(127).to(torch.uint8)
+        parts = source.view(num_chunks, -1).split(splits, dim=1)
+        expected = buffer.clone()
+        for part, outer_size, offset in zip(parts, outer_sizes, offsets):
+            chunks = part.reshape(num_chunks, outer_size, -1).unbind(0)
+            expected[offset : offset + size] = torch.cat(chunks, dim=1).flatten()
+        with DeterministicGuard(True):
+            torch.ops.fsdp._all_gather_copy_out_(
+                outputs, source, splits, outer_sizes, num_chunks
+            )
+        self.assertEqual(buffer, expected)
+
+    @parametrize("all_empty", [False, True])
+    def test_all_gather_copy_out_empty(self, device, all_empty):
+        source = torch.arange(12, device=device, dtype=torch.float32)
+        if all_empty:
+            source = source[:0]
+        outputs = [torch.empty(0, device=device), torch.empty_like(source)]
+        torch.ops.fsdp._all_gather_copy_out_(
+            outputs, source, [0, source.numel() // 4], [128, 1], 4
+        )
+        self.assertEqual(outputs[1], source)
+        torch.ops.fsdp._all_gather_copy_out_([], source[:0], [], [], 4)
+
+    @parametrize(
+        "invalid,error,match",
+        [
+            ("chunks", ValueError, "positive num_chunks"),
+            ("split_count", ValueError, "one split size and outer size per output"),
+            (
+                "outer_size_count",
+                ValueError,
+                "one split size and outer size per output",
+            ),
+            ("negative_split", ValueError, "non-negative split size"),
+            ("zero_outer_size", ValueError, "positive outer size"),
+            (
+                "indivisible_outer_size",
+                ValueError,
+                "divisible by a positive outer size",
+            ),
+            ("input_size", ValueError, "sum to the input size 15"),
+            (
+                "output_size",
+                ValueError,
+                "num_chunks = 16 input elements, but it holds 15",
+            ),
+            ("dtype", TypeError, "outputs with the input dtype"),
+            ("byte_input", TypeError, "outputs with the input dtype"),
+            ("output_contiguity", ValueError, "contiguous"),
+        ],
+    )
+    def test_all_gather_copy_out_invalid(self, device, invalid, error, match):
+        source = torch.zeros(16, device=device)
+        outputs = [torch.empty_like(source)]
+        splits, outer_sizes, num_chunks = [8], [2], 2
+        if invalid == "chunks":
+            num_chunks = 0
+        elif invalid == "split_count":
+            splits = []
+        elif invalid == "outer_size_count":
+            outer_sizes = []
+        elif invalid == "negative_split":
+            splits = [-8]
+        elif invalid == "zero_outer_size":
+            outer_sizes = [0]
+        elif invalid == "indivisible_outer_size":
+            outer_sizes = [3]
+        elif invalid == "input_size":
+            source = source[:-1]
+        elif invalid == "output_size":
+            outputs = [outputs[0][:-1]]
+        elif invalid == "dtype":
+            outputs = [outputs[0].to(torch.float64)]
+        elif invalid == "byte_input":
+            source = source.view(torch.uint8)
+            splits = [32]
+        elif invalid == "output_contiguity":
+            outputs = [torch.empty(32, device=device)[::2]]
+        with self.assertRaisesRegex(error, match):
+            torch.ops.fsdp._all_gather_copy_out_(
+                outputs, source, splits, outer_sizes, num_chunks
+            )
+
+    @parametrize("num_chunks", [1, 4])
+    @parametrize("outer_size", [1, 128])
+    @parametrize("noncontiguous", [False, True])
+    @parametrize("nonzero_shards", [False, True])
+    @parametrize(
+        "in_dtype,out_dtype",
+        [
+            (torch.bfloat16, torch.bfloat16),
+            (torch.bfloat16, torch.float32),
+            (torch.float16, torch.float32),
+            (torch.float32, torch.float32),
+            (torch.float32, torch.float64),
+        ],
+    )
+    def test_reduce_scatter_copy_in(
+        self,
+        device,
+        num_chunks,
+        outer_size,
+        noncontiguous,
+        nonzero_shards,
+        in_dtype,
+        out_dtype,
+    ):
+        shapes = [
+            (num_chunks + 1, 5),
+            (outer_size, num_chunks * 3, 5),
+            (2, 3, num_chunks * 2, 5),
+        ]
+        tensors = [make_tensor(s, device=device, dtype=in_dtype) for s in shapes]
+        if noncontiguous:
+            tensors[0] = tensors[0].t().contiguous().t()
+        dims = [0, 1, 2] if nonzero_shards else [0, 0, 0]
+        rank_outputs = []
+        for rank in range(num_chunks):
+            rank_shards = []
+            for dim, tensor in zip(dims, tensors):
+                shard_size = (tensor.size(dim) + num_chunks - 1) // num_chunks
+                start = min(rank * shard_size, tensor.size(dim))
+                length = min(shard_size, tensor.size(dim) - start)
+                shape = list(tensor.shape)
+                shape[dim] = shard_size
+                shard = torch.zeros(shape, device=device, dtype=out_dtype)
+                shard.narrow(dim, 0, length).copy_(tensor.narrow(dim, start, length))
+                rank_shards.append(shard.flatten())
+            rank_outputs.append(torch.cat(rank_shards))
+        expected = torch.stack(rank_outputs)
+        buffer = expected.new_full((expected.numel() + 10,), 7)
+        output = buffer[5:-5].view(expected.shape)
+        version = output._version
+        result = torch.ops.fsdp._reduce_scatter_copy_in_(
+            output, tensors, dims, num_chunks
+        )
+        self.assertIs(result, output)
+        self.assertGreater(output._version, version)
+        self.assertEqual(output, expected, atol=0, rtol=0)
+        self.assertEqual(buffer[:5], buffer.new_full((5,), 7))
+        self.assertEqual(buffer[-5:], buffer.new_full((5,), 7))
+
+    @parametrize("num_leading_dims", [1, 2])
+    def test_reduce_scatter_copy_in_empty_outer_size(self, device, num_leading_dims):
+        tensor = make_tensor((2, 8, 3), device=device, dtype=torch.float32)
+        if num_leading_dims == 2:
+            tensor = tensor.unsqueeze(0)
+        expected = torch.stack(
+            [shard.flatten() for shard in torch.chunk(tensor, 4, num_leading_dims)]
+        )
+        output = torch.empty_like(expected)
+        torch.ops.fsdp._reduce_scatter_copy_in_(
+            output, [tensor[:0], tensor], [num_leading_dims] * 2, 4
+        )
+        self.assertEqual(output, expected, atol=0, rtol=0)
+
+    @parametrize("dim", [0, 1])
+    def test_reduce_scatter_copy_in_strided_output(self, device, dim):
+        tensor = torch.arange(32, device=device, dtype=torch.bfloat16).view(4, 8)
+        expected = torch.stack([t.flatten() for t in tensor.chunk(2, dim)]).float()
+        buffer = expected.new_full((expected.numel() * 2,), 7)
+        output = buffer[::2].view_as(expected)
+        version = output._version
+        result = torch.ops.fsdp._reduce_scatter_copy_in_(output, [tensor], [dim], 2)
+        self.assertIs(result, output)
+        self.assertGreater(output._version, version)
+        self.assertEqual(output, expected)
+        self.assertEqual(buffer[1::2], buffer.new_full((expected.numel(),), 7))
+
+    @parametrize(
+        "invalid,error,match",
+        [
+            ("chunks", ValueError, "positive num_chunks"),
+            ("empty_list", ValueError, "non-empty input tensor list"),
+            ("empty_tensor", ValueError, "at least one non-empty input"),
+            ("dim_count", ValueError, "one leading dimension count per input"),
+            ("negative_dim", ValueError, r"leading dimension count in \[0, 2\)"),
+            ("dim_too_large", ValueError, r"leading dimension count in \[0, 2\)"),
+            ("indivisible_shard", ValueError, "divisible by num_chunks"),
+            ("dtype", TypeError, "same dtype"),
+            ("input_contiguity", ValueError, "contiguous"),
+            ("output_numel", ValueError, "output with 16 elements"),
+        ],
+    )
+    def test_reduce_scatter_copy_in_invalid(self, device, invalid, error, match):
+        tensors = [torch.zeros(2, 8, device=device)]
+        dims, num_chunks = [1], 4
+        output = torch.empty(4, 4, device=device)
+        if invalid == "chunks":
+            num_chunks = 0
+        elif invalid == "empty_list":
+            tensors, dims = [], []
+        elif invalid == "empty_tensor":
+            tensors = [tensors[0][:0]]
+        elif invalid == "dim_count":
+            dims = []
+        elif invalid == "negative_dim":
+            dims = [-1]
+        elif invalid == "dim_too_large":
+            dims = [2]
+        elif invalid == "indivisible_shard":
+            tensors = [torch.zeros(2, 7, device=device)]
+        elif invalid == "dtype":
+            tensors.append(tensors[0].to(torch.float64))
+            dims.append(1)
+        elif invalid == "input_contiguity":
+            tensors = [torch.zeros(8, 2, device=device).t()]
+        elif invalid == "output_numel":
+            output = torch.empty(4, 5, device=device)
+        with self.assertRaisesRegex(error, match):
+            torch.ops.fsdp._reduce_scatter_copy_in_(output, tensors, dims, num_chunks)
+
+    @parametrize("operation", ["all_gather", "reduce_scatter"])
+    @parametrize("view", ["conjugate", "negative"])
+    @parametrize("flagged_output", [False, True])
+    def test_view_flags(self, device, operation, view, flagged_output):
+        tensor = make_tensor((2, 8, 3), device=device, dtype=torch.complex64)
+        packed = torch.stack([t.flatten() for t in torch.chunk(tensor, 4, dim=1)])
+        view_fn = torch.Tensor.conj if view == "conjugate" else torch._neg_view
+        if not flagged_output:
+            tensor = view_fn(tensor)
+            packed = view_fn(packed)
+        expected = tensor if operation == "all_gather" else packed
+        output = torch.empty_like(expected)
+        if flagged_output:
+            output = view_fn(output)
+        if operation == "all_gather" and flagged_output:
+            with self.assertRaisesRegex(RuntimeError, "mutable TensorLists"):
+                torch.ops.fsdp._all_gather_copy_out_(
+                    [output], packed, [tensor.numel() // 4], [2], 4
+                )
+            return
+        if operation == "all_gather":
+            torch.ops.fsdp._all_gather_copy_out_(
+                [output], packed, [tensor.numel() // 4], [2], 4
+            )
+        else:
+            torch.ops.fsdp._reduce_scatter_copy_in_(output, [tensor], [1], 4)
+        self.assertEqual(output, expected, atol=0, rtol=0)
+
+    @parametrize("operation", ["all_gather", "reduce_scatter"])
+    def test_functionalize(self, device, operation):
+        # One strided copy per tensor keeps graphs independent of outer_size
+        def trace(outer_size):
+            tensor = make_tensor((outer_size, 8, 3), device=device, dtype=torch.float32)
+            packed = torch.stack([t.flatten() for t in torch.chunk(tensor, 4, dim=1)])
+            expected = tensor if operation == "all_gather" else packed
+
+            def copy(destination):
+                if operation == "all_gather":
+                    torch.ops.fsdp._all_gather_copy_out_(
+                        [destination], packed, [tensor.numel() // 4], [outer_size], 4
+                    )
+                else:
+                    torch.ops.fsdp._reduce_scatter_copy_in_(
+                        destination, [tensor], [1], 4
+                    )
+                return destination
+
+            output = torch.empty_like(expected)
+            self.assertEqual(torch.func.functionalize(copy)(output), expected)
+            self.assertEqual(output, expected, atol=0, rtol=0)
+            graph = make_fx(torch.func.functionalize(copy))(torch.empty_like(expected))
+            return len(graph.graph.nodes)
+
+        self.assertEqual(trace(1), trace(500))
+
+    def test_compile_dynamic(self, device):
+        def copy(tensor, output, outer_size):
+            packed = torch.stack([t.flatten() for t in torch.chunk(tensor, 4, dim=1)])
+            torch.ops.fsdp._all_gather_copy_out_(
+                [output], packed.flatten(), [tensor.numel() // 4], [outer_size], 4
+            )
+            return output
+
+        compiled = torch.compile(copy, dynamic=True, fullgraph=True)
+        for outer_size in (2, 3):
+            tensor = make_tensor((outer_size, 8, 3), device=device, dtype=torch.float32)
+            output = compiled(tensor, torch.empty_like(tensor), outer_size)
+            self.assertEqual(output, tensor, atol=0, rtol=0)
+
+    @parametrize("outer_size", [1, 2])
+    def test_opcheck(self, device, outer_size):
+        tensor = make_tensor((outer_size, 8, 3), device=device, dtype=torch.float32)
+        packed = torch.stack([t.flatten() for t in torch.chunk(tensor, 4, dim=1)])
+        torch.library.opcheck(
+            torch.ops.fsdp._all_gather_copy_out_.default,
+            ([torch.empty_like(tensor)], packed, [packed.size(1)], [outer_size], 4),
+        )
+        torch.library.opcheck(
+            torch.ops.fsdp._reduce_scatter_copy_in_.default,
+            (torch.empty_like(packed), [tensor], [1], 4),
+        )
+
+    @onlyCUDA
+    def test_device_mismatch(self, device):
+        tensor = torch.zeros(2, 8, device=device)
+        output = torch.empty(16)
+        with self.assertRaisesRegex(ValueError, "on the input device"):
+            torch.ops.fsdp._all_gather_copy_out_([output], tensor, [4], [2], 4)
+        with self.assertRaisesRegex(ValueError, "on the output device"):
+            torch.ops.fsdp._reduce_scatter_copy_in_(output, [tensor], [1], 4)
+
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    def test_device_and_stream(self, devices):
+        stream = torch.cuda.Stream(device=devices[0])
+        with torch.cuda.stream(stream):
+            tensor = make_tensor((2, 8, 3), device=devices[0], dtype=torch.float32)
+            expected = torch.stack([t.flatten() for t in torch.chunk(tensor, 4, 1)])
+            packed = torch.empty_like(expected)
+            output = torch.empty_like(tensor)
+            with torch.cuda.device(devices[1]):
+                torch.ops.fsdp._reduce_scatter_copy_in_(packed, [tensor], [1], 4)
+                torch.ops.fsdp._all_gather_copy_out_([output], packed, [12], [2], 4)
+                self.assertEqual(
+                    torch.cuda.current_device(), torch.device(devices[1]).index
+                )
+        stream.synchronize()
+        self.assertEqual(packed, expected, atol=0, rtol=0)
+        self.assertEqual(output, tensor, atol=0, rtol=0)
+
+    @onlyCUDA
+    def test_cuda_graph(self, device):
+        tensors = [
+            make_tensor(shape, device=device, dtype=torch.bfloat16)
+            for shape in [(8, 3), (128, 8, 3)]
+        ]
+        num_chunks = 4
+        splits = [t.numel() // num_chunks for t in tensors]
+        packed = tensors[0].new_empty((num_chunks, sum(splits)))
+        outputs = [torch.empty_like(t) for t in tensors]
+
+        def copy():
+            torch.ops.fsdp._reduce_scatter_copy_in_(packed, tensors, [0, 1], num_chunks)
+            torch.ops.fsdp._all_gather_copy_out_(
+                outputs, packed, splits, [1, 128], num_chunks
+            )
+
+        copy()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            copy()
+        for _ in range(3):
+            for tensor in tensors:
+                tensor.add_(1)
+            graph.replay()
+            shards = [torch.chunk(t, num_chunks, dim) for dim, t in enumerate(tensors)]
+            expected = torch.stack(
+                [
+                    torch.cat([shard[rank].flatten() for shard in shards])
+                    for rank in range(num_chunks)
+                ]
+            )
+            self.assertEqual(packed, expected, atol=0, rtol=0)
+            self.assertEqual(outputs, tensors, atol=0, rtol=0)
+
+
+instantiate_device_type_tests(
+    TestFullyShardNativeCollectiveCopy, globals(), only_for=("cpu", "cuda", "xpu")
+)
+
+
+class TestFullyShardCustomAllocation(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @parametrize("shard_dim", [0, 1])
+    @parametrize("collective", ["all_gather", "reduce_scatter"])
+    @parametrize("native_copy", [False, True])
+    def test_strided_allocation(self, device, shard_dim, collective, native_copy):
+        test_case = self
+        model = nn.Linear(8, 4, bias=False, device=device)
+        dist.broadcast(model.weight.detach(), src=0)
+        reference = copy.deepcopy(model)
+        shard_numel = model.weight.numel() // self.world_size
+
+        class StridedAlloc:
+            def allocate(self, size, *, dtype, device):
+                # FSDP views the reduced gradient with contiguous strides.
+                if collective == "reduce_scatter" and size == (shard_numel,):
+                    return torch.empty(size, dtype=dtype, device=device)
+                buffer = torch.empty((*size, 2), dtype=dtype, device=device)[..., 0]
+                test_case.assertFalse(buffer.is_contiguous())
+                return buffer
+
+        class StridedAllGather(StridedAlloc, DefaultAllGather):
+            def __call__(self, output_tensor, input_tensor, group, async_op=False):
+                output = torch.empty_like(output_tensor)
+                super().__call__(output, input_tensor.contiguous(), group)
+                output_tensor.copy_(output)
+
+        class StridedReduceScatter(StridedAlloc, DefaultReduceScatter):
+            def __call__(self, output_tensor, input_tensor, group, op, async_op=False):
+                output = torch.empty_like(output_tensor)
+                super().__call__(output, input_tensor.contiguous(), group, op)
+                output_tensor.copy_(output)
+
+        fully_shard(
+            model,
+            mesh=init_device_mesh(torch.device(device).type, (self.world_size,)),
+            shard_placement_fn=lambda param: Shard(shard_dim),
+        )
+        if collective == "all_gather":
+            model.set_custom_all_gather(StridedAllGather())
+            if native_copy:
+                model.set_all_gather_output_fn(all_gather_output_fn_with_native_copy)
+        else:
+            model.set_custom_reduce_scatter(StridedReduceScatter())
+            if native_copy:
+                model.set_reduce_scatter_input_fn(
+                    reduce_scatter_input_fn_with_native_copy
+                )
+        native_ops = {
+            "all_gather": torch.ops.fsdp._all_gather_copy_out_.default,
+            "reduce_scatter": torch.ops.fsdp._reduce_scatter_copy_in_.default,
+        }
+
+        class RecordCopies(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if func in native_counts:
+                    native_counts[func] += 1
+                return func(*args, **(kwargs or {}))
+
+        optim = torch.optim.SGD(model.parameters(), lr=0.1)
+        reference_optim = torch.optim.SGD(reference.parameters(), lr=0.1)
+        for iteration in range(2):
+            inp = torch.full((2, 8), float(self.rank + iteration + 1), device=device)
+            expected = reference(inp)
+            expected.sum().backward()
+            native_counts = dict.fromkeys(native_ops.values(), 0)
+            with RecordCopies():
+                actual = model(inp)
+                actual.sum().backward()
+            self.assertEqual(actual, expected)
+            for direction, op in native_ops.items():
+                self.assertEqual(
+                    native_counts[op] > 0, native_copy and direction == collective
+                )
+            dist.all_reduce(reference.weight.grad)
+            reference.weight.grad.div_(self.world_size)
+            self.assertEqual(model.weight.grad.full_tensor(), reference.weight.grad)
+            optim.step()
+            reference_optim.step()
+            optim.zero_grad()
+            reference_optim.zero_grad()
+
+
+instantiate_device_type_tests(
+    TestFullyShardCustomAllocation, globals(), only_for=("cpu", "cuda")
 )
 
 
