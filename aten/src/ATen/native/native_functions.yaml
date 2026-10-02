@@ -8440,6 +8440,8 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   structured_delegate: bitwise_and.Tensor_out
+  dispatch:
+    Meta: bitwise_and_Tensor_meta
   tags: [core, pointwise]
 
 - func: bitwise_and_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)

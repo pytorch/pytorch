@@ -1743,4 +1743,11 @@ Tensor& add__Tensor_meta(Tensor& self, const Tensor& other, const Scalar& /*alph
   return self;
 }
 
+// Python fake runs the refs for the ops below, under FakeTensorMode for
+// symbolic inputs and as the Meta kernel otherwise.
+Tensor bitwise_and_Tensor_meta(const Tensor& self, const Tensor& other) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other);
+  return elementwise_binary_ref_meta("bitwise_and", self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT, symbolic);
+}
+
 } // namespace at::native
