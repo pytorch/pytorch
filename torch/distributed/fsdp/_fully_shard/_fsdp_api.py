@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, KW_ONLY
 
 import torch
 import torch.distributed as dist
@@ -237,5 +237,6 @@ class AllGatherInput:
     """
 
     tensor: torch.Tensor
+    _: KW_ONLY
     dim: int = 0
     output_size: torch.Size | None = None
