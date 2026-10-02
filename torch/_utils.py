@@ -846,14 +846,18 @@ def _get_device_attr(get_member):
     if device_type and device_type.lower() == "mtia":
         return get_member(torch.mtia)
     if device_type == torch._C._get_privateuse1_backend_name():
-        return get_member(getattr(torch, device_type))
+        custom_device_mod = getattr(torch, device_type, None)
+        if custom_device_mod is not None:
+            return get_member(custom_device_mod)
     # add more available device types here
     return None
 
 
 def _get_current_device_index():
     # current device index
-    return _get_device_attr(lambda m: m.current_device())
+    if torch.accelerator.is_available():
+        return torch.accelerator.current_device_index()
+    return _get_device_attr(lambda m: getattr(m, "current_device", lambda: 0)())
 
 
 def _get_all_device_indices():

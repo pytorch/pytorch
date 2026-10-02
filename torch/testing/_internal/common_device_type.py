@@ -999,7 +999,13 @@ class PrivateUse1TestBase(DeviceTypeTestBase):
                 f"torch has no module of `{cls.device_type}`, you should register "
                 "a module by `torch._register_device_module`."
             )
-        cls.primary_device = f"{cls.device_type}:{cls.device_mod.current_device()}"
+        if torch.accelerator.is_available():
+            curr_dev = torch.accelerator.current_device_index()
+        elif hasattr(cls.device_mod, "current_device"):
+            curr_dev = cls.device_mod.current_device()
+        else:
+            curr_dev = 0
+        cls.primary_device = f"{cls.device_type}:{curr_dev}"
 
 
 # Adds available device-type-specific test base classes
