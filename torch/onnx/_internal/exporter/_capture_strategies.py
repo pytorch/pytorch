@@ -222,14 +222,14 @@ class TorchExportStrictStrategy(CaptureStrategy):
     def _success(self, model) -> None:
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=True)`... ✅"
+            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=True)`... [OK]"
         )
 
     def _failure(self, model, e) -> None:
         del e  # Unused
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=True)`... ❌"
+            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=True)`... [FAIL]"
         )
 
 
@@ -278,14 +278,14 @@ class TorchExportNonStrictStrategy(CaptureStrategy):
     def _success(self, model) -> None:
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=False)`... ✅"
+            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=False)`... [OK]"
         )
 
     def _failure(self, model, e) -> None:
         del e  # Unused
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=False)`... ❌"
+            f"Obtain model graph for `{model_repr}` with `torch.export.export(..., strict=False)`... [FAIL]"
         )
 
 
@@ -311,14 +311,14 @@ class TorchExportDraftExportStrategy(CaptureStrategy):
     def _success(self, model) -> None:
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export.draft_export`... ✅"
+            f"Obtain model graph for `{model_repr}` with `torch.export.draft_export`... [OK]"
         )
 
     def _failure(self, model, e) -> None:
         del e  # Unused
         model_repr = _take_first_line(repr(model))
         self._verbose_print(
-            f"Obtain model graph for `{model_repr}` with `torch.export.draft_export`... ❌"
+            f"Obtain model graph for `{model_repr}` with `torch.export.draft_export`... [FAIL]"
         )
 
 
