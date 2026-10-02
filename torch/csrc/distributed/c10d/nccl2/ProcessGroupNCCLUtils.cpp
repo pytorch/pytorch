@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
 #include <algorithm>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -380,18 +381,22 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       TORCH_CHECK(false, "NCCL operation timed out");
     }
   } else if (comm_state_ == CommState::ERROR) {
-    // CleanUpOnly may have already removed the communicator on the watchdog
-    // thread, so a later collective cannot query the original NCCL error.
-    TORCH_CHECK(
-        nccl_comm_, "NCCL communicator was aborted after a previous error");
-    ncclResult_t asyncErr{};
-    NCCL_CHECK(
-        nccl_api_,
-        nccl_comm_,
-        nccl_api_->commGetAsyncError(nccl_comm_, &asyncErr),
-        "failed to get async error");
-    NCCLException ncclException(
-        *nccl_api_, "NCCL Async Error", asyncErr, nccl_comm_);
+    std::optional<NCCLException> ncclException;
+    {
+      // CleanUpOnly may abort the communicator on the watchdog thread, before
+      // or during this check; the original NCCL error is then gone.
+      std::lock_guard<std::mutex> lock(nccl_comm_abort_mutex_);
+      TORCH_CHECK(
+          nccl_comm_, "NCCL communicator was aborted after a previous error");
+      ncclResult_t asyncErr{};
+      NCCL_CHECK(
+          nccl_api_,
+          nccl_comm_,
+          nccl_api_->commGetAsyncError(nccl_comm_, &asyncErr),
+          "failed to get async error");
+      ncclException.emplace(
+          *nccl_api_, "NCCL Async Error", asyncErr, nccl_comm_);
+    }
     if (options_c10d_->enable_reconfigure) {
       // In reconfigurable mode we never abort the process: revoke the comm so
       // it can be reconfigured and surface the error to the caller.
@@ -400,11 +405,11 @@ void ProcessGroupNCCL::checkAndAbortIfTimedOutOrError() {
       // commRevoke() inside revokeNcclComm() overwrites, so the exception has
       // to be built first. A check macro would raise before the revoke ran.
       // @allow-raw-throw: the revoke above clobbers its last error
-      throw std::move(ncclException);
+      throw std::move(*ncclException);
     }
-    handleWatchdogFailure(std::string("error - ") + ncclException.what());
+    handleWatchdogFailure(std::string("error - ") + ncclException->what());
     // @allow-raw-throw: its what() is an argument to the call above
-    throw std::move(ncclException);
+    throw std::move(*ncclException);
   }
 }
 

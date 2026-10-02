@@ -171,7 +171,9 @@ void WorkNCCL::recordFunctionStart(std::string_view coll_name) {
   }
 }
 
-void WorkNCCL::recordStart(std::string_view coll_name) {
+void WorkNCCL::recordStart(std::string_view coll_name, ::c10d::OpType op_type) {
+  opType_ = op_type;
+  state_->opType = op_type;
   recordFunctionStart(coll_name);
   state_->events->start->record(state_->stream);
 }
@@ -221,7 +223,8 @@ void WorkNCCL::State::notifyCompletion() {
   // for success -- a timed-out or failed work reports nothing, because a
   // consumer that read that as "finished" would lose the very fact a
   // post-mortem needs.
-  if (!comm->hasCompletionHooks()) {
+  const bool onCompletionHook = comm->hasOnCompletionHook();
+  if (!onCompletionHook && !comm->hasCompletionHooks()) {
     return;
   }
   std::optional<float> duration;
@@ -236,6 +239,14 @@ void WorkNCCL::State::notifyCompletion() {
       TC_LOG(WARNING, comm)
           << "Cannot measure collective duration: " << e.what();
     }
+  }
+  if (onCompletionHook) {
+    comm->enqueueOnCompletion(std::make_shared<::c10d::WorkInfo>(
+        opType,
+        seq,
+        workStartTime,
+        std::chrono::steady_clock::now(),
+        std::chrono::duration<float, std::milli>(duration.value_or(0))));
   }
   comm->runCompletionHooks(completionKey, duration);
 }

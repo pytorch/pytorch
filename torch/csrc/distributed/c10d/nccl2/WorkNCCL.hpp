@@ -111,7 +111,9 @@ class WorkNCCL : public c10d::Work {
   void setHostBlocking(bool host_blocking);
 
  protected:
-  void recordStart(std::string_view coll_name);
+  void recordStart(
+      std::string_view coll_name,
+      ::c10d::OpType op_type = ::c10d::OpType::UNKNOWN);
   void recordEnd();
 
   friend class ProcessGroupNCCL;
@@ -153,6 +155,7 @@ class WorkNCCL : public c10d::Work {
     std::atomic<bool> ephemeralTimeoutReleased{false};
     bool timingEnabled;
     uint64_t seq{0};
+    ::c10d::OpType opType{::c10d::OpType::UNKNOWN};
     std::shared_ptr<Events> events;
     std::mutex durationMutex;
     std::shared_ptr<Events> durationStartEvents;
@@ -190,6 +193,8 @@ class WorkNCCLQueue {
   WorkNCCL::WorkStatus garbageCollect();
   // Finalize function can only be called from the main thread
   WorkNCCL::WorkStatus finalize();
+  // No work is queued and every popped work has been notified.
+  bool idle();
   void enqueueWork(
       const c10::intrusive_ptr<WorkNCCL>& work,
       cudaStream_t stream);
@@ -203,6 +208,8 @@ class WorkNCCLQueue {
       stream_work_queues_;
   std::queue<std::shared_ptr<WorkNCCL::InputTensorShelf>>
       completedInputTensors_;
+  // Works popped by garbageCollect() whose notifyCompletion() has not returned.
+  size_t notifying_{0};
   std::mutex work_queues_mutex_;
 };
 

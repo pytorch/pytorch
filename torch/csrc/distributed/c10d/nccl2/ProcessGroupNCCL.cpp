@@ -202,6 +202,8 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
     }
   }
 
+  stopOnCompletionHookThread();
+
   // We need to detach the memory hook in case finalize is not called,
   // so that we don't encounter a memory corruption.
   detachMemoryHook();
@@ -460,6 +462,7 @@ void ProcessGroupNCCL::abort() {
     // again after reconfigure(). The error is still published before the
     // teardown, so work in flight reports it instead of completing.
     stopWatchdog();
+    stopOnCompletionHookThread();
     comm_state_ = CommState::ERROR;
     abortNcclComm();
   }
@@ -533,6 +536,8 @@ void ProcessGroupNCCL::finalize() {
 
   // Wait for all pending work objects to complete and get final status
   auto work_status = workq_.finalize();
+  // After workq_.finalize() so the works it retires still reach the hook.
+  stopOnCompletionHookThread();
 
   TORCH_CHECK(
       work_status != WorkNCCL::WorkStatus::NOT_STARTED &&
@@ -600,6 +605,7 @@ void ProcessGroupNCCL::finalize() {
 void ProcessGroupNCCL::abortNcclComm() {
   detachMemoryHook();
   retireComm();
+  std::lock_guard<std::mutex> lock(nccl_comm_abort_mutex_);
   if (nccl_comm_) {
     waitForNcclCompletion(
         *nccl_api_,
@@ -745,7 +751,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::sendImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("send");
+  work->recordStart("send", ::c10d::OpType::SEND);
 
   // Wrap in ncclGroupStart/End so the kernel is enqueued on the stream before
   // we record the end event. Without the group wrapper, a non-blocking NCCL
@@ -803,7 +809,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::recvImpl(
   auto work = createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("recv");
+  work->recordStart("recv", ::c10d::OpType::RECV);
 
   // Wrap in ncclGroupStart/End -- see sendImpl comment for rationale.
   // (TorchComms fix D109625550.)
@@ -881,7 +887,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::batch_op_issue(
   auto work = createWork(stream, timeout, input_tensors);
 
   // Record start event before NCCL operations
-  work->recordStart("batch_op_issue");
+  work->recordStart("batch_op_issue", ::c10d::OpType::COALESCED);
 
   // Start NCCL group for batched operations
   NCCL_CHECK(
@@ -954,7 +960,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::broadcastImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("broadcast");
+  work->recordStart("broadcast", ::c10d::OpType::BROADCAST);
 
   waitForNcclOperation(
       nccl_api_->bcast(
@@ -995,7 +1001,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_reduce(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("all_reduce");
+  work->recordStart("all_reduce", ::c10d::OpType::ALLREDUCE);
 
   const auto dataType = getNcclDataType(tensor);
   waitForNcclOperation(
@@ -1039,7 +1045,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("reduce");
+  work->recordStart("reduce", ::c10d::OpType::REDUCE);
 
   const auto dataType = getNcclDataType(tensor);
   waitForNcclOperation(
@@ -1128,7 +1134,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_gather(
   auto work = async_op ? createWork(stream, timeout, tensor)
                        : createWork(stream, timeout);
 
-  work->recordStart("all_gather");
+  work->recordStart("all_gather", ::c10d::OpType::ALLGATHER);
 
   // Use multiple broadcast operations for all_gather
   NCCL_CHECK(
@@ -1205,7 +1211,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allGatherSingleImpl(
   auto work = async_op ? createWork(stream, timeout, input)
                        : createWork(stream, timeout);
 
-  work->recordStart("allGatherSingleImpl");
+  work->recordStart("allGatherSingleImpl", ::c10d::OpType::_ALLGATHER_BASE);
 
   waitForNcclOperation(
       nccl_api_->allGather(
@@ -1266,7 +1272,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduce_scatter(
   auto work = async_op ? createWork(stream, timeout, input_list)
                        : createWork(stream, timeout);
 
-  work->recordStart("reduce_scatter");
+  work->recordStart("reduce_scatter", ::c10d::OpType::REDUCE_SCATTER);
 
   // Use multiple reduce operations for reduce_scatter
   NCCL_CHECK(
@@ -1355,7 +1361,8 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::reduceScatterSingleImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("reduceScatterSingleImpl");
+  work->recordStart(
+      "reduceScatterSingleImpl", ::c10d::OpType::_REDUCE_SCATTER_BASE);
 
   const auto dataType = getNcclDataType(input);
   waitForNcclOperation(
@@ -1415,7 +1422,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::allToAllSingleImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("allToAllSingleImpl");
+  work->recordStart("allToAllSingleImpl", ::c10d::OpType::ALLTOALL_BASE);
 
   size_t chunk_size = input.numel() / comm_size_;
   const auto data_type = getNcclDataType(input);
@@ -1528,7 +1535,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all_v_single(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operation
-  work->recordStart("all_to_all_v_single");
+  work->recordStart("all_to_all_v_single", ::c10d::OpType::ALLTOALL_BASE);
 
   // Convert split sizes to arrays and calculate displacements
   std::vector<size_t> sendcounts(comm_size_);
@@ -1642,7 +1649,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::all_to_all(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operations
-  work->recordStart("all_to_all");
+  work->recordStart("all_to_all", ::c10d::OpType::ALLTOALL);
 
   NCCL_CHECK(
       nccl_api_, nccl_comm_, nccl_api_->groupStart(), "NCCL GroupStart failed");
@@ -1722,7 +1729,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::barrierImpl(
   work->setHostBlocking(!async_op);
 
   // Record start event before NCCL operation
-  work->recordStart("barrier");
+  work->recordStart("barrier", ::c10d::OpType::BARRIER);
 
   // Use pre-allocated CUDA buffer for barrier
   waitForNcclOperation(
@@ -1791,7 +1798,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::scatterImpl(
   auto work = createWork(stream, timeout, input_tensors);
 
   // Record start event before NCCL operations
-  work->recordStart("scatter");
+  work->recordStart("scatter", ::c10d::OpType::SCATTER);
 
   // Implement scatter using point-to-point operations
   if (rank_ == root) {
@@ -1911,7 +1918,7 @@ c10::intrusive_ptr<WorkNCCL> ProcessGroupNCCL::gatherImpl(
                        : createWork(stream, timeout);
 
   // Record start event before NCCL operations
-  work->recordStart("gather");
+  work->recordStart("gather", ::c10d::OpType::GATHER);
 
   if (rank_ == root) {
     // Root receives from all ranks (except itself)

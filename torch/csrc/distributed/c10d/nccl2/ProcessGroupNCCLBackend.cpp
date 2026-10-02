@@ -12,6 +12,7 @@
 
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/irange.h>
+#include <c10/util/thread_name.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
@@ -313,6 +314,121 @@ void ProcessGroupNCCL::registerCompletionHook(
 void ProcessGroupNCCL::unregisterCompletionHook(int64_t hook_id) {
   std::lock_guard<std::mutex> lock(completion_hooks_mutex_);
   completionHooks_.erase(hook_id);
+}
+
+void ProcessGroupNCCL::registerOnCompletionHook(
+    std::function<void(std::shared_ptr<::c10d::WorkInfo>)>&& hook) {
+  TORCH_WARN_ONCE(
+      "ProcessGroupNCCL OnCompletion hook will be deprecated in favor of Flight Recorder. "
+      "Please check out FlightRecorder.hpp for information that is recorded at work completion. "
+      "You can file an issue if you want additional information to be recorded. "
+      "You can also file an RFC if you want Flight Recorder to accept plugins that customize the recording.");
+
+  std::lock_guard<std::mutex> lock(on_completion_->mutex);
+  TORCH_CHECK_WITH(
+      DistBackendError,
+      onCompletionHook_ == nullptr,
+      "ProcessGroupNCCL OnCompletion hook already registered");
+  TORCH_CHECK_WITH(
+      ValueError,
+      collectivesTimingEnabled(),
+      "ProcessGroupNCCL OnCompletion hook requires recording start and end "
+      "events which require setting TORCH_NCCL_ENABLE_TIMING environment variable. "
+      "This is only available for NCCL version >= 2.4.");
+  on_completion_->hook = hook;
+  on_completion_->log_prefix =
+      fmt::format("[TC]{}{} ", getRankPrefix(this), getCommNamePrefix(this));
+  onCompletionHook_ = std::move(hook);
+  on_completion_thread_ =
+      std::thread(&ProcessGroupNCCL::runOnCompletionHookLoop, on_completion_);
+}
+
+bool ProcessGroupNCCL::hasOnCompletionHook() {
+  std::lock_guard<std::mutex> lock(on_completion_->mutex);
+  return on_completion_->hook != nullptr;
+}
+
+void ProcessGroupNCCL::enqueueOnCompletion(
+    std::shared_ptr<::c10d::WorkInfo> info) {
+  {
+    std::lock_guard<std::mutex> lock(on_completion_->mutex);
+    if (on_completion_->stop) {
+      return;
+    }
+    on_completion_->queue.push(std::move(info));
+  }
+  on_completion_->cv.notify_all();
+}
+
+void ProcessGroupNCCL::runOnCompletionHookLoop(
+    const std::shared_ptr<OnCompletionState>& state) {
+  c10::setThreadName("pt_nccl_runhook");
+  std::unique_lock<std::mutex> lock(state->mutex);
+  state->thread_id = std::this_thread::get_id();
+  while (true) {
+    state->cv.wait(
+        lock, [&state] { return state->stop || !state->queue.empty(); });
+    // Stopping still drains what was queued before the stop.
+    if (state->queue.empty()) {
+      return;
+    }
+    auto info = std::move(state->queue.front());
+    state->queue.pop();
+    state->running = true;
+    // A Python hook takes the GIL, so it must not run under our lock.
+    lock.unlock();
+    try {
+      state->hook(std::move(info));
+    } catch (const std::exception& e) {
+      LOG(ERROR) << state->log_prefix
+                 << "OnCompletion hook threw exception: " << e.what();
+    } catch (...) {
+      LOG(ERROR) << state->log_prefix
+                 << "OnCompletion hook threw unknown exception.";
+    }
+    lock.lock();
+    state->running = false;
+    state->cv.notify_all();
+  }
+}
+
+void ProcessGroupNCCL::stopOnCompletionHookThread() {
+  {
+    std::lock_guard<std::mutex> lock(on_completion_->mutex);
+    on_completion_->stop = true;
+  }
+  on_completion_->cv.notify_all();
+  if (!on_completion_thread_.joinable()) {
+    return;
+  }
+  // The hook itself may tear the group down; the thread keeps its own
+  // reference to on_completion_.
+  if (std::this_thread::get_id() == on_completion_thread_.get_id()) {
+    on_completion_thread_.detach(); // NOLINT(facebook-hte-BadCall-detach)
+    return;
+  }
+  // Remaining hooks may need the GIL, which callers must not hold.
+  on_completion_thread_.join();
+}
+
+void ProcessGroupNCCL::waitForPendingWorks() {
+  while (init_state_ == InitializationState::INITIALIZED) {
+    // Retire completed work here rather than waiting for the watchdog's next
+    // tick; this also raises on a timed-out or failed work.
+    checkAndAbortIfTimedOutOrError();
+    const bool workq_idle = workq_.idle();
+    std::unique_lock<std::mutex> lock(on_completion_->mutex);
+    // A hook (e.g. via destroy_process_group) cannot wait for itself.
+    const bool on_hook_thread =
+        std::this_thread::get_id() == on_completion_->thread_id;
+    if (workq_idle &&
+        (on_hook_thread ||
+         (on_completion_->queue.empty() && !on_completion_->running))) {
+      return;
+    }
+    // GPU progress has no host-side notification, so poll.
+    on_completion_->cv.wait_for(lock, std::chrono::milliseconds(10));
+  }
 }
 
 void ProcessGroupNCCL::shutdown() {

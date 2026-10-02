@@ -367,6 +367,10 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
       override;
   void unregisterCompletionHook(int64_t hook_id) override;
 
+  void registerOnCompletionHook(
+      std::function<void(std::shared_ptr<::c10d::WorkInfo>)>&& hook) override;
+  void waitForPendingWorks() override;
+
   // ---- accessors used by friend classes (work) ----
   NcclApi* getNcclApi() const {
     return nccl_api_.get();
@@ -619,6 +623,24 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   void runCompletionHooks(
       uint64_t completion_key,
       std::optional<float> duration_ms);
+  // registerOnCompletionHook state, shared with the hook thread. A hook may
+  // tear the group down, so that thread may outlive this object and touches
+  // only this struct.
+  struct OnCompletionState {
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::queue<std::shared_ptr<::c10d::WorkInfo>> queue;
+    std::function<void(std::shared_ptr<::c10d::WorkInfo>)> hook;
+    std::thread::id thread_id;
+    bool running{false};
+    bool stop{false};
+    std::string log_prefix;
+  };
+  bool hasOnCompletionHook();
+  void enqueueOnCompletion(std::shared_ptr<::c10d::WorkInfo> info);
+  static void runOnCompletionHookLoop(
+      const std::shared_ptr<OnCompletionState>& state);
+  void stopOnCompletionHookThread();
 
   void attachMemoryHook();
   void detachMemoryHook();
@@ -632,6 +654,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   // Member variables (port of TorchCommNCCL).
   ncclComm_t nccl_comm_{};
+  // Serializes abortNcclComm() with checkAndAbortIfTimedOutOrError() reading
+  // nccl_comm_ on a user thread while the watchdog aborts it.
+  std::mutex nccl_comm_abort_mutex_;
   at::Device device_;
   int comm_size_{};
   // NOTE: the rank is stored in the inherited c10d::Backend::rank_ (set in the
@@ -723,6 +748,13 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
   // un/registering on another thread.
   std::unordered_map<int64_t, ::c10d::CompletionHook> completionHooks_;
   std::mutex completion_hooks_mutex_;
+
+  // notifyCompletion() queues a WorkInfo and the hook runs on
+  // on_completion_thread_, so the watchdog never waits on the GIL a Python hook
+  // takes.
+  std::shared_ptr<OnCompletionState> on_completion_{
+      std::make_shared<OnCompletionState>()};
+  std::thread on_completion_thread_;
 
   // Active coalescing batch (port of BackendWrapper). Engaged between
   // startCoalescing() and endCoalescing(); send()/recv() append into it.
