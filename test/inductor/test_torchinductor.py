@@ -6970,6 +6970,71 @@ for dtype in (torch.int32, torch.int64):
             (torch.randn(2, 4, 4, 4),),
         )
 
+    @skip_if_mps  # MPS does not implement adaptive_max_pool3d.
+    def test_adaptive_max_pool3d_channels_last_backward(self):
+        def fn(x):
+            return F.adaptive_max_pool3d(x, (2, 3, 5), return_indices=True)
+
+        x = torch.randperm(480, device=self.device).float().reshape(1, 4, 4, 6, 5)
+        x = x.clone(memory_format=torch.channels_last_3d)
+        eager = x.detach().clone(memory_format=torch.preserve_format).requires_grad_()
+        compiled = (
+            x.detach().clone(memory_format=torch.preserve_format).requires_grad_()
+        )
+        grad = torch.arange(1.0, 121.0, device=self.device).reshape(1, 4, 2, 3, 5)
+        eager_out, eager_indices = fn(eager)
+        compiled_out, compiled_indices = torch.compile(fn, fullgraph=True)(compiled)
+        self.assertEqual(compiled_out, eager_out)
+        self.assertEqual(compiled_out.stride(), eager_out.stride())
+        (eager_out * grad).sum().backward()
+        (compiled_out * grad).sum().backward()
+        self.assertEqual(compiled.grad, eager.grad)
+        self.assertEqual(compiled_indices, eager_indices)
+        self.assertEqual(
+            aten.adaptive_max_pool3d_backward(grad, eager, compiled_indices),
+            aten.adaptive_max_pool3d_backward(grad, eager, eager_indices),
+        )
+        self.assertEqual(compiled_indices.stride(), eager_indices.stride())
+
+    @skip_if_mps  # MPS does not implement adaptive_max_pool3d.
+    def test_adaptive_max_pool3d_backward_noncontiguous_indices(self):
+        """Native backward ignores index strides, so use contiguous indices as reference."""
+        x = torch.randperm(480, device=self.device).float().reshape(1, 4, 4, 6, 5)
+        grad = torch.arange(1.0, 121.0, device=self.device).reshape(1, 4, 2, 3, 5)
+        _, indices = F.adaptive_max_pool3d(x, (2, 3, 5), return_indices=True)
+        indices = indices.contiguous(memory_format=torch.channels_last_3d)
+        self.assertFalse(indices.is_contiguous())
+
+        def backward(grad_output, input, saved_indices):
+            return aten.adaptive_max_pool3d_backward(grad_output, input, saved_indices)
+
+        expected = backward(grad, x, indices.contiguous())
+        actual = torch.compile(backward, fullgraph=True)(grad, x, indices)
+        self.assertEqual(actual, expected)
+
+    @skip_if_mps  # MPS does not implement adaptive_max_pool3d.
+    def test_adaptive_max_pool3d_out_decomposition(self):
+        from torch._inductor.decomposition import decompositions
+
+        x = torch.randperm(480, device=self.device).float().reshape(1, 4, 4, 6, 5)
+        x = x.clone(memory_format=torch.channels_last_3d)
+        output = torch.empty(1, 4, 2, 3, 5, device=self.device)
+        indices = torch.empty_like(output, dtype=torch.int64)
+        expected_output = torch.empty_like(output)
+        expected_indices = torch.empty_like(indices)
+
+        expected = aten.adaptive_max_pool3d.out(
+            x, (2, 3, 5), out=expected_output, indices=expected_indices
+        )
+        actual = decompositions[aten.adaptive_max_pool3d.out](
+            x, (2, 3, 5), out=output, indices=indices
+        )
+        self.assertIs(actual[0], output)
+        self.assertIs(actual[1], indices)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual[0].stride(), expected[0].stride())
+        self.assertEqual(actual[1].stride(), expected[1].stride())
+
     # halide/mps take the non-logical-index path in _pool_argmax_inner_fn, so the
     # window offsets are still physical there; halide additionally fails to schedule
     # the fallback argmax for this shape.
