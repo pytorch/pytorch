@@ -271,6 +271,10 @@ ncclComm_t shrinkAndGrowComm(
           "NCCL commGetUniqueId failed during reconfigure: ",
           api.getErrorString(status));
       store.set(growIdKey, uniqueIdToBytes(uniqueId));
+    } else {
+      // commGrow blocks without a timeout until rank 0 sends the grow handle
+      // from commGetUniqueId, which happens before the store key is set.
+      waitForUniqueId(store, growIdKey, timeout);
     }
     status = api.commGrow(comm, newSize, nullptr, -1, &grown, &config);
   } catch (...) {

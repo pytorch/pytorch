@@ -433,6 +433,24 @@ class AbstractFaultToleranceTest:
         self._store_barrier("ft_reused_uuid_rejected")
         self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
 
+    def test_grow_rejects_reused_uuid(self):
+        # Rank 0 rejects the reused uuid before growing; the other survivor must
+        # time out instead of blocking in commGrow.
+        handles = self._create_reconfigured_pg("ft_grow_reused", 1110)
+        last = self.world_size - 1
+        if self.rank != last:
+            self._reconfigure(1111, handles[:last])
+        handles = self._collect_handles("ft_grow_reused_all")
+        if self.backend_name == "nccl2":
+            error = "already used" if self.rank == 0 else "Wait timeout"
+            with self.assertRaisesRegex(RuntimeError, error):
+                dist._reconfigure(
+                    1111, handles, timeout=timedelta(milliseconds=500)
+                ).wait()
+            handles = self._collect_handles("ft_grow_reused_retry")
+        self._reconfigure(1112, handles)
+        self._assert_all_reduce_sum(sum(range(1, self.world_size + 1)))
+
     def test_reconfigure_timeout_is_retryable(self):
         if self.backend_name != "nccl2":
             self.skipTest("nonblocking NCCL initialization behavior")
