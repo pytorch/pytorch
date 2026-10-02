@@ -1,0 +1,139 @@
+# Owner(s): ["module: ci"]
+name: pi triage plan
+
+# The model job shared by issue-triage-pi.yml and distributed-triage-pi.yml: for
+# each issue, pi runs a triage skill with read-only gh tools and submits a plan
+# as the artifact `<artifact-prefix>-<issue>`. The job holds no write token, has
+# no shell, and egress is blocked. The callers apply the plan in a separate job.
+
+on:
+  workflow_call:
+    inputs:
+      issues:
+        description: JSON array of issue numbers
+        required: true
+        type: string
+      repo:
+        description: Repository the issues live in
+        required: true
+        type: string
+      skill:
+        description: Skill directory name under .agents/skills
+        required: true
+        type: string
+      schema:
+        description: Plan JSON Schema path in this repository
+        required: true
+        type: string
+      prompt:
+        description: Prompt text; {0} is replaced with the issue number
+        required: true
+        type: string
+      artifact-prefix:
+        required: true
+        type: string
+      model:
+        required: true
+        type: string
+      thinking:
+        default: medium
+        type: string
+      replay:
+        description: Show each issue as it was before the triage bot acted
+        default: false
+        type: boolean
+      log-prefix:
+        description: >
+          S3 prefix under ossci-raw-job-status for the execution log; empty to skip
+          (replays and dry runs must not overwrite the log of the run that triaged)
+        default: ""
+        type: string
+
+jobs:
+  plan:
+    name: "Plan #${{ matrix.issue }}"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: bedrock
+    strategy:
+      fail-fast: false
+      matrix:
+        issue: ${{ fromJSON(inputs.issues) }}
+    permissions:
+      contents: read
+      issues: read
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TRIAGE_REPO: ${{ inputs.repo }}
+      TRIAGE_REPLAY_ISSUE: ${{ inputs.replay && matrix.issue || '' }}
+    steps:
+      # MUST be the first step. The allowlist is pinned by
+      # scripts/issue_triage_pi/test_workflow_contract.py; pi.dev is deliberately
+      # absent, so a model outside the pinned catalog fails here.
+      - name: Harden runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2
+        with:
+          egress-policy: block
+          disable-sudo: true
+          allowed-endpoints: >
+            sts.us-east-1.amazonaws.com:443
+            bedrock-runtime.us-east-1.amazonaws.com:443
+            api.github.com:443
+            github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            registry.npmjs.org:443
+            ossci-raw-job-status.s3.us-east-1.amazonaws.com:443
+            ossci-raw-job-status.s3.amazonaws.com:443
+
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          role-duration-seconds: 900
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
+          aws-region: us-east-1
+
+      - name: Plan with pi
+        id: pi
+        timeout-minutes: 8
+        uses: ./.github/actions/pi-agent
+        with:
+          model: ${{ inputs.model }}
+          thinking: ${{ inputs.thinking }}
+          tools: read,grep,find,ls,get_issue,get_issue_comments,search_issues
+          extensions: ${{ github.workspace }}/.github/pi/extensions/github-issue-tools.ts
+          skills: ${{ github.workspace }}/.agents/skills/${{ inputs.skill }}
+          prompt: ${{ format(inputs.prompt, matrix.issue) }}
+          result-schema: ${{ github.workspace }}/${{ inputs.schema }}
+          artifact-name: ${{ inputs.artifact-prefix }}-${{ matrix.issue }}
+
+      # The execution file has claude-code-action's shape, so the usage table and
+      # the review log inspector read pi runs unchanged.
+      - name: Upload usage metrics
+        if: always() && steps.pi.outputs.execution-file != ''
+        uses: pytorch/test-infra/.github/actions/upload-claude-usage@ca88203856609d21d36a0219da0a29792c3aff73 # main
+        with:
+          metrics-file: ${{ steps.pi.outputs.execution-file }}
+
+      - name: Upload execution log to S3
+        if: always() && steps.pi.outputs.execution-file != '' && inputs.log-prefix != ''
+        continue-on-error: true
+        env:
+          EXECUTION_FILE: ${{ steps.pi.outputs.execution-file }}
+          S3_KEY: ${{ inputs.log-prefix }}/${{ matrix.issue }}.json
+        run: |
+          # Keep earlier runs' events for the same issue in one JSON array.
+          combined="$RUNNER_TEMP/combined-execution.json"
+          if aws s3 cp "s3://ossci-raw-job-status/$S3_KEY" "$RUNNER_TEMP/previous.json" 2> /dev/null \
+            && jq -s 'add' "$RUNNER_TEMP/previous.json" "$EXECUTION_FILE" > "$combined" 2> /dev/null; then
+            :
+          else
+            cp "$EXECUTION_FILE" "$combined"
+          fi
+          aws s3 cp "$combined" "s3://ossci-raw-job-status/$S3_KEY"

@@ -25,16 +25,19 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-
-SKILL_DIR = Path(__file__).resolve().parents[2] / ".agents/skills/triaging-issues"
-sys.path.insert(0, str(SKILL_DIR / "scripts"))
-
-from validate_labels import is_forbidden, load_valid_labels, strip_redundant
+from labels import (
+    DISTRIBUTED,
+    is_forbidden,
+    is_sub_queue,
+    load_templates,
+    load_valid_labels,
+    strip_redundant,
+    TRIAGE_SKILL,
+)
 
 
 BOT_TRIAGED = "bot-triaged"
 TRIAGE_REVIEW = "triage review"
-DISTRIBUTED = "oncall: distributed"
 TRIAGE_BOT = "github-actions[bot]"
 LABELING_DECISIONS = {"label", "redirect_oncall", "triage_review"}
 # Decisions that close the issue, and the template each must post.
@@ -44,8 +47,9 @@ CLOSING_TEMPLATES = {
 }
 
 
-def gh_api(args: list[str], attempts: int = 3) -> str:
+def gh_api(args: list[str]) -> str:
     """Run `gh api`, retrying transient failures (429/5xx surface as exit 1)."""
+    attempts = 3
     for attempt in range(1, attempts + 1):
         result = subprocess.run(
             ["gh", "api", *args], capture_output=True, text=True, timeout=30
@@ -87,6 +91,53 @@ class Effects:
         return bool(self.add_labels or self.comment or self.close)
 
 
+def template_comment(
+    keys: list[str],
+    templates: dict[str, dict],
+    bot_comments: list[str],
+    notes: list[str],
+) -> tuple[str, bool]:
+    """Join the comments of the known `keys` the bot has not already posted.
+
+    Also returns whether any requested template was already posted, which
+    counts as triage done: a rerun after a partial failure (comment posted,
+    label call failed) still adds the bot marker.
+    """
+    unknown = [key for key in keys if key not in templates]
+    if unknown:
+        notes.append(f"dropped unknown templates {unknown}")
+    known = [key for key in keys if key in templates]
+    posted = [
+        key
+        for key in known
+        if any(templates[key]["comment"] in body for body in bot_comments)
+    ]
+    if posted:
+        notes.append(f"already posted {posted}")
+    comment = "\n\n---\n\n".join(
+        templates[key]["comment"] for key in known if key not in posted
+    )
+    return comment, bool(posted)
+
+
+def fetch_issue(repo: str, number: int) -> tuple[dict, list[str]]:
+    """The issue and the bodies of the triage bot's comments on it."""
+    issue = json.loads(gh_api([f"repos/{repo}/issues/{number}"]))
+    comments = json.loads(
+        gh_api([f"repos/{repo}/issues/{number}/comments?per_page=100"])
+    )
+    return issue, [
+        c["body"] or "" for c in comments if c["user"]["login"] == TRIAGE_BOT
+    ]
+
+
+def publish(summary: str) -> None:
+    print(summary)
+    if path := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(path, "a") as f:
+            f.write(summary + "\n")
+
+
 def plan_effects(
     plan: dict,
     existing_labels: set[str],
@@ -112,7 +163,7 @@ def plan_effects(
     requested = [label for label in plan.get("labels", []) if label != BOT_TRIAGED]
     # Stage 2 routes to the parent queue only. The distributed triage picks the
     # sub-queue, and it stops early on an issue that already has one.
-    sub_queues = [label for label in requested if label.startswith(DISTRIBUTED + " ")]
+    sub_queues = [label for label in requested if is_sub_queue(label)]
     if sub_queues:
         effects.notes.append(f"mapped {sub_queues} to {DISTRIBUTED!r}")
         requested = [
@@ -150,28 +201,13 @@ def plan_effects(
     effects.close = decision in CLOSING_TEMPLATES
     if effects.close and CLOSING_TEMPLATES[decision] not in keys:
         keys.insert(0, CLOSING_TEMPLATES[decision])
-    unknown_templates = [key for key in keys if key not in templates]
-    if unknown_templates:
-        effects.notes.append(f"dropped unknown templates {unknown_templates}")
-    posted = [
-        key
-        for key in keys
-        if key in templates
-        and any(templates[key]["comment"] in body for body in bot_comments)
-    ]
-    if posted:
-        effects.notes.append(f"already posted {posted}")
-    effects.comment = "\n\n---\n\n".join(
-        templates[key]["comment"]
-        for key in keys
-        if key in templates and key not in posted
+    effects.comment, posted = template_comment(
+        keys, templates, bot_comments, effects.notes
     )
 
     effects.add_labels = [
         label for label in dict.fromkeys(labels) if label not in existing_labels
     ]
-    # An already-posted template counts as triage done, so a rerun after a
-    # partial failure (comment posted, label call failed) still marks the issue.
     if (effects.mutates or posted) and BOT_TRIAGED not in existing_labels:
         effects.add_labels.append(BOT_TRIAGED)
     return effects
@@ -276,15 +312,9 @@ def main() -> int:
     args = parser.parse_args()
 
     plan = json.loads(args.plan.read_text())
-    templates = json.loads((SKILL_DIR / "templates.json").read_text())["templates"]
-    issue = json.loads(gh_api([f"repos/{args.repo}/issues/{args.issue}"]))
+    templates = load_templates(TRIAGE_SKILL)
+    issue, bot_comments = fetch_issue(args.repo, args.issue)
     current = {label["name"] for label in issue["labels"]}
-    comments = json.loads(
-        gh_api([f"repos/{args.repo}/issues/{args.issue}/comments?per_page=100"])
-    )
-    bot_comments = [
-        c["body"] or "" for c in comments if c["user"]["login"] == TRIAGE_BOT
-    ]
 
     if args.replay:
         pages = json.loads(
@@ -313,22 +343,17 @@ def main() -> int:
     state_after = (
         "closed" if effects.close else ("open" if args.replay else issue["state"])
     )
-    outcome = classify(labels_after, state_after, effects.mutates)
-    if plan["decision"] == "skip_already_routed" and not effects.mutates:
+    # A skip plan never mutates (plan_effects returns early).
+    if plan["decision"] == "skip_already_routed":
         outcome = "skipped"
+    else:
+        outcome = classify(labels_after, state_after, effects.mutates)
 
     reference = current - existing - {BOT_TRIAGED} if args.replay else None
     summary = summary_markdown(
         args.repo, args.issue, plan, effects, outcome, args.apply, reference
     )
-    print(summary)
-    if path := os.environ.get("GITHUB_STEP_SUMMARY"):
-        with open(path, "a") as f:
-            f.write(summary + "\n")
-    if path := os.environ.get("GITHUB_OUTPUT"):
-        with open(path, "a") as f:
-            f.write(f"outcome={outcome}\n")
-
+    publish(summary)
     if outcome == "no_action":
         print(f"::error::triage plan for #{args.issue} produced no action")
         return 1

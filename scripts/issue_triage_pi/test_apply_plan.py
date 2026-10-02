@@ -2,13 +2,25 @@
 
 import json
 import unittest
+from pathlib import Path
 
-from apply_plan import labels_before_triage, plan_effects, SKILL_DIR
-from validate_labels import load_valid_labels
+from apply_plan import (
+    CLOSING_TEMPLATES,
+    LABELING_DECISIONS,
+    labels_before_triage,
+    plan_effects,
+)
+from labels import load_templates, load_valid_labels, TRIAGE_SKILL
 
 
-TEMPLATES = json.loads((SKILL_DIR / "templates.json").read_text())["templates"]
+TEMPLATES = load_templates(TRIAGE_SKILL)
 VALID = load_valid_labels()
+SCHEMA = json.loads(
+    (
+        Path(__file__).resolve().parents[2]
+        / ".github/pi/schemas/issue-triage-plan.json"
+    ).read_text()
+)["properties"]
 
 
 def effects(decision, labels=(), templates=(), existing=(), bot_comments=(), **extra):
@@ -74,7 +86,7 @@ class PlanEffectsTest(unittest.TestCase):
     def test_transfer_is_flagged_for_review(self):
         result = effects("transfer", ["module: vision"], transfer_repo="pytorch/vision")
         self.assertEqual(result.add_labels, ["triage review", "bot-triaged"])
-        self.assertIn("pytorch/vision", result.notes[0])
+        self.assertTrue(any("pytorch/vision" in note for note in result.notes))
 
     def test_a_template_the_bot_already_posted_is_not_repeated(self):
         posted = "Bot says: " + TEMPLATES["request_more_info"]["comment"]
@@ -96,12 +108,29 @@ class PlanEffectsTest(unittest.TestCase):
         result = effects("close_expected_behavior", ["module: edge cases"])
         self.assertTrue(result.close)
         self.assertEqual(result.comment, TEMPLATES["numerical_accuracy"]["comment"])
-        self.assertNotIn(TEMPLATES["redirect_to_forum"]["comment"], result.comment)
 
     def test_unknown_template_is_not_posted(self):
         result = effects("request_info", templates=["anything goes"])
         self.assertEqual(result.comment, "")
         self.assertFalse(result.mutates)
+
+
+class PlanSchemaTest(unittest.TestCase):
+    # The model can only submit what the schema allows, so a template or
+    # decision renamed on one side silently disables that path.
+    def test_schema_offers_exactly_the_templates_apply_can_post(self):
+        self.assertEqual(set(SCHEMA["templates"]["items"]["enum"]), set(TEMPLATES))
+
+    def test_schema_offers_every_decision_apply_acts_on(self):
+        self.assertLessEqual(
+            {
+                *CLOSING_TEMPLATES,
+                *LABELING_DECISIONS,
+                "skip_already_routed",
+                "transfer",
+            },
+            set(SCHEMA["decision"]["enum"]),
+        )
 
 
 class LabelsBeforeTriageTest(unittest.TestCase):
