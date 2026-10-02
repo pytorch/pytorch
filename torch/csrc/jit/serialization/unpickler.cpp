@@ -1,5 +1,6 @@
 #include <ATen/ATen.h>
 #include <ATen/EmptyTensor.h>
+#include <ATen/ceil_div.h>
 #include <ATen/core/Dict.h>
 #ifdef USE_RPC
 #include <torch/csrc/distributed/rpc/rref_context.h>
@@ -1007,15 +1008,23 @@ void Unpickler::rebuildTensor(bool quantized) {
     }
     const size_t itemsize = storage_tensor.dtype().itemsize();
     const size_t storage_nbytes = storage_tensor.storage().nbytes();
+    const size_t element_per_byte =
+        at::detail::subByteElementPerByte(storage_tensor.dtype());
     // Bound storage_offset independently: computeStorageNbytes returns 0 when
     // any dim is 0, so without this check a zero-numel tensor with a huge
     // offset would slip past the combined check and later operations
     // (reshape/resize_) could dereference out-of-bounds memory.
     size_t offset_nbytes = 0;
+    const bool offset_overflow = c10::mul_overflows(
+        static_cast<size_t>(storage_offset), itemsize, &offset_nbytes);
+    size_t required_nbytes = at::detail::computeStorageNbytes(
+        size, stride, itemsize, static_cast<size_t>(storage_offset));
+    if (element_per_byte > 1) {
+      offset_nbytes = ceil_div(offset_nbytes, element_per_byte);
+      required_nbytes = ceil_div(required_nbytes, element_per_byte);
+    }
     TORCH_CHECK(
-        !c10::mul_overflows(
-            static_cast<size_t>(storage_offset), itemsize, &offset_nbytes) &&
-            offset_nbytes <= storage_nbytes,
+        !offset_overflow && offset_nbytes <= storage_nbytes,
         "Tensor: storage offset ",
         storage_offset,
         " is out of bounds for storage of size ",
@@ -1023,8 +1032,6 @@ void Unpickler::rebuildTensor(bool quantized) {
         " bytes (itemsize ",
         itemsize,
         ")");
-    const size_t required_nbytes = at::detail::computeStorageNbytes(
-        size, stride, itemsize, static_cast<size_t>(storage_offset));
     TORCH_CHECK(
         required_nbytes == 0 || required_nbytes <= storage_nbytes,
         "Tensor: sizes ",
