@@ -503,12 +503,13 @@ class RNN(RNNBase):
         # Efficient implementation equivalent to the following with bidirectional=False
         rnn = nn.RNN(input_size, hidden_size, num_layers)
         params = dict(rnn.named_parameters())
-        def forward(x, h_t_minus_1=None, batch_first=False):
+        def forward(x, hx=None, batch_first=False):
             if batch_first:
                 x = x.transpose(0, 1)
             seq_len, batch_size, _ = x.size()
-            if h_t_minus_1 is None:
-                h_t_minus_1 = torch.zeros(rnn.num_layers, batch_size, rnn.hidden_size)
+            if hx is None:
+                hx = torch.zeros(rnn.num_layers, batch_size, rnn.hidden_size)
+            h_t_minus_1 = hx
             output = []
             for t in range(seq_len):
                 h_t = []
