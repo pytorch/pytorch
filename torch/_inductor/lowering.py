@@ -4473,15 +4473,21 @@ def _full(fill_value, device, dtype, size):
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
 
+    unsigned_half_singleton = False
     if (
         device.type == "cpu"
         and config.cpp_wrapper
         and isinstance(value, sympy.Symbol)
+        and (
+            dtype != torch.float16
+            or all(V.graph.sizevars.is_size_one_or_false(dim) for dim in size)
+        )
         and dtype
         in (
             torch.bool,
             torch.uint64,
             torch.bfloat16,
+            torch.float16,
             torch.float32,
             torch.float64,
             torch.complex64,
@@ -4505,6 +4511,7 @@ def _full(fill_value, device, dtype, size):
                 and buffer.inputs[0].get_device() == device
             ):
                 value = ir.SqueezeView.create(buffer.inputs[0])
+                unsigned_half_singleton = dtype == torch.float16
                 break
 
     if isinstance(value, (int, float)):
@@ -4523,6 +4530,20 @@ def _full(fill_value, device, dtype, size):
         value_loader = value.make_loader()
 
         def inner_fn(index):
+            if unsigned_half_singleton:
+                # Eager scalar fills of a single Half element round 65505..65519
+                # to 65504 and larger uint64 values to infinity.  Bound the
+                # checked cast before selecting infinity for the latter case.
+                source = value_loader([])
+                finite = ops.to_dtype(
+                    ops.minimum(source, ops.constant(65504, torch.uint64)),
+                    torch.float16,
+                )
+                return ops.where(
+                    ops.gt(source, ops.constant(65519, torch.uint64)),
+                    ops.constant(float("inf"), torch.float16),
+                    finite,
+                )
             return value_loader([])
 
     return Pointwise.create(

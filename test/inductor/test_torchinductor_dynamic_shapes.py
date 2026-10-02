@@ -1819,6 +1819,42 @@ class TestSymbolicFull(TestCase):
                 x = base[1:2, 1:2]
             self.assertEqual(compiled_f(x), f(x))
 
+    @onlyOn(["cpu"])
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @parametrize("size", ((), (1,), (1, 1)))
+    def test_full_symbolic_uint64_half_singleton_cpp_wrapper(self, device, size):
+        def f(x):
+            return torch.full(size, x.item(), dtype=torch.float16, device=device)
+
+        compiled_f = torch.compile(f, fullgraph=True)
+        for value in (
+            65503,
+            65504,
+            65505,
+            65519,
+            65520,
+            1 << 63,
+            torch.iinfo(torch.uint64).max,
+        ):
+            x = torch.tensor(value, dtype=torch.uint64, device=device)
+            self.assertEqual(compiled_f(x), f(x))
+
+    @onlyOn(["cpu"])
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_full_symbolic_uint64_half_nonsingleton_overflow_cpp_wrapper(self, device):
+        def f(x):
+            return torch.full((2,), x.item(), dtype=torch.float16, device=device)
+
+        compiled_f = torch.compile(f, fullgraph=True)
+        for value in (1 << 63, torch.iinfo(torch.uint64).max):
+            x = torch.tensor(value, dtype=torch.uint64, device=device)
+            with self.assertRaisesRegex(RuntimeError, self._overflow_error):
+                f(x)
+            with self.assertRaisesRegex(RuntimeError, self._overflow_error):
+                compiled_f(x)
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals(), allow_xpu=True)
 instantiate_device_type_tests(
