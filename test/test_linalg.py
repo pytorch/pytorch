@@ -6009,7 +6009,7 @@ class TestLinalg(TestCase):
                 self.assertTrue((scaled_residual < K).all())
 
         # Check info vector. Note, it is 1-based
-        for n in (300, 1030):
+        for n in (300, 1024) + ((1030, 1050) if pivot else ()):
             A = make_well_conditioned(16, n, n)
             A[0, :, 150:] = 0
             A[2, :, :150] = 0
