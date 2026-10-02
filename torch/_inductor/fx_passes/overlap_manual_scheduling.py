@@ -193,7 +193,9 @@ def _all_reduce_bucket_trace_inputs(coll_node: fx.Node) -> list[fx.Node]:
     return _bucket_trace_inputs(coll_node, coll_node.args[0], group_name_arg=2)
 
 
-def _repair_backward_edges(graph: fx.Graph, changed_nodes: Iterable[fx.Node]) -> None:
+def _do_stable_topological_sort_if_needed(
+    graph: fx.Graph, changed_nodes: Iterable[fx.Node]
+) -> None:
     """Restore stable topological order if a changed node crosses an edge.
 
     Callers must include every node moved relative to its neighbors and every
@@ -228,7 +230,7 @@ def _move_wait_users_after_latest_inputs(
     changed_nodes: OrderedSet[fx.Node] = OrderedSet(replacements.values())
     for old_out in replacements:
         changed_nodes.update(replaced_users.get(old_out, ()))
-    _repair_backward_edges(graph, changed_nodes)
+    _do_stable_topological_sort_if_needed(graph, changed_nodes)
 
 
 def _move_overlap_nodes(
@@ -282,7 +284,7 @@ def _move_overlap_nodes(
 
     # Moving only the closed part of a chain can leave a boundary edge pointing
     # backward. Repair once after all requested overlap moves have been applied.
-    _repair_backward_edges(graph, moved_nodes)
+    _do_stable_topological_sort_if_needed(graph, moved_nodes)
 
 
 class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
