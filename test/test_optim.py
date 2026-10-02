@@ -777,7 +777,9 @@ class TestOptimRenewed(TestCase):
             [torch.nn.Parameter(weight.detach().clone())], lr=1e-2, betas=(0.9, 0.99)
         )
         for opt in (skipped, kept):
-            next(iter(opt.param_groups[0]["params"])).grad = torch.randn(n, device=device)
+            next(iter(opt.param_groups[0]["params"])).grad = torch.randn(
+                n, device=device
+            )
             opt.step()
 
         def state_bytes(opt):

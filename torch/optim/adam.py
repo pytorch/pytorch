@@ -668,14 +668,17 @@ def _multi_tensor_adam(
         _check_no_first_moment(beta1)
 
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [
-            params,
-            grads,
-            exp_avgs if has_first_moment else grads,
-            exp_avg_sqs,
-            max_exp_avg_sqs,
-            state_steps,
-        ]  # type: ignore[list-item]
+        cast(
+            list[list[Tensor | None]],
+            [
+                params,
+                grads,
+                exp_avgs if has_first_moment else grads,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps,
+            ],
+        )
     )
 
     # We only shuffle around the beta when it is a Tensor and on CUDA, otherwise, we prefer
@@ -883,7 +886,9 @@ def _fused_adam(
     if differentiable:
         raise RuntimeError("Adam with fused=True does not support differentiable=True")
     if len(exp_avgs) == 0:
-        raise RuntimeError("Adam with fused=True requires exp_avgs, even for beta1 == 0")
+        raise RuntimeError(
+            "Adam with fused=True requires exp_avgs, even for beta1 == 0"
+        )
 
     beta1 = _to_scalar(beta1)
     beta2 = _to_scalar(beta2)
