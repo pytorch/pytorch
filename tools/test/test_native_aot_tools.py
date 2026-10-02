@@ -1466,13 +1466,25 @@ class TestAotSourceGeneration(unittest.TestCase):
             fn,
         )
 
-    def test_cpp_covers_absent_no_registration(self):
+    def test_arch_registration_without_cpp_covers(self):
         sidecar = dict(SIDECAR, spec={"N": 1024, "K": 8})
         src = gen_aot_lib.gen_op(
             "fakeop", "CUDA", _FakeDecl, [sidecar], "const at::Tensor & self, int64_t k"
         )
-        self.assertNotIn("TORCH_LIBRARY_FRAGMENT", src)
+        self.assertIn('m.def("archs_fakeop() -> int[]"', src)
+        self.assertIn("return {100};", src)
         self.assertNotIn("fakeop_cuda_covers", src)
+
+    def test_arch_registration_uses_only_embedded_targets(self):
+        sidecars = [
+            dict(SIDECAR, prefix=f"fakeop_{arch}", arch=arch)
+            for arch in ("sm_90", "sm_90a")
+        ]
+        src = gen_aot_lib.gen_op(
+            "fakeop", "CUDA", _FakeDecl, sidecars, "const at::Tensor & self, int64_t k"
+        )
+        self.assertIn("return {90};", src)
+        self.assertNotIn("return {90, 100};", src)
 
     def test_covers_signature_from_schema(self):
         # Functional schema args + out-variant outputs as trailing
@@ -4215,7 +4227,7 @@ class TestGeneratedCoversGuards(unittest.TestCase):
         self.assertIn(r"str mode=\"constant\"", src)
         # ...and the literal is still one argument: nothing between the escaped
         # quotes ends it.
-        line = next(l for l in src.splitlines() if "m.def(" in l)
+        line = next(l for l in src.splitlines() if 'm.def("covers_' in l)
         self.assertEqual(line.count('", &::'), 1)
 
 
@@ -6164,10 +6176,10 @@ class TestSelectiveIncludes(unittest.TestCase):
             covers,
         )
 
-    def test_library_header_omitted_without_covers(self):
+    def test_library_header_present_for_arch_registration(self):
         src = self._gen(None)
-        self.assertNotIn("#include <torch/library.h>", src)
-        self.assertFalse(
+        self.assertIn("#include <torch/library.h>", src)
+        self.assertTrue(
             any(l.startswith("TORCH_LIBRARY_FRAGMENT") for l in src.splitlines())
         )
 

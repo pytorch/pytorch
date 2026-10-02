@@ -2907,6 +2907,23 @@ def skipIfNoXNNPACK(fn):
 def skipIfNoLapack(fn):
     return lazy_skip_if(lambda: not torch._C.has_lapack, "PyTorch compiled without Lapack")(fn)
 
+def skipIfNoNativeAot(op, *, device="cuda"):
+    """Skip unless this op has native-AOT kernels embedded for the given device."""
+    def unavailable():
+        from torch._native.aot_manifest import get_coverage
+
+        coverage = get_coverage(op, "CUDA")
+        return (
+            coverage is None
+            or not torch.cuda.is_available()
+            or not coverage.is_available(torch.device(device))
+        )
+
+    return lazy_skip_if(
+        unavailable,
+        f"AOT kernels for {op} not embedded for {device}",
+    )
+
 def skipIfNotRegistered(op_name, message):
     """Wraps the decorator to hide the import of the `core`.
 
