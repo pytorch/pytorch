@@ -411,7 +411,7 @@ def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | No
 
 def math_prod(iterable: Iterable[Any], /, *, start: Any = 1) -> Any:
     for element in iterable:
-        start *= element
+        start = start * element
     return start
 
 
