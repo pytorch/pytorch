@@ -370,6 +370,7 @@ jobs:
                      scripts/pr_review/extract_verdict.py \
                      scripts/pr_review/emit_row.py \
                      scripts/pr_review/validate_findings.py \
+                     scripts/pr_review/verdict_after_subagents.py \
                      .claude/hooks/pr_review/restrict-write.sh \
                      .claude/hooks/pr_review/validate-findings.sh \
                      .claude/hooks/pr_review/validate-on-stop.sh \
@@ -919,7 +920,9 @@ jobs:
 
             IT IS CHECKED THE MOMENT YOU WRITE IT, and the errors come back to
             you. Write it early and rewrite it as often as you like — that is the
-            intended way to work, not a fallback. The check is the same code that
+            intended way to work, not a fallback. If you use sub-agents, your last
+            write must come after the last of them has reported: an earlier file
+            is a draft and is not published. The check is the same code that
             publishes, so if it reports a problem the finding really would be
             lost, and if it reports none nothing will be dropped behind your back.
             You cannot finish while it still reports a problem.
@@ -950,9 +953,16 @@ jobs:
           TOO_LARGE: ${{ steps.diff.outputs.too_large }}
           CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
           FINDINGS_FILE: ${{ runner.temp }}/pr-review-findings.json
+          PR_REVIEW_HOOK_LOG: ${{ runner.temp }}/pr-review-hooks.log
         run: |
           set -euo pipefail
           mkdir -p out
+          # validate-on-stop.sh writes this when the session ended on a findings
+          # file older than the last sub-agent report: a draft, not the review.
+          if grep -q '^STALE_VERDICT' "$PR_REVIEW_HOOK_LOG" 2>/dev/null; then
+            echo "::warning::the findings file predates the last sub-agent report; recording a failed run"
+            CLAUDE_OUTCOME=failure
+          fi
           if [ "$TOO_LARGE" = "true" ]; then
             printf '%s' '{"status":"skipped_too_large","verdict":null,"summary":"","findings":[],"findings_dropped":0}' > out/verdict.json
           else

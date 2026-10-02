@@ -1659,6 +1659,7 @@ class TestTheReviewJobsTrustedSurfaceIsPinned(unittest.TestCase):
             "scripts/pr_review/extract_verdict.py",
             "scripts/pr_review/emit_row.py",
             "scripts/pr_review/validate_findings.py",
+            "scripts/pr_review/verdict_after_subagents.py",
             ".claude/skills/pr-review-readiness/SKILL.md",
             # The rubric's delegates. They carry the review logic, so omitting
             # them lets the whole checklist be rewritten under an unmoved hash.
@@ -6337,6 +6338,118 @@ class TestOnlyTheReviewerWritesTheVerdict(unittest.TestCase):
             "tool_input": {"file_path": "/tmp/allowed.json"},
         }
         self.assertEqual(self._decision(payload), "deny")
+
+
+STOP_HOOK = REPO / ".claude" / "hooks" / "pr_review" / "validate-on-stop.sh"
+
+
+def _transcript(td: str, entries: list) -> str:
+    path = Path(td) / "transcript.jsonl"
+    path.write_text("".join(json.dumps(e) + "\n" for e in entries))
+    return str(path)
+
+
+def _use(tool_id: str, name: str, **args) -> dict:
+    return {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {"type": "tool_use", "id": tool_id, "name": name, "input": args}
+            ]
+        },
+    }
+
+
+def _result(tool_id: str) -> dict:
+    return {
+        "type": "user",
+        "message": {
+            "content": [{"type": "tool_result", "tool_use_id": tool_id, "content": "x"}]
+        },
+    }
+
+
+class TestADraftWrittenBeforeSubAgentsIsNotPublished(unittest.TestCase):
+    """A findings file older than the last sub-agent report is a draft."""
+
+    FINDINGS = "/tmp/allowed.json"
+    WRITE = staticmethod(lambda i: _use(i, "Write", file_path="/tmp/allowed.json"))
+
+    def _stop(self, entries: list, active: bool):
+        with tempfile.TemporaryDirectory() as td:
+            log = Path(td) / "hooks.log"
+            payload = {
+                "stop_hook_active": active,
+                "transcript_path": _transcript(td, entries),
+            }
+            proc = subprocess.run(
+                ["bash", str(STOP_HOOK)],
+                input=json.dumps(payload),
+                text=True,
+                capture_output=True,
+                env={
+                    **os.environ,
+                    "PR_REVIEW_HOOK_LOG": str(log),
+                    "PR_REVIEW_FINDINGS_FILE": self.FINDINGS,
+                },
+                check=False,
+            )
+            return proc, (log.read_text() if log.exists() else "")
+
+    def test_a_draft_blocks_the_first_stop(self):
+        proc, _log = self._stop(
+            [self.WRITE("w1"), _use("a1", "Agent", prompt="p"), _result("a1")],
+            active=False,
+        )
+        self.assertEqual(proc.returncode, 2, proc.stderr)
+        self.assertIn("draft", proc.stderr)
+
+    def test_a_draft_that_survives_is_marked_for_publish(self):
+        proc, log = self._stop(
+            [self.WRITE("w1"), _use("a1", "Agent", prompt="p"), _result("a1")],
+            active=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("STALE_VERDICT", log)
+
+    def test_a_failed_rewrite_leaves_the_draft_stale(self):
+        failed = _result("w2")
+        failed["message"]["content"][0]["is_error"] = True
+        proc, log = self._stop(
+            [
+                self.WRITE("w1"),
+                _result("w1"),
+                _use("a1", "Agent", prompt="p"),
+                _result("a1"),
+                self.WRITE("w2"),
+                failed,
+            ],
+            active=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("STALE_VERDICT", log)
+
+    def test_a_write_after_the_reports_is_final(self):
+        proc, log = self._stop(
+            [
+                self.WRITE("w1"),
+                _result("w1"),
+                _use("a1", "Agent", prompt="p"),
+                _result("a1"),
+                self.WRITE("w2"),
+                _result("w2"),
+            ],
+            active=True,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertNotIn("STALE_VERDICT", log)
+
+    def test_publish_downgrades_on_the_marker(self):
+        step = strip_comments(
+            STAGE2.read_text().split("      - name: Sanitize the verdict", 1)[1]
+        )
+        self.assertIn("grep -q '^STALE_VERDICT' \"$PR_REVIEW_HOOK_LOG\"", step)
+        self.assertIn("CLAUDE_OUTCOME=failure", step)
 
 
 class TestTheSizeGateShortCircuitsBeforeTheRunner(unittest.TestCase):
