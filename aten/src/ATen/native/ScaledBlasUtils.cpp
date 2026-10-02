@@ -620,10 +620,13 @@ void validate_scaled_grouped_mm_v2_inputs(
   if (offs.has_value()) {
     TORCH_CHECK_VALUE(offs->dim() == 1, "offs has to be 1D");
     TORCH_CHECK_VALUE(offs->dtype() == at::kInt, "Offsets have to be int32");
+    TORCH_CHECK_VALUE(offs->is_contiguous(), "Offsets have to be contiguous");
   }
 
   const auto out_dtype_ = out_dtype.value_or(ScalarType::BFloat16);
-  TORCH_CHECK_VALUE(out_dtype_ == ScalarType::BFloat16, "Only bf16 high precision output types are supported for grouped gemm");
+  TORCH_CHECK_VALUE(
+      out_dtype_ == ScalarType::BFloat16 || out_dtype_ == ScalarType::Half || out_dtype_ == ScalarType::Float,
+      "Only bf16, fp16, and fp32 high precision output types are supported for grouped gemm");
 }
 
 }  // at::scaled
