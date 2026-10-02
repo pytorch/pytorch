@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import dataclasses
 import re
 import unittest
@@ -6,6 +7,7 @@ from unittest import mock
 
 import torch
 from torch._inductor import config
+from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.autows_utils import has_two_ctas, meta_ws_enabled
 from torch._inductor.codegen import simd
 from torch._inductor.heuristics.registry import _HEURISTIC_CACHE, get_template_heuristic
@@ -16,20 +18,30 @@ from torch._inductor.heuristics.template.triton import (
     CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
     CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAScaledBlackwellTMATemplateConfigHeuristic,
+    GemmConfig,
 )
 from torch._inductor.ir import MultiTemplateBuffer
-from torch._inductor.kernel.mm import blackwell_ws_persistent_tma_mm_template
+from torch._inductor.kernel.mm import (
+    blackwell_ws_persistent_tma_mm_template,
+    persistent_tma_mm_template,
+    scaled_mm_device_tma_epilogue_scaling_template,
+    scaled_mm_device_tma_main_loop_scaling_template,
+)
 from torch._inductor.kernel.mm_common import blackwell_persistent_mm_grid
 from torch._inductor.scheduler import Scheduler
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import get_num_sms, run_and_get_code
+from torch.nn.functional import scaled_mm, ScalingType  # type: ignore[attr-defined]
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
-from torch.utils._triton import has_datacenter_blackwell_tma_device
+from torch.utils._triton import (
+    has_datacenter_blackwell_tma_device,
+    has_triton_tma_device,
+)
 
 
 def has_tlx() -> bool:
@@ -969,6 +981,17 @@ class TestBlackwellTMALoadFusion(TestCase):
                     _HEURISTIC_CACHE[key].blackwell_persistent_mm_configs,
                 ) = orig
 
+    @staticmethod
+    def _poison_outputs():
+        """Poison allocations so unwritten outputs show up as NaN."""
+
+        def empty_strided(size, stride, dtype):
+            out = torch.empty_strided(size, stride, dtype=dtype, device=GPU_TYPE)
+            out.untyped_storage().fill_(255)
+            return out
+
+        return mock.patch("torch._C._dynamo.guards._empty_strided_cuda", empty_strided)
+
     def _run_reduction(
         self,
         fn,
@@ -987,14 +1010,7 @@ class TestBlackwellTMALoadFusion(TestCase):
         # depend on summation order and must match eager bitwise.
         a = torch.randint(-1, 2, (M, K), device=GPU_TYPE).to(dtype)
         b = torch.randint(-1, 2, (K, N), device=GPU_TYPE).to(dtype)
-
-        # Poison allocations so unwritten outputs show up as NaN.
-        def empty_strided(size, stride, dtype):
-            out = torch.empty_strided(size, stride, dtype=dtype, device=GPU_TYPE)
-            out.untyped_storage().fill_(255)
-            return out
-
-        with mock.patch("torch._C._dynamo.guards._empty_strided_cuda", empty_strided):
+        with self._poison_outputs():
             actual, code = self._run_with_mm_config(
                 fn, (a, b), test_config, *extra_configs, **patches
             )
@@ -1124,7 +1140,7 @@ class TestBlackwellTMALoadFusion(TestCase):
         if case == "fp32" and meta_ws_enabled():
             self.skipTest("fp32 GEMMs fail to compile under meta WS")
         if case == "cpp_wrapper":
-            # The cpp wrapper can't embed the template's source (T5).
+            # The cpp wrapper can't embed the template's source.
             patches["triton.autotune_at_compile_time"] = True
         dtype = torch.float32 if case == "fp32" else torch.bfloat16
         a = torch.randint(-1, 2, (M, K), device=GPU_TYPE).to(dtype)
@@ -1501,6 +1517,218 @@ class TestBlackwellTMALoadFusion(TestCase):
         self.assertTrue(
             all(tile is not None and tile[2] > 1 for tile in rejected_tiles),
             rejected_tiles,
+        )
+
+    def _run_stale_pending_fusion(self, compile_mode: str, **patches):
+        """Compile a GEMM whose epilogue fusion with a pointwise node is
+        benchmarked before that node fuses with a row reduction. The benchmark
+        picks a subtiled choice, whose tile can't hold var_mean."""
+        if compile_mode == "async" and not AsyncCompile.wait_process_pool_ready():
+            self.skipTest("compile worker pool unavailable")
+        orig_choice_timings = MultiTemplateBuffer.choice_timings
+
+        def choice_timings(self, hint_override=None):
+            timings = orig_choice_timings(self, hint_override)
+            subtiled = [c for c in timings if (c.output_tile or (0, 0, 1))[2] > 1]
+            return dict.fromkeys([*subtiled, *timings], 1.0)
+
+        with (
+            mock.patch.object(MultiTemplateBuffer, "choice_timings", choice_timings),
+            mock.patch.object(AsyncCompile, "use_process_pool", return_value=False)
+            if compile_mode == "sync"
+            else contextlib.nullcontext(),
+        ):
+            return self._run_reduction(
+                lambda a, b: ((c := a @ b) * 2, torch.var_mean(c.float(), -1)),
+                1024,
+                512,
+                128,
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8),
+                BlackwellGPUGemmConfig(128, 128, 64, 3, 8, epilogue_subtile=2),
+                tol=1e-5,
+                **{
+                    "triton.template_reduction_epilogue": True,
+                    "epilogue_fusion_first": True,
+                    **patches,
+                },
+            )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("compile_mode", ("sync", "async"))
+    def test_blackwell_mm_reduction_epilogue_stale_pending_fusion(
+        self, compile_mode: str
+    ):
+        """A pending epilogue fusion whose pointwise node has since fused with a
+        row reduction isn't applied, and the next fusion round benchmarks the
+        template with both."""
+        kernels, code = self._run_stale_pending_fusion(compile_mode)
+        self._assert_row_fused(kernels, code)
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    @parametrize("compile_mode", ("sync", "async"))
+    def test_blackwell_mm_reduction_epilogue_stale_pending_fusion_memory_guard(
+        self, compile_mode: str
+    ):
+        """The peak-memory fusion guard still rejects the template fusion that
+        the next round proposes after a stale pending fusion is skipped."""
+        orig_check = Scheduler._can_fuse_peak_memory_check
+        orig_is_stale = Scheduler._is_stale_pending_fusion
+        stale, rejected = [], []
+
+        def check(self, state, node1, node2):
+            # Treat template fusions with the fused pointwise and reduction
+            # nodes as exceeding the allowed peak increase.
+            nodes = node2.get_nodes()
+            if node1.is_template() and len(nodes) > 1:
+                if any(n.is_reduction() for n in nodes):
+                    rejected.append(node2)
+                    return False, None
+            return orig_check(self, state, node1, node2)
+
+        def is_stale(self, pending_fusion):
+            stale.append(orig_is_stale(self, pending_fusion))
+            return stale[-1]
+
+        with (
+            mock.patch.object(Scheduler, "_can_fuse_peak_memory_check", check),
+            mock.patch.object(Scheduler, "_is_stale_pending_fusion", is_stale),
+        ):
+            kernels, _ = self._run_stale_pending_fusion(
+                compile_mode, fusion_memory_timeline_peak_memory_increase_gb=1000.0
+            )
+        self.assertIn(True, stale)
+        self.assertTrue(rejected)
+        self.assertTrue(any(k.startswith("triton_tem") for k in kernels), kernels)
+        self.assertTrue(
+            any(k.startswith(("triton_per", "triton_red")) for k in kernels), kernels
+        )
+
+    def _assert_template_row_sum_fused(
+        self, fn, args, template, op_name, test_config, expected
+    ):
+        """Compile fn with test_config, and a twin so epilogues are benchmarked,
+        as the only choices of template. Fused epilogue benchmarks report 0 ms."""
+        heuristic = get_template_heuristic(template.uid, GPU_TYPE, op_name)
+        twin = dataclasses.replace(test_config, num_stages=test_config.num_stages - 1)
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "triton.enable_persistent_tma_matmul": True,
+                    "test_configs.autotune_choice_name_regex": template.name,
+                    "benchmark_template_fusion": True,
+                    "triton.template_reduction_epilogue": True,
+                }
+            ),
+            mock.patch.object(heuristic, "mm_configs", [test_config, twin]),
+            mock.patch.object(
+                Scheduler, "benchmark_codegened_module", return_value=(0.0, "")
+            ),
+            self._poison_outputs(),
+        ):
+            actual, code = run_and_get_code(torch.compile(fn), *args)
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        kernels = re.findall(r"def (triton_\w+)\(", code[0])
+        # A scale layout fixup may run as a separate pointwise kernel.
+        self.assertFalse(
+            any(k.startswith(("triton_per", "triton_red")) for k in kernels), kernels
+        )
+        self.assertTrue(
+            any(k.startswith("triton_tem_fused") and "sum" in k for k in kernels),
+            kernels,
+        )
+
+    @unittest.skipIf(not has_triton_tma_device(), "Need device-side TMA support")
+    def test_persistent_tma_mm_row_reduction_epilogue_fusion(self):
+        a = torch.randint(-1, 2, (1024, 512), device=GPU_TYPE).to(torch.bfloat16)
+        b = torch.randint(-1, 2, (512, 128), device=GPU_TYPE).to(torch.bfloat16)
+        fn = self.ROW_OPS["sum"]
+        # On datacenter Blackwell the Blackwell template replaces this one.
+        with mock.patch.object(
+            torch._inductor.kernel.mm,
+            "use_triton_blackwell_tma_template",
+            return_value=False,
+        ):
+            self._assert_template_row_sum_fused(
+                fn,
+                (a, b),
+                persistent_tma_mm_template,
+                "mm",
+                GemmConfig(128, 128, 64, 3, 8),
+                fn(a, b),
+            )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_scaled_mm_epilogue_scaling_row_reduction_epilogue_fusion(self):
+        M, K, N = 1024, 512, 128
+        a = torch.randint(-1, 2, (M, K), device=GPU_TYPE).to(torch.float8_e4m3fn)
+        b = torch.randint(-1, 2, (N, K), device=GPU_TYPE).to(torch.float8_e4m3fn).t()
+        # Power-of-two scales keep the GEMM exact, so it matches eager bitwise.
+        scale_a = 2.0 ** torch.randint(0, 2, (M, 1), device=GPU_TYPE)
+        scale_b = 2.0 ** torch.randint(0, 2, (1, N), device=GPU_TYPE)
+
+        def fn(a, b, scale_a, scale_b):
+            c = torch._scaled_mm(a, b, scale_a, scale_b, out_dtype=torch.bfloat16)
+            return c.float().sum(-1)
+
+        args = (a, b, scale_a, scale_b)
+        self._assert_template_row_sum_fused(
+            fn,
+            args,
+            scaled_mm_device_tma_epilogue_scaling_template,
+            "scaled_mm",
+            GemmConfig(128, 128, 128, 3, 8),
+            fn(*args),
+        )
+
+    @unittest.skipIf(
+        not has_datacenter_blackwell_tma_device(),
+        "Need Blackwell with device-side TMA support in Triton",
+    )
+    def test_scaled_mm_main_loop_scaling_row_reduction_epilogue_fusion(self):
+        M, K, N = 1024, 256, 128
+        a = torch.randint(-1, 2, (M, K), device=GPU_TYPE).to(torch.float8_e4m3fn)
+        b = torch.randint(-1, 2, (N, K), device=GPU_TYPE).to(torch.float8_e4m3fn)
+        # 1x128 scales for a (stored outer-dim-major) and 128x128 scales for b.
+        scale_a = 2.0 ** torch.randint(0, 2, (K // 128, M), device=GPU_TYPE).t()
+        scale_b = 2.0 ** torch.randint(0, 2, (N // 128, K // 128), device=GPU_TYPE)
+
+        def fn(a, b, scale_a, scale_b):
+            c = scaled_mm(
+                a,
+                b,
+                scale_a,
+                ScalingType.BlockWise1x128,
+                scale_b,
+                ScalingType.BlockWise128x128,
+                output_dtype=torch.bfloat16,
+            )
+            return c.float().sum(-1)
+
+        # Eager blockwise scaling needs SM90 cuBLAS, so compare against an exact
+        # reference: integer inputs and power-of-two scales make the GEMM exact
+        # in fp64 and fp32, and its bf16 rounding and row sums then match.
+        scale_a_full = scale_a.double().repeat_interleave(128, 1)
+        scale_b_full = scale_b.double().repeat_interleave(128, 0)
+        scale_b_full = scale_b_full.repeat_interleave(128, 1)
+        c = (a.double() * scale_a_full) @ (b.double() * scale_b_full).t()
+        self._assert_template_row_sum_fused(
+            fn,
+            (a, b.t(), scale_a, scale_b),
+            scaled_mm_device_tma_main_loop_scaling_template,
+            "scaled_mm",
+            GemmConfig(128, 128, 128, 3, 8),
+            c.bfloat16().float().sum(-1),
         )
 
 
