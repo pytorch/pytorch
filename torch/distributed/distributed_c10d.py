@@ -53,6 +53,7 @@ from torch._C._distributed_c10d import (
     FlightRecorderHook,
     GatherOptions,
     get_debug_level,
+    HealthCheckHook,
     NanCheckHook,
     PrefixStore,
     ProcessGroup,
@@ -3238,6 +3239,8 @@ def _new_process_group_helper(
     # hook, so there is no handle to keep alive here.
     if os.environ.get("TORCH_DIST_NAN_CHECK", "0") == "1":
         NanCheckHook.attach(pg)
+
+    HealthCheckHook.attach(pg)
 
     # Backend-agnostic FlightRecorder recording, for backends with no native
     # integration. Attached here (rather than lazily) so a group is recorded
@@ -7073,6 +7076,7 @@ def split_group(
             f"group name should be set to {group_name} but got {split_pg.group_name}"
         )
 
+    HealthCheckHook.attach(split_pg)
     _maybe_attach_flight_recorder(split_pg, backend_config, global_ranks_in_my_group)
 
     # update global state

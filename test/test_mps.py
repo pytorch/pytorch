@@ -26,7 +26,7 @@ from torch.nn import Buffer, Parameter
 from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_APPLE_M1, IS_CI,
+    (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier
 from torch.testing import make_tensor
@@ -2174,8 +2174,10 @@ class TestMPS(TestCaseMPS):
         tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
         self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
 
-    @xfailIf(MACOS_VERSION < 15.0 or IS_APPLE_M1)
     @parametrize("dtype", [torch.float16, torch.bfloat16])
+    # Upper bound MPS memory usage based on actual measurement
+    @largeTensorTest("10GB", device="mps")
+    @largeMPSBufferTest(int(8.3 * 1024**3), device="mps")
     def test_large_bmm(self, dtype):
         B, M, N = 11, 20064, 128
         batch1 = torch.randn(B, M, N, dtype=dtype, device='mps')
