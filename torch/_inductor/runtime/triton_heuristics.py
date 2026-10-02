@@ -111,6 +111,12 @@ class BenchmarkFailureReason(enum.Enum):
 
     REGISTER_SPILLING = "register_spilling"
     INVALID_CONFIG = "invalid_config"
+    UNSAFE_HIP_LAUNCH = "unsafe_hip_launch"
+
+
+_UNLAUNCHABLE_BENCHMARK_FAILURES = OrderedSet(
+    [BenchmarkFailureReason.INVALID_CONFIG, BenchmarkFailureReason.UNSAFE_HIP_LAUNCH]
+)
 
 
 class InductorConfig(Config):
@@ -1497,6 +1503,13 @@ class CachingAutotuner(KernelInterface):
 
     def bench(self, launcher, *args, with_profiler=False, **kwargs):
         """Measure the performance of a given launcher."""
+        if not self._is_autotune_launcher_launch_safe(args, launcher, kwargs=kwargs):
+            self.benchmark_failure_reasons[launcher] = (
+                BenchmarkFailureReason.UNSAFE_HIP_LAUNCH
+            )
+            return float("inf")
+        self.benchmark_failure_reasons.pop(launcher, None)
+
         # we don't skip configs with spilled registers when auto-tuning custom
         # (user-written) Triton kernels, as (i) we don't have any knowledge or
         # control over the kernel code; (ii) there is empirical evidence that
@@ -1864,7 +1877,24 @@ class CachingAutotuner(KernelInterface):
                 timings[launcher] = timing
                 # Close losing static launchers eagerly so exhaustive autotuning
                 # keeps only the current winner and candidate modules loaded.
-                if best_launcher is None or timing < best_timing:
+                launcher_is_spilling = (
+                    self.benchmark_failure_reasons.get(launcher)
+                    == BenchmarkFailureReason.REGISTER_SPILLING
+                )
+                best_launcher_is_spilling = (
+                    best_launcher is not None
+                    and self.benchmark_failure_reasons.get(best_launcher)
+                    == BenchmarkFailureReason.REGISTER_SPILLING
+                )
+                if (
+                    best_launcher is None
+                    or timing < best_timing
+                    or (
+                        timing == best_timing
+                        and launcher_is_spilling
+                        and not best_launcher_is_spilling
+                    )
+                ):
                     if best_launcher is not None:
                         self._close_static_launcher(best_launcher)
                     best_launcher = launcher
@@ -1910,6 +1940,21 @@ class CachingAutotuner(KernelInterface):
         timings = self.benchmark_all_configs(*args, **kwargs)
         benchmark_time_taken_ns = time.time_ns() - start_time
 
+        eligible_timings = {
+            launcher: timing
+            for launcher, timing in timings.items()
+            if timing != float("inf")
+            or self.benchmark_failure_reasons.get(launcher)
+            == BenchmarkFailureReason.REGISTER_SPILLING
+        }
+        if not eligible_timings:
+            retained_launcher = builtins.min(timings, key=timings.get)
+            self._close_static_launcher(retained_launcher)
+            raise NoTritonConfigsError(
+                f"No valid Triton configs for {self.fn.__name__}: "
+                "all configs are invalid or exceed the HIP work-item limit"
+            )
+
         # Check if any configs failed (have inf timing) and log which one was selected
         failed_launchers = [
             launcher for launcher, timing in timings.items() if timing == float("inf")
@@ -1932,12 +1977,20 @@ class CachingAutotuner(KernelInterface):
                     if self.benchmark_failure_reasons.get(launcher)
                     == BenchmarkFailureReason.INVALID_CONFIG
                 )
+                unsafe_hip_launch_count = sum(
+                    1
+                    for launcher in failed_launchers
+                    if self.benchmark_failure_reasons.get(launcher)
+                    == BenchmarkFailureReason.UNSAFE_HIP_LAUNCH
+                )
 
                 reason_parts = []
                 if spill_count > 0:
                     reason_parts.append(f"{spill_count} register spilling")
                 if invalid_config_count > 0:
                     reason_parts.append(f"{invalid_config_count} invalid config")
+                if unsafe_hip_launch_count > 0:
+                    reason_parts.append(f"{unsafe_hip_launch_count} unsafe HIP launch")
                 reason_str = ", ".join(reason_parts) if reason_parts else "unknown"
 
                 log.info(
@@ -1949,8 +2002,7 @@ class CachingAutotuner(KernelInterface):
                     best_launcher.config,
                     best_time,
                 )
-
-        best_launcher = builtins.min(timings, key=timings.get)
+        best_launcher = builtins.min(eligible_timings, key=eligible_timings.get)
         self._release_static_launchers_except(best_launcher)
         self.launchers = [best_launcher]
         self._prune_compile_results_to_launcher(best_launcher)
@@ -2014,6 +2066,15 @@ class CachingAutotuner(KernelInterface):
             best_time,
         )
 
+        def is_better_trial(trial_launcher, trial_time):
+            return trial_time < best_time or (
+                trial_time == best_time
+                and self.benchmark_failure_reasons.get(launcher)
+                in _UNLAUNCHABLE_BENCHMARK_FAILURES
+                and self.benchmark_failure_reasons.get(trial_launcher)
+                == BenchmarkFailureReason.REGISTER_SPILLING
+            )
+
         # Phase 1: Tune block sizes per sub-kernel (largest first).
         # warps/stages stay fixed at base config values.
         for gi, group in enumerate(combo_tuning_groups):
@@ -2057,7 +2118,7 @@ class CachingAutotuner(KernelInterface):
                 counters["inductor"]["combo_autotune_bench"] += 1
                 self.coordesc_tuner.cache_benchmark_result(trial_config, trial_time)
 
-                improved = trial_time < best_time
+                improved = is_better_trial(trial_launcher, trial_time)
                 log.debug(
                     "    cfg[%d] trial=%s time=%f%s",
                     ci,
@@ -2106,7 +2167,7 @@ class CachingAutotuner(KernelInterface):
             counters["inductor"]["combo_autotune_bench"] += 1
             self.coordesc_tuner.cache_benchmark_result(trial_config, trial_time)
 
-            improved = trial_time < best_time
+            improved = is_better_trial(trial_launcher, trial_time)
             log.debug(
                 "    warps=%d stages=%d time=%f%s",
                 num_warps,
@@ -2126,6 +2187,17 @@ class CachingAutotuner(KernelInterface):
             launcher.config,
             best_time,
         )
+        if (
+            self.benchmark_failure_reasons.get(launcher)
+            in _UNLAUNCHABLE_BENCHMARK_FAILURES
+            or not self._is_autotune_launcher_launch_safe(args, launcher, kwargs=kwargs)
+        ):
+            self._close_static_launcher(launcher)
+            raise NoTritonConfigsError(
+                f"No valid Triton configs for {self.fn.__name__}: "
+                "combo tuning selected an invalid config or one over the "
+                "HIP work-item limit"
+            )
         launcher.config.found_by_combo_autotune = True
         self.autotune_time_taken_ns += time.time_ns() - start_time
         if self.save_cache_hook:
@@ -2362,6 +2434,9 @@ class CachingAutotuner(KernelInterface):
         self._ensure_kernel_loaded()
 
         def benchmark_one_config(config):
+            if not self._is_autotune_candidate_launch_safe(args, config, kwargs=kwargs):
+                return float("inf")
+
             with self.lock:
                 launcher = self._precompile_config(config).make_launcher()
             config2launcher[config] = launcher
@@ -2390,14 +2465,6 @@ class CachingAutotuner(KernelInterface):
             benchmark_one_config, launcher.config, None
         )
         coordesc_time_taken_ns = time.time_ns() - start_time
-        best_config.found_by_coordesc = True
-
-        if self.save_cache_hook:
-            self.save_cache_hook(
-                best_config,
-                self.autotune_time_taken_ns + coordesc_time_taken_ns,
-                found_by_coordesc=True,
-            )
 
         if best_config not in config2launcher:
             # On a Coordesc cache hit, we might not have loaded the launcher
@@ -2408,6 +2475,41 @@ class CachingAutotuner(KernelInterface):
             ).make_launcher()
 
         winner = config2launcher[best_config]
+        if (
+            self.benchmark_failure_reasons.get(winner)
+            in _UNLAUNCHABLE_BENCHMARK_FAILURES
+            or not self._is_autotune_launcher_launch_safe(args, winner, kwargs=kwargs)
+        ):
+            fallback = next(
+                (
+                    candidate
+                    for candidate in config2launcher.values()
+                    if self.benchmark_failure_reasons.get(candidate)
+                    == BenchmarkFailureReason.REGISTER_SPILLING
+                    and self._is_autotune_launcher_launch_safe(
+                        args, candidate, kwargs=kwargs
+                    )
+                ),
+                None,
+            )
+            if fallback is None:
+                self._close_static_launcher(winner)
+                raise NoTritonConfigsError(
+                    f"No valid Triton configs for {self.fn.__name__}: "
+                    "coordinate descent selected an invalid config or one over "
+                    "the HIP work-item limit"
+                )
+            best_config = fallback.config
+            winner = fallback
+
+        best_config.found_by_coordesc = True
+        if self.save_cache_hook:
+            self.save_cache_hook(
+                best_config,
+                self.autotune_time_taken_ns + coordesc_time_taken_ns,
+                found_by_coordesc=True,
+            )
+
         TritonBundler.put_winner(winner.cache_hash)
 
         fn_hash = generate_lookup_hash_from_source_code(
@@ -2720,6 +2822,7 @@ class CachingAutotuner(KernelInterface):
                 "store_cubin",
                 "_is_static",
                 "_expected_positional_count",
+                "_launch_num_warps",
             ):
                 val = getattr(launcher, attr, None)
                 if val is not None:
@@ -2744,7 +2847,11 @@ class CachingAutotuner(KernelInterface):
             return None
 
     def _interpret_args_grid(
-        self, args: tuple[Any, ...], cfg: Config
+        self,
+        args: tuple[Any, ...],
+        cfg: Config,
+        *,
+        kwargs: dict[str, Any] | None = None,
     ) -> tuple[tuple[Any, ...], tuple[int, int, int]]:
         if triton_version_uses_attrs_dict():
 
@@ -2772,22 +2879,64 @@ class CachingAutotuner(KernelInterface):
             def filtered_signature() -> list[str]:
                 return list(self.triton_meta["signature"].keys())
 
-        grid = GridExpr.from_meta(
-            self.inductor_meta, cfg, mode=self.grid_mode
-        ).eval_slow(
-            dict(
-                zip(
-                    [
-                        *filtered_signature(),
-                        *self.inductor_meta.get("extra_launcher_args", ()),
-                    ],
-                    args,
-                )
+        grid_args = dict(
+            zip(
+                [
+                    *filtered_signature(),
+                    *self.inductor_meta.get("extra_launcher_args", ()),
+                ],
+                args,
             )
         )
+        if kwargs:
+            grid_args.update(kwargs)
+        grid = GridExpr.from_meta(
+            self.inductor_meta, cfg, mode=self.grid_mode
+        ).eval_slow(grid_args)
         if self.inductor_meta.get("extra_launcher_args"):
             args = args[: -len(self.inductor_meta["extra_launcher_args"])]
         return args, grid
+
+    def _is_autotune_candidate_launch_safe(
+        self,
+        args: tuple[Any, ...],
+        cfg: Config,
+        *,
+        num_warps: int | None = None,
+        kwargs: dict[str, Any] | None = None,
+    ) -> bool:
+        if self.device_props.type != "hip":
+            return True
+
+        _, grid = self._interpret_args_grid(args, cfg, kwargs=kwargs)
+        is_safe = _fits_hip_work_item_limit(
+            grid,
+            cfg.num_warps if num_warps is None else num_warps,
+            warp_size=self.device_props.warp_size_or_default,
+            num_ctas=getattr(cfg, "num_ctas", 1),
+        )
+        if not is_safe:
+            counters["inductor"]["unsafe_hip_launch"] += 1
+            log.debug(
+                "Skip config %s with unsafe HIP launch grid %s",
+                cfg,
+                grid,
+            )
+        return is_safe
+
+    def _is_autotune_launcher_launch_safe(
+        self,
+        args: tuple[Any, ...],
+        launcher: LauncherType,
+        *,
+        kwargs: dict[str, Any] | None = None,
+    ) -> bool:
+        return self._is_autotune_candidate_launch_safe(
+            args,
+            launcher.config,
+            num_warps=getattr(launcher, "_launch_num_warps", launcher.config.num_warps),
+            kwargs=kwargs,
+        )
 
 
 class _ConstRepr:
@@ -3221,6 +3370,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
             scope, def_args, runner_args, pre_runner_lines=pre_runner_lines
         )
         launcher.config = self.config  # type: ignore[attr-defined]
+        launcher._launch_num_warps = self.kernel.num_warps  # type: ignore[attr-defined]
         launcher.n_regs = self.kernel.n_regs  # type: ignore[attr-defined]
         launcher.n_spills = self.kernel.n_spills  # type: ignore[attr-defined]
         launcher.shared = self.kernel.shared  # type: ignore[attr-defined]
@@ -3446,6 +3596,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
 
         launcher = scope["launcher"]
         launcher.config = cfg
+        launcher._launch_num_warps = scope["num_warps"]
         launcher.n_regs = getattr(binary, "n_regs", None)
         launcher.n_spills = getattr(binary, "n_spills", None)
         launcher.shared = binary_shared
@@ -3916,6 +4067,29 @@ def _num_warps(
     if register_intensive:
         max_num_warps = max_num_warps // 2
     return next_power_of_2(min(max(num_warps, min_num_warps), max_num_warps))
+
+
+_HIP_MAX_LAUNCH_WORK_ITEMS: Final = (1 << 32) - 1
+
+
+def _fits_hip_work_item_limit(
+    grid: tuple[int, int, int],
+    num_warps: int,
+    *,
+    warp_size: int,
+    num_ctas: int = 1,
+) -> bool:
+    """Return whether a Triton launch fits HIP's per-dimension uint32 limit."""
+    threads_per_program = num_warps * warp_size * num_ctas
+    return (
+        num_warps > 0
+        and warp_size > 0
+        and num_ctas > 0
+        and all(grid_dim >= 0 for grid_dim in grid)
+        and grid[0] <= _HIP_MAX_LAUNCH_WORK_ITEMS // threads_per_program
+        and grid[1] <= _HIP_MAX_LAUNCH_WORK_ITEMS
+        and grid[2] <= _HIP_MAX_LAUNCH_WORK_ITEMS
+    )
 
 
 def _check_max_grid_x(size_hints, x, num_warps, *, warp_size: int = 32):
