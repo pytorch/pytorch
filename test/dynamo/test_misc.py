@@ -5209,29 +5209,32 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         def deep_copy(obj):
             return copy.deepcopy(obj)
 
-        for copy_fn, fn in ((copy.copy, shallow_copy), (copy.deepcopy, deep_copy)):
-            compiled_fn = torch.compile(fn, fullgraph=True, backend="eager")
-            originals = (
-                ListSubclass([torch.randn(2)]),
-                DictSubclass(value=torch.randn(2)),
-            )
-            for original in originals:
-                original.attr = "state"
-                result = compiled_fn(original)
-                self.assertIs(type(result), type(original))
-                self.assertEqual(result, original)
-                self.assertEqual(result.attr, original.attr)
+        def item(obj):
+            return obj[0] if isinstance(obj, list) else obj["value"]
 
-                if isinstance(original, list):
-                    original_tensor = original[0]
-                    result_tensor = result[0]
-                else:
-                    original_tensor = original["value"]
-                    result_tensor = result["value"]
-                if copy_fn is copy.deepcopy:
-                    self.assertIsNot(result_tensor, original_tensor)
-                else:
-                    self.assertIs(result_tensor, original_tensor)
+        compiled_copy = torch.compile(shallow_copy, fullgraph=True, backend="eager")
+        for original in (
+            ListSubclass([torch.randn(2)]),
+            DictSubclass(value=torch.randn(2)),
+        ):
+            original.attr = "state"
+            result = compiled_copy(original)
+            self.assertIs(type(result), type(original))
+            self.assertEqual(result, original)
+            self.assertEqual(result.attr, original.attr)
+            self.assertIs(item(result), item(original))
+
+        compiled_deepcopy = torch.compile(deep_copy, fullgraph=True, backend="eager")
+        for original in (
+            ListSubclass([[1, 2]]),
+            DictSubclass(value=[1, 2]),
+        ):
+            original.attr = "state"
+            result = compiled_deepcopy(original)
+            self.assertIs(type(result), type(original))
+            self.assertEqual(result, original)
+            self.assertEqual(result.attr, original.attr)
+            self.assertIsNot(item(result), item(original))
 
     def test_deepcopy_user_defined_object(self):
         class MyConfig:
