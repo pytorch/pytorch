@@ -2913,6 +2913,24 @@ instantiate_parametrized_tests(TestStreamsCPUSpecific)
 
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
+    def test_aot_rejects_input_writeback_after_device_sync(self) -> None:
+        """The AOT-only check must still reject a join if tracing did not."""
+        from torch._functorch._aot_autograd.streams import assign_epilogue_copy_streams
+
+        graph = torch.fx.Graph()
+        inp = graph.placeholder("inp")
+        inp.meta["val"] = torch.zeros(8, device="cuda:0")
+        updated = graph.call_function(torch.ops.aten.add.Tensor, (inp, 1))
+        updated.meta["val"] = torch.ones_like(inp.meta["val"])
+        graph.call_function(torch.ops.streams.synchronize_device.default, ("cuda", 0))
+        writeback = graph.call_function(torch.ops.aten.copy_.default, (inp, updated))
+        writeback.meta["val"] = updated.meta["val"]
+        graph.output(writeback)
+        gm = torch.fx.GraphModule({}, graph)
+
+        with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+            assign_epilogue_copy_streams(gm)
+
     @parametrize("backend", ("aot_eager", "inductor"))
     def test_cross_device_operand_sync_does_not_join_input_mutation(
         self, backend
@@ -2926,7 +2944,7 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
             with torch.cuda.stream(mutation_stream):
                 x.add_(value.to(x.device))
             source_stream.synchronize()
-            return x * 2
+            return z + 2
 
         x = torch.ones(8, device="cuda:1")
         z = torch.zeros(8, device="cuda:0")
@@ -2940,7 +2958,7 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         torch.cuda.synchronize(0)
         torch.cuda.synchronize(1)
         self.assertEqual(x, torch.full_like(x, 2))
-        self.assertEqual(result, torch.full_like(x, 4))
+        self.assertEqual(result, torch.full_like(z, 2))
 
     def test_eager_backend_allows_input_mutation_stream_join(self) -> None:
         def fn(x, small):
