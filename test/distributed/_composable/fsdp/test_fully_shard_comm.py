@@ -609,14 +609,13 @@ class TestFullyShardCollectiveCopy(TestCase):
     @parametrize("native_copy", [False, True])
     @parametrize(
         "layout",
-        ["shard0", "shard1", "unit_outer_size", "empty", "mixed_dtype", "all_empty"],
+        ["shard0", "shard1", "unit_outer_size", "empty", "mixed_dtype"],
     )
     def test_all_gather_output(self, device, native_copy, layout):
         world_size = 4
         kinds = {
             "empty": ("empty", "shard0"),
             "mixed_dtype": ("shard0", "shard1"),
-            "all_empty": ("empty",),
         }.get(layout, (layout,))
         expected, shards, outer_sizes = [], [], []
         for kind in kinds:

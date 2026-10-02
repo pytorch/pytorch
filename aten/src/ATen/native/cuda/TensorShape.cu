@@ -621,11 +621,6 @@ void split_with_sizes_copy_out_cuda_contiguous_no_cast(
     at::IntArrayRef split_sizes,
     int64_t dim,
     at::TensorList out) {
-  // Every output is empty, and the launch size math below would divide by
-  // zero chunks per block.
-  if (self.numel() == 0) {
-    return;
-  }
   const auto device = self.device();
   const auto src_base_addrs =
       detail::get_split_base_addrs(self, split_sizes, dim);

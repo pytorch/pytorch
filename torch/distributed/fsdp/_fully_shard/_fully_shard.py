@@ -882,7 +882,8 @@ class FSDPModule:
         elements (see :data:`~torch.distributed.fsdp.experimental.AllGatherOutputFn`).
         The function runs on the current stream after the collective completes
         and must only write to ``outputs``. It is not called when the all-gather
-        group has a single rank, since FSDP then copies the inputs directly.
+        buffer is empty or the group has a single rank, since FSDP then copies
+        the inputs directly.
         See :mod:`torch.distributed.fsdp.experimental` for a native
         implementation.
 
