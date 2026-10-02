@@ -197,6 +197,31 @@ BLACKWELL_BMM_MAX_AUTOTUNE_CONFIGS = (
     BlackwellBMMConfig(128, 256, 64, 4, 8),
 )
 
+
+def use_triton_blackwell_bmm_template(mat1, mat2, layout, out_dtype) -> bool:
+    """Whether tuned_bmm should offer the Blackwell persistent-TMA BMM template.
+
+    Mirrors the gating of the Blackwell mm template. The config heuristic also
+    rejects dynamic shapes and non-TMA-compatible operands, but raises when
+    neither matrix dim of an operand is contiguous, so that case is filtered
+    here.
+    """
+    if out_dtype is not None or torch.version.hip is not None:
+        return False
+    if not inductor_config.triton.enable_persistent_tma_matmul:
+        return False
+    if not use_triton_template(layout, check_max_autotune=True):
+        return False
+    if not all(m.get_stride()[1] == 1 or m.get_stride()[2] == 1 for m in (mat1, mat2)):
+        return False
+
+    from torch.utils._triton import has_triton_tensor_descriptor_host_tma
+
+    from ..codegen.cuda.cuda_env import is_datacenter_blackwell_arch
+
+    return has_triton_tensor_descriptor_host_tma() and is_datacenter_blackwell_arch()
+
+
 aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
     torch.bmm,
@@ -378,6 +403,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
     if use_triton_template(layout, check_max_autotune=False):
         templates_to_use.append(bmm_template)
+
+    if use_triton_blackwell_bmm_template(mat1, mat2, layout, out_dtype):
+        templates_to_use.append(blackwell_ws_persistent_tma_bmm_template)
 
     # Single unified call for all templates
     choices.extend(
