@@ -549,6 +549,10 @@ class FSDPParamGroup:
                     for output, tensor in zip(
                         fsdp_param.all_gather_outputs, all_gather_inputs
                     ):
+                        # Like the world_size > 1 path, copy byte payloads
+                        # bytewise into cached outputs of other dtypes
+                        if tensor.dtype == torch.uint8:
+                            output = output.view(torch.uint8)
                         output.copy_(tensor)
 
         else:
