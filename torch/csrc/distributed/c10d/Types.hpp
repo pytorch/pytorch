@@ -190,6 +190,7 @@ struct DistributedBackendOptions {
   int group_size;
   std::chrono::duration<float> timeout;
   std::string group_id;
+  std::string group_desc;
   std::vector<int64_t> global_ranks_in_group;
   c10::intrusive_ptr<ProcessGroup> process_group;
   c10::intrusive_ptr<Backend> split_from;

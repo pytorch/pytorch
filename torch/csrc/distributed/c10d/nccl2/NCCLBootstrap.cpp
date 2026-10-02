@@ -196,9 +196,6 @@ ncclComm_t NCCLBootstrap::createNcclComm(
   // TODO: add logging on failures and successes
   // TODO: get the local rank
   ncclConfig_t config = base_config;
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
-  config.commName = name.c_str();
-#endif
 
   constexpr int kDefaultRanksPerRoot = 128;
   const int ranksPerRoot =
