@@ -10592,6 +10592,30 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs, move_model_to_device=False)
 
     @requires_gpu
+    def test_mixed_device_constant_view(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Mixed-device test requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("cpu_w", torch.arange(64.0).view(32, 2))
+                self.register_buffer(
+                    "gpu_w", torch.arange(64.0, device=GPU_TYPE).view(32, 2)
+                )
+
+            def forward(self, x):
+                return (
+                    self.cpu_w.t().to(x.device) + x,
+                    self.cpu_w[1:].to(x.device),
+                    self.gpu_w.t().to("cpu"),
+                    self.gpu_w[1:].to("cpu"),
+                )
+
+        example_inputs = (torch.randn(2, 32, device=self.device),)
+        self.check_model(Model(), example_inputs, move_model_to_device=False)
+
+    @requires_gpu
     def test_mixed_device_zero_size_constant(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("Mixed-device test requires GPU")

@@ -37,8 +37,7 @@ from torch.nn.parallel._functions import Broadcast
 from torch.testing._internal.common_dtype import integral_types, get_all_math_dtypes, floating_types
 from torch.testing._internal.common_utils import dtype_name, freeze_rng_state, run_tests, TestCase, \
     skipIfNoLapack, skipIfRocm, skipIfRocmVersionLessThan, getRocmVersion, TEST_NUMPY, TEST_SCIPY, TEST_WITH_CROSSREF, TEST_WITH_ROCM, TEST_MULTIACCELERATOR, \
-    download_file, get_function_arglist, load_tests, skipIfMPS, MACOS_VERSION, IS_APPLE_M1, \
-    IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
+    download_file, get_function_arglist, load_tests, skipIfMPS, IS_PPC, IS_ARM64, IS_MACOS, IS_WINDOWS, IS_CPU_CAPABILITY_SVE, IS_CPU_EXT_SVE_SUPPORTED, xfailIf, \
     parametrize as parametrize_test, subtest, instantiate_parametrized_tests, \
     skipIfTorchDynamo, gcIfJetson, set_default_dtype, skipIfNoCuteDSL, isRocmArchAnyOf, MI200_ARCH, \
     TEST_WITH_TORCHDYNAMO, HardwareClassification
@@ -49,7 +48,7 @@ from torch.testing._internal.common_nn import NNTestCase, NewModuleTest, Criteri
     ctcloss_reference, get_new_module_tests, single_batch_reference_fn, _test_bfloat16_ops, _test_module_empty_input
 from torch.testing._internal.common_device_type import dtypesIfMPS, instantiate_device_type_tests, dtypes, \
     dtypesIfCUDA, precisionOverride, onlyCUDA, onlyCPU, onlyAccelerator, \
-    skipCUDAIf, skipCUDAIfMiopen, skipCUDAIfNoCudnn, skipMPSIf, skipMPS, \
+    skipCUDAIf, skipCUDAIfMiopen, skipCUDAIfNoCudnn, largeMPSBufferTest, skipMPS, \
     onlyNativeDeviceTypes, deviceCountAtLeast, largeTensorTest, expectedFailureMeta, \
     expectedFailureMPS, skipMeta, get_all_device_types, skipCUDAIfNoSparseGeneric
 from torch.testing._internal.common_modules import module_inputs_torch_nn_LinearCrossEntropyLoss
@@ -10463,13 +10462,15 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float)
-    @skipMPSIf(MACOS_VERSION < 15.0 or IS_APPLE_M1, "M1 runners have lower memory")
     @largeTensorTest(lambda self, device, dtype:
+                     # Upper bound MPS memory usage based on actual measurement
+                     int(2.5 * 1024**3 * dtype.itemsize) if torch.device(device).type == 'mps' else
                      # Compute sum of the large tensor sizes:
                      # (im.numel() + small_image.numel() + small_image.grad.numel() +
                      #   large_view.grad.numel()) * sizeof(dtype)
                      32769 * (65536 + 3 * 65536 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
+    @largeMPSBufferTest(lambda self, device, dtype : dtype.itemsize * 32769 * 65536)
     def test_grid_sample_large_index_2d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
         # Try accessing the corners, there should be no segfault
@@ -10510,13 +10511,15 @@ class TestNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float)  # MPS doesn't support float64
-    @skipMPSIf(MACOS_VERSION < 15.0 or IS_APPLE_M1, "M1 runners have lower memory")
     @largeTensorTest(lambda self, device, dtype:
+                     # Upper bound MPS memory usage based on actual measurement
+                     int(2.5 * 1024**3 * dtype.itemsize) if torch.device(device).type == 'mps' else
                      # Compute sum of the large tensor sizes:
                      # (im.numel() + small_image.numel() + small_image.grad.numel() +
                      #   large_view.grad.numel()) * sizeof(dtype)
                      2 * 32769 * (32768 + 3 * 32768 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
+    @largeMPSBufferTest(lambda self, device, dtype : dtype.itemsize * 2 * 32769 * 32768)
     def test_grid_sample_large_index_3d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
         # Try accessing the corners, there should be no segfault
