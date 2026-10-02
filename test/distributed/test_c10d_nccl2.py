@@ -7,9 +7,12 @@ import gc
 import json
 import os
 import pickle
+import queue
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import weakref
@@ -1453,6 +1456,157 @@ backend.shutdown()
         # into the same allocator: without lazyInitDevice() it hits the identical
         # assert one call later.
         self._run_child("dist.barrier()")
+
+
+_HEARTBEAT_SCRIPT = """\
+import sys
+
+import torch
+import torch.distributed as dist
+
+dist.init_process_group(
+    "cpu:gloo,cuda:nccl2",
+    rank=0,
+    world_size=1,
+    store=dist.HashStore(),
+    device_id=torch.device("cuda:0"),
+)
+dist.all_reduce(torch.ones(4, device="cuda"))
+torch.cuda.synchronize()
+backend = dist.distributed_c10d._get_default_group()._get_backend(torch.device("cuda:0"))
+{body}
+# Blocks until the parent releases it.
+sys.stdin.readline()
+dist.destroy_process_group()
+"""
+
+
+class ProcessGroupNCCL2HeartbeatMonitorTest(TestCase):
+    """The monitor is process-wide and reads its env once, and its job is to
+    kill the process, so each case runs in a fresh child."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tempdir.cleanup)
+        self.trace_prefix = os.path.join(tempdir.name, "trace_")
+        self.pipe_prefix = os.path.join(tempdir.name, "pipe_")
+
+    def _run_child(self, body, env, on_line=lambda line: False):
+        """Runs the child, writing to its stdin to release it whenever
+        on_line(line) is true for a line of its output."""
+        env = {**os.environ, "TORCH_FR_DUMP_TEMP_FILE": self.trace_prefix, **env}
+        proc = subprocess.Popen(
+            [sys.executable, "-c", _HEARTBEAT_SCRIPT.format(body=body)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env,
+        )
+        # Drained on its own thread so the child never blocks on a full pipe
+        # while on_line runs.
+        lines: queue.Queue[str | None] = queue.Queue()
+
+        def read() -> None:
+            for line in proc.stdout:
+                lines.put(line)
+            lines.put(None)
+
+        reader = threading.Thread(target=read)
+        reader.start()
+        output = []
+        deadline = time.monotonic() + 60
+        try:
+            while True:
+                line = lines.get(timeout=max(0, deadline - time.monotonic()))
+                if line is None:
+                    break
+                output.append(line)
+                if on_line(line):
+                    proc.stdin.write("\n")
+                    proc.stdin.flush()
+            proc.wait(timeout=max(0, deadline - time.monotonic()))
+        except (queue.Empty, subprocess.TimeoutExpired):
+            self.fail("child timed out:\n" + "".join(output))
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            reader.join()
+            proc.stdin.close()
+            proc.stdout.close()
+        return proc.returncode, "".join(output)
+
+    def _load_trace(self):
+        path = self.trace_prefix + "0"
+        # Written asynchronously and empty mid-write.
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            try:
+                with open(path, "rb") as f:
+                    return pickle.load(f)
+            except (OSError, EOFError, pickle.UnpicklingError):
+                time.sleep(0.1)
+        self.fail(f"no trace written to {path}")
+
+    def _assert_all_reduce_traced(self, dump) -> None:
+        names = [e["profiling_name"] for e in dump["entries"]]
+        self.assertIn("nccl2:all_reduce", names)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_stalled_watchdog_terminates_process(self) -> None:
+        returncode, output = self._run_child(
+            "backend._stall_watchdog_for_testing()",
+            {"TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC": "2"},
+        )
+        self.assertEqual(returncode, -signal.SIGABRT, msg=output)
+        self.assertIn("ProcessGroupNCCL's watchdog got stuck for 2 seconds", output)
+        self.assertIn(
+            "Terminating the process after attempting to dump debug info, due to ProcessGroupNCCL watchdog hang.",
+            output,
+        )
+        self._assert_all_reduce_traced(self._load_trace())
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_stalled_watchdog_with_monitoring_disabled(self) -> None:
+        returncode, output = self._run_child(
+            "backend._stall_watchdog_for_testing()",
+            {
+                "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC": "2",
+                "TORCH_NCCL_ENABLE_MONITORING": "0",
+            },
+            on_line=lambda line: "would have terminated the process" in line,
+        )
+        self.assertEqual(returncode, 0, msg=output)
+        self.assertIn("ProcessGroupNCCL's watchdog got stuck for 2 seconds", output)
+
+    @unittest.skipIf(IS_FBCODE or IS_SANDCASTLE, "subprocess test fails in fbcode")
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_debug_info_pipe_dumps_trace(self) -> None:
+        def on_line(line: str) -> bool:
+            if "has been opened, write to it" not in line:
+                return False
+            self.assertFalse(os.path.exists(self.trace_prefix + "0"))
+            with open(self.pipe_prefix + "0.pipe", "w") as f:
+                f.write("1")
+            self._assert_all_reduce_traced(self._load_trace())
+            return True
+
+        returncode, output = self._run_child(
+            "",
+            {
+                "TORCH_NCCL_DEBUG_INFO_PIPE_FILE": self.pipe_prefix,
+                "TORCH_CPP_LOG_LEVEL": "INFO",
+            },
+            on_line=on_line,
+        )
+        self.assertEqual(returncode, 0, msg=output)
 
 
 if __name__ == "__main__":
