@@ -9,8 +9,9 @@ may close the issue. Labels are only ever added.
 Usage:
   apply_plan.py <owner/repo> <issue> <plan.json> [--apply] [--replay]
 
-Without --apply nothing is written (dry run). --replay compares the plan with
-the issue's current labels, for issues that were already triaged.
+Without --apply nothing is written (dry run). --replay evaluates the plan
+against the issue as it was before the triage bot acted (labels from before its
+first label event) and compares it with the labels added since.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
-SKILL_DIR = Path(__file__).resolve().parents[2] / ".claude/skills/triaging-issues"
+SKILL_DIR = Path(__file__).resolve().parents[2] / ".agents/skills/triaging-issues"
 sys.path.insert(0, str(SKILL_DIR / "scripts"))
 
 from validate_labels import is_forbidden, load_valid_labels, strip_redundant
@@ -33,7 +34,13 @@ from validate_labels import is_forbidden, load_valid_labels, strip_redundant
 
 BOT_TRIAGED = "bot-triaged"
 TRIAGE_REVIEW = "triage review"
+TRIAGE_BOT = "github-actions[bot]"
 LABELING_DECISIONS = {"label", "redirect_oncall", "triage_review"}
+# Decisions that close the issue, and the template each must post.
+CLOSING_TEMPLATES = {
+    "close_question": "redirect_to_forum",
+    "close_expected_behavior": "numerical_accuracy",
+}
 
 
 def gh_api(args: list[str], attempts: int = 3) -> str:
@@ -131,9 +138,9 @@ def plan_effects(
         labels.append(TRIAGE_REVIEW)
 
     keys = list(dict.fromkeys(plan.get("templates", [])))
-    effects.close = decision == "close_question"
-    if effects.close and "redirect_to_forum" not in keys:
-        keys.insert(0, "redirect_to_forum")
+    effects.close = decision in CLOSING_TEMPLATES
+    if effects.close and CLOSING_TEMPLATES[decision] not in keys:
+        keys.insert(0, CLOSING_TEMPLATES[decision])
     unknown_templates = [key for key in keys if key not in templates]
     if unknown_templates:
         effects.notes.append(f"dropped unknown templates {unknown_templates}")
@@ -154,9 +161,31 @@ def plan_effects(
     effects.add_labels = [
         label for label in dict.fromkeys(labels) if label not in existing_labels
     ]
-    if effects.mutates and BOT_TRIAGED not in existing_labels:
+    # An already-posted template counts as triage done, so a rerun after a
+    # partial failure (comment posted, label call failed) still marks the issue.
+    if (effects.mutates or posted) and BOT_TRIAGED not in existing_labels:
         effects.add_labels.append(BOT_TRIAGED)
     return effects
+
+
+def labels_before_triage(events: list[dict]) -> set[str]:
+    """Labels the issue had before the triage bot's first label event.
+
+    Issue templates apply labels such as `oncall: pt2` at creation; a replay
+    must show those, not an unlabeled issue.
+    """
+    labels: set[str] = set()
+    for event in events:
+        if event["event"] not in ("labeled", "unlabeled"):
+            continue
+        if (event.get("actor") or {}).get("login") == TRIAGE_BOT:
+            break
+        name = event["label"]["name"]
+        if event["event"] == "labeled":
+            labels.add(name)
+        else:
+            labels.discard(name)
+    return labels
 
 
 def apply_effects(repo: str, issue: int, effects: Effects) -> None:
@@ -215,7 +244,7 @@ def summary_markdown(
     if reference is not None:
         planned = set(effects.add_labels) - {BOT_TRIAGED}
         lines.append(
-            f"**vs current labels:** matched {sorted(planned & reference) or '—'} · "
+            f"**vs labels added since:** matched {sorted(planned & reference) or '—'} · "
             f"missed {sorted(reference - planned) or '—'} · extra {sorted(planned - reference) or '—'}"
         )
     lines += ["", f"> {plan.get('reasoning', '').strip()}", ""]
@@ -231,7 +260,9 @@ def main() -> int:
         "--apply", action="store_true", help="write effects (default: dry run)"
     )
     parser.add_argument(
-        "--replay", action="store_true", help="plan was made without the current labels"
+        "--replay",
+        action="store_true",
+        help="plan was made on the issue as it was before the triage bot acted",
     )
     args = parser.parse_args()
 
@@ -242,9 +273,23 @@ def main() -> int:
     comments = json.loads(
         gh_api([f"repos/{args.repo}/issues/{args.issue}/comments?per_page=100"])
     )
-    bot_comments = [c["body"] or "" for c in comments if c["user"]["type"] == "Bot"]
+    bot_comments = [
+        c["body"] or "" for c in comments if c["user"]["login"] == TRIAGE_BOT
+    ]
 
-    existing = set() if args.replay else current
+    if args.replay:
+        pages = json.loads(
+            gh_api(
+                [
+                    "--paginate",
+                    "--slurp",
+                    f"repos/{args.repo}/issues/{args.issue}/events?per_page=100",
+                ]
+            )
+        )
+        existing = labels_before_triage([event for page in pages for event in page])
+    else:
+        existing = current
     effects = plan_effects(
         plan,
         existing,
@@ -263,7 +308,7 @@ def main() -> int:
     if plan["decision"] == "skip_already_routed" and not effects.mutates:
         outcome = "skipped"
 
-    reference = current - {BOT_TRIAGED} if args.replay else None
+    reference = current - existing - {BOT_TRIAGED} if args.replay else None
     summary = summary_markdown(
         args.repo, args.issue, plan, effects, outcome, args.apply, reference
     )

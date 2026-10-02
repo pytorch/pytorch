@@ -13,6 +13,7 @@
       "enum": [
         "skip_already_routed",
         "close_question",
+        "close_expected_behavior",
         "request_info",
         "request_reproduction",
         "transfer",

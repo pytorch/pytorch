@@ -1,7 +1,7 @@
 # Owner(s): ["module: ci"]
 name: Issue Triage (pi)
 
-# Stage 2 of issue triage. "Claude Issue Triage" (claude-issue-triage.yml)
+# Stage 2 of issue triage. "Issue Triage" (issue-triage.yml)
 # captures each opened issue's number with no privileges; this workflow_run then
 # triages it with pi, split by trust level:
 #   plan   (bedrock, issues:read)  the model reads the issue through read-only gh
@@ -20,7 +20,7 @@ name: Issue Triage (pi)
 
 on:
   workflow_run:
-    workflows: ["Claude Issue Triage"]
+    workflows: ["Issue Triage"]
     types: [completed]
   workflow_dispatch:
     inputs:
@@ -44,7 +44,7 @@ jobs:
       github.repository == 'pytorch/pytorch' &&
       (github.event_name == 'workflow_dispatch' ||
        (github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow.path == '.github/workflows/claude-issue-triage.yml'))
+        github.event.workflow.path == '.github/workflows/issue-triage.yml'))
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions:
@@ -100,7 +100,7 @@ jobs:
             || { echo "::error::issues must be space-separated positive integers"; exit 1; }
           # The skill drops its version-dependent criteria when this is "unknown".
           release=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name \
-            | sed -nE 's/^v?([0-9]+\.[0-9]+).*/\1/p')
+            | sed -nE 's/^v?([0-9]+\.[0-9]+).*/\1/p') || true
           {
             echo "issues=$(jq -cn --arg s "$ISSUES" '$s | [splits("\\s+") | select(length > 0) | tonumber]')"
             echo "mode=$MODE"

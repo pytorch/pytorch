@@ -45,7 +45,7 @@ steps:
 | `--allowedTools` | `tools`, enforced per call by `tool-guard` |
 | `--json-schema` → `structured_output` | `result-schema` → `structured_output` |
 | `--setting-sources ""` | always: nothing discoverable from the checkout loads |
-| skills from `.claude/skills` | `skills:` (explicit paths only) |
+| skills discovered from `.claude/skills` | `skills:` (explicit paths only) |
 | execution file | artifact with `transcript.html`, `events.jsonl`, `result.json`, `usage.json` |
 
 The step summary shows the outcome, token and cost totals, which tools were offered, used,
@@ -57,9 +57,9 @@ submitting. The step fails when there is no valid result, the model call errored
 exits 0 on provider errors), or a tool outside `tools` was offered or used. Treat
 `structured_output` as untrusted: pass it through env vars, never `${{ }}` in a script.
 
-`extensions:` and `skills:` load only the listed trusted paths. Skills are found through
-`.agents/skills`, a symlink to `.claude/skills`. Claude-only skill frontmatter such as
-`hooks:` is ignored by pi, so enforce those rules outside the model.
+`extensions:` and `skills:` load only the listed trusted paths. Skills live in
+`.agents/skills` (`.claude/skills` links to it for Claude Code). Claude-only skill
+frontmatter such as `hooks:` is ignored by pi, so enforce those rules outside the model.
 
 ## Lockdown
 
@@ -92,7 +92,7 @@ supported". Some models need a one-time AWS Marketplace subscription by an accou
 ## Issue triage
 
 `.github/workflows/issue-triage-pi.yml` is stage 2 of issue triage, after
-`claude-issue-triage.yml` captures the opened issue. It uses the `triaging-issues` skill and
+`issue-triage.yml` captures the opened issue. It uses the `triaging-issues` skill and
 `global.anthropic.claude-sonnet-5`, as the Claude Code stage 2 did:
 
 1. **plan** (Bedrock, `issues: read`, egress blocked): the model reads the issue through
@@ -102,10 +102,11 @@ supported". Some models need a one-time AWS Marketplace subscription by an accou
 2. **apply** (`issues: write`, no AWS): `scripts/issue_triage_pi/apply_plan.py` filters the
    plan with the skill's label rules (forbidden → `triage review`; unknown and redundant
    dropped), only adds labels, posts only `templates.json` comments the bot has not already
-   posted, closes only usage questions, and adds `bot-triaged`. It then hands the issue to
-   `claude-distributed-triage.yml`.
+   posted, closes only usage questions and expected numerical behavior, and adds
+   `bot-triaged`. It then hands the issue to `claude-distributed-triage.yml`.
 
-Run it manually with `mode`: `replay` shows already-triaged issues as they were before
-triage and compares each plan with the current labels; `dry-run` plans against the issues
-as they are now; `apply` writes. Issue transfers and issue-body redaction are not ported;
-both become `triage review`.
+Run it manually with `mode`: `replay` shows already-triaged issues as they were before the
+triage bot acted (their labels and human comments from before its first label event) and
+compares each plan with the labels added since; `dry-run` plans against the issues as they
+are now; `apply` writes. Issue transfers and issue-body redaction are not automated: a
+transfer becomes `triage review`, and download links stay in the body.

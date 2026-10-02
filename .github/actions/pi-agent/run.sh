@@ -63,7 +63,7 @@ fi
 
 echo "pi $(pi --version) | amazon-bedrock/$PI_MODEL | thinking=$PI_THINKING | tools=$tools"
 set +e
-pi --mode json "${isolation[@]}" "${extensions[@]}" "${skills[@]}" \
+pi --mode json "${isolation[@]}" "${extensions[@]}" ${skills[@]+"${skills[@]}"} \
   --session-dir "$out/session" --provider amazon-bedrock --model "$PI_MODEL" \
   --thinking "$PI_THINKING" --tools "$tools" "@$out/prompt.md" 2> "$out/stderr.log" \
   | tee "$out/events.jsonl" \

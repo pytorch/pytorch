@@ -8,9 +8,9 @@
  * Env:
  *   GH_TOKEN                  read token for gh
  *   TRIAGE_REPO               owner/repo the tools may read
- *   TRIAGE_REPLAY_ISSUE       optional issue number to show as it was before
- *                             triage: no labels, open state, and only human
- *                             comments posted before its first label event
+ *   TRIAGE_REPLAY_ISSUE       optional issue number to show as it was before the
+ *                             triage bot acted: open, with the labels and the
+ *                             human comments from before its first label event
  *                             (dry-run replays of already-triaged issues)
  */
 
@@ -24,6 +24,7 @@ const MAX_BODY = 20_000;
 const MAX_COMMENT = 4_000;
 const MAX_COMMENTS = 50;
 
+const TRIAGE_BOT = "github-actions[bot]";
 const repo = process.env.TRIAGE_REPO ?? "";
 const replayIssue = Number(process.env.TRIAGE_REPLAY_ISSUE ?? 0);
 
@@ -45,14 +46,22 @@ function text(value: unknown) {
 	return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }], details: undefined };
 }
 
-async function firstLabelTime(issue: number, signal?: AbortSignal): Promise<string | undefined> {
-	const events = (await ghApi(["--paginate", "--slurp", `repos/${repo}/issues/${issue}/events?per_page=100`], signal)) as any[][];
-	const times = events
-		.flat()
-		.filter((event) => event.event === "labeled")
-		.map((event) => event.created_at as string)
-		.sort();
-	return times[0];
+interface PreTriage {
+	labels: string[];
+	cutoff?: string;
+}
+
+/** Labels and time of the issue just before the triage bot's first label event. */
+async function preTriage(issue: number, signal?: AbortSignal): Promise<PreTriage> {
+	const pages = (await ghApi(["--paginate", "--slurp", `repos/${repo}/issues/${issue}/events?per_page=100`], signal)) as any[][];
+	const labels = new Set<string>();
+	for (const event of pages.flat()) {
+		if (event.event !== "labeled" && event.event !== "unlabeled") continue;
+		if (event.actor?.login === TRIAGE_BOT) return { labels: [...labels], cutoff: event.created_at };
+		if (event.event === "labeled") labels.add(event.label.name);
+		else labels.delete(event.label.name);
+	}
+	return { labels: [...labels] };
 }
 
 export default function (pi: ExtensionAPI) {
@@ -73,7 +82,7 @@ export default function (pi: ExtensionAPI) {
 				number: issue.number,
 				title: issue.title,
 				state: replay ? "open" : issue.state,
-				labels: replay ? [] : issue.labels.map((label: any) => label.name),
+				labels: replay ? (await preTriage(issue_number, signal)).labels : issue.labels.map((label: any) => label.name),
 				author: issue.user?.login,
 				author_association: issue.author_association,
 				created_at: issue.created_at,
@@ -91,10 +100,10 @@ export default function (pi: ExtensionAPI) {
 		async execute(_id, { issue_number }, signal) {
 			let comments = (await ghApi([`repos/${repo}/issues/${issue_number}/comments?per_page=${MAX_COMMENTS}`], signal)) as any[];
 			if (issue_number === replayIssue) {
-				// The triage bot comments as github-actions[bot], sometimes before its first label.
-				const cutoff = await firstLabelTime(issue_number, signal);
+				// The triage bot sometimes comments before its first label event.
+				const { cutoff } = await preTriage(issue_number, signal);
 				comments = comments.filter(
-					(comment) => comment.user?.type !== "Bot" && (!cutoff || comment.created_at < cutoff),
+					(comment) => comment.user?.login !== TRIAGE_BOT && (!cutoff || comment.created_at < cutoff),
 				);
 			}
 			return text(
