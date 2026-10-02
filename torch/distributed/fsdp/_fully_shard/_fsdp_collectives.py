@@ -475,8 +475,8 @@ def _get_param_all_gather_inputs(
 # which case it fills the leading split_sizes[i] * world_size elements of the
 # rank-major buffer that is reassembled into outputs[i], with zeros after it.
 # The callback must only write to outputs and must not keep references to its
-# arguments. It is not called when the all-gather group has one rank, since FSDP
-# then copies the inputs directly.
+# arguments. It is not called when the all-gather buffer is empty, or when the
+# all-gather group has one rank, since FSDP then copies the inputs directly.
 AllGatherOutputFn = Callable[
     [torch.Tensor, list[torch.Tensor], list[int], list[int], int], None
 ]
@@ -563,6 +563,8 @@ def foreach_all_gather_copy_out(
         )
         fsdp_param.alloc_all_gather_outputs()
         outputs.extend(fsdp_param.all_gather_outputs)
+    if all_gather_output.numel() == 0:
+        return
     non_inference_outputs = tuple(t for t in outputs if not t.is_inference())
     if all_gather_output.dtype == torch.uint8:
         outputs = [t.view(torch.uint8) for t in outputs]
