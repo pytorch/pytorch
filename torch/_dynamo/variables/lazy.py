@@ -685,19 +685,26 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
 
 class LazySymNodeFormatString:
     def __init__(
-        self, sym_node_variable: SymNodeVariable, fmt_spec_var: VariableTracker
+        self,
+        sym_node_variable: SymNodeVariable,
+        fmt_spec_var: VariableTracker,
+        conversion: int = 0,
     ) -> None:
         from .constant import ConstantVariable
 
         self.sym_node_var = sym_node_variable
         self.fmt_var = ConstantVariable.create(
-            "{:" + fmt_spec_var.as_python_constant() + "}"
+            "{"
+            + ("", "!s", "!r", "!a")[conversion]
+            + ":"
+            + fmt_spec_var.as_python_constant()
+            + "}"
         )
 
     def __repr__(self) -> str:
         return str.format(
             self.fmt_var.as_python_constant(),
-            str(self.sym_node_var.evaluate_expr()),
+            self.sym_node_var.evaluate_expr(),
         )
 
 

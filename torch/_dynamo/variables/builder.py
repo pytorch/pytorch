@@ -5486,6 +5486,8 @@ class SourcelessBuilder:
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             try:
                 return ConstantVariable.create(str(value))
+            except ValueError as e:
+                raise_observed_exception(ValueError, tx, args=list(e.args))
             # If we cannot create due to error in str() call, we should
             # try explicitly for string format variable
             except (
