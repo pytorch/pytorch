@@ -4479,30 +4479,7 @@ def _full(fill_value, device, dtype, size):
         value = value.value
 
     unsigned_half_singleton = False
-    if (
-        device.type == "cpu"
-        and config.cpp_wrapper
-        and isinstance(value, sympy.Symbol)
-        and (
-            dtype != torch.float16
-            or all(V.graph.sizevars.is_size_one_or_false(dim) for dim in size)
-        )
-        and dtype
-        in (
-            torch.bool,
-            torch.uint64,
-            torch.bfloat16,
-            torch.float16,
-            torch.float32,
-            torch.float64,
-            torch.complex64,
-            torch.complex128,
-        )
-    ):
-        # A uint64 item can exceed the range of the C++ wrapper's int64_t
-        # unbacked symbol, even when the destination can represent the value.
-        # Load the scalar tensor in the full kernel instead; integer destinations
-        # that can overflow still use the wrapper's checked conversion.
+    if device.type == "cpu" and config.cpp_wrapper and isinstance(value, sympy.Symbol):
         for buffer in V.graph.buffers:
             if not isinstance(buffer, ir.DynamicScalar):
                 continue
@@ -4518,8 +4495,30 @@ def _full(fill_value, device, dtype, size):
                 and source.get_dtype() == torch.uint64
                 and source.get_device() == device
             ):
-                value = ir.SqueezeView.create(source)
-                unsigned_half_singleton = dtype == torch.float16
+                singleton = all(
+                    V.graph.sizevars.is_size_one_or_false(dim) for dim in size
+                )
+                if dtype == torch.float16 and not singleton:
+                    assert_op = ir.AssertScalar(
+                        value <= int(torch.finfo(dtype).max),
+                        f"value cannot be converted to type {dtype} without overflow",
+                    )
+                    V.graph.register_buffer(assert_op, set_name=True)
+                    V.graph.register_operation(assert_op)
+                elif dtype in (
+                    torch.bool,
+                    torch.uint64,
+                    torch.bfloat16,
+                    torch.float16,
+                    torch.float32,
+                    torch.float64,
+                    torch.complex64,
+                    torch.complex128,
+                ):
+                    # Load large uint64 values in the full kernel when the
+                    # destination can represent the eager result.
+                    value = ir.SqueezeView.create(source)
+                    unsigned_half_singleton = dtype == torch.float16
                 break
 
     if isinstance(value, (int, float)):

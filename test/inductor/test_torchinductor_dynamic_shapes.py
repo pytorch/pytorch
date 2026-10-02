@@ -1778,6 +1778,30 @@ class TestSymbolicFull(TestCase):
         with self.assertRaisesRegex(RuntimeError, self._overflow_error):
             compiled_f(x)
 
+    @onlyOn(["cpu", "cuda", "xpu"])
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_full_symbolic_uint64_item_cpp_wrapper(self, device):
+        compiled_f = torch.compile(lambda x: x.item(), fullgraph=True)
+        for value in (1 << 63, torch.iinfo(torch.uint64).max):
+            x = torch.tensor(value, dtype=torch.uint64, device=device)
+            self.assertEqual(compiled_f(x), value)
+
+    @onlyOn(["cpu", "cuda", "xpu"])
+    @torch._inductor.config.patch(cpp_wrapper=True)
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_full_symbolic_uint64_large_int64_fill_cpp_wrapper(self, device):
+        def f(x):
+            return torch.full((2,), x.item(), dtype=torch.int64, device=device)
+
+        compiled_f = torch.compile(f, fullgraph=True)
+        for value in (1 << 63, torch.iinfo(torch.uint64).max):
+            x = torch.tensor(value, dtype=torch.uint64, device=device)
+            with self.assertRaisesRegex(RuntimeError, self._overflow_error):
+                f(x)
+            with self.assertRaisesRegex(RuntimeError, self._overflow_error):
+                compiled_f(x)
+
     @onlyOn(["cpu"])
     @torch._inductor.config.patch(cpp_wrapper=True)
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
@@ -1862,10 +1886,13 @@ class TestSymbolicFull(TestCase):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_full_symbolic_uint64_half_nonsingleton_overflow_cpp_wrapper(self, device):
         def f(x):
-            return torch.full((2,), x.item(), dtype=torch.float16, device=device)
+            value = x.item()
+            return value, torch.full((2,), value, dtype=torch.float16, device=device)
 
         compiled_f = torch.compile(f, fullgraph=True)
-        for value in (1 << 63, torch.iinfo(torch.uint64).max):
+        valid = torch.tensor(65504, dtype=torch.uint64, device=device)
+        self.assertEqual(compiled_f(valid), f(valid))
+        for value in (65505, 65519, 65520, 1 << 63, torch.iinfo(torch.uint64).max):
             x = torch.tensor(value, dtype=torch.uint64, device=device)
             with self.assertRaisesRegex(RuntimeError, self._overflow_error):
                 f(x)

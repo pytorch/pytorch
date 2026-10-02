@@ -13,6 +13,7 @@ from itertools import chain, count
 from typing import Any, Literal, TYPE_CHECKING
 
 import sympy
+from sympy.printing.precedence import precedence
 
 import torch
 import torch._higher_order_ops.torchbind
@@ -39,6 +40,7 @@ from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import get_device_op_overrides, IndentedBuffer, Kernel
 from .cpp_utils import (
     cexpr,
+    CppPrinter,
     device_to_aten,
     DEVICE_TO_INT,
     DTYPE_TO_ATEN,
@@ -64,6 +66,8 @@ from .wrapper import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from sympy.core.relational import Relational
+
     from ..graph import GraphLowering
     from ..runtime.hints import TritonMeta
 
@@ -71,6 +75,46 @@ if TYPE_CHECKING:
     _OUTPUT_ARGS_TYPE = list[str | None | list[str | None]]
 
     from ..scheduler import BaseSchedulerNode
+
+
+class _TypeSafeCppAssertPrinter(CppPrinter):
+    def __init__(self, unsigned_symbols: OrderedSet[sympy.Symbol]) -> None:
+        super().__init__()
+        self.unsigned_symbols = unsigned_symbols
+
+    def _print_Integer(self, expr: sympy.Integer) -> str:
+        value = int(expr)
+        if 1 << 63 <= value <= (1 << 64) - 1:
+            return f"{value}ULL"
+        return super()._print_Integer(expr)
+
+    def _print_Relational(self, expr: Relational) -> str:
+        has_unsigned_literal = any(
+            1 << 63 <= int(value) <= (1 << 64) - 1
+            for value in expr.atoms(sympy.Integer)
+        )
+        if not (
+            (expr.free_symbols & self.unsigned_symbols or has_unsigned_literal)
+            and all(arg.is_integer is True for arg in expr.args)
+        ):
+            return super()._print_Relational(expr)
+
+        lhs = self.parenthesize(expr.lhs, precedence(expr))
+        rhs = self.parenthesize(expr.rhs, precedence(expr))
+        if expr.rel_op in ("<", "<="):
+            sign_result = f"c10::is_negative({lhs})"
+        elif expr.rel_op in (">", ">="):
+            sign_result = f"c10::is_negative({rhs})"
+        elif expr.rel_op == "==":
+            sign_result = "false"
+        elif expr.rel_op == "!=":
+            sign_result = "true"
+        else:
+            raise AssertionError(f"unsupported relational operator: {expr.rel_op}")
+        return (
+            f"(c10::signs_differ({lhs}, {rhs}) ? {sign_result} : "
+            f"({lhs} {expr.rel_op} {rhs}))"
+        )
 
 
 @dataclasses.dataclass
@@ -2271,7 +2315,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         walk(expr)
         return divisors
 
-    def codegen_cpp_sizevar(self, x: sympy.Expr, *, simplify: bool = True) -> str:
+    def codegen_cpp_sizevar(
+        self,
+        x: sympy.Expr,
+        *,
+        simplify: bool = True,
+        unsigned_symbols: OrderedSet[sympy.Symbol] | None = None,
+    ) -> str:
         maybe_simplified_x = V.graph.sizevars.simplify(x) if simplify else x
         # In AOT mode, emit runtime checks for potential division/modulo by zero
         # to prevent SIGFPE crashes when symbolic tensor shapes can be 0.
@@ -2280,6 +2330,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 maybe_simplified_x
             ):
                 self.write_assert_div_by_zero(cexpr(divisor), op_name)
+        has_unsigned_literal = any(
+            1 << 63 <= int(value) <= (1 << 64) - 1
+            for value in maybe_simplified_x.atoms(sympy.Integer)
+        )
+        if unsigned_symbols or has_unsigned_literal:
+            self.include_extra_header("c10/util/TypeSafeSignMath.h")
+            return _TypeSafeCppAssertPrinter(unsigned_symbols or OrderedSet()).doprint(
+                maybe_simplified_x, simplify=False
+            )
         return cexpr(maybe_simplified_x)
 
     def _codegen_assert_div_by_zero(
@@ -2340,21 +2399,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.codegen_tensor_item(node.inputs[0].get_dtype(), data, f"{node.sym}_raw")
 
         if len(node.keypath) == 0:
-            if (
-                symbol_is_type(node.sym, SymT.UNBACKED_INT)
-                and V.graph.device_type == "cpu"
-            ):
-                if node.inputs[0].get_dtype() == torch.uint64:
-                    self.writeline(
-                        f"if ({node.sym}_raw > std::numeric_limits<int64_t>::max()) "
-                        '{ throw std::runtime_error("value cannot be converted to '
-                        'type int64_t without overflow"); }'
-                    )
-                self.writeline(
-                    f"int64_t {node.sym} = static_cast<int64_t>({node.sym}_raw);"
-                )
-            else:
-                self.writeline(f"auto {node.sym} = {node.sym}_raw;")
+            self.writeline(f"auto {node.sym} = {node.sym}_raw;")
         elif len(node.keypath) == 1 and isinstance(node.keypath[0], ConvertIntKey):
             self.writeline(f"int64_t {node.sym} = {node.sym}_raw ? 1 : 0;")
         elif len(node.keypath) == 1 and isinstance(node.keypath[0], DivideByKey):
