@@ -428,6 +428,9 @@ class TORCH_API ProcessGroupNCCL : public ::c10d::Backend {
 
   std::atomic<CommState> comm_state_{CommState::NORMAL};
   std::atomic<bool> revoked_{false};
+  // Serializes revokeNcclComm() with reconfigure()'s teardown, so abort() on
+  // another thread cannot still be inside commRevoke when the comm is aborted.
+  std::mutex revoke_mutex_;
 
   ncclDataType_t getNcclDataType(const at::Tensor& tensor);
   c10::intrusive_ptr<WorkNCCL> createWork(
