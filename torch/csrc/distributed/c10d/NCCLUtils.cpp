@@ -1,11 +1,63 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 
 #ifdef USE_C10D_NCCL
+#include <c10/cuda/CUDAGraphsC10Utils.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <fmt/format.h>
+#include <map>
 #include <thread>
 #include <vector>
 
 namespace c10d {
+
+at::cuda::CUDAStream getNCCLStreamForCapture(
+    const at::cuda::CUDAStream& defaultStream,
+    at::cuda::CUDAEvent& event) {
+  const auto device = defaultStream.device_index();
+  auto currentStream = at::cuda::getCurrentCUDAStream(device);
+  auto curInfo = c10::cuda::captureInfoMayInitCtx(currentStream.stream());
+  if (curInfo.status != c10::cuda::CaptureStatus::Active) {
+    return defaultStream;
+  }
+  auto ncclInfo = c10::cuda::captureInfoMayInitCtx(defaultStream.stream());
+  if (ncclInfo.status != c10::cuda::CaptureStatus::Active ||
+      ncclInfo.id == curInfo.id) {
+    return defaultStream;
+  }
+
+  // Dedicated, process-lifetime streams avoid both the 32-stream pool limit
+  // and destruction while allocator recordStream references still exist.
+  static std::mutex poolMutex;
+  using StreamPool = std::vector<at::cuda::CUDAStream>;
+  static std::map<std::pair<c10::DeviceIndex, int>, StreamPool> pools;
+  const auto priority = defaultStream.priority();
+  std::lock_guard<std::mutex> lock(poolMutex);
+  auto& streams = pools[{device, priority}];
+  std::optional<at::cuda::CUDAStream> idleStream;
+  for (const auto& stream : streams) {
+    auto info = c10::cuda::captureInfoMayInitCtx(stream.stream());
+    if (info.status == c10::cuda::CaptureStatus::Active &&
+        info.id == curInfo.id) {
+      return stream;
+    }
+    if (info.status == c10::cuda::CaptureStatus::None && !idleStream) {
+      idleStream = stream;
+    }
+  }
+  if (!idleStream) {
+    at::cuda::CUDAGuard gpuGuard(device);
+    cudaStream_t rawStream = nullptr;
+    C10_CUDA_CHECK(cudaStreamCreateWithPriority(
+        &rawStream, cudaStreamNonBlocking, priority));
+    idleStream = at::cuda::getStreamFromExternal(rawStream, device);
+    streams.push_back(*idleStream);
+  }
+  // Reserve the stream by joining this capture while holding the pool lock.
+  // Returning it idle would let another capture select it before syncStream.
+  event.record(currentStream);
+  event.block(*idleStream);
+  return *idleStream;
+}
 
 NCCLComm::NCCLComm(ncclComm_t ncclComm) : ncclComm_(ncclComm) {}
 

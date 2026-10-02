@@ -3650,7 +3650,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::endCoalescing(OpType optype) {
 
   // `getKeyFromDevice` is how we get keys for both collectives and batch P2P
   const auto key = getKeyFromDevice(device);
-  auto ncclStream = getNCCLStream(key, device);
+  auto ncclStream =
+      getNCCLStreamForCapture(ncclStreams_.at(key), ncclEvents_[key]);
   auto opProfilerTitle = optype != OpType::COALESCED
       ? "nccl:" + opTypeToString(optype) + "_coalesced"
       : "nccl:coalesced";
@@ -3808,8 +3809,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 
   // in asyncOp=false [default] mode, we use currentStream as ncclStream
   // otherwise, we use separate ncclStream and let it sync on currentStream
-  auto ncclStream = asyncOp ? getNCCLStream(key, device)
-                            : at::cuda::getCurrentCUDAStream(device.index());
+  auto ncclStream = asyncOp
+      ? getNCCLStreamForCapture(ncclStreams_.at(key), ncclEvents_[key])
+      : at::cuda::getCurrentCUDAStream(device.index());
   if (asyncOp) {
     // First let NCCL streams wait for input tensors allocation streams
     syncStream(device, ncclEvents_[key], ncclStream);
@@ -4006,8 +4008,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 
   // in asyncOp=false [default] mode, we use currentStream as ncclStream
   // otherwise, we use separate ncclStream and let it sync on currentStream
-  auto ncclStream = asyncOp ? getNCCLStream(key, device)
-                            : at::cuda::getCurrentCUDAStream(device.index());
+  auto ncclStream = asyncOp
+      ? getNCCLStreamForCapture(ncclStreams_.at(key), ncclEvents_[key])
+      : at::cuda::getCurrentCUDAStream(device.index());
   if (asyncOp) {
     // First let NCCL streams wait for input tensors allocation streams
     syncStream(device, ncclEvents_[key], ncclStream);
@@ -4265,7 +4268,8 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
   }
 
   // Used many times below, so we stash the unordered_map lookup
-  auto ncclStream = getNCCLStream(key, device);
+  auto ncclStream =
+      getNCCLStreamForCapture(ncclStreams_.at(key), ncclEvents_[key]);
   // First let NCCL streams wait for input tensors allocation streams
   syncStream(device, ncclEvents_[key], ncclStream);
 
@@ -6201,62 +6205,6 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::shrink(
 }
 
 #endif // NCCL_HAS_COMM_SHRINK
-
-at::cuda::CUDAStream ProcessGroupNCCL::getNCCLStream(
-    const std::string& key,
-    const at::Device& device) {
-  auto& defaultStream = ncclStreams_.at(key);
-  auto currentStream = at::cuda::getCurrentCUDAStream(device.index());
-  auto curInfo = c10::cuda::captureInfoMayInitCtx(currentStream.stream());
-  if (curInfo.status != c10::cuda::CaptureStatus::Active) {
-    return defaultStream;
-  }
-  auto ncclInfo = c10::cuda::captureInfoMayInitCtx(defaultStream.stream());
-  if (ncclInfo.status != c10::cuda::CaptureStatus::Active ||
-      ncclInfo.id == curInfo.id) {
-    return defaultStream;
-  }
-  // Dedicated streams avoid wrapping the 32-stream getStreamFromPool pool.
-  // Like that pool, these streams are never destroyed: tensors recorded on
-  // them may outlive their process group. Reuse them across process groups
-  // and captures, keeping different devices and priorities separate.
-  static std::mutex poolMutex;
-  using StreamPool = std::vector<at::cuda::CUDAStream>;
-  static std::map<std::pair<c10::DeviceIndex, bool>, StreamPool> pools;
-  bool highPriority = options_->is_high_priority_stream ||
-      getCvarBool(TORCH_NCCL_HIGH_PRIORITY, false);
-  std::lock_guard<std::mutex> lock(poolMutex);
-  auto& streams = pools[{device.index(), highPriority}];
-  std::optional<at::cuda::CUDAStream> idleStream;
-  for (const auto& stream : streams) {
-    auto info = c10::cuda::captureInfoMayInitCtx(stream.stream());
-    if (info.status == c10::cuda::CaptureStatus::Active &&
-        info.id == curInfo.id) {
-      return stream;
-    }
-    if (info.status == c10::cuda::CaptureStatus::None && !idleStream) {
-      idleStream = stream;
-    }
-  }
-  if (idleStream) {
-    return *idleStream;
-  }
-  at::cuda::CUDAGuard gpuGuard(device.index());
-  cudaStream_t raw_stream = nullptr;
-  if (highPriority) {
-    int least_priority = -1, greatest_priority = -1;
-    C10_CUDA_CHECK(
-        cudaDeviceGetStreamPriorityRange(&least_priority, &greatest_priority));
-    C10_CUDA_CHECK(cudaStreamCreateWithPriority(
-        &raw_stream, cudaStreamNonBlocking, greatest_priority));
-  } else {
-    C10_CUDA_CHECK(
-        cudaStreamCreateWithFlags(&raw_stream, cudaStreamNonBlocking));
-  }
-  auto stream = at::cuda::getStreamFromExternal(raw_stream, device.index());
-  streams.push_back(stream);
-  return stream;
-}
 
 void ProcessGroupNCCL::initializeDeviceStateForComm(
     const at::Device& device,

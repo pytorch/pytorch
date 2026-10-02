@@ -34,7 +34,9 @@ from torch.testing._internal.common_distributed import (
     requires_nccl_version,
 )
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_LINUX,
+    parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_CUDA_GRAPH_CONDITIONAL_NODES,
@@ -1256,6 +1258,7 @@ class ProcessGroupNCCLOpTest(MultiProcContinuousTest):
         self.assertEqual(c10d.ReduceOp.PREMUL_SUM, 8)
 
 
+@instantiate_parametrized_tests
 @unittest.skipIf(
     not TEST_CUDA_GRAPH_CONDITIONAL_NODES,
     "CUDA 12.4 or greater is required for CUDA Graphs with conditional nodes",
@@ -1273,29 +1276,33 @@ class ProcessGroupNCCLConditionalGraphTest(MultiProcessTestCase):
         with mock.patch.dict(os.environ, {"NCCL_GRAPH_MIXING_SUPPORT": "0"}):
             self._spawn_processes()
 
-    def _test_nested_capture(self, num_cond_nodes):
-        from torch._higher_order_ops.cudagraph_conditional_nodes import (
-            CUDAGraphCaptureControlFlowOpDispatchMode,
-        )
-
+    def _init_process_group(self, backend):
         self.assertEqual(os.environ["NCCL_GRAPH_MIXING_SUPPORT"], "0")
         torch.cuda.set_device(self.rank)
         c10d.init_process_group(
-            "nccl-legacy",
+            backend,
             store=c10d.FileStore(self.file_name, self.world_size),
             rank=self.rank,
             world_size=self.world_size,
             timeout=timedelta(seconds=60),
         )
-        pg = c10d.distributed_c10d._get_default_group()
-        group_name = pg.group_name
+        return c10d.distributed_c10d._get_default_group().group_name
+
+    @requires_nccl()
+    @parametrize("backend", ["nccl-legacy", "nccl2"])
+    def test_nccl_cudagraph_nested_capture(self, backend):
+        """Replay NCCL in a parent capture and a conditional-node body."""
+        from torch._higher_order_ops.cudagraph_conditional_nodes import (
+            CUDAGraphCaptureControlFlowOpDispatchMode,
+        )
+
+        group_name = self._init_process_group(backend)
 
         def all_reduce(tensor):
             result = torch.ops._c10d_functional.all_reduce(tensor, "sum", group_name)
             return torch.ops._c10d_functional.wait_tensor(result)
 
         def true_branch(tensor):
-            # Keep values bounded through all 40 conditional nodes.
             return all_reduce(tensor + 1) / self.world_size
 
         def false_branch(tensor):
@@ -1318,8 +1325,7 @@ class ProcessGroupNCCLConditionalGraphTest(MultiProcessTestCase):
                 CUDAGraphCaptureControlFlowOpDispatchMode(),
             ):
                 output = all_reduce(tensor)
-                for _ in range(num_cond_nodes):
-                    output = torch.cond(predicate, true_branch, false_branch, (output,))
+                output = torch.cond(predicate, true_branch, false_branch, (output,))
 
             graph.instantiate()
             for offset, pred in ((0, True), (2, False), (4, True)):
@@ -1329,39 +1335,22 @@ class ProcessGroupNCCLConditionalGraphTest(MultiProcessTestCase):
                 torch.cuda.synchronize()
                 expected = self.world_size * (self.world_size + 1) // 2
                 expected += self.world_size * offset
-                expected += num_cond_nodes if pred else -num_cond_nodes
+                expected += 1 if pred else -1
                 self.assertEqual(output, torch.full_like(output, expected))
         finally:
             # Release NCCL graph resources before destroying the process group.
             graph.reset()
+            c10d.destroy_process_group()
 
     @requires_nccl()
-    def test_nccl_cudagraph_nested_capture(self):
-        """Replay NCCL in a parent capture and a conditional-node body."""
-        self._test_nested_capture(num_cond_nodes=1)
-
-    @requires_nccl()
-    def test_nccl_cudagraph_many_nested_captures(self):
-        """Replay more conditional nodes than the 32-stream pool can hold."""
-        self._test_nested_capture(num_cond_nodes=40)
-
-    @requires_nccl()
-    def test_nccl_cudagraph_nested_conditionals(self):
+    @parametrize("backend", ["nccl-legacy", "nccl2"])
+    def test_nccl_cudagraph_nested_conditionals(self, backend):
         """Replay NCCL with more than 32 simultaneously active child captures."""
         from torch._higher_order_ops.cudagraph_conditional_nodes import (
             CUDAGraphCaptureControlFlowOpDispatchMode,
         )
 
-        self.assertEqual(os.environ["NCCL_GRAPH_MIXING_SUPPORT"], "0")
-        torch.cuda.set_device(self.rank)
-        c10d.init_process_group(
-            "nccl-legacy",
-            store=c10d.FileStore(self.file_name, self.world_size),
-            rank=self.rank,
-            world_size=self.world_size,
-            timeout=timedelta(seconds=60),
-        )
-        group_name = c10d.distributed_c10d._get_default_group().group_name
+        group_name = self._init_process_group(backend)
         world_size = self.world_size
         num_cond_nodes = 40
         levels = torch.arange(num_cond_nodes, device=self.rank)
@@ -1380,7 +1369,9 @@ class ProcessGroupNCCLConditionalGraphTest(MultiProcessTestCase):
         def make_branch(next_branch, level):
             def branch(tensor):
                 tensor = all_reduce(tensor + 1) / world_size
-                # Use torch.cond's HOP directly to avoid recursive Dynamo tracing.
+                # Use torch.cond's HOP directly to avoid recursive
+                # Dynamo tracing, which is very slow when we nest 40
+                # torch.cond() nodes
                 tensor = torch.ops.higher_order.cond(
                     predicates[level], next_branch, false_branch, (tensor,)
                 )
@@ -1428,6 +1419,7 @@ class ProcessGroupNCCLConditionalGraphTest(MultiProcessTestCase):
         finally:
             graph.reset()
             sys.setrecursionlimit(python_recursion_limit)
+            c10d.destroy_process_group()
 
 
 if __name__ == "__main__":
