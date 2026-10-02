@@ -351,19 +351,20 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
   const auto class_dim = input_arg.dim() == 1 ? 0 : 1;
   const auto map_size = is2D ? input_arg.size(2) * input_arg.size(3) : 1;
   const NLLLossBackwardParams<> params{
-      .forward = {
-          .n_classes = input_arg.size(class_dim),
-          .map_size = map_size,
-          .batch_stride = input_arg.dim() == 1 ? 0 : grad_input_arg.stride(0),
-          .class_stride = grad_input_arg.stride(class_dim),
-          .input_offset = grad_output.storage_offset(),
-          .output_offset = grad_input_arg.storage_offset(),
-          .target_offset = target.storage_offset(),
-          .weight_offset = has_weight ? weight.storage_offset() : 0,
-          .ignore_index = ignore_index,
-          .tid_offset = 0,
-          .has_weight = has_weight,
-      },
+      .forward =
+          {
+              .n_classes = input_arg.size(class_dim),
+              .map_size = map_size,
+              .batch_stride = input_arg.dim() == 1 ? 0 : grad_input_arg.stride(0),
+              .class_stride = grad_input_arg.stride(class_dim),
+              .input_offset = grad_output.storage_offset(),
+              .output_offset = grad_input_arg.storage_offset(),
+              .target_offset = target.storage_offset(),
+              .weight_offset = has_weight ? weight.storage_offset() : 0,
+              .ignore_index = ignore_index,
+              .tid_offset = 0,
+              .has_weight = has_weight,
+          },
       .total_weight_offset = total_weight_cast.storage_offset(),
       .is_reduction = reduction != Reduction::None,
       .is_mean = reduction == Reduction::Mean,
@@ -390,7 +391,7 @@ static void nllnd_loss_backward_impl(Tensor& grad_input_arg,
       constexpr auto max_threads = int64_t{std::numeric_limits<uint32_t>::max()};
       auto dispatch_params = params;
       for (auto offset = int64_t{0}; offset < num_outputs; offset += max_threads) {
-        dispatch_params.tid_offset = offset;
+        dispatch_params.forward.tid_offset = offset;
         mtl_setArgs<5>(encoder, dispatch_params, stream->getErrorBuffer());
         mtl_dispatch1DJob(encoder, pso, std::min(max_threads, num_outputs - offset));
       }
@@ -480,12 +481,7 @@ static void nllnd_loss_forward_impl(Tensor& output,
       auto pso = lib.getPipelineStateForFunc("nllnd_loss_forward_" + scalarToMetalTypeString(input_arg));
       auto encoder = stream->commandEncoder();
       [encoder setComputePipelineState:pso];
-      mtl_setArgs(encoder,
-                  input,
-                  target,
-                  weight,
-                  unreduced_loss,
-                  sample_weights);
+      mtl_setArgs(encoder, input, target, weight, unreduced_loss, sample_weights);
 
       constexpr auto max_threads = int64_t{std::numeric_limits<uint32_t>::max()};
       auto dispatch_params = params;
