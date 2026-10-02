@@ -533,10 +533,35 @@ class TestFullyShardMixedPrecisionTraining(FSDPTestContinuous):
             inp = torch.full((8,), value, device=device_type)
             model(inp).backward()
             self.assertEqual(unsharded_weight.grad_dtype, torch.float32)
-        # Only the gradient that starts accumulation is cast; AccumulateGrad
-        # adds the later ones to it in place
-        self.assertEqual(grad_dtypes, [torch.float32, torch.bfloat16, torch.bfloat16])
+        # Every gradient arrives in bf16: the first is upcast after resharding,
+        # and AccumulateGrad adds the later ones to it in place
+        self.assertEqual(grad_dtypes, [torch.bfloat16] * 3)
         self.assertEqual(model.weight.grad.full_tensor(), torch.ones_like(inp))
+
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_upcast_after_reshard(self):
+        model = nn.Linear(8, 8, bias=False, device=device_type)
+        fully_shard(model, mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16))
+        group = model._get_fsdp_state()._fsdp_param_group
+        set_unsharded_grad_dtypes = group._set_unsharded_grad_dtypes
+        sharded_at_upcast = []
+
+        def record_sharded_at_upcast(defer_upcast: bool):
+            if not defer_upcast:
+                sharded_at_upcast.append(group.is_sharded)
+            set_unsharded_grad_dtypes(defer_upcast=defer_upcast)
+
+        model.set_requires_gradient_sync(False)
+        with patch.object(
+            group, "_set_unsharded_grad_dtypes", record_sharded_at_upcast
+        ):
+            model(torch.ones(2, 8, device=device_type)).sum().backward()
+        # The fp32 gradient is allocated only after the bf16 unsharded
+        # parameter is freed
+        self.assertEqual(sharded_at_upcast, [True])
+        accumulated_grad = group.fsdp_params[0].unsharded_accumulated_grad
+        self.assertEqual(accumulated_grad.dtype, torch.float32)
+        self.assertEqual(accumulated_grad, torch.full((8, 8), 2.0, device=device_type))
 
     @skip_if_lt_x_gpu(2)
     def test_grad_dtype_upcasts_before_tp_all_reduce(self):
