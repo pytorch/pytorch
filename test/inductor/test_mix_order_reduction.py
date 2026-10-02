@@ -50,7 +50,7 @@ class SkipPatternTest(TestBase):
 
     @inductor_config.patch(split_reductions=False)
     def test_workload_too_small(self):
-        """768x768 is 0.6Mi elements, under the 5Mi strict threshold."""
+        """768x768 = 589824 elements, under `size_thres = 5 * 2**20` elements in `MixOrderReduction.can_fuse`."""
 
         def f(x):
             out1 = x.sum(dim=1)
