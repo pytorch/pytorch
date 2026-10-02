@@ -12,7 +12,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.utils import register_fake
 from torch._ops import HigherOrderOperator
-from torch._subclasses.fake_tensor import FakeTensor
+from torch._subclasses.fake_tensor import is_fake_tensor
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -80,7 +80,7 @@ def call_delegate_cpu(
         weight_args + input_args,
         lambda a: isinstance(a, tuple(map_types.keys())),
     )
-    has_fake_args = any(isinstance(arg, FakeTensor) for arg in new_args)
+    has_fake_args = any(is_fake_tensor(arg) for arg in new_args)
     if has_fake_args:
         # use stateless original_gm for tracing with fake tensors
         fake_out = original_gm(*new_args)

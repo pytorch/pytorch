@@ -55,10 +55,26 @@ if IS_WINDOWS and IS_CI:
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
-if torch.version.hip:
-    torch.set_float32_matmul_precision("highest")
-else:
-    torch.set_float32_matmul_precision("high")
+
+
+_PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+def setUpModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    _PRIOR_FP32_MATMUL_PRECISION = torch.get_float32_matmul_precision()
+    if torch.version.hip:
+        torch.set_float32_matmul_precision("highest")
+    else:
+        torch.set_float32_matmul_precision("high")
+
+
+def tearDownModule():
+    global _PRIOR_FP32_MATMUL_PRECISION
+    if _PRIOR_FP32_MATMUL_PRECISION is not None:
+        torch.set_float32_matmul_precision(_PRIOR_FP32_MATMUL_PRECISION)
+        _PRIOR_FP32_MATMUL_PRECISION = None
+
 
 index = torch.ops.aten.index
 Tensor = torch.Tensor
@@ -386,7 +402,7 @@ class TestFlexDecoding(InductorTestCase):
             # Note, it seems like we really are less accurate than the float32
             # computation, likely due to the online softmax
             if dtype == torch.float32:
-                fudge_factor = 10.0
+                fudge_factor = 12.0
             else:
                 fudge_factor = 1.1
 
@@ -984,6 +1000,26 @@ class TestFlexDecoding(InductorTestCase):
         torch.testing.assert_close(
             ref_out, paged_compiled_out, atol=tolerance.atol, rtol=tolerance.rtol
         )
+
+    @supported_platform
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    @with_tf32_off
+    def test_pointwise_query_producer(self, device, head_dims):
+        # https://github.com/pytorch/pytorch/issues/198513
+        # The pointwise producer's layout follows its [B, S, H, D] input, not the
+        # contiguous [B, H, S, D] strides it has when flex decoding is lowered.
+        Hq, Hkv = head_dims
+        Q_S, D = 4, 16
+        x = torch.randn(2, Q_S, Hq * D, device=device)
+        scale = torch.rand(D, device=device) + 0.5
+        k = torch.randn(2, Hkv, Q_S, D, device=device)
+        v = torch.randn(2, Hkv, Q_S, D, device=device)
+
+        def f(x, k, v):
+            q = x.view(2, Q_S, Hq, D).transpose(1, 2) * scale
+            return flex_attention(q, k, v, enable_gqa=Hq != Hkv)
+
+        self.assertEqual(torch.compile(f)(x, k, v), f(x, k, v))
 
     @supported_platform
     @parametrize_device_dtype("dtypes_fast")

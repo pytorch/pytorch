@@ -7,7 +7,7 @@ import threading
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import torch
@@ -38,12 +38,52 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
+from torch.fx.immutable_collections import immutable_dict
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.utils._debug_mode import DebugMode
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
 invoke_subgraph_counter = 0
+
+
+# Keep this list limited to configs with established region-local semantics.
+_SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS = frozenset(
+    {
+        "fallback_by_default",
+        "max_autotune",
+    }
+)
+
+
+def _validate_nested_region_inductor_config_patches(
+    patches: dict[str, Any] | None, direction: str | None = None
+) -> None:
+    if patches is None:
+        return
+
+    from torch._inductor import config as inductor_config
+
+    for key in patches:
+        if not hasattr(inductor_config, key):
+            raise ValueError(
+                f"Invalid inductor config key '{key}'. "
+                "Available config keys can be found in torch._inductor.config"
+            )
+        if key not in _SUPPORTED_NESTED_REGION_INDUCTOR_CONFIG_KEYS:
+            context = f"{direction} " if direction is not None else ""
+            raise ValueError(
+                f"Inductor config key '{key}' is not supported in {context}"
+                "nested compile-region options"
+            )
+
+
+def _freeze_nested_region_inductor_config_patches(
+    patches: dict[str, Any] | None,
+) -> immutable_dict[str, Any] | None:
+    if patches is None or isinstance(patches, immutable_dict):
+        return patches
+    return immutable_dict(patches)
 
 
 # During the tracing of the joint graph, we construct this information. This is
@@ -58,7 +98,7 @@ class OutputMetadata:
 
 # This config will be stored in invoke_subgraph HOP node.meta["custom"]["nested_region_config"]
 # as well as the subgraph's gm.meta["nested_region_config"].
-@dataclass
+@dataclass(frozen=True)
 class NestedCompileRegionOptions:
     # A Callable that takes (gm, example_inputs, decompositions=None, **kwargs) as inputs.
     # Returns AOTCompiledArtifact
@@ -76,6 +116,44 @@ class NestedCompileRegionOptions:
     # If it's None, we'll inherit the parent call's decompositions.
     # Otherwise, the nested region will use this decompositions.
     decompositions: dict[str, Any] | None = None
+
+    # Immutable snapshot of the Inductor config patches to apply while compiling
+    # this nested region. Also used for the backward unless
+    # bw_inductor_config_patches replaces it.
+    inductor_config_patches: dict[str, Any] | None = None
+
+    # If set, an immutable snapshot of the full Inductor config for the backward
+    # subgraph, used instead of inductor_config_patches (a replacement, not merged
+    # with it), mirroring aot_autograd's separate fw_compiler/bw_compiler. If None,
+    # the backward reuses the forward config.
+    bw_inductor_config_patches: dict[str, Any] | None = None
+
+    def __post_init__(self) -> None:
+        fw_patches = _freeze_nested_region_inductor_config_patches(
+            self.inductor_config_patches
+        )
+        bw_patches = _freeze_nested_region_inductor_config_patches(
+            self.bw_inductor_config_patches
+        )
+        object.__setattr__(
+            self,
+            "inductor_config_patches",
+            fw_patches,
+        )
+        object.__setattr__(
+            self,
+            "bw_inductor_config_patches",
+            bw_patches,
+        )
+        self.validate_inductor_config_patches()
+
+    def validate_inductor_config_patches(self) -> None:
+        _validate_nested_region_inductor_config_patches(
+            self.inductor_config_patches, "forward"
+        )
+        _validate_nested_region_inductor_config_patches(
+            self.bw_inductor_config_patches, "backward"
+        )
 
 
 def _extract_nested_region_config(fn):
@@ -98,6 +176,28 @@ def _extract_nested_region_config(fn):
         ):
             return gm_to_compile.meta["nested_region_config"].decompositions
     return None
+
+
+def get_backward_nested_region_config(
+    fw_config: NestedCompileRegionOptions | None,
+) -> NestedCompileRegionOptions | None:
+    """Region config for compiling the backward subgraph.
+
+    When the region sets bw_inductor_config_patches, the backward compiles under
+    it (a replacement for inductor_config_patches, not merged with it). Otherwise
+    the forward config is reused unchanged, so the returned object is identical
+    (callers rely on this identity to detect a distinct backward config).
+    """
+    if (
+        isinstance(fw_config, NestedCompileRegionOptions)
+        and fw_config.bw_inductor_config_patches is not None
+    ):
+        return replace(
+            fw_config,
+            inductor_config_patches=fw_config.bw_inductor_config_patches,
+            bw_inductor_config_patches=None,
+        )
+    return fw_config
 
 
 # Per-call id used by downstream graph passes to pair fw and bw
@@ -779,7 +879,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx._identifier = identifier
         ctx._output_metadata = output_metadata
         ctx._call_id = _next_invoke_subgraph_call_id()
-        # We snapshot the dispatch keys in forward for materializing the
+        # We snapshot the dispatch keys in forward for materializing
         # the bw_graph in backward.
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
@@ -1087,11 +1187,9 @@ def _(ctx, subgraph, identifier, *operands):
     else:
         hop_instance = HopInstance(invoke_subgraph, functionalize_schema)
 
+    functionalized_identifier = None
     if can_auto_functionalize(hop_instance):
         # NOTE: [auto_functionalize x invoke_subgraph caching]
-        # We call auto_functionalized_v2 to support input mutation of invoke_subgraph.
-        # See NOTE [Support input mutation of hops] for the overall design.
-        #
         # invoke_subgraph is special because of its identifier based caching mechanism.
         # In invoke_subgraph's functionalization key implementation, we create a new
         # identifier because the subgraph is replaced by FunctionWithNoFreeVars in a
@@ -1100,19 +1198,55 @@ def _(ctx, subgraph, identifier, *operands):
             raise AssertionError(
                 f"identifier must be a string for auto_functionalize, got {type(identifier)}"
             )
-        return do_auto_functionalize_v2(
-            ctx.mode,
-            hop_instance,
-            (subgraph, "auto_functionalized_" + identifier, *operands),
-            {},
-        )
 
-    with ctx.redispatch_to_next():
-        # NB: There is an assumption that subgraph does not mutate inputs and
-        # there is no aliasing. It's Dynamo's responsibility to prevent formation
-        # of invoke_subgraph ops if input aliasing/mutation is detected.
-        functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
-        out = invoke_subgraph(functionalized_subgraph, identifier, *unwrapped_operands)
+        if ctx.mode._keep_input_mutations:
+            # With keep_input_mutations=True, wrap invoke_subgraph in
+            # auto_functionalized_v2. This allows copy_ epilogues in the subgraph for
+            # Inductor to fuse where useful.
+            # See NOTE [Support input mutation of hops] for the overall design.
+            return do_auto_functionalize_v2(
+                ctx.mode,
+                hop_instance,
+                (subgraph, "auto_functionalized_" + identifier, *operands),
+                {},
+            )
+
+        # With keep_input_mutations=False, the subgraph must not mutate its inputs.
+        # Return updated inputs so AOTAutograd can generate the copy_ epilogue.
+        mutated_operand_indices = tuple(
+            idx
+            for idx, arg in enumerate(hop_instance._schema.arguments[2:])
+            if arg.alias_info is not None and arg.alias_info.is_write
+        )
+        functionalized_subgraph = FunctionalizeCtxWrapper(
+            ctx, subgraph, mutated_input_indices=mutated_operand_indices
+        )
+        functionalized_identifier = "functionalized_" + identifier
+        with ctx.redispatch_to_next():
+            out = invoke_subgraph(
+                functionalized_subgraph,
+                functionalized_identifier,
+                *unwrapped_operands,
+            )
+
+        num_outputs = len(hop_instance._schema.returns)
+        actual_out = out[:num_outputs]
+        mutated_out = out[num_outputs:]
+        for operand_idx, updated_operand in zip(mutated_operand_indices, mutated_out):
+            operand = operands[operand_idx]
+            ctx.replace(operand, updated_operand)
+            ctx.commit_update(operand)
+            ctx.sync(operand)
+        out = actual_out
+    else:
+        with ctx.redispatch_to_next():
+            # NB: There is an assumption that subgraph does not mutate inputs and
+            # there is no aliasing. It's Dynamo's responsibility to prevent formation
+            # of invoke_subgraph ops if input aliasing/mutation is detected.
+            functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
+            out = invoke_subgraph(
+                functionalized_subgraph, identifier, *unwrapped_operands
+            )
 
     if effects:
         (new_token, *out) = out
@@ -1132,9 +1266,13 @@ def _(ctx, subgraph, identifier, *operands):
             raise AssertionError(
                 f"Number of tokens changed by {len(discovered_effects)} when tracing subgraph {subgraph}."
             )
-        # Store discovered effects in the cache by identifier
+        # Later passes look up effects using the identifier on the emitted HOP.
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_effects(identifier, discovered_effects)
+            if functionalized_identifier is not None:
+                invoke_subgraph_cache.add_effects(
+                    functionalized_identifier, discovered_effects
+                )
 
     return ctx.wrap_tensors(out)
 
@@ -1278,6 +1416,10 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
 def invoke_subgraph_inductor_compile(
     gm, example_inputs, inductor_config_patches=None, **kwargs
 ):
+    _validate_nested_region_inductor_config_patches(inductor_config_patches)
+    if inductor_config_patches is None:
+        inductor_config_patches = {}
+
     from torch._functorch._aot_autograd.runtime_wrappers import (
         SerializableCompiledFunction,
     )
@@ -1294,9 +1436,6 @@ def invoke_subgraph_inductor_compile(
         torch._dynamo.testing._testing_invoke_subgraph_inductor_compile_captured_gms.append(
             copy.deepcopy(gm)
         )
-
-    if inductor_config_patches is None:
-        inductor_config_patches = {}
 
     # Saved tensors flow across the HOP boundary into a separately-compiled bw
     # subgraph whose IR was traced with natural (unpadded) strides. Mark every
@@ -1339,31 +1478,39 @@ def invoke_subgraph_inductor_compile(
 
 
 def get_invoke_subgraph_compile_options(
-    inductor_config_patches=None,
+    fw_inductor_config_patches=None,
     decompositions=None,
     partitioner="min_cut_rematerialization_partition",
+    *,
+    bw_inductor_config_patches=None,
 ):
-    if inductor_config_patches is None:
-        inductor_config_patches = {"triton.autotune_at_compile_time": True}
-    inductor_compile = functools.partial(
-        invoke_subgraph_inductor_compile,
-        inductor_config_patches=inductor_config_patches,
+    fw_patches = _freeze_nested_region_inductor_config_patches(
+        fw_inductor_config_patches
+    )
+    if fw_patches is None:
+        fw_patches = immutable_dict()
+    bw_patches = _freeze_nested_region_inductor_config_patches(
+        bw_inductor_config_patches
     )
 
-    if inductor_config_patches:
-        from torch._inductor import config as inductor_config
+    # The backward uses bw_inductor_config_patches when set (independently of the
+    # forward), otherwise it reuses the forward config.
+    effective_bw_patches = bw_patches if bw_patches is not None else fw_patches
 
-        # Validate that all config keys exist
-        for key in inductor_config_patches:
-            if not hasattr(inductor_config, key):
-                raise ValueError(
-                    f"Invalid inductor config key '{key}' in get_invoke_subgraph_compile_options. "
-                    f"Available config keys can be found in torch._inductor.config"
-                )
+    fw_compiler = functools.partial(
+        invoke_subgraph_inductor_compile,
+        inductor_config_patches=fw_patches,
+    )
+    bw_compiler = functools.partial(
+        invoke_subgraph_inductor_compile,
+        inductor_config_patches=effective_bw_patches,
+    )
 
     return NestedCompileRegionOptions(
-        fw_compiler=inductor_compile,
-        bw_compiler=inductor_compile,
+        fw_compiler=fw_compiler,
+        bw_compiler=bw_compiler,
         partitioner=partitioner,
         decompositions=decompositions,
+        inductor_config_patches=fw_patches,
+        bw_inductor_config_patches=bw_patches,
     )

@@ -20,6 +20,7 @@ This checklist covers areas that CI cannot check. Skip items related to linting,
 When a PR introduces new API patterns, carefully evaluate the broader implications:
 
 - [ ] **No flag-based internal access** - Reject patterns like `_internal=True` kwargs that gate internal functionality. These are confusing to reason about, impossible to document properly, and create BC headaches. Use a separate private function instead (e.g., `_my_internal_op()`)
+- [ ] **Positional-only / keyword-only markers** - While historical APIs don't use them, new public APIs (and internal functions) should use `/` and `*` appropriately, e.g. `def my_api(module, /, x, *, dtype=None)`. Either marker can be dropped later without breaking callers, so we always prefer to have them to begin with unless the author explicitly refuses. Put arguments whose names are not part of the documented contract (`self`, callbacks, wrapped objects) before `/`, and optional or configuration arguments after `*`. Leave an argument positional-or-keyword only when both its name and its position are meant to be stable.
 - [ ] **Pattern already exists?** - Before accepting a new pattern, search the codebase to check if this pattern is already established. If not, the PR is introducing a new convention that needs stronger justification
 - [ ] **Documentation implications** - Can this API be clearly documented? Flag-based access creates ambiguity about what is public vs private
 - [ ] **BC implications going forward** - Will this pattern create future BC constraints?
@@ -153,6 +154,12 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 - [ ] **_make_wrapper_subclass** — PR creates tensor subclasses by calling `torch.Tensor.__new__()` directly instead of using `torch.Tensor._make_wrapper_subclass()` which properly sets up the subclass wrapper
 - [ ] **__tensor_flatten__ / __tensor_unflatten__** — PR adds a tensor subclass without implementing `__tensor_flatten__()` and `__tensor_unflatten__()`, breaking serialization and `torch.compile` support
 
+### CI Runner Labels
+
+When a PR adds CI (a workflow, job, matrix or matrix entry) or changes a CI runner label, even if only its prefix changes:
+
+- [ ] **Runner naming standard** — PR adds or changes a runner label, or adds CI that inherits one from an input, matrix or dispatch default or option, and the label breaks the runner naming standard in [ci-runner-naming.md](ci-runner-naming.md). If no other CI in this repo uses that label, this always means **Request Changes**; if other CI already uses it, give a short non-blocking heads-up instead (an exception to "Everything is a must-fix")
+
 ### Miscellaneous
 
 - [ ] **torch._check** — PR uses `assert` or `if not cond: raise` in Python op implementations instead of `torch._check()` / `torch._check_is_size()` which work correctly with meta tensors and symbolic shapes
@@ -178,6 +185,7 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 - [ ] **Use run_tests** - Test file ends with `if __name__ == "__main__": run_tests()`
 - [ ] **Use assertEqual for tensors** - Tensor comparisons use `assertEqual`, not raw assertions or `torch.allclose`
 - [ ] **Device generic** - Any test checking compute result should happen in a device-generic test class (taking device as an argument) via `instantiate_device_type_tests`. Device-specific tests should be very rare and in device-specific test files
+- [ ] **No device-agnostic tests in accelerator-specific files** - A regression test added to `test_mps.py`/`test_cuda.py`/`test_xpu.py`/... must exercise an accelerator-specific API or behavior. If it would pass verbatim on any backend, move it to a device-generic test (a generic test file using `instantiate_device_type_tests`, or an existing OpInfo/ModuleInfo). A hardcoded `device=`, `.to()`/`.cuda()`, or `torch.<device>.synchronize()` is incidental and does not count as accelerator-specific
 - [ ] **Use @dtypes** - PR writes separate test methods per dtype or manual `for dtype in [...]` loops instead of using the `@dtypes(...)` decorator from `common_device_type.py`
 - [ ] **Use @parametrize** - PR duplicates test methods that differ only in a parameter instead of using `@parametrize` from `common_utils.py`
 - [ ] **Use @ops for operator tests** - PR writes manual per-operator test iterations instead of using the `@ops(op_db)` decorator which automatically parametrizes tests over OpInfo entries

@@ -336,7 +336,9 @@ class CheckpointWrapperTest(TestCase):
         lin = checkpoint_wrapper(lin)
         state_dict = lin.state_dict()
         for fqn, _ in lin.named_parameters():
-            self.assertTrue(fqn in state_dict, msg=f"{fqn} not in state_dict.")
+            self.assertTrue(
+                fqn in state_dict, msg=lambda msg: f"{msg}\n{fqn} not in state_dict."
+            )
 
     def test_checkpoint_wrapper_cpu_offload(self):
         model = nn.Sequential(

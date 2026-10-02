@@ -10,6 +10,7 @@ import contextvars
 import functools
 import inspect
 import logging
+import math
 import operator
 import threading
 import typing
@@ -57,6 +58,8 @@ from torch._subclasses.fake_tensor import (
     FakeTensorMode,
     get_plain_tensors,
     is_fake,
+    is_fake_tensor,
+    maybe_get_fake_mode,
     unset_fake_temporarily,
 )
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -553,7 +556,7 @@ def _nary_sym_min(*args: Any) -> Any:
 def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
     """
     Returns a dict mapping sympy types to Python callables
-    (e.g. ``sympy.Mul`` -> ``operator.mul``, ``sympy.Add`` -> ``torch.sym_sum``).
+    (e.g. ``sympy.Mul`` -> a fold over ``operator.mul``).
     """
     import sympy
 
@@ -674,7 +677,7 @@ def _build_proxy_for_sym_expr(
     if expr.is_Float:
         return float(expr)
 
-    args = []
+    args: list[Any] = []
     for arg in expr.args:
         if (arg_value := _build_proxy_for_sym_expr(tracer, arg)) is None:
             return None
@@ -684,9 +687,18 @@ def _build_proxy_for_sym_expr(
     if not func:
         return None
 
+    # sympy Mul and Add are n-ary, but the handlers they map to (operator.mul,
+    # operator.add) take exactly two arguments, so an expression like s0*s1*s2
+    # has to be folded into a chain of binary ops. Fold rather than passing a
+    # variadic wrapper: the handler becomes the fx node's target, and that has
+    # to stay a real operator for downstream consumers.
     if out is None:
+        if len(args) > 2:
+            return functools.reduce(func, args)
         out = func(*args)
     else:
+        if len(args) > 2:
+            args = [functools.reduce(func, args[:-1]), args[-1]]
         _sym_register(tracer, func, tuple(args), out)
     return out
 
@@ -695,8 +707,8 @@ def snapshot_fake(val: Tensor, include_real: bool = False) -> Tensor | None:
     # val.detach() will also eventually call fast_detach(),
     # but this saves us a full trip into __torch_dispatch__
     # (snapshot_fake is called a lot)
-    if isinstance(val, FakeTensor):
-        return fast_detach(val.fake_mode, val, include_real)
+    if is_fake_tensor(val):
+        return fast_detach(maybe_get_fake_mode(val), val, include_real)
     else:
         return val.detach()
 
@@ -1182,7 +1194,11 @@ def _coor_enabled() -> bool:
 def _coor_current_accelerator() -> torch.device | None:
     """The current accelerator as an indexed device (e.g. cuda:0), or None if there is no
     accelerator. Used to classify device operands under compile-on-one-rank."""
-    acc = torch.accelerator.current_accelerator()
+    # check_available matters: current_accelerator() reports the accelerator the build
+    # supports, so on a CUDA-enabled build with no visible GPUs it returns cuda and the
+    # index lookup below then raises "No CUDA GPUs are available". Such a machine has no
+    # accelerator for our purposes, and a cpu-only graph must still compile there.
+    acc = torch.accelerator.current_accelerator(check_available=True)
     if acc is None:
         return None
     return torch.device(acc.type, torch.accelerator.current_device_index())
@@ -1200,6 +1216,26 @@ def _coor_current_device() -> torch.device:
     if cur is None:
         raise RuntimeError("compile-on-one-rank requires an accelerator")
     return cur
+
+
+def _coor_device_index_is_current(device: torch.device) -> bool:
+    """Whether ``device``'s index is just "the device this rank happens to be on".
+
+    True only under compile-on-one-rank, and only for the current accelerator. CooR
+    enforces a single-accelerator invariant while tracing -- one accelerator device,
+    though cpu tensors may coexist with it -- so for an accelerator device the index
+    is the compiling rank's and conveys nothing that is true of any other rank.
+    Callers use this to leave the index out of anything that has to be identical
+    across ranks (a guard, a cache key, a traced constant).
+
+    cpu is excluded: it is portable already and its index is not a rank identity.
+    Outside CooR several accelerator devices can legitimately be live at once, so
+    the index is real information and this returns False.
+    """
+    if not _coor_enabled() or device.index is None:
+        return False
+    cur = _coor_current_accelerator()
+    return cur is not None and device.type == cur.type and device.index == cur.index
 
 
 # Registered as an op (not a bare function) so it is a serializable call_function target
@@ -1222,32 +1258,58 @@ def _coor_current_device_fake() -> torch.device:
     return _coor_current_device()
 
 
-def _coor_match_current_accelerator(
-    device: torch.device, cur: torch.device | None
-) -> bool:
-    """Whether ``device`` should be replaced by the current-device node under CooR.
+# An int has no index-less form meaning "this rank's device", so device-index
+# observations stay unknown until the artifact runs. The fake implementation returns
+# an unbacked symbol rather than the compiling rank's index.
+torch.library.define(
+    "coor::current_device_index",
+    "() -> SymInt",
+    tags=torch.Tag.pt2_compliant_tag,
+)
 
-    True for the current accelerator (matching type, index None or the current index, so
-    both bare ``cuda`` and ``cuda:0`` qualify); False for portable ``cpu``/``meta``.
-    Raises for a different accelerator type or a non-current index -- such a device is
-    rank-specific and cannot be made device-agnostic, so the graph is refused rather than
-    left silently non-portable.
+
+@torch.library.impl("coor::current_device_index", "CompositeExplicitAutograd")
+def _coor_current_device_index_impl() -> int:
+    return torch.accelerator.current_device_index()
+
+
+@torch.library.register_fake("coor::current_device_index")
+def _coor_current_device_index_fake() -> torch.SymInt:
+    from torch.fx.experimental.symbolic_shapes import constrain_range
+
+    # Unbacked, but not a size, so not ctx.new_dynamic_size(): that files the
+    # symbol under ShapeEnv.size_like, whose size-oblivious reasoning assumes a
+    # value is never 0 or 1 -- here, that this rank is never cuda:0 or cuda:1.
+    ctx = torch.library.get_ctx()
+    index = ctx._shape_env.create_unbacked_symint()
+    constrain_range(index, min=0)  # an accelerator index is non-negative
+    return index
+
+
+def _coor_check_current_accelerator(
+    device: torch.device, cur: torch.device | None
+) -> None:
+    """Raise if ``device`` is an accelerator other than ``cur`` (``cpu``/``meta`` pass).
+
+    A different accelerator type or a non-current index is rank-specific and cannot be made
+    device-agnostic for compile-on-one-rank, so the graph is refused rather than left
+    silently non-portable. Callers supply ``cur`` from their own per-scope cache of the
+    current accelerator (the tracer while tracing, the wrapper during codegen).
     """
     if device.type in ("cpu", "meta"):
-        return False
+        return
     if cur is None or device.type != cur.type:
         raise RuntimeError(
-            f"device_as_parameter: an op targets {device}, which is not the current "
-            f"accelerator ({cur}); the traced graph cannot be made device-agnostic for "
-            f"compile-on-one-rank."
-        )
-    if device.index is not None and device.index != cur.index:
-        raise RuntimeError(
-            f"device_as_parameter: an op targets {device}, whose index differs from the "
+            f"device_as_parameter: the graph references {device}, which is not the "
             f"current accelerator ({cur}); the traced graph cannot be made "
             f"device-agnostic for compile-on-one-rank."
         )
-    return True
+    if device.index is not None and device.index != cur.index:
+        raise RuntimeError(
+            f"device_as_parameter: the graph references {device}, whose index differs "
+            f"from the current accelerator ({cur}); the traced graph cannot be made "
+            f"device-agnostic for compile-on-one-rank."
+        )
 
 
 def _current_device_edge(tracer: _ProxyTracer, device: torch.device) -> Proxy:
@@ -1271,6 +1333,27 @@ def _current_device_edge(tracer: _ProxyTracer, device: torch.device) -> Proxy:
     edge.node.meta["val"] = _coor_current_device()
     tracer._current_device_node = edge
     return edge
+
+
+def _coor_traced_current_accelerator(tracer: _ProxyTracer) -> torch.device | None:
+    """The current accelerator for this trace, read once (a cudaGetDevice) and cached on the
+    tracer beside the current_device node, so the input check and the per-op device-operand
+    rewrite together pay a single lookup per trace."""
+    if tracer._coor_current_accelerator is None:
+        tracer._coor_current_accelerator = _coor_current_accelerator()
+    return tracer._coor_current_accelerator
+
+
+def _coor_match_current_accelerator(tracer: _ProxyTracer, device: torch.device) -> bool:
+    """Whether ``device`` should be replaced by the current-device node under CooR.
+
+    True for the current accelerator (bare ``cuda`` or its current index); False for portable
+    ``cpu``/``meta``; raises for a rank-specific device.
+    """
+    if device.type in ("cpu", "meta"):
+        return False
+    _coor_check_current_accelerator(device, _coor_traced_current_accelerator(tracer))
+    return True
 
 
 def proxy_call(
@@ -1366,10 +1449,10 @@ def proxy_call(
     if _coor_enabled() and any(
         isinstance(e, torch.device) for e in proxy_flat_args_kwargs
     ):
-        cur = _coor_current_accelerator()
         proxy_flat_args_kwargs = [
             _current_device_edge(tracer, e)
-            if isinstance(e, torch.device) and _coor_match_current_accelerator(e, cur)
+            if isinstance(e, torch.device)
+            and _coor_match_current_accelerator(tracer, e)
             else e
             for e in proxy_flat_args_kwargs
         ]
@@ -1544,6 +1627,7 @@ def _init_proxy_trackers(tracer: PythonKeyTracer | _GraphAppendingTracerEx) -> N
     tracer._opaque_real_obj_proxy = {}
     tracer.sympy_expr_tracker = {}
     tracer._current_device_node = None
+    tracer._coor_current_accelerator = None
     # Stores the torch function that was called during tracing
     tracer.torch_fn_metadata = None
     # Stores the counts for every torch function called. This is to help
@@ -1567,12 +1651,14 @@ class PythonKeyTracer(Tracer):
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     # [device-as-parameter] the single current_device() node for this graph (CooR)
     _current_device_node: Proxy | None
+    # [device-as-parameter] current accelerator for this graph, read once (None = not yet)
+    _coor_current_accelerator: torch.device | None
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
 
-    def __init__(self) -> None:
-        super().__init__(autowrap_modules=())  # type: ignore[arg-type]
+    def __init__(self, *, autowrap_modules: tuple[types.ModuleType, ...] = ()) -> None:
+        super().__init__(autowrap_modules=autowrap_modules)
         _init_proxy_trackers(self)
 
     # In general, we don't want to make modules leaves. In principle, users of
@@ -1724,7 +1810,7 @@ class PythonKeyTracer(Tracer):
             val = v.meta["val"]
             # other subclasses like FunctionalTensor error on `extract_val`
             # "Attempting to use FunctionalTensor on its own." just store FakeTensors for now
-            if isinstance(val, torch.Tensor) and not isinstance(val, FakeTensor):
+            if isinstance(val, torch.Tensor) and not is_fake_tensor(val):
                 return None
             return extract_val(v.meta["val"])
 
@@ -1900,6 +1986,17 @@ def wrap_key(
                     proxy, fx.Proxy
                 ):
                     set_meta(proxy, input_value)
+
+        # [device-as-parameter] Under compile-on-one-rank a graph input on a non-current
+        # accelerator is rank-specific and can't be made device-agnostic (the wrapper
+        # resolves a single current device at runtime, so the whole graph must live on it).
+        # Inductor's pattern-matcher templates are traced with CooR off, so this only sees
+        # real user graphs, not internal fixed-device template traces.
+        if _coor_enabled():
+            cur = _coor_traced_current_accelerator(tracer)
+            for input_value in flat_tensors:
+                if isinstance(input_value, torch.Tensor):
+                    _coor_check_current_accelerator(input_value.device, cur)
 
         if getattr(tracer, "proxy_module_inputs", False):
             tensors = [  # type: ignore[assignment, var-annotated]
@@ -2280,6 +2377,8 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
     # [device-as-parameter] the single current_device() node for this graph (CooR)
     _current_device_node: Proxy | None
+    # [device-as-parameter] current accelerator for this graph, read once (None = not yet)
+    _coor_current_accelerator: torch.device | None
     torch_fn_metadata: OpOverload | None
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
@@ -2419,11 +2518,18 @@ class _SelectiveDecomposeInterpreter(fx.Interpreter):
         )
 
     def run_node(self, n: fx.Node) -> Any:
+        from torch._guards import detect_fake_mode
+        from torch.fx.experimental.symbolic_shapes import rebind_unbacked
+
         if self.should_decompose(n):
             with decompose(self.decomposition_table):
                 result = super().run_node(n)
         else:
             result = super().run_node(n)
+        # Retracing allocates fresh unbacked symbols; tie them back to the
+        # originals, which deferred runtime asserts are keyed on.
+        if (fake_mode := detect_fake_mode()) is not None:
+            rebind_unbacked(fake_mode.shape_env, n, result)
         return result
 
 
@@ -2435,6 +2541,12 @@ def selective_decompose(
     trace_joint_graph: bool,
 ) -> fx.GraphModule:
     """Retrace a joint graph module and selectively apply decomposition."""
+    from torch._guards import detect_fake_mode
+
+    # rebind_unbacked (in _SelectiveDecomposeInterpreter.run_node) requires that
+    # the retrace not hit fake tensor memos from the original trace.
+    if (fake_mode := detect_fake_mode(args)) is not None:
+        fake_mode.epoch += 1
 
     if trace_joint_graph:
         # the arg name, primals and tangents, are important.
@@ -2507,8 +2619,17 @@ class _ModuleStackTracer(PythonKeyTracer):
     See Note [Preserving the nn module stack metadata during export non-strict mode]  # noqa: W605
     """
 
-    def __init__(self, scope_root: GraphModule) -> None:
-        super().__init__()
+    @classmethod
+    def _graph_module_deserialization_tracer(cls, root: Module) -> Tracer:
+        return _ModuleStackTracerForGraphModuleDeserialization(root)
+
+    def __init__(
+        self,
+        scope_root: Module,
+        *,
+        autowrap_modules: tuple[types.ModuleType, ...] = (),
+    ) -> None:
+        super().__init__(autowrap_modules=autowrap_modules)
         self.record_stack_traces = not fx.config.do_not_emit_stack_traces
         self._record_forward_stack_traces_only = True
         self.scope_root = scope_root
@@ -2669,8 +2790,20 @@ class _ModuleStackTracer(PythonKeyTracer):
         global _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT
         _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT.clear()
 
-        for key, val in self.tensor_tracker.items():
-            _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(key)] = val.proxy.node
+        # Only step (2) of the strategy above, and only the consumers gated on
+        # detect_non_strict_fake_tensor_leaks ever read this. Populating it
+        # regardless kept a node per traced tensor in a module-level dict, and
+        # through them the graph, its owning module, and every parameter -- for
+        # the life of the process, long after the trace returned.
+        # Imported here rather than at module level on purpose: importing
+        # torch._export.config runs torch/_export/__init__.py, which does
+        # `from torch.fx.experimental.proxy_tensor import make_fx` -- a cycle
+        # back into this module while it is still initialising.
+        import torch._export.config as _export_config
+
+        if _export_config.detect_non_strict_fake_tensor_leaks:
+            for key, val in self.tensor_tracker.items():
+                _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(key)] = val.proxy.node
 
         # Since we are making _AttrProxy mimic the original
         # submodule, when someone registers a module directly
@@ -2794,6 +2927,43 @@ class _ModuleStackTracer(PythonKeyTracer):
         return node
 
 
+class _ModuleStackTracerForGraphModuleDeserialization(_ModuleStackTracer):
+    """Replay GraphModule code without running export-only tracer behavior."""
+
+    def __init__(self, scope_root: Module) -> None:
+        super().__init__(scope_root, autowrap_modules=(math,))
+        self.record_stack_traces = False
+
+    def trace(
+        self,
+        root: Module | Callable[..., Any],
+        concrete_args: dict[str, object] | None = None,
+    ) -> fx.Graph:
+        return Tracer.trace(self, root, concrete_args)
+
+    def call_module(
+        self,
+        m: Module,
+        forward: Callable[..., Any],
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+    ) -> Any:
+        return Tracer.call_module(self, m, forward, args, kwargs)
+
+    def getattr(
+        self, attr: str, attr_val: object, parameter_proxy_cache: dict[str, Proxy]
+    ) -> object:
+        if isinstance(attr_val, Module) and self.enable_attr_proxy:
+            return self.proxy_type(attr_val, attr)
+        return Tracer.getattr(self, attr, attr_val, parameter_proxy_cache)
+
+    def is_leaf_module(self, m: Module, module_qualified_name: str) -> bool:
+        return True
+
+    def create_node(self, *args: object, **kwargs: object) -> fx.node.Node:
+        return Tracer.create_node(self, *args, **kwargs)  # type: ignore[arg-type]
+
+
 class _MakefxTracer:
     def __init__(
         self,
@@ -2818,6 +2988,14 @@ class _MakefxTracer:
         self.decomposition_table.setdefault(
             torch.ops.aten.sym_numel.default, torch._decomp.decompositions.sym_numel
         )
+        # Only inject the default detach decomp when the caller passed no table
+        # at all. An explicit table, even empty, opts out and preserves exact
+        # detach semantics for pre-autograd export and compile paths.
+        if decomposition_table is None and not pre_dispatch:
+            self.decomposition_table.setdefault(
+                torch.ops.aten.detach.default,
+                torch._decomp.decompositions.nop_decomposition,
+            )
         self.tracing_mode: _TracingMode = tracing_mode
         self._allow_non_fake_inputs: bool = _allow_non_fake_inputs
         self.pre_dispatch: bool = pre_dispatch
@@ -3179,6 +3357,20 @@ class _MakefxTracer:
             stack.enter_context(disable_autocast_cache())
             stack.enter_context(_set_make_fx_tracer(self))
 
+            # Under compile-on-one-rank, redirect legacy in-place c10d
+            # collectives to functional collectives so the ProcessGroup flows
+            # into the graph as a (serializable) op argument instead of being
+            # baked in as a torchbind constant by the in-place op.
+            if (
+                torch.compiler.config.compile_on_one_rank
+                and torch.distributed.is_available()
+            ):
+                from torch.distributed._functional_collectives import (
+                    _LegacyToFunctionalCollectiveMode,
+                )
+
+                stack.enter_context(_LegacyToFunctionalCollectiveMode())
+
             if self.fx_tracer is None:
                 raise AssertionError("fx_tracer should not be None")
             try:
@@ -3306,6 +3498,11 @@ def make_fx(
     were executed during the course of execution.
 
     If record_stack_traces is True, the stack trace will be preserved on node.meta["stack_trace"]
+
+    By default, post-dispatch traces without an explicit decomposition_table
+    rewrite detach to alias. Re-differentiating the returned graph does not
+    preserve those detach calls as autograd gradient cuts; pass an explicit
+    decomposition_table or use pre_dispatch=True if exact detach nodes are needed.
 
     ``tracing_mode``:
         - ``"real"``: no fakification, traces with real tensors.

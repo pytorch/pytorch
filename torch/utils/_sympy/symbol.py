@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This file contains canonical definitions for our symbol naming conventions,
 across torch.fx.experimental.symbolic_shapes and torch._inductor.  The
@@ -80,7 +79,7 @@ prefix_str = {
 }
 
 
-def make_symbol(prefix: SymT, idx: int, **kwargs) -> sympy.Symbol:
+def make_symbol(prefix: SymT, idx: int, **kwargs: bool | None) -> sympy.Symbol:
     # TODO: maybe put the assumptions here directly
     return sympy.Symbol(f"{prefix_str[prefix]}{idx}", **kwargs)
 

@@ -43,7 +43,7 @@ variable_list CppFunctionTensorPreHook::operator()(
     value = std::move(res);
   }
   variable_list results(values);
-  results[value_idx_] = value;
+  results[value_idx_] = std::move(value);
   return results;
 }
 

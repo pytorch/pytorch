@@ -74,10 +74,6 @@ static void upsample_out_template(const Tensor& input,
   } else {
     native::upsample_2d_common_check(input.sizes(), output_size);
   }
-  Tensor out;
-  if (needsGather(output)) {
-    out = at::empty_like(output, MemoryFormat::Contiguous);
-  }
 
   bool centerResults = false;
   MPSGraphResizeMode resizeMode = MPSGraphResizeNearest;
@@ -219,19 +215,14 @@ static void upsample_out_template(const Tensor& input,
     [sizeNDArray writeBytes:(int32_t[]){(int32_t)output_height, (int32_t)output_width} strideBytes:nil];
     MPSGraphTensorData* sizeTensorData = [[[MPSGraphTensorData alloc] initWithMPSNDArray:sizeNDArray] autorelease];
 
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
-    Placeholder outputPlaceholder =
-        Placeholder(cachedGraph->outputTensor, out.has_storage() ? out : output, nil, false);
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
 
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
       inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
       cachedGraph->outputSizeTensor : sizeTensorData,
     };
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
-
-    if (out.has_storage()) {
-      output.copy_(out);
-    }
   }
 }
 
@@ -292,6 +283,11 @@ static void upsample_kernel_backward_out_template(const Tensor& grad_input,
   if (grad_output.numel() == 0) {
     return;
   }
+
+  // See Note [Writing Nondeterministic Operations]
+  // Nondeterministic due to atomic_add
+  at::globalContext().alertNotDeterministic(fmt::format("upsample_{}_backward", name));
+
   UpsampleParams<N> params(grad_input, grad_output, align_corners, scales);
   dispatch_upsample(fmt::format("upsample_{}_backward_{}", name, scalarToMetalTypeString(grad_input)),
                     grad_input,

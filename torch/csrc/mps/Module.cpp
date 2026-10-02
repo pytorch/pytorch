@@ -11,11 +11,13 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <memory>
+#include <vector>
 
 #ifdef USE_MPS
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/MetalShaderLibrary.h>
+#include <torch/csrc/mps/Stream.h>
 #endif
 
 namespace torch::mps {
@@ -228,6 +230,42 @@ static PyObject* MPSModule_elapsedTimeOfEvents(
   END_HANDLE_TH_ERRORS
 }
 
+#ifdef USE_MPS
+static PyObject* MPSModule_setStream(PyObject* _unused, PyObject* stream) {
+  HANDLE_TH_ERRORS
+  at::mps::MPSStream* mps_stream = nullptr;
+  if (stream != Py_None) {
+    TORCH_CHECK(
+        THPMPSStream_Check(stream), "invalid stream argument to setStream");
+    mps_stream = reinterpret_cast<THPMPSStream*>(stream)->mps_stream;
+  }
+  at::mps::setCurrentMPSStream(mps_stream);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* MPSModule_getCurrentStream(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto* type = reinterpret_cast<PyTypeObject*>(THPMPSStreamClass);
+  THPObjectPtr ptr(type->tp_alloc(type, 0));
+  if (!ptr) {
+    return nullptr;
+  }
+  at::mps::MPSStream* stream = at::mps::getCurrentMPSStream();
+  c10::Stream unwrapped = stream->unwrap();
+  THPMPSStream* self = reinterpret_cast<THPMPSStream*>(ptr.get());
+  self->stream_id = static_cast<int64_t>(unwrapped.id());
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+  self->device_index = static_cast<int64_t>(unwrapped.device_index());
+  self->device_type = static_cast<int64_t>(unwrapped.device_type());
+  self->mps_stream = stream;
+  return ptr.release();
+  END_HANDLE_TH_ERRORS
+}
+#endif /* USE_MPS */
+
 // NOLINTNEXTLINE(*-c-arrays, *-global-variables)
 static struct PyMethodDef _MPSModule_methods[] = {
     {"_mps_deviceSynchronize",
@@ -277,6 +315,10 @@ static struct PyMethodDef _MPSModule_methods[] = {
      MPSModule_elapsedTimeOfEvents,
      METH_VARARGS,
      nullptr},
+#ifdef USE_MPS
+    {"_mps_setStream", MPSModule_setStream, METH_O, nullptr},
+    {"_mps_getCurrentStream", MPSModule_getCurrentStream, METH_NOARGS, nullptr},
+#endif /* USE_MPS */
     {nullptr}};
 
 PyMethodDef* python_functions() {
@@ -545,7 +587,12 @@ void initModule(PyObject* module) {
   m.def("_mps_startCapture", [](const std::string& fileName) {
     at::mps::getMPSProfiler().startCapture(fileName);
   });
-  m.def("_mps_stopCapture", []() { at::mps::getMPSProfiler().stopCapture(); });
+  m.def("_mps_stopCapture", []() {
+    // See MPSModule_deviceSynchronize: stopCapture drains the stream, so the
+    // GIL must be released while waiting on GPU work
+    pybind11::gil_scoped_release no_gil;
+    at::mps::getMPSProfiler().stopCapture();
+  });
   m.def("_mps_get_name", []() {
     return at::mps::MPSDevice::getInstance()->getName();
   });
@@ -563,6 +610,19 @@ void initModule(PyObject* module) {
     c10::Storage host_alias = allocator->getHostAliasStorage(mps_storage);
     return py::reinterpret_steal<py::object>(
         THPStorage_Wrap(std::move(host_alias)));
+  });
+  // This function is added just to test that `MPSAllocator::waitForEvents`
+  // properly waits for every recorded stream
+  m.def("_mps_allocator_waitForEvents", [](const std::vector<int64_t>& ptrs) {
+    auto* allocator = at::mps::getIMPSAllocator();
+    TORCH_INTERNAL_ASSERT(allocator, "MPS allocator is not available");
+    std::vector<const void*> buffers;
+    buffers.reserve(ptrs.size());
+    for (const auto ptr : ptrs) {
+      buffers.push_back(reinterpret_cast<const void*>(ptr));
+    }
+    pybind11::gil_scoped_release no_gil;
+    return allocator->waitForEvents(buffers);
   });
 }
 #endif /* USE_MPS */

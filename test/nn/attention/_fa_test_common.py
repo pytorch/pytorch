@@ -119,7 +119,7 @@ def flash_vs_math(test_case: TestCase, q, k, v, is_causal: bool = False, rtol: i
     test_case.assertLessEqual(
         flash_error,
         rtol * math_low_error + fwd_atol,
-        f"Flash error {flash_error:.2e} exceeds {rtol}x Math-low error {math_low_error:.2e} + {fwd_atol:.2e}",
+        lambda msg: f"{msg}\nFlash error {flash_error:.2e} exceeds {rtol}x Math-low error {math_low_error:.2e} + {fwd_atol:.2e}",
     )
 
     return out_flash, out_math_low, out_math_fp32
@@ -203,7 +203,7 @@ class FlashAttentionTestMixin:
             self.assertLessEqual(
                 dq_flash_error,
                 rtol * dq_math_low_error + dq_atol,
-                f"dQ: Flash error {dq_flash_error:.2e} exceeds {rtol}x Math-low error {dq_math_low_error:.2e} + {dq_atol:.2e}",
+                lambda msg: f"{msg}\ndQ: Flash error {dq_flash_error:.2e} exceeds {rtol}x Math-low error {dq_math_low_error:.2e} + {dq_atol:.2e}",
             )
 
             dk_math_low_error = (dk_math_low - dk_math_fp32).abs().max().item()
@@ -211,7 +211,7 @@ class FlashAttentionTestMixin:
             self.assertLessEqual(
                 dk_flash_error,
                 rtol * dk_math_low_error + dk_atol,
-                f"dK: Flash error {dk_flash_error:.2e} exceeds {rtol}x Math-low error {dk_math_low_error:.2e} + {dk_atol:.2e}",
+                lambda msg: f"{msg}\ndK: Flash error {dk_flash_error:.2e} exceeds {rtol}x Math-low error {dk_math_low_error:.2e} + {dk_atol:.2e}",
             )
 
             dv_math_low_error = (dv_math_low - dv_math_fp32).abs().max().item()
@@ -219,7 +219,7 @@ class FlashAttentionTestMixin:
             self.assertLessEqual(
                 dv_flash_error,
                 rtol * (dv_math_low_error + dv_atol),
-                f"dV: Flash error {dv_flash_error:.2e} exceeds {rtol}x (Math-low error {dv_math_low_error:.2e} + {dv_atol:.2e})",
+                lambda msg: f"{msg}\ndV: Flash error {dv_flash_error:.2e} exceeds {rtol}x (Math-low error {dv_math_low_error:.2e} + {dv_atol:.2e})",
             )
 
     def _test_multiple_activate_impl(self):
@@ -331,7 +331,7 @@ class FlashAttentionTestMixin:
         self.assertLessEqual(
             compiled_error,
             rtol * math_low_error + fwd_atol,
-            f"Compiled error {compiled_error:.2e} exceeds "
+            lambda msg: f"{msg}\nCompiled error {compiled_error:.2e} exceeds "
             f"{rtol}x Math-low error {math_low_error:.2e} + {fwd_atol:.2e}",
         )
 
@@ -421,7 +421,7 @@ class FlashAttentionTestMixin:
             self.assertLessEqual(
                 compiled_error,
                 rtol * math_low_error + atol,
-                f"{name}: Compiled error {compiled_error:.2e} exceeds "
+                lambda msg: f"{msg}\n{name}: Compiled error {compiled_error:.2e} exceeds "
                 f"{rtol}x Math-low error {math_low_error:.2e} + {atol:.2e}",
             )
 
@@ -452,7 +452,7 @@ class FlashAttentionTestMixin:
                 out = F.scaled_dot_product_attention(q, k, v)
             self.assertTrue(
                 out.permute(permute_order).is_contiguous(),
-                f"Output layout mismatch for permute_order={permute_order}, "
+                lambda msg: f"{msg}\nOutput layout mismatch for permute_order={permute_order}, "
                 f"q.stride()={q.stride()}, out.stride()={out.stride()}",
             )
 
@@ -484,7 +484,7 @@ class FlashAttentionTestMixin:
 
                 self.assertTrue(
                     prof_result["found"],
-                    f"{self.impl_name} kernel not found in forward/backward. "
+                    lambda msg: f"{msg}\n{self.impl_name} kernel not found in forward/backward. "
                     f"Expected pattern: {kernel_pattern}. "
                     f"Available kernels: {prof_result['kernel_names']}",
                 )
@@ -506,7 +506,7 @@ class FlashAttentionTestMixin:
 
                 self.assertFalse(
                     prof_result["found"],
-                    f"{self.impl_name} kernel unexpectedly found with MATH backend. "
+                    lambda msg: f"{msg}\n{self.impl_name} kernel unexpectedly found with MATH backend. "
                     f"Kernels: {prof_result['kernel_names']}",
                 )
         finally:

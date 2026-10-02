@@ -94,11 +94,64 @@ def pytest_addoption(parser: Parser) -> None:
         "Emit XML for schema: one of legacy|xunit1|xunit2",
         default="xunit2",
     )
+    parser.addoption(
+        "--hw-classification",
+        nargs="+",
+        default=None,
+        metavar="SCOPE",
+        dest="hw_classification",
+        type=str.upper,
+        help="filter tests by hardware classification categories (e.g., GENERIC ACCELERATOR CPU CUDA MPS XPU)",
+    )
+    parser.addoption(
+        "--multigpu-min-gpus",
+        action="store",
+        type=int,
+        default=0,
+        dest="multigpu_min_gpus",
+        metavar="N",
+        help="Among the auto-applied `multigpu` tests (see pytest_itemcollected), "
+        "keep only those declaring an accelerator requirement of at least N GPUs "
+        "via skip_if_lt_x_gpu/requires_world_size; deselect the rest. "
+        "0 (default) disables the filter, so runs "
+        "without it are unaffected. Layered on top of `-m multigpu` so a "
+        "larger-runner config can run just the >2-GPU distributed tests.",
+    )
     shard_addoptions(parser)
+
+
+class HardwareClassificationPytestPlugin:
+    """Pytest plugin to filter collected tests by hw_classification."""
+
+    def __init__(self, hw_classification):
+        self.hw_classification = self._resolve_hw_classification(hw_classification)
+
+    @staticmethod
+    def _resolve_hw_classification(hw_classification):
+        if hw_classification is None:
+            return None
+        from torch.testing._internal.common_utils import HardwareClassification
+
+        return {HardwareClassification[name] for name in hw_classification}
+
+    def pytest_collection_modifyitems(self, items):
+        if self.hw_classification is None:
+            return
+        import torch.testing._internal.common_utils as _cu
+
+        filtered = []
+        _cu.filter_by_hw_classification(
+            items,
+            self.hw_classification,
+            get_class=lambda item: getattr(item, "cls", None),
+            on_match=filtered.append,
+        )
+        items[:] = filtered
 
 
 def pytest_configure(config: Config) -> None:
     parse_cmd_line_args()
+
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
     if xmlpath and not hasattr(config, "workerinput"):
@@ -121,6 +174,16 @@ def pytest_configure(config: Config) -> None:
         config.pluginmanager.register(StepcurrentPlugin(config), "stepcurrentplugin")
     if config.getoption("num_shards"):
         config.pluginmanager.register(PytestShardPlugin(config), "pytestshardplugin")
+    if config.getoption("hw_classification"):
+        config.pluginmanager.register(
+            HardwareClassificationPytestPlugin(config.getoption("hw_classification")),
+            "hw_classification_plugin",
+        )
+    if config.getoption("multigpu_min_gpus"):
+        config.pluginmanager.register(
+            MultiGpuMinFilterPlugin(config.getoption("multigpu_min_gpus")),
+            "multigpu_min_filter_plugin",
+        )
 
 
 def pytest_unconfigure(config: Config) -> None:
@@ -337,6 +400,40 @@ def _spawns_multiple_processes(
     return issubclass(cls, (MultiProcessTestCase, MultiProcContinuousTest))
 
 
+def _safe_obj(item: Any) -> object | None:
+    # item.obj imports the test module, so any exception is possible here.
+    try:
+        return item.obj
+    except Exception:
+        return None
+
+
+def _decorator_gpu_requirement(func: object | None) -> int:
+    """Highest accelerator requirement stamped on ``func`` (or anything in its
+    ``__wrapped__`` chain) by ``skip_if_lt_x_gpu`` (``_min_gpus_required``) or
+    ``requires_world_size`` (``_required_world_size``). 0 when unstamped."""
+    best = 0
+    while func is not None:
+        for attr in ("_min_gpus_required", "_required_world_size"):
+            try:
+                best = max(best, int(getattr(func, attr)))  # type: ignore[arg-type]
+            except (AttributeError, TypeError, ValueError):
+                pass
+        func = getattr(func, "__wrapped__", None)
+    return best
+
+
+def _resolve_gpu_requirement(item: Any) -> int:
+    """Accelerators a distributed test declares it needs, read at collection from
+    its decorator stamps (see _decorator_gpu_requirement). 0 when undeclared.
+
+    Class world_size is not consulted. On a 4-GPU runner a literal 4 is
+    indistinguishable from capacity-scaled NUM_DEVICES/DEVICE_COUNT values that
+    still run on 2 GPUs.
+    """
+    return _decorator_gpu_requirement(_safe_obj(item))
+
+
 def pytest_itemcollected(item: Any) -> None:
     """
     Auto-apply the `multigpu` marker based on the resolved test class. Runs
@@ -346,6 +443,42 @@ def pytest_itemcollected(item: Any) -> None:
     """
     if _spawns_multiple_processes(getattr(item, "cls", None)):
         item.add_marker("multigpu")
+
+
+class MultiGpuMinFilterPlugin:
+    """Deselect auto-`multigpu`-marked tests whose resolved accelerator
+    requirement is below ``--multigpu-min-gpus`` (see _resolve_gpu_requirement),
+    so a larger-runner config can run just the >N-GPU distributed tests on top of
+    the existing `-m multigpu` selection. Only `multigpu`-marked items are
+    considered, and the plugin is registered only when the option is set, so runs
+    without it (e.g. every CUDA distributed job) are untouched."""
+
+    def __init__(self, min_gpus: int) -> None:
+        self.min_gpus = min_gpus
+
+    def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
+        selected, deselected = [], []
+        for item in items:
+            is_multigpu = any(m.name == "multigpu" for m in item.iter_markers())
+            if is_multigpu and _resolve_gpu_requirement(item) < self.min_gpus:
+                deselected.append(item)
+            else:
+                selected.append(item)
+        if deselected:
+            config.hook.pytest_deselected(items=deselected)
+            items[:] = selected
+
+    def pytest_collection_finish(self, session: pytest.Session) -> None:
+        selected = len(session.items)
+        if session.config.getoption("verbose") >= 0:
+            print(
+                f"multigpu-min-gpus={self.min_gpus}: final selected {selected}",
+                flush=True,
+            )
+        count_file = os.getenv("PYTORCH_MULTIGPU_SELECTION_COUNT_FILE")
+        if count_file:
+            with open(count_file, "a") as fp:
+                fp.write(f"{selected}\n")
 
 
 class StepcurrentPlugin:

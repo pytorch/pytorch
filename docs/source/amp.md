@@ -527,7 +527,6 @@ please file an issue. `float16` shares the lists of `bfloat16`.
 `fake_quantize_per_tensor_affine`,
 `geqrf`,
 `_lu_with_info`,
-`qr`,
 `svd`,
 `triangular_solve`,
 `fractional_max_pool2d`,
