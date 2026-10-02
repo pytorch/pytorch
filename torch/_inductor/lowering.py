@@ -2929,7 +2929,12 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
             isinstance(fill_value, torch.fx.Node)
             and fill_value.target is aten._local_scalar_dense.default
         ):
-            source = fill_value.args[0].meta.get("val")
+            source_node = fill_value.args[0]
+            source = (
+                source_node.meta.get("val")
+                if isinstance(source_node, torch.fx.Node)
+                else None
+            )
             if (
                 isinstance(source, torch.Tensor)
                 and source.device.type == "cpu"
@@ -4499,18 +4504,21 @@ def _full(fill_value, device, dtype, size):
         # Load the scalar tensor in the full kernel instead; integer destinations
         # that can overflow still use the wrapper's checked conversion.
         for buffer in V.graph.buffers:
+            if not isinstance(buffer, ir.DynamicScalar):
+                continue
+            source = buffer.inputs[0]
             if (
-                isinstance(buffer, ir.DynamicScalar)
+                isinstance(source, ir.IRNode)
                 and buffer.sym == value
                 and not buffer.keypath
                 and all(
                     V.graph.sizevars.is_size_one_or_false(dim)
-                    for dim in buffer.inputs[0].get_size()
+                    for dim in source.get_size()
                 )
-                and buffer.inputs[0].get_dtype() == torch.uint64
-                and buffer.inputs[0].get_device() == device
+                and source.get_dtype() == torch.uint64
+                and source.get_device() == device
             ):
-                value = ir.SqueezeView.create(buffer.inputs[0])
+                value = ir.SqueezeView.create(source)
                 unsigned_half_singleton = dtype == torch.float16
                 break
 
