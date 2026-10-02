@@ -6905,6 +6905,46 @@ class TestSDPAGridOverflow(NNTestCase):
             self.assertEqual(grad_cuda.stride(), grad_meta.stride())
 
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+                     "Requires mem-efficient attention support")
+    @onlyCUDA
+    @parametrize("heads", [(65538, 32769), (131072, 2), (196608, 1)],
+                 name_fn=lambda heads: f"q{heads[0]}_kv{heads[1]}")
+    @parametrize("dtype", [torch.float32, torch.bfloat16])
+    def test_large_num_heads_gqa(self, device, heads, dtype):
+        """Head-splitting should pair each chunk of query heads with the key
+        and value heads they map to under grouped query attention.
+
+        The cases cover a group size of two, where chunks must hold whole
+        groups, a group of 65536 query heads, which spans two chunks that share
+        one key and value head, and multi-query attention.
+        """
+        num_heads, num_heads_kv = heads
+        batch, seq_len, head_dim = 1, 4, 8
+        q = torch.randn(batch, num_heads, seq_len, head_dim,
+                        device=device, dtype=dtype)
+        k = torch.randn(batch, num_heads_kv, seq_len, head_dim,
+                        device=device, dtype=dtype)
+        v = torch.randn_like(k)
+        grad_out = torch.randn_like(q)
+
+        def run(backend, ref_dtype=None):
+            q_, k_, v_ = (t.to(ref_dtype or dtype).requires_grad_(True)
+                          for t in (q, k, v))
+            with sdpa_kernel(backend):
+                out = scaled_dot_product_attention(q_, k_, v_, enable_gqa=True)
+            out.backward(grad_out.to(out.dtype))
+            return out, q_.grad, k_.grad, v_.grad
+
+        # Each key and value head reduces over up to 196608 query heads, so
+        # compare against the error MATH itself incurs in the test dtype
+        # rather than a fixed tolerance.
+        golden = run(SDPBackend.MATH, torch.float64)
+        low_precision = run(SDPBackend.MATH)
+        test = run(SDPBackend.EFFICIENT_ATTENTION)
+        check_out_and_grad(*zip(golden, low_precision, test))
+
+
 instantiate_device_type_tests(TestSDPAGridOverflow, globals(), only_for="cuda")
 
 

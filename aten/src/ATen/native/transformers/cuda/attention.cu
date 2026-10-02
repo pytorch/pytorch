@@ -1410,6 +1410,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     if (h <= MAX_BATCH_SIZE) {
       return process_chunk(q, k, v, bias);
     }
+    int64_t h_kv = k.size(1);
+    // With grouped query attention key and value hold fewer heads than
+    // query, so each chunk pairs its query heads with the key and value
+    // heads they map to.
+    TORCH_CHECK(
+        h_kv > 0 && h % h_kv == 0,
+        "Number of heads in key/value must divide number of heads in query");
+    int64_t group = h / h_kv;
 
     Tensor final_attn, final_lse;
     // Only the first chunk's seed/offset are kept; this is safe because
@@ -1418,12 +1426,21 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
     Tensor seed, offset;
     bool first = true;
 
-    for (int64_t h_start = 0; h_start < h; h_start += MAX_BATCH_SIZE) {
-      int64_t h_end = std::min(h_start + MAX_BATCH_SIZE, h);
+    for (int64_t h_start = 0, h_end = 0; h_start < h; h_start = h_end) {
+      // Under grouped query attention each key and value head serves
+      // `group` query heads. When a group fits in a chunk, chunks hold whole
+      // groups so every chunk keeps the same ratio; otherwise a chunk stays
+      // inside one group and maps to a single key and value head.
+      h_end = group <= MAX_BATCH_SIZE
+          ? std::min(h_start + (MAX_BATCH_SIZE / group) * group, h)
+          : std::min({h_start + MAX_BATCH_SIZE,
+                      (h_start / group + 1) * group, h});
+      int64_t kv_start = h_start / group;
+      int64_t kv_end = (h_end + group - 1) / group;
 
       Tensor q_h = q.slice(1, h_start, h_end);
-      Tensor k_h = k.slice(1, h_start, h_end);
-      Tensor v_h = v.slice(1, h_start, h_end);
+      Tensor k_h = k.slice(1, kv_start, kv_end);
+      Tensor v_h = v.slice(1, kv_start, kv_end);
       std::optional<Tensor> bias_h;
       if (bias.has_value()) {
         bias_h = bias.value().slice(1, h_start, h_end);

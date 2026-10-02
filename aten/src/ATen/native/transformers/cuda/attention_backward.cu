@@ -1176,6 +1176,14 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
                            value_chunk, attn_bias_chunk, out_chunk,
                            logsumexp_chunk);
     }
+    int64_t h_kv = key_chunk.size(2);
+    // With grouped query attention key and value hold fewer heads than
+    // query, so each chunk pairs its query heads with the key and value
+    // heads they map to.
+    TORCH_CHECK(
+        h_kv > 0 && h % h_kv == 0,
+        "Number of heads in key/value must divide number of heads in query");
+    int64_t group = h / h_kv;
 
     // Allocate full-size outputs with logical shape (B,H,M,K). The non
     // chunked path returns transposed views of (B,M,H,K) packed buffers and
@@ -1191,12 +1199,15 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
         ? at::empty({B_chunk, M_q, h, K_q}, query_chunk.options())
               .transpose(1, 2)
         : Tensor{};
+    // Key and value gradients have h_kv heads. When a group spans several
+    // chunks, each chunk contributes to the same key and value heads, so
+    // these are zero initialized and accumulated rather than copied.
     Tensor final_gk = grad_input_mask[1]
-        ? at::empty({B_chunk, M_k, h, K_q}, key_chunk.options())
+        ? at::zeros({B_chunk, M_k, h_kv, K_q}, key_chunk.options())
               .transpose(1, 2)
         : Tensor{};
     Tensor final_gv = grad_input_mask[2]
-        ? at::empty({B_chunk, M_k, h, K_v}, value_chunk.options())
+        ? at::zeros({B_chunk, M_k, h_kv, K_v}, value_chunk.options())
               .transpose(1, 2)
         : Tensor{};
     Tensor final_gb;
@@ -1210,14 +1221,23 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
                            attn_bias_chunk.value().options());
     }
 
-    for (int64_t h_start = 0; h_start < h; h_start += MAX_BATCH_SIZE) {
-      int64_t h_end = std::min(h_start + MAX_BATCH_SIZE, h);
+    for (int64_t h_start = 0, h_end = 0; h_start < h; h_start = h_end) {
+      // Under grouped query attention each key and value head serves
+      // `group` query heads. When a group fits in a chunk, chunks hold whole
+      // groups so every chunk keeps the same ratio; otherwise a chunk stays
+      // inside one group and maps to a single key and value head.
+      h_end = group <= MAX_BATCH_SIZE
+          ? std::min(h_start + (MAX_BATCH_SIZE / group) * group, h)
+          : std::min({h_start + MAX_BATCH_SIZE,
+                      (h_start / group + 1) * group, h});
+      int64_t kv_start = h_start / group;
+      int64_t kv_end = (h_end + group - 1) / group;
 
       // Slice transposed tensors on dim 2 (heads)
       Tensor go_h = grad_out_chunk.slice(2, h_start, h_end);
       Tensor q_h = query_chunk.slice(2, h_start, h_end);
-      Tensor k_h = key_chunk.slice(2, h_start, h_end);
-      Tensor v_h = value_chunk.slice(2, h_start, h_end);
+      Tensor k_h = key_chunk.slice(2, kv_start, kv_end);
+      Tensor v_h = value_chunk.slice(2, kv_start, kv_end);
       // kernel_backward.h computes o_strideM() from num_heads and head_dim
       // rather than reading the tensor's stride, so the head slice of out,
       // whose M stride still reflects the full head count, must be repacked
@@ -1244,10 +1264,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
         final_gq.slice(1, h_start, h_end).copy_(gq);
       }
       if (grad_input_mask[1] && gk.defined()) {
-        final_gk.slice(1, h_start, h_end).copy_(gk);
+        final_gk.slice(1, kv_start, kv_end).add_(gk);
       }
       if (grad_input_mask[2] && gv.defined()) {
-        final_gv.slice(1, h_start, h_end).copy_(gv);
+        final_gv.slice(1, kv_start, kv_end).add_(gv);
       }
       if (grad_input_mask[3] && gb.defined()) {
         final_gb.slice(1, h_start, h_end).copy_(gb);
