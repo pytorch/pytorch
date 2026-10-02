@@ -514,11 +514,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allreduce_coalesced(
     works.push_back(all_reduce(
         tensor, opts.reduceOp, opts.asyncOp, operationTimeout(opts.timeout)));
   }
-  auto work = coalesceWorks(std::move(works), tensors);
-  if (coalescing_batch_) {
-    coalesced_work_ = work;
-  }
-  return work;
+  return coalesceWorks(std::move(works), tensors);
 }
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reduce(
@@ -609,11 +605,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::allgather_coalesced(
         outputTensorLists.at(i).begin(),
         outputTensorLists.at(i).end());
   }
-  auto work = coalesceWorks(std::move(works), std::move(outputs));
-  if (coalescing_batch_) {
-    coalesced_work_ = work;
-  }
-  return work;
+  return coalesceWorks(std::move(works), std::move(outputs));
 }
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
@@ -634,11 +626,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
         opts.asyncOp,
         operationTimeout(opts.timeout)));
   }
-  auto work = coalesceWorks(std::move(works), outputs);
-  if (coalescing_batch_) {
-    coalesced_work_ = work;
-  }
-  return work;
+  return coalesceWorks(std::move(works), outputs);
 }
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_allgather_base(
@@ -801,11 +789,7 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::
         opts.asyncOp,
         operationTimeout(opts.timeout)));
   }
-  auto work = coalesceWorks(std::move(works), outputs);
-  if (coalescing_batch_) {
-    coalesced_work_ = work;
-  }
-  return work;
+  return coalesceWorks(std::move(works), outputs);
 }
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::_reduce_scatter_base(
@@ -914,7 +898,7 @@ void ProcessGroupNCCL::startCoalescing() {
   TORCH_CHECK(
       !coalescing_batch_.has_value(),
       "startCoalescing called while a batch is already active");
-  coalesced_work_.reset();
+  coalescing_works_.clear();
   coalescing_batch_.emplace();
 }
 
@@ -924,15 +908,21 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::endCoalescing() {
       "endCoalescing called without a matching startCoalescing");
   auto batch = std::move(*coalescing_batch_);
   coalescing_batch_.reset();
-  if (batch.ops.empty()) {
-    if (coalesced_work_) {
-      auto work = std::move(coalesced_work_);
-      coalesced_work_.reset();
-      return work;
-    }
+  auto works = std::move(coalescing_works_);
+  coalescing_works_.clear();
+  if (!batch.ops.empty()) {
+    works.push_back(
+        batch_op_issue(batch.ops, /*async_op=*/true, options_c10d_->timeout));
+  }
+  if (works.empty()) {
     return c10::make_intrusive<CompletedWork>();
   }
-  return batch_op_issue(batch.ops, /*async_op=*/true, options_c10d_->timeout);
+  // All tracked works ran in order on internal_stream_, so the last one
+  // completes after every op in the window.
+  auto work = std::move(works.back());
+  works.pop_back();
+  work->setChildren(std::move(works));
+  return work;
 }
 
 } // namespace c10d::nccl2

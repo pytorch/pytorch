@@ -781,6 +781,50 @@ class AbstractCollectivesTest(C10dBackendTest):
                 expected_value = rank_sum + i * self.world_size
                 self.assertEqual(output, torch.full_like(output, expected_value))
 
+    def _coalescing_window(self, p2p, signal_peer=None):
+        pg = dist.distributed_c10d._get_default_group()
+        peer = 1 - self.rank
+        n = 4 * self.world_size
+        a2a_in = torch.full((n,), float(self.rank), device=self.device)
+        a2a_out = torch.empty_like(a2a_in)
+        reduced = torch.full((4,), float(self.rank + 1), device=self.device)
+        sent = torch.full((4,), float(self.rank), device=self.device)
+        received = torch.empty_like(sent)
+        pg._start_coalescing(self.device)
+        dist.all_to_all_single(a2a_out, a2a_in, async_op=True)
+        dist.all_reduce(reduced, async_op=True)
+        if p2p:
+            dist.isend(sent, peer)
+            dist.irecv(received, peer)
+        work = pg._end_coalescing(self.device)
+        if signal_peer is not None:
+            # The peer has not issued anything yet, so the window cannot be done.
+            completed = work.is_completed()
+            signal_peer()
+            self.assertFalse(completed)
+        work.wait()
+
+        ranks = torch.arange(self.world_size, device=self.device)
+        self.assertEqual(a2a_out, ranks.repeat_interleave(4).float())
+        self.assertEqual(reduced, torch.full_like(reduced, 3.0))
+        if p2p:
+            self.assertEqual(received, torch.full_like(received, float(peer)))
+
+    def test_coalescing_window_covers_all_ops(self):
+        if not self.supports_coalescing:
+            self.skipTest(f"{self.backend_name} does not support coalescing")
+        self._init_pg()
+        store = dist.distributed_c10d._get_default_store()
+        for p2p in (False, True):
+            # Warm up so NCCL connections exist and rank 0 can issue alone.
+            self._coalescing_window(p2p)
+            key = f"rank0_issued_{p2p}"
+            if self.rank == 1:
+                store.wait([key])
+                self._coalescing_window(p2p)
+            else:
+                self._coalescing_window(p2p, lambda: store.set(key, "1"))
+
     def test_float8_transport(self):
         if not self.float8_dtypes:
             self.skipTest(f"{self.backend_name} does not support Float8")
