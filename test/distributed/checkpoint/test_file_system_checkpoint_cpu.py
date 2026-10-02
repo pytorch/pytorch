@@ -23,6 +23,7 @@ from torch.distributed.checkpoint import (
     save_state_dict,
 )
 from torch.distributed.checkpoint._extension import ZStandard
+from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
 from torch.testing._internal.common_utils import (
@@ -143,7 +144,7 @@ class TestDistributedStateDictSaveLoad(TestCase):
                 assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
             # Load from file without any resharding
-            fs_reader = FileSystemReader(path=path)
+            fs_reader = FileSystemReader(path=path, thread_count=thread_count)
             load_state_dict(
                 state_dict=state_dict_to_load_to,
                 storage_reader=fs_reader,
@@ -151,6 +152,56 @@ class TestDistributedStateDictSaveLoad(TestCase):
             )
 
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+
+class TestFileSystemReaderParallelRead(TestCase):
+    def test_planner_with_custom_commit_tensor(self) -> None:
+        class StashPlanner(DefaultLoadPlanner):
+            # Like Megatron's MCoreLoadPlanner: commit pairs with the last resolve.
+            def resolve_tensor(self, read_item):
+                self.last = (read_item, super().resolve_tensor(read_item))
+                return torch.empty_like(self.last[1])
+
+            def commit_tensor(self, read_item, tensor):
+                if self.last[0] is read_item:
+                    self.last[1].copy_(tensor)
+
+        with tempfile.TemporaryDirectory() as path:
+            state_dict = {f"w{i}": torch.randn(8, 8) for i in range(16)}
+            save(state_dict, checkpoint_id=path, no_dist=True)
+            loaded = {key: torch.zeros_like(value) for key, value in state_dict.items()}
+            load(
+                loaded,
+                storage_reader=FileSystemReader(path, thread_count=4),
+                planner=StashPlanner(),
+                no_dist=True,
+            )
+            self.assertEqual(loaded, state_dict)
+
+    def test_load_with_dtype_cast_under_inference_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as path:
+            state_dict = {"w": torch.randn(8, 8)}
+            save(state_dict, checkpoint_id=path, no_dist=True)
+            with torch.inference_mode():
+                loaded = {"w": torch.zeros(8, 8, dtype=torch.float64)}
+                load(
+                    loaded,
+                    storage_reader=FileSystemReader(path, thread_count=2),
+                    no_dist=True,
+                )
+            self.assertEqual(loaded["w"], state_dict["w"].double())
+
+    def test_load_conj_tensor(self) -> None:
+        with tempfile.TemporaryDirectory() as path:
+            state_dict = {"c": torch.randn(8, 8, dtype=torch.complex64).conj()}
+            save(state_dict, checkpoint_id=path, no_dist=True)
+            loaded = {"c": torch.zeros(8, 8, dtype=torch.complex64)}
+            load(
+                loaded,
+                storage_reader=FileSystemReader(path, thread_count=2),
+                no_dist=True,
+            )
+            self.assertEqual(loaded["c"], state_dict["c"])
 
 
 class TestDistributedStateDictSaveLoadRot13(TestCase):
@@ -179,7 +230,9 @@ class TestDistributedStateDictSaveLoadRot13(TestCase):
             # Load from file without any resharding.  Note there is no extension
             # specification here; it is determined dynamically from the metadata.
             fs_reader = FileSystemReader(
-                path=path, _extension_registry=get_test_extension_registry()
+                path=path,
+                _extension_registry=get_test_extension_registry(),
+                thread_count=thread_count,
             )
             load(
                 state_dict=state_dict_to_load_to,
@@ -213,7 +266,7 @@ class TestDistributedStateDictSaveLoadZStandard(TestCase):
                 assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
             # Load from file without any resharding
-            fs_reader = FileSystemReader(path=path)
+            fs_reader = FileSystemReader(path=path, thread_count=thread_count)
             load(
                 state_dict=state_dict_to_load_to,
                 storage_reader=fs_reader,
@@ -269,7 +322,7 @@ class TestDistributedStateDictSaveLoadWithSharedTensor(MultiProcContinuousTest):
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
 
         # Test load.
-        fs_reader = FileSystemReader(path=path)
+        fs_reader = FileSystemReader(path=path, thread_count=thread_count)
         load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
 
         assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
@@ -387,7 +440,7 @@ class TestDistributedReshardOnLoad(MultiProcContinuousTest):
                 state_dict_to_load_to = model_to_load.state_dict()
                 dist.barrier()
 
-                fs_reader = FileSystemReader(path=path)
+                fs_reader = FileSystemReader(path=path, thread_count=thread_count)
                 load_state_dict(
                     state_dict=state_dict_to_load_to, storage_reader=fs_reader
                 )
@@ -437,7 +490,7 @@ class TestDistributedReshardOnLoad(MultiProcContinuousTest):
         model_to_load._register_state_dict_hook(state_dict_hook)
         state_dict_to_load_to = model_to_load.state_dict()
 
-        fs_reader = FileSystemReader(path=path)
+        fs_reader = FileSystemReader(path=path, thread_count=thread_count)
 
         load_state_dict(state_dict=state_dict_to_load_to, storage_reader=fs_reader)
 
@@ -459,7 +512,7 @@ class TestDistributedReshardOnLoad(MultiProcContinuousTest):
 
         state_dict_to_load = {"bytes0": [2], "bytes1": "other"}
 
-        fs_reader = FileSystemReader(path=path)
+        fs_reader = FileSystemReader(path=path, thread_count=thread_count)
         load_state_dict(state_dict=state_dict_to_load, storage_reader=fs_reader)
 
         self.assertEqual([1], state_dict_to_load["bytes0"])
@@ -534,7 +587,7 @@ class TestDistributedReshardOnLoad(MultiProcContinuousTest):
                     "replicated": sharded_tensor.zeros(load_spec, tensor_size),
                 }
 
-                fs_reader = FileSystemReader(path=path)
+                fs_reader = FileSystemReader(path=path, thread_count=thread_count)
                 load_state_dict(state_dict=load_dict, storage_reader=fs_reader)
 
                 save_dict_sharded = self.load_tensor(save_dict["sharded"])

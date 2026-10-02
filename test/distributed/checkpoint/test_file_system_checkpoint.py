@@ -4,6 +4,8 @@ import os
 import shutil
 import sys
 import tempfile
+import unittest
+from unittest.mock import patch
 
 import torch
 import torch.distributed as dist
@@ -166,6 +168,38 @@ class TestDistributedStateDictSaveLoad(TestCase):
             )
 
             assert_state_dict_equal(self, state_dict_to_load_to, state_dict_to_save)
+
+
+class TestFileSystemReaderParallelRead(TestCase):
+    @unittest.skipIf(device_type == "cpu", "requires an accelerator")
+    def test_read_into_accelerator_tensors_through_staging_chunks(self) -> None:
+        with tempfile.TemporaryDirectory() as path:
+            state_dict_to_save = MyTestModule().state_dict()
+            save_state_dict(
+                state_dict=state_dict_to_save,
+                storage_writer=FileSystemWriter(path=path),
+                no_dist=True,
+            )
+
+            state_dict_to_load_to = {
+                key: torch.zeros_like(value, device=device_type)
+                for key, value in state_dict_to_save.items()
+            }
+            # 64-byte chunks send each tensor through the pinned buffer several times.
+            with patch(
+                "torch.distributed.checkpoint.filesystem._STAGING_CHUNK_BYTES", 64
+            ):
+                load_state_dict(
+                    state_dict=state_dict_to_load_to,
+                    storage_reader=FileSystemReader(path=path, thread_count=2),
+                    no_dist=True,
+                )
+
+            assert_state_dict_equal(
+                self,
+                {key: value.cpu() for key, value in state_dict_to_load_to.items()},
+                state_dict_to_save,
+            )
 
 
 class _CheckpointContinuousTest(MultiProcContinuousTest):
