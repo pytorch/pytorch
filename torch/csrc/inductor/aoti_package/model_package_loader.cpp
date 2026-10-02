@@ -10,6 +10,7 @@
 #include <fmt/format.h>
 #include <miniz.h>
 #include <nlohmann/json.hpp>
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <iostream>
@@ -108,6 +109,23 @@ bool path_starts_with_directory(
       append_separator_if_needed(normalized_directory);
   return normalized_path == normalized_directory ||
       c10::starts_with(normalized_path, normalized_directory_with_sep);
+}
+
+// Joins rel_path onto extract_dir, rejecting rooted paths and ".." components
+// so that zip entry zip_filename can't be extracted outside extract_dir.
+std::string get_extraction_path(
+    const std::string& extract_dir,
+    const std::string& rel_path,
+    const std::string& zip_filename) {
+  const std::string normalized_rel_path = normalize_path_separator(rel_path);
+  const fs::path path(normalized_rel_path);
+  TORCH_CHECK(
+      !path.has_root_path() &&
+          std::find(path.begin(), path.end(), "..") == path.end(),
+      "Refusing to extract zip entry '",
+      zip_filename,
+      "' because its path escapes the extraction directory.");
+  return extract_dir + k_separator + normalized_rel_path;
 }
 
 void list_files_recursive(
@@ -656,7 +674,7 @@ std::unordered_map<std::string, std::string> AOTIModelPackageLoader::
       // Create temporary directory for extraction
       std::string temp_dir = normalize_path_separator(create_temp_dir());
       std::string output_path_str =
-          normalize_path_separator(temp_dir + k_separator + metadata_filename);
+          get_extraction_path(temp_dir, metadata_filename, metadata_filename);
 
       // Create the parent directory if it doesn't exist
       size_t parent_path_idx = output_path_str.find_last_of(k_separator);
@@ -848,11 +866,9 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
       // Only compile files in the specified model directory
       if (path_starts_with_directory(cur_filename, model_directory) ||
           path_starts_with_directory(cur_filename, const_directory)) {
-        std::string output_path_str = temp_dir_;
-
+        std::string rel_path;
         if (path_starts_with_directory(cur_filename, model_directory)) {
-          output_path_str += k_separator;
-          output_path_str += cur_filename;
+          rel_path = cur_filename;
         } else { // startsWith(zip_filename_str, const_directory)
           // Extract constants to the same directory as the rest of the files
           // to be consistent with internal implementation
@@ -861,14 +877,12 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
           if (lastSlash != std::string::npos) {
             filename = cur_filename.substr(lastSlash + 1);
           }
-          output_path_str.append(k_separator)
-              .append(model_directory)
-              .append(k_separator)
-              .append(filename);
+          rel_path = model_directory;
+          rel_path.append(k_separator).append(filename);
         }
 
         std::string output_file_path =
-            normalize_path_separator(output_path_str);
+            get_extraction_path(temp_dir_, rel_path, zip_filename_str);
         LOG(INFO) << "Extract file: " << zip_filename_str << " to "
                   << output_file_path;
 
@@ -888,7 +902,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
             mkdir_ec.message());
 
         // Extracts file to the temp directory
-        zip_archive.extract_file(zip_filename_str, output_path_str);
+        zip_archive.extract_file(zip_filename_str, output_file_path);
 
         // Save the file for bookkeeping
         categorize_model_file(
