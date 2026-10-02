@@ -29,12 +29,17 @@ from collections.abc import Callable
 import torch
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGatherInput
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
+    _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
+    AllGatherOutputFn,
+    PrepareReduceScatterInputsFn,
 )
 
 
 __all__ = [
     "AllGatherInput",
+    "AllGatherOutputFn",
+    "PrepareReduceScatterInputsFn",
     "all_gather_output_fn_with_native_copy",
     "reduce_scatter_input_fn_with_native_copy",
 ]
@@ -53,8 +58,17 @@ def all_gather_output_fn_with_native_copy(
 
     Register with
     :meth:`torch.distributed.fsdp.FSDPModule.set_all_gather_output_fn`.
-    See the module documentation for the performance tradeoffs.
+    See the module documentation for the performance tradeoffs. Groups with a
+    tensor payload smaller than its cached output use the default copy-out.
     """
+    if any(
+        output.numel() != split_size * world_size
+        for output, split_size in zip(outputs, split_sizes)
+    ):
+        _default_all_gather_output_fn(
+            all_gather_output, outputs, split_sizes, outer_sizes, world_size
+        )
+        return
     torch.ops.fsdp._all_gather_copy_out_(
         outputs, all_gather_output, split_sizes, outer_sizes, world_size
     )
@@ -73,7 +87,6 @@ def reduce_scatter_input_fn_with_native_copy(
 
     Contiguous nonzero-dimension shards copy directly into the collective buffer.
     Noncontiguous gradients use the existing chunk-and-concatenate reorder.
-    Groups with only Shard(0) gradients, or of size one, use the original operator.
     Groups with mixed gradient dtypes use the default copy-in.
     """
     if len({grad.dtype for grad in unsharded_grads}) > 1:

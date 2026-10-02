@@ -821,8 +821,6 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/symm_mem/intra_node_comm.cu",
     "torch/csrc/distributed/c10d/symm_mem/cuda_mem_pool.cpp",
     "torch/csrc/distributed/fsdp/ChunkCat.cu",
-    "torch/csrc/distributed/fsdp/CollectiveCopyCUDA.cpp",
-    "torch/csrc/distributed/fsdp/CollectiveCopyKernels.cu",
     "torch/csrc/distributed/rpc/tensorpipe_cuda.cpp",
 ]
 

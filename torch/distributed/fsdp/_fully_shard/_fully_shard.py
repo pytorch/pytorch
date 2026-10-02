@@ -22,6 +22,8 @@ from ._fsdp_api import (
 from ._fsdp_collectives import (
     _default_all_gather_output_fn,
     _default_reduce_scatter_input_fn,
+    AllGatherOutputFn,
+    PrepareReduceScatterInputsFn,
 )
 from ._fsdp_common import _dynamo_disable, FSDPMeshInfo, ShardPlacementFnResult
 from ._fsdp_init import (
@@ -44,7 +46,6 @@ if TYPE_CHECKING:
 
     from torch.distributed.tensor import DeviceMesh
 
-    from ._fsdp_collectives import AllGatherOutputFn, PrepareReduceScatterInputsFn
     from ._fsdp_param_group import FSDPParamGroup
 
 __all__ = [
@@ -859,7 +860,7 @@ class FSDPModule:
             fsdp_param_group.force_sum_reduction_for_comms = enable
 
     def set_all_gather_output_fn(
-        self, fn: AllGatherOutputFn | None, *, recurse: bool = True
+        self, fn: AllGatherOutputFn | None, /, *, recurse: bool = True
     ) -> None:
         r"""Set the function that copies a parameter group's all-gather outputs.
 
@@ -871,12 +872,17 @@ class FSDPModule:
         ``fn(all_gather_output, outputs, split_sizes, outer_sizes, world_size)``.
         ``all_gather_output`` is the flat rank-major collective buffer, and
         ``outputs`` are the preallocated all-gather outputs of the parameter
-        group, viewed as ``uint8`` if the buffer is. For each output,
-        ``split_sizes`` gives its per-rank element count in the buffer and
-        ``outer_sizes`` gives the product of its dimensions before the
-        concatenation dimension. Each rank's slice is concatenated along that
-        dimension into the output. The function runs on the current stream
-        after the collective completes and must only write to ``outputs``.
+        group, viewed as ``uint8`` if the buffer is, in which case
+        ``split_sizes`` count bytes. For each output, ``split_sizes`` gives its
+        per-rank element count in the buffer and ``outer_sizes`` gives the
+        product of its dimensions before the concatenation dimension. Each
+        rank's slice is concatenated along that dimension into the output. A
+        tensor returned by ``fsdp_pre_all_gather`` may be smaller than its
+        cached output, which then has more than ``split_sizes[i] * world_size``
+        elements (see :data:`~torch.distributed.fsdp.experimental.AllGatherOutputFn`).
+        The function runs on the current stream after the collective completes
+        and must only write to ``outputs``. It is not called when the all-gather
+        group has a single rank, since FSDP then copies the inputs directly.
         See :mod:`torch.distributed.fsdp.experimental` for a native
         implementation.
 
@@ -896,7 +902,7 @@ class FSDPModule:
                     fsdp_param_group._all_gather_output_fn = fn
 
     def set_reduce_scatter_input_fn(
-        self, fn: PrepareReduceScatterInputsFn | None, *, recurse: bool = True
+        self, fn: PrepareReduceScatterInputsFn | None, /, *, recurse: bool = True
     ) -> None:
         r"""Set the function that prepares reduce-scatter inputs.
 
@@ -910,14 +916,16 @@ class FSDPModule:
         ``unsharded_grads`` with reordered gradients. FSDP then calls
         ``copy_in(reduce_scatter_input)``, which must fill the flat input
         buffer with each rank's padded shards in rank-major order, converting
-        to the buffer's dtype. Gradients in a group can have different dtypes,
-        e.g. with per-parameter ``grad_dtype``. ``world_size`` is 1 when no
-        reduce-scatter is needed. Both calls run on the current stream. See
+        to the buffer's dtype. FSDP frees ``copy_in`` and the gradients right
+        after that call, so neither may be kept elsewhere. Gradients in a group
+        can have different dtypes, e.g. with per-parameter ``grad_dtype``.
+        ``world_size`` is 1 when no reduce-scatter is needed, and the function
+        is still called. Both calls run on the current stream. See
         :mod:`torch.distributed.fsdp.experimental` for a native implementation.
 
         Args:
-            fn (Optional[Callable]): Copy-in function, or ``None`` to restore
-                the default.
+            fn (Optional[Callable]): Function returning the copy-in function, or
+                ``None`` to restore the default.
             recurse (bool): Whether to also set the function for all nested FSDP
                 modules. Defaults to ``True``.
         """
