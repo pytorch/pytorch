@@ -839,6 +839,57 @@ class TestOptimRenewed(TestCase):
         restored_opt.step()
         self.assertIn("exp_avg", restored_opt.state[restored])
 
+        # Saving and loading continues from the saved parameters. beta1 == 0
+        # omits exp_avg; beta1 > 0 keeps it.
+        for beta1 in (0.0, 0.9):
+            src = torch.nn.Parameter(torch.randn(16, device=device))
+            src_opt = torch.optim.Adam([src], lr=1e-2, betas=(beta1, 0.99))
+            grads = [torch.randn(16, device=device) for _ in range(4)]
+            for grad in grads[:2]:
+                src.grad = grad
+                src_opt.step()
+            saved_param = src.detach().clone()
+            saved_state = deepcopy(src_opt.state_dict())
+            rest = [grad.clone() for grad in grads[2:]]
+            moment = saved_state["state"][0]
+            if beta1 == 0.0:
+                self.assertNotIn("exp_avg", moment)
+            else:
+                self.assertIn("exp_avg", moment)
+            for grad in rest:
+                src.grad = grad
+                src_opt.step()
+            dst = torch.nn.Parameter(saved_param.clone())
+            dst_opt = torch.optim.Adam([dst], lr=1e-2, betas=(beta1, 0.99))
+            dst_opt.load_state_dict(deepcopy(saved_state))
+            for grad in rest:
+                dst.grad = grad.clone()
+                dst_opt.step()
+            self.assertEqual(dst, src)
+
+        # An older beta1 == 0 checkpoint still contains exp_avg. Loading it and
+        # stepping matches an optimizer that never stored that moment, because
+        # beta1 == 0 replaces the moment with the current gradient.
+        src = torch.nn.Parameter(torch.randn(16, device=device))
+        src_opt = torch.optim.Adam([src], lr=1e-2, betas=(0.0, 0.99))
+        first, later = (torch.randn(16, device=device) for _ in range(2))
+        src.grad = first
+        src_opt.step()
+        saved_param = src.detach().clone()
+        legacy = deepcopy(src_opt.state_dict())
+        self.assertNotIn("exp_avg", legacy["state"][0])
+        legacy["state"][0]["exp_avg"] = torch.randn(16, device=device)
+        held = later.clone()
+        src.grad = held
+        src_opt.step()
+        dst = torch.nn.Parameter(saved_param.clone())
+        dst_opt = torch.optim.Adam([dst], lr=1e-2, betas=(0.0, 0.99))
+        dst_opt.load_state_dict(legacy)
+        dst.grad = held.clone()
+        dst_opt.step()
+        self.assertEqual(dst, src)
+        self.assertIn("exp_avg", dst_opt.state[dst])
+
         # The fused kernels read the buffer, so they still allocate it.
         fused_weight = torch.nn.Parameter(torch.randn(8, device=device))
         fused = torch.optim.Adam([fused_weight], lr=1e-2, betas=(0.0, 0.99), fused=True)
