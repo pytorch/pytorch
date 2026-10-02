@@ -1,14 +1,18 @@
 # Owner(s): ["oncall: distributed"]
 
+import subprocess
+import sys
+
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import (
-    _set_gated_hooks_enabled,
-    HookOpName,
-)
+from torch._C._distributed_c10d import _set_gated_hooks_enabled, HookOpName
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
-from torch.testing._internal.common_utils import HardwareClassification, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestProcessGroupHooks(MultiProcContinuousTest):
@@ -189,6 +193,24 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         self.assertEqual(len(posts), 1)
 
         dist.barrier()
+
+
+class TestProcessGroupHooksAtExit(TestCase):
+    def test_python_hook_on_group_alive_at_exit(self):
+        # The group registry destroys the group, and with it the hook, after
+        # the interpreter has finalized.
+        script = """
+import torch.distributed as dist
+from torch._C._distributed_c10d import _register_process_group, ProcessGroup
+pg = ProcessGroup(dist.HashStore(), 0, 1)
+pg.register_pre_hook(0, lambda args: None)
+_register_process_group("hooked", pg)
+del pg
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":
