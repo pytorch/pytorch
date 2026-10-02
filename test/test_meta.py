@@ -1906,18 +1906,6 @@ class TestMetaCore(TestCase):
         r2 = torch.ops.aten.fill(inps, 1.0)
         self.assertNotEqual(id(inps), id(r2))
 
-    # opinfo test is using aten.fill_, it's not testing aten.fill
-    def test_fill_stride(self):
-        to_meta = MetaConverter()
-        sample_args = [torch.rand(2, 2, 2, 2), 1.0]
-
-        for args in get_strided_args(sample_args):
-            meta_args = to_meta(args)
-            ref_out = torch.ops.aten.fill(*args)
-            meta_out = torch.ops.aten.fill(*meta_args)
-            self.assertEqual(ref_out.size(), meta_out.size())
-            self.assertEqual(ref_out.stride(), meta_out.stride())
-
     def test_quantized_embedding_bag(self):
         tab_shape = [8, 128]
         emb_size, ind_len, off_len = tab_shape[0], 32, 33
@@ -2037,6 +2025,18 @@ class TestMetaCore(TestCase):
             offsets.to('meta'), offset2bag.to('meta'), mode, padding_idx
         )
         self.assertEqual(grad_weight.to('meta'), meta_grad_weight)
+
+    # opinfo test is using aten.fill_, it's not testing aten.fill
+    def test_fill_stride(self):
+        to_meta = MetaConverter()
+        sample_args = [torch.rand(2, 2, 2, 2), 1.0]
+
+        for args in get_strided_args(sample_args):
+            meta_args = to_meta(args)
+            ref_out = torch.ops.aten.fill(*args)
+            meta_out = torch.ops.aten.fill(*meta_args)
+            self.assertEqual(ref_out.size(), meta_out.size())
+            self.assertEqual(ref_out.stride(), meta_out.stride())
 
     def test_map_location_deserialize(self):
         import io
