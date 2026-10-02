@@ -1675,4 +1675,33 @@ Tensor add_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& al
       default_alpha ? std::nullopt : std::optional<Scalar>(alpha));
 }
 
+// sub.Tensor meta kernel
+Tensor sub_Tensor_meta(const Tensor& self, const Tensor& other, const Scalar& alpha) {
+  const bool symbolic = is_symbolic_operand(self) || is_symbolic_operand(other) || alpha.isSymInt();
+  if (symbolic) {
+    if (auto out = fast_binary_impl(self, other, ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT); out.defined()) {
+      return out;
+    }
+  }
+  // refs.sub applies alpha only when alpha != 1. Python evaluates SymBool != 1
+  // to True without guarding.
+  bool apply_alpha = true;
+  if (alpha.isSymInt()) {
+    apply_alpha = alpha.toSymInt().sym_ne(1).guard_bool(__FILE__, __LINE__);
+  } else if (alpha.isSymFloat()) {
+    apply_alpha = alpha.toSymFloat().sym_ne(1.0).guard_bool(__FILE__, __LINE__);
+  } else if (alpha.isComplex()) {
+    apply_alpha = alpha.toComplexDouble() != c10::complex<double>(1, 0);
+  } else if (!alpha.isSymBool()) {
+    apply_alpha = alpha.toDouble() != 1;
+  }
+  return binary_ref_meta(
+      self,
+      other,
+      ELEMENTWISE_TYPE_PROMOTION_KIND::DEFAULT,
+      symbolic,
+      apply_alpha ? std::optional<Scalar>(alpha) : std::nullopt,
+      /*is_sub=*/true);
+}
+
 } // namespace at::native

@@ -6951,6 +6951,7 @@
   dispatch:
     SparseCPU, SparseCUDA, SparseMPS, SparseXPU: sub_sparse
     ZeroTensor: sub_zerotensor
+    Meta: sub_Tensor_meta
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA, NestedTensorXPU: NestedTensor_sub_Tensor
   tags: [core, pointwise]
 
