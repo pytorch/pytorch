@@ -1422,13 +1422,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // The CUDA streams used by NCCL kernels
   std::unordered_map<std::string, at::cuda::CUDAStream> ncclStreams_;
 
-  // Returns the NCCL stream for the given device key, creating a
-  // capture-specific stream when the current stream and the default NCCL
-  // stream belong to different CUDA graph captures.
-  at::cuda::CUDAStream getNCCLStream(
-      const std::string& key,
-      const at::Device& device);
-
   // The CUDA events used to sync NCCL streams
   std::unordered_map<std::string, at::cuda::CUDAEvent> ncclEvents_;
 

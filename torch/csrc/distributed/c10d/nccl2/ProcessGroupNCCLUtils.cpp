@@ -7,6 +7,7 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <nccl.h>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
 #include <algorithm>
@@ -528,12 +529,13 @@ cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
         dependency_event_.has_value() && internal_stream_.has_value(),
         "NCCL stream resources are not initialized");
     auto& dependency_event = dependency_event_.value();
-    auto& internal_stream = internal_stream_.value();
+    auto operation_stream = ::c10d::getNCCLStreamForCapture(
+        internal_stream_.value(), dependency_event);
 
     dependency_event.record(current_stream);
-    dependency_event.block(internal_stream);
+    dependency_event.block(operation_stream);
 
-    return internal_stream.stream();
+    return operation_stream.stream();
   } else {
     return at::cuda::getCurrentCUDAStream(device_.index()).stream();
   }

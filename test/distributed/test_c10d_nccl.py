@@ -352,8 +352,11 @@ class ProcessGroupNCCLCaptureStreamTest(MultiProcessTestCase):
             self._spawn_processes()
 
     @requires_nccl()
+    @parametrize("backend", ["nccl-legacy", "nccl2"])
     @parametrize("high_priority_stream", [False, True])
-    def test_cudagraph_stream_outlives_process_group(self, high_priority_stream):
+    def test_cudagraph_stream_outlives_process_group(
+        self, backend, high_priority_stream
+    ):
         self.assertEqual(os.environ["NCCL_GRAPH_MIXING_SUPPORT"], "0")
         torch.cuda.set_device(self.rank)
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -361,7 +364,7 @@ class ProcessGroupNCCLCaptureStreamTest(MultiProcessTestCase):
             opts = c10d.ProcessGroupNCCL.Options()
             opts.is_high_priority_stream = high_priority_stream
             c10d.init_process_group(
-                NCCL_BACKEND,
+                backend,
                 store=c10d.PrefixStore(str(generation), store),
                 rank=self.rank,
                 world_size=self.world_size,
