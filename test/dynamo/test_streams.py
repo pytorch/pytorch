@@ -2913,6 +2913,35 @@ instantiate_parametrized_tests(TestStreamsCPUSpecific)
 
 @requires_cuda
 class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
+    @parametrize("backend", ("aot_eager", "inductor"))
+    def test_cross_device_operand_sync_does_not_join_input_mutation(
+        self, backend
+    ) -> None:
+        if torch.cuda.device_count() < 2:
+            self.skipTest("requires two CUDA devices")
+
+        def fn(x, z, source_stream, mutation_stream):
+            with torch.cuda.stream(source_stream):
+                value = z + 1
+            with torch.cuda.stream(mutation_stream):
+                x.add_(value.to(x.device))
+            source_stream.synchronize()
+            return x * 2
+
+        x = torch.ones(8, device="cuda:1")
+        z = torch.zeros(8, device="cuda:0")
+        source_stream = torch.cuda.Stream(device="cuda:0")
+        mutation_stream = torch.cuda.Stream(device="cuda:1")
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(1)
+        result = torch.compile(fn, backend=backend, fullgraph=True)(
+            x, z, source_stream, mutation_stream
+        )
+        torch.cuda.synchronize(0)
+        torch.cuda.synchronize(1)
+        self.assertEqual(x, torch.full_like(x, 2))
+        self.assertEqual(result, torch.full_like(x, 4))
+
     def test_eager_backend_allows_input_mutation_stream_join(self) -> None:
         def fn(x, small):
             side = torch.cuda.Stream()

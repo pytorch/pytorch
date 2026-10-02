@@ -361,6 +361,7 @@ def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
             or get_device(epi_copy.args[0]).type == "cpu"
         ):
             continue
+        input_device = get_device(epi_copy.args[0])
         # Without any preceding observable barrier, there is no ordering to
         # reject and no reason to traverse this input's mutation ancestors.
         if first_barrier_position >= positions[epi_copy]:
@@ -376,10 +377,13 @@ def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
                 ancestors.update(node.all_input_nodes)
         source_values: list[Node] = []
         for node in nodes[: positions[source] + 1]:
+            node_value = node.meta.get("val")
             if (
                 node in ancestors
                 and node.op == "call_function"
                 and node.target not in _SYNC_OPS
+                and isinstance(node_value, torch.Tensor)
+                and node_value.device == input_device
             ):
                 source_values.append(node)
         first_source_value = (
@@ -404,6 +408,16 @@ def assign_epilogue_copy_streams(gm: torch.fx.GraphModule) -> None:
                     if positions[value] >= positions[barrier]:
                         break
                     value_stream = get_stream(value)
+                    if value_stream is not None:
+                        try:
+                            annotated_stream = _get_stream_by_index(value_stream)
+                        except AssertionError:
+                            joined = True
+                            break
+                        if annotated_stream.device != input_device:
+                            # A CUDA:0 context does not change where a CUDA:1
+                            # tensor op runs; it uses CUDA:1's current stream.
+                            value_stream = None
                     if value_stream is not None and barrier_stream == value_stream:
                         joined = True
                         break
