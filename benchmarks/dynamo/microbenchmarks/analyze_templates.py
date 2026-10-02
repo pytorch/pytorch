@@ -150,7 +150,7 @@ def optimize_templates(N, occurrence_count, benchmark_logs, verbose=False):
         )
 
         # Ensure Triton templates can only be selected if they are included in the N allowed templates
-        for triton_time, template in triton_options:
+        for _triton_time, template in triton_options:
             prob += selection_vars[(shape, template)] <= template_vars[template]
 
     # Print the constraints
