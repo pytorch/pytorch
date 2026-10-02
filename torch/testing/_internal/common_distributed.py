@@ -270,6 +270,8 @@ def require_n_gpus_for_nccl_backend(n, backend):
             else:
                 return func(*args, **kwargs)
 
+        if backend == "nccl":
+            wrapper._min_gpus_required = n
         return wrapper
 
     return decorator
@@ -325,6 +327,9 @@ def skip_if_lt_x_gpu(x, *, allow_cpu=False):
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
+        # Record the accelerator requirement so the collection-time GPU-count
+        # resolver (test/conftest.py) can read it without running the test.
+        wrapper._min_gpus_required = x
         if (
             not allow_cpu
             and torch.accelerator.current_accelerator(check_available=False) is None
@@ -393,6 +398,8 @@ def nccl_skip_if_lt_x_gpu(backend, x):
             if not _maybe_handle_skip_if_lt_x_gpu(args, test_skip.message):
                 sys.exit(test_skip.exit_code)
 
+        if backend == "nccl":
+            wrapper._min_gpus_required = x
         return wrapper
 
     return decorator
@@ -2222,27 +2229,27 @@ class MultiProcContinuousTest(TestCase):
             if self.rank == self.MAIN_PROCESS_RANK:
                 logger.debug(f"Waiting for workers to finish {self.id()}")  # noqa: G004
                 # Drain all completion queues before raising any exception,
-                # so stale results don't desync subsequent tests.
-                deferred_exception = None
+                # so stale results don't desync subsequent tests. A failure on
+                # any rank takes precedence over a skip on another.
+                failure = None
+                skip = None
                 for i, (p, completion_queue) in enumerate(
                     zip(self.processes, self.completion_queues)
                 ):
                     rv = retrieve_result_from_completion_queue(
                         p, completion_queue, timeout=get_timeout(self.id())
                     )
-                    if deferred_exception is not None:
-                        # Already captured an exception; just drain
-                        continue
                     if isinstance(rv, unittest.SkipTest):
-                        deferred_exception = rv
+                        skip = skip or rv
                         continue
                     if isinstance(rv, BaseException):
-                        logger.warning(
-                            f"Detected failure from Rank {i} in: {self.id()}, "  # noqa: G004
-                            f"skipping rest of tests in Test class: {self.__class__.__name__}"
-                        )
-                        self.__class__.poison_pill = True
-                        deferred_exception = rv
+                        if failure is None:
+                            logger.warning(
+                                f"Detected failure from Rank {i} in: {self.id()}, "  # noqa: G004
+                                f"skipping rest of tests in Test class: {self.__class__.__name__}"
+                            )
+                            self.__class__.poison_pill = True
+                            failure = rv
                         continue
 
                     # Success
@@ -2254,8 +2261,10 @@ class MultiProcContinuousTest(TestCase):
                         f"Main proc detected rank {i} finished {self.id()}"  # noqa: G004
                     )
 
-                if deferred_exception is not None:
-                    raise deferred_exception
+                if failure is not None:
+                    raise failure
+                if skip is not None:
+                    raise skip
             else:
                 # Worker just runs the test
                 fn()
