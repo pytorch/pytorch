@@ -805,7 +805,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
       const c10::intrusive_ptr<Store>& store,
       int rank,
       int size,
-      const std::string& groupName,
+      const std::string& /*groupName*/,
       c10::intrusive_ptr<Options> options = Options::create())
       : ProcessGroupNCCL(store, rank, size, std::move(options)) {}
 

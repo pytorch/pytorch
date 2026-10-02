@@ -594,7 +594,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   virtual c10::intrusive_ptr<Work> alltoall(
       std::vector<at::Tensor>& /* outputTensors */,
       std::vector<at::Tensor>& /* inputTensors */,
-      const AllToAllOptions& opts = AllToAllOptions()) {
+      const AllToAllOptions& /*opts*/ = AllToAllOptions()) {
     TORCH_CHECK(
         false,
         c10::str("Backend ", getBackendName(), " does not support alltoall"));
@@ -670,7 +670,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   virtual void registerOnCompletionHook(
-      std::function<void(std::shared_ptr<WorkInfo>)>&& hook) {
+      std::function<void(std::shared_ptr<WorkInfo>)>&& /*hook*/) {
     TORCH_CHECK(
         false,
         "Only ProcessGrouppNCCL supports onCompletion hook, but got ",
@@ -698,9 +698,9 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // the parent's live connection. Implementations that block while holding or
   // mutate connection-global state, such as the timeout, must clone it first.
   virtual c10::intrusive_ptr<Backend> split(
-      const c10::intrusive_ptr<Store>& store,
-      const std::vector<int>& ranks,
-      const c10::intrusive_ptr<Options>& opts) {
+      const c10::intrusive_ptr<Store>& /*store*/,
+      const std::vector<int>& /*ranks*/,
+      const c10::intrusive_ptr<Options>& /*opts*/) {
     TORCH_CHECK(
         false,
         "Backend ",
@@ -712,10 +712,10 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   // retain or clone it as required by their initialization and connection-state
   // semantics.
   virtual c10::intrusive_ptr<Backend> merge(
-      const c10::intrusive_ptr<Store>& store,
-      const c10::intrusive_ptr<Options>& opts,
-      const int& rank,
-      const int& size) {
+      const c10::intrusive_ptr<Store>& /*store*/,
+      const c10::intrusive_ptr<Options>& /*opts*/,
+      const int& /*rank*/,
+      const int& /*size*/) {
     TORCH_CHECK(
         false,
         "Backend ",
@@ -776,7 +776,9 @@ class TORCH_API Backend : public torch::CustomClassHolder {
 
   // Allocate tensor (aten::empty) from backend's communication-optimized memory
   // pool
-  virtual at::Tensor allocateTensor(long size, at::TensorOptions options = {}) {
+  virtual at::Tensor allocateTensor(
+      long /*size*/,
+      at::TensorOptions /*options*/ = {}) {
     TORCH_CHECK(
         false,
         c10::str(
@@ -784,7 +786,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   // Returns true if backend supports tensor allocation
-  virtual bool supportsTensorAlloc(c10::DeviceIndex deviceIdx) {
+  virtual bool supportsTensorAlloc(c10::DeviceIndex /*deviceIdx*/) {
     // Change to true in concrete backend if supported
     return false;
   }

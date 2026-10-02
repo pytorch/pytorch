@@ -4491,7 +4491,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
 
 c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_sparse(
     std::vector<at::Tensor>& tensors,
-    const AllreduceOptions& opts) {
+    const AllreduceOptions& /*opts*/) {
   TORCH_CHECK(tensors.size() == 1, MULTI_DEVICE_ERROR_MSG);
   auto tensor = tensors.back();
   TORCH_CHECK(
@@ -4736,7 +4736,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
       tensor,
       tensor,
       [&](at::Tensor& input,
-          at::Tensor& output,
+          at::Tensor& /*output*/,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
         return ncclBcast(
