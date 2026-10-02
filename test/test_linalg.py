@@ -5929,8 +5929,8 @@ class TestLinalg(TestCase):
         eps = torch.finfo(dtype).eps
 
         # low batch regime shapes
-        bsl = (4, 8)
-        nsl = (259, 513, 1027)
+        bsl = (4, 8) if pivot else (16,)
+        nsl = (259, 513, 1024, 1027)
 
         # high batch regime shapes
         bsh = (150, 550)
@@ -6009,12 +6009,12 @@ class TestLinalg(TestCase):
                 self.assertTrue((scaled_residual < K).all())
 
         # Check info vector. Note, it is 1-based
-        for n in (300, 1030):
-            A = make_well_conditioned(5, n, n)
+        for n in (300, 1024) + ((1030, 1050) if pivot else ()):
+            A = make_well_conditioned(16, n, n)
             A[0, :, 150:] = 0
             A[2, :, :150] = 0
             A[4, :, 17] = 0
-            LU, _, info = torch.linalg.lu_factor_ex(A)
+            LU, _, info = torch.linalg.lu_factor_ex(A, pivot=pivot)
             self.assertTrue(torch.isfinite(LU).all())
             self.assertEqual(info[0], 151)
             self.assertEqual(info[2], 1)
@@ -6025,8 +6025,9 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @skipCUDAIfNoCusolver
     @setLinalgBackendsToDefaultFinally
+    @parametrize("pivot", [True, False])
     @dtypes(*floating_and_complex_types())
-    def test_linalg_batched_lu_edge_cases(self, device, dtype):
+    def test_linalg_batched_lu_edge_cases(self, device, dtype, pivot):
         # Test the register-resident kernel for shapes n == i (mod 32)
         if not dtype.is_complex:
             compute_dtype = torch.double
@@ -6038,17 +6039,21 @@ class TestLinalg(TestCase):
         norm = partial(torch.linalg.norm, dim=(-2, -1), ord='fro')
 
         # shape that dispatches to the register-resident kernel
-        b = 4  # batch
+        b = 16  # batch
         n = 256  # shape
         r = 32  # testing shapes n + i such that n == i (mod r)
         buffer = make_input(b, n + r, n + r)
+        if not pivot:
+            # strictly diagonally dominant systems for stability
+            diag = buffer.abs().sum(-2)
+            buffer.diagonal(dim1=-2, dim2=-1).zero_().copy_(diag)
 
         for i in range(1, r):
             A = buffer[..., :n + i, :n + i]
-            P, L, U = torch.linalg.lu(A)
+            P, L, U = torch.linalg.lu(A, pivot=pivot)
             A, P, L, U = (t.to(compute_dtype) for t in (A, P, L, U))
 
-            residual = P @ L @ U - A
+            residual = P @ L @ U - A if pivot else L @ U - A
             # Compute scaled residual
             # ||PLU - A|| / (||A|| * n * eps)
             scale = norm(A).mul_(n * eps)
