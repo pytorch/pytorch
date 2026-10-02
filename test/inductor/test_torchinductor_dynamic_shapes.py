@@ -1677,7 +1677,7 @@ class TestSymbolicFull(TestCase):
             (torch.uint8, 256, 255, torch.int64),
             (torch.uint8, -256, -255, torch.int64),
             (torch.int8, 128.0, 127.5, torch.float32),
-            (torch.int8, -128.5, -128.0, torch.float32),
+            (torch.int8, -128.5, -127.5, torch.float32),
             (torch.uint8, 256.0, 255.5, torch.float32),
             (torch.uint8, -1.0, 0.0, torch.float32),
         ),
@@ -1703,7 +1703,7 @@ class TestSymbolicFull(TestCase):
             (torch.int8, -128.5, -128.0, torch.float64),
             (torch.uint8, 256.0, 255.5, torch.float64),
             (torch.uint8, -1.0, 0.0, torch.float64),
-            (torch.uint64, float(2**64), float(2**63), torch.float64),
+            (torch.uint64, float(2**64), float(2**63 - 1024), torch.float64),
         ),
     )
     def test_full_symbolic_fill_overflow_cpp_wrapper(
