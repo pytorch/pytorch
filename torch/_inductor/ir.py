@@ -4274,8 +4274,9 @@ class ReinterpretView(BaseView):
         def loader(index: Sequence[Expr]) -> OpsValue:
             indexer = self.layout.make_indexer()
             name = self.get_name()
-            if name in V.graph.constants:
-                name = V.graph.constant_name(name, ConstantBuffer.override_device)
+            device = ConstantBuffer.override_device
+            if device is not None and name in V.graph.constants:
+                name = V.graph.constant_name(name, device)
             tmp_loader = ops.load(name, indexer(index))
             if self.layout.dtype != self.data.dtype:
                 return ops.to_dtype_bitcast(tmp_loader, self.dtype, self.data.dtype)
