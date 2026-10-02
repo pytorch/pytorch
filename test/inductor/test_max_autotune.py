@@ -5216,6 +5216,40 @@ class TestPrologueFusion(TestCase):
 
     @config.patch(
         {
+            "prologue_fusion": False,
+            "epilogue_fusion": True,
+            "benchmark_epilogue_fusion": True,
+            "max_epilogue_benchmarked_choices": 3,
+        }
+    )
+    def test_baddbmm_store_output_producer_fusion(self):
+        batch, M, K, N = 4, 31, 48, 70
+
+        def foo(a, b, bias):
+            computed_bias = bias * 2.0 - 1.0
+            return torch.baddbmm(computed_bias, a, b)
+
+        a = torch.randn(batch, M, K, device=GPU_TYPE)
+        b = torch.randn(batch, K, N, device=GPU_TYPE)
+        bias = torch.randn(batch, M, N, device=GPU_TYPE)
+
+        with self.force_template_fusion_benchmark():
+            out, code = run_and_get_code(torch.compile(foo), a, b, bias)
+
+        self.assertEqual(out, foo(a, b, bias), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
+        (
+            FileCheck()
+            .check("tl.dot")
+            .check("2.0")
+            .check("1.0")
+            .check("acc +")
+            .check_count("tl.store", 1, exactly=True)
+            .run(code[0])
+        )
+
+    @config.patch(
+        {
             "prologue_fusion": True,
             "epilogue_fusion": False,
             "benchmark_epilogue_fusion": True,

@@ -1818,7 +1818,7 @@ class TritonTemplateKernel(TritonKernel):
 
             # Generate fused prefix-input producers and capture their values for
             # the template epilogue. The store cache connects nodes within a group.
-            capture_names = self.store_output_fused_inputs
+            capture_names = OrderedSet(self.store_output_input_producer_groups)
             store_output_capture = _StoreOutputCapture(
                 V.get_ops_handler(), capture_names
             )
