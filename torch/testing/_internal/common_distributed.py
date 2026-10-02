@@ -1010,7 +1010,11 @@ class MultiProcessTestCase(TestCase):
         # Each Process instance holds a few open file descriptors. The unittest
         # runner creates a new TestCase instance for each test method and keeps
         # it alive until the end of the entire suite. We must thus reset the
-        # processes to prevent an effective file descriptor leak.
+        # processes to prevent an effective file descriptor leak. Skip and
+        # failure tracebacks can still reference them, so close exited ones.
+        for p in self.processes:
+            if p.exitcode is not None:
+                p.close()
         self.processes = []
 
     def _current_test_name(self) -> str:
