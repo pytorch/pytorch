@@ -7,6 +7,7 @@
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <nccl.h>
+#include <torch/csrc/distributed/c10d/nccl2/HeartbeatMonitor.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
 #include <algorithm>
@@ -278,6 +279,13 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
     c10::cuda::CUDAGuard device_guard(device_);
     c10::cuda::CUDAStreamCaptureModeGuard capture_mode_guard(
         cudaStreamCaptureModeThreadLocal);
+    // Empty for the default group, whose rank is the global rank.
+    const auto& global_ranks = options_c10d_->global_ranks_in_group;
+    HeartbeatRegistration heartbeat(
+        fmt::format("[TC][rank={}][name={}] ", rank_, name_),
+        static_cast<size_t>(rank_) < global_ranks.size()
+            ? static_cast<int>(global_ranks[rank_])
+            : rank_);
     while (!shutdown_) {
       {
         std::unique_lock<std::mutex> lock(timeout_mutex_);
@@ -286,12 +294,16 @@ void ProcessGroupNCCL::timeoutWatchdog() noexcept {
         timeout_cv_.wait_for(lock, std::chrono::seconds(1), [this]() {
           return shutdown_.load();
         });
+        timeout_cv_.wait(lock, [this]() {
+          return shutdown_.load() || !stall_watchdog_for_testing_.load();
+        });
 
         // If we're shutting down, exit the loop
         if (shutdown_) {
           break;
         }
       }
+      heartbeat.beat();
 
       // Check work objects for completion or timeout
       // Thread-safety: checkWorkQueue() calls garbageCollect() which acquires

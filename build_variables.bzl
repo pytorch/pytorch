@@ -799,6 +799,7 @@ libtorch_cuda_distributed_extra_sources = [
     "torch/csrc/distributed/c10d/nccl2/WindowNCCL.cpp",
     "torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLUtils.cpp",
     "torch/csrc/distributed/c10d/nccl2/ProcessGroupNCCLBackend.cpp",
+    "torch/csrc/distributed/c10d/nccl2/HeartbeatMonitor.cpp",
     "torch/csrc/distributed/c10d/ProcessGroupUCC.cpp",
     "torch/csrc/distributed/c10d/ucc/UCCTracing.cpp",
     "torch/csrc/distributed/c10d/ucc/UCCUtils.cpp",
