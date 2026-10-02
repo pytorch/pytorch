@@ -750,12 +750,7 @@ void lu_batched_panel_recursive(
       return;
     }
     // Fallback: nrows > 1024 or nb is larger than what the register-resident kernel requires
-    TORCH_CHECK(
-      compute_pivots && (nrows > 1024 || nb > MAX_RECNB),
-      "nrows=", nrows, " > 1024 or ",
-      "nb=", nb, " > ", MAX_RECNB,
-      " is not supported for the nopiv LU kernel"
-    );
+    TORCH_CHECK(compute_pivots, "nopiv LU must not reach the pivoting colserial fallback");
     auto grid = dim3(1, 1, batch_count);
     if ((m - col_start) > tuning.panel_threshold) {
       batched_panel_colserial_fused_kernel<scalar_t, 1024><<<grid, 1024, 0, at::cuda::getCurrentCUDAStream()>>>(
