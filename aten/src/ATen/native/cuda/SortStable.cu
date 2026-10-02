@@ -104,6 +104,16 @@ __global__ void fill_reverse_indices_kernel(
   }
 }
 
+// segmented_sort_large_segments may be handed a slice longer than INT_MAX, so
+// unlike fill_reverse_indices_kernel this indexes in 64 bits. The reverse
+// indices it would compute for a single segment are just 0..numel-1.
+C10_LAUNCH_BOUNDS_1(at::cuda::detail::CUDA_NUM_THREADS)
+__global__ void fill_iota_kernel(int64_t* data, int64_t numel) {
+  CUDA_KERNEL_LOOP_TYPE(idx, numel, int64_t) {
+    data[idx] = idx;
+  }
+}
+
 template <typename scalar_t>
 inline void segmented_sort_large_segments(
     const int64_t nsegments,
@@ -117,16 +127,25 @@ inline void segmented_sort_large_segments(
   auto allocator = at::cuda::getCUDADeviceAllocator();
   auto stream = at::cuda::getCurrentCUDAStream();
   dim3 block = CUDA_NUM_THREADS;
-  dim3 grid = GET_BLOCKS(nsort);
+  // nsort can exceed INT_MAX, so size the grid by hand. CUDA_KERNEL_LOOP strides
+  // by blockDim.x * gridDim.x, a product of two unsigned ints, so a grid of 2^32
+  // work-items wraps the stride to 0 and hangs the kernel on any backend; ROCm
+  // additionally bounds a launch dimension by work-items rather than by blocks,
+  // and GET_BLOCKS asserts past 2^41 blocks. The kernel is a grid-stride loop,
+  // so capping the grid only costs iterations.
+  constexpr int64_t max_blocks = (int64_t{1} << 31) / CUDA_NUM_THREADS;
+  const int64_t nblocks = (nsort + CUDA_NUM_THREADS - 1) / CUDA_NUM_THREADS;
+  dim3 grid = static_cast<unsigned int>(std::min(nblocks, max_blocks));
   c10::DeviceArray<int64_t> indices(*allocator, nsort);
-  at::cuda::detail::IntDivider<uint32_t> nsort_divider(nsort);
-  fill_reverse_indices_kernel<<<grid, block, 0, stream>>>(
-      indices.get(), nsort, nsort_divider);
+  fill_iota_kernel<<<grid, block, 0, stream>>>(indices.get(), nsort);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
   const int64_t* initial_indices = indices.get();
 
   for ([[maybe_unused]] auto i : c10::irange(nsegments)) {
     at::cuda::cub::radix_sort_pairs<scalar_t, int64_t>(
-        self_ptr, values_ptr, initial_indices, indices_ptr, nsort, descending);
+        self_ptr, values_ptr, initial_indices, indices_ptr, nsort, descending,
+        /*begin_bit=*/0, /*end_bit=*/sizeof(scalar_t) * 8,
+        /*allow_large_n=*/true);
     indices_ptr += nsort;
     self_ptr += nsort;
     values_ptr += nsort;
@@ -142,6 +161,9 @@ inline void segmented_sort_pairs_by_full_sort(
     const scalar_t* const self_ptr,
     scalar_t* const values_ptr,
     int64_t* const indices_ptr) {
+  // This path indexes in 32 bits (sort_postprocess_kernel, offset_t). Slices
+  // longer than INT_MAX must go to segmented_sort_large_segments instead.
+  TORCH_INTERNAL_ASSERT(n <= std::numeric_limits<int>::max());
   int64_t segment_bits = std::max<int64_t>(
       1L, static_cast<int64_t>(std::ceil(std::log2(nsegments))));
 
@@ -193,6 +215,8 @@ void segmented_sort_pairs(
     const scalar_t* self_ptr,
     scalar_t* values_ptr,
     int64_t* indices_ptr) {
+  // offset_t below truncates nsort to int, so this path is INT_MAX bound too.
+  TORCH_INTERNAL_ASSERT(n <= std::numeric_limits<int>::max());
   const auto numel = nsort * nsegments;
   auto cuda_allocator = at::cuda::getCUDADeviceAllocator();
   auto reverse_indices = cuda_allocator->allocate(numel * sizeof(int64_t));
@@ -236,7 +260,12 @@ void launch_stable_sort_kernel(
   int64_t numel_or_intmax = numel < intmax ? numel : intmax;
   int64_t nsort = self.size(dim);
   int64_t nbatch = (numel_or_intmax / nsort) * nsort;
-  TORCH_CHECK(nbatch > 0, "Cannot sort dimension of length ", nsort);
+  if (nbatch == 0) {
+    // A single slice is already longer than INT_MAX, so no whole number of
+    // slices fits in a batch. segmented_sort_large_segments handles a slice of
+    // any length, so hand it one slice per iteration.
+    nbatch = nsort;
+  }
   int64_t* indices_ptr = indices.mutable_data_ptr<int64_t>();
 
   AT_DISPATCH_ALL_TYPES_AND3(

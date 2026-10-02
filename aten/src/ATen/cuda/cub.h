@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
+#include <limits>
 #include <c10/core/ScalarType.h>
+#include <c10/util/Exception.h>
 #include <ATen/cuda/CUDAConfig.h>
 
 // NOTE: These templates are intentionally not defined in this header,
@@ -40,11 +42,18 @@ void radix_sort_pairs_impl(
 
 }  // namespace detail
 
+// The backends take a 64-bit item count, but most callers here (randperm,
+// embedding backward, index_put) index their own surrounding kernels in 32
+// bits and rely on this check to reject oversized inputs. Only pass
+// allow_large_n from a caller that has been audited for it.
 template<typename key_t, typename value_t>
 void radix_sort_pairs(
     const key_t *keys_in, key_t *keys_out,
     const value_t *values_in, value_t *values_out,
-    int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8) {
+    int64_t n, bool descending=false, int64_t begin_bit=0, int64_t end_bit=sizeof(key_t)*8,
+    bool allow_large_n=false) {
+  TORCH_CHECK(allow_large_n || n <= std::numeric_limits<int>::max(),
+              "cub sort does not support sorting more than INT_MAX elements");
   static_assert(std::is_trivially_copyable_v<value_t> ||
                 AT_ROCM_ENABLED(),  // ROCm incorrectly fails this check for vector types
                 "radix_sort_pairs value type must be trivially copyable");
