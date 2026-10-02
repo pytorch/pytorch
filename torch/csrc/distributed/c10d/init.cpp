@@ -156,6 +156,24 @@ class IntrusivePtrNoGilDestructor {
   }
 };
 
+// A group can outlive the interpreter: the C++ group registry destroys any
+// still-registered group at exit, after Python has finalized. Leak the hook's
+// callable then, since taking the GIL would crash.
+template <typename Args>
+std::function<void(const Args&)> wrapPythonHook(py::function fn) {
+  std::shared_ptr<py::function> holder(
+      new py::function(std::move(fn)), [](py::function* f) {
+        if (Py_IsInitialized()) {
+          pybind11::gil_scoped_acquire gil;
+          delete f;
+        }
+      });
+  return [holder = std::move(holder)](const Args& args) {
+    pybind11::gil_scoped_acquire gil;
+    (*holder)(args);
+  };
+}
+
 } // anonymous namespace
 
 PYBIND11_DECLARE_HOLDER_TYPE(T, IntrusivePtrNoGilDestructor<T>, true)
@@ -1169,6 +1187,13 @@ Example:
         return ::c10d::unregister_process_group(group_name);
       },
       py::arg("group_name"));
+
+  module.def(
+      "_set_gated_hooks_enabled",
+      &::c10d::ProcessGroup::setGatedHooksEnabled,
+      py::arg("enabled"),
+      R"(Enable or disable the gated pre/post hooks of every process group.
+Returns the previous value, for the caller to restore.)");
 
   // Remove all process groups from the native registry
   module.def("_unregister_all_process_groups", []() {
@@ -3079,20 +3104,46 @@ Arguments:
               "(test whether the process group supports completion hooks)")
           .def(
               "register_pre_hook",
-              &::c10d::ProcessGroup::registerPreHook,
+              [](::c10d::ProcessGroup& self,
+                 int64_t hook_id,
+                 py::function fn,
+                 bool gated) {
+                auto hook = wrapPythonHook<::c10d::PreHookArgs>(std::move(fn));
+                if (gated) {
+                  self.registerGatedPreHook(hook_id, std::move(hook));
+                } else {
+                  self.registerPreHook(hook_id, std::move(hook));
+                }
+              },
               py::arg("hook_id"),
               py::arg("hook"),
-              "Register a pre-hook, called before each collective is issued")
+              py::arg("gated") = false,
+              R"(Register a pre-hook, called before each collective is issued.
+A gated hook is called only while gated hooks are enabled, see
+``_set_gated_hooks_enabled``.)")
           .def(
               "unregister_pre_hook",
               &::c10d::ProcessGroup::unregisterPreHook,
               py::arg("hook_id"))
           .def(
               "register_post_hook",
-              &::c10d::ProcessGroup::registerPostHook,
+              [](::c10d::ProcessGroup& self,
+                 int64_t hook_id,
+                 py::function fn,
+                 bool gated) {
+                auto hook =
+                    wrapPythonHook<::c10d::PostHookArgs>(std::move(fn));
+                if (gated) {
+                  self.registerGatedPostHook(hook_id, std::move(hook));
+                } else {
+                  self.registerPostHook(hook_id, std::move(hook));
+                }
+              },
               py::arg("hook_id"),
               py::arg("hook"),
-              "Register a post-hook, called after each collective is issued")
+              py::arg("gated") = false,
+              R"(Register a post-hook, called after each collective is issued.
+A gated post-hook is called for the collectives whose gated pre-hooks were.)")
           .def(
               "unregister_post_hook",
               &::c10d::ProcessGroup::unregisterPostHook,

@@ -1,11 +1,18 @@
 # Owner(s): ["oncall: distributed"]
 
+import subprocess
+import sys
+
 import torch
 import torch.distributed as dist
-from torch._C._distributed_c10d import HookOpName
+from torch._C._distributed_c10d import _set_gated_hooks_enabled, HookOpName
 from torch.distributed.distributed_c10d import _get_default_group
 from torch.testing._internal.common_distributed import MultiProcContinuousTest
-from torch.testing._internal.common_utils import HardwareClassification, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class TestProcessGroupHooks(MultiProcContinuousTest):
@@ -104,6 +111,8 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         # each post correlates with its pre via op_id.
         self.assertEqual(len(pre_ops), len(post_ops))
         self.assertEqual(pre_op_ids, post_op_ids)
+        # firePreHook returns 0 when no hooks are registered.
+        self.assertNotIn(0, pre_op_ids)
 
         # After unregistering, no further hooks fire.
         pg.unregister_pre_hook(0)
@@ -143,6 +152,65 @@ class TestProcessGroupHooks(MultiProcContinuousTest):
         pg.unregister_pre_hook(0)
 
         dist.barrier()
+
+    def test_gated_hooks(self):
+        pg = _get_default_group()
+        calls: list[str] = []
+        pg.register_pre_hook(0, lambda args: calls.append("pre"), gated=True)
+        pg.register_post_hook(0, lambda args: calls.append("post"), gated=True)
+        try:
+            dist.all_reduce(torch.ones(2))
+            self.assertEqual(calls, [])
+            self.assertFalse(_set_gated_hooks_enabled(True))
+            try:
+                dist.all_reduce(torch.ones(2))
+            finally:
+                self.assertTrue(_set_gated_hooks_enabled(False))
+            self.assertEqual(calls, ["pre", "post"])
+            calls.clear()
+            dist.all_reduce(torch.ones(2))
+            self.assertEqual(calls, [])
+        finally:
+            pg.unregister_post_hook(0)
+            pg.unregister_pre_hook(0)
+
+        dist.barrier()
+
+    def test_gated_post_hook_fires_if_pre_hook_did(self):
+        pg = _get_default_group()
+        posts: list[int] = []
+        # Disabling between the pre and post hooks doesn't drop the post hook.
+        pg.register_pre_hook(
+            0, lambda args: _set_gated_hooks_enabled(False), gated=True
+        )
+        pg.register_post_hook(0, lambda args: posts.append(args.op_id), gated=True)
+        _set_gated_hooks_enabled(True)
+        try:
+            dist.all_reduce(torch.ones(2))
+        finally:
+            pg.unregister_post_hook(0)
+            pg.unregister_pre_hook(0)
+        self.assertEqual(len(posts), 1)
+
+        dist.barrier()
+
+
+class TestProcessGroupHooksAtExit(TestCase):
+    def test_python_hook_on_group_alive_at_exit(self):
+        # The group registry destroys the group, and with it the hook, after
+        # the interpreter has finalized.
+        script = """
+import torch.distributed as dist
+from torch._C._distributed_c10d import _register_process_group, ProcessGroup
+pg = ProcessGroup(dist.HashStore(), 0, 1)
+pg.register_pre_hook(0, lambda args: None)
+_register_process_group("hooked", pg)
+del pg
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 if __name__ == "__main__":
