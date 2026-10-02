@@ -15720,7 +15720,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
         for _ in range(2):
             test()
 
-    # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    # AttributeError: module 'torch.mps' has no attribute '_sleep'
     @onlyAccelerator
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
@@ -15734,7 +15734,7 @@ class TestAutogradStreamSynchronization(_TestAutogradStreamSynchronizationBase):
             non_default_ambient_stream=True
         )
 
-    # AttributeError: module 'torch.mps' has no attribute 'default_stream'
+    # AttributeError: module 'torch.mps' has no attribute '_sleep'
     @expectedFailureMPS
     @skipCUDANonDefaultStreamIf(True)
     @onlyAccelerator
