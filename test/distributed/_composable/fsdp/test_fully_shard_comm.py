@@ -256,11 +256,19 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             all_gather_stream=stream,
             shard_placement_fn=lambda _: Shard(1),
         )
-        params = self._init_params([torch.Size([4, 256])])
+        # Only resharding to a smaller mesh needs dim 0 to divide evenly
+        uneven_kwargs = {
+            "param_sizes": [torch.Size([4, 256])],
+            "async_op": False,
+            "all_gather_copy_in_stream": stream,
+            "all_gather_stream": stream,
+            "shard_placement_fn": lambda _: Shard(1),
+        }
+        self._test_all_gather(reshard_after_forward=True, **uneven_kwargs)
         with self.assertRaisesRegex(
             NotImplementedError, r"resharding Shard\(1\) parameters after forward"
         ):
-            self._init_fsdp_param_group(params, 8, lambda _: Shard(1))
+            self._test_all_gather(reshard_after_forward=8, **uneven_kwargs)
 
     @skip_if_lt_x_gpu(1)
     def test_all_gather_empty_params(self):
