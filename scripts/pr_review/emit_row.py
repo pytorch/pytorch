@@ -84,7 +84,8 @@ _FINDING_KEYS = ("path", "line", "severity", "message")
 # the `#` of a defused reference; neutralize_path() only before `[]()@#*_`.
 _STRAY_BACKSLASH = re.compile(r"\\(?![\[\]#])")
 _UNESCAPED_BRACKET = re.compile(r"(?<!\\)[\[\]]")
-_BARE_AMPERSAND = re.compile(r"&(?!amp;|lt;|gt;)")
+# neutralize() caps AFTER escaping, so a capped string can end in a cut entity.
+_BARE_AMPERSAND = re.compile(r"&(?!amp;|lt;|gt;|(?:a(?:mp?)?|lt?|gt?)?\Z)")
 _PATH_ESCAPE = re.compile(r"\\([\[\]()@#*_])")
 
 # Terminal statuses. Anything not in this set is a bug in the caller.
@@ -318,7 +319,8 @@ def main() -> int:
         # Only a succeeded review carries a verdict. A failed one must not look
         # like an objection to the change.
         if status == "succeeded" and (
-            verdict.get("verdict") not in VERDICTS
+            not isinstance(verdict.get("verdict"), str)
+            or verdict.get("verdict") not in VERDICTS
             or not neutral_prose(verdict.get("summary"), MAX_SUMMARY)
         ):
             # A verdict extract_verdict.py could not have written. Record the
@@ -332,7 +334,10 @@ def main() -> int:
             verdict = {"failure_detail": "verdict failed the publish-side re-check"}
         row["verdict"] = verdict.get("verdict") if status == "succeeded" else None
         row["summary"] = verdict.get("summary", "") if status == "succeeded" else ""
-        row["findings_count"] = len(verdict.get("findings") or [])
+        raw_findings = verdict.get("findings")
+        row["findings_count"] = (
+            len(raw_findings) if isinstance(raw_findings, list) else 0
+        )
         if status == "succeeded":
             try:
                 findings = published_findings(verdict)

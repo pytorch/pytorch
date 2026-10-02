@@ -227,6 +227,29 @@ class TestPublishSideRecheckMatchesTheSanitizer(unittest.TestCase):
             if out:
                 self.assertTrue(neutral_prose(out, 600), repr((text, out)))
 
+    def test_text_cut_at_the_cap_still_passes(self):
+        # neutralize() escapes and then caps, so the cap can split an entity.
+        for cap in (600, 1500):
+            for fill in range(cap - 12, cap + 1):
+                for tail in ("<", ">", "&", "x < y", "[a]", "#12", "@me"):
+                    out = neutralize("p" * fill + tail, cap).strip()
+                    if out:
+                        self.assertTrue(neutral_prose(out, cap), repr(out[-12:]))
+
+    def test_malformed_verdict_shapes_still_write_a_row(self):
+        for verdict in (
+            {"status": "succeeded", "verdict": [], "summary": "s", "findings": []},
+            {"status": "succeeded", "verdict": {}, "summary": "s", "findings": []},
+            {
+                "status": "succeeded",
+                "verdict": "ready_for_human_review",
+                "summary": "ok",
+                "findings": 1,
+            },
+        ):
+            row = TestTerminalRowCarriesFindings._row(self, verdict)
+            self.assertIn(row["status"], ("sanitizer_rejected", "succeeded"))
+
     def test_raw_hostile_text_is_refused(self):
         for text in HOSTILE:
             self.assertFalse(neutral_prose(text, 600), repr(text))
