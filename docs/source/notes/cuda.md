@@ -1349,6 +1349,89 @@ to overlap data transfers with computation.
 You can make the {class}`~torch.utils.data.DataLoader` return batches placed in
 pinned memory by passing `pin_memory=True` to its constructor.
 
+(cuda-device-to-host-copies)=
+
+### Device-to-host copies on NVLink-C2C systems
+
+On systems such as NVIDIA Grace Hopper and Grace Blackwell, NVLink-C2C
+connects the GPU to its local CPU. Transfers between the GPU and local CPU
+memory use this connection without a PyTorch configuration option. PyTorch
+delegates transfers made with {meth}`~torch.Tensor.cpu`,
+{meth}`~torch.Tensor.to`, and {meth}`~torch.Tensor.copy_` to CUDA.
+
+A fast interconnect does not eliminate the cost of preparing CPU memory.
+For a CUDA tensor, `tensor.cpu()` allocates a CPU result in pageable memory
+and waits for the copy to finish. Fresh allocations can require physical
+pages to be allocated and mapped on first access, so the first copy can be
+limited by memory allocation and page faults rather than link bandwidth.
+CUDA may stage a copy into fresh pageable memory through an intermediate
+pinned buffer, adding a CPU copy into the destination.
+Pinned memory also has allocation and registration costs; allocating a new
+pinned buffer for every transfer can move these costs outside the copy
+without eliminating them.
+
+On hardware-coherent systems, reusing a pageable buffer can also amortize
+these costs as long as its pages remain mapped and physically allocated.
+Once populated, pageable and pinned buffers can have similar transfer
+performance. Reuse does not pin pageable memory: it remains eligible for
+swapping. Pinned buffers are recommended for large, repeated transfers to
+avoid swapping, but excessive pinning can put pressure on available RAM
+(see {ref}`cuda-memory-pinning`).
+
+```{note}
+On hardware-coherent systems, pinned memory does not guarantee immovable
+physical pages. Operating system memory compaction can still cause page
+faults, including for memory allocated with `cudaMallocHost` or registered
+with `cudaHostRegister`. Buffer reuse reduces allocation overhead but does
+not guarantee fault-free transfers.
+```
+
+For repeated transfers, such as activation offloading, allocate pinned CPU
+buffers once and reuse them with {meth}`~torch.Tensor.copy_`:
+
+```python
+# Allocate once for a CUDA tensor t with a fixed shape and dtype.
+cpu_buf = torch.empty(t.shape, dtype=t.dtype, device="cpu", pin_memory=True)
+copy_done = torch.cuda.Event()
+
+# Repeat for each transfer, after producing t on the current stream.
+with torch.no_grad():
+    cpu_buf.copy_(t, non_blocking=True)
+copy_done.record(torch.cuda.current_stream(t.device))
+
+# Independent CPU work can run here while the copy is in flight.
+copy_done.synchronize()
+# cpu_buf is now safe to read on the CPU.
+```
+
+Wait for the copy to complete before reading or modifying `cpu_buf` on the
+CPU, and finish consuming its contents before reusing it. Do not modify the
+source tensor while the copy is in flight. `non_blocking=True` avoids waiting
+on the host, but operations on the same CUDA stream still execute in order.
+To overlap the transfer with independent GPU computation, use a separate
+stream and establish the required dependencies and tensor lifetimes as
+described in {ref}`cuda-stream-semantics`.
+
+For a dense CUDA tensor, `tensor.to("cpu", non_blocking=True)` allocates its
+CPU output in pinned memory. PyTorch's caching host allocator can reuse freed
+pinned allocations, which amortizes allocation costs. The same synchronization
+requirements apply before accessing the result on the CPU. See the `pinned_*`
+options in {ref}`cuda-memory-envvars` for allocator configuration.
+
+When measuring bandwidth, distinguish allocation and the first transfer from
+transfers into a reused buffer, and synchronize to measure completion rather
+than enqueue time. Hardware-coherent systems can access pageable memory
+directly, so do not assume every pageable transfer requires a staging buffer.
+See NVIDIA's [Unified Memory performance tuning guidance](https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/unified-memory.html#performance-tuning)
+for details on populated buffers and memory placement.
+
+On systems with multiple CPU NUMA nodes, place CPU buffers on the node local
+to the GPU to avoid traffic through a remote CPU node. Check both process
+affinity and memory placement before allocating buffers. `torchrun` provides
+`--numa-binding=node` to bind workers to CPUs near their assigned GPUs;
+this is not enabled by default. See {ref}`numa-api` and NVIDIA's
+[Grace Performance Tuning Guide](https://docs.nvidia.com/dccpu/grace-perf-tuning-guide/).
+
 (cuda-nn-ddp-instead)=
 
 ### Use nn.parallel.DistributedDataParallel instead of multiprocessing or nn.DataParallel
