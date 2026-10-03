@@ -1332,9 +1332,7 @@ def forward(self, x):
     _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
     _remove_batch_dim_1 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim, 3, 128, 0);  _remove_batch_dim = None
     _vmap_decrement_nesting_1 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
-    _remove_batch_dim_2 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_1, 2, 1, 0)
-    unsqueeze_default = torch.ops.aten.unsqueeze.default(_remove_batch_dim_1, 0);  _remove_batch_dim_1 = None
-    expand_default = torch.ops.aten.expand.default(unsqueeze_default, [1, 128, 128]);  unsqueeze_default = expand_default = None
+    _remove_batch_dim_2 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_1, 2, 1, 0);  _remove_batch_dim_1 = None
     _vmap_decrement_nesting_2 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_2 = None
     _remove_batch_dim_3 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_2, 1, 2, 0);  _remove_batch_dim_2 = None
     _vmap_decrement_nesting_3 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_3 = None
@@ -1378,11 +1376,11 @@ def forward(self, x):
     arange_default_1 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
     new_zeros_default = torch.ops.aten.new_zeros.default(_add_batch_dim_7, [1, 2], dtype = torch.int32, pin_memory = False)
     new_ones_default = torch.ops.aten.new_ones.default(new_zeros_default, [], pin_memory = False)
-    unsqueeze_default_1 = torch.ops.aten.unsqueeze.default(_add_batch_dim_6, -1);  _add_batch_dim_6 = None
-    lt_tensor = torch.ops.aten.lt.Tensor(arange_default_1, unsqueeze_default_1);  arange_default_1 = unsqueeze_default_1 = None
-    unsqueeze_default_2 = torch.ops.aten.unsqueeze.default(arange_default, -1);  arange_default = None
+    unsqueeze_default = torch.ops.aten.unsqueeze.default(_add_batch_dim_6, -1);  _add_batch_dim_6 = None
+    lt_tensor = torch.ops.aten.lt.Tensor(arange_default_1, unsqueeze_default);  arange_default_1 = unsqueeze_default = None
+    unsqueeze_default_1 = torch.ops.aten.unsqueeze.default(arange_default, -1);  arange_default = None
     where_scalar_other = torch.ops.aten.where.ScalarOther(lt_tensor, _add_batch_dim_7, 1);  lt_tensor = _add_batch_dim_7 = None
-    index_put__default = torch.ops.aten.index_put_.default(new_zeros_default, [unsqueeze_default_2, where_scalar_other], new_ones_default);  new_zeros_default = unsqueeze_default_2 = where_scalar_other = new_ones_default = None
+    index_put__default = torch.ops.aten.index_put_.default(new_zeros_default, [unsqueeze_default_1, where_scalar_other], new_ones_default);  new_zeros_default = unsqueeze_default_1 = where_scalar_other = new_ones_default = None
     slice_tensor = torch.ops.aten.slice.Tensor(index_put__default, 1, 0, 1);  index_put__default = None
     _remove_batch_dim_4 = torch._functorch.predispatch._remove_batch_dim(slice_tensor, 2, 1, 0);  slice_tensor = None
     _vmap_decrement_nesting_4 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_4 = None
@@ -1409,11 +1407,11 @@ def forward(self, x):
     arange_default_3 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
     new_zeros_default_1 = torch.ops.aten.new_zeros.default(_add_batch_dim_11, [1, 2], dtype = torch.int32, pin_memory = False)
     new_ones_default_1 = torch.ops.aten.new_ones.default(new_zeros_default_1, [], pin_memory = False)
-    unsqueeze_default_3 = torch.ops.aten.unsqueeze.default(_add_batch_dim_10, -1);  _add_batch_dim_10 = None
-    lt_tensor_1 = torch.ops.aten.lt.Tensor(arange_default_3, unsqueeze_default_3);  arange_default_3 = unsqueeze_default_3 = None
-    unsqueeze_default_4 = torch.ops.aten.unsqueeze.default(arange_default_2, -1);  arange_default_2 = None
+    unsqueeze_default_2 = torch.ops.aten.unsqueeze.default(_add_batch_dim_10, -1);  _add_batch_dim_10 = None
+    lt_tensor_1 = torch.ops.aten.lt.Tensor(arange_default_3, unsqueeze_default_2);  arange_default_3 = unsqueeze_default_2 = None
+    unsqueeze_default_3 = torch.ops.aten.unsqueeze.default(arange_default_2, -1);  arange_default_2 = None
     where_scalar_other_1 = torch.ops.aten.where.ScalarOther(lt_tensor_1, _add_batch_dim_11, 1);  lt_tensor_1 = _add_batch_dim_11 = None
-    index_put__default_1 = torch.ops.aten.index_put_.default(new_zeros_default_1, [unsqueeze_default_4, where_scalar_other_1], new_ones_default_1);  new_zeros_default_1 = unsqueeze_default_4 = where_scalar_other_1 = new_ones_default_1 = None
+    index_put__default_1 = torch.ops.aten.index_put_.default(new_zeros_default_1, [unsqueeze_default_3, where_scalar_other_1], new_ones_default_1);  new_zeros_default_1 = unsqueeze_default_3 = where_scalar_other_1 = new_ones_default_1 = None
     slice_tensor_1 = torch.ops.aten.slice.Tensor(index_put__default_1, 1, 0, 1);  index_put__default_1 = None
     _remove_batch_dim_6 = torch._functorch.predispatch._remove_batch_dim(slice_tensor_1, 2, 1, 0);  slice_tensor_1 = None
     _vmap_decrement_nesting_6 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_6 = None
