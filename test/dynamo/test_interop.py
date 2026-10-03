@@ -1,6 +1,8 @@
 # Owner(s): ["module: dynamo"]
 from functools import wraps
 
+import numpy as np
+
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
@@ -17,6 +19,27 @@ def fn(a, b):
 
 
 class InteropTests(torch._dynamo.test_case.TestCase):
+    def test_numpy_array_dtype_metadata(self):
+        for metadata in ({"unit": "m"}, {}):
+            dtype = np.dtype("float64", metadata=metadata)
+
+            def fn(x):
+                return np.array(x, dtype=dtype, copy=True)
+
+            with self.subTest(metadata=metadata):
+                torch._dynamo.reset()
+                x = torch.arange(12, dtype=torch.float64).reshape(3, 4).t()
+                result = torch.compile(fn, backend="eager")(x)
+                self.assertEqual(result, x.numpy())
+                self.assertEqual(result.dtype.metadata, metadata)
+                self.assertFalse(np.shares_memory(result, x.numpy()))
+                self.assertTrue(result.flags.f_contiguous)
+                torch._dynamo.reset()
+                with self.assertRaisesRegex(
+                    torch._dynamo.exc.Unsupported, "NumPy dtype with metadata"
+                ):
+                    torch.compile(fn, backend="eager", fullgraph=True)(x)
+
     def _common(self, fn):
         inputs = [
             torch.randn(10, device=device_type),

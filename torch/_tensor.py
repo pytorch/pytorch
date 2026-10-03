@@ -1250,20 +1250,32 @@ class Tensor(torch._C.TensorBase):
     # Numpy array interface, to support `numpy.asarray(tensor) -> ndarray`
     __array_priority__ = 1000  # prefer Tensor ops over numpy ones
 
-    def __array__(self, dtype=None):
+    def __array__(self, dtype=None, *, copy=None):
         if has_torch_function_unary(self):
-            return handle_torch_function(Tensor.__array__, (self,), self, dtype=dtype)
-        if dtype is None:
-            return self.numpy()
-        else:
-            return self.numpy().astype(dtype, copy=False)
+            return handle_torch_function(
+                Tensor.__array__, (self,), self, dtype=dtype, copy=copy
+            )
+        array = self.numpy()
+        if copy is False and dtype is not None and array.dtype != dtype:
+            raise ValueError(
+                f"Unable to avoid a copy when converting a tensor of dtype {array.dtype} "
+                f"to an array of dtype {dtype}."
+            )
+        if dtype is not None:
+            return array.astype(dtype, copy=copy is True)
+        return array.copy(order="K") if copy else array
 
     # Wrap Numpy array again in a suitable tensor when done, to support e.g.
     # `numpy.sin(tensor) -> tensor` or `numpy.greater(tensor, 0) -> ByteTensor`
-    def __array_wrap__(self, array):
+    def __array_wrap__(self, array, context=None, return_scalar=False):
         if has_torch_function_unary(self):
             return handle_torch_function(
-                Tensor.__array_wrap__, (self,), self, array=array
+                Tensor.__array_wrap__,
+                (self,),
+                self,
+                array=array,
+                context=context,
+                return_scalar=return_scalar,
             )
         if array.dtype == bool:
             # Workaround, torch has no built-in bool tensor

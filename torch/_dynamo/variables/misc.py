@@ -2348,7 +2348,16 @@ class NumpyDTypeVariable(ConstantLikeVariable):
         # np_constant_collections_map entry for tnp.dtype, builder.py's
         # is_numpy_dtype branch, and ConstantLikeVariable.tp_getattro_impl's
         # isinstance(result, self.np_dtype) branch.
-        return cast("np.dtype[Any]", self.value).type.__name__
+        dtype = cast("np.dtype[Any]", self.value)
+        if dtype.metadata is not None:
+            unimplemented(
+                gb_type="NumPy dtype with metadata",
+                context=f"numpy dtype: {dtype}",
+                explanation="torch.compile cannot preserve NumPy dtype metadata. "
+                "This operation will execute eagerly.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return dtype.type.__name__
 
 
 np_constant_collections_map = {
