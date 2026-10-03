@@ -7252,6 +7252,115 @@ def disable_gc():
 class TestTorch(TestCase):
     exact_dtype = True
 
+    @parametrize("dtype", [torch.bool, torch.uint8, torch.int8, torch.int16,
+                           torch.int32, torch.int64, torch.uint16, torch.uint32,
+                           torch.uint64, torch.float16, torch.float32, torch.float64,
+                           torch.complex64, torch.complex128])
+    def test_tobytes_numpy(self, dtype):
+        base = (torch.arange(24).reshape(3, 8) % 7).to(dtype)
+        tensors = [base, base.t(), base[1:, 1::2], base[:1].expand(3, 8),
+                   base.unsqueeze(1).transpose(0, 2), base[0, 0],
+                   base[:0], base[:, :0], base[1:2, 2:3]]
+        for tensor, order in product(tensors, ("C", "F", "A", "c", "f", "a", "K", None, b"F")):
+            with self.subTest(shape=tensor.shape, stride=tensor.stride(), order=order):
+                expected = tensor.numpy().tobytes(order)
+                actual = tensor.tobytes(order=order)
+                self.assertIs(type(actual), bytes)
+                self.assertEqual(actual, expected)
+                self.assertEqual(len(actual), tensor.numel() * tensor.element_size())
+                self.assertEqual(tensor.tobytes(order), expected)
+        self.assertEqual(base.tobytes(), base.numpy().tobytes())
+
+    def test_tobytes_view_bits_and_grad(self):
+        real = torch.arange(24, dtype=torch.float64).reshape(3, 8)
+        base = torch.complex(real, real + 1).requires_grad_()
+        for tensor, reference in (
+            (base.t().conj(), base.detach().numpy().conj().T),
+            (base.t()[::2].conj(), base.detach().numpy().conj().T[::2]),
+            (torch._neg_view(base.t()[::2]), -base.detach().numpy().T[::2]),
+            (torch._neg_view(base.t()[::2].conj()), -base.detach().numpy().conj().T[::2]),
+        ):
+            # Negation may copy a NumPy view, so restore the original strides.
+            storage = bytearray(base.numel() * base.element_size())
+            expected = np.ndarray(tensor.shape, dtype=reference.dtype, buffer=storage,
+                                  strides=tuple(s * tensor.element_size() for s in tensor.stride()))
+            expected[...] = reference
+            version = base._version
+            for order in ("C", "F", "A"):
+                self.assertEqual(tensor.tobytes(order), expected.tobytes(order))
+            self.assertEqual(base._version, version)
+            self.assertTrue(tensor.requires_grad)
+            self.assertIsNone(base.grad)
+
+    @parametrize("dtype", [torch.bfloat16, torch.float8_e4m3fn, torch.float8_e5m2])
+    def test_tobytes_numpy_unsupported_dtype(self, dtype):
+        tensor = torch.arange(12, dtype=torch.float32).reshape(3, 4).to(dtype).t()
+        for order, logical in (("C", tensor), ("F", tensor.t()), ("A", tensor.t())):
+            expected = bytes(logical.contiguous().view(torch.uint8).flatten().tolist())
+            self.assertEqual(tensor.tobytes(order), expected)
+
+    def test_tobytes_owns_copy_and_respects_storage_offset(self):
+        base = torch.arange(16, dtype=torch.int32)
+        view = base[3:7]
+        expected = view.numpy().tobytes()
+        actual = view.tobytes()
+        base.fill_(99)
+        self.assertEqual(actual, expected)
+        self.assertEqual(len(actual), 4 * base.element_size())
+        # Adding tobytes does not alter the pre-existing bytes(iterable) protocol.
+        self.assertEqual(bytes(torch.tensor([1, 2, 3])), b"\x01\x02\x03")
+
+    def test_tobytes_invalid_arguments_and_layouts(self):
+        tensor = torch.ones(2)
+        for order in ("", "CF", "Q", "\x00", b"CF"):
+            with self.assertRaisesRegex(ValueError, "order must be"):
+                tensor.tobytes(order)
+        for order in (1, [], object()):
+            with self.assertRaises(TypeError):
+                tensor.tobytes(order)
+        for tensor in (torch.empty(2, device="meta"), torch.empty(0, device="meta")):
+            with self.assertRaisesRegex(RuntimeError, "only supported for CPU"):
+                tensor.tobytes()
+        for tensor in (torch.eye(2).to_sparse(),
+                       torch.quantize_per_tensor(torch.ones(2), 0.1, 0, torch.qint8)):
+            with self.assertRaisesRegex(RuntimeError, "requires a strided, non-quantized, non-nested"):
+                tensor.tobytes()
+
+    def test_tobytes_nested_and_size_limit(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            nested = torch.nested.nested_tensor([torch.ones(2), torch.ones(3)])
+        with self.assertRaisesRegex(RuntimeError, "non-nested"):
+            nested.tobytes()
+        # An expanded view needs no large allocation; reject its byte length
+        # before trying to make the logical data contiguous.
+        huge = torch.empty(1, dtype=torch.float64).expand(sys.maxsize // 8 + 1)
+        with self.assertRaisesRegex(ValueError, "too large to convert to bytes"):
+            huge.tobytes()
+
+    def test_tobytes_zero_tensor(self):
+        for shape in ((3, 4), (), (0, 3)):
+            tensor = torch._efficientzerotensor(shape, dtype=torch.float64)
+            for view in (tensor, tensor.mT if tensor.ndim == 2 else tensor):
+                for order in ("C", "F", "A"):
+                    self.assertEqual(view.tobytes(order), bytes(view.numel() * view.element_size()))
+                    self.assertTrue(view._is_zerotensor())
+
+    def test_tobytes_torch_function(self):
+        class TensorSubclass(torch.Tensor):
+            @classmethod
+            def __torch_function__(cls, func, types, args=(), kwargs=None):
+                if func is torch.Tensor.tobytes:
+                    return kwargs["order"].encode()
+                return super().__torch_function__(func, types, args, kwargs)
+
+        tensor = torch.ones(2).as_subclass(TensorSubclass)
+        self.assertEqual(tensor.tobytes(order="F"), b"F")
+
+    def test_tobytes_without_numpy(self):
+        with unittest.mock.patch.dict(sys.modules, {"numpy": None}):
+            self.assertEqual(torch.tensor([1, 2, 3], dtype=torch.uint8).tobytes(), b"\x01\x02\x03")
+
     def test_dir(self):
         dir(torch)
 
