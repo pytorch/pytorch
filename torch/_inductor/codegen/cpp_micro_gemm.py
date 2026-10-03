@@ -486,6 +486,31 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
 {%- else %}
             } else {
 {%- endif %}
+{%- if pow2_m_tails %}
+                int64_t m_offset = 0;
+    {%- for b in pow2_tail_rows %}
+                if (block_m - m_offset >= {{b}}) {
+        {%- if not trans_b %}
+                    {{kernel_name}}_kernel<{{b}}, {{block_n}}, accum, prefetch>(
+        {%- else %}
+                    {{kernel_name}}_transpose_b_kernel<{{b}}, {{block_n}}, accum, prefetch>(
+        {%- endif %}
+                        A + (m + m_offset) * lda,
+        {%- if not trans_b %}
+                        B + n,
+        {%- else %}
+                        B + n * ldb,
+        {%- endif %}
+                        C + (m + m_offset) * ldc + n,
+                        K,
+                        lda,
+                        ldb,
+                        ldc
+                    );
+                    m_offset += {{b}};
+                }
+    {%- endfor %}
+{%- else %}
                 switch (block_m) {
 {%- for b in range(block_m - 1, 0, -1) %}
                 case {{b}}:
@@ -511,9 +536,36 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
                 default:
                     {{kernel.assert_function}}(false, "Unsupported block_m: {{block_m}}");
                 }
+{%- endif %}
 
 {%- if tail_n %}
             } else {
+    {%- if pow2_m_tails %}
+                int64_t m_offset = 0;
+        {%- for b in [block_m] + pow2_tail_rows %}
+                if (block_m - m_offset >= {{b}}) {
+            {%- if not trans_b %}
+                    {{kernel_name}}_ntail_kernel<{{b}}, {{block_n}}, accum, prefetch>(
+            {%- else %}
+                    {{kernel_name}}_ntail_transpose_b_kernel<{{b}}, {{block_n}}, accum, prefetch>(
+            {%- endif %}
+                        A + (m + m_offset) * lda,
+            {%- if not trans_b %}
+                        B + n,
+            {%- else %}
+                        B + n * ldb,
+            {%- endif %}
+                        C + (m + m_offset) * ldc + n,
+                        block_n,
+                        K,
+                        lda,
+                        ldb,
+                        ldc
+                    );
+                    m_offset += {{b}};
+                }
+        {%- endfor %}
+    {%- else %}
                 switch (block_m) {
     {%- for b in range(block_m, 0, -1) %}
                 case {{b}}:
@@ -540,6 +592,7 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
                 default:
                     {{kernel.assert_function}}(false, "Unsupported block_m: {{block_m}}");
                 }
+    {%- endif %}
             }
 {%- else %}
             }
@@ -701,7 +754,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
     //   which introduces an additional vector reduction of [M, N] compared to the non-transpose version.
     // Therefore, when M * N / (K * N) is large, the first implementation has better performance.
     {%- if tail_n %}
-    if (K % Vectorized::size() == 0 && N % Vectorized::size() == 0 && 24 * BLOCK_M > K) {
+    if (K % Vectorized::size() == 0 && N == BLOCK_N && 24 * BLOCK_M > K) {
     {%- else %}
     if (K % Vectorized::size() == 0 && 24 * BLOCK_M > K) {
     {%- endif %}
@@ -890,6 +943,8 @@ inline void {{kernel_name}}_transpose_b_kernel(
 
     # set trans_b to generate gemm that supports transposed B matrix
     # set tail_n to support the tail of N
+    # set pow2_m_tails to cover the tail of M with power-of-two row kernels: this
+    # instantiates about log2(block_m) tail kernels to save C++ compile time
     # TODO add trans_b support for other micro gemms
     # and move setting of trans_b to the init of CppMicroGemm
     def __init__(
@@ -903,6 +958,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
         alpha=1,
         tail_n=False,
         trans_b=False,
+        pow2_m_tails=False,
     ) -> None:
         super().__init__(
             name,
@@ -927,16 +983,21 @@ inline void {{kernel_name}}_transpose_b_kernel(
                     f"trans_b requires AVX512 or AVX2 vec ISA, got {vec_isa.__class__}"
                 )
         self.trans_b = trans_b
+        self.pow2_m_tails = pow2_m_tails
 
     def codegen_define(self, kernel: CppTemplateKernel) -> str:
+        block_m = self.register_blocking.block_m
+        tail_bits = (block_m - 1).bit_length()
         options = {
             "declare_kernel": self.get_kernel_declaration(),
             "kernel": kernel,
-            "block_m": self.register_blocking.block_m,
+            "block_m": block_m,
             "block_n": self.register_blocking.block_n,
             "block_k": self.register_blocking.block_k,
             "trans_b": False,
             "tail_n": False,
+            "pow2_m_tails": self.pow2_m_tails,
+            "pow2_tail_rows": [1 << i for i in reversed(range(tail_bits))],
             "restrict_keyword": get_restrict_keyword(),
             **self.get_common_options(),
         }
