@@ -385,8 +385,13 @@ LITE_MODE_TEST_FAILURES = {
 
 if LITE_MODE:
     # These pass in lite mode
-    del CPU_TEST_FAILURES["test_cond_unbacked_symint_predicate"]
-    del CPU_TEST_FAILURES["test_while_loop_with_mixed_device_dynamic_True"]
+    for name in (
+        "test_cond_unbacked_symint_predicate",
+        "test_while_loop_with_mixed_device_dynamic_False",
+        "test_while_loop_with_mixed_device_dynamic_True",
+        "test_while_loop_with_pytree_inputs",
+    ):
+        del CPU_TEST_FAILURES[name]
     CPU_TEST_FAILURES.update(LITE_MODE_TEST_FAILURES)
 
 
