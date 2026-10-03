@@ -132,7 +132,7 @@ from .fx_passes.post_grad import (
 )
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
-from .ir import get_device_type, IRNode
+from .ir import get_device_type, IRNode, is_triton
 from .triton_bundler import TritonBundler
 from .utils import (
     align_inputs_from_check_idxs,
@@ -3177,10 +3177,9 @@ def compile_fx(
         compile_region_name=compile_region_name,
     )
 
-    # Wake up the AsyncCompile subproc pool as early as possible (if there's cuda).
+    # Wake up the AsyncCompile subproc pool as early as possible (if the graph uses Triton).
     if any(
-        isinstance(e, torch.Tensor) and e.device.type in ("cuda", "xpu")
-        for e in example_inputs_
+        isinstance(e, torch.Tensor) and is_triton(e.device) for e in example_inputs_
     ):
         torch._inductor.async_compile.AsyncCompile.wakeup()
 
