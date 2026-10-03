@@ -7058,6 +7058,35 @@ class TestCudaAllocator(TestCase):
         super().tearDown()
         _check_allocator_settings_on_tear_down(self)
 
+    @unittest.skipIf(IS_WINDOWS, "expandable segment IPC is not supported on Windows")
+    @skipIfRocm(msg="expandable_segments mode is not supported on ROCm")
+    def test_expandable_segment_ipc_handle_is_deterministic(self):
+        # Sharing the same block must always give the same handle, since the
+        # receiver caches its mappings by handle (#198305). Runs in a subprocess
+        # so the IPC ref counts of these never-received handles don't leak.
+        script = """import os, struct
+import torch
+t = torch.full((5,), 1.0, device="cuda")
+def share(depth):  # vary the stack contents under the ShareHeader
+    if depth:
+        torch.empty(depth, device="cuda")
+        return share(depth - 1)
+    return t.untyped_storage()._share_cuda_()[1]
+handles = {share(depth) for depth in range(32)}
+h = next(iter(handles))
+assert h[1:2] == b"e"  # expandable segment handle
+# the 32-byte header after the 2-byte prefix, reserved bytes zero
+pid, _, num_handles, handle_type = struct.unpack_from("=i4xQQi4x", h, 2)
+assert h[6:10] == h[30:34] == bytes(4), h[:34]
+assert pid == os.getpid() and num_handles >= 1 and handle_type in (1, 2)
+print(len(handles))
+"""
+        env = dict(os.environ, PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True")
+        out = subprocess.check_output(
+            [sys.executable, "-c", script], env=env, text=True
+        )
+        self.assertEqual(out.split()[-1], "1")
+
     @unittest.skipIf(
         not EXPANDABLE_SEGMENTS,
         "requires expandable_segments mode (run via test_cuda_expandable_segments.py)",
