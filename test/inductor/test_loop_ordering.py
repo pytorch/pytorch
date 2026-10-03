@@ -644,6 +644,47 @@ class LoopOrderingTest(TestCase):
         self.assertEqual(2, metrics.generated_kernel_count)
         self.assertEqual(0, metrics.num_loop_reordering)
 
+    def test_pruned_weak_dep_after_reorder(self):
+        """
+        x.copy_(x.transpose(-1, -2) * 1.0): the weak dep between the read of x
+        and the copy back into x is pruned because the indices match in the
+        original loop order. Reordering the reader's loops to fuse it with the
+        copy would read x transposed while writing it.
+        """
+
+        def f(x):
+            x.copy_(x.transpose(-1, -2) * 1.0)
+            return x
+
+        x = torch.rand(80000, 5, 5, device=GPU_TYPE)
+        expect = f(x.clone())
+        actual = torch.compile(f)(x.clone())
+        self.assertEqual(expect, actual)
+        self.assertEqual(2, metrics.generated_kernel_count)
+
+    def test_pruned_weak_dep_after_reorder_for_other_node(self):
+        """
+        As above, but the reader of x is reordered to fuse with the sum, which
+        mutates nothing. It then lines up with the copy back into x without
+        another reorder, so the pruned weak dep is only checked again when the
+        two are fused.
+        """
+
+        def f(x):
+            t = x.transpose(-1, -2) * 1.0
+            w = t.sum(-1)
+            x.copy_(t)
+            return x, w
+
+        x = torch.rand(20000, 10, 10, device=GPU_TYPE)
+        expect = f(x.clone())
+        actual, (code,) = run_and_get_code(torch.compile(f), x.clone())
+        self.assertEqual(expect, actual)
+        self.assertEqual(2, metrics.generated_kernel_count)
+        # Whether the race shows in the values depends on the schedule of the
+        # blocks: check that no kernel reads x while writing it.
+        FileCheck().check_not("(arg0_1, arg0_1,").run(code)
+
     def test_keep_fake_dep(self):
         """
         In this model, there are fake dependencies (StarDep) between Scatter

@@ -1700,6 +1700,7 @@ class TestScheduler(TestCase):
 
         scheduler = Scheduler.__new__(Scheduler)
         scheduler.mutation_renames = {}
+        scheduler.pruned_weak_deps = {}
         scheduler.fusable_weak_dep = Mock(return_value=False)
         scheduler.name_to_buf = {}
         scheduler.name_to_fused_node = {}
