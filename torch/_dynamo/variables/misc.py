@@ -74,7 +74,9 @@ from ..utils import (
 )
 from .base import (
     AsPythonConstantNotImplementedError,
+    GetSet,
     getset_build,
+    load_pending_mutation,
     Member,
     Method,
     NO_SUCH_SUBOBJ,
@@ -760,6 +762,22 @@ class AutogradFunctionVariable(VariableTracker):
         setup_context = self.fn_cls.setup_context
         is_setup_ctx_defined = setup_context is not _SingleLevelFunction.setup_context
 
+        # Tracing forward directly would skip the custom vmap staticmethod that
+        # eager custom_function_call runs while a functorch transform is active.
+        # generate_vmap_rule is fine: its rule is vmap over forward.
+        if (
+            self.fn_cls.vmap is not torch.autograd.Function.vmap
+            and torch._C._functorch.peek_interpreter_stack() is not None
+        ):
+            unimplemented(
+                gb_type="autograd.Function with custom vmap under functorch transform",
+                context=f"call_apply {self} {args} {kwargs}",
+                explanation="Dynamo traces `forward` directly and does not model "
+                "the `vmap` staticmethod of a `torch.autograd.Function` while a "
+                "functorch transform is active.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
         if kwargs:
             resolved = self._resolve_kwargs(args, kwargs, is_setup_ctx_defined)
             if resolved is None:
@@ -1118,6 +1136,25 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         self.saved_tensors = saved_tensors
         self.non_differentiable = non_differentiable
         self.dirty_tensors = dirty_tensors
+
+    # _FunctionBase.needs_input_grad is a writable getset. apply() seeds it as an
+    # instance-dict entry, so user writes go there too and reads see them;
+    # without a pending entry the read falls through to tp_getattro_impl.
+    def _get_needs_input_grad(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker | None:
+        return load_pending_mutation(tx, self, "needs_input_grad")
+
+    def _set_needs_input_grad(
+        self, tx: "InstructionTranslatorBase", value: VariableTracker | None
+    ) -> None:
+        stored = variables.DeletedVariable() if value is None else value
+        se = tx.output.side_effects
+        se.store_instance_dict_attr(self, "needs_input_grad", stored)
+
+    tp_getset = {
+        "needs_input_grad": GetSet(_get_needs_input_grad, _set_needs_input_grad)
+    }
 
     @staticmethod
     def create(
