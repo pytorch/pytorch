@@ -11,16 +11,16 @@ from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest, get_devtype
+from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
 
-
-device_type = torch.device(get_devtype())
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -72,18 +72,18 @@ class A(nn.Module):
 
 
 class Y(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, device: str) -> None:
         super().__init__()
-        p = torch.randn(10, device=device_type)
+        p = torch.randn(10, device=device)
         self.p = nn.Parameter(p)
 
 
 class X(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, device: str) -> None:
         super().__init__()
-        q = torch.randn(10, device=device_type)
+        q = torch.randn(10, device=device)
         self.q = nn.Parameter(q)
-        self.y = Y()
+        self.y = Y(device)
 
 
 def _append_prefix(prefix: str, name: str) -> str:
@@ -93,19 +93,19 @@ def _append_prefix(prefix: str, name: str) -> str:
         return prefix + name
 
 
-def _generate_model_and_input() -> nn.Module:
+def _generate_model_and_input(device: str) -> nn.Module:
     dim = 8
 
     torch.manual_seed(42)
-    addend = torch.randn((dim, dim), device=device_type)
+    addend = torch.randn((dim, dim), device=device)
 
     torch.manual_seed(70)
-    subend = torch.randn((dim, dim), device=device_type)
+    subend = torch.randn((dim, dim), device=device)
 
-    model = A(dim, addend, subend).to(device_type)
+    model = A(dim, addend, subend).to(device)
 
     torch.manual_seed(84)
-    inp = torch.randn((dim, dim), device=device_type)
+    inp = torch.randn((dim, dim), device=device)
 
     return model, inp
 
@@ -213,6 +213,8 @@ def _find_all_fsdped_modules(module: torch.nn.Module, path) -> set[str]:
 class TestFullyShardIgnoreParams(FSDPTest):
     """Tests for fully_shard ignore params"""
 
+    hw_classification = HardwareClassification.ACCELERATOR
+
     def compare_params(self, name, ref_param, test_param):
         ref_full_tensor = _get_full_tensor(name, ref_param)
         test_full_tensor = _get_full_tensor(name, test_param)
@@ -230,17 +232,17 @@ class TestFullyShardIgnoreParams(FSDPTest):
             self.compare_params(name, ref_param, test_param)
 
     @skip_if_lt_x_gpu(2)
-    def test_ddp_A_fsdp_B_ddp_C(self):
+    def test_ddp_A_fsdp_B_ddp_C(self, device):
         default_pg = dist.distributed_c10d._get_default_group()
-        mesh = init_device_mesh(device_type.type, mesh_shape=(default_pg.size(),))
+        mesh = init_device_mesh(self.device_type, mesh_shape=(default_pg.size(),))
 
-        ref_model, ref_inp = _generate_model_and_input()
+        ref_model, ref_inp = _generate_model_and_input(self.device_type)
 
         ref_model = DDP(ref_model, process_group=default_pg)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         ref_name_to_param_map, _ = _find_name_param_mappings(ref_model, "")
 
-        test_model, test_inp = _generate_model_and_input()
+        test_model, test_inp = _generate_model_and_input(self.device_type)
 
         # Computes the mappings before applying FSDP and DDP
         test_name_to_param_map, _ = _find_name_param_mappings(test_model, "")
@@ -316,6 +318,14 @@ class TestFullyShardIgnoreParams(FSDPTest):
 
 
 instantiate_parametrized_tests(TestFullyShardIgnoreParams)
+
+instantiate_device_type_tests(
+    TestFullyShardIgnoreParams,
+    globals(),
+    except_for=["cpu"],
+    allow_xpu=True,
+)
+
 
 if __name__ == "__main__":
     run_tests()
