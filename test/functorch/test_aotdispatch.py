@@ -11269,6 +11269,270 @@ class GradsNoForceContiguousContextManager(ContextDecorator):
         }
 
 
+@instantiate_parametrized_tests
+class TestAOTInputNames(AOTTestCase):
+    @parametrize(
+        "partition_fn", [default_partition, min_cut_rematerialization_partition]
+    )
+    @parametrize("requires_grad", [False, True])
+    @parametrize(
+        "input_name",
+        [
+            "input_features",
+            "tangents_input",
+            "fwd_seed_input",
+            "bwd_seed_input",
+            "fwd_base_offset_input",
+            "bwd_base_offset_input",
+            "fwd_rng_state_input",
+            "bwd_rng_state_input",
+            "tangents_token_input",
+        ],
+    )
+    def test_original_input_names(self, partition_fn, requires_grad, input_name):
+        class Model(nn.Module):
+            def forward(self, features, scale):
+                return (features.sin() * scale,)
+
+        gm = torch.fx.symbolic_trace(Model())
+        first = next(iter(gm.graph.find_nodes(op="placeholder")))
+        first._rename(input_name)
+        first.target = first.name
+        gm.recompile()
+        graphs = []
+
+        def compiler(graph, _):
+            graphs.append(graph)
+            return make_boxed_func(graph.forward)
+
+        features = torch.randn(4, requires_grad=requires_grad)
+        scale = torch.randn(4, requires_grad=requires_grad)
+        compiled = aot_module_simplified(
+            gm, (features, scale), compiler, partition_fn=partition_fn
+        )
+        result = compiled(features, scale)[0]
+        self.assertEqual(result, features.sin() * scale)
+        if requires_grad:
+            grads = torch.autograd.grad(result.sum(), (features, scale))
+            self.assertEqual(grads, (features.cos() * scale, features.sin()))
+        for graph in graphs:
+            names = [node.name for node in graph.graph.find_nodes(op="placeholder")]
+            self.assertTrue(any(input_name in name for name in names), names)
+            self.assertTrue(any("scale" in name for name in names), names)
+
+    @parametrize(
+        "partition_fn", [default_partition, min_cut_rematerialization_partition]
+    )
+    def test_dynamic_dynamo_input_names(self, partition_fn):
+        from torch._dynamo.backends.common import aot_autograd
+
+        def fn(fwd_rng_state_features, bwd_rng_state_scale):
+            return (fwd_rng_state_features.sin() * bwd_rng_state_scale).sum()
+
+        graphs = []
+
+        def compiler(graph, _):
+            graphs.append(graph)
+            return make_boxed_func(graph.forward)
+
+        backend = aot_autograd(fw_compiler=compiler, partition_fn=partition_fn)
+        compiled = torch.compile(fn, backend=backend, dynamic=True, fullgraph=True)
+        for size in (4, 7):
+            features = torch.randn(size, requires_grad=True)
+            scale = torch.randn(size, requires_grad=True)
+            result = compiled(features, scale)
+            self.assertEqual(result, fn(features, scale))
+            self.assertEqual(
+                torch.autograd.grad(result, (features, scale)),
+                (features.cos() * scale, features.sin()),
+            )
+        for graph in graphs:
+            names = [node.name for node in graph.graph.find_nodes(op="placeholder")]
+            for original in ("fwd_rng_state_features", "bwd_rng_state_scale"):
+                self.assertTrue(any(original in name for name in names), names)
+
+    @parametrize("input_name", ["tangent_input", "tangents_input"])
+    def test_checkpoint_rng_input_names(self, input_name):
+        from torch._dynamo.backends.common import aot_autograd
+        from torch.utils.checkpoint import checkpoint
+
+        def fn(features):
+            return checkpoint(
+                lambda x: torch.rand_like(x) * x.sin(), features, use_reentrant=False
+            )
+
+        graphs = []
+
+        def compiler(graph, _):
+            graphs.append(graph)
+            return make_boxed_func(graph.forward)
+
+        aot_backend = aot_autograd(
+            fw_compiler=compiler, partition_fn=min_cut_rematerialization_partition
+        )
+
+        def backend(graph, inputs):
+            node = next(iter(graph.graph.find_nodes(op="placeholder")))
+            node._rename(input_name)
+            node.target = node.name
+            graph.recompile()
+            return aot_backend(graph, inputs)
+
+        features = torch.randn(4, requires_grad=True)
+        torch.manual_seed(123)
+        expected = fn(features)
+        expected_grad = torch.autograd.grad(expected.sum(), features)[0]
+        torch.manual_seed(123)
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(features)
+        self.assertEqual(actual, expected)
+        self.assertEqual(torch.autograd.grad(actual.sum(), features)[0], expected_grad)
+        names = [node.name for node in graphs[0].graph.find_nodes(op="placeholder")]
+        self.assertTrue(any(input_name in name for name in names), names)
+
+    @parametrize("named_input", ["matrix", "scalar"])
+    @torch._inductor.config.patch(
+        {
+            "auto_chunker.enable": True,
+            "auto_chunker.output_size_threshold": 1024,
+            "auto_chunker.num_chunk": 2,
+        }
+    )
+    @torch._functorch.config.patch("enable_autograd_cache", False)
+    def test_auto_chunking_original_input_names(self, named_input):
+        from torch._inductor import metrics
+        from torch._inductor.compile_fx import compile_fx
+
+        def fn(features, weight, scale):
+            return (((features * 2) @ weight).tanh() * scale).sum()
+
+        names = (
+            ("tangents_input", "weight", "scale")
+            if named_input == "matrix"
+            else ("features", "weight", "tangent_scale")
+        )
+
+        def backend(graph, inputs):
+            for node, name in zip(graph.graph.find_nodes(op="placeholder"), names):
+                node._rename(name)
+                node.target = node.name
+            graph.recompile()
+            return compile_fx(graph, inputs)
+
+        inputs = (
+            torch.randn(256, 4, requires_grad=True),
+            torch.randn(4, 256, requires_grad=True),
+            torch.tensor(0.37, requires_grad=True),
+        )
+        expected = fn(*inputs)
+        expected_grads = torch.autograd.grad(expected, inputs)
+        with patch.object(metrics, "num_auto_chunking", 0):
+            result = torch.compile(fn, backend=backend, fullgraph=True)(*inputs)
+            self.assertEqual(result, expected, atol=1e-4, rtol=1e-4)
+            self.assertEqual(
+                torch.autograd.grad(result, inputs),
+                expected_grads,
+                atol=1e-4,
+                rtol=1e-4,
+            )
+            self.assertEqual(metrics.num_auto_chunking, 1)
+
+    @parametrize("aliased_views", [False, True])
+    @parametrize(
+        "partition_fn", [default_partition, min_cut_rematerialization_partition]
+    )
+    def test_names_after_mutating_input_deduplication(
+        self, aliased_views, partition_fn
+    ):
+        class Model(nn.Module):
+            def forward(self, left, right, scale):
+                left.add_(1)
+                return ((left + right) * scale,)
+
+        base = torch.randn(4)
+        left = base.view(2, 2) if aliased_views else base
+        right = base.view(2, 2) if aliased_views else base
+        scale = torch.randn_like(left, requires_grad=True)
+        before = left.clone()
+        graphs = []
+
+        def compiler(graph, _):
+            graphs.append(graph)
+            return make_boxed_func(graph.forward)
+
+        compiled = aot_module_simplified(
+            torch.fx.symbolic_trace(Model()),
+            (left, right, scale),
+            compiler,
+            partition_fn=partition_fn,
+        )
+        result = compiled(left, right, scale)[0]
+        self.assertEqual(result, 2 * (before + 1) * scale)
+        self.assertEqual(left, before + 1)
+        self.assertEqual(torch.autograd.grad(result.sum(), scale)[0], 2 * (before + 1))
+        names = [node.name for node in graphs[0].graph.find_nodes(op="placeholder")]
+        # The remaining scale input is original argument 2, not argument 1.
+        self.assertTrue(any("scale" in name for name in names), names)
+        self.assertTrue(any("left" in name for name in names), names)
+        self.assertFalse(any("right" in name for name in names), names)
+
+    @parametrize("requires_grad", [False, True])
+    def test_lifted_parameter_and_buffer_names(self, requires_grad):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = nn.Parameter(torch.randn(4), requires_grad=requires_grad)
+                self.register_buffer("bias", torch.randn(4))
+
+            def forward(self, features):
+                return (features * self.weight + self.bias,)
+
+        gm = torch.fx.symbolic_trace(Model())
+        features = torch.randn(4, requires_grad=requires_grad)
+        graphs = []
+
+        def compiler(graph, _):
+            graphs.append(graph)
+            return make_boxed_func(graph.forward)
+
+        compiled = aot_module_simplified(gm, (features,), compiler)
+        result = compiled(features)[0]
+        self.assertEqual(result, gm(features)[0])
+        if requires_grad:
+            self.assertEqual(torch.autograd.grad(result.sum(), features)[0], gm.weight)
+        names = [node.name for node in graphs[0].graph.find_nodes(op="placeholder")]
+        for original in ("features", "weight", "bias"):
+            self.assertTrue(any(original in name for name in names), names)
+
+    @parametrize("requires_grad", [False, True])
+    def test_tensor_subclass_input_names(self, requires_grad):
+        class Model(nn.Module):
+            def forward(self, features):
+                return (features.sin(),)
+
+        features = TwoTensor(
+            torch.randn(4, requires_grad=requires_grad),
+            torch.randn(4, requires_grad=requires_grad),
+        )
+        graphs = []
+
+        def compiler(graph, _):
+            graphs.append(graph)
+            return make_boxed_func(graph.forward)
+
+        compiled = aot_module_simplified(
+            torch.fx.symbolic_trace(Model()), (features,), compiler
+        )
+        result = compiled(features)[0]
+        self.assertEqual(result, features.sin())
+        if requires_grad:
+            self.assertEqual(
+                torch.autograd.grad(result.sum(), features)[0], features.cos()
+            )
+        names = [node.name for node in graphs[0].graph.find_nodes(op="placeholder")]
+        self.assertTrue(any("features_a" in name for name in names), names)
+        self.assertTrue(any("features_b" in name for name in names), names)
+
+
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):
         class MockModule(torch.nn.Module):

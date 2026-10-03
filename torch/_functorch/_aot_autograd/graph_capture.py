@@ -19,7 +19,18 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torchgen.utils import dataclass_repr
 
 from .. import config
-from .descriptors import AOTInput, BackwardTokenAOTInput
+from .descriptors import (
+    AOTInput,
+    BackwardTokenAOTInput,
+    BufferAOTInput,
+    ParamAOTInput,
+    PlainAOTInput,
+    SubclassGetAttrAOTInput,
+    SubclassSizeAOTInput,
+    SubclassStrideAOTInput,
+    SyntheticBaseAOTInput,
+    ViewBaseAOTInput,
+)
 from .functional_utils import (
     assert_functional_graph,
     propagate_input_mutation_stacktraces,
@@ -87,6 +98,28 @@ def _extract_tangent_source_stack_traces(
 
     if got_one:
         fw_metadata.tangent_source_stack_traces = stack_traces
+
+
+def _original_input_name(desc: AOTInput, names: tuple[str, ...]) -> str | None:
+    if isinstance(desc, PlainAOTInput):
+        return names[desc.idx]
+    if isinstance(desc, (ParamAOTInput, BufferAOTInput)):
+        return desc.target
+    if isinstance(desc, (ViewBaseAOTInput, SyntheticBaseAOTInput)):
+        base = _original_input_name(desc.base_of, names)
+        suffix = "view_base" if isinstance(desc, ViewBaseAOTInput) else "synthetic_base"
+        return f"{base}_{suffix}" if base is not None else None
+    if isinstance(
+        desc, (SubclassGetAttrAOTInput, SubclassSizeAOTInput, SubclassStrideAOTInput)
+    ):
+        base = _original_input_name(desc.base, names)
+        if isinstance(desc, SubclassGetAttrAOTInput):
+            suffix = desc.attr
+        else:
+            kind = "size" if isinstance(desc, SubclassSizeAOTInput) else "stride"
+            suffix = f"{kind}_{desc.idx}"
+        return f"{base}_{suffix}" if base is not None else None
+    return None
 
 
 def _create_graph(
@@ -180,6 +213,18 @@ def _create_graph(
                         i += 1
                 elif n.op == "output":
                     n.meta["desc"] = flat_out_descs
+
+    if args_descs is not None and aot_config.original_input_names is not None:
+        for node in fx_g.graph.find_nodes(op="placeholder"):
+            name = _original_input_name(
+                node.meta["desc"], aot_config.original_input_names
+            )
+            if name is not None:
+                # Preserve canonical prefixes: partitioning and Inductor use them
+                # to distinguish primals, tangents, RNG inputs and input lifetimes.
+                node._rename(f"{node.name}_{name}")
+                node.target = node.name
+        fx_g.recompile()
 
     return fx_g
 

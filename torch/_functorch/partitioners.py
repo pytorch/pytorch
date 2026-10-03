@@ -2205,7 +2205,7 @@ def functionalize_rng_ops(
 
     bw_tangent_start_node = None
     for node in bw_module.graph.find_nodes(op="placeholder"):
-        if "tangent" in node.name:
+        if not node.name.startswith("primals_") and "tangent" in node.name:
             bw_tangent_start_node = node
             break
     if bw_tangent_start_node is None:
@@ -4095,7 +4095,7 @@ def classify_nodes(
     name_to_node = get_name_to_node(joint_module.graph)
     required_bw_nodes: OrderedSet[fx.Node] = OrderedSet()
     for node in joint_module.graph.nodes:
-        if node.op == "placeholder" and "tangents" in node.target:
+        if _is_tangent(node):
             required_bw_nodes.add(node)
         elif _must_be_in_backward(node):
             required_bw_nodes.add(node)

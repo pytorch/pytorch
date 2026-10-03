@@ -242,7 +242,7 @@ def propagate_single_node(
         for arg in get_args_of_node_type(node):
             # don't propagate back thru a placeholder node
             if arg.op == "placeholder":
-                if "tangent" in arg.target:  # type: ignore[operator]
+                if is_tangent_node(arg):
                     # we have a separate pass to propagate scale_by information fwd.
                     set_chunking_meta(arg, scale_by=arg)
             elif bwd_filter[arg]:

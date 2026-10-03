@@ -4276,7 +4276,7 @@ def count_tangents(fx_g: torch.fx.GraphModule) -> int:
     """
 
     def is_saved_tensor(x: Node) -> bool:
-        return (
+        return x.name.startswith("primals_") or (
             "tangents" not in x.name
             and "bwd_seed" not in x.name
             and "bwd_base_offset" not in x.name
