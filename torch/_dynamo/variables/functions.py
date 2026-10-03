@@ -2655,6 +2655,18 @@ class SkipFunctionVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
+    def _get_builtin_self(
+        self, tx: "InstructionTranslatorBase"
+    ) -> VariableTracker | None:
+        if not hasattr(self.value, "__self__"):
+            return None
+        source = self.source and AttrSource(self.source, "__self__")
+        return VariableTracker.build(tx, getattr(self.value, "__self__"), source)
+
+    tp_members = {
+        "__self__": Member(_get_builtin_self, readonly_setter),
+    }
+
     def __init__(self, value: object, reason: str | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
