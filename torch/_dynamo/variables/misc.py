@@ -1900,8 +1900,7 @@ class NumpyVariable(VariableTracker):
 
     def as_proxy(self) -> Any:
         if config.trace_numpy:
-            # Can replace with EnumType once we drop 3.10 support
-            if isinstance(self.value, enum.EnumMeta):
+            if isinstance(self.value, enum.EnumType):
                 # This is mostly for np._CopyMode
                 return self.value
             if isinstance(self.value, type):
@@ -1922,16 +1921,6 @@ class NullVariable(VariableTracker):
         return "NullVariable"
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        if sys.version_info < (3, 11):
-            unimplemented(
-                gb_type="cannot reconstruct NullVariable in Python < 3.11",
-                context="",
-                explanation="Attempted to generate PUSH_NULL instruction in Python < 3.11; "
-                "where this instruction does not exist.",
-                hints=[
-                    *graph_break_hints.DYNAMO_BUG,
-                ],
-            )
         codegen.append_output(create_instruction("PUSH_NULL"))
 
     def reconstruct_pycode(self, codegen: "PyCodegen") -> str:

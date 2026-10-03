@@ -472,10 +472,7 @@ class BaseUserFunctionVariable(VariableTracker):
         return self.get_code().co_name
 
     def get_qualname(self) -> str:
-        if sys.version_info >= (3, 11):
-            return self.get_code().co_qualname
-        else:
-            return self.get_name()
+        return self.get_code().co_qualname
 
     def get_doc(self) -> str | None:
         # stored in code.co_consts[0]
@@ -1239,8 +1236,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                     return None
                 collected.extend(flat)
             return collected
-        union_type = getattr(types, "UnionType", None)
-        if union_type is not None and isinstance(value, union_type):
+        if isinstance(value, types.UnionType):
             collected = []
             for entry in typing.get_args(value):
                 flat = self._flatten_type_spec(entry)
@@ -1812,8 +1808,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         code = self.vt.get_code()
         f_globals = self.vt.get_globals()
 
-        if sys.version_info >= (3, 11):
-            inline_tracer.inline_call_()
+        inline_tracer.inline_call_()
         # calling a generator returns a generator object
         return self.generator_cls(
             code,
@@ -2103,7 +2098,7 @@ class UserMethodVariable(BaseUserFunctionVariable):
         owner: VariableTracker,
     ) -> VariableTracker:
         # method_descr_get: a bound method does not re-bind. Only reached where
-        # method has tp_descr_get (3.10 and 3.13+); see tp_getset below.
+        # method has tp_descr_get (3.13+); see tp_getset below.
         return self
 
     # __self__ / __func__ are read-only members on method objects.
@@ -5611,26 +5606,18 @@ class PropertyVariable(VariableTracker):
         if fn is None:
             display_name = getattr(self.descriptor, "__name__", None)
             kind = "setter" if value is not None else "deleter"
-            if sys.version_info >= (3, 11):
-                # property_descr_set formats %R of the owner's *type*, whose
-                # repr is its bare __qualname__ (no module prefix) -- unlike
-                # python_qualified_name(), which mirrors the module-qualified
-                # _PyType_GetFullyQualifiedName used elsewhere (e.g. __repr__).
-                try:
-                    cls_name = obj.python_type().__qualname__
-                except NotImplementedError:
-                    cls_name = obj.python_type_name()
-                if display_name is not None:
-                    msg = f"property '{display_name}' of '{cls_name}' object has no {kind}"
-                else:
-                    msg = f"property of '{cls_name}' object has no {kind}"
+            # property_descr_set formats %R of the owner's *type*, whose
+            # repr is its bare __qualname__ (no module prefix) -- unlike
+            # python_qualified_name(), which mirrors the module-qualified
+            # _PyType_GetFullyQualifiedName used elsewhere (e.g. __repr__).
+            try:
+                cls_name = obj.python_type().__qualname__
+            except NotImplementedError:
+                cls_name = obj.python_type_name()
+            if display_name is not None:
+                msg = f"property '{display_name}' of '{cls_name}' object has no {kind}"
             else:
-                # < 3.11: no owner/property-name in the message at all.
-                verb = "set" if value is not None else "delete"
-                if display_name is not None:
-                    msg = f"can't {verb} attribute '{display_name}'"
-                else:
-                    msg = f"can't {verb} attribute"
+                msg = f"property of '{cls_name}' object has no {kind}"
             raise_attribute_error(tx, msg)
 
         args = [obj] if value is None else [obj, value]
