@@ -13,6 +13,8 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
+    parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
@@ -327,6 +329,132 @@ class TestAutocastDevice(TestCase):
             self.assertEqual(result.dtype, torch.bfloat16)
 
 
+class TestAutocastCustomFunction(TestCase):
+    hw_classification = HardwareClassification.CPU
+
+    @staticmethod
+    def _make_fn(cast_inputs, decorate_setup_context, record):
+        """Build an autograd Function whose setup_context is separate from forward."""
+
+        class MyMul(torch.autograd.Function):
+            @staticmethod
+            @torch.amp.custom_fwd(device_type="cpu", cast_inputs=cast_inputs)
+            def forward(a, b):
+                record["fwd_enabled"] = torch.is_autocast_enabled("cpu")
+                record["fwd_input_dtype"] = a.dtype
+                return a * b
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.save_for_backward(*inputs)
+
+            @staticmethod
+            @torch.amp.custom_bwd(device_type="cpu")
+            def backward(ctx, grad):
+                record["bwd_enabled"] = torch.is_autocast_enabled("cpu")
+                record["bwd_dtype"] = torch.get_autocast_dtype("cpu")
+                a, b = ctx.saved_tensors
+                return grad * b, grad * a
+
+        if decorate_setup_context:
+            MyMul.setup_context = staticmethod(
+                torch.amp.custom_setup_context(
+                    MyMul.setup_context, device_type="cpu", cast_inputs=cast_inputs
+                )
+            )
+        return MyMul
+
+    @parametrize("cast_inputs", [None, torch.float32])
+    def test_custom_setup_context_separate_from_forward(self, cast_inputs):
+        # custom_fwd cannot record the autocast state when setup_context is
+        # separate from forward, because forward is not passed ctx. Decorating
+        # setup_context with custom_setup_context carries the state to backward.
+        record = {}
+        fn = self._make_fn(cast_inputs, True, record)
+        a = torch.randn(3, requires_grad=True)
+        b = torch.randn(3, requires_grad=True)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            out = fn.apply(a, b)
+        out.sum().backward()
+
+        if cast_inputs is None:
+            # forward ran under the ambient autocast state, so backward must too
+            self.assertTrue(record["fwd_enabled"])
+            self.assertTrue(record["bwd_enabled"])
+            self.assertEqual(record["bwd_dtype"], torch.bfloat16)
+        else:
+            # custom_fwd casts the inputs and disables autocast for forward,
+            # so backward must run with autocast disabled as well
+            self.assertFalse(record["fwd_enabled"])
+            self.assertEqual(record["fwd_input_dtype"], cast_inputs)
+            self.assertFalse(record["bwd_enabled"])
+        self.assertIsNotNone(a.grad)
+        self.assertIsNotNone(b.grad)
+
+    @parametrize("cast_inputs", [None, torch.float32])
+    def test_custom_fwd_does_not_set_attrs_on_inputs(self, cast_inputs):
+        # When setup_context is separate from forward, forward's first argument
+        # is a user input rather than ctx, and must not be written to.
+        record = {}
+        fn = self._make_fn(cast_inputs, True, record)
+        a = torch.randn(3, requires_grad=True)
+        b = torch.randn(3, requires_grad=True)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            fn.apply(a, b).sum().backward()
+        for tensor in (a, b):
+            self.assertFalse(hasattr(tensor, "_dtype"))
+            self.assertFalse(hasattr(tensor, "_fwd_used_autocast"))
+
+    def test_custom_bwd_without_custom_setup_context_errors(self):
+        # Undecorated setup_context used to surface as an opaque AttributeError
+        # about a missing _fwd_used_autocast attribute.
+        record = {}
+        fn = self._make_fn(None, False, record)
+        a = torch.randn(3, requires_grad=True)
+        b = torch.randn(3, requires_grad=True)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            out = fn.apply(a, b)
+        with self.assertRaisesRegex(RuntimeError, "custom_setup_context"):
+            out.sum().backward()
+
+    def test_custom_fwd_with_ctx_still_records_state(self):
+        # The combined forward(ctx, ...) flavor needs no extra decorator.
+        record = {}
+
+        class MyMul(torch.autograd.Function):
+            @staticmethod
+            @torch.amp.custom_fwd(device_type="cpu")
+            def forward(ctx, a, b):
+                ctx.save_for_backward(a, b)
+                return a * b
+
+            @staticmethod
+            @torch.amp.custom_bwd(device_type="cpu")
+            def backward(ctx, grad):
+                record["bwd_enabled"] = torch.is_autocast_enabled("cpu")
+                a, b = ctx.saved_tensors
+                return grad * b, grad * a
+
+        a = torch.randn(3, requires_grad=True)
+        b = torch.randn(3, requires_grad=True)
+        with torch.autocast("cpu", dtype=torch.bfloat16):
+            out = MyMul.apply(a, b)
+        out.sum().backward()
+        self.assertTrue(record["bwd_enabled"])
+
+    def test_custom_setup_context_outside_autocast(self):
+        record = {}
+        fn = self._make_fn(None, True, record)
+        a = torch.randn(3, requires_grad=True)
+        b = torch.randn(3, requires_grad=True)
+        fn.apply(a, b).sum().backward()
+        self.assertFalse(record["bwd_enabled"])
+
+    def test_custom_setup_context_non_string_device(self):
+        with self.assertRaisesRegex(ValueError, "Expected `device_type` of type `str`"):
+            torch.amp.custom_setup_context(device_type=torch.device("cpu"))
+
+
 class TestTorchAutocast(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -478,6 +606,7 @@ instantiate_device_type_tests(
     TestAutocastDevice, globals(), allow_mps=True, allow_xpu=True
 )
 instantiate_device_type_tests(TestTorchAutocastDevice, globals(), allow_xpu=True)
+instantiate_parametrized_tests(TestAutocastCustomFunction)
 
 if __name__ == "__main__":
     run_tests()

@@ -89,6 +89,10 @@ compiled region. See {ref}`compiler_backward` for details.
 ```
 
 ```{eval-rst}
+.. autofunction::  custom_setup_context
+```
+
+```{eval-rst}
 .. autofunction::  custom_bwd
 ```
 
