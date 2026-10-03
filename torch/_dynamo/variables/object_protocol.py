@@ -50,6 +50,7 @@ from ..source import (
 from ..utils import specialize_symnode
 from .base import (
     AsPythonConstantNotImplementedError,
+    AttributeMutationNew,
     AttrMutationKind,
     maybe_get_python_type,
     NO_SUCH_SUBOBJ,
@@ -123,6 +124,18 @@ def vt_identity_compare(
             UserMethodVariable,
             CurrentDeviceVariable,
         ),
+    ):
+        return ConstantVariable.create(False)
+
+    from .misc import CellVariable
+
+    if (
+        isinstance(left, CellVariable)
+        and isinstance(right, CellVariable)
+        and (
+            isinstance(left.mutation_type, AttributeMutationNew)
+            or isinstance(right.mutation_type, AttributeMutationNew)
+        )
     ):
         return ConstantVariable.create(False)
 

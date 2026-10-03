@@ -6124,6 +6124,27 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_new_closure_cell_identity(self):
+        def fn():
+            value = 42
+
+            def inner():
+                return value
+
+            cell = inner.__closure__[0]
+
+            def outer(arg):
+                def nested():
+                    return arg
+
+                return nested
+
+            nested = outer(cell)
+            return nested() is cell, nested.__closure__[0] is cell
+
+        self.assertEqual(fn(), (True, False))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
     def test_nested_closure(self):
         v0 = torch.randn(10)
 
