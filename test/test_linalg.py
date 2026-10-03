@@ -5800,7 +5800,7 @@ class TestLinalg(TestCase):
             tau = tau.to(wrong_device)
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.householder_product(reflectors, tau)
-    
+
     @skipCPUIfNoLapack
     @skipCUDAIfNoCusolver
     @dtypes(torch.float64)
