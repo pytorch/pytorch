@@ -340,9 +340,6 @@ CPU_TEST_FAILURES = {
 # Additional failures under lite mode, tracked in
 # https://github.com/pytorch/pytorch/issues/199205
 LITE_MODE_TEST_FAILURES = {
-    # AssertionError: got <class 'torch.SymInt'>
-    "test_while_loop_with_sym_expr_cond_dynamic_False": fail_stack_allocation(),
-    "test_while_loop_with_sym_expr_cond_dynamic_True": fail_stack_allocation(),
     # Unsupported return type SymIntType for aten.sym_numel
     "test_size_with_unbacked_add_expr": fail_stack_allocation(),
     # SerializeError: Empty list with type number nyi

@@ -10407,13 +10407,23 @@ class FallbackKernel(ExternKernelAlloc):
 
         def maybe_wrap(value: Any, arg_info: torch._C.Argument) -> Any:
             # bool is a subclass of int; SymInt/SymFloat/SymBool are not int/float/complex.
-            if not isinstance(value, (int, float, complex)):
+            if not isinstance(value, (int, float, complex, sympy.Expr)):
                 return value
             if not is_tensor_slot(arg_info):
                 return value
             alias = arg_info.alias_info
             if alias is not None and alias.is_write:
                 return value
+            if isinstance(value, sympy.Expr):
+                # A symbolic scalar is only known at runtime, so build the 0-d tensor
+                # at runtime; the proxy executor passes a SymInt in a Scalar slot.
+                dtype = scalar_dtype(0 if value.is_integer else 0.0)
+                return pytree.tree_map(
+                    lambda x: x.wrap_for_lowering() if isinstance(x, IRNode) else x,
+                    cls.create(
+                        aten.scalar_tensor.default, value, dtype=dtype, device=device
+                    ),
+                )
             with torch.utils._python_dispatch._disable_current_modes():
                 const = torch.tensor(value, dtype=scalar_dtype(value), device=device)
             materialized.append(True)
