@@ -1017,6 +1017,23 @@ class TestIndexingDevice(TestCase):
         v[:, mask] = 0
         self.assertEqual(v, torch.tensor([[0, 2], [0, 4]], device=device))
 
+    def test_zero_dim_bool_mask_assignment_dtype_promotion(self, device):
+        # Regression test for https://github.com/pytorch/pytorch/issues/150017
+        # A 0-dim bool mask used to be resolved to a plain Long select-index
+        # before reaching index_put, which skipped the masked_fill_ dtype
+        # promotion fast path that identically-shaped N-dim bool masks get.
+        x = torch.tensor(1.0, dtype=torch.float64, device=device)
+        x[torch.tensor(True, device=device)] = torch.tensor(
+            2.0, dtype=torch.float32, device=device
+        )
+        self.assertEqual(x, torch.tensor(2.0, dtype=torch.float64, device=device))
+
+        x = torch.tensor(1.0, dtype=torch.float64, device=device)
+        x[torch.tensor(False, device=device)] = torch.tensor(
+            2.0, dtype=torch.float32, device=device
+        )
+        self.assertEqual(x, torch.tensor(1.0, dtype=torch.float64, device=device))
+
     def test_multi_dimensional_bool_mask_assignment(self, device):
         v = torch.tensor([[[[1], [2]], [[3], [4]]]], device=device)
         mask = torch.tensor([[1, 0], [0, 1]], dtype=torch.bool, device=device)
