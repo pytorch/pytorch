@@ -9701,6 +9701,7 @@ for args in ((a, b), (a, b, False)):
 
         self._setup_mempool_limited_memory_test(40)
         try:
+
             def allocate_from_temporary_pool():
                 pool = torch.cuda.MemPool(allocator.allocator())
                 with torch.cuda.use_mem_pool(pool):
