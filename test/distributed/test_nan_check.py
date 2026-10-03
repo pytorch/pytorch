@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-import unittest
 
 import torch
 import torch.distributed as dist
@@ -11,16 +10,20 @@ if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
-from torch.testing._internal.common_utils import run_tests, TestCase
-
-
-HAS_ACCELERATOR = torch.accelerator.is_available()
-ACCELERATOR = (
-    torch.accelerator.current_accelerator() if HAS_ACCELERATOR else torch.device("cpu")
+from torch.testing._internal.common_device_type import (
+    DeviceTypeTestBase,
+    instantiate_device_type_tests,
+)
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
 )
 
 
 class TestNanCheck(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _check_for_nan(self, tensor):
         torch.ops.c10d.check_for_nan(tensor)
 
@@ -35,43 +38,6 @@ class TestNanCheck(TestCase):
 
     def test_no_nan_bfloat16(self):
         self._check_for_nan(torch.randn(100, dtype=torch.bfloat16))
-
-    @unittest.skipUnless(HAS_ACCELERATOR, "no accelerator available")
-    def test_no_nan_float32_accelerator(self):
-        self._check_for_nan(torch.randn(100, device=ACCELERATOR))
-        torch.accelerator.synchronize()
-
-    @unittest.skipUnless(HAS_ACCELERATOR, "no accelerator available")
-    def test_no_nan_float64_accelerator(self):
-        self._check_for_nan(torch.randn(100, dtype=torch.float64, device=ACCELERATOR))
-        torch.accelerator.synchronize()
-
-    @unittest.skipUnless(HAS_ACCELERATOR, "no accelerator available")
-    def test_no_nan_float16_accelerator(self):
-        self._check_for_nan(torch.randn(100, dtype=torch.float16, device=ACCELERATOR))
-        torch.accelerator.synchronize()
-
-    @unittest.skipUnless(HAS_ACCELERATOR, "no accelerator available")
-    def test_no_nan_bfloat16_accelerator(self):
-        self._check_for_nan(torch.randn(100, dtype=torch.bfloat16, device=ACCELERATOR))
-        torch.accelerator.synchronize()
-
-    @unittest.skipUnless(HAS_ACCELERATOR, "no accelerator available")
-    def test_skips_integer_tensors_accelerator(self):
-        self._check_for_nan(
-            torch.tensor([1, 2, 3], dtype=torch.int32, device=ACCELERATOR)
-        )
-        torch.accelerator.synchronize()
-
-    @unittest.skipUnless(HAS_ACCELERATOR, "no accelerator available")
-    def test_empty_tensor_accelerator(self):
-        self._check_for_nan(torch.tensor([], dtype=torch.float32, device=ACCELERATOR))
-        torch.accelerator.synchronize()
-
-    @unittest.skipUnless(HAS_ACCELERATOR, "no accelerator available")
-    def test_large_tensor_no_nan_accelerator(self):
-        self._check_for_nan(torch.randn(100000, device=ACCELERATOR))
-        torch.accelerator.synchronize()
 
     def test_nan_float32(self):
         tensor = torch.tensor([1.0, 2.0, float("nan"), 4.0])
@@ -117,6 +83,46 @@ class TestNanCheck(TestCase):
         tensor[99999] = float("nan")
         with self.assertRaisesRegex(RuntimeError, "NaN"):
             self._check_for_nan(tensor)
+
+
+class TestNanCheckDevice(DeviceTypeTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _check_for_nan(self, tensor):
+        torch.ops.c10d.check_for_nan(tensor)
+
+    def test_no_nan_float32_accelerator(self, device):
+        self._check_for_nan(torch.randn(100, device=device))
+        torch.accelerator.synchronize(device)
+
+    def test_no_nan_float64_accelerator(self, device):
+        self._check_for_nan(torch.randn(100, dtype=torch.float64, device=device))
+        torch.accelerator.synchronize(device)
+
+    def test_no_nan_float16_accelerator(self, device):
+        self._check_for_nan(torch.randn(100, dtype=torch.float16, device=device))
+        torch.accelerator.synchronize(device)
+
+    def test_no_nan_bfloat16_accelerator(self, device):
+        self._check_for_nan(torch.randn(100, dtype=torch.bfloat16, device=device))
+        torch.accelerator.synchronize(device)
+
+    def test_skips_integer_tensors_accelerator(self, device):
+        self._check_for_nan(torch.tensor([1, 2, 3], dtype=torch.int32, device=device))
+        torch.accelerator.synchronize(device)
+
+    def test_empty_tensor_accelerator(self, device):
+        self._check_for_nan(torch.tensor([], dtype=torch.float32, device=device))
+        torch.accelerator.synchronize(device)
+
+    def test_large_tensor_no_nan_accelerator(self, device):
+        self._check_for_nan(torch.randn(100000, device=device))
+        torch.accelerator.synchronize(device)
+
+
+instantiate_device_type_tests(
+    TestNanCheckDevice, globals(), except_for="cpu", allow_xpu=True
+)
 
 
 if __name__ == "__main__":
