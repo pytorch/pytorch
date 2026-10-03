@@ -22,3 +22,19 @@ def initialize_kineto_with_cuda():
             torch.cuda.synchronize()
         return True
     return False
+
+
+def initialize_kineto_with_accelerator():
+    accelerator = torch.accelerator.current_accelerator(check_available=True)
+    if not kineto_available() or accelerator is None:
+        return False
+    activity = getattr(ProfilerActivity, accelerator.type.upper(), None)
+    if activity not in supported_activities():
+        return False
+    # Same Kineto limitation as initialize_kineto_with_cuda(), for whichever
+    # accelerator is current.
+    x = torch.ones(1, device=accelerator)
+    with profile(activities=[ProfilerActivity.CPU, activity]):
+        x + x
+        torch.accelerator.synchronize()
+    return True
