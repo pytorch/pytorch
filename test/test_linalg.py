@@ -5800,6 +5800,32 @@ class TestLinalg(TestCase):
             tau = tau.to(wrong_device)
             with self.assertRaisesRegex(RuntimeError, "Expected all tensors to be on the same device"):
                 torch.linalg.householder_product(reflectors, tau)
+    
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float64)
+    def test_householder_product_nested_jvp(self, device, dtype):
+        def householder(t):
+            a = torch.stack((torch.ones_like(t), t)).reshape(2, 1)
+            tau = (2 / (1 + t * t)).reshape(1)
+            return torch.linalg.householder_product(a, tau).sum()
+
+        def reference(t):
+            return 1 - 2 * (1 + t) / (1 + t * t)
+
+        def second_derivative(f, t):
+            def first_derivative(x):
+                return torch.func.jvp(f, (x,), (torch.ones_like(x),))[1]
+
+            return torch.func.jvp(
+                first_derivative, (t,), (torch.ones_like(t),)
+            )[1]
+
+        t = torch.tensor(0.7, device=device, dtype=dtype)
+        self.assertEqual(
+            second_derivative(householder, t),
+            second_derivative(reference, t),
+        )
 
     @precisionOverride({torch.float32: 1e-2, torch.complex64: 1e-2})
     @skipCUDAIfNoCusolver
