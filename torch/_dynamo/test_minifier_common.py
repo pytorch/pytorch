@@ -30,6 +30,8 @@ from unittest.mock import patch
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
+import torch._functorch.config
+import torch.fx.experimental._config
 from torch._dynamo.trace_rules import _as_posix_path
 from torch.utils._traceback import report_compile_source_on_error
 
@@ -146,10 +148,16 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
             # need to handle for tests.  If you need more stuff, you will
             # need to augment this appropriately.
 
-            # NB: Can't use save_config because that will omit some fields,
-            # but we must save and reset ALL fields
-            dynamo_config = torch._dynamo.config.get_config_copy()
-            inductor_config = torch._inductor.config.get_config_copy()
+            saved_configs = [
+                # pyrefly: ignore[missing-attribute]
+                (mod, mod._save_user_overrides())
+                for mod in (
+                    torch._dynamo.config,
+                    torch._inductor.config,
+                    torch._functorch.config,
+                    torch.fx.experimental._config,
+                )
+            ]
             try:
                 stderr = io.StringIO()
                 log_handler = logging.StreamHandler(stderr)
@@ -174,8 +182,9 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
                     # around
                     torch._dynamo.reset()
             finally:
-                torch._dynamo.config.load_config(dynamo_config)
-                torch._inductor.config.load_config(inductor_config)
+                for mod, saved in saved_configs:
+                    # pyrefly: ignore[missing-attribute]
+                    mod._restore_user_overrides(saved)
 
             # TODO: return a more appropriate data structure here
             return subprocess.CompletedProcess(
