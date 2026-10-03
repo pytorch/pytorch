@@ -2675,11 +2675,285 @@ class DictTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(_is_safe_to_reorder(token_consumer))
         self.assertTrue(_is_safe_to_reorder(pure(token_consumer)))
 
-        # HOPs are exempt from the value heuristic: graph passes (e.g. graph
-        # deduplication) create invoke_subgraph nodes without example_value/val.
-        hop = torch.ops.higher_order.invoke_subgraph
-        hop_node = graph.call_function(hop, (x, "subgraph_0", x))
-        self.assertTrue(_is_safe_to_reorder(hop_node))
+        def flat_apply_capture(value):
+            return value
+
+        flat_apply_capture.__module__ = "torch._dynamo.variables.torch"
+        opaque_call = pure(graph.call_function(flat_apply_capture, (x,)))
+        self.assertFalse(_is_safe_to_reorder(opaque_call))
+
+        # Nodes binding unbacked symbols are barriers: reordering them changes
+        # the order the ShapeEnv resolves replacements (compile-time blowup).
+        # Checked before the call_method branch, since Dynamo emits item() as a
+        # call_method that would otherwise be reported safe.
+        unbacked_method = graph.call_method("item", (x,))
+        self.assertTrue(_is_safe_to_reorder(unbacked_method))
+        unbacked_method.meta["unbacked_bindings"] = {"u0": ()}
+        self.assertFalse(_is_safe_to_reorder(unbacked_method))
+
+        # The generic state-only-function heuristic must keep both aliases of
+        # increment_version pinned even though their names differ.
+        self.assertFalse(
+            _is_safe_to_reorder(
+                graph.call_function(torch.autograd.graph.increment_version, (x,))
+            )
+        )
+        self.assertFalse(
+            _is_safe_to_reorder(graph.call_function(torch._C._increment_version, (x,)))
+        )
+
+        # A HOP whose subgraphs cannot be resolved is a barrier: its effects
+        # could live anywhere this pass cannot see.
+        cond_node = graph.call_function(torch.ops.higher_order.cond, (x, x, x, ()))
+        self.assertFalse(_is_safe_to_reorder(cond_node))
+
+    def test_canonical_graph_allow_in_graph_mutation_is_not_reordered(self):
+        @torch.compiler.allow_in_graph
+        def mutate(x):
+            x.add_(10)
+            return x
+
+        def fn(x):
+            y = x.clone()
+            before = y * 2
+            mutate(y)
+            return before + y
+
+        x = torch.ones(1)
+        ref = fn(x)
+        with torch._dynamo.config.patch(canonicalize_output_graph_node_order=True):
+            res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res, ref)
+
+    def test_canonical_graph_hop_mutation_is_not_reordered(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(8))
+
+            def forward(self, p, x):
+                def true_fn(x):
+                    x.add_(1)
+                    self.buf.add_(1)
+                    return x + self.buf
+
+                x = x.clone()
+                out = torch.cond(p, true_fn, true_fn, (x,))
+                # Reads the values true_fn mutated; hoisting either read above
+                # the cond observes the pre-mutation buffer.
+                return x + self.buf + out
+
+        p, x = torch.tensor(True), torch.randn(1)
+        with torch.no_grad():
+            ref = M()(p, x.clone())
+            torch._dynamo.reset()
+            res = torch.compile(M(), backend="eager", fullgraph=True)(p, x.clone())
+        self.assertEqual(ref, res)
+
+    @torch._dynamo.config.patch(
+        canonicalize_output_graph_node_order=True,
+        do_not_emit_runtime_asserts=True,
+    )
+    def test_canonical_graph_hop_purity_without_runtime_asserts(self):
+        def fn(pred, x):
+            def branch(x):
+                return x.sin()
+
+            out = torch.cond(pred, branch, branch, (x,))
+            return out + torch.abs(x)
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(fn, backend=backend, fullgraph=True)(
+            torch.tensor(True), torch.randn(4)
+        )
+        nodes = list(backend.graphs[0].graph.nodes)
+        cond = next(
+            node for node in nodes if node.target is torch.ops.higher_order.cond
+        )
+        abs_ = next(node for node in nodes if node.target is torch.abs)
+        self.assertLess(nodes.index(abs_), nodes.index(cond))
+
+    def test_canonical_graph_explicit_owner_for_call_module(self):
+        from torch._dynamo.output_graph import _canonicalize_graph
+
+        root = torch.nn.Module()
+        root.relu = torch.nn.ReLU()
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        relu = graph.call_module("relu", (x,))
+        graph.output(relu)
+
+        self.assertIsNone(graph.owning_module)
+        _canonicalize_graph(graph, owning_module=root)
+
+    def test_canonical_graph_increment_version_stays_between_reads(self):
+        from torch._dynamo.output_graph import _canonicalize_graph
+        from torch._dynamo.tensor_version_op import _tensor_version
+
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+        v0 = graph.call_function(_tensor_version, (x,))
+        graph.call_function(torch.autograd.graph.increment_version, (x,))
+        v1 = graph.call_function(_tensor_version, (x,))
+        graph.output((v0, v1))
+
+        # Both reads sort before the bump on the canonical key, so without the
+        # barrier they hoist above it and observe the same version.
+        _canonicalize_graph(graph)
+        read, bump = "_tensor_version_default", "increment_version"
+        expected = ["x", read, bump, f"{read}_1", "output"]
+        self.assertEqual([n.name for n in graph.nodes], expected)
+
+    def test_canonical_graph_hop_barrier_follows_subgraph_purity(self):
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        def make(
+            body,
+            target=torch.ops.higher_order.cond,
+            *,
+            nested=False,
+            with_constant=False,
+        ):
+            root = torch.nn.Module()
+            sub = fx.Graph()
+            s = sub.placeholder("s")
+            sub.output((body(sub, s),))
+            root.branch = fx.GraphModule(torch.nn.Module(), sub)
+            if with_constant:
+                root.register_buffer("constant", torch.ones(1))
+            g = fx.Graph()
+            x = g.placeholder("x")
+            attr = g.get_attr("branch")
+            constant = g.get_attr("constant") if with_constant else None
+            gm = fx.GraphModule(root, g)
+            subgraphs = [attr] if nested else attr
+            operands = (x, constant) if with_constant else (x,)
+            return gm.graph.call_function(target, (x, subgraphs, operands))
+
+        # aten overloads, not bare python callables: main's value heuristic
+        # barriers any non-OpOverload node lacking example_value/val meta,
+        # which synthetic test nodes do not carry.
+        pure = make(lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,)))
+        self.assertTrue(_is_safe_to_reorder(pure))
+
+        mutating = make(lambda sub, s: sub.call_method("add_", (s, s)))
+        self.assertFalse(_is_safe_to_reorder(mutating))
+
+        for target in (
+            torch.ops.higher_order.flex_attention_backward,
+            torch.ops.higher_order.flex_gemm,
+            torch.ops.higher_order.foreach_map,
+            torch.ops.higher_order.hints_wrapper,
+            torch.ops.higher_order.invoke_quant,
+            torch.ops.higher_order.invoke_quant_packed,
+            torch.ops.higher_order.local_map_hop,
+            torch.ops.higher_order.strict_mode,
+            torch.ops.higher_order.while_loop_stack_output,
+        ):
+            self.assertTrue(
+                _is_safe_to_reorder(
+                    make(
+                        lambda sub, s: sub.call_function(
+                            torch.ops.aten.sin.default, (s,)
+                        ),
+                        target,
+                    )
+                ),
+                target.__name__,
+            )
+
+        nested_pure = make(
+            lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,)),
+            torch.ops.higher_order.switch,
+            nested=True,
+        )
+        self.assertTrue(_is_safe_to_reorder(nested_pure))
+        nested_pure_with_constant = make(
+            lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,)),
+            torch.ops.higher_order.switch,
+            nested=True,
+            with_constant=True,
+        )
+        self.assertTrue(_is_safe_to_reorder(nested_pure_with_constant))
+        nested_mutating = make(
+            lambda sub, s: sub.call_method("add_", (s, s)),
+            torch.ops.higher_order.switch,
+            nested=True,
+        )
+        self.assertFalse(_is_safe_to_reorder(nested_mutating))
+
+        checkpoint = make(
+            lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,)),
+            torch.ops.higher_order.tag_activation_checkpoint,
+        )
+        self.assertTrue(_is_safe_to_reorder(checkpoint))
+        owning_module = checkpoint.graph.owning_module
+        if owning_module is None:
+            raise AssertionError("checkpoint graph must have an owning module")
+        checkpoint_body = owning_module.get_submodule("branch")
+        checkpoint_body.meta["_checkpoint_context_fn"] = lambda: None
+        self.assertFalse(_is_safe_to_reorder(checkpoint))
+
+        wrap_checkpoint = make(
+            lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,)),
+            torch.ops.higher_order.wrap_activation_checkpoint,
+        )
+        self.assertTrue(_is_safe_to_reorder(wrap_checkpoint))
+        owning_module = wrap_checkpoint.graph.owning_module
+        if owning_module is None:
+            raise AssertionError("checkpoint graph must have an owning module")
+        checkpoint_body = owning_module.get_submodule("branch")
+        checkpoint_body.meta["_checkpoint_context_fn"] = lambda: None
+        self.assertFalse(_is_safe_to_reorder(wrap_checkpoint))
+
+        # Effects that do not live in a subgraph keep the HOP pinned even when
+        # every subgraph it does carry is pure.
+        not_allowlisted = make(
+            lambda sub, s: sub.call_function(torch.ops.aten.sin.default, (s,))
+        )
+        not_allowlisted.target = torch.ops.higher_order.auto_functionalized_v2
+        self.assertFalse(_is_safe_to_reorder(not_allowlisted))
+
+    @unittest.skipIf(not torch.distributed.is_available(), "requires distributed")
+    def test_canonical_graph_collectives_are_barriers(self):
+        from torch.distributed import _functional_collectives
+        from torch.fx.passes.canonicalize import _is_safe_to_reorder
+
+        self.assertIsNotNone(_functional_collectives)
+        graph = fx.Graph()
+        x = graph.placeholder("x")
+
+        # Functional collectives are barriers (comm/compute overlap + Inductor's
+        # in-place collective reuse). Cover current and legacy namespaces in
+        # both the Dynamo packet and aten overload forms.
+        for namespace in (
+            torch.ops._c10d_functional,
+            torch.ops.c10d_functional,
+        ):
+            self.assertFalse(
+                _is_safe_to_reorder(
+                    graph.call_function(namespace.all_reduce.default, (x,))
+                )
+            )
+            collective_packet = graph.call_function(namespace.all_reduce, (x,))
+            collective_packet.meta["example_value"] = torch.randn(4)
+            self.assertFalse(_is_safe_to_reorder(collective_packet))
+        self.assertTrue(
+            _is_safe_to_reorder(graph.call_function(torch.ops.aten.add.Tensor, (x, x)))
+        )
+
+        # Every order-sensitive namespace, not just _c10d_functional. symm_mem
+        # carries sync primitives, so reordering across a wait breaks the sync
+        # contract; _dtensor carries collectives with the same overlap concern.
+        for op in (
+            torch.ops._c10d_functional_autograd.all_to_all_single.default,
+            torch.ops.symm_mem.one_shot_all_reduce.default,
+            torch.ops.symm_mem.nvshmem_wait_for_signal.default,
+            torch.ops._dtensor.shard_dim_alltoall.default,
+        ):
+            self.assertFalse(
+                _is_safe_to_reorder(graph.call_function(op, (x,))), op.name()
+            )
 
 
 instantiate_parametrized_tests(DictTests)

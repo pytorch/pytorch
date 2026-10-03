@@ -578,15 +578,22 @@ def _canonical_key(node: fx.Node, canonical_idx: dict[fx.Node, int]) -> object:
     return _canonical_node_key(node, canonical_idx)
 
 
-def _canonicalize_graph(graph: fx.Graph) -> None:
+def _canonicalize_graph(
+    graph: fx.Graph, *, owning_module: torch.nn.Module | None = None
+) -> None:
     """Canonicalize a Dynamo output graph's node order and names.
 
     Delegates to ``torch.fx.passes.canonicalize.canonicalize_graph`` with
-    Dynamo-specific key generation and barrier detection.
+    Dynamo-specific key generation and barrier detection. ``owning_module``
+    resolves HOP subgraphs before ``graph`` is wrapped in a GraphModule.
     """
     from torch.fx.passes.canonicalize import _is_safe_to_reorder, canonicalize_graph
 
-    canonicalize_graph(graph, _canonical_key, _is_safe_to_reorder)
+    canonicalize_graph(
+        graph,
+        _canonical_key,
+        lambda node: _is_safe_to_reorder(node, owning_module=owning_module),
+    )
 
 
 def get_builtins_dict(global_scope: Scope) -> dict[str, Any]:
@@ -2941,7 +2948,7 @@ class OutputGraph(OutputGraphCommon):
                 and not torch.compiler.is_exporting()
                 and not torch._dynamo.compiled_autograd.in_compiled_autograd_region
             ):
-                _canonicalize_graph(self.graph)
+                _canonicalize_graph(self.graph, owning_module=root)
 
             gm = _make_graph_module(root, self.graph)
 
