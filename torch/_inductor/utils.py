@@ -5113,6 +5113,22 @@ def is_cudagraph_unsafe_fx_node(fx_node: torch.fx.Node) -> bool:
     return False
 
 
+def fx_node_crosses_devices(fx_node: torch.fx.Node) -> bool:
+    """
+    Check if an FX node reads or produces tensors on more than one device.
+
+    A CUDA graph cannot record such an op: whatever it touches on the other
+    device lives outside the graph's memory pool. Meta tensors have no storage
+    and are ignored.
+    """
+    devices: OrderedSet[torch.device] = OrderedSet()
+    for node in (*fx_node.all_input_nodes, fx_node):
+        for val in pytree.tree_leaves(node.meta.get("val")):
+            if isinstance(val, torch.Tensor) and val.device.type != "meta":
+                devices.add(val.device)
+    return len(devices) > 1
+
+
 def is_cudagraph_unsafe_op(node: Operation) -> bool:
     """
     Returns True if the node is an op that is not cudagraphable.
@@ -5677,27 +5693,36 @@ def is_collective_op(op_name: str) -> bool:
 
 
 @lru_cache
+def _tlx_registry() -> Any:
+    try:
+        # Succeeds only when fbtriton (a Triton fork) is installed
+        from triton.language.extra.tlx.inductor import registry
+
+        return registry
+    except ImportError:
+        return None
+
+
+def _tlx_registry_options(name: str) -> list[str]:
+    from torch._inductor import config
+    from torch._inductor.compile_worker.utils import in_toplevel_process
+
+    # Importing the registry replaces config.inductor_choices_class, which keys
+    # the FX graph cache, so the parent must not import it while TLX is off.
+    # Compile workers do not inherit config.patch'd tlx_mode, so they stay
+    # ungated to avoid dropping enabled TLX options.
+    if config.triton.tlx_mode is None and in_toplevel_process():
+        return []
+    registry = _tlx_registry()
+    return [] if registry is None else getattr(registry, name, [])
+
+
 def tlx_only_cuda_options() -> list[str]:
-    try:
-        # Succeeds only when fbtriton (a Triton fork) is installed
-        from triton.language.extra.tlx.inductor.registry import tlx_only_cuda_options
-
-        return tlx_only_cuda_options
-
-    except ImportError:
-        return []
+    return _tlx_registry_options("tlx_only_cuda_options")
 
 
-@lru_cache
 def tlx_only_hip_options() -> list[str]:
-    try:
-        # Succeeds only when fbtriton (a Triton fork) is installed
-        from triton.language.extra.tlx.inductor.registry import tlx_only_hip_options
-
-        return tlx_only_hip_options
-
-    except ImportError:
-        return []
+    return _tlx_registry_options("tlx_only_hip_options")
 
 
 def _round_up(x: int, y: int) -> int:
