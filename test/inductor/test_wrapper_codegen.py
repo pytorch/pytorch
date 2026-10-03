@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import types
+import unittest
 from itertools import count
 from types import SimpleNamespace
 
@@ -17,7 +18,9 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import IndentedBuffer
 from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import CallMethodKey
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
 )
@@ -941,6 +944,138 @@ int64_t s0 = s1;""",
         self.assertNotEqual(first, second)
         self.assertIn(f"{first}[] = {{2, 3}};", first_buffer.getvalue())
         self.assertIn(f"{second}[] = {{2, 3}};", second_buffer.getvalue())
+
+
+class TestCppWrapperConstantsAlignment(TestCase):
+    """codegen_model_constructor keeps the default 64-byte data_size alignment for
+    all-CPU constants. This runs on CPU CI without requiring an accelerator;
+    accelerator-device alignment behavior is covered by
+    TestCppWrapperConstantsAlignmentDevice."""
+
+    hw_classification = HardwareClassification.GENERIC
+
+    def _wrapper(self, device: str):
+        wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
+        wrapper.prefix = IndentedBuffer()
+        wrapper.aoti_model_class_name = "AOTInductorModel"
+        wrapper.device = device
+        wrapper.used_cached_devices = OrderedSet()
+        wrapper.used_cached_dtypes = OrderedSet()
+        wrapper.used_cached_layouts = OrderedSet()
+        wrapper.used_cached_memory_formats = OrderedSet()
+        wrapper.used_cached_stride_orders = OrderedSet()
+        wrapper.used_switch_selector = OrderedSet()
+        return wrapper
+
+    @staticmethod
+    def _constant(name: str, device_type: str, nbytes: int):
+        tensor = unittest.mock.Mock(spec=torch.Tensor)
+        tensor.device = SimpleNamespace(type=device_type, index=0)
+        tensor.dtype = torch.float32
+        tensor.layout = torch.strided
+        tensor.is_mkldnn = False
+        tensor.storage_offset.return_value = 0
+        tensor.size.return_value = torch.Size([nbytes // 4])
+        tensor.stride.return_value = (1,)
+        tensor.untyped_storage.return_value.nbytes.return_value = nbytes
+        return name, tensor
+
+    def _codegen_constructor(self, constants, *, device="cpu"):
+        graph = SimpleNamespace(
+            graph_inputs={},
+            graph_outputs=[],
+            constants=dict(constants),
+            folded_constants=set(),
+            get_original_value_of_constant=lambda name: dict(constants)[name],
+            named_parameters={},
+            named_buffers={},
+            dynamo_flat_name_to_original_fqn={name: name for name, _ in constants},
+            allocated_constant_name={},
+            device_type=device,
+            device_idxs=OrderedSet(),
+            aot_mode=True,
+        )
+        wrapper = self._wrapper(device)
+        with (
+            V.set_graph_handler(graph),
+            unittest.mock.patch.object(
+                wrapper, "codegen_device", return_value="cached_torch_device_type_x, 0"
+            ),
+        ):
+            wrapper.codegen_model_constructor()
+        return wrapper.prefix.getvalue()
+
+    def test_cpu_only_constants_stay_aligned_by_default(self):
+        # Default path (no accelerator involved): CPU constants keep the
+        # historical behavior of aligning data_size up to 64 bytes.
+        code = self._codegen_constructor([self._constant("c0", "cpu", 16)])
+        self.assertIn("constants_info_[0].data_size = 64;", code)
+
+
+class TestCppWrapperConstantsAlignmentDevice(TestCase):
+    """codegen_model_constructor must decide the 64-byte data_size alignment from
+    the real devices the constants live on: constants on an accelerator device get
+    unaligned data_size, while mixing CPU constants in forces alignment for every
+    constant. Same codegen path as TestCppWrapperConstantsAlignment but exercised
+    with real tensors on a real accelerator device."""
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    def _codegen_constructor(self, constants, *, device="cpu"):
+        graph = SimpleNamespace(
+            graph_inputs={},
+            graph_outputs=[],
+            constants=dict(constants),
+            folded_constants=set(),
+            get_original_value_of_constant=lambda name: dict(constants)[name],
+            named_parameters={},
+            named_buffers={},
+            dynamo_flat_name_to_original_fqn={name: name for name, _ in constants},
+            allocated_constant_name={},
+            device_type=device,
+            device_idxs=OrderedSet(),
+            aot_mode=True,
+        )
+        wrapper = CppWrapperCpu.__new__(CppWrapperCpu)
+        wrapper.prefix = IndentedBuffer()
+        wrapper.aoti_model_class_name = "AOTInductorModel"
+        wrapper.device = device
+        wrapper.used_cached_devices = OrderedSet()
+        wrapper.used_cached_dtypes = OrderedSet()
+        wrapper.used_cached_layouts = OrderedSet()
+        wrapper.used_cached_memory_formats = OrderedSet()
+        wrapper.used_cached_stride_orders = OrderedSet()
+        wrapper.used_switch_selector = OrderedSet()
+        with (
+            V.set_graph_handler(graph),
+            unittest.mock.patch.object(
+                wrapper, "codegen_device", return_value="cached_torch_device_type_x, 0"
+            ),
+        ):
+            wrapper.codegen_model_constructor()
+        return wrapper.prefix.getvalue()
+
+    def test_accelerator_constants_not_aligned(self, device):
+        device_type = torch.device(device).type
+        tensor = torch.tensor([1.0, 2.0, 3.0, 4.0], device=device)
+        code = self._codegen_constructor([("accel_c", tensor)], device=device_type)
+        if device_type == "cpu":
+            self.assertIn("constants_info_[0].data_size = 64;", code)
+        else:
+            self.assertIn("constants_info_[0].data_size = 16;", code)
+            self.assertNotIn("_align", code)
+
+    def test_mixed_cpu_and_accelerator_constants_align(self, device):
+        constants = [
+            ("accel_c", torch.tensor([1.0, 2.0, 3.0, 4.0], device=device)),
+            ("cpu_c", torch.tensor([5.0, 6.0, 7.0, 8.0])),
+        ]
+        code = self._codegen_constructor(constants, device=torch.device(device).type)
+        self.assertIn("constants_info_[0].data_size = 64;", code)
+        self.assertIn("constants_info_[1].data_size = 64;", code)
+
+
+instantiate_device_type_tests(TestCppWrapperConstantsAlignmentDevice, globals())
 
 
 if __name__ == "__main__":
