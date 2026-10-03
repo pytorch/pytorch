@@ -2488,15 +2488,19 @@ class BuiltinVariable(BaseBuiltinVariable):
         if isinstance(arg, BuiltinVariable):
             return VariableTracker.build(tx, dir(arg.fn))
         if isinstance(arg, (variables.UserFunctionVariable, variables.UserMethodVariable)):
-            # dir() on functions and bound methods must include attributes
-            # buffered in Dynamo's function __dict__ side-effect tracker. A
-            # constant-folded dir(real_function) misses writes made earlier in
-            # the same trace because they have not been replayed yet.
-            fn_vt = arg.im_func if isinstance(arg, variables.UserMethodVariable) else arg
-            names = set(dir(arg.get_function()))
-            if isinstance(arg, variables.UserMethodVariable):
-                names.update(dir(types.MethodType))
-            for key in fn_vt.get_dict_vt(tx).unpack_var_sequence(tx):
+            # Mirror CPython object.__dir__: copy the object's __dict__, then
+            # merge attributes reachable from its actual class hierarchy.
+            # For a bound method, __dict__ is forwarded to __func__ by
+            # method_getattro, but its class is still MethodType; seeding from
+            # dir(the underlying function) would incorrectly expose
+            # function-only names such as __code__.
+            obj_type = (
+                types.MethodType
+                if isinstance(arg, variables.UserMethodVariable)
+                else types.FunctionType
+            )
+            names = set(dir(obj_type))
+            for key in arg.get_dict_vt(tx).unpack_var_sequence(tx):
                 if key.is_python_constant():
                     name = key.as_python_constant()
                     if isinstance(name, str):
