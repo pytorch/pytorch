@@ -136,7 +136,7 @@ def alpha_dropout(
     b = b * (alpha * a) + alpha * a * p
     dropout_mask = a * dropout_mask
 
-    return self * dropout_mask + b
+    return (self * dropout_mask + b).to(self.dtype)
 
 
 def _inplace_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
