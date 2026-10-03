@@ -1394,14 +1394,6 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   const uint32_t threshold = ilp_threshold.value_or(
       c10::isFloatingType(out.scalar_type()) ? (1u << 18) : std::numeric_limits<uint32_t>::max());
   bool dense_ilp = ilp_applicable && static_cast<uint32_t>(iter.numel()) >= threshold;
-  if (ilp_applicable) {
-    if (auto force = c10::utils::get_env("PYTORCH_BINARY_FORCE_FLAVOR")) {
-      if (force.value() == "ilp")
-        dense_ilp = true;
-      else if (force.value() == "scalar")
-        dense_ilp = false;
-    }
-  }
 
   // Inner-contiguous: a strided iterator whose innermost (coalesced) dim is unit
   // stride for every operand, with no cast/scalar/broadcast/alpha. Prefer the
@@ -1409,12 +1401,31 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   const bool ic_applicable = !use_scalar_kernel && !use_broadcast_kernel && !cast_needed && !alpha.has_value() &&
       !output_cast_needed && !iter.is_contiguous() && isInnerContiguous(iter);
   bool inner_contiguous = ic_applicable && iter.shape()[0] >= INNER_CONTIGUOUS_MIN_EXTENT;
-  if (ic_applicable) {
-    if (auto force = c10::utils::get_env("PYTORCH_BINARY_FORCE_FLAVOR")) {
-      if (force.value() == "strided")
-        inner_contiguous = false;
-      else if (force.value() == "inner_contiguous")
-        inner_contiguous = true;
+
+  // Inner-strided shares generic stride/type bindings, but decodes the outer
+  // coordinate once per ILP tile. Scalar, broadcast, alpha and castout paths
+  // retain their existing dispatch and buffer contracts.
+  const bool is_applicable = !use_scalar_kernel && !use_broadcast_kernel && !alpha.has_value() && !output_cast_needed &&
+      !iter.is_contiguous() && iter.ndim() > 0 && iter.strides(0)[0] != 0;
+  // Keep the generic path for small tensors, where the extra dispatch and
+  // per-row tile setup cost more than the saved outer-coordinate work.
+  const bool inner_strided_size = iter.numel() >= (1 << 16);
+  bool inner_local = is_applicable && inner_strided_size;
+  if (inner_local) {
+    for (const auto i : c10::irange(iter.ntensors())) {
+      const auto stride = iter.strides(i)[0];
+      inner_local &= stride == 0 || stride == static_cast<int64_t>(iter.element_size(i));
+    }
+  }
+  bool inner_strided =
+      is_applicable && inner_strided_size && !inner_contiguous && (cast_needed || inner_local) && iter.shape()[0] >= 8;
+  if (auto force = c10::utils::get_env("PYTORCH_BINARY_FORCE_FLAVOR")) {
+    const auto& flavor = *force;
+    if (flavor == "scalar" || flavor == "strided" || flavor == "ilp" || flavor == "inner_contiguous" ||
+        flavor == "inner_strided") {
+      dense_ilp = flavor == "ilp" && ilp_applicable;
+      inner_contiguous = flavor == "inner_contiguous" && ic_applicable;
+      inner_strided = flavor == "inner_strided" && is_applicable;
     }
   }
 
@@ -1429,6 +1440,13 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       fmt::format("{}_{}",
                   scalarToMetalTypeString(out),
                   scalarToMetalTypeString(out.scalar_type() == kBool ? iter.common_dtype() : out.scalar_type()));
+  if (inner_strided) {
+    const auto candidate = cast_needed
+        ? fmt::format("{}_inner_strided_cast_{}", name, cast_suffix_type)
+        : fmt::format("{}_inner_strided_{}_{}", name, scalarToMetalTypeString(out), scalarToMetalTypeString(input));
+    // A forced but unregistered flavor deterministically uses generic strided.
+    inner_strided = hasFunction(candidate);
+  }
   std::string kernel_name;
   if (output_cast_needed) {
     // Force the strided castout path regardless of contiguity / scalar /
@@ -1474,6 +1492,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     const bool offset_inputs = !iter.is_contiguous() && !alpha.has_value() && hasUnalignedBufferInput(iter);
     const auto suffix = iter.is_contiguous() ? (dense_ilp ? "dense_ilp" C10_METAL_ILP_PER_THREAD_STR : "dense")
         : inner_contiguous                   ? (offset_inputs ? "inner_contiguous_offset" : "inner_contiguous")
+        : inner_strided                      ? "inner_strided"
                                              : (offset_inputs ? "strided_offset" : "strided");
     kernel_name = cast_needed ? fmt::format("{}_{}_cast_{}{}", name, suffix, cast_suffix_type, alpha_suffix)
                               : fmt::format("{}_{}_{}_{}{}",
@@ -1573,7 +1592,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
           }
         }
       }
-      if (inner_contiguous) {
+      if (inner_contiguous || inner_strided) {
         const auto inner = static_cast<uint32_t>(iter.shape()[0]);
         const auto inner_tiles =
             (static_cast<NSUInteger>(inner) + c10::metal::ILP_PER_THREAD - 1) / c10::metal::ILP_PER_THREAD;

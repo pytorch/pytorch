@@ -7,6 +7,7 @@ import sys
 import math
 import random
 import unittest
+from unittest import mock
 import warnings
 import shutil
 import subprocess
@@ -11370,6 +11371,92 @@ class TestInnerContiguous(TestCaseMPS):
             self.assertEqual(dev[offset:].clone().cpu(), full[offset:])
 
 
+
+class TestBinaryInnerStrided(TestCaseMPS):
+    FLAVORS = ("default", "strided", "inner_contiguous", "inner_strided")
+
+    @contextlib.contextmanager
+    def _force_flavor(self, flavor):
+        # "default" leaves the override unset, so production dispatch picks the kernel.
+        with mock.patch.dict(os.environ):
+            os.environ.pop("PYTORCH_BINARY_FORCE_FLAVOR", None)
+            if flavor != "default":
+                os.environ["PYTORCH_BINARY_FORCE_FLAVOR"] = flavor
+            yield
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16, torch.int32)
+    @parametrize("inner", [1, 3, 4, 7, 8, 15, 16, 17])
+    @parametrize("layout", ["unit_inner", "broadcast", "gather"])
+    @parametrize("op", [torch.add, torch.sub, torch.mul, torch.div])
+    def test_flavors(self, device, dtype, inner, layout, op):
+        x = torch.arange(3 * (inner + 2), dtype=torch.float32).reshape(3, inner + 2).remainder(9).add(1).to(dtype)
+        x_dev = x.to(device)[:, 1:-1]
+        x = x[:, 1:-1]
+        if layout == "broadcast":
+            y = torch.tensor([[1], [2], [4]], dtype=dtype)
+        elif layout == "gather":
+            y = torch.arange(3 * inner, dtype=torch.float32).reshape(inner, 3).remainder(4).add(1).to(dtype).t()
+        else:
+            y = torch.full((3, inner + 2), 2, dtype=dtype)[:, 1:-1]
+        y_dev = y.to(device)
+        expected = op(x.float(), y.float()).to(op(x, y).dtype)
+        for flavor in self.FLAVORS:
+            with self.subTest(flavor=flavor), self._force_flavor(flavor):
+                self.assertEqual(op(x_dev, y_dev).cpu(), expected)
+                storage = torch.full((3, inner + 2), 99, dtype=expected.dtype, device=device)
+                op(x_dev, y_dev, out=storage[:, 1:-1])
+                expected_storage = torch.full((3, inner + 2), 99, dtype=expected.dtype)
+                expected_storage[:, 1:-1] = expected
+                self.assertEqual(storage.cpu(), expected_storage)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16, torch.int32)
+    @parametrize("rows", [8191, 8192, 8193])
+    @parametrize("mixed", [False, True])
+    @parametrize("op", [torch.add, torch.sub, torch.mul, torch.div])
+    def test_default_size_boundary(self, device, dtype, rows, mixed, op):
+        # Exercise production dispatch below, at and above the 64K-element gate.
+        # Offset inputs and an offset output also cover the shared buffer binding.
+        inner = 8
+        x = torch.arange(rows * (inner + 2), dtype=torch.float32).reshape(rows, inner + 2).remainder(9).add(1).to(dtype)
+        x_dev = x.to(device)[:, 1:-1]
+        x = x[:, 1:-1]
+        y = torch.tensor([1, 2, 4], dtype=torch.float32 if mixed else dtype).repeat((rows + 2) // 3)[:rows, None]
+        y_dev = y.to(device)
+        expected = op(x.float(), y.float()).to(op(x, y).dtype)
+        with self._force_flavor("default"):
+            self.assertEqual(op(x_dev, y_dev).cpu(), expected)
+            storage = torch.full((rows, inner + 2), 99, dtype=expected.dtype, device=device)
+            op(x_dev, y_dev, out=storage[:, 1:-1])
+            expected_storage = torch.full((rows, inner + 2), 99, dtype=expected.dtype)
+            expected_storage[:, 1:-1] = expected
+            self.assertEqual(storage.cpu(), expected_storage)
+
+    @parametrize("dtype", [torch.float16, torch.bfloat16])
+    @parametrize("reverse", [False, True])
+    @parametrize("inner", [3, 8, 17])
+    def test_mixed_inputs(self, device, dtype, reverse, inner):
+        x = torch.linspace(-1, 1, 3 * inner).reshape(3, inner).to(dtype)
+        y = torch.tensor([[0.12345], [0.23456], [0.34567]])
+        a, b = (y, x) if reverse else (x, y)
+        for flavor in self.FLAVORS:
+            with self.subTest(flavor=flavor), self._force_flavor(flavor):
+                self.assertEqual(torch.sub(a.to(device), b.to(device)).cpu(), a.float() - b.float())
+
+    @parametrize("flavor", ["default", "strided", "inner_contiguous", "inner_strided"])
+    def test_dispatch_fallbacks(self, device, flavor):
+        x = torch.arange(1, 52, dtype=torch.float32).reshape(3, 17)
+        y = torch.tensor([[1.0], [2.0], [3.0]])
+        with self._force_flavor(flavor):
+            # pow has no inner_strided registration; alpha and fixed-output
+            # comparisons must keep their existing buffer/dtype contracts.
+            for op in (torch.pow, lambda a, b: torch.add(a, b, alpha=2)):
+                self.assertEqual(op(x.to(device), y.to(device)).cpu(), op(x, y))
+            out = torch.empty_like(x, device=device)
+            torch.gt(x.to(device), y.to(device), out=out)
+            self.assertEqual(out.cpu(), torch.gt(x, y).float())
+            self.assertEqual(torch.add(x.to(device), 2).cpu(), x + 2)
+
+
 @serialTest()
 class TestLargeTensors(TestCaseMPS):
     def test_64bit_binops(self):
@@ -18286,6 +18373,7 @@ class TestMetalLibrary(TestCaseMPS):
 # This requires mps to be properly registered in the device generic test framework which is not the
 # case right now. We can probably use `allow_mps` introduced in https://github.com/pytorch/pytorch/pull/87342
 # to achieve this.
+instantiate_device_type_tests(TestBinaryInnerStrided, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestConsistency, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestErrorInputs, globals(), allow_mps=True, only_for="mps")
 instantiate_device_type_tests(TestCommon, globals(), allow_mps=True, only_for="mps")

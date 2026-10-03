@@ -882,6 +882,117 @@ kernel void binary_inner_contiguous(
   }
 }
 
+// Strided-ILP flavor: decode the outer
+// coordinate once per thread, then walk ILP_PER_THREAD elements of the
+// innermost run via each operand's constant dim-0 byte stride. Accepts any
+// layout binary_strided does (a stride-0 broadcast input just re-reads one
+// address). The host
+// guarantees a nonzero output dim-0 stride so tile lanes never store to the
+// same address. Buffer slots match binary_strided, but the tensor inputs of
+// both inner-strided kernels are `device const`: Apple GPUs need 4-byte
+// offsets for constant buffers, and a half/bfloat view can start 2 bytes into
+// its storage.
+template <typename T, typename F, typename om_t = T>
+kernel void binary_inner_strided(
+    device void* output [[buffer(0)]],
+    device const char* input [[buffer(1)]],
+    device const char* other [[buffer(2)]],
+    constant long* sizes [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant long* input_strides [[buffer(5)]],
+    constant long* other_strides [[buffer(6)]],
+    constant uint3& ndim [[buffer(7)]],
+    uint2 thread_pos [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  int pos[max_ndim];
+  pos_from_thread_index(uint2(0, thread_pos.y), pos, sizes, ndim.x);
+  const auto out_base = offset_from_coord(pos, output_strides, ndim.x);
+  const auto in_base = offset_from_coord(pos, input_strides, ndim.x);
+  const auto oth_base = offset_from_coord(pos, other_strides, ndim.x);
+  const int out_s = int(output_strides[0]);
+  const int in_s = int(input_strides[0]);
+  const int oth_s = int(other_strides[0]);
+  const int inner = int(sizes[0]);
+  const int base = int(thread_pos.x) * ILP_PER_THREAD;
+  if (inner - base >= int(ILP_PER_THREAD)) {
+    array<T, ILP_PER_THREAD> ta;
+    array<T, ILP_PER_THREAD> tb;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      const int i = base + int(j);
+      ta[j] = val_at_offs<T>(input, in_base + i * in_s);
+      tb[j] = val_at_offs<T>(other, oth_base + i * oth_s);
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      ref_at_offs<res_t>(output, out_base + (base + int(j)) * out_s) =
+          static_cast<res_t>(f(om_t(ta[j]), om_t(tb[j])));
+    }
+  } else {
+    for (int i = base; i < inner; ++i) {
+      const auto a = val_at_offs<T>(input, in_base + i * in_s);
+      const auto b = val_at_offs<T>(other, oth_base + i * oth_s);
+      ref_at_offs<res_t>(output, out_base + i * out_s) =
+          static_cast<res_t>(f(om_t(a), om_t(b)));
+    }
+  }
+}
+
+// Cast variant of binary_inner_strided: operands are read at their runtime
+// dtypes (ndim_types.y/.z) into om_t. Output casting stays on the existing
+// generic castout path.
+template <typename T, typename F, typename om_t = opmath_t<T>>
+kernel void binary_inner_strided_cast(
+    device void* output [[buffer(0)]],
+    device const char* input [[buffer(1)]],
+    device const char* other [[buffer(2)]],
+    constant long* sizes [[buffer(3)]],
+    constant long* output_strides [[buffer(4)]],
+    constant long* input_strides [[buffer(5)]],
+    constant long* other_strides [[buffer(6)]],
+    constant uint4& ndim_types [[buffer(7)]],
+    uint2 thread_pos [[thread_position_in_grid]]) {
+  F f;
+  using res_t = result_of<F, T, T>;
+  int pos[max_ndim];
+  pos_from_thread_index(uint2(0, thread_pos.y), pos, sizes, ndim_types.x);
+  const auto out_base = offset_from_coord(pos, output_strides, ndim_types.x);
+  const auto in_base = offset_from_coord(pos, input_strides, ndim_types.x);
+  const auto oth_base = offset_from_coord(pos, other_strides, ndim_types.x);
+  const int out_s = int(output_strides[0]);
+  const int in_s = int(input_strides[0]);
+  const int oth_s = int(other_strides[0]);
+  const int inner = int(sizes[0]);
+  const int base = int(thread_pos.x) * ILP_PER_THREAD;
+  if (inner - base >= int(ILP_PER_THREAD)) {
+    array<om_t, ILP_PER_THREAD> ta;
+    array<om_t, ILP_PER_THREAD> tb;
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      const int i = base + int(j);
+      ta[j] = val_at_offs<om_t>(
+          input, in_base + i * in_s, static_cast<ScalarType>(ndim_types.y));
+      tb[j] = val_at_offs<om_t>(
+          other, oth_base + i * oth_s, static_cast<ScalarType>(ndim_types.z));
+    }
+#pragma unroll
+    for (uint j = 0; j < ILP_PER_THREAD; ++j) {
+      ref_at_offs<res_t>(output, out_base + (base + int(j)) * out_s) =
+          static_cast<res_t>(f(ta[j], tb[j]));
+    }
+  } else {
+    for (int i = base; i < inner; ++i) {
+      const auto a = val_at_offs<om_t>(
+          input, in_base + i * in_s, static_cast<ScalarType>(ndim_types.y));
+      const auto b = val_at_offs<om_t>(
+          other, oth_base + i * oth_s, static_cast<ScalarType>(ndim_types.z));
+      ref_at_offs<res_t>(output, out_base + i * out_s) =
+          static_cast<res_t>(f(a, b));
+    }
+  }
+}
+
 template <typename T, typename T2, typename F>
 kernel void binary_alpha_dense(
     device result_of<F, T, T, T2>* out [[buffer(0)]],
@@ -1302,6 +1413,39 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant void* input_,                                               \
           constant uint4& sizes_types,                                         \
           uint tid)
+
+// Explicit registration limits the extra variants to the arithmetic core.
+#define REGISTER_BINARY_INNER_STRIDED_OP_(NAME, DTYPEI, DTYPEO, OMT)           \
+  template [[host_name(#NAME "_inner_strided_" #DTYPEO "_" #DTYPEI)]]          \
+  kernel void ::c10::metal::binary_inner_strided<DTYPEI, NAME##_functor, OMT>( \
+      device void* out,                                                        \
+      device const char* input,                                                \
+      device const char* other,                                                \
+      constant long* sizes,                                                    \
+      constant long* output_strides,                                           \
+      constant long* input_strides,                                            \
+      constant long* other_strides,                                            \
+      constant uint3& ndim,                                                    \
+      uint2 tid);                                                              \
+  template [[host_name(#NAME "_inner_strided_cast_" #DTYPEO "_" #DTYPEI)]]     \
+  kernel void ::c10::metal::                                                   \
+      binary_inner_strided_cast<DTYPEI, NAME##_functor, OMT>(                  \
+          device void* out,                                                    \
+          device const char* input,                                            \
+          device const char* other,                                            \
+          constant long* sizes,                                                \
+          constant long* output_strides,                                       \
+          constant long* input_strides,                                        \
+          constant long* other_strides,                                        \
+          constant uint4& ndim_types,                                          \
+          uint2 tid)
+
+#define REGISTER_BINARY_INNER_STRIDED_OP(NAME, DTYPEI, DTYPEO) \
+  REGISTER_BINARY_INNER_STRIDED_OP_(NAME, DTYPEI, DTYPEO, DTYPEI)
+
+#define REGISTER_OPMATH_BINARY_INNER_STRIDED_OP(NAME, DTYPEI, DTYPEO) \
+  REGISTER_BINARY_INNER_STRIDED_OP_(                                  \
+      NAME, DTYPEI, DTYPEO, ::c10::metal::opmath_t<DTYPEI>)
 
 // OpMath Binary Op promotes inputs to higher precision type before Functor call
 #define REGISTER_OPMATH_BINARY_OP(NAME, DTYPEI, DTYPEO) \
