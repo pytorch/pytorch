@@ -123,29 +123,38 @@ struct threshold_functor {
 };
 
 typedef ThresholdParams<float> ThresholdParams_float;
-REGISTER_BINARY_ALPHA_OP_WITH_INPUT_PTR(
+// Constant-buffer offsets must be four-byte aligned even for narrow types.
+REGISTER_BINARY_ALPHA_OP_WITH_INPUT_PTRS(
     threshold,
     float,
     ThresholdParams_float,
     float,
-    device const char*);
-REGISTER_BINARY_ALPHA_OP_WITH_INPUT_PTR(
+    device const char*,
+    device const float*);
+REGISTER_BINARY_ALPHA_OP_WITH_INPUT_PTRS(
     threshold,
     half,
     ThresholdParams_float,
     half,
-    device const char*);
-REGISTER_BINARY_ALPHA_OP_WITH_INPUT_PTR(
+    device const char*,
+    device const half*);
+REGISTER_BINARY_ALPHA_OP_WITH_INPUT_PTRS(
     threshold,
     bfloat,
     ThresholdParams_float,
     bfloat,
-    device const char*);
+    device const char*,
+    device const bfloat*);
 
 #define REGISTER_THRESHOLD_INT_OP(T)              \
   typedef ThresholdParams<T> ThresholdParams_##T; \
-  REGISTER_BINARY_ALPHA_OP_WITH_INPUT_PTR(        \
-      threshold, T, ThresholdParams_##T, T, device const char*);
+  REGISTER_BINARY_ALPHA_OP_WITH_INPUT_PTRS(       \
+      threshold,                                  \
+      T,                                          \
+      ThresholdParams_##T,                        \
+      T,                                          \
+      device const char*,                         \
+      device const T*);
 
 REGISTER_THRESHOLD_INT_OP(long);
 REGISTER_THRESHOLD_INT_OP(int);
