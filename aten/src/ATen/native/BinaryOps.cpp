@@ -994,7 +994,7 @@ Tensor mul(const Tensor& self, const Scalar& other) {
 }
 
 Tensor& mul_(Tensor& self, const Scalar& other) {
-  return at::mul_out(self, wrapped_scalar_tensor(other), self); // redispatch!
+  return at::mul_out(self, self, wrapped_scalar_tensor(other)); // redispatch!
 }
 
 Tensor& mul__scalar_sparse_csr(Tensor& self, const Scalar& other) {
