@@ -454,6 +454,56 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         dist.barrier()
 
 
+@requires_nvshmem()
+@requires_cuda_p2p_access()
+class NVSHMEMLifecycleTest(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def _init_process(self) -> None:
+        torch.cuda.set_device(self.device)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        symm_mem.set_backend("NVSHMEM")
+
+    @skip_if_lt_x_gpu(2)
+    def test_explicit_finalize(self) -> None:
+        self._init_process()
+        symm_mem.initialize_nvshmem(self.device)
+        symm_mem.initialize_nvshmem(self.device)
+        dist.barrier()
+        symm_mem.finalize_nvshmem()
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot be initialized after it has been finalized"
+        ):
+            symm_mem.initialize_nvshmem(self.device)
+
+    @skip_if_lt_x_gpu(2)
+    def test_explicit_init_then_alloc(self) -> None:
+        self._init_process()
+        symm_mem.initialize_nvshmem(self.device)
+        symm_mem.initialize_nvshmem(self.device)
+
+        tensor = symm_mem.empty(64, dtype=torch.float32, device=self.device)
+        hdl = symm_mem.rendezvous(tensor, group=dist.group.WORLD.group_name)
+        hdl.barrier()
+        torch.cuda.synchronize()
+
+
 # Negative tests for barrier/put_signal/wait_signal. They use
 # MultiProcessTestCase rather than MultiProcContinuousTest: a device-side
 # timeout calls trap(), which poisons the CUDA context, so each test needs

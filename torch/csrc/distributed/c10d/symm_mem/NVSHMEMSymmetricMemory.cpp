@@ -14,7 +14,10 @@
 #include <c10/util/error.h>
 #include <c10/util/flat_hash_map.h>
 
+#include <atomic>
+#include <memory>
 #include <mutex>
+#include <thread>
 #include <utility>
 
 // Starting from NVSHMEM 3.3.9, nvshmem_host.h exists so that we can cleanly
@@ -33,6 +36,7 @@ namespace symmetric_memory {
 /* Start of NVSHMEMSymmetricMemory implementation */
 
 static StoreExchange storeExchange = StoreExchange("NVSHMEMSymmetricMemory");
+static StoreExchange finalizeStoreExchange = StoreExchange("NVSHMEMFinalize");
 
 struct NVSHMEMAllocation {
   // Layout (signal pad first):
@@ -84,6 +88,27 @@ static std::unordered_map<std::string, std::vector<int>>
 // A map from group name to rank-to-global rank device array
 static std::unordered_map<std::string, int*> rank_to_global_rank_dev_map{};
 
+static void clear_rank_to_global_rank_mappings() {
+  std::vector<int*> rank_to_global_rank_devs;
+  {
+    std::lock_guard<std::mutex> lock(rank_map_mutex);
+    rank_to_global_rank_devs.reserve(rank_to_global_rank_dev_map.size());
+    for (const auto& [_, rank_to_global_rank_dev] :
+         rank_to_global_rank_dev_map) {
+      rank_to_global_rank_devs.push_back(rank_to_global_rank_dev);
+    }
+    rank_to_global_rank_dev_map.clear();
+    rank_to_global_rank_map.clear();
+  }
+  for (int* rank_to_global_rank_dev : rank_to_global_rank_devs) {
+    c10::cuda::CUDACachingAllocator::raw_delete(rank_to_global_rank_dev);
+  }
+}
+
+struct NVSHMEMHandleTracker {
+  std::atomic<size_t> live_handles{0};
+};
+
 // A class to hold the base pointers and signal pad pointers for a group of
 // peers. One `NVSHMEMPeerAllocInfo` object can be shared by multiple
 // `NVSHMEMSymmetricMemory` objects when latter reside on the same allocation
@@ -95,7 +120,8 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
       NVSHMEMAllocation* allocation,
       const std::string& group_name)
       : base_ptr_(allocation->alloc_base),
-        buffer_size_(allocation->buffer_size) {
+        buffer_size_(allocation->buffer_size),
+        device_idx_(allocation->device_idx) {
     // Byte offset from base_ptr_ to the start of the user buffer; only needed
     // during setup below.
     const size_t buffer_offset = allocation->buffer_offset;
@@ -189,15 +215,29 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
 #endif
   }
 
+  ~NVSHMEMPeerAllocInfo() override {
+    if (is_finalizing()) {
+      return;
+    }
+    c10::cuda::CUDAGuard guard(device_idx_);
+    if (buffers_dev_ != nullptr) {
+      c10::cuda::CUDACachingAllocator::raw_delete(buffers_dev_);
+    }
+    if (signal_pads_dev_ != nullptr) {
+      c10::cuda::CUDACachingAllocator::raw_delete(signal_pads_dev_);
+    }
+  }
+
  private:
   void* base_ptr_;
   size_t buffer_size_;
+  int device_idx_;
   int rank_;
   int world_size_;
   std::vector<void*> buffers_;
   std::vector<void*> signal_pads_;
-  void** buffers_dev_;
-  void** signal_pads_dev_;
+  void** buffers_dev_{nullptr};
+  void** signal_pads_dev_{nullptr};
   // Whether the world is within CUDA P2P only, not network
   bool world_within_cuda_p2p_;
   // Multicast address
@@ -210,13 +250,17 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
  public:
   NVSHMEMSymmetricMemory(
       NVSHMEMAllocation* allocation,
-      const std::string& group_name)
-      : device_idx_(allocation->device_idx), group_name_(group_name) {
+      const std::string& group_name,
+      std::shared_ptr<NVSHMEMHandleTracker> handle_tracker)
+      : device_idx_(allocation->device_idx),
+        group_name_(group_name),
+        handle_tracker_(std::move(handle_tracker)) {
     // A handle stores two types of info:
     // (i) allocation's base ptrs and base signal pads, ours and peers'
     pai_ = c10::make_intrusive<NVSHMEMPeerAllocInfo>(allocation, group_name);
     // (ii) offset of tensor compared to base ptr (in byte)
     offset_ = 0;
+    handle_tracker_->live_handles.fetch_add(1, std::memory_order_relaxed);
   }
 
   // Exact copy is not needed / supported
@@ -228,12 +272,14 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   NVSHMEMSymmetricMemory(const NVSHMEMSymmetricMemory& other, size_t offset)
       : device_idx_(other.device_idx_),
         group_name_(other.group_name_),
-        pai_(other.pai_) {
+        pai_(other.pai_),
+        handle_tracker_(other.handle_tracker_) {
     offset_ = offset;
+    handle_tracker_->live_handles.fetch_add(1, std::memory_order_relaxed);
   }
 
   ~NVSHMEMSymmetricMemory() override {
-    // TODO
+    handle_tracker_->live_handles.fetch_sub(1, std::memory_order_relaxed);
   };
 
   std::vector<void*> get_buffer_ptrs() override {
@@ -358,6 +404,7 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   int device_idx_;
   std::string group_name_;
   c10::intrusive_ptr<NVSHMEMPeerAllocInfo> pai_;
+  std::shared_ptr<NVSHMEMHandleTracker> handle_tracker_;
   size_t offset_{0}; // in byte
 };
 
@@ -385,49 +432,102 @@ static void maybe_initialize_env_vars() {
   }
 }
 
-static void initialize_nvshmem_with_store(
-    c10::intrusive_ptr<c10d::Store> store,
-    int rank,
-    int world_size,
-    int device_idx) {
-  static bool is_initialized = false;
-  if (is_initialized) {
-    return;
-  }
-
-  c10::cuda::CUDAGuard guard(device_idx);
-  maybe_initialize_env_vars();
-  // Make sure the CUDA runtime is initialized.
-  cudaFree(nullptr);
-
-  nvshmemx_uniqueid_t unique_id;
-  NVSHMEM_CHECK(
-      nvshmemx_get_uniqueid(&unique_id), "nvshmemx_get_uniqueid failed");
-
-  // Using an existing store_all_gather due to laziness.
-  // TODO(yifu): should use broadcast
-  auto unique_ids =
-      storeExchange.all_gather(store, rank, world_size, unique_id);
-
-  nvshmemx_init_attr_t attr;
-  nvshmemx_set_attr_uniqueid_args(rank, world_size, &unique_ids[0], &attr);
-
-  NVSHMEM_CHECK(
-      nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr),
-      "nvshmemx_init_attr failed");
-
-  is_initialized = true;
-
-  // Print version
-#if !defined(USE_ROCM)
-  int major, minor;
-  ::nvshmem_info_get_version(&major, &minor);
-  LOG(INFO) << "NVSHMEM is available, version: " << major << '.' << minor;
-#endif
-}
-
 class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
+  void initialize_nvshmem(int device_idx) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    initialize_nvshmem_locked(device_idx);
+  }
+
+  void finalize_nvshmem() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (lifecycle_state_ == LifecycleState::Finalized) {
+      return;
+    }
+
+    auto group = resolve_process_group("0");
+    auto initialized_by_rank = finalizeStoreExchange.all_gather(
+        group->getStore(),
+        group->getRank(),
+        group->getSize(),
+        static_cast<int>(lifecycle_state_ == LifecycleState::Initialized));
+    bool all_initialized = true;
+    bool none_initialized = true;
+    for (int initialized : initialized_by_rank) {
+      all_initialized = all_initialized && initialized != 0;
+      none_initialized = none_initialized && initialized == 0;
+    }
+    TORCH_CHECK(
+        all_initialized || none_initialized,
+        "Cannot finalize NVSHMEM because it is not initialized on every rank. "
+        "Initialize NVSHMEM collectively before finalizing it.");
+    if (none_initialized) {
+      return;
+    }
+
+    auto ready_by_rank = finalizeStoreExchange.all_gather(
+        group->getStore(),
+        group->getRank(),
+        group->getSize(),
+        static_cast<int>(
+            init_thread_ == std::this_thread::get_id() &&
+            allocations_.empty() && symm_mems_.empty() &&
+            handle_tracker_->live_handles.load(std::memory_order_relaxed) ==
+                0));
+    bool all_ready = true;
+    for (int ready : ready_by_rank) {
+      all_ready = all_ready && ready != 0;
+    }
+    TORCH_CHECK(
+        all_ready,
+        "Cannot finalize NVSHMEM because one or more ranks have live "
+        "symmetric-memory allocations or handles, or call finalization from a "
+        "different thread. Release all symmetric-memory state collectively and "
+        "finalize from the initializing thread on every rank.");
+
+    c10::cuda::CUDAGuard guard(device_idx_);
+    auto synchronize_by_rank = finalizeStoreExchange.all_gather(
+        group->getStore(),
+        group->getRank(),
+        group->getSize(),
+        static_cast<int>(cudaDeviceSynchronize()));
+    bool all_synchronized = true;
+    for (int synchronized : synchronize_by_rank) {
+      all_synchronized =
+          all_synchronized && synchronized == static_cast<int>(cudaSuccess);
+    }
+    TORCH_CHECK(
+        all_synchronized,
+        "Cannot finalize NVSHMEM because CUDA synchronization failed on one "
+        "or more ranks.");
+
+    bool cleanup_succeeded = true;
+    try {
+      clear_rank_to_global_rank_mappings();
+      c10d::nvshmem_extension::TeamManager::get(
+          c10::Device(c10::DeviceType::CUDA, device_idx_))
+          .clear();
+    } catch (...) {
+      cleanup_succeeded = false;
+    }
+    auto cleanup_by_rank = finalizeStoreExchange.all_gather(
+        group->getStore(),
+        group->getRank(),
+        group->getSize(),
+        static_cast<int>(cleanup_succeeded));
+    bool all_cleaned_up = true;
+    for (int cleaned_up : cleanup_by_rank) {
+      all_cleaned_up = all_cleaned_up && cleaned_up != 0;
+    }
+    TORCH_CHECK(
+        all_cleaned_up,
+        "Cannot finalize NVSHMEM because one or more ranks failed to release "
+        "PyTorch-owned CUDA metadata.");
+
+    nvshmem_finalize();
+    lifecycle_state_ = LifecycleState::Finalized;
+  }
+
   // Allocates a symmetric-memory region laid out as [signal pad | data buffer]:
   // the signal pad occupies [0, buffer_offset) and the user data buffer starts
   // at buffer_offset. Returns the data buffer pointer (alloc_base +
@@ -442,11 +542,8 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         "NVSHMEMSymmetricMemoryAllocator::alloc "
         "must not be called with a group_name");
     c10::cuda::CUDAGuard guard(device_idx);
-
-    // NVSHMEM needs to be initialized with the global group
-    auto group = resolve_process_group("0");
-    initialize_nvshmem_with_store(
-        group->getStore(), group->getRank(), group->getSize(), device_idx);
+    std::lock_guard<std::mutex> lock(mutex_);
+    initialize_nvshmem_locked(device_idx);
 
     // Signal pad first at [0, buffer_offset), data buffer at buffer_offset,
     // which is the signal pad size rounded up to signal_pad_alignment.
@@ -470,13 +567,10 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // alloc_base in its destructor, so free() only needs the data ptr to drop
     // the allocation entry.
     void* buffer_ptr = static_cast<char*>(alloc_base) + buffer_offset;
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      allocations_.try_emplace(
-          buffer_ptr,
-          std::make_unique<NVSHMEMAllocation>(
-              alloc_base, size, buffer_offset, device_idx));
-    }
+    allocations_.try_emplace(
+        buffer_ptr,
+        std::make_unique<NVSHMEMAllocation>(
+            alloc_base, size, buffer_offset, device_idx));
     return buffer_ptr;
   }
 
@@ -547,7 +641,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     } else {
       // Create a new rendezvous
       symm_mem = c10::make_intrusive<NVSHMEMSymmetricMemory>(
-          allocation.get(), *group_name);
+          allocation.get(), *group_name, handle_tracker_);
     }
 
     // Cache rendezvous using the data buffer base address as key
@@ -588,7 +682,65 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 
  private:
+  enum class LifecycleState { Uninitialized, Initialized, Finalized };
+
+  void initialize_nvshmem_locked(int device_idx) {
+    if (lifecycle_state_ == LifecycleState::Initialized) {
+      TORCH_CHECK(
+          device_idx == device_idx_,
+          "NVSHMEM is already initialized on cuda:",
+          device_idx_,
+          ", not cuda:",
+          device_idx);
+      return;
+    }
+    TORCH_CHECK(
+        lifecycle_state_ == LifecycleState::Uninitialized,
+        "NVSHMEM cannot be initialized after it has been finalized in this "
+        "process. Reinitializing the UID bootstrap with a different process "
+        "group is unsupported.");
+
+    c10::cuda::CUDAGuard guard(device_idx);
+    auto group = resolve_process_group("0");
+    maybe_initialize_env_vars();
+    // Make sure the CUDA runtime is initialized.
+    cudaFree(nullptr);
+
+    nvshmemx_uniqueid_t unique_id;
+    NVSHMEM_CHECK(
+        nvshmemx_get_uniqueid(&unique_id), "nvshmemx_get_uniqueid failed");
+
+    // Using an existing store_all_gather due to laziness.
+    // TODO(yifu): should use broadcast
+    auto unique_ids = storeExchange.all_gather(
+        group->getStore(), group->getRank(), group->getSize(), unique_id);
+
+    nvshmemx_init_attr_t attr;
+    nvshmemx_set_attr_uniqueid_args(
+        group->getRank(), group->getSize(), &unique_ids[0], &attr);
+
+    NVSHMEM_CHECK(
+        nvshmemx_init_attr(NVSHMEMX_INIT_WITH_UNIQUEID, &attr),
+        "nvshmemx_init_attr failed");
+
+    device_idx_ = device_idx;
+    init_thread_ = std::this_thread::get_id();
+    lifecycle_state_ = LifecycleState::Initialized;
+
+    // Print version
+#if !defined(USE_ROCM)
+    int major, minor;
+    ::nvshmem_info_get_version(&major, &minor);
+    LOG(INFO) << "NVSHMEM is available, version: " << major << '.' << minor;
+#endif
+  }
+
   std::mutex mutex_;
+  LifecycleState lifecycle_state_{LifecycleState::Uninitialized};
+  int device_idx_{-1};
+  std::thread::id init_thread_{};
+  std::shared_ptr<NVSHMEMHandleTracker> handle_tracker_ =
+      std::make_shared<NVSHMEMHandleTracker>();
   std::unordered_map<void*, std::unique_ptr<NVSHMEMAllocation>> allocations_;
   ska::flat_hash_map<
       SymmMemKey,
@@ -605,21 +757,31 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 };
 
+static c10::intrusive_ptr<NVSHMEMSymmetricMemoryAllocator> nvshmem_allocator_;
+
 struct RegisterNVSHMEMSymmetricMemoryAllocator {
   RegisterNVSHMEMSymmetricMemoryAllocator() {
-    auto allocator = c10::make_intrusive<NVSHMEMSymmetricMemoryAllocator>();
+    nvshmem_allocator_ = c10::make_intrusive<NVSHMEMSymmetricMemoryAllocator>();
     // Query backend used for CUDA tensor
     if (getSymmMemBackendCUDA() == "NVSHMEM") {
       // Direct set (static registration)
-      register_allocator(c10::DeviceType::CUDA, allocator);
+      register_allocator(c10::DeviceType::CUDA, nvshmem_allocator_);
     } else {
       // Register availability in case `set_backend` is called dynamically
-      register_availability("NVSHMEM", allocator);
+      register_availability("NVSHMEM", nvshmem_allocator_);
     }
   }
 };
 
 static RegisterNVSHMEMSymmetricMemoryAllocator register_allocator_;
+
+void initialize_nvshmem(int device_idx) {
+  nvshmem_allocator_->initialize_nvshmem(device_idx);
+}
+
+void finalize_nvshmem() {
+  nvshmem_allocator_->finalize_nvshmem();
+}
 
 } // namespace symmetric_memory
 } // namespace c10d

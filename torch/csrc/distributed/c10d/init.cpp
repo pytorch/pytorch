@@ -1180,6 +1180,17 @@ Example:
   });
 
 #ifdef USE_NVSHMEM
+  module.def(
+      "_initialize_nvshmem",
+      ::c10d::symmetric_memory::initialize_nvshmem,
+      py::arg("device_idx"),
+      py::call_guard<py::gil_scoped_release>());
+
+  module.def(
+      "_finalize_nvshmem",
+      ::c10d::symmetric_memory::finalize_nvshmem,
+      py::call_guard<py::gil_scoped_release>());
+
   // Initializes the device state in CUmodule so that it’s able to perform
   // NVSHMEM operations.
   module.def(
