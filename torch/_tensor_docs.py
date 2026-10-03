@@ -1279,6 +1279,9 @@ Returns a copy of this object in CPU memory.
 If this object is already in CPU memory,
 then no copy is performed and the original object is returned.
 
+See :ref:`cuda-device-to-host-copies` for guidance on repeated CUDA-to-CPU
+transfers and reusing CPU buffers.
+
 Args:
     {memory_format}
 
