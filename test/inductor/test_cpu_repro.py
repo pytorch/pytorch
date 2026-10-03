@@ -7886,7 +7886,6 @@ class CPUReproTests(TestCase):
         )
         self.assertTrue(cuda_storage.has_exceeded_max_reads())
 
-
     def test_masked_bool_vec(self):
         # Regression test for gh-198613
         def fn_cmp_slice(a):
