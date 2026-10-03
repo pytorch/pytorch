@@ -20243,6 +20243,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @requires_cuda_and_triton
     @skip_if_cpu
     @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch({"triton.enable_pdl": True})
+    def test_pdl_store_only_kernel_waits(self):
+        def fn(x):
+            y = x
+            for _ in range(64):
+                y = torch.sin(y) * 1.5
+            y = y.sum(-1)
+            idx = torch.arange(32, device=x.device)
+            return x.new_zeros(37).index_put_((idx,), y[:32] * 3.0)
+
+        x = torch.randn(64, 256, device=GPU_TYPE)
+        self.common(fn, (x,), check_lowp=False)
+
+        code = run_and_get_triton_code(torch.compile(fn), x)
+        # gdc_wait only waits for the direct predecessor, so the zero fill must
+        # wait before exiting or index_put can read y before the sum writes it
+        (
+            FileCheck()
+            .check("def triton_poi_fused_new_zeros")
+            .check("store")
+            .check_not("def triton_")
+            .check("gdc_wait")
+        ).run(code)
+
+    @requires_cuda_and_triton
+    @skip_if_cpu
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @config.patch(
         {
             "triton.enable_pdl": True,

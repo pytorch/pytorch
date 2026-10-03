@@ -5070,6 +5070,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 previous_launch = len(new_lines)
             new_lines.append(l)
         code._lines = new_lines
+        # gdc_wait only covers the direct predecessor, so a kernel that exits
+        # without waiting lets its dependents start before older kernels finish.
+        if not has_wait and self._enable_pdl_codegen():
+            code.writeline(self.GDC_WAIT)
 
     def _load_index_split_basis(
         self, index: sympy.Expr, tree: IterationRangesRoot
