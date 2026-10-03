@@ -10,6 +10,9 @@
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/NCCLCachingAllocatorHook.hpp>
 #include <algorithm>
+#include <map>
+#include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -522,21 +525,61 @@ void ProcessGroupNCCL::drainRetiredGraphWork() {
 
 cudaStream_t ProcessGroupNCCL::getOperationStream(bool async_op) {
   c10::cuda::CUDAGuard gpuGuard(device_);
-  if (async_op) {
-    auto current_stream = at::cuda::getCurrentCUDAStream(device_.index());
-    TORCH_CHECK(
-        dependency_event_.has_value() && internal_stream_.has_value(),
-        "NCCL stream resources are not initialized");
-    auto& dependency_event = dependency_event_.value();
-    auto& internal_stream = internal_stream_.value();
-
-    dependency_event.record(current_stream);
-    dependency_event.block(internal_stream);
-
-    return internal_stream.stream();
-  } else {
-    return at::cuda::getCurrentCUDAStream(device_.index()).stream();
+  const auto device = device_.index();
+  auto current_stream = at::cuda::getCurrentCUDAStream(device);
+  if (!async_op) {
+    return current_stream.stream();
   }
+  TORCH_CHECK(
+      dependency_event_.has_value() && internal_stream_.has_value(),
+      "NCCL stream resources are not initialized");
+  auto sync_stream = [&](const at::cuda::CUDAStream& stream) {
+    auto& dependency_event = dependency_event_.value();
+    dependency_event.record(current_stream);
+    dependency_event.block(stream);
+    return stream.stream();
+  };
+
+  const auto& internal_stream = internal_stream_.value();
+  auto cur_info = c10::cuda::captureInfoMayInitCtx(current_stream.stream());
+  if (cur_info.status != c10::cuda::CaptureStatus::Active) {
+    return sync_stream(internal_stream);
+  }
+  auto nccl_info = c10::cuda::captureInfoMayInitCtx(internal_stream.stream());
+  if (nccl_info.status != c10::cuda::CaptureStatus::Active ||
+      nccl_info.id == cur_info.id) {
+    return sync_stream(internal_stream);
+  }
+
+  // Dedicated, process-lifetime streams avoid both the 32-stream pool limit
+  // and destruction while allocator recordStream references still exist.
+  static std::mutex pool_mutex;
+  using StreamPool = std::vector<at::cuda::CUDAStream>;
+  static std::map<std::pair<c10::DeviceIndex, int>, StreamPool> pools;
+  const auto priority = internal_stream.priority();
+  std::lock_guard<std::mutex> lock(pool_mutex);
+  auto& streams = pools[{device, priority}];
+  std::optional<at::cuda::CUDAStream> idle_stream;
+  for (const auto& stream : streams) {
+    auto info = c10::cuda::captureInfoMayInitCtx(stream.stream());
+    if (info.status == c10::cuda::CaptureStatus::Active &&
+        info.id == cur_info.id) {
+      return sync_stream(stream);
+    }
+    if (info.status == c10::cuda::CaptureStatus::None && !idle_stream) {
+      idle_stream = stream;
+    }
+  }
+  if (!idle_stream) {
+    cudaStream_t raw_stream = nullptr;
+    C10_CUDA_CHECK(cudaStreamCreateWithPriority(
+        &raw_stream, cudaStreamNonBlocking, priority));
+    idle_stream = at::cuda::getStreamFromExternal(raw_stream, device);
+    streams.push_back(*idle_stream);
+  }
+  // Join this capture before unlocking so another capture cannot take the
+  // same idle stream. This also establishes the per-operation dependency.
+  return sync_stream(*idle_stream);
 }
 
 void ProcessGroupNCCL::ensureTensorContiguous(const at::Tensor& tensor) {
