@@ -7766,7 +7766,7 @@ class Scheduler:
                             res = None
 
                     # Ideally we would more narrowly catch Exceptions here but
-                    # triton  will unpredictably error with valid producer fusions
+                    # Triton will unpredictably error with valid producer fusions.
                     except Exception as e:
                         if fusion_log.isEnabledFor(logging.DEBUG):
                             fusion_log.debug(

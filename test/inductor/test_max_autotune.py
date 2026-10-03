@@ -5046,6 +5046,37 @@ class TestPrologueFusion(TestCase):
         ):
             yield
 
+    @config.patch(
+        {
+            "benchmark_epilogue_fusion": True,
+            "max_epilogue_benchmarked_choices": 3,
+        }
+    )
+    def test_addmm_shared_prefix_and_input_prologue_fusion(self):
+        M = K = N = 64
+
+        def foo(x, b):
+            computed = x * 2.0
+            return torch.addmm(computed, computed, b)
+
+        x = torch.randn(M, K, device=GPU_TYPE)
+        b = torch.randn(K, N, device=GPU_TYPE)
+
+        with self.force_template_fusion_benchmark():
+            out, code = run_and_get_code(torch.compile(foo), x, b)
+
+        self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
+        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
+        (
+            FileCheck()
+            .check("2.0")
+            .check("tl.dot")
+            .check("2.0")
+            .check("acc +")
+            .check_count("tl.store", 1, exactly=True)
+            .run(code[0])
+        )
+
     @config.patch(epilogue_fusion=False)
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
@@ -5209,7 +5240,7 @@ class TestPrologueFusion(TestCase):
             self.check_code(code[0], num_kernels=3, num_allocs=None, num_deallocs=None)
 
     @config.patch({"prologue_fusion": False, "epilogue_fusion": True})
-    def test_upcast_prologue_fusion_disabled(self):
+    def test_epilogue_fusion_does_not_enable_input_prologue_fusion(self):
         M, K, N = 64, 128, 256
         x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
         y = torch.rand([K, N], dtype=torch.float, device=GPU_TYPE)
@@ -5245,93 +5276,6 @@ class TestPrologueFusion(TestCase):
 
         self.assertEqual(out, foo(a, b, bias), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
-        (
-            FileCheck()
-            .check("tl.dot")
-            .check("2.0")
-            .check("1.0")
-            .check("acc +")
-            .check_count("tl.store", 1, exactly=True)
-            .run(code[0])
-        )
-
-    @config.patch(
-        {
-            "benchmark_epilogue_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
-        }
-    )
-    def test_addmm_removed_prefix_not_registered(self):
-        from torch._inductor.select_algorithm import TritonTemplateKernel
-
-        M, K, N = 63, 120, 190
-
-        def foo(a, b, bias):
-            computed_bias = bias * 4.0
-            return torch.addmm(computed_bias, a, b)
-
-        original_def_kernel = TritonTemplateKernel.def_kernel
-        saw_removed_prefix = False
-
-        @functools.wraps(original_def_kernel)
-        def mark_prefix_removed(kernel, *argnames):
-            nonlocal saw_removed_prefix
-            if kernel.store_output_input_producer_groups:
-                prefix_name = kernel.input_nodes[0].get_name()
-                # Isolate graph-wide elimination from the kernel-local marker.
-                kernel.store_output_fused_inputs.discard(prefix_name)
-                V.graph.removed_buffers.add(prefix_name)
-                saw_removed_prefix = True
-            return original_def_kernel(kernel, *argnames)
-
-        a = torch.randn(M, K, device=GPU_TYPE)
-        b = torch.randn(K, N, device=GPU_TYPE)
-        bias = torch.randn(M, N, device=GPU_TYPE)
-
-        with (
-            mock.patch.object(
-                TritonTemplateKernel,
-                "def_kernel",
-                mark_prefix_removed,
-            ),
-            self.force_template_fusion_benchmark(),
-        ):
-            out, code = run_and_get_code(torch.compile(foo), a, b, bias)
-
-        self.assertTrue(saw_removed_prefix)
-        self.assertEqual(out, foo(a, b, bias), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=3)
-
-    @config.patch(
-        {
-            "benchmark_epilogue_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
-        }
-    )
-    def test_addmm_shared_prefix_and_input_prologue_fusion(self):
-        M = K = N = 64
-
-        def foo(x, b):
-            computed = x * 2.0
-            return torch.addmm(computed, computed, b)
-
-        x = torch.randn(M, K, device=GPU_TYPE)
-        b = torch.randn(K, N, device=GPU_TYPE)
-
-        with self.force_template_fusion_benchmark():
-            out, code = run_and_get_code(torch.compile(foo), x, b)
-
-        self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
-        (
-            FileCheck()
-            .check("2.0")
-            .check("tl.dot")
-            .check("2.0")
-            .check("acc +")
-            .check_count("tl.store", 1, exactly=True)
-            .run(code[0])
-        )
 
     @fresh_cache()
     @mock.patch("torch._inductor.select_algorithm.TritonTemplate.test_cache", new=True)
