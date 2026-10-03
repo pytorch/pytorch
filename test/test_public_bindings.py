@@ -265,7 +265,10 @@ class TestPublicBindings(TestCase):
         "Inductor/Distributed modules hard fail on windows and macos",
     )
     @skipIfTorchDynamo("Broken and not relevant for now")
-    def test_modules_can_be_imported(self):
+    def test_modules_can_be_imported(self, modnames=None):
+        # `modnames` limits the check to an explicit list of submodules (used by
+        # the PUBLIC_API_CHECKS lintrunner adapter). When None, every submodule
+        # is walked, which is the full-test behavior.
         failures = []
 
         def onerror(modname):
@@ -273,8 +276,14 @@ class TestPublicBindings(TestCase):
                 (modname, ImportError("exception occurred importing package"))
             )
 
-        for mod in pkgutil.walk_packages(torch.__path__, "torch.", onerror=onerror):
-            modname = mod.name
+        if modnames is None:
+            modnames = (
+                mod.name
+                for mod in pkgutil.walk_packages(
+                    torch.__path__, "torch.", onerror=onerror
+                )
+            )
+        for modname in modnames:
             try:
                 if "__main__" in modname:
                     continue
@@ -466,7 +475,7 @@ class TestPublicBindings(TestCase):
     # AttributeError: module 'torch.distributed' has no attribute '_shard'
     @unittest.skipIf(IS_WINDOWS or IS_JETSON, "Distributed Attribute Error")
     @skipIfTorchDynamo("Broken and not relevant for now")
-    def test_correct_module_names(self):
+    def test_correct_module_names(self, modnames=None):
         """
         An API is considered public, if  its  `__module__` starts with `torch.`
         and there is no name in `__module__` or the object itself that starts with "_".
@@ -476,6 +485,10 @@ class TestPublicBindings(TestCase):
           NOT have their `__module__` start with the current submodule.
         - (for simple python-only modules) Not define `__all__` and all the elements in `dir(submod)` must have their
           `__module__` that start with the current submodule.
+
+        `modnames` limits the check to an explicit list of submodules (used by
+        the PUBLIC_API_CHECKS lintrunner adapter). When None, every submodule
+        plus `torch` itself is checked, which is the full-test behavior.
         """
 
         failure_list = []
@@ -625,10 +638,13 @@ class TestPublicBindings(TestCase):
                             elem, modname, mod, is_public=True, is_all=False
                         )
 
-        for mod in pkgutil.walk_packages(torch.__path__, "torch."):
-            modname = mod.name
-            test_module(modname)
-        test_module("torch")
+        if modnames is None:
+            for mod in pkgutil.walk_packages(torch.__path__, "torch."):
+                test_module(mod.name)
+            test_module("torch")
+        else:
+            for modname in modnames:
+                test_module(modname)
 
         msg = (
             "All the APIs below do not meet our guidelines for public API from "
