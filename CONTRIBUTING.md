@@ -1,9 +1,9 @@
 Thank you for your interest in contributing to PyTorch!
 If you're a new contributor, please first read the [Issue and PR Workflow](#issue-and-pr-workflow)
-section, which describes how to use issues and pull requests (PRs) to contribute a change to PyTorch.
+section, which describes how to contribute a change to PyTorch.
 This document is the source of truth for that process, in particular how to most effectively engage with issues and PRs.
 
-The rest of this document (CONTRIBUTING.md) covers some of the more technical
+The rest of this document covers some of the more technical
 aspects of contributing to PyTorch.
 
 # Table of Contents
@@ -29,8 +29,6 @@ aspects of contributing to PyTorch.
 - [Unit testing](#unit-testing)
   - [Python Unit Testing](#python-unit-testing)
   - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
-  - [Local linting](#local-linting)
-    - [Running `pyrefly`](#running-pyrefly)
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
   - [Skip CI while iterating](#skip-ci-while-iterating)
@@ -39,7 +37,6 @@ aspects of contributing to PyTorch.
 - [Writing documentation](#writing-documentation)
   - [Docstring type formatting](#docstring-type-formatting)
   - [Building documentation](#building-documentation)
-    - [Tips](#tips)
     - [Building C++ Documentation](#building-c-documentation)
   - [Previewing changes locally](#previewing-changes-locally)
   - [Previewing documentation on PRs](#previewing-documentation-on-prs)
@@ -65,15 +62,8 @@ aspects of contributing to PyTorch.
   - [Known MSVC (and MSVC with NVCC) bugs](#known-msvc-and-msvc-with-nvcc-bugs)
   - [Building on legacy code and CUDA](#building-on-legacy-code-and-cuda)
 - [Linting before committing](#linting-before-committing)
-- [Building PyTorch with ASAN](#building-pytorch-with-asan)
-  - [Getting `ccache` to work](#getting-ccache-to-work)
-  - [Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?](#why-this-stuff-with-ld_preload-and-libasan_rt)
-  - [Why LD_PRELOAD in the build function?](#why-ld_preload-in-the-build-function)
-  - [Why no leak detection?](#why-no-leak-detection)
-- [Caffe2 notes](#caffe2-notes)
 - [CI failure tips](#ci-failure-tips)
   - [Which commit is used in CI?](#which-commit-is-used-in-ci)
-- [Dev Infra Office Hours](#dev-infra-office-hours)
 
 <!-- tocstop -->
 
@@ -332,7 +322,6 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
     ```
     remove any `submodule.*` settings in your local git config (`.git/config` of your pytorch repo) and try again.
 * If you're a Windows contributor, please check out [Best Practices](https://github.com/pytorch/pytorch/wiki/Best-Practices-to-Edit-and-Compile-Pytorch-Source-Code-On-Windows).
-* For help with any part of the contributing process, please don’t hesitate to utilize our Zoom office hours! See details [here](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours)
 
 ## Nightly Checkout & Pull
 
@@ -488,7 +477,7 @@ regular pip. Build configuration comes from the environment as usual, e.g.
 
 ### Linting
 
-Spin helps with linting by making sure that lintrunner is installed correctly
+Spin helps with linting by making sure that [lintrunner](https://github.com/pytorch/pytorch/wiki/lintrunner) is installed correctly
 and by isolating the lintrunner environment from the general development
 environment using uv.
 You can pass additional arguments to lintrunner by adding them after a
@@ -595,43 +584,6 @@ The above is an example of testing a change to all Loss functions: this
 command runs tests such as `TestNN.test_BCELoss` and
 `TestNN.test_MSELoss` and can be useful to save keystrokes.
 
-### Local linting
-
-You can run the same linting steps that are used in CI locally via `make`:
-
-```bash
-make lint
-```
-
-Learn more about the linter on the [lintrunner wiki page](https://github.com/pytorch/pytorch/wiki/lintrunner)
-
-#### Running `pyrefly`
-
-[Pyrefly](https://pyrefly.org/) is a high-performance static type checker for Python. It provides fast type checking along with IDE features like autocomplete and instant error feedback.
-
-PyTorch uses Pyrefly for type checking across the codebase. The configuration is managed in `pyrefly.toml` at the root of the repository.
-
-**Getting Started with Pyrefly:**
-
-To run type checking on the PyTorch codebase:
-```bash
-pyrefly check
-```
-
-For more detailed error information with summaries:
-```bash
-pyrefly check --summarize-errors
-```
-
-**Learn More:**
-- [Pyrefly Configuration](https://pyrefly.org/en/docs/configuration/) - Detailed configuration options
-- [Pyrefly IDE Features](https://pyrefly.org/en/docs/IDE-features/) - Set up Pyrefly in your editor for real-time type checking
-- [Python Typing Tutorial](https://pyrefly.org/en/docs/typing-for-python-developers/) - Learn about Python type annotations
-
-See [Guide for adding type annotations to
-PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
-for PyTorch-specific guidance on how to set up `pyrefly` and tackle type annotation tasks in this codebase.
-
 ### C++ Unit Testing
 
 PyTorch offers a series of tests located in the `test/cpp` folder.
@@ -701,17 +653,17 @@ If you know the right people or team that should approve your PR (and you have t
 
 Occasionally, things might fall through the cracks (sorry!). In case your PR is waiting on its reviewers for more than a week, please don't hesitate to leave a comment on the PR mentioning them! That will get it nudged back onto peoples' radars.
 
-If that still doesn't help, come see us during [our office hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours)
-
 Once your PR is approved and CI is green, you can merge it in by entering a comment `@pytorchbot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
 
 ## GreenLight
 
-GreenLight is an automated reviewer for pull requests. It is separate from the automated review in the [PR lifecycle](#pr-lifecycle): it only applies to authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml), and can approve their PRs without a human review. **It is experimental and at an early stage**: we are still working out both the experience of using it and the policy it applies, so expect what is described here to be at risk of changing.
+GreenLight is an automated reviewer for pull requests. It is separate from the automated review in the [PR lifecycle](#pr-lifecycle): it only applies to authors listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml), and can approve their PRs without a human review.
 
-The rollout is phased. GreenLight will eventually review pull requests from every username listed in [`.github/merge_rules.yaml`](.github/merge_rules.yaml); for now it reviews a [smaller set](https://github.com/pytorch/test-infra/blob/main/greenlight/src/greenlight/review.py), which we widen as our confidence grows.
+GreenLight is undergoing a phased rollout. For now it reviews PRs from a [smaller set](https://github.com/pytorch/test-infra/issues/8945) of those authors. The next step is to enable it for every author listed in `merge_rules.yaml`.
 
-GreenLight reads the changes and decides whether they are safe to land as-is; when they are, it approves the PR, and that approval alone satisfies a merge rule. The criteria it applies are in [its review skill](https://github.com/pytorch/test-infra/tree/main/.claude/skills/greenlight-review). There is nothing to opt into; a scan picks up open PRs from eligible authors every few minutes.
+The current set is the list in the code block at the top of [pytorch/test-infra#8945](https://github.com/pytorch/test-infra/issues/8945). If you have write access to pytorch/test-infra, you can add yourself by editing the issue body: put your GitHub username as `@username` alone on a new line inside that block, and change nothing else. Every line in the block must be exactly one `@username`, a `#` comment, or blank; any other line makes GreenLight reject the whole list, and no new reviews start for anyone until the body is fixed. If you don't have write access, ask to be added in a comment on the issue and we will add you promptly.
+
+Once you are listed, there is nothing else to do: a scan picks up your open PRs every few minutes, as long as one rule in `merge_rules.yaml` names you and covers every file the PR changes. A PR that was already open when you were added may need a new push first. GreenLight reads the changes and decides whether they are safe to land as-is; when they are, it approves the PR, and that approval alone satisfies a merge rule. The criteria it applies are in [its review skill](https://github.com/pytorch/test-infra/tree/main/.claude/skills/greenlight-review).
 
 The outcome appears as a `GREEN LIGHT` section in the Dr. CI comment on your PR (pytorchbot comment), with a short explanation and a link to the job that decided it. Once a review finishes it reads `PR approved to be merged without human review` or `PR requires human review`, and while one is running, `Green Light review in progress`. A verdict reached on an earlier commit is prefixed `OUTDATED (earlier commit)`; it does not authorize landing the current head. An approval is an ordinary GitHub approving review from `pytorchgreenlight` (shown on the PR as `pytorchgreenlight[bot]`) that satisfies the `Greenlight Review Bot` rule in [`.github/merge_rules.yaml`](.github/merge_rules.yaml). It adds no label and no CI check.
 
@@ -721,7 +673,7 @@ You still land the change yourself with `@pytorchbot merge`. When GreenLight's a
 
 GreenLight does not review drafts, PRs with unresolved requested changes, PRs already approved by someone listed in `merge_rules.yaml`, or PRs that have not been updated in the last 24 hours, and a diff over 2000 lines is declined automatically as too large to review. It also skips PRs labeled `Stale` and does not re-scan them; pushing does not help while the label is set, so remove it to bring the PR back into scope. If a PR is reverted, GreenLight dismisses its approval and does not review that PR again, so re-landing it always needs a human approval.
 
-To propose a change to what GreenLight reviews or how it decides, open an issue in [pytorch/test-infra](https://github.com/pytorch/test-infra/issues) with the prefix on the title `[Greenlight Policy Triage]`; those are triaged on the [GreenLight Policies Reviews](https://github.com/orgs/pytorch/projects/177/views/1) board.
+To propose a change to what GreenLight reviews or how it decides, open an issue in [pytorch/test-infra](https://github.com/pytorch/test-infra/issues) with the prefix on the title `[Greenlight Policy Triage]`; those are triaged on the [GreenLight Policies Reviews](https://github.com/orgs/pytorch/projects/177/views/1) board. To report a wrong verdict on a merged PR, open its landed commit on HUD (for example, [commit 38395f3](https://hud.pytorch.org/pytorch/pytorch/commit/38395f306af10d0f565d5e14f8f55beb3cb44937)), expand the `GREEN LIGHT` section if it is collapsed, click `Report wrong verdict`, and describe what GreenLight got wrong. HUD then files an issue in pytorch/test-infra and adds it to the same board. The button only appears when you are signed in to HUD with write access to pytorch/pytorch.
 
 ## Writing documentation
 
@@ -812,26 +764,6 @@ yarn global add katex
 
 ```bash
 make html
-```
-
-#### Tips
-
-The `.rst` source files live in [docs/source](docs/source). Some of the `.rst`
-files pull in docstrings from PyTorch Python code (for example, via
-the `autofunction` or `autoclass` directives). To vastly shorten doc build times,
-it is helpful to remove the files you are not working on, only keeping the base
-`index.rst` file and the files you are editing. The Sphinx build will produce
-missing file warnings but will still complete. For example, to work on `jit.rst`:
-
-```bash
-cd docs/source
-find . -type f | grep rst | grep -v index | grep -v jit | xargs rm
-
-# Make your changes, build the docs, etc.
-
-# Don't commit the deletions!
-git add index.rst jit.rst
-...
 ```
 
 #### Building C++ Documentation
@@ -1010,6 +942,11 @@ On the initial build, you can also speed things up by disabling the features you
 - `USE_CPU_VECTORIZATION=0` will disable building vectorized CPU kernel variants (AVX2, AVX512, VSX, ZVECTOR, SVE). Only the scalar DEFAULT kernels are built. Fine for correctness/dispatch work; not for CPU benchmarking.
 - `USE_COLORIZE_OUTPUT=1` will colorize compiler output for easier reading.
 - `TORCH_NATIVE_AOT=0` will disable the native-AOT stage-2 step (exporting the DSL kernels and embedding them into `libtorch_cuda`; see `tools/native_aot/build_stage2.py`, whose module docstring lists these in the order they are checked). Stage 2 already skips itself when the platform is not Linux, when the built torch does not import or was built without CUDA, when no toolchain targets this backend, when CUDA is older than 13 or cannot be determined, when the interpreter has no published DSL wheel and none is installed, when `BUILD_SHARED_LIBS=OFF` leaves a static `torch_cuda` that cannot take the version script, when nothing declares kernels, and when no supported arch is targeted -- note that with `TORCH_CUDA_ARCH_LIST` unset it exports for whatever GPU is present, so a machine with a supported GPU does not hit that last one. Once it decides it *will* export, a missing DSL wheel is a hard error rather than a skip, so this is the switch to use when you want a build without the DSL toolchain installed.
+
+  Native-AOT export for supported Hopper and Blackwell targets requires Triton at
+  build time alongside CuTeDSL. Install the pinned Triton wheel with
+  `bash scripts/install_triton_wheel.sh`. Embedded Triton kernels do not require
+  the Triton Python package at runtime.
 
 The full list of build environment variables, what each one does, and how it reaches CMake is
 documented at the top of [`cmake/EnvVarForwarding.cmake`](./cmake/EnvVarForwarding.cmake).
@@ -1483,117 +1420,6 @@ changed relative to the merge-base, so just run:
 Fix the code so that no errors are reported when you re-run the above check again,
 and then commit the fix.
 
-## Building PyTorch with ASAN
-
-[ASAN](https://github.com/google/sanitizers/wiki/AddressSanitizer) is very
-useful for debugging memory errors in C++. We run it in CI, but here's how to
-get the same thing to run on your local machine.
-
-First, install LLVM (our ASAN CI currently uses clang 18). The easiest way is to get [prebuilt
-binaries](https://releases.llvm.org/download.html) and extract them to a
-folder (later called `$LLVM_ROOT`).
-
-Then set up the appropriate scripts. You can put this in your `.bashrc`:
-
-```bash
-LLVM_ROOT=<wherever your llvm install is>
-PYTORCH_ROOT=<wherever your pytorch checkout is>
-
-LIBASAN_RT="$LLVM_ROOT/lib/clang/18/lib/linux/libclang_rt.asan-x86_64.so"
-build_with_asan()
-{
-  LD_PRELOAD=${LIBASAN_RT} \
-  CC="$LLVM_ROOT/bin/clang" \
-  CXX="$LLVM_ROOT/bin/clang++" \
-  LDSHARED="clang --shared" \
-  LDFLAGS="-stdlib=libstdc++" \
-  CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
-  CXX_FLAGS="-pthread" \
-  USE_CUDA=0 USE_OPENMP=0 USE_DISTRIBUTED=0 DEBUG=1 \
-  python -m pip install --no-build-isolation -v -e .
-}
-
-run_with_asan()
-{
-  LD_PRELOAD=${LIBASAN_RT} $@
-}
-
-# you can look at build-asan.sh to find the latest options the CI uses
-export ASAN_OPTIONS=detect_leaks=0:symbolize=1:strict_init_order=true
-export UBSAN_OPTIONS=print_stacktrace=1:suppressions=$PYTORCH_ROOT/ubsan.supp
-export ASAN_SYMBOLIZER_PATH=$LLVM_ROOT/bin/llvm-symbolizer
-```
-
-Then you can use the scripts like:
-
-```
-suo-devfair ~/pytorch ❯ build_with_asan
-suo-devfair ~/pytorch ❯ run_with_asan python test/test_jit.py
-```
-
-### Getting `ccache` to work
-
-The scripts above specify the `clang` and `clang++` binaries directly, which
-bypasses `ccache`. Here's how to get `ccache` to work:
-
-1. Make sure the ccache symlinks for `clang` and `clang++` are set up (see
-   CONTRIBUTING.md)
-2. Make sure `$LLVM_ROOT/bin` is available on your `$PATH`.
-3. Change the `CC` and `CXX` variables in `build_with_asan()` to point
-   directly to `clang` and `clang++`.
-
-### Why this stuff with `LD_PRELOAD` and `LIBASAN_RT`?
-
-The “standard” workflow for ASAN assumes you have a standalone binary:
-
-1. Recompile your binary with `-fsanitize=address`.
-2. Run the binary, and ASAN will report whatever errors it find.
-
-Unfortunately, PyTorch is a distributed as a shared library that is loaded by
-a third-party executable (Python). It’s too much of a hassle to recompile all
-of Python every time we want to use ASAN. Luckily, the ASAN folks have a
-workaround for cases like this:
-
-1. Recompile your library with `-fsanitize=address -shared-libasan`. The
-   extra `-shared-libasan` tells the compiler to ask for the shared ASAN
-   runtime library.
-2. Use `LD_PRELOAD` to tell the dynamic linker to load the ASAN runtime
-   library before anything else.
-
-More information can be found
-[here](https://github.com/google/sanitizers/wiki/AddressSanitizerAsDso).
-
-### Why LD_PRELOAD in the build function?
-
-We need `LD_PRELOAD` because there is a cmake check that ensures that a
-simple program builds and runs. If we are building with ASAN as a shared
-library, we need to use `LD_PRELOAD` to load the runtime library, otherwise there will be
-dynamic linker errors and the check will fail.
-
-We don’t actually need either of these if we fix the cmake checks.
-
-### Why no leak detection?
-
-Python leaks a lot of memory. Possibly we could configure a suppression file,
-but we haven’t gotten around to it.
-
-## Caffe2 notes
-
-In 2018, we merged Caffe2 into the PyTorch source repository. While the
-steady state aspiration is that Caffe2 and PyTorch share code freely,
-in the meantime there will be some separation.
-
-There are a few "unusual" directories which, for historical reasons,
-are Caffe2/PyTorch specific. Here they are:
-
-- `CMakeLists.txt`, `Makefile`, `binaries`, `cmake`, `modules`,
-  `scripts` are Caffe2-specific. Don't put PyTorch code in them without
-  extra coordination.
-
-- `mypy*`, `requirements.txt`, `pyproject.toml`, `test`, `tools` are
-  PyTorch-specific. Don't put Caffe2 code in them without extra
-  coordination.
-
 ## CI failure tips
 
 Once you submit a PR or push a new commit to a branch that is in
@@ -1645,7 +1471,3 @@ The workflow files themselves get taken from checkpoint `C`, the merger of your
 PR and the `main` branch. But only the workflow files get taken from that merged
 checkpoint. Everything else (tests, code, etc) all get taken directly from your
 PR's commit (commit `B`). Please note, this scenario would never affect PRs authored by `ghstack` as they would not automatically ingest the updates from default branch.
-
-
-## Dev Infra Office Hours
-[Dev Infra Office Hours](https://github.com/pytorch/pytorch/wiki/Dev-Infra-Office-Hours) are hosted every Friday to answer any questions regarding developer experience, Green HUD, and CI.
