@@ -241,6 +241,7 @@ from .functions import (
     GetSetDescriptorVariable,
     LocalGeneratorFunctionVariable,
     MemberDescriptorVariable,
+    MethodDescriptorVariable,
     MethodWrapperVariable,
     PropertyVariable,
     SysFunctionVariable,
@@ -1908,6 +1909,23 @@ class VariableBuilder:
                 BuiltinVariable(float, source=self.source),
                 value.__name__,
                 py_type=type(value),
+            )
+        elif (
+            isinstance(value, types.MethodDescriptorType)
+            and trace_rules.lookup_callable(value.__objclass__) is not None
+        ):
+            # A method_descriptor reached as a plain value, e.g.
+            # `copier = list.copy`.  MethodDescriptorVariable mirrors
+            # methoddescr_call: check the receiver against __objclass__, then
+            # dispatch the call on it.  Descriptors that carry a trace rule of
+            # their own (the object.__reduce_ex__ polyfill, say) are dispatched
+            # earlier in _wrap, and the guard keeps the traced semantics tied to
+            # the descriptor identity.
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return MethodDescriptorVariable(
+                value,
+                owner=VariableTracker.build(self.tx, value.__objclass__),
+                source=self.source,
             )
         elif is_function_or_wrapper(value):
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
