@@ -5,6 +5,8 @@ import textwrap
 import warnings
 from typing_extensions import Format, get_annotations
 
+from typing_extensions import Format, get_annotations
+
 import torch
 
 

@@ -7,6 +7,8 @@ import types
 import warnings
 from typing_extensions import Format, get_annotations as get_type_annotations
 
+from typing_extensions import Format, get_annotations as get_type_annotations
+
 import torch
 import torch._jit_internal as _jit_internal
 from torch._sources import fake_range
