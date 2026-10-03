@@ -1,6 +1,5 @@
 #include <ATen/DTensorState.h>
 #include <ATen/native/Resize.h>
-#include <c10/core/DeviceType.h>
 #include <c10/core/SymIntArrayRef.h>
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
@@ -14,7 +13,6 @@
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/Size.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/Types.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/edge.h>
 #include <torch/csrc/autograd/function.h>
@@ -33,7 +31,6 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/pyobject_preservation.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_dispatch.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_new.h>
@@ -551,8 +548,8 @@ static PyObject* view_func_impl(
           out = view_func(new_base);
         }
       } else {
-        out = new_base.as_strided(
-            self.sizes(), self.strides(), self.storage_offset());
+        out = new_base.as_strided_symint(
+            self.sym_sizes(), self.sym_strides(), self.sym_storage_offset());
       }
     }
   }
@@ -3314,8 +3311,11 @@ static PyObject* THPVariable_get_has_grad_dtype_override(
   if (has_torch_function((PyObject*)self)) {
     return handle_torch_function_getter(self, "_has_grad_dtype_override");
   }
-  const auto* meta =
-      torch::autograd::impl::get_autograd_meta(THPVariable_Unpack(self));
+  const auto& var = THPVariable_Unpack(self);
+  TORCH_CHECK(
+      !var.grad_fn(),
+      "_has_grad_dtype_override is only supported for leaf tensors.");
+  const auto* meta = torch::autograd::impl::get_autograd_meta(var);
   return torch::autograd::utils::wrap(
       meta &&
       (meta->grad_dtype_.has_value() || meta->allow_grad_dtype_mismatch_));
@@ -3924,43 +3924,6 @@ static void initTensorImplConversion(PyObject* module) {
     // code to keep the original tensor alive
     return t->getIntrusivePtr().get();
   });
-  m.def(
-      "_set_grad_after_module_conversion",
-      [](const at::Tensor& param,
-         const std::optional<at::Tensor>& grad,
-         bool has_grad_dtype_override,
-         std::optional<at::ScalarType> grad_dtype) {
-        TORCH_CHECK(
-            param.is_leaf(), "Module conversion expects a leaf parameter");
-        if (grad.has_value()) {
-          TORCH_CHECK(
-              !param.is_same(*grad), "can't assign Variable as its own grad");
-          TORCH_CHECK(
-              param.device() == grad->device(),
-              "Converted gradient must match the parameter's device");
-          TORCH_CHECK(
-              param.sym_sizes().equals(grad->sym_sizes()),
-              "Converted gradient must match the parameter's size");
-          if (grad->layout() != kSparse) {
-            TORCH_CHECK(
-                grad->options().type_equal(
-                    param.options().dtype(grad->scalar_type())),
-                "Converted gradient must match the parameter's tensor type");
-          }
-        }
-        // Unlike assigning .grad or grad_dtype, Module._apply transforms an
-        // existing gradient independently of its policy, as .data conversion
-        // does.
-        auto* meta = impl::materialize_autograd_meta(param);
-        meta->grad_dtype_ = has_grad_dtype_override ? grad_dtype : std::nullopt;
-        meta->allow_grad_dtype_mismatch_ =
-            has_grad_dtype_override && !grad_dtype.has_value();
-        if (auto accumulator = impl::try_get_grad_accumulator(param)) {
-          accumulator->mutable_input_metadata(0).set_grad_dtype(
-              meta->grad_dtype(param));
-        }
-        param.mutable_grad() = grad.value_or(at::Tensor());
-      });
 }
 } // namespace torch::autograd
 

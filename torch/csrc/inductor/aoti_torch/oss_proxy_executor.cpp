@@ -760,6 +760,17 @@ void OSSProxyExecutor::call_function(
     int length = dynamic_arg.length;
 
     if (length == 0) {
+      // An empty (Sym)IntList contributes no runtime ints, so the switch below
+      // never writes its slot and the op would see the default None and abort
+      // in toIntList()/toSymIntList(). An empty list is what the caller meant
+      // -- an empty size/stride is exactly a 0-d tensor. A genuinely-None
+      // optional list does not reach here: the as_none branch above registers a
+      // zero-length ListIntType only for a bare List[SymInt], which an Optional
+      // never is.
+      if (dynamic_arg_type == DynamicArgType::ListIntType &&
+          stack[arg_index].isNone()) {
+        stack[arg_index] = c10::List<int64_t>{};
+      }
       continue;
     }
 

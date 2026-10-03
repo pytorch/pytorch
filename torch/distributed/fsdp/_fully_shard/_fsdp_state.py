@@ -21,8 +21,8 @@ from torch.distributed.fsdp._common_utils import collect_grad_tensors
 from torch.distributed.utils import _apply_to_tensors, _to_kwargs
 
 from ._fsdp_api import MixedPrecisionPolicy
-from ._fsdp_common import _cast_fp_tensor, _dynamo_disable, TrainingState
-from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
+from ._fsdp_common import _cast_fp_tensor, _dynamo_disable, DDPMeshInfo, TrainingState
+from ._fsdp_param_group import _GradientReductionState, FSDPCommContext, FSDPParamGroup
 
 
 if TYPE_CHECKING:
@@ -51,6 +51,13 @@ class FSDPStateContext(Generic[_StateType]):
         self.post_backward_final_callback_queued: bool = False
         # Whether to finalize backward in this backward's final callback
         self.is_last_backward: bool = True
+        # Whether backward finalization is owned by the caller
+        self.manual_backward_finalization: bool = False
+        # Manual finalization mode selected when backward starts
+        self.manual_backward_finalization_active: bool | None = None
+        # An asynchronous explicit finalization must be waited on before this
+        # FSDP tree starts more work.
+        self.gradient_reduction_pending: bool = False
         # Optional user-provided event recorded after optimizer for the
         # all-gather streams to wait on in the root pre-forward
         self.post_optim_event: torch.Event | None = None
@@ -129,7 +136,7 @@ class FSDPState(_State):
                 self._pre_forward,
                 self._post_forward,
                 self._modules_to_run_forward,
-                self._post_partial_forward,
+                self._cast_output_dtype,
             )
             self._pre_forward_hook_handle = hook_handle
             self._post_forward_hook_handle = hook_handle
@@ -177,12 +184,23 @@ class FSDPState(_State):
         """
         if self._is_root is not None:
             return  # no-op: already initialized
-        self._is_root = True
         if len(self._modules) > 1:
             raise RuntimeError(
                 f"{self._state_name} requires a single root module but got {self._modules}"
             )
         root_module = self._modules[0]
+        for module in root_module.modules():
+            state = self._get_state_for_module(module)
+            if (
+                state is not None
+                and state is not self
+                and state._state_ctx.manual_backward_finalization
+            ):
+                raise RuntimeError(
+                    "set_manual_backward_finalization must be called on the "
+                    f"root {self._state_name} module"
+                )
+        self._is_root = True
         visited_states: set[FSDPState] = set()
         for module_name, module in root_module.named_modules():
             if (state := self._get_state_for_module(module)) is None:
@@ -290,6 +308,13 @@ class FSDPState(_State):
     def _pre_forward(
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
+        if (
+            self._state_ctx.gradient_reduction_pending
+            or self._comm_ctx.active_gradient_reduction is not None
+        ):
+            raise RuntimeError(
+                "The previous gradient reduction must be waited on before forward"
+            )
         # When composing with module-hook-based activation checkpointing, the
         # pre-backward hook is responsible for the unshard
         if self._training_state == TrainingState.PRE_BACKWARD:
@@ -337,22 +362,11 @@ class FSDPState(_State):
             self._training_state = TrainingState.IDLE
             if self._state_ctx.iter_forward_root is self:
                 output = self._force_complete_incomplete_states(output)
-                if all_gather_state := self._comm_ctx.all_gather_state:
-                    # Free the last all-gather result if needed; refer to
-                    # [Note: Overlapping all-gather copy-in and all-gather]
-                    self._comm_ctx.all_gather_copy_in_stream.wait_event(
-                        all_gather_state.event
-                    )
-                    self._comm_ctx.all_gather_stream.wait_event(all_gather_state.event)
-                    self._comm_ctx.all_gather_state = None  # free the all-gather result
+                # Free the last result retained for forward copy-in overlap; see
+                # [Note: Overlapping all-gather copy-in and all-gather].
+                self._comm_ctx.release_all_gather_state_for_comm_reuse()
                 self._state_ctx.iter_forward_root = None
             return self._cast_output_dtype(output)
-
-    def _post_partial_forward(self, output: Any) -> Any:
-        with _spmd_no_typecheck():
-            for fsdp_param_group in self._fsdp_param_groups:
-                fsdp_param_group._register_cpu_grad_owners()
-        return self._cast_output_dtype(output)
 
     def _cast_forward_inputs(
         self, args: tuple[Any, ...], kwargs: dict[str, Any]
@@ -407,6 +421,11 @@ class FSDPState(_State):
     def _root_post_backward_final_callback(self) -> None:
         logger.debug("FSDP::root_post_backward")
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
+            manual_finalization = self._state_ctx.manual_backward_finalization_active
+            if manual_finalization is None:
+                raise AssertionError(
+                    "Expected manual backward finalization mode to be set"
+                )
             # Reset per-iteration state. With chunked loss, each standalone
             # per-chunk call repopulates an inner state's
             # ``_modules_to_run_forward`` (and claims ``iter_forward_root``)
@@ -422,26 +441,141 @@ class FSDPState(_State):
                 # per-param-mesh modules whose inputs lack gradients.
                 for fsdp_param_group in reversed(state._fsdp_param_groups):
                     if fsdp_param_group._training_state != TrainingState.POST_BACKWARD:
-                        # Run post-backward in case forward inputs did not require
-                        # gradient so the autograd backward did not run
-                        fsdp_param_group.post_backward()
+                        if manual_finalization and fsdp_param_group.reduce_grads:
+                            fsdp_param_group._post_backward_pending = True
+                        else:
+                            # Run post-backward in case forward inputs did not require
+                            # gradient so the autograd backward did not run
+                            fsdp_param_group.post_backward()
                     fsdp_param_group._training_state = TrainingState.IDLE
                 state._training_state = TrainingState.IDLE
-                if self._state_ctx.is_last_backward:
-                    for fsdp_param_group in state._fsdp_param_groups:
-                        fsdp_param_group.finalize_backward()
-            if self._state_ctx.is_last_backward:
-                self._comm_ctx.post_forward_order.clear()
-                # Wait on and release any retained reduce-scatter input buffers:
-                # the last module's (which no later module's rs_wait clears) and,
-                # when set_reduce_scatter_max_input_buffers retains more than
-                # one in flight, the rest. The compute stream (which reuses the
-                # memory) is ordered past each reduce-scatter first.
-                for rs_state in self._comm_ctx.reduce_scatter_states:
-                    if rs_state.event is not None:
-                        self._device_handle.current_stream().wait_event(rs_state.event)
-                self._comm_ctx.reduce_scatter_states.clear()
+            if self._state_ctx.is_last_backward and not manual_finalization:
+                self.wait_for_gradient_reduction()
+            else:
+                # A partial grouped forward can retain the last all-gather result
+                # until backward. Release it at every non-finalized boundary so
+                # gradient accumulation does not retain the buffer.
+                self._comm_ctx.release_all_gather_state_on_current_stream()
             self._state_ctx.post_backward_final_callback_queued = False
+
+    def finalize_backward(self, *, wait_for_gradient_reduction: bool = True) -> None:
+        if self._is_root is None:
+            return
+        logger.debug("%s::finalize_backward", self._state_name)
+        with torch.profiler.record_function(f"{self._state_name}::finalize_backward"):
+            self._validate_finalize_backward()
+            # Autograd has completed, and wait_for_gradient_reduction waits for
+            # these reductions, so no inter-autograd wait is needed.
+            for fsdp_state in reversed(self._state_ctx.all_states):
+                for group in reversed(fsdp_state._fsdp_param_groups):
+                    if group._post_backward_pending:
+                        group.post_backward()
+                    elif group.reshard_after_backward:
+                        with _spmd_no_typecheck():
+                            group.reshard()
+                    group._training_state = TrainingState.IDLE
+            if wait_for_gradient_reduction:
+                self.wait_for_gradient_reduction()
+
+    def _validate_finalize_backward(self) -> None:
+        if self._is_root is None:
+            raise RuntimeError(
+                "finalize_backward must be called after the first forward"
+            )
+        if self._state_ctx.gradient_reduction_pending:
+            raise RuntimeError(
+                "The previous gradient reduction must be waited on before "
+                "finalizing backward again"
+            )
+        if not self._is_root:
+            raise RuntimeError(
+                "finalize_backward must be called on the root "
+                f"{self._state_name} module"
+            )
+        manual_finalization = self._state_ctx.manual_backward_finalization_active
+        if manual_finalization is None:
+            manual_finalization = self._state_ctx.manual_backward_finalization
+        if not manual_finalization:
+            raise RuntimeError(
+                f"{self._state_name} finalize_backward requires manual backward "
+                "finalization. Call "
+                "set_manual_backward_finalization(True) before forward"
+            )
+        if self._state_ctx.post_backward_final_callback_queued:
+            raise RuntimeError(
+                f"{self._state_name} finalize_backward must be called after "
+                "backward completes"
+            )
+        param_groups = [
+            group
+            for fsdp_state in self._state_ctx.all_states
+            for group in fsdp_state._fsdp_param_groups
+        ]
+        if partial_group := next(
+            (
+                group
+                for group in param_groups
+                if group._partial_reduce_output is not None
+            ),
+            None,
+        ):
+            group_name = partial_group._module_fqn or "<root>"
+            raise RuntimeError(
+                f"{self._state_name} manual backward finalization does not support "
+                f"partial gradient reductions for parameter group {group_name!r}. "
+                "Use automatic backward finalization for this configuration"
+            )
+        if no_all_reduce_group := next(
+            (
+                group
+                for group in param_groups
+                if group._post_backward_pending
+                and group.reduce_grads
+                and isinstance(group.mesh_info, DDPMeshInfo)
+                and not group.all_reduce_grads
+            ),
+            None,
+        ):
+            group_name = no_all_reduce_group._module_fqn or "<root>"
+            raise RuntimeError(
+                f"{self._state_name} manual backward finalization requires "
+                f"all-reduce for parameter group {group_name!r}. Call "
+                "set_requires_all_reduce(True) before finalization"
+            )
+
+    def _end_backward_iteration(self) -> None:
+        current_stream = self._device_handle.current_stream()
+        for event in self._comm_ctx._last_post_reduce_events.values():
+            current_stream.wait_event(event)
+        self._comm_ctx._last_post_reduce_events.clear()
+        for state in self._state_ctx.all_states:
+            for fsdp_param_group in state._fsdp_param_groups:
+                fsdp_param_group.finalize_backward()
+        self._comm_ctx.release_all_gather_state_on_current_stream()
+        self._comm_ctx.post_forward_order.clear()
+        # Wait on and release any retained reduce-scatter input buffers:
+        # the last module's (which no later module's rs_wait clears) and,
+        # when set_reduce_scatter_max_input_buffers retains more than
+        # one in flight, the rest. The compute stream (which reuses the
+        # memory) is ordered past each reduce-scatter first.
+        for rs_state in self._comm_ctx.reduce_scatter_states:
+            if rs_state.event is not None:
+                rs_state.allocation_stream.wait_event(rs_state.event)
+        self._comm_ctx.reduce_scatter_states.clear()
+        self._state_ctx.manual_backward_finalization_active = None
+
+    def wait_for_gradient_reduction(
+        self, reduction: _GradientReductionState | None = None
+    ) -> None:
+        """Wait for gradient reduction and finish the backward iteration."""
+        if reduction is not None:
+            if self._comm_ctx.active_gradient_reduction is not reduction:
+                raise RuntimeError("This gradient reduction handle was invalidated")
+
+        self._end_backward_iteration()
+        if reduction is not None:
+            self._state_ctx.gradient_reduction_pending = False
+            self._comm_ctx.active_gradient_reduction = None
 
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
@@ -478,7 +612,16 @@ class FSDPState(_State):
     def _register_root_post_backward_final_callback(self):
         if self._state_ctx.post_backward_final_callback_queued:
             return
+        if self._state_ctx.manual_backward_finalization_active is None:
+            self._state_ctx.manual_backward_finalization_active = (
+                self._state_ctx.manual_backward_finalization
+            )
         self._state_ctx.post_backward_final_callback_queued = True
+        # TODO: To support modifying the sharded parameters between forward and
+        # backward, make the all-gather copy-in and all-gather streams
+        # wait_stream(current_stream) here, as _root_pre_forward does. This runs
+        # once per backward before any backward all-gather. The cost is that the
+        # first backward all-gather cannot overlap the forward tail.
         Variable._execution_engine.queue_callback(
             self._root_post_backward_final_callback
         )
@@ -494,14 +637,18 @@ class FSDPState(_State):
             raise RuntimeError(
                 "reset_iter_state must be called on the root FSDP module"
             )
+        if (
+            reduction := self._comm_ctx.active_gradient_reduction
+        ) is not None and reduction.owner is not self._state_ctx:
+            raise RuntimeError(
+                "reset_iter_state cannot reset a gradient reduction owned by "
+                "another FSDP root sharing the communication context"
+            )
         current_stream = self._device_handle.current_stream()
-        if ag_state := self._comm_ctx.all_gather_state:
-            if ag_state.event is not None:
-                current_stream.wait_event(ag_state.event)
-            self._comm_ctx.all_gather_state = None
+        self._comm_ctx.release_all_gather_state_on_current_stream()
         for rs_state in self._comm_ctx.reduce_scatter_states:
             if rs_state.event is not None:
-                current_stream.wait_event(rs_state.event)
+                rs_state.allocation_stream.wait_event(rs_state.event)
         self._comm_ctx.reduce_scatter_states.clear()
         for event in self._comm_ctx._last_post_reduce_events.values():
             current_stream.wait_event(event)
@@ -514,6 +661,9 @@ class FSDPState(_State):
                 fsdp_param_group._reset_iter_state()
         self._state_ctx.iter_forward_root = None
         self._state_ctx.post_backward_final_callback_queued = False
+        self._state_ctx.manual_backward_finalization_active = None
+        self._state_ctx.gradient_reduction_pending = False
+        self._comm_ctx.active_gradient_reduction = None
 
 
 def _get_module_fsdp_state(module: nn.Module) -> FSDPState | None:
@@ -556,15 +706,16 @@ def _register_group_forward_hooks(
     pre_hook: Callable,
     post_hook: Callable,
     modules_to_run: set[nn.Module],
-    post_partial_forward: Callable[[Any], Any],
+    cast_output_dtype: Callable[[Any], Any],
 ) -> _MultiHandle:
     """
     Registers group forward pre and post-hooks. The pre-hook runs on every
     module pre-forward; downstream state gating ensures one-shot work
     (root setup, post_backward hook registration) fires once per group
     pass. The post-hook runs on every module's post-forward: on the
-    partial path (group not yet complete) it exposes CPU gradient owners and
-    applies the ``mp_policy.output_dtype`` cast for standalone callers; on
+    partial path (group not yet complete) it applies only the
+    ``mp_policy.output_dtype`` cast so standalone per-module callers
+    observe the same output dtype semantics as the non-grouped case; on
     the last module it runs the full ``post_hook`` (which reshards,
     registers the pre-backward hook, and itself casts output_dtype). If
     a module never runs forward, the post-hook does not fire for it and
@@ -585,13 +736,15 @@ def _register_group_forward_hooks(
         @functools.wraps(post_hook)
         def wrapped_post_hook(hook_module: nn.Module, input: Any, output: Any) -> Any:
             # Full path fires once, when this invocation completes the
-            # group. Otherwise expose pending CPU gradients and cast outputs
-            # without resharding or completing the group's forward state.
+            # group. Otherwise apply only the output_dtype cast so every
+            # module in the group (including repeat invocations such as
+            # per-chunk standalone head calls) produces output in the
+            # mp_policy's output_dtype.
             if module in modules_to_run:
                 modules_to_run.remove(module)
                 if len(modules_to_run) == 0:
                     return post_hook(hook_module, input, output)
-            return post_partial_forward(output)
+            return cast_output_dtype(output)
 
         return wrapped_post_hook
 

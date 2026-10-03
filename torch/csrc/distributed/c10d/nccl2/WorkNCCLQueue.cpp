@@ -7,7 +7,7 @@
 namespace c10d::nccl2 {
 
 WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked(
-    std::vector<c10::intrusive_ptr<WorkNCCL>>& completed) {
+    std::vector<std::shared_ptr<WorkNCCL::State>>& completed) {
   WorkNCCL::WorkStatus last_status = WorkNCCL::WorkStatus::COMPLETED;
 
   // Keep popping completed elements until we hit an in-progress element
@@ -18,20 +18,14 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked(
     auto& work_queue = it->second;
 
     while (!work_queue.empty()) {
-      // Get the first work object in the queue
-      auto work = work_queue.front();
+      auto& work = work_queue.front();
 
       // Use the checkStatus function to determine the work status
-      WorkNCCL::WorkStatus status = work->checkStatus();
+      WorkNCCL::WorkStatus status = work.state->checkStatus();
 
       if (status == WorkNCCL::WorkStatus::COMPLETED) {
-        // Reported to the completion hooks once the lock is dropped. The
-        // reference kept here is what makes that safe: the completed queue is
-        // swapped out and destroyed by the next enqueueWork, on another thread.
-        completed.push_back(work);
-        // Tensor references must be released by a caller thread, not by the
-        // watchdog that runs garbageCollect().
-        completed_work_queue_.push(std::move(work_queue.front()));
+        completed.push_back(work.state);
+        completedInputTensors_.push(std::move(work.inputTensors));
         work_queue.pop();
         // Continue to the next element in the queue
       } else if (
@@ -62,7 +56,7 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollectLocked(
 // work_queues_mutex_ ensures proper synchronization - both garbageCollect() and
 // enqueueWork() acquire the mutex before accessing stream_work_queues_.
 WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollect() {
-  std::vector<c10::intrusive_ptr<WorkNCCL>> completed;
+  std::vector<std::shared_ptr<WorkNCCL::State>> completed;
   WorkNCCL::WorkStatus status = WorkNCCL::WorkStatus::COMPLETED;
   {
     std::lock_guard<std::mutex> lock(work_queues_mutex_);
@@ -73,8 +67,8 @@ WorkNCCL::WorkStatus WorkNCCLQueue::garbageCollect() {
   // concurrent dump can hold while it waits on the GIL), and holding
   // work_queues_mutex_ across it would put enqueueWork -- every collective on
   // this backend -- behind that wait.
-  for (const auto& work : completed) {
-    work->notifyCompletion();
+  for (const auto& state : completed) {
+    state->notifyCompletion();
   }
   return status;
 }
@@ -89,7 +83,7 @@ WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
 
   // Initialize the status to COMPLETED to cover the case where the queue is
   // empty
-  std::vector<c10::intrusive_ptr<WorkNCCL>> completed;
+  std::vector<std::shared_ptr<WorkNCCL::State>> completed;
   WorkNCCL::WorkStatus status = WorkNCCL::WorkStatus::COMPLETED;
   while (!stream_work_queues_.empty()) {
     status = garbageCollectLocked(completed);
@@ -100,30 +94,37 @@ WorkNCCL::WorkStatus WorkNCCLQueue::finalize() {
     }
   }
 
-  // Clear all work queues & completed work queue.
+  // Clear all work queues and input tensors.
   //
   // NOTE: finalize MUST return without holding references to any work object,
   // otherwise it may leak object and cause side effects.
   stream_work_queues_.clear();
-  std::queue<c10::intrusive_ptr<WorkNCCL>> completed_work_queue;
-  completed_work_queue.swap(completed_work_queue_);
+  std::queue<std::shared_ptr<WorkNCCL::InputTensorShelf>> completedInputTensors;
+  completedInputTensors.swap(completedInputTensors_);
   lock.unlock();
 
-  for (const auto& work : completed) {
-    work->notifyCompletion();
+  for (const auto& state : completed) {
+    state->notifyCompletion();
+  }
+  while (!completedInputTensors.empty()) {
+    completedInputTensors.front()->clear();
+    completedInputTensors.pop();
   }
   return status;
 }
 
 void WorkNCCLQueue::enqueueWork(
-    c10::intrusive_ptr<WorkNCCL> work,
+    const c10::intrusive_ptr<WorkNCCL>& work,
     cudaStream_t stream) {
-  std::queue<c10::intrusive_ptr<WorkNCCL>> completed_work_queue;
+  std::queue<std::shared_ptr<WorkNCCL::InputTensorShelf>> completedInputTensors;
   {
     std::lock_guard<std::mutex> lock(work_queues_mutex_);
-    completed_work_queue.swap(completed_work_queue_);
-    // Add work to stream's queue after events have been recorded
-    stream_work_queues_[stream].push(std::move(work));
+    completedInputTensors.swap(completedInputTensors_);
+    stream_work_queues_[stream].push({work->state_, work->inputTensors_});
+  }
+  while (!completedInputTensors.empty()) {
+    completedInputTensors.front()->clear();
+    completedInputTensors.pop();
   }
 }
 

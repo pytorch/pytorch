@@ -30,15 +30,25 @@ class MixedPrecisionPolicy:
             the unsharded parameter uses the original dtype. The optimizer step
             uses the sharded parameter in the original dtype. (Default:
             ``None``)
-        reduce_dtype (Optional[torch.dtype]): The dtype for unsharded gradients
-            and gradient reduction (reduce-scatter or all-reduce). FSDP sets
-            the unsharded parameter's ``grad_dtype`` to this dtype, so autograd
-            produces and accumulates gradients in this dtype regardless of
-            whether gradient synchronization is enabled. FSDP packs these
-            gradients without casting before reduction. If ``None``, this uses
-            the compute dtype. Reduced sharded gradients use each parameter's
-            ``grad_dtype`` as specified before calling
-            :func:`fully_shard`. (Default: ``None``)
+        reduce_dtype (Optional[torch.dtype]): The dtype for gradient reduction
+            (reduce-scatter or all-reduce) and for accumulating gradients while
+            reduction is disabled via :meth:`FSDPModule.set_requires_gradient_sync`.
+            If ``None``, follows the parameter's ``grad_dtype`` configured before
+            lazy initialization (the first forward or :meth:`FSDPModule.unshard`):
+            unset uses the original parameter dtype;
+            explicit ``None`` accepts any incoming gradient dtype. This fallback
+            is independent of ``param_dtype``. Gradients with different dtypes
+            in one communication group are reduced in their promoted dtype
+            (e.g. fp32 for bf16 and fp32). Reduced shards retain the input
+            ``grad_dtype`` policy. (Default: ``None``)
+
+            .. versionchanged:: 2.15
+                With ``reduce_dtype=None``, gradients were previously reduced
+                in ``param_dtype`` when it was set. They now follow the
+                parameter's ``grad_dtype`` as described above, e.g. fp32 for fp32
+                parameters with ``param_dtype=torch.bfloat16``. Set
+                ``reduce_dtype=torch.bfloat16`` to keep the previous behavior.
+                FSDP1 still reduces in ``param_dtype``.
         output_dtype (Optional[torch.dtype]): This specifies the dtype for
             casting floating-point forward outputs. This can be used to
             help implement cases where different modules have different mixed
