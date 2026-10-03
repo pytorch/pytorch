@@ -1543,31 +1543,45 @@ class DeviceCachingAllocator {
     try {
       drain_deferred_custom_frees(deferred_frees);
     } catch (const std::exception& e) {
-      LOG(ERROR) << "Exception while releasing a custom CUDA MemPool after "
-                    "another allocator error: "
+      LOG(ERROR) << "Exception while releasing a custom CUDA MemPool: "
                  << e.what();
     } catch (...) {
-      LOG(ERROR) << "Unknown exception while releasing a custom CUDA MemPool "
-                    "after another allocator error";
+      LOG(ERROR) << "Unknown exception while releasing a custom CUDA MemPool";
     }
+  }
+
+  static void drain_deferred_custom_frees_outside_lock(
+      DeferredCustomFrees& deferred_frees,
+      std::unique_lock<std::recursive_mutex>& lock) {
+    if (deferred_frees.empty()) {
+      return;
+    }
+    auto relock = c10::make_scope_exit([&]() { lock.lock(); });
+    lock.unlock();
+    drain_deferred_custom_frees_noexcept(deferred_frees);
   }
 
   class DeferredCustomFreeGuard {
    public:
-    explicit DeferredCustomFreeGuard(DeferredCustomFrees& deferred_frees)
+    explicit DeferredCustomFreeGuard(
+        DeferredCustomFrees& deferred_frees,
+        bool rethrow_exceptions)
         : deferred_frees_(deferred_frees),
+          rethrow_exceptions_(rethrow_exceptions),
           uncaught_exceptions_(std::uncaught_exceptions()) {}
 
     ~DeferredCustomFreeGuard() noexcept(false) {
-      if (std::uncaught_exceptions() > uncaught_exceptions_) {
-        drain_deferred_custom_frees_noexcept(deferred_frees_);
-      } else {
+      if (rethrow_exceptions_ &&
+          std::uncaught_exceptions() == uncaught_exceptions_) {
         drain_deferred_custom_frees(deferred_frees_);
+      } else {
+        drain_deferred_custom_frees_noexcept(deferred_frees_);
       }
     }
 
    private:
     DeferredCustomFrees& deferred_frees_;
+    bool rethrow_exceptions_;
     int uncaught_exceptions_;
   };
 
@@ -1881,7 +1895,8 @@ class DeviceCachingAllocator {
     // to have...
     auto context = maybeGatherContext(RecordContext::STATE);
     DeferredCustomFrees deferred_frees;
-    DeferredCustomFreeGuard deferred_free_guard(deferred_frees);
+    DeferredCustomFreeGuard deferred_free_guard(
+        deferred_frees, /*rethrow_exceptions=*/false);
 
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
@@ -1919,6 +1934,7 @@ class DeviceCachingAllocator {
               AcceleratorAllocatorConfig::garbage_collection_threshold() >
                   0.0)) {
         garbage_collect_cached_blocks(context, deferred_frees);
+        drain_deferred_custom_frees_outside_lock(deferred_frees, lock);
       }
 
       // Attempt allocate
@@ -1933,28 +1949,38 @@ class DeviceCachingAllocator {
       if (!block_found && params.oom_rejection_info.rejected) {
         // Skip retry chain - will be handled below in the !block_found path
       } else if (!block_found) {
-        // Custom allocator deletes queued by the reclamation paths below are
-        // intentionally deferred until this allocator operation unlocks. A
-        // retry therefore cannot reuse memory returned by those callbacks.
         // Normal retry chain: try various strategies to free memory and retry
-        block_found =
-            // Try to use memory pools that have opted in as overflow before
-            // expensive memory freeing operations.
-            try_mempool_fallback(
-                params, size, stream, device_id, alloc_size, stats)
-            // Free enough available cached blocks to satisfy alloc and retry
-            // alloc.
-            ||
-            (release_available_cached_blocks(params, context, deferred_frees) &&
-             alloc_block(params, false, context, lock))
-            // Free all non-split cached blocks and retry alloc.
-            // Only skip this during actual graph capture; user mempools
-            // should be able to reclaim cached memory.
-            || (C10_LIKELY(!is_capture_context()) &&
-                release_cached_blocks(context, {0, 0}, deferred_frees) &&
-                alloc_block(params, true, context, lock));
+        // Try to use memory pools that have opted in as overflow before
+        // expensive memory freeing operations.
+        block_found = try_mempool_fallback(
+            params, size, stream, device_id, alloc_size, stats);
+
+        // Free enough available cached blocks to satisfy alloc and retry.
+        if (!block_found &&
+            release_available_cached_blocks(
+                params, context, deferred_frees)) {
+          // The reclamation loop has finished, so it is safe to unlock while
+          // invoking custom frees. Drain before retrying so the external
+          // allocator can reuse the returned memory.
+          drain_deferred_custom_frees_outside_lock(deferred_frees, lock);
+          block_found = alloc_block(params, false, context, lock);
+        }
+
+        // Free all non-split cached blocks and retry alloc. Only skip this
+        // during actual graph capture; user mempools should be able to reclaim
+        // cached memory.
+        if (!block_found && C10_LIKELY(!is_capture_context())) {
+          release_cached_blocks(context, {0, 0}, deferred_frees);
+          drain_deferred_custom_frees_outside_lock(deferred_frees, lock);
+          block_found = alloc_block(params, true, context, lock);
+        }
       }
     }
+
+    // A partial reclamation can queue custom frees without leading to a retry
+    // above. Drain them before reporting OOM so cudaMemGetInfo and the OOM
+    // message reflect memory already returned by custom allocators.
+    drain_deferred_custom_frees_outside_lock(deferred_frees, lock);
 
     if (!block_found) {
       // For any error code other than cudaErrorMemoryAllocation,
@@ -2789,7 +2815,8 @@ class DeviceCachingAllocator {
   void emptyCache(MempoolId_t mempool_id) {
     auto context = maybeGatherContext(RecordContext::ALL);
     DeferredCustomFrees deferred_frees;
-    DeferredCustomFreeGuard deferred_free_guard(deferred_frees);
+    DeferredCustomFreeGuard deferred_free_guard(
+        deferred_frees, /*rethrow_exceptions=*/true);
     std::lock_guard<std::recursive_mutex> lock(mutex);
     release_cached_blocks(context, mempool_id, deferred_frees);
   }
