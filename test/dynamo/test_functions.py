@@ -7768,7 +7768,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
                 fill_value = torch.tensor(value, dtype=fill_dtype)
                 expected = func(fill_value)
-                result = torch.compile(func, backend="eager", fullgraph=True)(fill_value)
+                result = torch.compile(func, backend="eager", fullgraph=True)(
+                    fill_value
+                )
                 self.assertEqual(result, expected)
                 self.assertEqual(result.dtype, expected.dtype)
 
