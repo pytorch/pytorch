@@ -8673,6 +8673,30 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(f, (torch.randn(20, 1024),))
 
+    def test_inplace_copy_of_reshaped_transpose(self):
+        # The copy back into x must not inline a view of a computation that
+        # reads x at other positions: the computation gets a buffer of its
+        # own first, which makes two nodes before fusion, as the copies of
+        # x + 1 and of a row of x already have.
+        def reshaped_transpose(x):
+            x.copy_((x.transpose(0, 1) + 1.0).reshape(x.shape))
+            return x
+
+        def plus_one(x):
+            x.copy_(x + 1)
+            return x
+
+        def other_row(x):
+            x[0] = x[1]
+            return x
+
+        for fn, nodes in ((reshaped_transpose, 2), (plus_one, 2), (other_row, 2)):
+            self.common(fn, (torch.randn(8, 4, 16),))
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            torch.compile(fn)(torch.randn(8, 4, 16, device=self.device))
+            self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, nodes)
+
     def test_gather_scatter(self):
         def fn(node_feat, edge_index):
             src_node_feat = node_feat[edge_index[0]]
