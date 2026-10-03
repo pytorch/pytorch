@@ -83,6 +83,22 @@ static std::tuple<Tensor, Tensor> sdpa_general_mps(const Tensor& query,
   int64_t qSize = query.size(2);
   int64_t valueHeadSize = value.size(3);
   int64_t maxSeqLength = key.size(2);
+  // bf16/fp16 Q*K GEMM loses precision before MPSGraph's internal fp32
+  // upcast.  Upcast only Q to fp32 (small per chunk: 3068×128 = 1.6 MB),
+  // keep K/V in their native dtype to stay within unified-memory budget.
+  static constexpr int64_t kChunkSize = 3068;
+  if ((query.scalar_type() == at::kBFloat16 || query.scalar_type() == at::kHalf) && qSize > kChunkSize) {
+    auto out = at::empty({batchSize, num_head, qSize, valueHeadSize}, query.options());
+    for (int64_t start = 0; start < qSize; start += kChunkSize) {
+      int64_t end = std::min(start + kChunkSize, qSize);
+      auto q_chunk = query.slice(2, start, end).to(at::kFloat);
+      auto [chunk_out, _] = sdpa_general_mps(
+          q_chunk, key, value, attn_mask, dropout_p, is_causal, dropout_mask, scale, orig_query, unsqueezed);
+      out.slice(2, start, end).copy_(chunk_out.to(query.scalar_type()));
+    }
+    return {out, at::empty({0})};
+  }
+
   auto out = at::empty({batchSize, num_head, qSize, valueHeadSize}, query.options());
   auto attn = at::empty({batchSize, num_head, qSize, maxSeqLength}, query.options());
   auto scale_factor = sdp::calculate_scale(query, scale).expect_float();
