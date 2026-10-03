@@ -1511,6 +1511,47 @@ class FxGraphHashDetails:
                     return True
         return False
 
+    @staticmethod
+    def _incoming_guard_context(
+        example_inputs: Sequence[InputType],
+    ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[tuple[str, str], ...]] | None:
+        symints = [
+            x
+            for x in example_inputs
+            if isinstance(x, torch.SymInt) and has_guarding_hint(x)
+        ]
+        if not symints:
+            return None
+        import sympy
+
+        shape_env = symints[0].node.shape_env
+        if shape_env is None:
+            raise BypassFxGraphCache("Symbolic inputs require a shape environment")
+        symbols: dict[sympy.Symbol, sympy.Symbol] = {}
+        for value in symints:
+            for symbol in sorted(value.node.expr.free_symbols, key=str):
+                if symbol not in symbols:
+                    symbols[symbol] = sympy.Symbol(f"input_{len(symbols)}")
+        guards = []
+        for guard in shape_env.guards:
+            if guard.expr.free_symbols & symbols.keys():
+                if guard.expr.free_symbols - symbols.keys():
+                    raise BypassFxGraphCache(
+                        "Incoming guard depends on a non-input symbol"
+                    )
+                guards.append(str(guard.expr.xreplace(symbols)))
+        return (
+            tuple(str(value.node.expr.xreplace(symbols)) for value in symints),
+            tuple(sorted(guards)),
+            tuple(
+                (
+                    str(shape_env.var_to_range[s].lower),
+                    str(shape_env.var_to_range[s].upper),
+                )
+                for s in symbols
+            ),
+        )
+
     def __init__(
         self,
         gm: torch.fx.GraphModule | None,
@@ -1519,6 +1560,8 @@ class FxGraphHashDetails:
         inputs_to_check: Sequence[int],
     ) -> None:
         self.gm = gm
+        # Freeze before compilation adds guards; AOTAutograd inherits this key.
+        self.incoming_guard_context = self._incoming_guard_context(example_inputs)
         # Replace opaque references with hashable ordinals. What's important
         # is that if the same reference appears twice then it's the same hash
         # value for each.
