@@ -30,7 +30,10 @@ from torch.testing._internal.common_quantization import (
     skipIfNoQNNPACK,
     override_quantized_engine,
 )
-from torch.testing._internal.common_utils import raise_on_run_directly
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    raise_on_run_directly,
+)
 
 
 """
@@ -119,6 +122,8 @@ class TwoThreeOps(nn.Module):
 class TestFxModelReportDetector(QuantizationTestCase):
 
     """Prepares and calibrate the model"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def _prepare_model_and_run_input(self, model, q_config_mapping, input):
         model_prep = torch.ao.quantization.quantize_fx.prepare_fx(model, q_config_mapping, input)  # prep model
@@ -505,6 +510,8 @@ Partition on Output
 
 
 class TestFxModelReportObserver(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     class NestedModifiedSingleLayerLinear(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
@@ -784,6 +791,8 @@ This will be more thoroughly tested with the implementation of the full end to e
 
 
 class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfNoFBGEMM
     def test_nested_detection_case(self):
         class SingleLinear(torch.nn.Module):
@@ -874,6 +883,7 @@ class TestFxModelReportDetectDynamicStatic(QuantizationTestCase):
             self.assertTrue(dynam_vs_stat_dict[linear_fqn]["dynamic_recommended"])
 
 class TestFxModelReportClass(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     @skipIfNoFBGEMM
     def test_constructor(self):
@@ -1254,6 +1264,7 @@ class TestFxModelReportClass(QuantizationTestCase):
             converted = quantize_fx.convert_fx(prepared)
 
 class TestFxDetectInputWeightEqualization(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     class SimpleConv(torch.nn.Module):
         def __init__(self, con_dims):
@@ -1500,6 +1511,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
 
 
 class TestFxDetectOutliers(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     class LargeBatchModel(torch.nn.Module):
         def __init__(self, param_size):
@@ -1769,6 +1781,7 @@ class TestFxDetectOutliers(QuantizationTestCase):
 
 
 class TestFxModelReportVisualizer(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def _callibrate_and_generate_visualizer(self, model, prepared_for_callibrate_model, mod_report):
         r"""
