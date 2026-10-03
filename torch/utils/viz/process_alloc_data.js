@@ -65,10 +65,8 @@
 //
 //   Segment-level view ("Active Cached Segment Timeline"):
 //     - process_alloc_data is called with plot_segments=true.
-//     - Matches "segment_alloc" and "segment_free" instead of alloc/free.
-//     - segment_map/segment_unmap are NOT matched (they don't appear in the switch).
-//     - Segments from the snapshot that weren't seen in the trace are added as
-//       initially_allocated (Phase 2).
+//     - Replays ordinary segment lifetimes and expandable mapped ranges.
+//     - Reconstructs the retained history's initial state from the final snapshot.
 //
 //   Allocator State History ("Allocator State History"):
 //     - EventSelector lists ALL trace events including segment_map/segment_unmap.
@@ -310,6 +308,222 @@ function format_frames(frames) {
   return elideRepeats(frame_strings).join('\n');
 }
 
+class SegmentHistoryError extends Error {}
+
+function process_segment_data(snapshot, device, max_entries) {
+  const events = (snapshot.device_traces[device] ?? []).filter(e =>
+    ['segment_alloc', 'segment_free', 'segment_map', 'segment_unmap'].includes(e.action));
+  const segments = snapshot.segments.filter(s => s.device === device);
+  const elements = [];
+  let ranges = [];
+  let event_index = null;
+  let history_error;
+
+  function make_range(source, addr, size, start) {
+    if ((typeof addr !== 'bigint' && !Number.isSafeInteger(addr)) ||
+        !Number.isSafeInteger(size) || size <= 0) {
+      throw new SegmentHistoryError('Invalid address or size');
+    }
+    return {begin: BigInt(addr), end: BigInt(addr) + BigInt(size), source, start};
+  }
+
+  const final_ranges = segments.map(s => make_range({
+    action: 'segment_snapshot', addr: s.address, stream: s.stream,
+    segment_pool_id: s.segment_pool_id, is_expandable: s.is_expandable,
+    snapshot_frames: s.frames, version: s.version ?? 0,
+  }, s.address, s.total_size, 0));
+  const changes = [];
+
+  function compatible(a, b) {
+    for (const key of ['stream', 'segment_pool_id', 'is_expandable']) {
+      if (a[key] != null && b[key] != null && String(a[key]) !== String(b[key])) {
+        throw new SegmentHistoryError(`Conflicting ${key}`);
+      }
+    }
+  }
+
+  function add(range) {
+    if (ranges.some(r => r.begin < range.end && range.begin < r.end)) {
+      throw new SegmentHistoryError('Overlapping segment ranges');
+    }
+    ranges.push(range);
+    ranges.sort((a, b) => a.begin < b.begin ? -1 : a.begin > b.begin ? 1 : 0);
+  }
+
+  function remove(range, stop = null) {
+    const covered = ranges.filter(r => r.begin < range.end && range.begin < r.end);
+    if (range.source.is_expandable === false &&
+        (covered.length !== 1 || covered[0].begin !== range.begin || covered[0].end !== range.end)) {
+      throw new SegmentHistoryError('Ordinary segment must be removed whole');
+    }
+    let cursor = range.begin;
+    for (const r of covered) {
+      if (r.begin > cursor) break;
+      compatible(r.source, range.source);
+      for (const key of ['stream', 'segment_pool_id']) {
+        range.source[key] ??= r.source[key];
+      }
+      cursor = r.end < range.end ? r.end : range.end;
+    }
+    if (cursor !== range.end) {
+      throw new SegmentHistoryError('Unmapped range is not fully present');
+    }
+    const remaining = [];
+    for (const r of ranges) {
+      if (r.end <= range.begin || r.begin >= range.end) {
+        remaining.push(r);
+        continue;
+      }
+      const begin = r.begin > range.begin ? r.begin : range.begin;
+      const end = r.end < range.end ? r.end : range.end;
+      if (stop !== null) {
+        // Metadata may be inferred only through this continuous lifetime.
+        for (const key of ['stream', 'segment_pool_id']) {
+          r.source[key] ??= range.source[key];
+        }
+        elements.push({...r.source, addr: begin, size: Number(end - begin),
+          start: r.start, stop, version: r.source.version ?? 0});
+      }
+      if (r.begin < begin) remaining.push({...r, end: begin});
+      if (end < r.end) remaining.push({...r, begin: end});
+    }
+    ranges = remaining;
+  }
+
+  let capacities;
+  try {
+    for (let i = 0; i < events.length; ++i) {
+      event_index = i;
+      const e = events[i];
+      changes.push(make_range({
+        ...e, segment_pool_id: e.pool_id ?? e.segment_pool_id,
+        is_expandable: e.action === 'segment_map' || e.action === 'segment_unmap',
+      }, e.addr, e.size, 0));
+    }
+    event_index = null;
+    for (const r of final_ranges) add(r);
+    // Undo the retained suffix; reconstructed births have no creation stack.
+    for (let i = changes.length - 1; i >= 0; --i) {
+      event_index = i;
+      const r = changes[i];
+      if (r.source.action === 'segment_alloc' || r.source.action === 'segment_map') {
+        remove(r);
+      } else {
+        add({...r, source: {
+          action: 'segment_snapshot', stream: r.source.stream,
+          segment_pool_id: r.source.segment_pool_id,
+          is_expandable: r.source.is_expandable,
+        }});
+      }
+    }
+    capacities = [ranges.reduce((total, r) => total + Number(r.end - r.begin), 0)];
+    for (let i = 0; i < changes.length; ++i) {
+      event_index = i;
+      const r = changes[i];
+      const creating = r.source.action === 'segment_alloc' || r.source.action === 'segment_map';
+      if (creating) add({...r, start: i + 1});
+      else remove(r, i + 1);
+      capacities.push(capacities.at(-1) + (creating ? 1 : -1) * Number(r.end - r.begin));
+    }
+  } catch (error) {
+    if (!(error instanceof SegmentHistoryError)) throw error;
+    history_error = `${event_index === null ? 'Snapshot' : `Segment event ${event_index}`}: ${error.message}`;
+    ranges = final_ranges;
+    elements.length = 0;
+    capacities = [segments.reduce((total, s) => total + s.total_size, 0)];
+  }
+  for (const r of ranges) {
+    elements.push({...r.source, addr: r.begin, size: Number(r.end - r.begin),
+      start: r.start, stop: capacities.length, version: r.source.version ?? 0});
+  }
+
+  const drawn = new Set(elements.map((e, i) => [e.size, i])
+    .sort(([a], [b]) => b - a).slice(0, max_entries).map(([, i]) => i));
+  const by_time = Array.from({length: capacities.length + 1}, () => ({add: [], remove: []}));
+  elements.forEach((e, i) => {
+    if (drawn.has(i)) {
+      by_time[e.start].add.push(i);
+      by_time[e.stop].remove.push(i);
+    }
+  });
+  const plots = new Map();
+  let active = [];
+  const summarized_mem = {elem: 'summarized', timesteps: [], offsets: [], size: [], color: 0};
+  let previous_offset = 0;
+  let previous_size = 0;
+  for (let t = 0; t <= capacities.length; ++t) {
+    const removing = new Set(by_time[t].remove);
+    for (const i of removing) {
+      const plot = plots.get(i);
+      plot.timesteps.push(t);
+      plot.offsets.push(plot.offsets.at(-1));
+    }
+    // All pieces of an unmap change at the same x coordinate.
+    active = active.filter(i => !removing.has(i)).concat(by_time[t].add);
+    let offset = 0;
+    for (const i of active) {
+      let plot = plots.get(i);
+      if (!plot) {
+        const color = snapshot.categories.length > 0
+          ? snapshot.categories.indexOf(elements[i].category || 'unknown') : i;
+        plot = {elem: i, timesteps: [t], offsets: [offset], size: elements[i].size, color};
+        plots.set(i, plot);
+      } else if (plot.offsets.at(-1) !== offset) {
+        plot.timesteps.push(t, t);
+        plot.offsets.push(plot.offsets.at(-1), offset);
+      }
+      offset += elements[i].size;
+    }
+    const total = capacities[Math.min(t, capacities.length - 1)];
+    if (t === capacities.length) {
+      offset = previous_offset;
+    }
+    const size = total - offset;
+    if (t > 0) {
+      summarized_mem.timesteps.push(t);
+      summarized_mem.offsets.push(previous_offset);
+      summarized_mem.size.push(previous_size);
+    }
+    summarized_mem.timesteps.push(t);
+    summarized_mem.offsets.push(offset);
+    summarized_mem.size.push(size);
+    previous_offset = offset;
+    previous_size = size;
+  }
+  return {
+    max_size: capacities.reduce((peak, size) => Math.max(peak, size), 0),
+    final_size: capacities.at(-1), history_error,
+    max_at_time: capacities, allocations_over_time: [...plots.values(), summarized_mem],
+    summarized_mem, elements_length: elements.length,
+    context_for_id: id => {
+      const e = elements[id];
+      const kind = e.is_expandable ? 'mapped range' : 'cached segment';
+      let text = `Addr: ${formatAddr(e)}, Size: ${formatSize(e.size)} ${kind}`;
+      const when = e.start === 0 ? 'at first observation' : 'after creation';
+      text += `, Cached capacity ${when}: ${formatSize(capacities[e.start])}`;
+      if (e.compile_context != null) text += `, Compile context: ${e.compile_context}`;
+      if (e.stream != null) text += `, stream ${e.stream}`;
+      text += e.segment_pool_id ? `, pool_id (${e.segment_pool_id.join(', ')})` : ', pool_id unknown';
+      if (Number.isFinite(e.time_us)) text += `, timestamp ${new Date(e.time_us / 1000)}`;
+      if (e.start === 0) {
+        text += history_error
+          ? '\nCreation provenance unavailable because recorded history cannot be reconciled.'
+          : '\nCreation event outside the retained history.';
+        if (e.snapshot_frames?.length) text += `\nSnapshot provenance:\n${format_frames(e.snapshot_frames)}`;
+      } else if (e.frames?.length) {
+        text += `\nCreation stack:\n${format_frames(e.frames)}`;
+      } else {
+        text += '\nCreation recorded; stack unavailable.';
+      }
+      for (const metadata of [format_user_metadata(e.user_metadata), format_annotations(e.annotations)]) {
+        if (metadata) text += `\n${metadata}`;
+      }
+      text += format_forward_frames(e.forward_frames);
+      return text;
+    },
+  };
+}
+
 /**
  * Transforms a memory snapshot into a stacked-area timeline suitable for
  * rendering by MemoryPlot. This is the core data-processing function behind
@@ -391,6 +605,7 @@ function format_frames(frames) {
  *     string for a given element index (address, size, stack trace, etc.).
  */
 function process_alloc_data(snapshot, device, plot_segments, max_entries, include_private_inactive = false) {
+  if (plot_segments) return process_segment_data(snapshot, device, max_entries);
   const elements = [];
   // Contains two types of blocks
   // 1. free without alloc in trace
