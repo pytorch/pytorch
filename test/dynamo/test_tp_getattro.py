@@ -598,6 +598,41 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(result, 10)
 
+    def test_classmethod_descriptor_explicit_get(self):
+        descr = dict.__dict__["fromkeys"]
+        arg = [1, 2, 3]
+        expected = {1: None, 2: None, 3: None}
+
+        def fn():
+            return (
+                descr.__get__(None, dict)(arg),
+                descr.__get__({})(arg),
+                descr.__get__({}, None)(arg),
+            )
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, (expected, expected, expected))
+
+    def test_classmethod_descriptor_explicit_get_errors(self):
+        descr = dict.__dict__["fromkeys"]
+
+        def both_none():
+            return descr.__get__(None, None)
+
+        def bad_obj():
+            return descr.__get__(42)
+
+        def owner_not_type():
+            return descr.__get__(None, 42)
+
+        def wrong_owner_type():
+            return descr.__get__(None, int)
+
+        for fn in (both_none, bad_obj, owner_not_type, wrong_owner_type):
+            with self.subTest(fn=fn.__name__):
+                with self.assertRaises(TypeError):
+                    torch.compile(fn, backend="eager", fullgraph=True)()
+
     def test_staticmethod_constructor_func_attr(self):
         def fn():
             def f():
