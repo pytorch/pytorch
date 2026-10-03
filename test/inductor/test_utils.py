@@ -15,7 +15,7 @@ from sympy import I, Max, Min, Symbol, sympify
 
 import torch
 from torch._dynamo import device_interface as di
-from torch._dynamo.device_interface import DeviceInterface
+from torch._dynamo.device_interface import DeviceInterface, get_interface_for_device
 from torch._dynamo.exc import TritonUnavailableError
 from torch._dynamo.testing import AotEagerAndRecordGraphs
 from torch._dynamo.utils import detect_fake_mode
@@ -60,6 +60,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -239,6 +240,8 @@ class TestDeviceDramBandwidth(_TestDeviceInfoTestCase):
 
 
 class TestUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_python_subprocess_env_prioritizes_loaded_torch(self):
         torch_package_root = os.path.dirname(
             os.path.dirname(os.path.abspath(torch.__file__))
@@ -526,15 +529,33 @@ class TestUtils(TestCase):
             )
             self.assertEqual(flops, expected)
 
+
+class TestDeviceTflops(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     @xfailIfNoAcceleratorTriton
-    @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
     @dtypes(torch.float16, torch.bfloat16, torch.float32)
-    def test_get_device_tflops(self, dtype):
-        ret = get_device_tflops(dtype)
+    def test_get_device_tflops(self, device, dtype):
+        device_interface = get_interface_for_device(torch.device(device).type)
+        if not device_interface.is_triton_capable(device):
+            import pytest
+
+            pytest.xfail(f"Triton not available for {device}")
+        try:
+            device_interface.raise_if_triton_unavailable(device)
+        except TritonUnavailableError as exc:
+            import pytest
+
+            pytest.xfail(str(exc))
+
+        with torch.cuda.device(device):
+            ret = get_device_tflops(dtype)
         self.assertTrue(type(ret) is float)
 
 
 class TestDeviceTflopsTritonFallback(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
     def setUp(self):
         super().setUp()
         _get_device_tflops.cache_clear()
@@ -545,14 +566,17 @@ class TestDeviceTflopsTritonFallback(TestCase):
         "requires Triton",
     )
     @unittest.skipIf(not torch.cuda.is_available(), "skip if no device")
-    def test_get_device_tflops_triton_fallback_magnitude(self):
+    def test_get_device_tflops_triton_fallback_magnitude(self, device):
         # The Triton fallback feeds max_clock_rate() (MHz) into triton's tflops
         # helpers, which are dimensioned in kHz. Getting that wrong under-reports
         # peak throughput by 1000x, which a type-only assertion cannot catch, so
         # pin the magnitude too. Measured fp16 values: the worst pre-fix case is
         # ~1.06 (MI300X) and the smallest post-fix case is ~312 (A100), so 10.0
         # clears the former by ~10x and sits far below the latter.
-        with mock.patch.object(inductor_utils, "datasheet_tops", return_value=None):
+        with (
+            torch.cuda.device(device),
+            mock.patch.object(inductor_utils, "datasheet_tops", return_value=None),
+        ):
             ret = get_device_tflops(torch.float16)
         self.assertGreater(ret, 10.0)
 
@@ -561,6 +585,8 @@ instantiate_device_type_tests(TestUtils, globals(), allow_xpu=True)
 
 
 class TestLoadTemplate(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_load_template_uses_utf8(self):
         # load_template must decode templates as UTF-8 regardless of the ambient
         # locale. On a host whose default encoding is ascii, reading a template
@@ -593,6 +619,8 @@ class TestLoadTemplate(TestCase):
 
 
 class TestRuntimeEstimation(_TestDeviceInfoTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         _get_device_tflops.cache_clear()
@@ -893,8 +921,8 @@ class TestRuntimeEstimation(_TestDeviceInfoTestCase):
         get_tflops.assert_called_once_with(torch.float32, device=device)
 
 
-class TestFP4Support(TestCase):
-    """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
+class TestFP4ImportError(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_ensure_nv_universal_gemm_import_error(self):
         from torch._inductor import utils
@@ -909,11 +937,17 @@ class TestFP4Support(TestCase):
         ):
             self.assertFalse(utils.ensure_nv_universal_gemm_available())
 
+
+class TestFP4Support(TestCase):
+    """Tests for FP4 (float4_e2m1fn_x2) infrastructure support."""
+
+    hw_classification = HardwareClassification.CUDA
+
     @unittest.skipIf(
-        not (torch.cuda.is_available() and ensure_nv_universal_gemm_available()),
-        "requires CUDA and cutlass.operators",
+        not ensure_nv_universal_gemm_available(),
+        "requires cutlass.operators",
     )
-    def test_ensure_fp4_dtype_registered(self):
+    def test_ensure_fp4_dtype_registered(self, device):
         """_ensure_fp4_dtype_registered should map torch FP4 to cutlass.Float4E2M1FN."""
         from torch._inductor.utils import _ensure_fp4_dtype_registered
 
@@ -931,6 +965,22 @@ class TestFP4Support(TestCase):
         )
         self.assertEqual(result_fp32, cutlass.Float32)
 
+
+class TestRandStridedFP4(TestCase):
+    hw_classification = HardwareClassification.CUDA
+
+    def test_rand_strided_fp4(self, device):
+        from torch._dynamo.testing import rand_strided
+
+        t = rand_strided((16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device=device)
+        self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
+        self.assertEqual(t.shape, (16, 32))
+        self.assertTrue(t.is_cuda)
+
+
+class TestFP4SupportCPU(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_rand_strided_fp4(self):
         """rand_strided should produce valid FP4 tensors."""
         from torch._dynamo.testing import rand_strided
@@ -940,18 +990,11 @@ class TestFP4Support(TestCase):
         self.assertEqual(t.shape, (4, 8))
         self.assertEqual(t.stride(), (8, 1))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
-    def test_rand_strided_fp4_cuda(self):
-        from torch._dynamo.testing import rand_strided
-
-        t = rand_strided((16, 32), (32, 1), dtype=torch.float4_e2m1fn_x2, device="cuda")
-        self.assertEqual(t.dtype, torch.float4_e2m1fn_x2)
-        self.assertEqual(t.shape, (16, 32))
-        self.assertTrue(t.is_cuda)
-
 
 class TestTritonTypeMapping(TestCase):
     """Tests for acc_type() dtype conversions."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_acc_type(self):
         from torch._inductor.kernel.mm_common import acc_type
@@ -971,6 +1014,8 @@ class TestTritonTypeMapping(TestCase):
 
 
 class TestFakeTensorUpdater(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def _get_faketensormode(
         graph: torch.fx.GraphModule,
@@ -1679,6 +1724,8 @@ def _make_triton_interface(*, available=True, capable=True, raise_exc=None):
 
 
 class TestHasTriton(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def tearDown(self):
         triton_utils.has_triton.cache_clear()
         super().tearDown()
@@ -2052,6 +2099,14 @@ class TestScaleSwizzleInference(TestCase):
         self.assertEqual(
             self._infer(mat_size, (1024,), mat_dtype, prefers_32_8=False), (None, None)
         )
+
+
+instantiate_device_type_tests(TestDeviceTflops, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestDeviceTflopsTritonFallback, globals(), only_for=("cuda",)
+)
+instantiate_device_type_tests(TestFP4Support, globals(), only_for=("cuda",))
+instantiate_device_type_tests(TestRandStridedFP4, globals(), only_for=("cuda",))
 
 
 if __name__ == "__main__":
