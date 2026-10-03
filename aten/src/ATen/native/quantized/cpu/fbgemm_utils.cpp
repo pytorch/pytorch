@@ -238,7 +238,7 @@ Tensor ConvertToChannelsLast3dTensor(const Tensor& src) {
               H,
               W,
               src_contig.const_data_ptr<scalar_t>(),
-              dst.data_ptr<scalar_t>());
+              dst.mutable_data_ptr<scalar_t>());
         });
   }
   return dst;
@@ -354,7 +354,7 @@ Tensor ConvertConvWeightsToChannelLastTensor<3>(
               H,
               W,
               src_contig.const_data_ptr<scalar_t>(),
-              dst.data_ptr<scalar_t>());
+              dst.mutable_data_ptr<scalar_t>());
         });
     return dst;
   }
@@ -441,7 +441,9 @@ int register_linear_params() {
 #endif
                   } else if (weight.scalar_type() == at::kFloat) {
                     // NB: fp16 weight is serialized as float
+#if !defined(__aarch64__) && !defined(_M_ARM64)
                     return std::apply(PackedLinearWeightFp16::prepack, std::move(state));
+#endif
                   } else {
                     TORCH_CHECK(
                         false,

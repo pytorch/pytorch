@@ -607,8 +607,13 @@ class Vectorized<float> {
   float reduce_add() const {
     return _mm512_reduce_add_ps(values);
   }
+  // Propagates NaN, matching maximum() and torch.max; the vmaxps sequence
+  // behind _mm512_reduce_max_ps drops it. See Vectorized<float> in vec256.
   float reduce_max() const {
-    return _mm512_reduce_max_ps(values);
+    const float m = _mm512_reduce_max_ps(values);
+    return _mm512_cmp_ps_mask(values, values, _CMP_UNORD_Q)
+        ? std::numeric_limits<float>::quiet_NaN()
+        : m;
   }
   // Comparison using the _CMP_**_OQ predicate.
   //   `O`: get false if an operand is NaN
