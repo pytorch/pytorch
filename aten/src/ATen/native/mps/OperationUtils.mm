@@ -1003,7 +1003,7 @@ static unsigned bindInnerContiguousOuter(id<MTLComputeCommandEncoder> encoder,
 
 // CPU scalars use setBytes at offset zero. Only GPU buffer bindings can
 // violate Metal's four-byte alignment for constant-address arguments.
-static bool hasUnalignedBufferInput(const TensorIteratorBase& iter) {
+static bool hasUnalignedBufferInput(TensorIteratorBase& iter) {
   for (const auto i : c10::irange(iter.noutputs(), iter.ntensors())) {
     if (iter.tensor_base(i).device().type() != kCPU && iter_tensor_offset(iter, i) % 4 != 0) {
       return true;
