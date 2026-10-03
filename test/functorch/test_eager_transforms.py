@@ -2761,6 +2761,55 @@ class TestHessian(TestCase):
 
 @markDynamoStrictTest
 class TestJvp(TestCase):
+    @dtypes(
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+        torch.complex64,
+        torch.complex128,
+    )
+    @parametrize("op_name", ["add", "sub", "mul", "div"])
+    def test_scalar_type_promotion(self, device, dtype, op_name):
+        op = getattr(torch, op_name)
+        scalars = [2, 2.0, torch.tensor(2.0, device=device, dtype=torch.float64)]
+        if dtype not in (torch.float16, torch.bfloat16):
+            scalars.append(2.0 + 1.0j)
+        for shape in ((), (2,)):
+            x = torch.full(shape, 1.5, device=device, dtype=dtype)
+            tangent = torch.ones_like(x)
+            for scalar in scalars:
+                for reverse in (False, True):
+                    with self.subTest(shape=shape, scalar=scalar, reverse=reverse):
+
+                        def fn(x):
+                            return op(scalar, x) if reverse else op(x, scalar)
+
+                        with fwAD.dual_level():
+                            expected = fwAD.unpack_dual(fn(fwAD.make_dual(x, tangent)))
+                        self.assertEqual(jvp(fn, (x,), (tangent,)), expected)
+                        self.assertEqual(
+                            vmap(lambda t: jvp(fn, (x,), (t,)))(
+                                tangent.expand(3, *shape)
+                            ),
+                            tuple(t.expand(3, *shape) for t in expected),
+                        )
+
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    def test_nested_jvp_python_scalar_dtype(self, device, dtype):
+        x = torch.tensor(1.5, device=device, dtype=dtype)
+
+        def fn(x):
+            return (x + 2.0) * x
+
+        def derivative(x):
+            return jvp(fn, (x,), (torch.ones_like(x),))[1]
+
+        self.assertEqual(
+            jvp(derivative, (x,), (torch.ones_like(x),)),
+            (2 * x + 2, torch.full_like(x, 2)),
+        )
+
     def test_inplace_on_captures(self, device):
         x = torch.tensor([1.0, 2.0, 3.0], device=device)
         captured = torch.randn(3, device=device)
