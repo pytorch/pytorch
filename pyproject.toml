@@ -260,7 +260,6 @@ exclude = [
     "torch/distributed/checkpoint/examples/**",
     "torch/distributed/examples/**",
     "torch/distributed/tensor/examples/**",
-    "torch/fx/experimental/shape_inference/**",
     # Only the sparse/ sub-dir is leakage; legacy ships the rest of
     # torch/utils/benchmark/examples/.
     "torch/utils/benchmark/examples/sparse/**",
