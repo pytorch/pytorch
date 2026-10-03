@@ -1423,7 +1423,10 @@ class MemPool(_MemPool):
 
         ``alloc_fn(size, device, stream)`` must return an integer device pointer.
         Returning ``None`` or zero reports an ordinary allocation failure.
-        Exceptions retain their Python message in the resulting allocator error.
+        Return ``None`` or zero for out-of-memory so the caching allocator can
+        run its normal release-and-retry path and OOM observers. Exceptions,
+        including ``MemoryError``, are treated as non-OOM callback failures and
+        propagate immediately with their Python message.
 
         ``free_fn(ptr, size, device, stream)`` releases a pointer returned by
         ``alloc_fn``. Exceptions raised by ``free_fn`` are logged and swallowed
@@ -1433,6 +1436,13 @@ class MemPool(_MemPool):
         segments can use them. Python-backed allocators are deliberately scoped
         to MemPool and cannot be installed with
         :func:`change_current_allocator`.
+
+        The callbacks may be invoked concurrently from multiple native threads,
+        including threads that did not previously hold the Python GIL. Callback
+        implementations and any native libraries they call must therefore be
+        thread-safe. Allocation callbacks must not allocate from a
+        Python-backed MemPool on the same thread, because that would recursively
+        invoke another Python allocation callback.
 
         Args:
             alloc_fn: Callable that allocates a segment.
@@ -1449,10 +1459,10 @@ class MemPool(_MemPool):
             stream, synchronize the device, or begin/end capture.
 
         .. note::
-            Custom frees triggered by allocation recovery are invoked after the
-            outer allocator operation releases its lock. The allocation retry
-            that queued those frees cannot reuse the returned memory; a later
-            allocation may succeed.
+            Custom frees triggered by allocation recovery are invoked without
+            the caching allocator lock after the reclamation pass completes and
+            before allocation is retried. The retry can therefore reuse memory
+            returned by the callback.
         """
         allocator = torch._C._cuda_customAllocatorFromCallbacks(alloc_fn, free_fn)
         return cls(allocator, use_on_oom=use_on_oom, no_split=no_split)
