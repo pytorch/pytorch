@@ -176,7 +176,7 @@ class _CombineAutograd(torch.autograd.Function):
         # Allocate the full-size dispatch output buffer matching the layout's
         # expected shape, dispatch the gradient into it, then slice back to
         # ctx.expert_shape so the returned grad matches the combine input.
-        max_recv = ts._max_recv_tokens_per_rank
+        max_recv = ts.max_recv_tokens_per_rank
         grad_expert_full, dummy_out_weights, dummy_out_idx = ts._alloc_dispatch_outputs(
             ctx.routing,
             grad_out_tokens,
@@ -205,7 +205,34 @@ class TokenSwitch(abc.ABC):
     """Abstract token routing switch (e.g. expert-parallel dispatch / combine).
 
     Typical usage: :meth:`create_routing`, then :meth:`dispatch` / :meth:`combine`.
+
+    Contract every backend implements:
+
+    - A :class:`Routing` fixes the receive-slot layout. Every :meth:`dispatch` and
+      :meth:`combine` on the same Routing uses that layout, so dispatching again
+      (e.g. the backward of :meth:`combine`) writes the new tokens into the same
+      slots. A backend may compute the layout in :meth:`create_routing` or in the
+      first :meth:`dispatch` on the Routing.
+    - Calls on different Routings may be interleaved in any order, e.g. two
+      dispatches before either combine.
+    - Flat layout: a token is received once per destination rank, however many of
+      its top-k experts live there. ``out_topk_idx`` holds that rank's local expert
+      ids in ascending order, packed to the front, padded with -1;
+      ``out_topk_weights`` is aligned with it and padded with 0.
+    - Expert-major layout: one receive slot per (token, local expert).
+    - :meth:`combine` sums, without weights, one row per receive slot that came
+      from the token. Callers apply ``topk_weights`` and reduce over their local
+      experts before combining. With an identity expert and the flat layout, a
+      token comes back multiplied by its number of destination ranks.
+    - Rows of the dispatch outputs past the number of received slots are
+      unspecified.
     """
+
+    @property
+    @abc.abstractmethod
+    def max_recv_tokens_per_rank(self) -> int:
+        """Upper bound on receive slots per rank; sizes full dispatch outputs."""
+        raise NotImplementedError
 
     @abc.abstractmethod
     def create_routing(
@@ -218,7 +245,8 @@ class TokenSwitch(abc.ABC):
         """Create expert routing for the current phase (e.g. top-k indices).
 
         ``per_expert_token_counts`` is optional 1D int32, length >= local experts:
-        output buffer for per-expert receive counts (NCCL EP ``RECV_EXPERT_COUNTER``).
+        output buffer for per-expert receive counts (NCCL EP ``RECV_EXPERT_COUNTER``),
+        i.e. the number of received (token, local expert) pairs per local expert.
         ``layout`` selects the dispatch output memory layout.
         """
         raise NotImplementedError
@@ -338,6 +366,10 @@ class TokenSwitchNCCL(TokenSwitch):
             max_recv_tokens_per_rank,
             max_token_bytes,
         )
+
+    @property
+    def max_recv_tokens_per_rank(self) -> int:
+        return self._max_recv_tokens_per_rank
 
     def _alloc_dispatch_outputs(
         self,
