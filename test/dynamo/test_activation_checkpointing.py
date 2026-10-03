@@ -3995,7 +3995,6 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, arg0_1, arg1_1):
     mm = torch.ops.aten.mm.default(arg1_1, arg0_1)
     sin = torch.ops.aten.sin.default(mm);  mm = None
-    alias = torch.ops.aten.alias.default(sin);  alias = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [2, 4]);  ones_like = None
