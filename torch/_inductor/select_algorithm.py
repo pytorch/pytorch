@@ -3716,6 +3716,8 @@ class ExternKernelCaller(ChoiceCaller):
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
             inner.annotations["ktc"] = self.annotations["ktc"]
+        if isinstance(inner, ir.ExternKernel):
+            inner.tunable_dyn_dims_mask = self.tunable_dyn_dims_mask
         return ir.TensorBox.create(inner)
 
     def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
