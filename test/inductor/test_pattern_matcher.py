@@ -1616,6 +1616,29 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    @parametrize("op", (torch.addmm, torch.baddbmm))
+    @parametrize("device", ("cuda", "xpu", "mps"))
+    @parametrize("alpha", (1, 0.5))
+    def test_unfuse_bias_zero_beta(self, op, device, alpha):
+        def fn(inp, a, b):
+            return op(inp, a, b, beta=0, alpha=alpha).relu()
+
+        mat_shape = (4, 4) if op is torch.addmm else (2, 4, 4)
+        with torch._subclasses.FakeTensorMode():
+            args = (
+                torch.empty(4, device=device),
+                torch.empty(mat_shape, device=device),
+                torch.empty(mat_shape, device=device),
+            )
+            gm = make_fx(fn)(*args)
+            patterns = torch._inductor.fx_passes.post_grad.pass_patterns[2]
+            self.assertEqual(patterns.apply(gm), 1)
+
+        inp = next(node for node in gm.graph.nodes if node.op == "placeholder")
+        self.assertFalse(inp.users)
+        has_mul = any(n.target is torch.ops.aten.mul.Tensor for n in gm.graph.nodes)
+        self.assertEqual(has_mul, alpha != 1)
+
     def test_unfuse_broadcast_bias_baddbmm(self):
         args = [
             torch.randn(4, 1, 8, device=GPU_TYPE),

@@ -2143,15 +2143,15 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
         ):
             return
 
-    drop_input_for_beta_zero = inp.meta["val"].device.type == "cuda"
+    is_cuda = inp.meta["val"].device.type == "cuda"
 
     def repl(inp, x1, x2, alpha, beta):
-        if alpha == 0 and beta == 0 and drop_input_for_beta_zero:
+        if alpha == 0 and beta == 0 and is_cuda:
             return x1.new_zeros((x1.shape[0], x2.shape[1]))
         mm_result = x1 @ x2
         if alpha != 1:
             mm_result = alpha * mm_result
-        if beta == 0 and drop_input_for_beta_zero:
+        if beta == 0:
             return mm_result
         if beta != 1:
             inp = beta * inp
@@ -2194,6 +2194,8 @@ def unfuse_bias_baddbmm_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, be
         bmm_result = torch.bmm(x1, x2)
         if alpha != 1:
             bmm_result = alpha * bmm_result
+        if beta == 0:
+            return bmm_result
         if beta != 1:
             inp = beta * inp
         return inp + bmm_result

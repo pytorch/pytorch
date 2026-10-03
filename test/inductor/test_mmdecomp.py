@@ -5,7 +5,7 @@ import unittest
 
 import torch
 from torch._inductor import config
-from torch._inductor.decomposition import bmm as decomp_bmm, mm
+from torch._inductor.decomposition import addmm as decomp_addmm, bmm as decomp_bmm, mm
 from torch._inductor.utils import fresh_cache
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.symbolic_shapes import (
@@ -14,7 +14,10 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    onlyCPU,
+)
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -416,6 +419,69 @@ class TestDecomp(NNTestCase):
             init_tensor([[[1, 2, 3, 4]]] * bs, dtype=dtype, device=device),
             init_tensor([[[1], [2], [3], [4]]] * bs, dtype=dtype, device=device),
         )
+
+    # Shapes hit each addmm decomp branch: CPU dot, CPU small mat2, non-CPU k == 1.
+    @parametrize("m,k,n", [(1, 4, 1), (1, 4, 4), (4, 1, 4)])
+    @parametrize("alpha", [1, 0.5])
+    def test_addmm_zero_beta_drops_nan_bias(self, device, m, k, n, alpha):
+        from torch._dynamo.utils import counters
+
+        def fn(x, a, b):
+            return torch.addmm(x, a, b, beta=0, alpha=alpha)
+
+        counters.clear()
+        torch._dynamo.reset()
+        x = torch.full((n,), float("nan"), device=device)
+        a = torch.randn(m, k, device=device)
+        b = torch.randn(k, n, device=device)
+        with fresh_cache():
+            out = torch.compile(fn, fullgraph=True)(x, a, b)
+        self.assertFalse(out.isnan().any())
+        self.assertEqual(out, fn(x, a, b), equal_nan=False)
+        # CUDA sends beta == 0 to the addmm lowering instead.
+        device_type = torch.device(device).type
+        decomposed = m == 1 if device_type == "cpu" else device_type == "xpu" and k == 1
+        self.assertEqual(counters["inductor"]["decompose_addmm"], int(decomposed))
+
+    @onlyCPU
+    @parametrize("beta", [0, 1])
+    def test_addmm_checks_bias_shape(self, device, beta):
+        def fn(x, a, b):
+            return torch.addmm(x, a, b, beta=beta)
+
+        args = (torch.zeros(1, 1, 4), torch.randn(1, 4), torch.randn(4, 4))
+        with self.assertRaisesRegex(RuntimeError, "expand"):
+            fn(*args)
+        with self.assertRaisesRegex(RuntimeError, "expand"):
+            torch.compile(fn, fullgraph=True)(*args)
+
+    @onlyCPU
+    def test_addmm_unbacked_alpha(self, device):
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            alpha = shape_env.create_unbacked_symint()
+            bias = torch.empty(4, device="xpu")
+            a = torch.empty(4, 1, device="xpu")
+            b = torch.empty(1, 4, device="xpu")
+            out = decomp_addmm(bias, a, b, alpha=alpha)
+        self.assertEqual(out.shape, (4, 4))
+
+    @onlyCPU
+    @parametrize(
+        "bias_device,bias_shape,msg",
+        [
+            ("xpu", (3,), "expand"),
+            ("xpu", (1, 1, 4), "expand"),
+            ("cpu", (4,), "device"),
+        ],
+    )
+    def test_addmm_checks_xpu_metadata(self, device, bias_device, bias_shape, msg):
+        with FakeTensorMode():
+            bias = torch.empty(bias_shape, device=bias_device)
+            a = torch.empty(4, 1, device="xpu")
+            b = torch.empty(1, 4, device="xpu")
+            with self.assertRaisesRegex(RuntimeError, msg):
+                decomp_addmm(bias, a, b, beta=0)
 
     @parametrize("dtype", [torch.float, torch.bfloat16])
     def test_dynamic_shape_mm(self, device, dtype):

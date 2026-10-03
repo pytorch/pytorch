@@ -1302,6 +1302,27 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(fn, dynamic=dynamic)(x, a, b)
 
+    @parametrize("op", [torch.addmm, torch.baddbmm])
+    def test_max_autotune_zero_beta_drops_nan_bias(self, op):
+        def fn(x, a, b):
+            return op(x, a, b, beta=0, alpha=0.5)
+
+        shape = (64, 64) if op is torch.addmm else (2, 64, 64)
+        x = torch.full((64,), float("nan"), device=GPU_TYPE)
+        a = torch.randn(shape, device=GPU_TYPE)
+        b = torch.randn(shape, device=GPU_TYPE)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.native_matmul": False,
+            }
+        ):
+            out, code = run_and_get_code(torch.compile(fn), x, a, b)
+        self.assertIn("triton_tem_fused", "".join(code))
+        self.assertFalse(out.isnan().any())
+        self.assertEqual(out, fn(x, a, b), atol=1e-2, rtol=1e-2, equal_nan=False)
+
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_autotune_conv1x1(self, search_space):
         # Assuming input has 3 channels and we want to produce 16 channels as output

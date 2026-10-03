@@ -522,11 +522,15 @@ def addmm(
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
     def add_input(out: torch.Tensor) -> torch.Tensor:
-        if alpha != 1:
-            out = alpha * out
-        if beta != 1:
-            return out + beta * self
-        return out + self
+        # CPU and XPU eager check that self expands to the output even when
+        # beta == 0 ignores its values (XPU skips the check for empty outputs).
+        # CUDA eager skips it, so CUDA leaves beta == 0 to tuned_addmm.
+        utils.check_same_device(self, out, allow_cpu_scalar_tensors=False)
+        bias = self.expand(out.shape)
+        out = alpha * out
+        if beta == 0:
+            return out
+        return out + beta * bias
 
     if mat1.device.type not in ["cpu", "mps"]:
         if beta == 0 and mat1.device.type == "cuda":
@@ -548,7 +552,7 @@ def addmm(
             out = torch.sum(
                 mat1.squeeze(0) * mat2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)
-            return alpha * out + beta * self
+            return add_input(out)
         if (
             statically_known_true(mat1.size(0) == 1)
             and guard_or_false(mat2.size(0) <= 16)
@@ -556,7 +560,7 @@ def addmm(
         ):
             counters["inductor"]["decompose_addmm"] += 1
             out = (mat1.T * mat2).sum(dim=0, keepdim=True)
-            return alpha * out + beta * self
+            return add_input(out)
     return NotImplemented
 
 
