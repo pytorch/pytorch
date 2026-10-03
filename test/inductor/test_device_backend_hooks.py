@@ -129,5 +129,100 @@ class TestUsesGpuCppWrapper(TestCase):
         self.assertFalse(_uses_gpu_cpp_wrapper("definitely_unregistered_device"))
 
 
+class TestCppWrapperTwoPassSelection(TestCase):
+    def _make_graph(self, device_types):
+        import torch
+        from torch._inductor.graph import GraphLowering
+        from torch.utils._ordered_set import OrderedSet
+
+        fx_graph = torch.fx.Graph()
+        fx_graph.output(())
+        graph = GraphLowering(
+            torch.fx.GraphModule(torch.nn.Module(), fx_graph),
+            cpp_wrapper=True,
+            aot_mode=True,
+        )
+        graph.device_types = OrderedSet(device_types)
+        graph.operations = []
+        return graph
+
+    def _takes_two_pass(self, device):
+        from torch._inductor.codegen.cpp_wrapper_gpu import CppWrapperGpu
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.utils import ValueWithLineMap
+
+        graph = self._make_graph([device])
+        jit = ValueWithLineMap("jit", [])
+        kern = ValueWithLineMap("kern", [])
+        wrapper = object.__new__(CppWrapperGpu)
+        wrapper._lazy_kernel_names = ["kernel"]
+        wrapper._aot_output = "aot"
+        graph.wrapper_code = wrapper
+        with (
+            config.patch({"triton.autotune_at_compile_time": False}),
+            mock.patch.object(GraphLowering, "codegen", return_value=(jit, kern)),
+            mock.patch.object(
+                GraphLowering, "_run_jit_variant_for_autotune"
+            ) as run_jit,
+            mock.patch(
+                "torch._inductor.codegen.cpp_wrapper_gpu."
+                "generate_aoti_kernel_config_header",
+                return_value="header\n",
+            ),
+        ):
+            graph.codegen_with_cpp_wrapper()
+        return run_jit.called
+
+    def _jit_compile_device(self, device_types):
+        from torch._inductor.codecache import CppWrapperCodeCache
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.utils import ValueWithLineMap
+
+        graph = self._make_graph(device_types)
+        graph.is_const_graph = False
+        graph.constants = {}
+        graph.graph_outputs = []
+        captured = {}
+
+        def fake_load_pybinding(*args, **kwargs):
+            captured["device_type"] = kwargs["device_type"]
+
+            def fake_compiled_fn(handles):
+                return []
+
+            return fake_compiled_fn
+
+        with (
+            mock.patch.object(GraphLowering, "_log_jit_variant_for_autotune_repro"),
+            mock.patch.object(
+                CppWrapperCodeCache, "load_pybinding", fake_load_pybinding
+            ),
+            mock.patch(
+                "torch._C._aoti.unsafe_alloc_void_ptrs_from_tensors",
+                return_value=[],
+                create=True,
+            ),
+            mock.patch(
+                "torch._C._aoti.alloc_tensors_by_stealing_from_void_ptrs",
+                return_value=[],
+                create=True,
+            ),
+        ):
+            graph._run_jit_variant_for_autotune(
+                ValueWithLineMap("cpp_src", []),
+                ValueWithLineMap("kernel_src", []),
+                list,
+                [],
+            )
+        return captured["device_type"]
+
+    def test_mtia_single_pass_cuda_xpu_two_pass(self):
+        self.assertFalse(self._takes_two_pass("mtia"))
+        self.assertTrue(self._takes_two_pass("cuda"))
+        self.assertTrue(self._takes_two_pass("xpu"))
+        self.assertEqual(self._jit_compile_device(["cpu", "mtia"]), "cpu")
+        self.assertEqual(self._jit_compile_device(["cpu", "cuda"]), "cuda")
+
+
 if __name__ == "__main__":
     run_tests()
