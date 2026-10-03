@@ -26,7 +26,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
-    OpDTypes, onlyCPU, onlyNativeDeviceTypes, expectedFailureMeta, expectedFailureXPU, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
+    OpDTypes, onlyCPU, onlyCUDA, onlyNativeDeviceTypes, expectedFailureMeta, expectedFailureXPU, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
     dtypesIfCPU, dtypesIfMPS, dtypesIfXPU, onlyAccelerator, largeMPSBufferTest, largeTensorTest, ops,
     precisionOverride)
 from torch.testing._internal.common_methods_invocations import (
@@ -1214,6 +1214,41 @@ class TestReductions(TestCase):
         with self.assertRaisesRegex(TypeError, 'not implemented'):
             torch.aminmax(torch.tensor(1., dtype=dtype, device=device), dim=0)
 
+    @onlyNativeDeviceTypes
+    @dtypes(torch.float32)
+    def test_aminmax_out_overlap(self, device, dtype):
+        x = torch.randn(3, 4, device=device, dtype=dtype)
+        expected = torch.aminmax(x, dim=1)
+
+        # `min` and `max` are written independently, so sharing storage makes
+        # whichever write lands last clobber the other, silently.
+        out = torch.empty(3, device=device, dtype=dtype)
+        with self.assertRaisesRegex(ValueError, "must not overlap"):
+            torch.aminmax(x, dim=1, out=(out, out))
+
+        buf = torch.empty(5, device=device, dtype=dtype)
+        with self.assertRaisesRegex(ValueError, "must not overlap"):
+            torch.aminmax(x, dim=1, out=(buf[0:3], buf[2:5]))
+
+        # Disjoint views of one storage do not overlap and stay allowed.
+        buf = torch.empty(6, device=device, dtype=dtype)
+        result = torch.aminmax(x, dim=1, out=(buf[0:3], buf[3:6]))
+        self.assertEqual(result.min, expected.min)
+        self.assertEqual(result.max, expected.max)
+
+        # Non-contiguous outputs must keep working. get_overlap_status reports
+        # TooHard rather than No for these, so a check demanding No would
+        # reject them even though they provably do not overlap.
+        strided = [torch.empty(6, device=device, dtype=dtype)[::2] for _ in range(2)]
+        result = torch.aminmax(x, dim=1, out=(strided[0], strided[1]))
+        self.assertEqual(result.min, expected.min)
+        self.assertEqual(result.max, expected.max)
+
+        buf = torch.empty(6, device=device, dtype=dtype)
+        result = torch.aminmax(x, dim=1, out=(buf[0::2], buf[1::2]))
+        self.assertEqual(result.min, expected.min)
+        self.assertEqual(result.max, expected.max)
+
     # TODO: bincount isn't a classic reduction -- maybe this test suite is
     #   reductions and summary ops?
     @skipIfMPS
@@ -1499,6 +1534,14 @@ class TestReductions(TestCase):
             expect = np.prod(np.array(val))
             self.assertEqual(result, expect)
 
+    @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32)
+    def test_prod_integer_accumulates_in_int64(self, device, dtype):
+        # 5**14 overflows int32 and float32's 24-bit mantissa; 200 elements spread the reduction over several simdgroups
+        x = torch.ones(2, 200, dtype=dtype, device=device)
+        x[:, :14] = 5
+        self.assertEqual(x[0].prod(), 5 ** 14)
+        self.assertEqual(x.prod(1), torch.full((2,), 5 ** 14, device=device))
+
     @onlyAccelerator
     @skipIfMPS
     def test_max_mixed_devices(self, device):
@@ -1647,6 +1690,19 @@ class TestReductions(TestCase):
             test_dtype_bfloat16(True, False)
             test_dtype_bfloat16(False, True)
             test_dtype_bfloat16(True, True)
+
+    @onlyCUDA
+    @largeTensorTest("10GB", "cuda")
+    @serialTest()
+    def test_bucketization_int32_overflow(self, device):
+        # More than INT_MAX elements; the launch configuration must not
+        # narrow numel to int (it did on ROCm via hipify's ::min rewrite).
+        x = torch.zeros(2**31 + 1, dtype=torch.uint8, device=device)
+        x[-1] = 2
+        boundaries = torch.tensor([0, 1], dtype=torch.uint8, device=device)
+        out = torch.bucketize(x, boundaries, out_int32=True)
+        self.assertEqual(out[0].item(), 0)
+        self.assertEqual(out[-1].item(), 2)
 
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     @skipIfMPS
@@ -4040,6 +4096,7 @@ class TestReductionsOnCPU(TestCase):
         for dim in range(D):
             self.assertEqual(actual_bin_edges[dim], expected_bin_edges[dim])
 
+    @skipIfTorchDynamo("histogramdd parameter combinations exceed the recompilation limit")
     def test_histogramdd(self):
         shapes = (
             (1, 5),

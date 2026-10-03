@@ -599,7 +599,7 @@ class TritonTemplateKernel(TritonKernel):
         )
         if tma_2d:
             # By default `construct_range_trees` will return the range_trees in the order
-            # ["z", "y", "x", "r0_", "r1_"] (see simd.py:all_prefixes)
+            # ["z", "y", "x", "r0_", "r1_", "r2_"] (see simd.py:all_prefixes)
             # and this order defines what the kernel block shape will be. So if the template
             # input / output has requested e.g. ["x", "y"], `construct_range_trees` will still return the
             # trees in the order ["y", "x"]. This would mean that the template would need to transpose
@@ -947,6 +947,8 @@ class TritonTemplateKernel(TritonKernel):
             self.triton_meta = triton_meta
         else:
             self.triton_meta.update(triton_meta)
+        if not config.emulate_precision_casts:
+            self.triton_meta.setdefault("enable_fp_fusion", True)
 
         inductor_meta = {
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
@@ -2756,6 +2758,7 @@ class GeneratedCodeCache:
                 "transpose_discontiguous_tensor_descriptors_override": transpose_discontiguous_tensor_descriptors_override,
                 "kwargs": kwargs,
                 "hint_override": hint_override,
+                "emulate_precision_casts": config.emulate_precision_casts,
                 "triton_meta": triton_meta,
             }
         )
@@ -4207,9 +4210,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
             if use_pipelined_autotuning():
-                if config.benchmark_epilogue_fusion:
+                if config.benchmark_template_fusion:
                     raise AssertionError(
-                        "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
+                        "Benchmarking template fusion will cause gpu contention with pipelined autotuning"
                     )
                 extern_kernels = [
                     c for c in choices if AlgorithmSelectorCache._is_extern(c)
@@ -5447,7 +5450,7 @@ class AlgorithmSelectorCache(PersistentCache):
             except CUDACompileError:
                 if not isinstance(choice, CUTLASSTemplateCaller):
                     log.exception(
-                        "CUDA compilation error during autotuning: \n%s. \nIgnoring this choice."
+                        "CUDA compilation error during autotuning. Ignoring this choice."
                     )
                 timing = float("inf")
             except NotImplementedError:
@@ -6236,7 +6239,7 @@ def autotune_select_algorithm(*args, **kwargs):
 
     if "return_multi_template" not in kwargs:
         kwargs["return_multi_template"] = (
-            torch._inductor.config.benchmark_epilogue_fusion
+            torch._inductor.config.benchmark_template_fusion
             or torch._inductor.config.pipeline_max_autotune_gemm
         )
 

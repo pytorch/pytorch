@@ -93,6 +93,11 @@ Optional exports:
                               narrower than the stub's dispatch chain
                               but never wider than intended coverage.
 
+Every generated op also registers torch.ops._native_aot.archs_<op>(), returning
+the embedded compute capabilities (e.g. [90, 100]). This is independent of
+cpp_covers: the Python fallback must verify that this op was embedded for the
+input device before subtracting any calls from the JIT route.
+
 Emission cardinality: cpp_helpers once per file, cpp_dispatch_prelude
 once per op, cpp_dispatch/cpp_launch once per precompile point. The
 generated stub is::
