@@ -28,6 +28,7 @@ from torch._inductor.utils import (
     run_and_get_triton_code,
 )
 from torch.testing import FileCheck
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
@@ -724,7 +725,16 @@ class ExprPrinterTests(InductorTestCase):
             """(static_cast<int64_t>(c10::div_floor_integer("""
             f"""static_cast<int64_t>((-10{LONG_SUFFIX}) + x), static_cast<int64_t>(ks))) % static_cast<int64_t>(ks))""",
         )
-        self.assertExpectedInline(texpr(expr), """((((-10) + x) // ks) % ks)""")
+        self.assertExpectedInline(
+            texpr(expr),
+            """triton_helpers.remainder_integer(triton_helpers.div_floor_integer((-10) + x,  ks), ks)""",
+        )
+
+        nonnegative = sympy.Symbol("nonnegative", integer=True, nonnegative=True)
+        self.assertExpectedInline(
+            texpr(ModularIndexing(nonnegative, 2, 4)),
+            """((nonnegative // 2) % 4)""",
+        )
 
     def test_print_python_mod(self):
         x = sympy.Symbol("x", integer=True)
@@ -813,6 +823,28 @@ class ExprPrinterTests(InductorTestCase):
 
 
 instantiate_parametrized_tests(ExprPrinterTests)
+
+
+class TestModularIndexingCodegen(InductorTestCase):
+    @unittest.skipIf(not HAS_CUDA_AND_TRITON, "requires CUDA and Triton")
+    @config.patch(force_disable_caches=True)
+    def test_negative_base(self, device):
+        from torch.func import functionalize
+
+        def fn(x):
+            x.narrow(3, 0, 1).fill_(0.3)
+            x.view(-1)[1:] = x.view(-1)[:-1].clone()
+            torch._foreach_addcmul_([x], [x.flip(2).clone()], [x.roll(-1, 2) * 0.5])
+            return x
+
+        torch.manual_seed(0)
+        x = torch.rand(4, 4, 4, 4, device=device) + 0.5
+        expected = functionalize(fn)(x.clone())
+        actual = torch.compile(fn)(x.clone())
+        self.assertEqual(actual, expected)
+
+
+instantiate_device_type_tests(TestModularIndexingCodegen, globals(), only_for="cuda")
 
 
 class TestIndexConstOverflowInt32(InductorTestCase):
