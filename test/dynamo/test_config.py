@@ -1,8 +1,11 @@
 # Owner(s): ["module: dynamo"]
 
 import importlib.util
+import os
+import subprocess
 import sys
 import tempfile
+import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -14,6 +17,7 @@ from torch.testing._internal import (
 from torch.testing._internal.common_utils import (
     HardwareClassification,
     instantiate_parametrized_tests,
+    IS_FBCODE,
     parametrize,
 )
 
@@ -24,6 +28,29 @@ from torch.testing._internal.common_utils import (
 @instantiate_parametrized_tests
 class ConfigTests(torch._dynamo.test_case.TestCase):
     hw_classification = HardwareClassification.GENERIC
+
+    @unittest.skipIf(IS_FBCODE, "the justknob controls the fbcode default")
+    def test_canonicalize_output_graph_node_order_default(self):
+        script = (
+            "import torch._dynamo.config as config; "
+            "print(config.canonicalize_output_graph_node_order)"
+        )
+        env = os.environ.copy()
+        env.pop("TORCH_DYNAMO_CANONICALIZE_GRAPH_NODE_ORDER", None)
+        self.assertEqual(
+            subprocess.check_output(
+                [sys.executable, "-c", script], env=env, text=True
+            ).strip(),
+            "True",
+        )
+
+        env["TORCH_DYNAMO_CANONICALIZE_GRAPH_NODE_ORDER"] = "0"
+        self.assertEqual(
+            subprocess.check_output(
+                [sys.executable, "-c", script], env=env, text=True
+            ).strip(),
+            "False",
+        )
 
     def _make_config_module(self, name: str):
         tmpdir = tempfile.TemporaryDirectory()
