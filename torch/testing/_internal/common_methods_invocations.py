@@ -12243,7 +12243,7 @@ op_db: list[OpInfo] = [
             ),
            ),
     OpInfo('arange',
-           dtypes=all_types_and(torch.bfloat16, torch.float16),
+           dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8),
            supports_out=True,
            supports_autograd=False,
@@ -12274,7 +12274,7 @@ op_db: list[OpInfo] = [
                # g: graph():
                #   %25 : Long(1, strides=[1], requires_grad=0, device=cpu) = prim::Constant[value={1}]()
                #   return (%25)
-               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32, torch.complex64, torch.complex128)),
 
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
@@ -12282,6 +12282,10 @@ op_db: list[OpInfo] = [
                # torch-xpu-ops/issues/4321
                DecorateInfo(unittest.skip("Skipped"), None, None, device_type='xpu',
                             dtypes=(torch.int64,)),
+
+               # MPS arange does not support complex dtypes yet
+               DecorateInfo(unittest.skip("MPS arange does not support complex dtypes yet"), None, None, device_type='mps',
+                            dtypes=(torch.complex64, torch.complex128)),
            )),
     OpInfo('cauchy',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.cauchy_, inp, *args, **kwargs),
