@@ -5,6 +5,7 @@ import enum
 import inspect
 import logging
 import operator
+import os
 import sys
 import traceback
 import types
@@ -323,11 +324,24 @@ class TracerBase:
                 user_frames: list[traceback.FrameSummary] = []
 
         from torch.fx.experimental.symbolic_shapes import uninteresting_files
+        import torch.nn.modules.module as _nn_module
 
+        # The tracer's own frames (torch/fx/proxy.py) and the module dispatch
+        # wrappers (torch/nn/modules/module.py) are not part of the user's
+        # forward code, but they are also not in uninteresting_files() -- that
+        # set is keyed to compiler/tracing modules. Drop them here so the
+        # recorded stack trace lands on the user's forward frame instead of
+        # the torch internals that captured it (regression since 2.4, where
+        # find_user_frame() used to exclude these).
+        internal_files = {
+            os.path.abspath(__file__),
+            os.path.abspath(_nn_module.__file__),
+        }
         user_frames = [
             frame
             for frame in user_frames
             if frame.filename not in uninteresting_files()
+            and frame.filename not in internal_files
         ]
 
         return traceback.StackSummary.from_list(user_frames)
