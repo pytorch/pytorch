@@ -15,12 +15,18 @@ from torch._inductor._functionalize_collectives import (
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.graph_module import _share_torchbind_and_process_group_on_deepcopy
 from torch.fx.passes.regional_inductor import regional_inductor
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
+
+from torch.testing._internal.common_distributed import requires_gloo
 
 
 def _f(t):
@@ -33,7 +39,10 @@ def _make_fx_with_allreduce():
     return make_fx(_f)(torch.ones(4))
 
 
+@requires_gloo()
 class TestInductorCompileCollectives(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
