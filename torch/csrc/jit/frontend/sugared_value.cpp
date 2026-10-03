@@ -100,7 +100,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
     const std::string& field) {
   // Allow method-style casts on Tensor types. e.g. x.int()
   if (value_->type()->isSubtypeOf(*TensorType::get())) {
-    if (builtin_cast_method_to_scalar_type().count(field)) {
+    if (builtin_cast_method_to_scalar_type().contains(field)) {
       return std::make_shared<TensorCastValue>(
           builtin_cast_method_to_scalar_type().at(field),
           NamedValue(loc, "self", value_));
@@ -290,7 +290,7 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
   };
   if (value_->type()->kind() == TypeKind::TupleType) {
     auto outputs = createTupleUnpack(value_);
-    return fmap(outputs, make_simple_value);
+    return fmap(std::move(outputs), make_simple_value);
   } else if (value_->type()->kind() == TypeKind::ListType) {
     if (!size_hint) {
       throw(

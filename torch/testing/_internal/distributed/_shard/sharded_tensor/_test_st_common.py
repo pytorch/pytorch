@@ -11,12 +11,13 @@ from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
-PLACEMENTS = [
-    f"rank:0/{device_type}:0",
-    f"rank:1/{device_type}:1",
-    f"rank:2/{device_type}:2",
-    f"rank:3/{device_type}:3",
-]
+def _placement(rank):
+    if device_type == "cpu":
+        return f"rank:{rank}/cpu"
+    return f"rank:{rank}/{device_type}:{rank}"
+
+
+PLACEMENTS = [_placement(i) for i in range(4)]
 
 DEFAULT_GPU_NUM = 4
 

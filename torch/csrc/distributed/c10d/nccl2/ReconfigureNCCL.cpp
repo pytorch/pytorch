@@ -6,10 +6,11 @@
 // isolated from the collective implementations. The handle format and the
 // rank-assignment contract (ordered handles assign ranks by position) match
 // ProcessGroupGloo's reconfigure; the communicator teardown/bootstrap steps
-// are a port of torchcomms' TorchCommNCCLReconfigure fresh-init path. The
-// torchcomms quorum shrink/grow fast path is intentionally not ported: it
-// assigns ranks by NCCL's shrink ordering, which conflicts with c10d's
-// ordered-handle rank assignment.
+// are a port of torchcomms' TorchCommNCCLReconfigure. The torchcomms quorum
+// shrink/grow fast path is opt-in (TORCH_NCCL2_RECONFIGURE_SHRINK_GROW=1, set
+// consistently on every rank) and only taken when NCCL's shrink/grow rank
+// order matches c10d's ordered-handle rank assignment; otherwise every rank
+// falls back to a fresh commInitRankConfig.
 
 #ifdef USE_C10D_NCCL
 
@@ -17,11 +18,14 @@
 
 #include <algorithm>
 #include <cstring>
+#include <exception>
+#include <map>
+#include <thread>
 #include <unordered_set>
 #include <variant>
 
-#include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/env.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/nccl2/Logging.hpp>
@@ -68,10 +72,15 @@ NCCLReconfigureHandle parseNCCLReconfigureHandle(
   auto third = handle.find(':', second + 1);
   TORCH_CHECK(
       third != std::string::npos, "Invalid nccl2 reconfigure handle: ", handle);
+  auto fourth = handle.find(':', third + 1);
+  TORCH_CHECK(
+      fourth != std::string::npos,
+      "Invalid nccl2 reconfigure handle: ",
+      handle);
   return {
       .rank = std::stoi(handle.substr(first + 1, second - first - 1)),
       .uuid = std::stoll(handle.substr(second + 1, third - second - 1)),
-      .storeAddress = handle.substr(third + 1)};
+      .storeAddress = handle.substr(fourth + 1)};
 }
 
 std::vector<::c10d::ReconfigureHandle> getOrderedReconfigureHandles(
@@ -98,6 +107,238 @@ std::vector<::c10d::ReconfigureHandle> getOrderedReconfigureHandles(
   return handles;
 }
 
+struct ReconfigureQuorum {
+  int64_t uuid = -1;
+  // Number of leading handles that keep their communicator; 0 = fresh init.
+  int size = 0;
+};
+
+// Picks the largest set of ranks sharing a previous communicator (ties go to
+// the larger uuid). The decision depends only on `handles`, so every rank
+// picks the same path. Shrink keeps survivors in old-rank order and grow
+// appends new ranks, so the fast path requires the quorum to come first in
+// ascending old-rank order.
+ReconfigureQuorum findReconfigureQuorum(
+    const std::vector<::c10d::ReconfigureHandle>& handles) {
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
+  if (!c10::utils::check_env("TORCH_NCCL2_RECONFIGURE_SHRINK_GROW")
+           .value_or(false)) {
+    return {};
+  }
+  std::map<int64_t, int> countByUuid;
+  for (const auto& handle : handles) {
+    auto uuid = parseNCCLReconfigureHandle(handle).uuid;
+    if (uuid >= 0) {
+      ++countByUuid[uuid];
+    }
+  }
+  ReconfigureQuorum quorum;
+  for (const auto& [uuid, count] : countByUuid) {
+    if (count >= quorum.size) {
+      quorum = {.uuid = uuid, .size = count};
+    }
+  }
+  // A single-rank communicator has no bootstrap network to grow from.
+  if (quorum.size < 2) {
+    return {};
+  }
+  int previousRank = -1;
+  for (int i = 0; i < quorum.size; ++i) {
+    auto info = parseNCCLReconfigureHandle(handles[i]);
+    if (info.uuid != quorum.uuid || info.rank <= previousRank) {
+      return {};
+    }
+    previousRank = info.rank;
+  }
+  return quorum;
+#else
+  std::ignore = handles;
+  return {};
+#endif
+}
+
+void abortCommIgnoringErrors(
+    NcclApi& api,
+    ncclComm_t comm,
+    std::chrono::milliseconds timeout,
+    std::string_view operation) {
+  try {
+    waitForNcclCompletion(api, comm, api.commAbort(comm), timeout, operation);
+  } catch (const std::exception& e) {
+    LOG(ERROR) << e.what();
+  }
+}
+
+std::vector<uint8_t> uniqueIdToBytes(const ncclUniqueId& uniqueId) {
+  return {
+      reinterpret_cast<const uint8_t*>(&uniqueId),
+      reinterpret_cast<const uint8_t*>(&uniqueId) + sizeof(uniqueId)};
+}
+
+ncclUniqueId waitForUniqueId(
+    ::c10d::Store& store,
+    const std::string& key,
+    std::chrono::milliseconds timeout) {
+  store.wait({key}, timeout);
+  auto vec = store.get(key);
+  TORCH_CHECK(
+      vec.size() == sizeof(ncclUniqueId),
+      "Invalid NCCL unique ID size during reconfigure");
+  ncclUniqueId uniqueId{};
+  std::memcpy(&uniqueId, vec.data(), sizeof(ncclUniqueId));
+  return uniqueId;
+}
+
+// Shrinks `comm` to exclude `excluded`, then grows it to `newSize`. Takes
+// ownership of `comm`: it is aborted on both success and failure.
+ncclComm_t shrinkAndGrowComm(
+    NcclApi& api,
+    ncclComm_t comm,
+    std::vector<int> excluded,
+    int newSize,
+    bool publishGrowId,
+    ::c10d::Store& store,
+    const std::string& growIdKey,
+    ncclConfig_t config,
+    std::chrono::milliseconds timeout) {
+  // A nonblocking commRevoke may still be in progress; NCCL rejects further
+  // calls on the comm until it completes. Errors are fine: shrink with
+  // NCCL_SHRINK_ABORT accepts a failed comm.
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  ncclResult_t asyncStatus = ncclInProgress;
+  while (api.commGetAsyncError(comm, &asyncStatus) == ncclSuccess &&
+         asyncStatus == ncclInProgress) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      abortCommIgnoringErrors(
+          api, comm, timeout, "NCCL commAbort after revoke timeout failed");
+      TORCH_CHECK_WITH(
+          DistBackendError,
+          false,
+          "NCCL commRevoke did not complete during reconfigure within ",
+          timeout.count(),
+          " ms");
+    }
+    std::this_thread::yield();
+  }
+
+  if (!excluded.empty()) {
+    ncclComm_t shrunk = nullptr;
+    auto status = api.commShrink(
+        comm,
+        excluded.data(),
+        static_cast<int>(excluded.size()),
+        &shrunk,
+        &config,
+        NCCL_SHRINK_ABORT);
+    try {
+      waitForNcclChildComm(
+          api,
+          comm,
+          &shrunk,
+          status,
+          true,
+          timeout,
+          "NCCL commShrink failed during reconfigure");
+    } catch (...) {
+      // waitForNcclChildComm aborts the parent unless the call itself failed.
+      if (status != ncclSuccess && status != ncclInProgress) {
+        abortCommIgnoringErrors(
+            api, comm, timeout, "NCCL commAbort failed after commShrink");
+      }
+      throw;
+    }
+    abortCommIgnoringErrors(
+        api, comm, timeout, "NCCL commAbort of pre-shrink comm failed");
+    comm = shrunk;
+  }
+
+  int size = 0;
+  auto status = api.commCount(comm, &size);
+  if (status == ncclSuccess && size == newSize) {
+    return comm;
+  }
+  ncclComm_t grown = nullptr;
+  try {
+    TORCH_CHECK(
+        status == ncclSuccess,
+        "NCCL commCount failed during reconfigure: ",
+        api.getErrorString(status));
+    if (publishGrowId) {
+      ncclUniqueId uniqueId{};
+      status = api.commGetUniqueId(comm, &uniqueId);
+      TORCH_CHECK(
+          status == ncclSuccess,
+          "NCCL commGetUniqueId failed during reconfigure: ",
+          api.getErrorString(status));
+      store.set(growIdKey, uniqueIdToBytes(uniqueId));
+    } else {
+      // commGrow blocks without a timeout until rank 0 sends the grow handle
+      // from commGetUniqueId, which happens before the store key is set.
+      waitForUniqueId(store, growIdKey, timeout);
+    }
+    status = api.commGrow(comm, newSize, nullptr, -1, &grown, &config);
+  } catch (...) {
+    abortCommIgnoringErrors(
+        api, comm, timeout, "NCCL commAbort failed after commGrow");
+    throw;
+  }
+  try {
+    waitForNcclChildComm(
+        api,
+        comm,
+        &grown,
+        status,
+        true,
+        timeout,
+        "NCCL commGrow failed during reconfigure");
+  } catch (...) {
+    if (status != ncclSuccess && status != ncclInProgress) {
+      abortCommIgnoringErrors(
+          api, comm, timeout, "NCCL commAbort failed after commGrow");
+    }
+    throw;
+  }
+  abortCommIgnoringErrors(
+      api, comm, timeout, "NCCL commAbort of pre-grow comm failed");
+  return grown;
+}
+
+// Creates a communicator with commInitRankConfig, or joins an existing one
+// with commGrow when `grow` is set.
+ncclComm_t initComm(
+    NcclApi& api,
+    bool grow,
+    int newSize,
+    int newRank,
+    const ncclUniqueId& uniqueId,
+    ncclConfig_t config,
+    std::chrono::milliseconds timeout) {
+  const auto operation = grow
+      ? "NCCL commGrow failed during reconfigure"
+      : "NCCL commInitRankConfig failed during reconfigure";
+  ncclComm_t comm = nullptr;
+  auto status = grow
+      ? api.commGrow(nullptr, newSize, &uniqueId, newRank, &comm, &config)
+      : api.commInitRankConfig(&comm, newSize, uniqueId, newRank, &config);
+  TORCH_CHECK(comm, operation, ": ", api.getErrorString(status));
+  // A nonblocking commGrow can return ncclSuccess while the joining comm is
+  // still initializing, so always poll its async state.
+  if (grow && status == ncclSuccess) {
+    status = ncclInProgress;
+  }
+  try {
+    waitForNcclCompletion(api, comm, status, timeout, operation);
+  } catch (...) {
+    abortCommIgnoringErrors(
+        api,
+        comm,
+        timeout,
+        "NCCL commAbort failed after reconfigure initialization failure");
+    throw;
+  }
+  return comm;
+}
+
 c10::intrusive_ptr<::c10d::Work> makeCompletedWork() {
   auto future = c10::make_intrusive<c10::ivalue::Future>(
       c10::ListType::create(c10::TensorType::get()), std::vector<at::Device>{});
@@ -115,11 +356,14 @@ c10::intrusive_ptr<::c10d::Work> makeCompletedWork() {
       ":",
       reconfigure_uuid_,
       ":",
+      reconfigure_instance_id_,
+      ":",
       getStoreAddress(store_));
 }
 
 c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
     const ::c10d::ReconfigureOptions& opts) {
+  std::lock_guard reconfigureLock(reconfigure_mutex_);
   TORCH_CHECK(
       init_state_ != InitializationState::FINALIZED,
       "ProcessGroupNCCL has been finalized");
@@ -133,17 +377,53 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
   auto newSize = static_cast<int>(handles.size());
   auto timeout = opts.timeout.value_or(options_c10d_->timeout);
 
+  auto quorum = findReconfigureQuorum(handles);
+  bool inQuorum = newRank < quorum.size;
+  std::vector<int> excluded;
+  if (inQuorum) {
+    TORCH_CHECK(
+        nccl_comm_ && init_state_ == InitializationState::INITIALIZED,
+        "nccl2 reconfigure handle names communicator ",
+        reconfigure_uuid_,
+        " but it is not initialized");
+    std::unordered_set<int> keptRanks;
+    for (int i = 0; i < quorum.size; ++i) {
+      keptRanks.insert(parseNCCLReconfigureHandle(handles[i]).rank);
+    }
+    for (int rank = 0; rank < comm_size_; ++rank) {
+      if (!keptRanks.contains(rank)) {
+        excluded.push_back(rank);
+      }
+    }
+    TORCH_CHECK(
+        comm_size_ - static_cast<int>(excluded.size()) == quorum.size,
+        "nccl2 reconfigure quorum has ranks outside communicator ",
+        reconfigure_uuid_);
+  }
+  // Identity reconfigure: the old comm may be revoked, so re-create it. Only
+  // quorum members reach this, and a full quorum has no other ranks.
+  if (inQuorum && quorum.size == newSize && excluded.empty()) {
+    quorum = {};
+    inQuorum = false;
+  }
+  const bool shrinkGrow = quorum.size > 0;
+
   TC_LOG(INFO, this) << "ProcessGroupNCCL reconfigure starting: uuid="
                      << opts.uuid << " new_rank=" << newRank
-                     << " new_size=" << newSize;
+                     << " new_size=" << newSize << " path="
+                     << (!shrinkGrow    ? "init"
+                             : inQuorum ? "shrink_grow"
+                                        : "grow_join");
 
   auto prefixedStore = c10::make_intrusive<::c10d::PrefixStore>(
       c10::str("nccl2_reconfigure/", opts.uuid), store_);
+  if (!nccl_api_) {
+    nccl_api_ = std::make_shared<DefaultNcclApi>();
+  }
 
-  // The uuid namespaces this reconfigure's rendezvous keys; reusing it would
-  // read stale rendezvous state. New rank 0 atomically claims the uuid: the
-  // compareSet writes our handle only while "claimed" is unset, so a reused
-  // uuid returns the prior claimant's handle, which differs from ours.
+  // The uuid namespaces this reconfigure's rendezvous keys. Rank 0 claims it
+  // before publishing a unique ID so a reused uuid cannot overwrite a live
+  // rendezvous.
   if (newRank == 0) {
     auto claimedBy = prefixedStore->compareSet("claimed", "", localHandle);
     TORCH_CHECK(
@@ -153,9 +433,39 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
         " was already used; each reconfigure() requires a unique uuid");
   }
 
+  // Including the current rank-0 handle prevents nonzero ranks from consuming
+  // a stale ID when rank 0 rejects a reused uuid; they instead time out here.
+  const auto uniqueIdKey = c10::str("unique_id/", handles.front());
+  ncclUniqueId uniqueId{};
+  // Exchange the ncclUniqueId before tearing down the current communicator.
+  // The shrink/grow path publishes it later, from the shrunk communicator.
+  if (!shrinkGrow) {
+    if (newRank == 0) {
+      NCCL_CHECK(
+          nccl_api_,
+          nccl_comm_,
+          nccl_api_->getUniqueId(&uniqueId),
+          "NCCL getUniqueId failed during reconfigure");
+      prefixedStore->set(uniqueIdKey, uniqueIdToBytes(uniqueId));
+    } else {
+      uniqueId = waitForUniqueId(*prefixedStore, uniqueIdKey, timeout);
+    }
+  }
+
+  ncclConfig_t config = options_c10d_->config;
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+  config.commName = name_.c_str();
+#endif
+  populateNcclConfigFromHints(config, opts.hints, name_);
+  // ReconfigureOptions::timeout must bound initialization even when the
+  // process-group config normally uses blocking NCCL calls.
+  config.blocking = 0;
+
   // Tear down the previous communicator generation: revoke in-flight work,
-  // stop the watchdog, drain the work queue, and abort the comm. Port of the
-  // pre-reconfigure cleanup in torchcomms' TorchCommNCCL::reconfigure.
+  // stop the watchdog, drain the work queue, and abort the comm unless it is
+  // shrunk below. Port of the pre-reconfigure cleanup in torchcomms'
+  // TorchCommNCCL::reconfigure.
+  ncclComm_t oldComm = nullptr;
   if (init_state_ == InitializationState::INITIALIZED) {
     auto workStatus = workq_.garbageCollect();
     if (nccl_comm_ &&
@@ -181,18 +491,21 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
 
     workq_.finalize();
 
-    if (nccl_comm_) {
-      NCCL_CHECK_IGNORE(
-          nccl_api_,
-          nccl_api_->commAbort(nccl_comm_),
+    oldComm = std::exchange(nccl_comm_, nullptr);
+    init_state_ = InitializationState::UNINITIALIZED;
+    // The handle must not advertise a communicator this rank no longer has.
+    reconfigure_uuid_ = -1;
+    if (oldComm && !inQuorum) {
+      auto comm = std::exchange(oldComm, nullptr);
+      waitForNcclCompletion(
+          *nccl_api_,
+          comm,
+          nccl_api_->commAbort(comm),
+          timeout,
           "NCCL commAbort failed during reconfigure");
-      nccl_comm_ = nullptr;
     }
   }
-
-  if (!nccl_api_) {
-    nccl_api_ = std::make_shared<DefaultNcclApi>();
-  }
+  init_state_ = InitializationState::UNINITIALIZED;
 
   comm_state_ = CommState::NORMAL;
   shutdown_ = false;
@@ -217,48 +530,45 @@ c10::intrusive_ptr<::c10d::Work> ProcessGroupNCCL::reconfigure(
 
   c10::cuda::CUDAGuard gpuGuard(device_);
 
-  // Exchange the ncclUniqueId through the uuid-namespaced store with a fixed
-  // key. NCCLBootstrap is not reused here: its store keys embed a
-  // process-wide static counter, which diverges across ranks when disjoint
-  // groups reconfigure a different number of times (e.g. a late-joining rank).
-  static const char* kUniqueIdKey = "unique_id";
-  ncclUniqueId uniqueId{};
-  if (newRank == 0) {
-    NCCL_CHECK(
-        nccl_api_,
-        nccl_comm_,
-        nccl_api_->getUniqueId(&uniqueId),
-        "NCCL getUniqueId failed during reconfigure");
-    std::vector<uint8_t> vec(
-        reinterpret_cast<uint8_t*>(&uniqueId),
-        reinterpret_cast<uint8_t*>(&uniqueId) + sizeof(uniqueId));
-    prefixedStore->set(kUniqueIdKey, vec);
-  } else {
-    prefixedStore->wait({kUniqueIdKey}, timeout);
-    auto vec = prefixedStore->get(kUniqueIdKey);
-    TORCH_CHECK(
-        vec.size() == sizeof(ncclUniqueId),
-        "Invalid NCCL unique ID size during reconfigure");
-    std::memcpy(&uniqueId, vec.data(), sizeof(ncclUniqueId));
+  const auto growIdKey = c10::str("grow_unique_id/", handles.front());
+  try {
+    if (inQuorum) {
+      nccl_comm_ = shrinkAndGrowComm(
+          *nccl_api_,
+          oldComm,
+          std::move(excluded),
+          newSize,
+          newRank == 0,
+          *prefixedStore,
+          growIdKey,
+          config,
+          timeout);
+    } else {
+      if (shrinkGrow) {
+        uniqueId = waitForUniqueId(*prefixedStore, growIdKey, timeout);
+      }
+      nccl_comm_ = initComm(
+          *nccl_api_, shrinkGrow, newSize, newRank, uniqueId, config, timeout);
+    }
+  } catch (...) {
+    comm_state_ = CommState::ERROR;
+    nccl_comm_ = nullptr;
+    init_state_ = InitializationState::UNINITIALIZED;
+    throw;
   }
-
-  ncclConfig_t config = NCCL_CONFIG_INITIALIZER;
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
-  config.commName = name_.c_str();
-#endif
-  populateNcclConfigFromHints(config, options_c10d_->hints, name_);
-
-  ncclComm_t new_comm = nullptr;
-  NCCL_CHECK(
-      nccl_api_,
-      nccl_comm_,
-      nccl_api_->commInitRankConfig(
-          &new_comm, newSize, uniqueId, newRank, &config),
-      "NCCL commInitRankConfig failed during reconfigure");
-  nccl_comm_ = new_comm;
 
   initNcclResources();
   init_state_ = InitializationState::INITIALIZED;
+  TORCH_CHECK(
+      rank_ == newRank && comm_size_ == newSize,
+      "nccl2 reconfigure produced rank ",
+      rank_,
+      " of ",
+      comm_size_,
+      ", expected ",
+      newRank,
+      " of ",
+      newSize);
   reconfigure_uuid_ = opts.uuid;
 
   TC_LOG(INFO, this) << "ProcessGroupNCCL reconfigure completed for rank: "

@@ -19,27 +19,14 @@ GemvConfig t2d(int nsimd, int kq) {
   return cfg;
 }
 
-// gemv_t is bandwidth bound, so the pick just has to keep enough simdgroups
-// issuing loads to hide memory latency on every device size: the output gives
-// ceil(outlen / (32 * vec)) blocks of them, splitting K gives nsimd per block.
-// These few numbers are all that change per dtype.
-struct GemvTuning {
-  int vec; // load width in elements
-  int nsimd_min; // smallest built nsimd for this dtype
-  int nsimd_max; // largest built nsimd
-  int min_k_per_simd; // fewest K elements worth one simdgroup
-  int waves; // target simdgroups per core, sets the occupancy knees
-  int small_outlen; // at or below this, use t2d
-  int t2d_kq; // t2d k-sublane count
-  int scalar_cols_k; // K at or above this uses scalar columns, 0 to disable
-};
+} // namespace
 
 // One profile for all GPU generations: sweep-fitted on M5 Pro and biased
 // toward oversubscription, since on unmeasured hardware extra simdgroups only
 // add reduction overhead while missing ones leave memory latency exposed.
 // nsimd_min and nsimd_max must match the built MB_GEMV_* kernels, since the
 // snap assumes contiguous powers of two.
-GemvTuning gemv_tuning_t(c10::ScalarType dt) {
+GemvTuning gemv_tuning(c10::ScalarType dt) {
   GemvTuning t{
       .vec = 2,
       .nsimd_min = 16,
@@ -48,7 +35,10 @@ GemvTuning gemv_tuning_t(c10::ScalarType dt) {
       .waves = 896,
       .small_outlen = 1024,
       .t2d_kq = 8,
-      .scalar_cols_k = 0};
+      .scalar_cols_k = 0,
+      .nt_nsimd_lo = 4,
+      .nt_nsimd_hi = 8,
+      .nt_vec = 8};
   if (dt == at::kFloat) {
     // fp32 moves twice the bytes per element, so it saturates the bus with
     // far fewer waves and rewards backing off the K-split on wide outputs.
@@ -56,11 +46,11 @@ GemvTuning gemv_tuning_t(c10::ScalarType dt) {
     t.waves = 56;
     t.t2d_kq = 4;
     t.scalar_cols_k = 16384; // long fp32 reductions prefer scalar columns
+    t.nt_nsimd_hi = 16;
+    t.nt_vec = 4;
   }
   return t;
 }
-
-} // namespace
 
 GemvPolicy::GemvPolicy(uint32_t cores) : cores_(cores) {}
 
@@ -70,7 +60,7 @@ GemvPolicy GemvPolicy::current() {
 }
 
 GemvConfig GemvPolicy::pick_t(c10::ScalarType dt, int64_t outlen, int64_t K, int64_t align) const {
-  const GemvTuning t = gemv_tuning_t(dt);
+  const GemvTuning t = gemv_tuning(dt);
 
   // Small matrices sit in cache, so let t2d stream them.
   if (outlen <= t.small_outlen) {
@@ -110,10 +100,11 @@ GemvConfig GemvPolicy::pick_t(c10::ScalarType dt, int64_t outlen, int64_t K, int
 // simdgroups no matter what nsimd is; nsimd only sets threadgroup granularity
 // and vec the K-loop load width.
 GemvConfig GemvPolicy::pick_nt(c10::ScalarType dt, int64_t outlen, int64_t /*K*/, int64_t align) const {
+  const GemvTuning t = gemv_tuning(dt);
   if (dt == at::kFloat) {
-    return clamp_vec({outlen >= 2048 ? 4 : 16, 4}, align);
+    return clamp_vec({outlen >= 2048 ? t.nt_nsimd_lo : t.nt_nsimd_hi, t.nt_vec}, align);
   }
-  return clamp_vec({outlen >= 8192 ? 8 : 4, 8}, align);
+  return clamp_vec({outlen >= 8192 ? t.nt_nsimd_hi : t.nt_nsimd_lo, t.nt_vec}, align);
 }
 
 } // namespace at::native::mps

@@ -26,8 +26,21 @@ stale compiled artifact and produce **incorrect results**. Only enable them once
 you understand the assumption each one makes.
 ```
 
-You can inspect which guards are being evaluated using tlparse or
-`TORCH_LOGS=guards`; see [tlparse / TORCH_TRACE](programming_model.observability).
+To see *which* guards are generated, use tlparse or `TORCH_LOGS=guards`; see
+[tlparse / TORCH_TRACE](programming_model.observability). To measure how much
+guard evaluation *costs*, profile the compiled function and look for the
+`TorchDynamo Cache Lookup` event, which times guard evaluation on each call:
+
+```python
+from torch.profiler import profile, ProfilerActivity
+
+with profile(activities=[ProfilerActivity.CPU]) as prof:
+    opt_mod(x)
+prof.export_chrome_trace("trace.json")  # inspect in chrome://tracing
+```
+
+Compare that time against the compiled function's total run time to decide
+whether the overhead is worth reducing.
 
 ## 1. Reduce pre-graph bytecode time with `install_free_tensors`
 
@@ -134,3 +147,10 @@ arrives), there is a risk of silently producing incorrect results, hence the
   the other keeps that saving from reappearing as pre-graph bytecode overhead.
 - For steady-state serving after warmup, consider
   `set_stance(skip_guard_eval_unsafe=True)`.
+
+## Further reading
+
+For a deeper mental model of guards — compile units (a graph plus its guard set),
+why the guard set is large, and worked profiler benchmarks for each of the
+techniques above — see the developer blog post
+[Inside torch.compile Guards](https://docs.pytorch.org/devlogs/dynamo/2025-06-04-inside-torch-compile-guards/).

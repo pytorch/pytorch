@@ -75,6 +75,12 @@ class InteractiveDebugSession:
             return "q"
 
 
+# The pregraph profiler marker (record_runtime_overhead, on by default) emits a
+# runtime-gated branch into every compiled function; its un-executed instructions
+# perturb the exact instruction counts / opname sequences these tests step
+# through. Disable it so the debugged bytecode is deterministic straight-line code
+# -- the marker is orthogonal to the debugger mechanics under test.
+@torch._dynamo.config.patch(record_runtime_overhead=False)
 class TestBytecodeDebugger(TestCase):
     def test_debug_context_manager_basic(self):
         """Test that the debug context manager works without errors."""
@@ -735,8 +741,9 @@ Stack (TOS at end):
         input_tensor = torch.tensor([1.0, 2.0, 3.0])
 
         def test_logic(sess, initial):
-            # Step a few times to get into the execution
-            for _ in range(5):
+            # Step to just before x is consumed by the graph call (the class
+            # disables the pregraph marker, so the pre-graph bytecode is minimal).
+            for _ in range(2):
                 yield "s"
 
             # In-place mutation - this DOES affect execution

@@ -338,6 +338,71 @@ inline c10::List<::std::optional<Tensor>> typeConvertIndices(
   return converted_inds;
 }
 
+inline std::tuple<bool, Tensor> canDispatchToMaskedFill(
+    const Tensor& self,
+    const torch::List<std::optional<at::Tensor>>& indices) {
+  int64_t num_ind = 0;
+  Tensor mask;
+  auto self_device = self.device();
+  for (const std::optional<Tensor> i : indices) {
+    if (!i.has_value() || !(*i).defined()) {
+      if (!mask.defined()) {
+        num_ind++;
+      }
+    } else {
+      const Tensor& index = *i;
+      if ((index.scalar_type() != kByte && index.scalar_type() != kBool) ||
+          index.device() != self_device || mask.defined()) {
+        return std::make_tuple(false, Tensor());
+      } else {
+        mask = index;
+        for (const auto j : c10::irange(index.dim())) {
+          int64_t srcIdx = num_ind + j;
+          TORCH_CHECK_INDEX(
+              index.size(j) == self.size(srcIdx),
+              "The shape of the mask ",
+              index.sizes(),
+              " at index ",
+              j,
+              " does not match the shape of the indexed tensor ",
+              self.sizes(),
+              " at index ",
+              srcIdx);
+        }
+        num_ind += mask.ndimension();
+      }
+    }
+  }
+  for ([[maybe_unused]] const auto i :
+       c10::irange(num_ind, self.ndimension())) {
+    mask = mask.unsqueeze(-1);
+  }
+  return std::make_tuple(true, std::move(mask));
+}
+
+inline bool allowsScalarIndexOnDevice(const Scalar& value, const Tensor& self) {
+  return true;
+}
+
+inline bool allowsScalarIndexOnDevice(const Tensor& value, const Tensor& self) {
+  return value.dim() == 0 && value.device() == self.device() &&
+      value.scalar_type() == self.scalar_type() && self.has_storage() &&
+      value.has_storage() && !value.is_alias_of(self);
+}
+
+// Setitem can leave an eligible scalar index on CUDA instead of calling item().
+inline bool canKeepScalarIndexOnDevice(
+    const Tensor& index,
+    const Tensor& self) {
+  const auto index_dtype = index.scalar_type();
+  return index.dim() == 0 && self.is_cuda() &&
+      index.device() == self.device() &&
+      (index_dtype == kLong || index_dtype == kInt) && !self.is_quantized() &&
+      self.has_storage() && index.has_storage() && !index.is_alias_of(self) &&
+      // CUDA index_fill_ and index_put_ do not support unsigned dtypes.
+      !c10::isBarebonesUnsignedType(self.scalar_type());
+}
+
 // NOTE: Why do we mirror instead of replace the `count_specified_dimensions`
 // function in torch/csrc/autograd/python_variable_indexing.cpp? It's because
 // `count_specified_dimensions` is on the hot path of Python tensor multi-dim
@@ -397,6 +462,20 @@ inline Tensor scalarToTensor(
   }
 }
 
+inline Tensor asTensor(const Tensor& value, const Tensor& target) {
+  return value;
+}
+inline Tensor asTensor(const Scalar& value, const Tensor& target) {
+  at::AutoDispatchBelowADInplaceOrView guard;
+  // TODO: This qint special case looks very suspicious...
+  if (isQIntType(target.scalar_type())) {
+    return scalarToTensor(
+        value, at::device(kCPU).dtype(kFloat), at::Device(kCPU));
+  } else {
+    return scalarToTensor(value, target.options(), target.device());
+  }
+}
+
 // To match numpy semantics:
 // As a special case for backwards compatibility,
 // strip away unit dimensions from the left of 'src'
@@ -415,6 +494,9 @@ inline SymIntArrayRef slicePrefix1sSize(const SymIntArrayRef& sizes) {
   return sizes.slice(first_non1_src);
 }
 
+inline void copy_to(const Tensor& dst, const Scalar& src) {
+  dst.fill_(src);
+}
 inline void copy_to(const Tensor& dst, const Tensor& src) {
   // Use TORCH_GUARD_OR_FALSE with sym_eq to avoid data-dependent-expression
   // errors with unbacked symbolic sizes.  When we can't prove equality,
@@ -458,7 +540,8 @@ inline Tensor handleDimInMultiDimIndexing(
     std::vector<Tensor>& outIndices,
     bool disable_slice_optimization,
     const at::Device& original_tensor_device,
-    const std::optional<SymIntArrayRef>& prev_dim_result_sizes) {
+    const std::optional<SymIntArrayRef>& prev_dim_result_sizes,
+    bool allow_device_index_for_setitem = false) {
   if (index.is_integer()) {
     return impl::applySelect(
         prev_dim_result,
@@ -512,7 +595,9 @@ inline Tensor handleDimInMultiDimIndexing(
         {c10::DispatchKey::FuncTorchBatched,
          c10::DispatchKey::BatchedNestedTensor}));
     if (tensor.dim() == 0 && !is_batched &&
-        at::isIntegralType(scalar_type, /*includeBool=*/true)) {
+        at::isIntegralType(scalar_type, /*includeBool=*/true) &&
+        !(allow_device_index_for_setitem &&
+          impl::canKeepScalarIndexOnDevice(tensor, original_tensor))) {
       if (scalar_type != at::kByte && scalar_type != at::kBool) {
         result = impl::applySelect(
             result,
@@ -555,7 +640,8 @@ inline Tensor applySlicing(
     std::vector<Tensor>& outIndices,
     bool disable_slice_optimization,
     const at::Device& self_device,
-    const std::optional<SymIntArrayRef>& self_sizes) {
+    const std::optional<SymIntArrayRef>& self_sizes,
+    bool allow_device_index_for_setitem = false) {
   int64_t dim = 0;
   int64_t specified_dims = impl::count_specified_dimensions(indices);
 
@@ -584,7 +670,8 @@ inline Tensor applySlicing(
         /*outIndices=*/outIndices,
         /*disable_slice_optimization=*/disable_slice_optimization,
         /*original_tensor_device=*/self_device,
-        /*prev_dim_result_sizes=*/result_sizes);
+        /*prev_dim_result_sizes=*/result_sizes,
+        /*allow_device_index_for_setitem=*/allow_device_index_for_setitem);
   }
   return result;
 }
@@ -608,6 +695,58 @@ inline Tensor dispatch_index_put_(
   }
   return self.index_put_(
       impl::typeConvertIndices(self, std::move(indices)), value);
+}
+
+inline bool try_dispatch_masked_fill_(
+    Tensor& self,
+    std::vector<Tensor> indices,
+    const Scalar& value) {
+  // Remove trailing null elements from indices
+  while (!indices.empty() && !indices.back().defined()) {
+    indices.pop_back();
+  }
+  auto list_indices = impl::typeConvertIndices(self, std::move(indices));
+  auto [can_dispatch, mask] = impl::canDispatchToMaskedFill(self, list_indices);
+  if (can_dispatch) {
+    self.masked_fill_(mask, value);
+    return true;
+  }
+  return false;
+}
+
+inline bool try_dispatch_index_fill_(
+    Tensor& self,
+    const std::vector<Tensor>& indices,
+    const Scalar& value) {
+  const auto self_dtype = self.scalar_type();
+  if (isQIntType(self_dtype) || isFloat8Type(self_dtype)) {
+    return false;
+  }
+
+  // index_fill_ only supports advanced indexing with a single index tensor.
+  std::optional<int64_t> index_dim;
+  for (const auto i : c10::irange(indices.size())) {
+    if (!indices[i].defined()) {
+      continue;
+    }
+    if (index_dim.has_value()) {
+      return false;
+    }
+    index_dim = static_cast<int64_t>(i);
+  }
+
+  if (!index_dim.has_value()) {
+    return false;
+  }
+  const auto dim = *index_dim;
+  const Tensor& index = indices[dim];
+  if (index.scalar_type() != kLong || index.device() != self.device() ||
+      (index.dim() > 1 && !index.is_contiguous_or_false())) {
+    return false;
+  }
+
+  self.index_fill_(dim, index.dim() > 1 ? index.view({-1}) : index, value);
+  return true;
 }
 
 // NOTE [ Setting `disable_slice_optimization` when calling C++ tensor indexing
@@ -710,11 +849,15 @@ inline Tensor get_item(
 // torch/csrc/autograd/python_variable_indexing.cpp for "the assigned value is a
 // Tensor" case See NOTE [ Setting `disable_slice_optimization` when calling C++
 // tensor indexing functions from Python ]
+template <typename T>
 inline void set_item(
     const Tensor& self,
     const ArrayRef<TensorIndex>& indices,
-    const Tensor& value,
+    const T& value,
     bool disable_slice_optimization = false) {
+  static_assert(
+      std::is_same_v<T, Tensor> || std::is_same_v<T, Scalar>,
+      "T must be either at::Tensor or at::Scalar");
   at::Device self_device = self.device();
   SymIntArrayRef self_sizes = self.sym_sizes();
 
@@ -760,19 +903,28 @@ inline void set_item(
       tensorIndices,
       disable_slice_optimization,
       self_device,
-      self_sizes);
+      self_sizes,
+      impl::allowsScalarIndexOnDevice(value, self));
   if (tensorIndices.empty()) {
     copy_to(sliced, value);
     return;
   }
 
-  SymIntArrayRef valueSizes = value.sym_sizes();
+  if constexpr (std::is_same_v<T, Scalar>) {
+    if (try_dispatch_masked_fill_(sliced, tensorIndices, value) ||
+        try_dispatch_index_fill_(sliced, tensorIndices, value)) {
+      return;
+    }
+  }
+
+  Tensor valueTensor = asTensor(value, self);
+  SymIntArrayRef valueSizes = valueTensor.sym_sizes();
   SymIntArrayRef slicedValueSizes = slicePrefix1sSize(valueSizes);
   Tensor valuesSliced;
   if (!valueSizes.equals(slicedValueSizes)) {
-    valuesSliced = value.view_symint(slicedValueSizes);
+    valuesSliced = valueTensor.view_symint(slicedValueSizes);
   } else {
-    valuesSliced = value;
+    valuesSliced = std::move(valueTensor);
   }
   dispatch_index_put_(sliced, std::move(tensorIndices), valuesSliced);
   return;

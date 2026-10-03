@@ -88,7 +88,7 @@ static void THPEvent_dealloc(THPEvent* self) {
   THPEvent_dealloc_common(self);
 }
 
-static PyObject* THPEvent_get_device(THPEvent* self, void* unused) {
+static PyObject* THPEvent_get_device(THPEvent* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return THPDevice_New(self->event.device());
   END_HANDLE_TH_ERRORS
@@ -161,7 +161,7 @@ static PyObject* THPEvent_from_ipc_handle(
 
 static PyObject* THPEvent_ipc_handle(
     PyObject* _self [[maybe_unused]],
-    PyObject* noargs) {
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
@@ -207,7 +207,7 @@ static PyObject* THPEvent_wait(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPEvent_query(PyObject* _self, PyObject* noargs) {
+static PyObject* THPEvent_query(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPEvent*>(_self);
   return PyBool_FromLong(self->event.query());
@@ -226,7 +226,7 @@ static PyObject* THPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPEvent_synchronize(PyObject* _self, PyObject* noargs) {
+static PyObject* THPEvent_synchronize(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil{};
     auto self = reinterpret_cast<THPEvent*>(_self);
@@ -236,7 +236,7 @@ static PyObject* THPEvent_synchronize(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPEvent_evend_id(PyObject* _self, PyObject* noargs) {
+static PyObject* THPEvent_evend_id(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPEvent*>(_self);
   return PyLong_FromVoidPtr(self->event.eventId());
@@ -335,7 +335,5 @@ PyTypeObject THPEventType = {
 
 void THPEvent_init(PyObject* module) {
   THPEventClass = &THPEventType;
-  if (PyModule_AddType(module, &THPEventType) < 0) {
-    throw python_error();
-  }
+  TORCH_CHECK_PYTHON(PyModule_AddType(module, &THPEventType) >= 0);
 }

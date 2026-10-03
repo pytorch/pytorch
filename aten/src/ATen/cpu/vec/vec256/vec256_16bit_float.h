@@ -11,6 +11,8 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 
+#include <limits>
+
 #if defined(CPU_CAPABILITY_AVX2)
 #define SLEEF_STATIC_LIBS
 #include <sleef.h>
@@ -406,7 +408,8 @@ class Vectorized16 {
     cvt_to_fp32<T>(values, lo, hi);
     auto angle_lambda = [](__m256 values_2) {
       const auto zero_vec = _mm256_set1_ps(0.f);
-      const auto nan_vec = _mm256_set1_ps(NAN);
+      const auto nan_vec =
+          _mm256_set1_ps(std::numeric_limits<float>::quiet_NaN());
       const auto not_nan_mask = _mm256_cmp_ps(values_2, values_2, _CMP_EQ_OQ);
       const auto nan_mask = _mm256_cmp_ps(not_nan_mask, zero_vec, _CMP_EQ_OQ);
       const auto pi = _mm256_set1_ps(c10::pi<float>);

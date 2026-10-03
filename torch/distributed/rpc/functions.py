@@ -24,7 +24,7 @@ def async_execution(fn):
         However, this does not mean this decorator has to be outmost one when
         defining a function. For example, when combined with ``@staticmethod``
         or ``@classmethod``, ``@rpc.functions.async_execution`` needs to be the
-        inner decorator to allow the target function be recognized as a static
+        inner decorator to allow the target function to be recognized as a static
         or class function. This target function can still execute asynchronously
         because, when accessed, the static or class method preserves attributes
         installed by ``@rpc.functions.async_execution``.
