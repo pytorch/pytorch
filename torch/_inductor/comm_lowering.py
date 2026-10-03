@@ -7,6 +7,7 @@ from torch._inductor.utils import is_symbolic
 from torch.utils._ordered_set import OrderedSet
 
 from . import config, ir
+from .fx_utils import get_node_storage
 from .virtualized import V
 
 
@@ -174,6 +175,44 @@ def _should_lower_as_one_shot_all_reduce(
     )
 
 
+def _is_mutation_unobservable(node: torch.fx.Node, mutated: torch.fx.Node) -> bool:
+    """
+    Whether no alias of `mutated`'s storage is a graph input or is read after
+    `node`, other than through `node`'s result.
+    """
+    storage = get_node_storage(mutated)
+    if storage is None:
+        # Unknown storage, so aliasing can't be ruled out.
+        return False
+
+    later = OrderedSet[torch.fx.Node]()
+    n = node.next
+    while n.op != "root":
+        later.add(n)
+        n = n.next
+
+    # Collect node and all its transitive users; they read the new result.
+    from_result = OrderedSet[torch.fx.Node]([node])
+    stack = [node]
+    while stack:
+        for user in stack.pop().users:
+            if user not in from_result:
+                from_result.add(user)
+                stack.append(user)
+
+    for alias in node.graph.nodes:
+        if alias in from_result or get_node_storage(alias) != storage:
+            continue
+        if alias.op in ("placeholder", "get_attr"):
+            # The caller sees the mutation of a graph input or attribute.
+            return False
+        if any(user in later for user in alias.users):
+            # A later read through another alias expects the mutated value.
+            return False
+    # Only node's result can observe the mutation.
+    return True
+
+
 def _one_shot_all_reduce(inp: ir.TensorBox, reduce_op, group_name):
     realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)
     return pytree.tree_map(
@@ -259,11 +298,13 @@ def register_comm_lowerings():
         group_name: "torch.distributed.distributed_c10d.GroupName",
     ) -> ir.TensorBox:
         if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
-            ret = copy_(
-                inp,
-                _one_shot_all_reduce(inp, reduce_op, group_name),
-            )
-            mark_as_skip_wait(ret)
+            out = _one_shot_all_reduce(inp, reduce_op, group_name)
+            # Input storage is dead after this op, so skip the copy back into it.
+            node = V.graph.current_node
+            if _is_mutation_unobservable(node, node.all_input_nodes[0]):
+                mark_as_skip_wait(out)
+                return out
+            mark_as_skip_wait(copy_(inp, out))
             return inp
 
         # Lower as c10d.all_reduce_
