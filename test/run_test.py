@@ -228,7 +228,6 @@ if TEST_WITH_ROCM and isRocmArchAnyOf(("gfx1100",)):
 S390X_BLOCKLIST = [
     # these tests fail due to various reasons
     "dynamo/test_misc",
-    "inductor/test_cpu_repro",
     "inductor/test_cpu_select_algorithm",
     "inductor/test_torchinductor_codegen_dynamic_shapes",
     "lazy/test_meta_kernel",
