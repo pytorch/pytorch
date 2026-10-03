@@ -1214,6 +1214,20 @@
     CPU, CUDA, MPS, MTIA, XPU: bitwise_not_out
   tags: pointwise
 
+- func: bitwise_count(Tensor self) -> Tensor
+  device_check: NoCheck   # TensorIterator
+  structured_delegate: bitwise_count.out
+  variants: function, method
+  tags: pointwise
+
+- func: bitwise_count.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
+  device_check: NoCheck   # TensorIterator
+  structured: True
+  structured_inherits: TensorIteratorBase
+  dispatch:
+    CPU, CUDA, MPS: bitwise_count_out
+  tags: pointwise
+
 - func: copysign.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured: True

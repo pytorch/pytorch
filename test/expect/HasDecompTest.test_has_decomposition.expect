@@ -752,6 +752,8 @@ aten::bincount
 aten::bincount.out
 aten::binomial
 aten::binomial.out
+aten::bitwise_count
+aten::bitwise_count.out
 aten::blackman_window
 aten::blackman_window.out
 aten::blackman_window.periodic

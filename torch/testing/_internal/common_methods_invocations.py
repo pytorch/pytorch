@@ -11714,6 +11714,14 @@ def reference_sgn(x):
     return out
 
 
+def reference_bitwise_count(x):
+    # np.bitwise_count (NumPy >= 2.0) counts the set bits of |x| and returns uint8
+    if hasattr(np, "bitwise_count"):
+        return np.bitwise_count(x)
+    counts = np.frompyfunc(lambda v: abs(int(v)).bit_count(), 1, 1)(np.asarray(x))
+    return np.asarray(counts, dtype=np.uint8)
+
+
 def reference_sigmoid(x):
     # 'scipy.special.expit' not supported for the input types
     if x.dtype in [np.complex64, np.complex128]:
@@ -13090,6 +13098,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=[torch.float32]),
            ),
            sample_inputs_func=sample_inputs_block_diag),
+    UnaryUfuncInfo('bitwise_count',
+                   ref=reference_bitwise_count,
+                   dtypes=integral_types_and(torch.bool),
+                   supports_autograd=False),
     UnaryUfuncInfo('bitwise_not',
                    ref=np.bitwise_not,
                    dtypes=integral_types_and(torch.bool),
