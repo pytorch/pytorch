@@ -3367,44 +3367,105 @@ def forward(self, arg0_1, arg1_1):
             """aot_autograd() does not yet handle non-differentiable view input mutations. input 0 (a) and input 1 (b) share storage but are not differentiable views of each other.""",
         )
 
-    def test_merge_view_inputs_error_different_bases(self):
-        # Inference mode (no requires_grad) skips site-1, reaching site-2.
+    def test_merge_view_inputs_error_different_dtypes(self):
+        # Training mode: the inputs are differentiable views of one another, but with
+        # different dtypes.
         def make_inputs():
-            x = torch.randn(10)
-            y = torch.randn(10)
+            x = torch.randn(4, 2, requires_grad=True).add(1)
+            return [x, torch.view_as_complex(x)]
+
+        def fn(a, b):
+            a.mul_(2)
+            return b + 1
+
+        self._check_merge_view_inputs_error(
+            fn,
+            make_inputs,
+            """aot_autograd() does not yet handle input mutations on views with different dtypes when gradients are required: input 0 (a) is torch.float32 and input 1 (b) is torch.complex64.""",
+        )
+
+    def _check_aliased_input_mutations(
+        self, fn, make_root, make_inputs, backend="aot_eager"
+    ):
+        """Compile fn, and check its outputs and its mutations of the aliased inputs
+        make_inputs(root) against eager."""
+        root = make_root()
+        expected = fn(*make_inputs(root))
+        torch._dynamo.reset()
+        test_root = make_root()
+        actual = torch.compile(fn, backend=backend)(*make_inputs(test_root))
+        self.assertEqual(actual, expected)
+        self.assertEqual(test_root, root)
+
+    def test_merge_view_inputs_different_bases_inference(self):
+        # Without autograd, aliases that view different ._base tensors of one storage
+        # are regenerated off a synthetic base built from the storage.
+        def make_inputs(x):
+            y = torch.empty(10)
             y.set_(x.untyped_storage(), 0, (10,), (1,))
-            v1 = x[0:5]  # _base = x
-            v2 = y[0:5]  # _base = y (different object, same storage)
-            return [v1, v2]
+            return [x[2:7], y[0:5]]  # _base = x, _base = y
 
         def fn(a, b):
             a.mul_(2)
             return a + b
 
-        self._check_merge_view_inputs_error(
-            fn,
-            make_inputs,
-            """aot_autograd() does not yet handle non-differentiable view input mutations. Aliased inputs share storage but have different autograd ._base tensors: input 0 (a) and input 1 (b) have ._base fields that point to different tensors.""",
+        self._check_aliased_input_mutations(
+            fn, partial(torch.arange, 10.0), make_inputs
         )
 
-    def test_merge_view_inputs_error_mixed_base_states(self):
-        # Inference mode (no requires_grad) skips site-1, reaching site-3.
-        def make_inputs():
-            x = torch.randn(10)
-            v1 = x[0:5]  # _base = x
-            v2 = torch.empty(5)
-            v2.set_(x.untyped_storage(), 0, (5,), (1,))  # _base=None
-            return [v1, v2]
+    def test_merge_view_inputs_mixed_base_states_inference(self):
+        def make_inputs(x):
+            v = torch.empty(5)
+            v.set_(x.untyped_storage(), 3, (5,), (1,))  # _base=None
+            return [x[0:5], v]  # _base = x
 
         def fn(a, b):
             a.mul_(2)
             return a + b
 
-        self._check_merge_view_inputs_error(
-            fn,
-            make_inputs,
-            """aot_autograd() does not yet handle non-differentiable view input mutations. Aliased inputs share storage but have mixed autograd ._base states: ['input 0 (a)'] have ._base set, while ['input 1 (b)'] have ._base=None (and are not the synthetic base).""",
+        self._check_aliased_input_mutations(
+            fn, partial(torch.arange, 10.0), make_inputs
         )
+
+    def test_merge_view_inputs_different_dtypes_inference(self):
+        # Views of one byte buffer with different dtypes, as when caches share one
+        # allocation, are regenerated off a byte view of the storage.
+        def make_buffer():
+            return torch.arange(64, dtype=torch.int32).view(torch.int8)
+
+        cases = {
+            "same itemsize": lambda r: [
+                r[0:64].view(torch.float16),
+                r[32:96].view(torch.bfloat16),
+            ],
+            # The overlap is only visible in bytes: in elements, the float32 view
+            # spans [0, 16) and the float16 view [16, 48).
+            "different itemsizes": lambda r: [
+                r[0:64].view(torch.float32),
+                r[32:96].view(torch.float16),
+            ],
+            # Each view's ._base is its own view(dtype).
+            "reshaped views": lambda r: [
+                r[0:64].view(torch.float16).view(4, 8),
+                r[32:96].view(torch.bfloat16).view(4, 8),
+            ],
+            "non-contiguous": lambda r: [
+                r[0:64].view(torch.float32).view(4, 4).t(),
+                r[8:40],
+            ],
+        }
+
+        def fn(a, b):
+            a.mul_(2)
+            b.add_(1)
+            return a.sum() + b.sum()
+
+        for backend in ("aot_eager", "inductor"):
+            for name, make_inputs in cases.items():
+                with self.subTest(backend=backend, case=name):
+                    self._check_aliased_input_mutations(
+                        fn, make_buffer, make_inputs, backend=backend
+                    )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_mem_leak_from_save_for_bw(self):
@@ -9863,6 +9924,38 @@ def forward(self, primals_1, tangents_1):
         a_ref = a.clone()
         compiled_f(a, b, c)
         self.assertEqual(a, a_ref * 2)
+
+    @xfailIfTorchDynamo
+    def test_synthetic_base_codegen_storage_base_dtype(self):
+        from functorch.compile import nop
+        from torch._functorch.aot_autograd import aot_function
+
+        def f(a, b):
+            a.mul_(2)
+            return a.sum() + b.sum()
+
+        def make_inputs():
+            buffer = torch.arange(16, dtype=torch.int32).view(torch.int8)
+            # Each view's ._base is its own view(dtype): the wrapper must rebuild the
+            # byte synthetic base from the storage rather than reuse a ._base.
+            return (
+                buffer,
+                buffer[0:32].view(torch.float16).view(4, 4),
+                buffer[16:48].view(torch.float32).view(2, 4),
+            )
+
+        buffer, a, b = make_inputs()
+        expected = f(a, b)
+        test_buffer, test_a, test_b = make_inputs()
+        with capture_codegen_source("synthetic_base_wrapper") as captured:
+            actual = aot_function(f, nop)(test_a, test_b)
+
+        self.assertEqual(len(captured), 1)
+        source = captured[0]
+        self.assertIn("dtype=torch.uint8", source)
+        self.assertNotIn("._base", source)
+        self.assertEqual(actual, expected)
+        self.assertEqual(test_buffer, buffer)
 
     @xfailIfTorchDynamo
     def test_synthetic_base_codegen_base_is_none(self):

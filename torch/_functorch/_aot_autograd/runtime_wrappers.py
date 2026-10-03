@@ -1867,6 +1867,10 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
     base_groups: dict[int, list[int]] = field(
         default_factory=lambda: collections.defaultdict(list)
     )
+    # Synthetic bases that merge_view_inputs built off the shared storage although the
+    # aliases have different dtypes or some ._base, keyed by base index. The runtime
+    # wrapper must rebuild them the same way rather than reuse an alias's ._base.
+    storage_base_dtypes: dict[int, torch.dtype] = field(default_factory=dict)
     other_arg_indices: list[int] = field(default_factory=list)
 
     def pre_compile(
@@ -1953,6 +1957,13 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                 self.base_groups[base_idx].append(orig_idx)
         other_arg_entries.sort()
         self.other_arg_indices = [orig_idx for _, orig_idx in other_arg_entries]
+        for base_idx, group in self.base_groups.items():
+            synthetic_base = flat_args_with_synthetic_bases[base_idx]
+            aliases = [t for i in group if isinstance(t := flat_args[i], Tensor)]
+            if not any(t._base is synthetic_base for t in aliases) and any(
+                t.dtype != synthetic_base.dtype or t._base is not None for t in aliases
+            ):
+                self.storage_base_dtypes[base_idx] = synthetic_base.dtype
 
         self.aliased_arg_idx_with_metadata_mutations = (
             aliased_arg_idx_with_metadata_mutations
@@ -2065,6 +2076,14 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             for base_idx in sorted(base_groups):
                 group = base_groups[base_idx]
                 first_orig = group[0]
+                if base_idx in self.storage_base_dtypes:
+                    buf.writeline(
+                        f"_b = torch.empty((0,), dtype={self.storage_base_dtypes[base_idx]}, "
+                        f"device=args[{first_orig}].device)"
+                    )
+                    buf.writeline(f"_b.set_(args[{first_orig}].untyped_storage())")
+                    buf.writeline(f"_bases[{base_idx}] = _b")
+                    continue
                 if len(group) == 1:
                     indices_check = f"args[{first_orig}]._base is not None"
                     base_expr = f"args[{first_orig}]._base"
@@ -2216,6 +2235,13 @@ def merge_view_inputs(
             return False
         return True
 
+    def _views_of_one_base(aliases: list[torch.Tensor]) -> bool:
+        # True if every alias is either a view of the same ._base, or that base itself.
+        base = next((a._base for a in aliases if a._base is not None), None)
+        return base is not None and all(
+            a._base is base if a._base is not None else a is base for a in aliases
+        )
+
     def _format_input(idx: int) -> str:
         if (
             aot_config.aot_autograd_arg_pos_to_source is not None
@@ -2310,12 +2336,14 @@ def merge_view_inputs(
                         f"{_format_input(idx1)} and {_format_input(idx2)} share storage but are "
                         f"not differentiable views of each other."
                     )
-            # Regenerating views when reinterpreting complex / real tensors seems non-trivial,
-            # not handling for now
-            if not _same_dtype_views(view1, view2):
-                raise AssertionError(
-                    "aot_autograd() does not yet handle input mutations on views with different dtypes."
-                )
+                # Regenerating views when reinterpreting complex / real tensors seems non-trivial,
+                # not handling for now
+                if not _same_dtype_views(view1, view2):
+                    raise AssertionError(
+                        f"aot_autograd() does not yet handle input mutations on views with different "
+                        f"dtypes when gradients are required: {_format_input(idx1)} is {view1.dtype} "
+                        f"and {_format_input(idx2)} is {view2.dtype}."
+                    )
         non_none_bases = [
             (i, fwd_inputs[i]._base)
             for i in aliased_input_indices
@@ -2325,8 +2353,12 @@ def merge_view_inputs(
             fwd_inputs[i] for i in aliased_input_indices if fwd_inputs[i]._base is None
         ]
         synthetic_base_desc: AOTInput
-        if len(non_none_bases) == 0:
-            # Case where none of the aliases have a ._base
+        if len(non_none_bases) == 0 or (
+            is_inference
+            and not _views_of_one_base([fwd_inputs[i] for i in aliased_input_indices])
+        ):
+            # Case where none of the aliases have a ._base, or, when no gradients are required,
+            # where they don't all view one ._base (e.g. view(dtype) never sets ._base).
             # we generate a synthetic base without gradients, and generate views off of it
             # We hit this case when we have input tensors to the graph that share a storage,
             # but do not have a ._base field.
@@ -2351,10 +2383,19 @@ def merge_view_inputs(
             # to have incorrect sizes.
             example_idx = aliased_input_indices[0]
             example_alias = fwd_inputs[example_idx]
+            # Aliases that reinterpret the storage with different dtypes are regenerated
+            # off a byte view of it (see gen_alias_from_base).
+            if all(
+                fwd_inputs[i].dtype == example_alias.dtype
+                for i in aliased_input_indices
+            ):
+                synthetic_base_dtype = example_alias.dtype
+            else:
+                synthetic_base_dtype = torch.uint8
             # Note that this function is reused at both trace time and runtime.
             # At trace time, we're under a FakeMode so synthetic_base becomes a FakeTensor.
             synthetic_base = torch.empty(
-                (0,), dtype=example_alias.dtype, device=example_alias.device
+                (0,), dtype=synthetic_base_dtype, device=example_alias.device
             )
             # We don't actually have a convenient way of going from storage -> tensor,
             # So using set_() here (we suffer some minor overhead, but this case is rare).
