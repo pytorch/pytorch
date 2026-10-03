@@ -3903,7 +3903,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # Batch norm updates running statistics during training, but fake
         # tensor propagation does not bump their versions. AOT functionalizes
         # those input writes into deferred copies, so record their stream here.
-        if fn_ in (torch.nn.functional.batch_norm, torch.batch_norm):
+        # The native_batch_norm schema does not mark its input writes, either.
+        batch_norm_functions = (
+            torch.nn.functional.batch_norm,
+            torch.batch_norm,
+            torch.ops.aten.native_batch_norm.default,
+            torch.ops.aten._native_batch_norm_legit.default,
+        )
+        if fn_ in batch_norm_functions:
             training = kwargs.get("training")
             if training is None and len(args) > 5:
                 training = args[5]
