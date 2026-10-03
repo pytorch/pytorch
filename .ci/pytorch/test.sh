@@ -790,7 +790,7 @@ test_inductor_shard() {
 
   # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
   python test/run_test.py \
-    --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor inductor/test_cpu_select_algorithm \
+    --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor inductor/test_cpu_select_algorithm dynamo/test_benchmark_runner \
     --shard "$1" "$NUM_TEST_SHARDS" \
     --verbose
 
@@ -1018,6 +1018,11 @@ test_perf_for_dashboard() {
   local suite="$1"
   shift
 
+  if [[ "$DASHBOARD_TAG" == *prefill-true* ]] && [[ "$suite" == "huggingface" ]] && [[ "$DASHBOARD_TAG" != *inference-true* ]]; then
+    echo "Hugging Face prefill benchmarking requires inference-true"
+    return 1
+  fi
+
   local backend=inductor
   local modes=()
   if [[ "$DASHBOARD_TAG" == *training-true* ]]; then
@@ -1169,6 +1174,27 @@ test_perf_for_dashboard() {
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs --batch-invariant "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_batch_invariant_accuracy_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+      fi
+      if [[ "$DASHBOARD_TAG" == *prefill-true* ]] && [[ "$suite" == "huggingface" ]] && [[ "$mode" == "inference" ]] && [[ "$device" == cuda* ]]; then
+        local prefill_args=(--hf-inference-mode prefill --prompt-length 1000 --batch-size 1)
+        local prefill_models="${TORCHBENCH_ONLY_MODELS:-}"
+        if [[ "$device" == "cuda_b200" ]]; then
+          prefill_models="Qwen/Qwen3-0.6B,Qwen/Qwen3.5-0.8B"
+        fi
+        local prefill_no_cudagraphs_profiler_flags=()
+        local prefill_with_cudagraphs_profiler_flags=()
+        if [[ "${EXPORT_PROFILER_TRACE:-0}" == "1" && "$target" == "performance" ]]; then
+          prefill_no_cudagraphs_profiler_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_prefill_no_cudagraphs_${suite}_${dtype}_${mode}_${device}")
+          prefill_with_cudagraphs_profiler_flags=(--export-profiler-trace --profiler-trace-name "$TEST_REPORTS_DIR/profiler_traces/${backend}_prefill_with_cudagraphs_${suite}_${dtype}_${mode}_${device}")
+        fi
+        TORCHBENCH_ONLY_MODELS="$prefill_models" $TASKSET python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --disable-cudagraphs \
+            "${prefill_args[@]}" "$@" "${prefill_no_cudagraphs_profiler_flags[@]}" \
+            --output "$TEST_REPORTS_DIR/${backend}_prefill_no_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
+        TORCHBENCH_ONLY_MODELS="$prefill_models" $TASKSET python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" \
+            "${prefill_args[@]}" "$@" "${prefill_with_cudagraphs_profiler_flags[@]}" \
+            --output "$TEST_REPORTS_DIR/${backend}_prefill_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
     done
   done
