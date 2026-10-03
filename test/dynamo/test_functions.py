@@ -7543,12 +7543,16 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             return (
                 "pending_attr" in dir(helper),
                 "pending_attr" in dir(obj.method),
+                "__code__" in dir(obj.method),
+                "__func__" in dir(obj.method),
                 x + 1,
             )
 
-        on_function, on_method, out = fn(torch.tensor(2))
+        on_function, on_method, method_has_code, method_has_func, out = fn(torch.tensor(2))
         self.assertTrue(on_function)
         self.assertTrue(on_method)
+        self.assertFalse(method_has_code)
+        self.assertTrue(method_has_func)
         self.assertEqual(out, torch.tensor(3))
 
     def test_functional_compile(self):
