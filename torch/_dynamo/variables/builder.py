@@ -5530,7 +5530,14 @@ class SourcelessBuilder:
             return ConstantLikeVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             try:
+                if value.runtime_format:
+                    # Validate the scalar type without specializing its value.
+                    fmt = value.fmt_var.as_python_constant()
+                    fmt.format(value.sym_node_var.python_type()())
+                    return StringFormatVariable(fmt, [value.sym_node_var], {})
                 return ConstantVariable.create(str(value))
+            except ValueError as e:
+                raise_observed_exception(ValueError, tx, args=list(e.args))
             # If we cannot create due to error in str() call, we should
             # try explicitly for string format variable
             except (

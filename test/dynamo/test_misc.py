@@ -20710,6 +20710,117 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
                 self.assertEqual(got, expected)
 
 
+class SymbolicNumericFormattingTests(torch._dynamo.test_case.TestCase):
+    @parametrize("floating", (False, True))
+    def test_numeric_format_preserves_dynamic_range(self, device, floating):
+        def fn(x):
+            text = (
+                f"ratio={x.shape[0] / 7.0:.3f}"
+                if floating
+                else f"size={x.shape[0]:04d}"
+            )
+            return x.sin(), text
+
+        counter = torch._dynamo.testing.CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+        for size in range(3, 13):
+            x = torch.randn(size, device=device)
+            torch._dynamo.mark_dynamic(x, 0, min=3, max=16)
+            self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_character_format_keeps_specialization(self, device):
+        def fn(x):
+            return x.sin(), f"{x.shape[0]:c}"
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+        for size in (3, 7, 3):
+            x = torch.randn(size, device=device)
+            self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 2)
+
+    @parametrize("spec", ("d", "04d", "x", "+d"))
+    def test_issue_197093_symint(self, device, spec):
+        def fn(x):
+            return x.sin(), f"size={x.shape[0]:{spec}}; again={x.shape[0]:04d}"
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+        for size in (3, 7, 3):
+            x = torch.randn(size, device=device)
+            self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("spec", (".3f", "+08.2f", "e"))
+    def test_issue_197093_symfloat(self, device, spec):
+        def fn(x):
+            return x.cos(), f"ratio={x.shape[0] / 7.0:{spec}}"
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+        for size in (3, 7, 3):
+            x = torch.randn(size, device=device)
+            self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("conversion", ("s", "r", "a"))
+    def test_issue_197093_conversion(self, device, conversion):
+        def fn(x):
+            if conversion == "s":
+                text = f"{x.shape[0]!s:>6}"
+            elif conversion == "r":
+                text = f"{x.shape[0] / 7.0!r:>24}"
+            else:
+                text = f"{x.shape[0]!a:>6}"
+            return x.sin(), text
+
+        compiled = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        for size in (3, 7, 3):
+            x = torch.randn(size, device=device)
+            self.assertEqual(compiled(x), fn(x))
+
+    def test_issue_197093_unused_format(self, device):
+        def fn(x):
+            f"{x.shape[0]:04d}"
+            return x.sin()
+
+        counter = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=counter, dynamic=True, fullgraph=True)
+        # Formatting remains lazy when Dynamo discards its result.
+        for size in (3, 7, 3):
+            x = torch.randn(size, device=device)
+            self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(counter.frame_count, 1)
+
+    @parametrize("conversion", (False, True))
+    def test_issue_197093_observed_value_error(self, device, conversion):
+        def fn(x):
+            try:
+                text = f"{x.shape[0]!s:d}" if conversion else f"{x.shape[0]:q}"
+                # Realize the lazy string while the exception handler is active.
+                text += ""
+            except ValueError:
+                text = "invalid format"
+            return x.cos(), text
+
+        compiled = torch.compile(fn, backend="eager", dynamic=True, fullgraph=True)
+        x = torch.randn(3, device=device)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_issue_197093_uncaught_value_error(self, device):
+        def fn(x):
+            return x.sin(), f"{x.shape[0]:q}"
+
+        compiled = torch.compile(fn, backend="eager", dynamic=True)
+        with self.assertRaisesRegex(ValueError, "Unknown format code"):
+            compiled(torch.randn(3, device=device))
+
+
+instantiate_device_type_tests(
+    SymbolicNumericFormattingTests, globals(), only_for=("cpu", "cuda")
+)
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
