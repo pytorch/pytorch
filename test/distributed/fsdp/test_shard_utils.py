@@ -6,8 +6,9 @@ from torch.distributed.fsdp._shard_utils import (
     _create_chunk_dtensor,
     _create_chunk_sharded_tensor,
 )
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_fsdp import FSDPTest
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import HardwareClassification, run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
@@ -15,10 +16,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-
-
 class TestShardUtilsDistributed(FSDPTest):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -26,10 +26,10 @@ class TestShardUtilsDistributed(FSDPTest):
     def _create_tensor(self, *size):
         # Keep everything deterministic.
         torch.manual_seed(0)
-        return torch.rand(*size).to(device=device_type)
+        return torch.rand(*size).to(device=self.device_type)
 
     @skip_if_lt_x_gpu(2)
-    def test_create_chunk_sharded_tensor(self):
+    def test_create_chunk_sharded_tensor(self, device):
         for size in ((1,), (1, 6), (12,), (12, 6), (25,), (25, 6)):
             tensor = self._create_tensor(*size)
 
@@ -41,7 +41,9 @@ class TestShardUtilsDistributed(FSDPTest):
                 _get_default_group(),
             )
             output = (
-                torch.empty(*size).to(device=device_type) if self.rank == 0 else None
+                torch.empty(*size).to(device=self.device_type)
+                if self.rank == 0
+                else None
             )
             sharded_tensor.gather(0, output)
             if self.rank == 0:
@@ -49,6 +51,8 @@ class TestShardUtilsDistributed(FSDPTest):
 
 
 class TestShardUtilsDistributedDTensor(DTensorTestBase):
+    hw_classification = HardwareClassification.ACCELERATOR
+
     @property
     def world_size(self):
         return 2
@@ -56,11 +60,11 @@ class TestShardUtilsDistributedDTensor(DTensorTestBase):
     def _create_tensor(self, *size):
         # Keep everything deterministic.
         torch.manual_seed(0)
-        return torch.rand(*size).to(device=device_type)
+        return torch.rand(*size).to(device=self.device_type)
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_create_chunk_dtensor(self):
+    def test_create_chunk_dtensor(self, device):
         device_mesh = self.build_device_mesh()
 
         for size in ((1,), (1, 6), (12,), (12, 6), (25,), (25, 6)):
@@ -76,5 +80,11 @@ class TestShardUtilsDistributedDTensor(DTensorTestBase):
                 self.assertEqual(self.rank >= len(tensor_chunks), True)
 
 
+instantiate_device_type_tests(
+    TestShardUtilsDistributed, globals(), except_for="cpu", allow_xpu=True
+)
+instantiate_device_type_tests(
+    TestShardUtilsDistributedDTensor, globals(), except_for="cpu", allow_xpu=True
+)
 if __name__ == "__main__":
     run_tests()
