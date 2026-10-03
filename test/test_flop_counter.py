@@ -15,6 +15,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    TEST_CUDA,
 )
 from torch.testing._internal.common_device_type import (
     e4m3_type,
@@ -1808,6 +1809,36 @@ class TestSkipUnsupported(TestCase):
         )
         self.assertEqual(len(mode.get_unsupported_ops()), 0)
 
+    def test_flex_attention_hop_backward_end_to_end(self):
+        """flex_attention_backward takes the same executing branch as forward."""
+        from torch.nn.attention.flex_attention import (
+            _create_empty_block_mask,
+            _identity,
+        )
+
+        q = torch.randn(2, 4, 128, 64, requires_grad=True)
+        k = torch.randn(2, 4, 128, 64, requires_grad=True)
+        v = torch.randn(2, 4, 128, 64, requires_grad=True)
+        block_mask = _create_empty_block_mask(q, k)
+
+        with FlopCounterMode() as mode:
+            out = torch.ops.higher_order.flex_attention(
+                q, k, v, _identity, block_mask.as_tuple(), 0.125, {}
+            )
+            out[0].sum().backward()
+
+        self.assertIsInstance(out, tuple)
+        self.assertEqual(out[0].shape, q.shape)
+        self.assertIsNotNone(q.grad)
+        self.assertIsNotNone(k.grad)
+        self.assertIsNotNone(v.grad)
+        self.assertEqual(
+            mode.get_total_flops(),
+            sdpa_flop_count(q.shape, k.shape, v.shape)
+            + sdpa_backward_flop_count(q.shape, q.shape, k.shape, v.shape),
+        )
+        self.assertEqual(len(mode.get_unsupported_ops()), 0)
+
     def test_registered_hop_returns_output_not_none(self):
         """Registered HOPs return their actual output. Guards against the bug
         where _handle_higher_order_ops passed None to _count_flops instead of
@@ -1925,6 +1956,177 @@ class TestSkipUnsupported(TestCase):
                 op(x)
 
         self.assertEqual(mode.get_total_flops(), 999)
+
+
+class TestFlexAttentionPublicAPI(TestCase):
+    """Public flex_attention API under dispatch modes, and Bkv=1 flop formulas."""
+
+    def test_flex_attention_public_api_end_to_end(self):
+        """The call from issue #134385 runs and counts FLOPs under FlopCounterMode."""
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q = torch.randn(2, 4, 128, 64)
+        k = torch.randn(2, 4, 128, 64)
+        v = torch.randn(2, 4, 128, 64)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with FlopCounterMode() as mode:
+                out = flex_attention(q, k, v)
+
+        self.assertEqual(out.shape, q.shape)
+        self.assertEqual(
+            mode.get_total_flops(), sdpa_flop_count(q.shape, k.shape, v.shape)
+        )
+        self.assertEqual(len(mode.get_unsupported_ops()), 0)
+
+    def test_flex_attention_broadcast_kv_batch(self):
+        """Bkv=1 broadcast counts as expanded KV, including with GQA."""
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        q = torch.randn(4, 8, 128, 64)
+        k = torch.randn(1, 2, 128, 64)
+        v = torch.randn(1, 2, 128, 64)
+        block_mask = create_block_mask(
+            lambda b, h, qi, ki: qi >= ki, 4, 8, 128, 128, device="cpu"
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with FlopCounterMode() as mode:
+                flex_attention(q, k, v, block_mask=block_mask, enable_gqa=True)
+
+        kv = (4, *k.shape[1:])
+        self.assertEqual(mode.get_total_flops(), sdpa_flop_count(q.shape, kv, kv))
+        self.assertEqual(len(mode.get_unsupported_ops()), 0)
+
+    def test_flex_attention_flop_formula_unbacked_batch(self):
+        """The formula must not guard on an unbacked batch size."""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+        from torch.utils.flop_counter import flop_registry
+
+        fwd_formula = flop_registry[torch.ops.higher_order.flex_attention]
+        shape_env = ShapeEnv()
+        with FakeTensorMode(shape_env=shape_env):
+            b = shape_env.create_unbacked_symint()
+            q = torch.empty(b, 4, 128, 64)
+            k = torch.empty(b, 4, 128, 64)
+            k1 = torch.empty(1, 4, 128, 64)
+            expected = sdpa_flop_count(q.shape, k.shape, k.shape)
+            self.assertEqual(fwd_formula(q, k, k), expected)
+            self.assertEqual(fwd_formula(q, k1, k1), expected)
+
+    def test_flex_attention_flash_backend_lse_under_flop_counter(self):
+        """Eager path lse must be natural log even with BACKEND=FLASH."""
+        from torch.nn.attention.flex_attention import AuxRequest, flex_attention
+
+        q = torch.randn(2, 4, 128, 64)
+        k = torch.randn(2, 4, 128, 64)
+        v = torch.randn(2, 4, 128, 64)
+        kernel_options = {"BACKEND": "FLASH"}
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with FlopCounterMode():
+                _, aux = flex_attention(
+                    q,
+                    k,
+                    v,
+                    kernel_options=kernel_options,
+                    return_aux=AuxRequest(lse=True),
+                )
+
+        scores = (q @ k.transpose(-2, -1)) * q.shape[-1] ** -0.5
+        self.assertEqual(aux.lse, torch.logsumexp(scores, dim=-1))
+
+    @unittest.skipIf(not TEST_CUDA, "flex_attention backward requires CUDA")
+    def test_flex_attention_broadcast_kv_batch_backward(self):
+        """Bkv=1 broadcast is handled by the backward formula too."""
+        from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+
+        q = torch.randn(4, 8, 128, 64, device="cuda", requires_grad=True)
+        k = torch.randn(1, 8, 128, 64, device="cuda", requires_grad=True)
+        v = torch.randn(1, 8, 128, 64, device="cuda", requires_grad=True)
+        block_mask = create_block_mask(
+            lambda b, h, qi, ki: qi >= ki, 4, 8, 128, 128, device="cuda"
+        )
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            with FlopCounterMode() as mode:
+                flex_attention(q, k, v, block_mask=block_mask).sum().backward()
+
+        kv = (4, *k.shape[1:])
+        fwd = sdpa_flop_count(q.shape, kv, kv)
+        bwd = sdpa_backward_flop_count(q.shape, q.shape, kv, kv)
+        self.assertEqual(mode.get_total_flops(), fwd + bwd)
+
+    @unittest.skipIf(not TEST_CUDA, "flex_attention backward requires CUDA")
+    def test_flex_attention_score_mod_grad_under_debug_mode(self):
+        """DebugMode is compilable, so score_mod captures keep their gradients."""
+        from torch.nn.attention.flex_attention import flex_attention
+        from torch.utils._debug_mode import DebugMode
+
+        q = torch.randn(2, 2, 128, 16, device="cuda", requires_grad=True)
+        k = torch.randn(2, 2, 128, 16, device="cuda")
+        v = torch.randn(2, 2, 128, 16, device="cuda")
+        bias = torch.randn(128, device="cuda", requires_grad=True)
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[kv_idx]
+
+        with DebugMode():
+            out = flex_attention(q, k, v, score_mod=score_mod)
+        out.sum().backward()
+
+        self.assertIsNotNone(bias.grad)
+        self.assertIsNotNone(q.grad)
+
+    @unittest.skipIf(not TEST_CUDA, "flex_attention backward requires CUDA")
+    def test_flex_attention_score_mod_grad_warns_under_flop_counter(self):
+        """Under FlopCounterMode score_mod captures get no grad, with a warning."""
+        import torch.nn.attention.flex_attention as fa
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q = torch.randn(2, 2, 128, 16, device="cuda", requires_grad=True)
+        k = torch.randn(2, 2, 128, 16, device="cuda")
+        v = torch.randn(2, 2, 128, 16, device="cuda")
+        bias = torch.randn(128, device="cuda", requires_grad=True)
+
+        def score_mod(score, b, h, q_idx, kv_idx):
+            return score + bias[kv_idx]
+
+        fa._WARNINGS_SHOWN.discard("flex_attention_eager_closure_grads")
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            with FlopCounterMode() as mode:
+                out = flex_attention(q, k, v, score_mod=score_mod)
+        out.sum().backward()
+
+        self.assertGreater(mode.get_total_flops(), 0)
+        self.assertIsNotNone(q.grad)
+        self.assertIsNone(bias.grad)
+        self.assertTrue(any("will not receive gradients" in str(w.message) for w in ws))
+
+    def test_flex_attention_no_grad_warning_without_score_mod(self):
+        """Without a score_mod there is nothing to lose, so no gradient warning."""
+        import torch.nn.attention.flex_attention as fa
+        from torch.nn.attention.flex_attention import flex_attention
+
+        q = torch.randn(2, 4, 128, 64)
+        k = torch.randn(2, 4, 128, 64)
+        v = torch.randn(2, 4, 128, 64)
+
+        fa._WARNINGS_SHOWN.discard("flex_attention_eager_closure_grads")
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            with FlopCounterMode():
+                flex_attention(q, k, v)
+
+        self.assertFalse(
+            any("will not receive gradients" in str(w.message) for w in ws)
+        )
 
 
 if __name__ == "__main__":
