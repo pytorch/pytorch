@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import ast
 import functools
 import os
 import sys
@@ -417,9 +418,10 @@ class TestTritonHeuristics(TestCase):
         # raw CompilationError.
         args = self._get_cos_kernel_caching_autotuner_args()
         autotuner = CachingAutotuner(**args)
+        dummy_node = ast.parse("x = 1").body[0]
 
         def raise_compilation_error(self, cfg):
-            raise CompilationError("shape mismatch in generated triton")
+            raise CompilationError("", dummy_node, "shape mismatch in generated triton")
 
         with patch.object(
             CachingAutotuner, "_precompile_config", raise_compilation_error
@@ -436,10 +438,12 @@ class TestTritonHeuristics(TestCase):
         autotuner = CachingAutotuner(**args)
         bad_config = args["configs"][0]
         good_result = MagicMock()
+        dummy_node = ast.parse("x = 1").body[0]
 
         def precompile_config(self, cfg):
             if cfg is bad_config:
-                raise CompilationError("shape mismatch in generated triton")
+                msg = "shape mismatch in generated triton"
+                raise CompilationError("", dummy_node, msg)
             return good_result
 
         with patch.object(CachingAutotuner, "_precompile_config", precompile_config):
