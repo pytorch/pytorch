@@ -8584,6 +8584,35 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (x,))
 
+    def test_neg_view_input(self):
+        # https://github.com/pytorch/pytorch/issues/145093: generated kernels read
+        # storage directly, so they used to drop an input's lazy negative bit.
+        # self.common clones its inputs, which would resolve the bit, so compare
+        # against eager directly.
+        def fn(x, y):
+            return x + y, (x * y).sum()
+
+        x = torch.randn(8, device=self.device)._neg_view()
+        y = torch.randn(8, device=self.device)
+        self.assertEqual(torch.compile(fn)(x, y), fn(x, y))
+
+        x_grad = x.detach().requires_grad_()
+        x_ref = x.detach().requires_grad_()
+        torch.compile(fn)(x_grad, y)[1].backward()
+        fn(x_ref, y)[1].backward()
+        self.assertEqual(x_grad.grad, x_ref.grad)
+
+        def mutate(x):
+            x.mul_(2)
+            return x + 1
+
+        base = torch.randn(8, device=self.device)
+        base_ref = base.clone()
+        out = torch.compile(mutate)(base._neg_view())
+        out_ref = mutate(base_ref._neg_view())
+        self.assertEqual(out, out_ref)
+        self.assertEqual(base, base_ref)
+
     def test_complex_conv2d_conj(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/171665
         # Tests that complex convolution works on conjugated inputs when compiled.

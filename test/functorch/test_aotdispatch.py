@@ -482,6 +482,77 @@ def skipIfDynamoInput(reason):
 
 
 class TestAOTAutograd(AOTTestCase):
+    def _no_neg_input_compiler(self, gm, example_inputs):
+        # Backends read storage directly and ignore the lazy negative bit
+        # (https://github.com/pytorch/pytorch/issues/145093), so AOTAutograd
+        # must never hand them an input that carries it.
+        def check(tensors):
+            for t in tensors:
+                if isinstance(t, torch.Tensor):
+                    self.assertFalse(t.is_neg())
+
+        check(example_inputs)
+
+        def compiled(*args):
+            check(args)
+            return gm.forward(*args)
+
+        return make_boxed_func(compiled)
+
+    def test_neg_view_inputs_resolved_before_backend(self):
+        def f(x, w):
+            return (x * w).sin().sum()
+
+        x_ref = torch.randn(4)._neg_view().requires_grad_()
+        w_ref = torch.randn(4, requires_grad=True)
+        f(x_ref, w_ref).backward()
+
+        x = x_ref.detach().requires_grad_()
+        w = w_ref.detach().requires_grad_()
+        self.assertTrue(x.is_neg())
+        compiled_f = aot_function(
+            f,
+            fw_compiler=self._no_neg_input_compiler,
+            bw_compiler=self._no_neg_input_compiler,
+        )
+        out = compiled_f(x, w)
+        self.assertEqual(out, f(x_ref, w_ref))
+        out.backward()
+        self.assertEqual(x.grad, x_ref.grad)
+        self.assertEqual(w.grad, w_ref.grad)
+
+    def test_neg_view_input_mutation_and_alias(self):
+        def f(x):
+            x.mul_(2)
+            return x[1:], x + 1
+
+        # keep_inference_input_mutations=True mutates the resolved copy in the
+        # graph, False goes through the runtime mutation epilogue.
+        for keep_mutations in (True, False):
+            base_ref = torch.arange(4.0)
+            outs_ref = f(base_ref._neg_view())
+            base = torch.arange(4.0)
+            compiled_f = aot_function(
+                f,
+                fw_compiler=self._no_neg_input_compiler,
+                keep_inference_input_mutations=keep_mutations,
+            )
+            outs = compiled_f(base._neg_view())
+            self.assertEqual(base, base_ref)
+            self.assertEqual(outs, outs_ref)
+            # The view output still aliases the user's tensor, negative bit included.
+            self.assertTrue(outs[0].is_neg())
+            self.assertEqual(outs[0].data_ptr(), base[1:].data_ptr())
+
+    def test_conj_view_input_left_to_traced_graph(self):
+        # Tracing records the conjugation of a conj-bit input as explicit ops
+        # (Tensor.imag emits _conj), so the input must reach the graph as is.
+        def f(x):
+            return x.imag * 2
+
+        x = torch.randn(4, dtype=torch.complex64).conj()
+        self.assertEqual(aot_function(f, nop)(x), f(x))
+
     def run_autograd(
         self,
         f: Callable,
