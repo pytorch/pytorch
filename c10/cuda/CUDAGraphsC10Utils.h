@@ -92,18 +92,47 @@ struct CaptureInfo {
   cudaGraph_t graph;
 };
 
-inline CaptureInfo captureInfoMayInitCtx(cudaStream_t stream) {
+inline CaptureInfo captureInfoMayInitCtx(
+    cudaStream_t stream,
+    const cudaGraphNode_t** dependencies = nullptr,
+    size_t* num_dependencies = nullptr) {
   cudaStreamCaptureStatus status{};
   CaptureId_t capture_id = 0;
   cudaGraph_t graph = nullptr;
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
   C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
-      stream, &status, &capture_id, &graph, nullptr, nullptr, nullptr));
+      stream,
+      &status,
+      &capture_id,
+      &graph,
+      dependencies,
+      nullptr,
+      num_dependencies));
 #else
   C10_CUDA_CHECK(cudaStreamGetCaptureInfo_v2(
-      stream, &status, &capture_id, &graph, nullptr, nullptr));
+      stream, &status, &capture_id, &graph, dependencies, num_dependencies));
 #endif
   return {CaptureStatus(status), capture_id, graph};
+}
+
+inline void setCaptureDependencies(
+    cudaStream_t stream,
+    cudaGraphNode_t* dependencies,
+    size_t num_dependencies) {
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
+  C10_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
+      stream,
+      dependencies,
+      nullptr,
+      num_dependencies,
+      cudaStreamSetCaptureDependencies));
+#else
+  C10_CUDA_CHECK(cudaStreamUpdateCaptureDependencies(
+      stream,
+      dependencies,
+      num_dependencies,
+      cudaStreamSetCaptureDependencies));
+#endif
 }
 
 template <typename T>
