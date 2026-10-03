@@ -3556,6 +3556,41 @@ class CommonTemplate:
         a = torch.rand(())
         self.common(fn, (a,))
 
+    @parametrize("dtype", (torch.uint8, torch.int32, torch.int64, torch.bool))
+    @parametrize("shape", ((), (4,)))
+    @parametrize("dynamic", (False, True))
+    def test_logcumsumexp_unsupported_dtype(self, dtype, shape, dynamic):
+        # https://github.com/pytorch/pytorch/issues/197807
+        # logcumsumexp only supports floating point and complex dtypes. Eager
+        # raises NotImplementedError; under torch.compile the meta kernel must
+        # reject the input while tracing (TorchRuntimeError) rather than letting
+        # inductor compile it or graph breaking to eager.
+        msg = "input dtype should be either floating point or complex"
+
+        def fn(x):
+            return x.logcumsumexp(0)
+
+        def fn_out(x, out):
+            return torch.logcumsumexp(x, 0, out=out)
+
+        x = torch.zeros(shape, dtype=dtype, device=self.device)
+
+        with self.assertRaisesRegex(NotImplementedError, msg):
+            fn(x)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(torch._dynamo.exc.TorchRuntimeError, msg):
+            torch.compile(fn, dynamic=dynamic, fullgraph=True)(x)
+
+        # out= is validated against the input dtype, so a floating point out
+        # must not make an integer input acceptable.
+        for out_dtype in (dtype, torch.float32):
+            out = torch.empty(shape, dtype=out_dtype, device=self.device)
+            with self.assertRaisesRegex(NotImplementedError, msg):
+                fn_out(x, out)
+            torch._dynamo.reset()
+            with self.assertRaisesRegex(torch._dynamo.exc.TorchRuntimeError, msg):
+                torch.compile(fn_out, dynamic=dynamic, fullgraph=True)(x, out)
+
     def test_clamp(self):
         def fn(a, b):
             return (a.clamp(-0.1, 0.1), b.clamp(0), torch.clamp(a + b, max=0))
