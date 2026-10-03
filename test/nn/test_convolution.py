@@ -2097,6 +2097,19 @@ class TestConvolutionNNDevice(NNTestCase):
         self.assertEqual(gx_expect, gx_actual)
         self.assertEqual(gy_expect, gy_actual)
 
+    @dtypes(torch.float, torch.half, torch.bfloat16)
+    @parametrize_test(
+        "stride,dilation,groups", [(1, 3, 2), (2, 1, 1), (3, 2, 2), (1, 2, 16)]
+    )
+    def test_conv1d_long_input(self, device, dtype, stride, dilation, groups):
+        # length + padding exceeds matmul2d's uint16 row-stride limit on M1/M2, which must take the conv3d fallback
+        x = torch.randint(-2, 3, (2, 16, 2**17 + 3), device=device, dtype=dtype)
+        w = torch.randint(-2, 3, (32, 16 // groups, 3), device=device, dtype=dtype)
+        b = torch.randint(-2, 3, (32,), device=device, dtype=dtype)
+        args = (stride, 2, dilation, groups)
+        expected = F.conv1d(x.cpu().double(), w.cpu().double(), b.cpu().double(), *args)
+        self.assertEqual(F.conv1d(x, w, b, *args), expected, exact_dtype=False)
+
     @unittest.skipIf(not TEST_SCIPY, "Scipy required for the test.")
     @dtypes(torch.float, torch.cfloat)
     @parametrize_test("mode", ("valid", "same"))
