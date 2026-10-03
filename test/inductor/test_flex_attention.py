@@ -7602,6 +7602,19 @@ class GraphModule(torch.nn.Module):
 
     @supported_platform
     @skip_on_cuda
+    @skip_on_xpu
+    @skip_on_mps
+    @dtypes(torch.bfloat16, torch.float16)
+    def test_cpu_seqlen_with_odd_tail_block(self, device, dtype):
+        qkv = [torch.randn(B, H, 299, D, device=device, dtype=dtype) for _ in range(3)]
+        block_mask = create_block_mask(noop_mask, B, H, 299, 299, device=device)
+        attention = functools.partial(flex_attention, block_mask=block_mask)
+        golden_out = attention(*query_key_value_clones(*qkv, torch.float64))
+        ref_out = attention(*qkv)
+        self._check_out(golden_out, ref_out, torch.compile(attention)(*qkv))
+
+    @supported_platform
+    @skip_on_cuda
     def test_cpu_error_message_return_lse(self, device):
         make_tensor = functools.partial(
             torch.randn,
