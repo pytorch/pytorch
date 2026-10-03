@@ -6770,10 +6770,12 @@ def meta__scaled_dot_product_attention_math_for_mps(
             batch_size = 1
             for i in range(x.dim() - 3):
                 batch_size *= x.shape[i]
-            return x.view(batch_size, x.size(-3), x.size(-2), x.size(-1)), True
+            return x.reshape(batch_size, x.size(-3), x.size(-2), x.size(-1)), True
         else:
             return x, False
 
+    batch_shape = torch.broadcast_shapes(*(t.shape[:-3] for t in (query, key, value)))
+    query = query.expand(*batch_shape, *query.shape[-3:])
     q_, unsqueezed = ensure_4d(query)
     k_, _ = ensure_4d(key)
     v_, _ = ensure_4d(value)
