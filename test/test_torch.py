@@ -1541,6 +1541,99 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(grad, input.grad, atol=0, rtol=0)
                 input.grad = None
 
+    # The generic trilinear test covers contiguous double precision and the
+    # channels-last double precision vector path under deterministic mode.
+    @onlyCUDA
+    @skipIfRocm
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @parametrize("dtype, channels", [
+        (torch.float32, 3),
+        (torch.float16, 8),
+        (torch.bfloat16, 8),
+        (torch.float32, 8),
+    ])
+    def test_deterministic_interpolate_trilinear(self, device, dtype, channels):
+        from torch._decomp import decompositions
+
+        input = torch.randn(
+            1, channels, 3, 4, 5, device=device, dtype=dtype
+        ).contiguous(memory_format=torch.channels_last_3d).requires_grad_()
+        output_grad = torch.randn(
+            1, channels, 6, 7, 8, device=device, dtype=dtype
+        ).contiguous(memory_format=torch.channels_last_3d)
+        atol, rtol = {
+            torch.float16: (1e-2, 1e-2),
+            torch.bfloat16: (5e-2, 5e-2),
+            torch.float32: (1e-5, 1e-5),
+        }[dtype]
+
+        grad = None
+        with DeterministicGuard(True), unittest.mock.patch.object(
+            decompositions,
+            "_upsample_linear_vec",
+            side_effect=AssertionError("CUDA should use the native deterministic kernel"),
+        ):
+            for _ in range(2):
+                input.grad = None
+                output = torch.nn.functional.interpolate(
+                    input, size=(6, 7, 8), mode="trilinear", align_corners=False)
+                output.backward(output_grad)
+                if grad is None:
+                    grad = input.grad.detach().clone()
+                else:
+                    self.assertEqual(grad, input.grad, atol=0, rtol=0)
+
+        self.assertTrue(grad.is_contiguous(memory_format=torch.channels_last_3d))
+
+        reference_input = input.detach().cpu().contiguous().requires_grad_()
+        reference_output = torch.nn.functional.interpolate(
+            reference_input, size=(6, 7, 8), mode="trilinear", align_corners=False)
+        reference_output.backward(output_grad.cpu().contiguous())
+        self.assertEqual(grad.cpu(), reference_input.grad, atol=atol, rtol=rtol)
+
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    @skipIfRocm
+    @onlyCUDA
+    @dtypes(torch.float32)
+    def test_deterministic_interpolate_trilinear_noncontiguous(self, device, dtype):
+        import torch.nn.functional as F
+        import torch._decomp.decompositions as decompositions
+
+        input_cuda = torch.randn(
+            1, 4, 3, 4, 5, dtype=dtype, device=device
+        ).transpose(1, 2).requires_grad_()
+        output_grad = torch.randn(1, 3, 6, 8, 10, dtype=dtype, device=device)
+        self.assertFalse(input_cuda.is_contiguous())
+
+        with unittest.mock.patch.object(
+            decompositions,
+            "_upsample_linear_vec",
+            side_effect=RuntimeError("unexpected trilinear decomposition"),
+        ):
+            with DeterministicGuard(True):
+                output = F.interpolate(
+                    input_cuda,
+                    size=(6, 8, 10),
+                    mode="trilinear",
+                    align_corners=False,
+                )
+                output.backward(output_grad)
+        self.assertFalse(input_cuda.grad.is_contiguous())
+        deterministic_grad = input_cuda.grad.detach().clone()
+
+        atomic_input = input_cuda.detach().clone().requires_grad_()
+        with DeterministicGuard(False):
+            output = F.interpolate(
+                atomic_input,
+                size=(6, 8, 10),
+                mode="trilinear",
+                align_corners=False,
+            )
+            output.backward(output_grad)
+        atomic_grad = atomic_input.grad.detach().clone()
+
+        self.assertEqual(deterministic_grad, atomic_grad, atol=1e-5, rtol=1e-5)
+
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
@@ -1574,21 +1667,6 @@ class TestTorchDeviceType(TestCase):
                 else:
                     self.assertEqual(grad, input.grad, atol=0, rtol=0)
                 input.grad = None
-
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
-    def test_nondeterministic_alert_interpolate_trilinear(self, device):
-        input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
-        res = torch.nn.functional.interpolate(
-            input,
-            size=12,
-            mode='trilinear',
-            align_corners=False)
-        grad = torch.ones_like(res)
-
-        self.check_nondeterministic_alert(
-            lambda: res.backward(grad),
-            'upsample_trilinear3d_backward_out_cuda',
-            torch.device(device).type == 'cuda')
 
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_ReflectionPad1d(self, device):

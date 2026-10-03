@@ -56,7 +56,7 @@ from torch.testing._internal.common_modules import module_inputs_torch_nn_Linear
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck, gradgradcheck, \
-    GRADCHECK_NONDET_TOL
+    GRADCHECK_NONDET_TOL, DeterministicGuard
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
@@ -9887,40 +9887,51 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS  # NotImplementedError: aten::upsample_trilinear3d.out https://github.com/pytorch/pytorch/issues/77764
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last_3d])
-    def test_upsamplingTrilinear3d(self, device, align_corners, memory_format):
-        kwargs = dict(mode='trilinear', align_corners=align_corners)
+    @parametrize_test("deterministic", [False, True])
+    def test_upsamplingTrilinear3d(self, device, align_corners, memory_format, deterministic):
+        if deterministic and torch.device(device).type != "cuda":
+            raise unittest.SkipTest("deterministic trilinear coverage runs on CUDA only")
 
-        # test float scale factor up & downsampling
-        for scale_factor in [0.5, 1.5, 2]:
-            m = nn.Upsample(scale_factor=scale_factor, **kwargs)
-            in_t = torch.ones(1, 2, 4, 4, 4, device=device, dtype=torch.double)
-            in_t = in_t.contiguous(memory_format=memory_format).requires_grad_()
-            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-            with warnings.catch_warnings(record=True) as w:
-                out_t = m(in_t)
-            expected_out = torch.ones(1, 2, out_size, out_size, out_size, device=device, dtype=torch.double)
-            self.assertEqual(expected_out, out_t)
-            # Assert that memory format is carried through to the output
-            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+        with DeterministicGuard(deterministic):
+            kwargs = dict(mode='trilinear', align_corners=align_corners)
 
-            grad_out = torch.randn_like(out_t).contiguous(memory_format=memory_format)
-            in_t.grad = None
-            out_t.backward(grad_out)
-            grad_in = in_t.grad
-            self.assertTrue(grad_in.is_contiguous(memory_format=memory_format))
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                in_t = torch.ones(1, 2, 4, 4, 4, device=device, dtype=torch.double)
+                in_t = in_t.contiguous(memory_format=memory_format).requires_grad_()
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                with warnings.catch_warnings(record=True) as w:
+                    out_t = m(in_t)
+                expected_out = torch.ones(1, 2, out_size, out_size, out_size, device=device, dtype=torch.double)
+                self.assertEqual(expected_out, out_t)
+                # Assert that memory format is carried through to the output
+                self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
 
-            if memory_format == torch.channels_last_3d:
-                # check if grad inputs CF and CL match
+                grad_out = torch.randn_like(out_t).contiguous(memory_format=memory_format)
                 in_t.grad = None
-                out_t.backward(grad_out.contiguous())
-                self.assertEqual(in_t.grad, grad_in)
+                out_t.backward(grad_out)
+                grad_in = in_t.grad
+                self.assertTrue(grad_in.is_contiguous(memory_format=memory_format))
 
-            input = torch.randn(1, 2, 4, 4, 4, requires_grad=True, dtype=torch.double)
-            self.assertEqual(
-                F.interpolate(input, (out_size, out_size, out_size), **kwargs),
-                F.interpolate(input, scale_factor=scale_factor, **kwargs))
-            gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
-            gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                if deterministic:
+                    input_ref = in_t.detach().cpu().requires_grad_()
+                    output_ref = F.interpolate(input_ref, scale_factor=scale_factor, **kwargs)
+                    output_ref.backward(grad_out.cpu())
+                    self.assertEqual(grad_in.cpu(), input_ref.grad, atol=1e-10, rtol=1e-10)
+
+                if memory_format == torch.channels_last_3d:
+                    # check if grad inputs CF and CL match
+                    in_t.grad = None
+                    out_t.backward(grad_out.contiguous())
+                    self.assertEqual(in_t.grad, grad_in)
+
+                input = torch.randn(1, 2, 4, 4, 4, requires_grad=True, dtype=torch.double)
+                self.assertEqual(
+                    F.interpolate(input, (out_size, out_size, out_size), **kwargs),
+                    F.interpolate(input, scale_factor=scale_factor, **kwargs))
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
     @skipMPS
     @onlyAccelerator
