@@ -4188,6 +4188,10 @@ def _worker_compile_cpp(
 # Customized Python binding for cpp kernels
 @clear_on_fresh_cache
 class CppPythonBindingsCodeCache(CppCodeCache):
+    """Compiles C++ kernels together with a Python entry point that converts
+    each argument from its Python object with ``parse_arg<T>`` for its C++
+    type."""
+
     cache: dict[str, Callable[[], CDLL | ModuleType]] = {}
     _loaded_module_names: OrderedSet[str] = OrderedSet()
 
@@ -4240,6 +4244,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             if(result == -1.0 && PyErr_Occurred()) [[unlikely]]
                 throw std::runtime_error("expected float arg");
             return static_cast<float>(result);
+        }}
+        template <> inline double parse_arg<double>(PyObject* const* args, size_t n) {{
+            auto result = PyFloat_AsDouble(args[n]);
+            if(result == -1.0 && PyErr_Occurred()) [[unlikely]]
+                throw std::runtime_error("expected float arg");
+            return result;
         }}
 
         {extra_parse_arg}

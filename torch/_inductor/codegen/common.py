@@ -2042,12 +2042,13 @@ class KernelArgs:
             arg_defs.append(f"{cpp_dtype}* {maybe_inner}")
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
+        float_type = "double" if config._use_fp64_for_unbacked_floats else "float"
         for outer, inner in self.sizevars.items():
             if isinstance(outer, sympy.Symbol) and symbol_is_type(
                 outer, (SymT.UNBACKED_FLOAT)
             ):
-                arg_defs.append(f"const float {inner}")
-                arg_types.append("const float")
+                arg_defs.append(f"const {float_type} {inner}")
+                arg_types.append(f"const {float_type}")
             else:
                 arg_defs.append(f"const {INDEX_TYPE} {inner}")
                 arg_types.append(f"const {INDEX_TYPE}")
