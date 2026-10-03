@@ -199,13 +199,9 @@ This workflow is being rolled out. The following parts are still in progress:
 
 | In progress | Until it lands |
 |---|---|
-| The `no automated triage` and `no automated review` labels | The labels exist, but the bots do not act on them yet. |
-| Requesting re-evaluation of an issue by removing its label. This needs `@pytorchbot` to support removing labels: today `@pytorchbot label` can only add labels, for any label, and there is no command to remove one. | Comment on the issue with the new information and mention the maintainer who applied the label. |
-| PR triage: a bot assigns one reviewer per module and adds `triaged` | Reviewers are requested through [CODEOWNERS](CODEOWNERS) and manual reviewer assignment. |
-| Automated review | It runs on PRs labeled `in progress` and replaces that label with `ready for review` when it passes, but it does not post its findings on the PR yet. Run the [pr-review skill](.claude/skills/pr-review/SKILL.md) locally to see what it checks. A "Request changes" review does not move the PR back to `in progress` automatically yet. |
-| [GreenLight](#greenlight) | It only approves PRs for a small set of authors. |
-| Closing PRs without an actionable issue or maintainer sponsor | These PRs are labeled `missing actionable issue` today. Maintainers can add these PRs back to their usual workflow by removing this label. |
-| Bots closing issues and PRs with a comment giving the reason | Maintainers close issues and PRs that do not meet the pre-conditions manually, with a reason. The stale bot closes PRs without a comment. |
+| The `no automated triage` label | The label exists, but the triage bots do not act on it yet. |
+| Requesting re-evaluation of an issue by removing its label. This needs `@pytorchbot` to support removing labels: today `@pytorchbot label` can only add labels and there is no command to remove one. | Comment on the issue with the new information and mention the maintainer who applied the label. |
+| PR triage: a bot assigns one reviewer per module and adds `triaged` | The bot only triages PRs labeled `open source` and only assigns reviewers for a few modules. Other reviewers are requested through [CODEOWNERS](CODEOWNERS) and manual reviewer assignment. |
 
 ### Why was my issue or PR closed?
 
