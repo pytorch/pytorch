@@ -639,14 +639,6 @@ def lookup_spec_from_dynamo_source(
     return _walk_spec(current_spec, full_path=path, start_index=1)
 
 
-# The unbound C method descriptors CPython's copy._copy_dispatch hands out for
-# exact list/dict/set.  Reached as plain values (e.g. `copier =
-# _copy_dispatch.get(cls)`) they would otherwise go through trace_rules.lookup,
-# which skips an untraceable C method as a skipped builtin and graph breaks the
-# call.
-_COPY_DISPATCH_METHOD_DESCRIPTORS = (list.copy, dict.copy, set.copy)
-
-
 def bound_builtin_method_descriptor(value: Any) -> Any | None:
     if not isinstance(value, types.BuiltinMethodType):
         return None
@@ -1920,14 +1912,13 @@ class VariableBuilder:
             )
         elif (
             isinstance(value, types.MethodDescriptorType)
-            and value in _COPY_DISPATCH_METHOD_DESCRIPTORS
+            and trace_rules.lookup_callable(value.__objclass__) is not None
         ):
-            # e.g. `copier = list.copy`: the descriptor is called with an
-            # explicit instance, which the owner type's VT dispatches; without
-            # this the branch below turns it into a skipped function and the
-            # call graph breaks.  Its identity selects the semantics baked in at
-            # trace time, so guard it (a no-op for sources Dynamo already skips
-            # guards for, such as stdlib module contents).
+            # A method_descriptor reached as a plain value, e.g.
+            # `copier = list.copy`.  MethodDescriptorVariable mirrors
+            # methoddescr_call: check the receiver against __objclass__, then
+            # dispatch the call on it.  The descriptor identity is what those
+            # traced semantics depend on, hence the guard.
             self.install_guards(GuardBuilder.ID_MATCH)
             return MethodDescriptorVariable(
                 value,

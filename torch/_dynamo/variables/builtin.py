@@ -4153,14 +4153,11 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                     tx=tx,
                 )
 
-        resolved_fn = getattr(list, name, None)
-        if args and resolved_fn is list.copy:
-            # Unbound C copy, i.e. the `copier = list.copy` that CPython's
-            # copy._copy_dispatch hands out for exact lists.  Only this method is
-            # dispatched here: the other list methods keep their graph break.
-            # Subclasses come first because their call_method resolves through
-            # the MRO and would run a Python override, while method_descr_call
-            # runs the C slot of list itself.
+        if args and name == "copy":
+            # Unbound list.copy.  Subclasses come first: UserDefinedListVariable
+            # is also a ListVariable, and its call_method would resolve through
+            # the MRO to a Python override, while method_descr_call runs the C
+            # slot of list itself.
             obj = args[0]
             if isinstance(obj, UserDefinedObjectVariable):
                 return obj.call_base_method(tx, name, args[1:], kwargs)

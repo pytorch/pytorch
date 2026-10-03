@@ -5430,7 +5430,20 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         # copy.copy dispatches exact list/dict/set through copy._copy_dispatch,
         # whose entries are the unbound C method descriptors list.copy,
         # dict.copy and set.copy.
-        def fn(x):
+        def fn(x, src):
+            lst = copy.copy(src)
+            lst.append(4)
+            return x + len(lst)
+
+        x = torch.randn(4)
+        src = [1, 2, 3]
+        correct = fn(x, src)
+        result = torch.compile(fn, fullgraph=True, backend="eager")(x, src)
+        self.assertEqual(result, correct)
+        # the copy is a new list: mutating it leaves the source alone
+        self.assertEqual(src, [1, 2, 3])
+
+        def fn_literal(x):
             lst = copy.copy([1, 2, 3])
             lst.append(4)
             dct = copy.copy({1: 2})
@@ -5439,9 +5452,8 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             st.add(3)
             return x + len(lst) + len(dct) + len(st)
 
-        x = torch.randn(4)
-        correct = fn(x)
-        result = torch.compile(fn, fullgraph=True, backend="eager")(x)
+        correct = fn_literal(x)
+        result = torch.compile(fn_literal, fullgraph=True, backend="eager")(x)
         self.assertEqual(result, correct)
 
     def test_unbound_container_copy_methods(self):
@@ -5450,17 +5462,59 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             def copy(self):
                 return "overridden"
 
+        class OverridingDict(dict):
+            def copy(self):
+                return "overridden"
+
+        class OverridingSet(set):
+            def copy(self):
+                return "overridden"
+
         def fn(x):
             lst = list.copy([1, 2, 3])
             dct = dict.copy({1: 2})
             st = set.copy({1, 2})
             sub = list.copy(OverridingList([1, 2]))
-            return x + len(lst) + len(dct) + len(st) + len(sub)
+            dsub = dict.copy(OverridingDict({1: 2}))
+            ssub = set.copy(OverridingSet({1, 2}))
+            return x + len(lst) + len(dct) + len(st) + len(sub) + len(dsub) + len(ssub)
 
         x = torch.randn(4)
         correct = fn(x)
         result = torch.compile(fn, fullgraph=True, backend="eager")(x)
         self.assertEqual(result, correct)
+
+    def test_unbound_method_descriptor_value(self):
+        # A method descriptor of a builtin type works as a plain value, not
+        # just the ones copy._copy_dispatch happens to hold.  The locals keep
+        # them sourced values; `dict.get` written inside fn would be an
+        # attribute lookup on the type instead and never reach the builder.
+        getter = dict.get
+        joiner = str.join
+
+        def fn(x):
+            d = {1: 2}
+            return x + getter(d, 1) + len(joiner("-", ["a", "b"]))
+
+        x = torch.randn(4)
+        correct = fn(x)
+        result = torch.compile(fn, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, correct)
+
+        # methoddescr_call checks the receiver against __objclass__ and raises
+        # the same TypeError eager raises, observed while tracing rather than
+        # graph breaking
+        copier = list.copy
+
+        def wrong_receiver(x):
+            try:
+                copier({1: 2})
+            except TypeError:
+                return x + 1
+            return x + 100
+
+        result = torch.compile(wrong_receiver, fullgraph=True, backend="eager")(x)
+        self.assertEqual(result, wrong_receiver(x))
 
     def test_deepcopy_set(self):
         MY_SET = {1, 2, 3}
