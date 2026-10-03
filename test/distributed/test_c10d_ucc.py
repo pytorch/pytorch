@@ -38,6 +38,7 @@ from torch.testing._internal.common_distributed import (
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
@@ -115,6 +116,8 @@ def simple_reduce_tests(rank, world_size):
 
 
 class RendezvousEnvTest(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @requires_ucc()
     @retry_on_connect_failures
     def test_logging_init(self):
@@ -144,6 +147,8 @@ class RendezvousEnvTest(TestCase):
 
 
 class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @requires_ucc()
     @retry_on_connect_failures
     def test_default_store_timeout_ucc(self):
@@ -151,6 +156,8 @@ class TimeoutTest(test_c10d_common.AbstractTimeoutTest, TestCase):
 
 
 class ProcessGroupUCCTest(MultiProcessTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _create_process_group_ucc(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         return c10d.ProcessGroupUCC(store, self.rank, self.world_size)
@@ -265,6 +272,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
                 result = [result]
             self.assertEqual(expected_output, result)
 
+    @requires_ucc()
     def test_allgather_basics(self):
         self._test_allgather_basics(lambda t: t.clone())
 
@@ -1006,6 +1014,8 @@ class DistributedDataParallelTest(
 
 
 class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @property
     def device(self):
         return "cpu"
@@ -1079,6 +1089,8 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 class UccProcessGroupWithDispatchedCollectivesTests(
     test_c10d_common.ProcessGroupWithDispatchedCollectivesTests
 ):
+    hw_classification = HardwareClassification.GENERIC
+
     @skip_but_pass_in_sandcastle("Fails on M60")
     @requires_ucc()
     @skip_if_lt_x_gpu(1)
@@ -1097,7 +1109,7 @@ class UccProcessGroupWithDispatchedCollectivesTests(
             rank=self.rank,
             store=store,
         )
-        device = "cuda"
+        device = "cpu"
         tensor = torch.ones(10, 10, device=torch.device(device))
         output_tensor = torch.zeros(10, 10, device=torch.device(device))
         dist.all_gather_single(output_tensor, tensor)
