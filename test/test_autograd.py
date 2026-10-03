@@ -14880,6 +14880,89 @@ class TestAutogradDeviceType(TestCase):
             )
             test(lambda: x, pin_memory)
 
+    @dtypes(torch.float, torch.double)
+    @parametrize("order", (2, 3.0, 4))
+    def test_zeta_scalar_forward_ad(self, device, dtype, order):
+        x = (torch.rand((2, 3), device=device, dtype=dtype) + 0.5).t()
+        tangent = torch.randn((2, 3), device=device, dtype=dtype).t()
+        fn = partial(torch.special.zeta, order)
+        factor = (-1) ** int(order) / math.factorial(int(order) - 1)
+
+        def reference(x):
+            return factor * torch.special.polygamma(int(order) - 1, x)
+
+        actual, actual_tangent = torch.func.jvp(fn, (x,), (tangent,))
+        expected, expected_tangent = torch.func.jvp(reference, (x,), (tangent,))
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_tangent, expected_tangent)
+        self.assertEqual(actual.dtype, dtype)
+        self.assertEqual(actual_tangent.dtype, dtype)
+
+    @dtypes(torch.double)
+    @parametrize("order", (1.5, 2, 3.5))
+    def test_zeta_scalar_forward_ad_gradcheck(self, device, dtype, order):
+        x = torch.rand((2, 3), device=device, dtype=dtype, requires_grad=True) + 0.5
+        fn = partial(torch.special.zeta, order)
+        self.assertTrue(
+            gradcheck(fn, (x,), check_forward_ad=True, check_batched_forward_grad=True)
+        )
+        self.assertTrue(gradgradcheck(fn, (x,), check_fwd_over_rev=True))
+
+    @dtypes(torch.float, torch.double)
+    @parametrize("shape", ((), (0,), (0, 3)))
+    def test_zeta_scalar_forward_ad_shapes(self, device, dtype, shape):
+        x = torch.full(shape, 1.25, device=device, dtype=dtype)
+        tangent = torch.ones_like(x)
+        fn = partial(torch.special.zeta, 2.5)
+        actual, actual_tangent = torch.func.jvp(fn, (x,), (tangent,))
+        self.assertEqual(actual, fn(x))
+        self.assertEqual(actual.shape, x.shape)
+        self.assertEqual(actual_tangent.shape, x.shape)
+        _, vjp = torch.func.vjp(fn, x)
+        self.assertEqual(actual_tangent, vjp(tangent)[0])
+
+    @dtypes(torch.double)
+    def test_zeta_scalar_forward_ad_higher_order(self, device, dtype):
+        x = torch.rand(3, device=device, dtype=dtype) + 0.5
+        tangent = torch.randn_like(x)
+
+        def fn(x):
+            return torch.special.zeta(2.5, x.square() + 0.5).sum()
+
+        expected = torch.func.jacrev(torch.func.grad(fn))(x)
+        self.assertEqual(torch.func.hessian(fn)(x), expected)
+        _, actual_tangent = torch.func.jvp(torch.func.grad(fn), (x,), (tangent,))
+        self.assertEqual(actual_tangent, expected @ tangent)
+
+    @dtypes(torch.double)
+    @parametrize("order", (2, 2.5))
+    def test_zeta_scalar_forward_ad_boundary_values(self, device, dtype, order):
+        x = torch.tensor(
+            [-math.inf, -2.0, -1.5, 0.0, 1.0, math.inf, math.nan],
+            device=device,
+            dtype=dtype,
+        )
+        fn = partial(torch.special.zeta, order)
+        for tangent in (torch.ones_like(x), torch.zeros_like(x)):
+            with self.subTest(zero_tangent=bool((tangent == 0).all())):
+                actual, actual_tangent = torch.func.jvp(fn, (x,), (tangent,))
+                self.assertEqual(actual, fn(x))
+                _, vjp = torch.func.vjp(fn, x)
+                self.assertEqual(actual_tangent, vjp(tangent)[0])
+
+    @dtypes(torch.double)
+    def test_zeta_scalar_forward_ad_preserves_tensor_order_error(self, device, dtype):
+        order = torch.tensor(2.5, device=device, dtype=dtype)
+        x = torch.ones(3, device=device, dtype=dtype)
+        with self.assertRaisesRegex(
+            NotImplementedError, "forward AD with special_zeta"
+        ):
+            torch.func.jvp(
+                torch.special.zeta,
+                (order, x),
+                (torch.ones_like(order), torch.ones_like(x)),
+            )
+
     @onlyAccelerator
     def test_graph_save_on_cpu_device(self, device):
         def f(x):
