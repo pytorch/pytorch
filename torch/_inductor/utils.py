@@ -223,6 +223,7 @@ from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
     Max,
+    Mod,
     ModularIndexing,
 )
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -2309,8 +2310,8 @@ def _bytes_aligned(expr_bytes: _IntLike, alignment: int = TMA_ALIGNMENT) -> bool
 def tma_inner_dim(strides: Sequence[_IntLike]) -> int | None:
     """Index of the single stride-1 ("inner") dim, or None if there is not
     exactly one. TMA requires exactly one contiguous dim, so None means the
-    tensor is not TMA-compatible. `strides` must already be resolved to ints or
-    hinted symbols by the caller.
+    tensor is not TMA-compatible. A symbolic stride only counts as inner when
+    it is statically 1.
     """
     from .virtualized import V
 
@@ -2343,7 +2344,29 @@ def can_use_tma(
 
     from .virtualized import V
 
-    _aligned = _bytes_aligned
+    # Guard the predicates, not the sizes, so dynamic dims stay dynamic. As in
+    # _descriptor_shapes_fit_in_int32, predicates are decided from hints first
+    # and combined into one guard at the end, so a rejection installs nothing.
+    deferred: list[sympy.Basic] = []
+
+    def _known_or_guarded(
+        expr: _IntLike, predicate: Callable[[_IntLike], sympy.Basic]
+    ) -> bool:
+        if V.graph.sizevars.statically_known_true(predicate(expr)):
+            return True
+        # AOTI does not check guards installed by Inductor at runtime.
+        if not add_guards or V.graph.aot_mode:
+            return False
+        hint = V.graph.sizevars.replace_backed_symbols_with_hints(expr)
+        if predicate(hint) == sympy.false:
+            return False
+        deferred.append(predicate(expr))
+        return True
+
+    def _aligned(expr_bytes: _IntLike) -> bool:
+        return _bytes_aligned(expr_bytes) or _known_or_guarded(
+            expr_bytes, lambda e: sympy.Eq(Mod(e, TMA_ALIGNMENT), 0)
+        )
 
     def _is_tma_compatible_layout(layout: Layout | None) -> bool:
         if layout is None:
@@ -2387,8 +2410,8 @@ def can_use_tma(
             return False
 
         if add_guards:
-            sizes_i = V.graph.sizevars.guard_int_seq(sizes)
-            strides_i = V.graph.sizevars.guard_int_seq(strides)
+            sizes_i: Sequence[_IntLike] = sizes
+            strides_i: Sequence[_IntLike] = strides
         else:
             sizes_i = [
                 V.graph.sizevars.replace_backed_symbols_with_hints(s) for s in sizes
@@ -2414,7 +2437,9 @@ def can_use_tma(
             return False
 
         # 1-byte dtypes (FP8 etc.) need inner dim ≥ 32 for tensor core alignment
-        if itemsize == 1 and not V.graph.sizevars.statically_known_geq(inner_dim, 32):
+        if itemsize == 1 and not _known_or_guarded(
+            inner_dim, lambda e: sympy.Ge(e, 32)
+        ):
             return False
 
         return True
@@ -2445,6 +2470,7 @@ def can_use_tma(
         has_triton_tma_device()
         and all(_is_tma_compatible_matrix(m) for m in matrices)
         and _is_tma_compatible_layout(output_layout)
+        and (not deferred or V.graph.sizevars.guard_or_false(sympy.And(*deferred)))
     )
 
 
