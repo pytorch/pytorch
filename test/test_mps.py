@@ -10754,6 +10754,109 @@ class TestMPS(TestCaseMPS):
         y = x / 64
         self.assertEqual(y, torch.tensor([0., 1023.9844], device="mps"))
 
+    _UNSIGNED_DTYPES = [torch.uint16, torch.uint32, torch.uint64]
+    _UNSIGNED_BINARY_OPS = [
+        "add", "sub", "mul", "floor_divide", "trunc_divide", "remainder", "fmod", "maximum", "minimum", "fmax", "fmin",
+        "gcd", "lcm", "pow", "heaviside", "bitwise_and", "bitwise_or", "bitwise_xor", "bitwise_left_shift",
+        "bitwise_right_shift", "true_divide", "atan2", "copysign", "xlogy",
+    ]
+    # Ops whose `other` may be a Python scalar; `pow` is excluded since its scalar-exponent
+    # variant is a unary kernel with no unsigned instantiations yet.
+    _UNSIGNED_SCALAR_RHS_OPS = [
+        "add", "sub", "mul", "floor_divide", "trunc_divide", "remainder", "fmod", "bitwise_and", "bitwise_or",
+        "bitwise_xor", "bitwise_left_shift", "bitwise_right_shift", "true_divide", "copysign", "xlogy",
+    ]
+
+    @staticmethod
+    def _unsigned_binary_inputs(op, dtype, shape):
+        # Full-range operands with the wraparound-relevant values pinned in front; divisors are zero-free,
+        # shift counts stay below the bit width, and pow/lcm operands are kept small enough to be meaningful.
+        np_dtype = torch.empty(0, dtype=dtype).numpy().dtype
+        bits = torch.iinfo(dtype).bits
+        rng = np.random.default_rng(0)
+
+        def full_range():
+            x = rng.integers(0, np.iinfo(np_dtype).max, size=shape, dtype=np_dtype, endpoint=True)
+            x.flat[:6] = [0, 1, 2, np.iinfo(np_dtype).max, np.iinfo(np_dtype).max - 1, 1 << (bits - 1)]
+            return x
+
+        if op in ("bitwise_left_shift", "bitwise_right_shift"):
+            return full_range(), rng.integers(0, bits, size=shape, dtype=np_dtype)
+        if op == "pow":
+            return rng.integers(0, 4096, size=shape, dtype=np_dtype), rng.integers(0, 6, size=shape, dtype=np_dtype)
+        if op == "lcm":
+            return rng.integers(1, 256, size=shape, dtype=np_dtype), rng.integers(1, 256, size=shape, dtype=np_dtype)
+        a, b = full_range(), full_range()
+        if op in ("floor_divide", "trunc_divide", "remainder", "fmod", "true_divide", "gcd", "xlogy"):
+            b = np.maximum(b, 1)
+        return a, b
+
+    # https://github.com/pytorch/pytorch/issues/176296
+    @parametrize("dtype", _UNSIGNED_DTYPES)
+    @parametrize("op", _UNSIGNED_BINARY_OPS)
+    def test_unsigned_binary_ops(self, op, dtype):
+        def f32(x):
+            return x.astype(np.float32)
+
+        torch_fns = {
+            "floor_divide": lambda x, y, **kw: torch.div(x, y, rounding_mode="floor", **kw),
+            "trunc_divide": lambda x, y, **kw: torch.div(x, y, rounding_mode="trunc", **kw),
+        }
+        np_fns = {
+            "sub": np.subtract, "mul": np.multiply, "trunc_divide": np.floor_divide, "pow": np.power,
+            "bitwise_left_shift": np.left_shift, "bitwise_right_shift": np.right_shift,
+            "heaviside": lambda x, y: np.where(x == 0, y, 1).astype(x.dtype),
+            "true_divide": lambda x, y: f32(x) / f32(y),
+            "atan2": lambda x, y: np.arctan2(f32(x), f32(y)),
+            "copysign": lambda x, y: np.copysign(f32(x), f32(y)),
+            "xlogy": lambda x, y: np.where(x == 0, np.float32(0), f32(x) * np.log(f32(y))),
+        }
+        torch_fn = torch_fns[op] if op in torch_fns else getattr(torch, op)
+        np_fn = np_fns[op] if op in np_fns else getattr(np, op)
+        tol = {"rtol": 1e-5, "atol": 1e-6} if op in ("atan2", "xlogy") else {}
+
+        def check(a_np, b_np, a, b, **kwargs):
+            res = torch_fn(a, b, **kwargs)
+            self.assertEqual(res.cpu(), torch.from_numpy(np.asarray(np_fn(a_np, b_np))), **tol)
+            return res
+
+        a_np, b_np = self._unsigned_binary_inputs(op, dtype, (4, 6))
+        a, b = torch.from_numpy(a_np).to("mps"), torch.from_numpy(b_np).to("mps")
+        res = check(a_np, b_np, a, b)
+        check(a_np, b_np, a, b, out=torch.empty_like(res))
+        check(a_np[:, ::2], b_np[:, ::2], a[:, ::2], b[:, ::2])
+        check(a_np, b_np[0], a, b[0])
+        check(a_np[:, :1], b_np[:1], a[:, :1], b[:1])
+        scalar = int(b_np[1, 1])
+        check(a_np, np.asarray(scalar, dtype=a_np.dtype), a, torch.tensor(scalar, dtype=dtype, device="mps"))
+        if op in self._UNSIGNED_SCALAR_RHS_OPS:
+            check(a_np, np.asarray(scalar, dtype=a_np.dtype), a, scalar)
+
+    @parametrize("dtype", _UNSIGNED_DTYPES)
+    def test_unsigned_add_alpha(self, dtype):
+        a_np, b_np = self._unsigned_binary_inputs("add", dtype, (4, 6))
+        a, b = torch.from_numpy(a_np).to("mps"), torch.from_numpy(b_np).to("mps")
+        three = np.asarray(3, dtype=a_np.dtype)
+        self.assertEqual(torch.add(a, b, alpha=3).cpu(), torch.from_numpy(a_np + three * b_np))
+        self.assertEqual(torch.add(a, b[0], alpha=3).cpu(), torch.from_numpy(a_np + three * b_np[0]))
+        self.assertEqual(torch.add(a, 7, alpha=3).cpu(), torch.from_numpy(a_np + three * np.asarray(7, a_np.dtype)))
+        self.assertEqual(torch.sub(a, b, alpha=2).cpu(), torch.from_numpy(a_np - np.asarray(2, a_np.dtype) * b_np))
+        # A negative alpha is narrowed to the unsigned dtype with two's-complement wraparound
+        # (same as uint8 on CPU), so add(alpha=-3) is a - 3*b modulo 2**bits.
+        self.assertEqual(torch.add(a, b, alpha=-3).cpu(), torch.from_numpy(a_np - three * b_np))
+
+    @parametrize("dtype", _UNSIGNED_DTYPES)
+    def test_unsigned_wraparound(self, dtype):
+        info = torch.iinfo(dtype)
+        half = 1 << (info.bits - 1)
+        x = torch.tensor([info.max, 0, info.max, half, info.max], dtype=dtype, device="mps")
+        y = torch.tensor([1, 1, 2, half, info.max], dtype=dtype, device="mps")
+        self.assertEqual((x + y).cpu(), torch.tensor([0, 1, 1, 0, info.max - 1], dtype=dtype))
+        self.assertEqual((x - y).cpu(), torch.tensor([info.max - 1, info.max, info.max - 2, 0, 0], dtype=dtype))
+        self.assertEqual((x * y).cpu(), torch.tensor([info.max, 0, info.max - 1, 0, 1], dtype=dtype))
+        self.assertEqual((x // y).cpu(), torch.tensor([info.max, 0, half - 1, 1, 1], dtype=dtype))
+        self.assertEqual((x % y).cpu(), torch.tensor([0, 0, 1, 0, 0], dtype=dtype))
+
     # https://github.com/pytorch/pytorch/issues/170370
     def test_embeddingbag_first_offset_forced_to_zero(self):
         # The user's offsets[0] value is ignored for the first bag; output
