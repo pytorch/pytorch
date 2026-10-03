@@ -6351,7 +6351,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
                 fill_value = torch.tensor(5.0, dtype=torch.float64, device=fill_device)
                 expected = func(fill_value)
-                result = torch.compile(func, backend="eager", fullgraph=True)(fill_value)
+                result = torch.compile(func, backend="eager", fullgraph=True)(
+                    fill_value
+                )
                 self.assertEqual(result, expected)
 
     def test_full_with_parameter_fill_value_raises(self):

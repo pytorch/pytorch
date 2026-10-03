@@ -821,11 +821,14 @@ class FakeTensorTest(TestCase):
 
         for op in (aten.fill.Tensor, aten.fill_.Tensor):
             for destination_device, value_device in device_pairs:
-                with self.subTest(
-                    op=op,
-                    destination_device=destination_device,
-                    value_device=value_device,
-                ), FakeTensorMode():
+                with (
+                    self.subTest(
+                        op=op,
+                        destination_device=destination_device,
+                        value_device=value_device,
+                    ),
+                    FakeTensorMode(),
+                ):
                     destination = torch.empty(2, device=destination_device)
                     value = torch.tensor(1.0, device=value_device)
                     result = op(destination, value)
