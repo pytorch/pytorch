@@ -2327,14 +2327,13 @@ Tensor cholesky_inverse_backward(
 }
 
 // If X = (L L^H)^{-1} with L lower-triangular with a real positive diagonal,
-// then dX = K^H + K, where
-// K =  L^{-H} dL^{-1} [dL^{-1} = -L^{-1} dL L^{-1}]
-//   = -L^{-H} L^{-1} dL L^{-1} [L^{-H} L^{-1} = X]
-//   = -X dL L^{-1} [X = X^H = L^{-H} L^{-1} = L^{-1} L^{-H}]
-//   = -X dL X L^{H}.
+// then dX = -X (dL L^H + L dL^H) X = K + K^H, where
+// K = -X dL L^{-1}
+//   = -X dL L^H (L^{-H} L^{-1})
+//   = -X dL L^H X.
 // If X = (U^H U)^{-1} with U upper-triangular with a real positive diagonal,
 // then K becomes
-// K = -X dU^H X U
+// K = -X dU^H U X.
 Tensor cholesky_inverse_jvp(
     const Tensor& F,
     const Tensor& dF,
@@ -2343,7 +2342,7 @@ Tensor cholesky_inverse_jvp(
   at::NoTF32Guard disable_tf32;
   const auto CF = upper ? F : F.mH();
   const auto dCF = upper ? dF.mH() : dF;
-  const auto partial_dX = -X.matmul(dCF).matmul(X).matmul(CF);
+  const auto partial_dX = -X.matmul(dCF).matmul(CF).matmul(X);
   return partial_dX + partial_dX.mH();
 }
 
