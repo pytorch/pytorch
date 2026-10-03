@@ -5523,6 +5523,8 @@ known_graph_breaks_tests = {
     "test_multi_grad_all_hooks",  # retains_grad_hooks
     "test_prehook_ordering",  # retains_grad_hooks
     "test_will_engine_execute_node",  # retains_grad_hooks
+    "test_will_execute_tensor_hook_leaf_during_grad",  # retains_grad_hooks
+    "test_multi_grad_hooks_with_autograd_grad",  # register_multi_grad_hook
     "test_backward_to_node",  # retains_grad_hooks
     "test_backward_with_nonleaf_inputs",  # retains_grad_hook on non-leaf input
     "test_create_graph_and_full_backward_hook_cycle",  # _pack_with_none

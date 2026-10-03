@@ -1790,15 +1790,23 @@ static PyObject* THPModule_checkSparseTensorInvariants(
     Py_RETURN_FALSE;
 }
 
-static PyObject* THPModule_willEngineExecuteNode(
-    PyObject* _unused,
-    PyObject* arg) {
-  HANDLE_TH_ERRORS
+// Shared by `_will_engine_execute_node` (does this Node run?) and
+// `_will_execute_tensor_hook` (will a tensor hook on this Node's Tensor fire?).
+// During autograd.grad(), leaf AccumulateGrad nodes are captured rather than
+// executed, but tensor hooks on those leaves still fire. See issue #131753.
+enum class WillExecuteQuery { kNode, kTensorHook };
+
+static bool willExecuteDuringCurrentBackward(
+    PyObject* arg,
+    WillExecuteQuery query) {
   bool isTHPFunction = THPFunction_Check(arg);
   bool isTHPCppFunction = torch::autograd::THPCppFunction_Check(arg);
+  const char* expect_msg = query == WillExecuteQuery::kNode
+      ? "_will_engine_execute_node expects an grad_fn, "
+      : "_will_execute_tensor_hook expects an grad_fn, ";
   TORCH_CHECK(
       isTHPFunction || isTHPCppFunction,
-      "_will_engine_execute_node expects an grad_fn, "
+      expect_msg,
       "but got ",
       THPUtils_typename(arg));
   const auto exec_info = torch::autograd::get_current_graph_task_exec_info();
@@ -1821,18 +1829,37 @@ static PyObject* THPModule_willEngineExecuteNode(
     auto it = exec_info->find(node);
     if (it == exec_info->end() || !it->second.should_execute()) {
       ret = false;
-    } else {
+    } else if (node->topological_nr() == 0 && it->second.captures_) {
       TORCH_CHECK(
-          !(node->topological_nr() == 0 && it->second.captures_),
+          query == WillExecuteQuery::kTensorHook,
           "A leaf node was passed to _will_engine_execute_node but we are "
           "currently running autograd.grad(). This is currently not supported.");
+      // Tensor hooks on leaves still run when .grad() captures the gradient.
+      ret = true;
     }
   }
-  if (ret) {
+  return ret;
+}
+
+static PyObject* THPModule_willEngineExecuteNode(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (willExecuteDuringCurrentBackward(arg, WillExecuteQuery::kNode)) {
     Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
   }
+  Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_willExecuteTensorHook(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  if (willExecuteDuringCurrentBackward(arg, WillExecuteQuery::kTensorHook)) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
   END_HANDLE_TH_ERRORS
 }
 
@@ -2341,6 +2368,10 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      nullptr},
     {"_will_engine_execute_node",
      THPModule_willEngineExecuteNode,
+     METH_O,
+     nullptr},
+    {"_will_execute_tensor_hook",
+     THPModule_willExecuteTensorHook,
      METH_O,
      nullptr},
     {"_current_graph_task_execution_order",

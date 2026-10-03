@@ -1483,6 +1483,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._warn_deprecation",
         "torch._C._warn",
         "torch._C._will_engine_execute_node",
+        "torch._C._will_execute_tensor_hook",
         "torch._C._wrap_tensor_impl",
         "torch._C._xpu_emptyCache",
         "torch._C._xpu_getArchFlags",

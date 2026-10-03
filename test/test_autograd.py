@@ -871,6 +871,48 @@ class TestAutograd(TestCase):
         h2.remove()
         h3.remove()
 
+    def test_will_execute_tensor_hook_leaf_during_grad(self):
+        # During autograd.grad(), leaf AccumulateGrad nodes are captured rather
+        # than executed, so _will_engine_execute_node raises. Tensor hooks on
+        # those leaves still fire; _will_execute_tensor_hook reports that.
+        # Capture AccumulateGrad before backward: clone() inside a hook has no
+        # grad_fn because grad mode is off during the backward pass.
+        a = torch.randn(2, 3, requires_grad=True)
+        leaf_acc = a.clone().grad_fn.next_functions[0][0]
+        b = a * 2
+        seen = []
+
+        def fn(_g):
+            self.assertTrue(torch._C._will_execute_tensor_hook(leaf_acc))
+            with self.assertRaisesRegex(
+                RuntimeError, "are currently running autograd.grad()"
+            ):
+                torch._C._will_engine_execute_node(leaf_acc)
+            self.assertTrue(torch._C._will_execute_tensor_hook(b.grad_fn))
+            self.assertTrue(torch._C._will_engine_execute_node(b.grad_fn))
+            seen.append(True)
+
+        h = b.register_hook(fn)
+        torch.autograd.grad(b.sum(), (a,))
+        self.assertEqual(len(seen), 1)
+        h.remove()
+
+    def test_multi_grad_hooks_with_autograd_grad(self):
+        t1 = torch.rand(2, requires_grad=True)
+        t2 = torch.rand(2, requires_grad=True)
+        called = []
+
+        def hook(grads):
+            called.append([g is not None for g in grads])
+
+        handle = torch.autograd.graph.register_multi_grad_hook((t1, t2), hook)
+        out = (t1 * t2).sum()
+        g1, g2 = torch.autograd.grad(out, (t1, t2))
+        self.assertEqual(called, [[True, True]])
+        self.assertEqual(g1, t2)
+        self.assertEqual(g2, t1)
+        handle.remove()
+
     def test_custom_function_vmap_defaults(self):
         class MySquare(Function):
             @staticmethod
