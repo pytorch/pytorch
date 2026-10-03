@@ -9673,7 +9673,7 @@ class FallbackKernel(ExternKernelAlloc):
             raise AssertionError("Expected self.python_kernel_name is not None")
         V.graph.warn_fallback(self.python_kernel_name)
 
-        # Aliased arguments and their mutation versions.
+        # args that are aliased
         self.alias_names: list[str] = []
 
         if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
