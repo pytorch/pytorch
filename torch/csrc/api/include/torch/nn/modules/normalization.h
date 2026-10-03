@@ -72,6 +72,60 @@ class TORCH_API LayerNormImpl : public torch::nn::Cloneable<LayerNormImpl> {
 /// learn about PyTorch's module storage semantics.
 TORCH_MODULE(LayerNorm);
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RMSNorm ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+/// Applies Root Mean Square Layer Normalization over a mini-batch of inputs
+/// as described in the paper `Root Mean Square Layer Normalization`_ .
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.RMSNorm to learn
+/// about the exact behavior of this module.
+///
+/// See the documentation for `torch::nn::RMSNormOptions` class to learn what
+/// constructor arguments are supported for this module.
+///
+/// Example:
+/// ```
+/// RMSNorm model(RMSNormOptions({2,
+/// 2}).elementwise_affine(false).eps(2e-5));
+/// ```
+class TORCH_API RMSNormImpl : public torch::nn::Cloneable<RMSNormImpl> {
+ public:
+  RMSNormImpl(std::vector<int64_t> normalized_shape)
+      : RMSNormImpl(RMSNormOptions(std::move(normalized_shape))) {}
+  explicit RMSNormImpl(RMSNormOptions options_);
+
+  void reset() override;
+
+  void reset_parameters();
+
+  /// Pretty prints the `RMSNorm` module into the given `stream`.
+  void pretty_print(std::ostream& stream) const override;
+
+  /// Applies root mean square layer normalization over a mini-batch of inputs
+  /// as described in the paper `Root Mean Square Layer Normalization`_ .
+  ///
+  /// Unlike `LayerNorm`, the input is not re-centered: it is only rescaled by
+  /// the root mean square computed over the last certain number of dimensions
+  /// which have to be of the shape specified by input `normalized_shape`.
+  ///
+  /// `Root Mean Square Layer Normalization`: https://arxiv.org/abs/1910.07467
+  Tensor forward(const Tensor& input);
+
+  /// The options with which this module was constructed.
+  RMSNormOptions options;
+
+  /// The learned weight.
+  /// Initialized to ones if the `elementwise_affine` option is set to `true`
+  /// upon construction.
+  Tensor weight;
+};
+
+/// A `ModuleHolder` subclass for `RMSNormImpl`.
+/// See the documentation for `RMSNormImpl` class to learn what methods it
+/// provides, and examples of how to use `RMSNorm` with
+/// `torch::nn::RMSNormOptions`. See the documentation for `ModuleHolder` to
+/// learn about PyTorch's module storage semantics.
+TORCH_MODULE(RMSNorm);
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LocalResponseNorm
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
