@@ -763,6 +763,22 @@ class AutogradFunctionVariable(VariableTracker):
         setup_context = self.fn_cls.setup_context
         is_setup_ctx_defined = setup_context is not _SingleLevelFunction.setup_context
 
+        # Tracing forward directly would skip the custom vmap staticmethod that
+        # eager custom_function_call runs while a functorch transform is active.
+        # generate_vmap_rule is fine: its rule is vmap over forward.
+        if (
+            self.fn_cls.vmap is not torch.autograd.Function.vmap
+            and torch._C._functorch.peek_interpreter_stack() is not None
+        ):
+            unimplemented(
+                gb_type="autograd.Function with custom vmap under functorch transform",
+                context=f"call_apply {self} {args} {kwargs}",
+                explanation="Dynamo traces `forward` directly and does not model "
+                "the `vmap` staticmethod of a `torch.autograd.Function` while a "
+                "functorch transform is active.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+
         if kwargs:
             resolved = self._resolve_kwargs(args, kwargs, is_setup_ctx_defined)
             if resolved is None:

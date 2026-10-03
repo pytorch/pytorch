@@ -893,6 +893,16 @@
       ]
     }
   ],
+  "GB7810": [
+    {
+      "Gb_type": "autograd.Function with custom vmap under functorch transform",
+      "Context": "call_apply {self} {args} {kwargs}",
+      "Explanation": "Dynamo traces `forward` directly and does not model the `vmap` staticmethod of a `torch.autograd.Function` while a functorch transform is active.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0057": [
     {
       "Gb_type": "Failed to raise exception",
