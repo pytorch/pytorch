@@ -8294,11 +8294,15 @@ class AOTInductorTestsTemplate:
         model = Model()
         example_inputs = (mask(1, 1, 0, 0), mask(1, 1, 1, 0))
         with config.patch(torch._inductor.lite_mode_options):
-            so_path = AOTIRunnerUtil.legacy_compile(model, example_inputs)
+            so_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check_regex(r"Expected u\d+ <= u\d+").run(code)
         compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
         self.assertEqual(compiled(*example_inputs), model(*example_inputs))
         # Same sizes as the example, so only the relational assert can catch it.
-        with self.assertRaisesRegex(RuntimeError, r"Expected u\d+ <= u\d+"):
+        # Don't match the message: the fbcode runner doesn't surface it.
+        with self.assertRaisesRegex(Exception, ""):
             compiled(mask(1, 1, 1, 0), mask(1, 0, 0, 0))
 
     def test_multi_input_nonzero_slice_shared_dim(self):
@@ -10589,6 +10593,30 @@ class AOTInductorTestsTemplate:
             torch.randn(10, 10, device=self.device),
             torch.randn(10, device=self.device),
         )
+        self.check_model(Model(), example_inputs, move_model_to_device=False)
+
+    @requires_gpu
+    def test_mixed_device_constant_view(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Mixed-device test requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("cpu_w", torch.arange(64.0).view(32, 2))
+                self.register_buffer(
+                    "gpu_w", torch.arange(64.0, device=GPU_TYPE).view(32, 2)
+                )
+
+            def forward(self, x):
+                return (
+                    self.cpu_w.t().to(x.device) + x,
+                    self.cpu_w[1:].to(x.device),
+                    self.gpu_w.t().to("cpu"),
+                    self.gpu_w[1:].to("cpu"),
+                )
+
+        example_inputs = (torch.randn(2, 32, device=self.device),)
         self.check_model(Model(), example_inputs, move_model_to_device=False)
 
     @requires_gpu

@@ -88,7 +88,12 @@ from .functions import (
     UserMethodVariable,
 )
 from .object_protocol import mro_attr_source
-from .user_defined import call_random_fn, is_standard_setattr, UserDefinedObjectVariable
+from .user_defined import (
+    call_random_fn,
+    is_standard_setattr,
+    RandomCallOnSource,
+    UserDefinedObjectVariable,
+)
 
 
 if TYPE_CHECKING:
@@ -1938,6 +1943,7 @@ class StringFormatVariable(VariableTracker):
     @classmethod
     def create(
         cls,
+        tx: "InstructionTranslatorBase",
         format_string: str,
         sym_args: list[VariableTracker],
         sym_kwargs: dict[str, VariableTracker],
@@ -1946,12 +1952,14 @@ class StringFormatVariable(VariableTracker):
             x.is_python_constant()
             for x in itertools.chain(sym_args, sym_kwargs.values())
         ):
-            return variables.ConstantVariable.create(
-                format_string.format(
+            try:
+                result = format_string.format(
                     *[v.as_python_constant() for v in sym_args],
                     **{k: v.as_python_constant() for k, v in sym_kwargs.items()},
                 )
-            )
+            except (ValueError, TypeError, IndexError, KeyError, AttributeError) as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
+            return variables.ConstantVariable.create(result)
         return cls(format_string, list(sym_args), dict(sym_kwargs))
 
     def __init__(
@@ -2277,7 +2285,15 @@ class ConstantLikeVariable(VariableTracker):
                 ],
             )
 
-        result = getattr(self.value, name)(*cargs, **ckwargs)
+        fn = getattr(self.value, name)
+        try:
+            result = fn(*cargs, **ckwargs)
+        except (TypeError, ValueError) as e:
+            raise_observed_exception(
+                type(e),
+                tx,
+                args=list(e.args),
+            )
 
         if variables.ConstantVariable.is_literal(result):
             return VariableTracker.build(tx, result)
@@ -2660,7 +2676,18 @@ class RandomVariable(VariableTracker):
         )
 
     def _call_random(self, tx, name, args, kwargs):
-        tx.output.side_effects.mutation(self)
+        side_effects = tx.output.side_effects
+        if self.source is not None and not side_effects.is_modified(self):
+            # A draw alone advances the runtime object without scheduling a
+            # setstate write-back. Later seed/setstate/shuffle/sample calls can
+            # still mark it modified and write back the trace-time state;
+            # unseeded state operations retain their existing limitations.
+            side_effects.check_allowed_side_effect(self)
+            # The incoming state is unknown at trace time, so replay the draw
+            # on the runtime object using the shadow only for an example value.
+            replay = RandomCallOnSource(self.source, name)
+            return call_random_fn(tx, getattr(self.random, name), args, kwargs, replay)
+        side_effects.mutation(self)
         state = self.random.getstate()
 
         def call_random_meth(*args: Any, **kwargs: Any) -> Any:

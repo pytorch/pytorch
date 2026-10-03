@@ -220,13 +220,89 @@ function test_non_pool_free_without_alloc() {
     }],
   });
 
-  const result = process_alloc_data(snapshot, 0, false, 15000, false);
-  // max_size is only updated inside the actions loop AFTER the free decrements total_mem,
-  // so for a free-without-alloc element, max_size ends up 0.
-  // The actual peak (300) is captured in max_at_time instead.
-  assertEqual(result.max_size, 0, 'non-pool free-without-alloc: max_size is 0 (peak is in max_at_time)');
-  assert(Math.max(...result.max_at_time) === 300,
-    'non-pool free-without-alloc: max_at_time peak should be 300');
+  for (const detail of [0, 15000]) {
+    const result = process_alloc_data(snapshot, 0, false, detail, false);
+    assertEqual(result.max_size, 300, 'peak includes the initially allocated block');
+    assertEqual(Math.max(...result.max_at_time), 300, 'minimap includes the initial peak');
+  }
+}
+
+function test_peak_independent_of_detail() {
+  console.log('test_peak_independent_of_detail');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 2048, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1800, size: 1024, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x1800, size: 1024, frames: [], stream: 0 },
+      { action: 'free_completed', addr: 0x1000, size: 2048, frames: [], stream: 0 },
+    ],
+  });
+
+  for (const detail of [0, 1, 2]) {
+    const result = process_alloc_data(snapshot, 0, false, detail, false);
+    assertEqual(result.max_size, 3072, `detail ${detail}: peak includes summarized allocations`);
+    assertEqual(result.max_size, Math.max(...result.max_at_time), 'plot and minimap peaks agree');
+  }
+}
+
+function test_global_summary_coordinates() {
+  console.log('test_global_summary_coordinates');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 512, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1200, size: 2048, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1a00, size: 256, frames: [], stream: 0 },
+    ],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 1, false);
+  const summary = result.summarized_mem;
+  assertEqual(summary.offsets.length, summary.timesteps.length, 'summary coordinates align');
+  assertEqual(summary.size.length, summary.timesteps.length, 'summary sizes align');
+  assertEqual(summary.offsets.join(','), '0,2048,2048,2048', 'summary stays above the drawn allocation');
+  assertEqual(summary.size.join(','), '512,512,768,768', 'summary includes both small allocations');
+  assertEqual(summary.timesteps.at(-1), result.max_at_time.length, 'summary reaches the end of the trace');
+}
+
+function test_summarized_only_allocation() {
+  console.log('test_summarized_only_allocation');
+  const snapshot = makeSnapshot({
+    traces: [{ action: 'alloc', addr: 0x1000, size: 512, frames: [], stream: 0 }],
+  });
+
+  const result = process_alloc_data(snapshot, 0, false, 0, false);
+  const summary = result.summarized_mem;
+  assertEqual(summary.timesteps.join(','), '0,1', 'summarized allocation has nonzero width');
+  assertEqual(summary.offsets.join(','), '0,0', 'summary starts at the bottom');
+  assertEqual(summary.size.join(','), '512,512', 'summary retains its size to the end');
+}
+
+function test_annotations_do_not_accumulate_on_rerender() {
+  console.log('test_annotations_do_not_accumulate_on_rerender');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 512, frames: [], stream: 0,
+        pool_id: [1, 1], annotations: ['existing'] },
+      { action: 'annotate', addr: 0x1000, user_metadata: 'first allocation' },
+      { action: 'free_completed', addr: 0x1000, size: 512, frames: [], stream: 0 },
+      { action: 'alloc', addr: 0x1000, size: 1024, frames: [], stream: 0, pool_id: [1, 1] },
+      { action: 'annotate', addr: 0x1000, user_metadata: 'second allocation' },
+      { action: 'annotate', addr: 0x1000, user_metadata: 'second allocation' },
+      { action: 'free_completed', addr: 0x3000, size: 256, frames: [], stream: 0 },
+    ],
+  });
+  const original = JSON.stringify(snapshot);
+
+  for (const include_private of [false, true, false]) {
+    const result = process_alloc_data(snapshot, 0, false, 15000, include_private);
+    const first = result.context_for_id(0);
+    const second = result.context_for_id(1);
+    assertContains(first, 'Annotations:\n  existing\n  first allocation', 'existing annotations are preserved');
+    assertEqual((first.match(/first allocation/g) || []).length, 1, 'annotation is added once per render');
+    assertEqual((second.match(/second allocation/g) || []).length, 2, 'distinct identical annotations are preserved');
+    assert(!second.includes('first allocation'), 'annotations do not follow reused addresses');
+    assertEqual(JSON.stringify(snapshot), original, 'processing leaves the input snapshot unchanged');
+  }
 }
 
 function test_mixed_pool_and_nonpool() {
@@ -931,6 +1007,39 @@ function test_ghost_blocks_private_pool() {
   assertEqual(envs_false.length, 0, 'no pool envelopes when include_private_inactive=false');
 }
 
+function test_initial_pool_summary_follows_envelope() {
+  console.log('test_initial_pool_summary_follows_envelope');
+  const snapshot = makeSnapshot({
+    traces: [
+      { action: 'alloc', addr: 0x1000, size: 2048, frames: [], stream: 0, pool_id: [0, 0] },
+      { action: 'free_completed', addr: 0x1000, size: 2048, frames: [], stream: 0 },
+    ],
+    segments: [
+      { device: 0, address: 0x10000, total_size: 8192, segment_pool_id: [1, 1],
+        stream: 0, blocks: [
+          { address: 0x10000, requested_size: 1024, state: 'active_allocated', frames: [] },
+          { address: 0x10400, requested_size: 256, state: 'active_allocated', frames: [] },
+        ] },
+      { device: 0, address: 0x20000, total_size: 4096, segment_pool_id: [1, 2],
+        stream: 0, blocks: [
+          { address: 0x20000, requested_size: 512, state: 'active_allocated', frames: [] },
+        ] },
+    ],
+  });
+
+  for (const detail of [1, 2]) {
+    const result = process_alloc_data(snapshot, 0, false, detail, true);
+    const envelope = result.allocations_over_time.find(d => d.elem === 'pool:1,1,s0');
+    const drawn = detail === 1 ? 0 : 1024;
+    const summary = result.allocations_over_time.find(
+      d => d.opacity === 0.3 && d.size[0] === 1280 - drawn);
+    assertEqual(envelope.offsets[0], 4096, 'lower pool reservation moves the upper envelope');
+    assertEqual(summary.offsets[0], envelope.offsets[0] + drawn, 'summary follows its own envelope');
+    assert(summary.offsets[0] + summary.size[0] <= envelope.offsets[0] + envelope.size[0],
+      'summary remains inside the pool reservation');
+  }
+}
+
 function test_ghost_stripe_offset_with_multiple_pools() {
   console.log('test_ghost_stripe_offset_with_multiple_pools');
   // When multiple private pools have initially_allocated blocks, pool envelopes
@@ -1581,6 +1690,10 @@ test_pool_free_without_alloc_no_inflation();
 test_pool_alloc_then_free_normal();
 test_multiple_pool_frees_without_alloc();
 test_non_pool_free_without_alloc();
+test_peak_independent_of_detail();
+test_global_summary_coordinates();
+test_summarized_only_allocation();
+test_annotations_do_not_accumulate_on_rerender();
 test_mixed_pool_and_nonpool();
 test_include_private_inactive_false_ignores_pools();
 test_formatSize_bytes();
@@ -1611,6 +1724,7 @@ test_ghost_blocks_not_created_for_traced_addrs();
 test_ghost_blocks_default_pool_collected();
 test_ghost_blocks_not_in_segment_mode();
 test_ghost_blocks_private_pool();
+test_initial_pool_summary_follows_envelope();
 test_ghost_stripe_offset_with_multiple_pools();
 test_full_snapshot_private_pools();
 test_full_snapshot_no_private_pools();

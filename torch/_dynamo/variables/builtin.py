@@ -78,7 +78,6 @@ from ..utils import (
     is_tensor_getset_descriptor,
     istype,
     no_keywords,
-    no_positional,
     numpy_operator_wrapper,
     proxy_args_kwargs,
     raise_args_mismatch,
@@ -2130,9 +2129,32 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
-        no_positional(tx, "bytes", list(args))
-        no_keywords(tx, "bytes", kwargs)
-        return variables.ConstantVariable.create(b"")
+        if not args and not kwargs:
+            return variables.ConstantVariable.create(b"")
+        if all(a.is_python_constant() for a in args) and all(
+            v.is_python_constant() for v in kwargs.values()
+        ):
+            try:
+                res = bytes(
+                    *(a.as_python_constant() for a in args),
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                )
+                return VariableTracker.build(tx, res)
+            except (TypeError, ValueError) as e:
+                raise_observed_exception(
+                    type(e),
+                    tx,
+                    args=list(e.args),
+                )
+        unimplemented(
+            gb_type="bytes() with non-constant arguments",
+            context=f"bytes(*{args}, **{kwargs})",
+            explanation="Attempted to call bytes() with non-constant args.",
+            hints=[
+                "Ensure that the args to bytes() are constant (int, str, etc.).",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def call___build_class__(self, tx, *args, **kwargs):
         def fail(args, kwargs) -> NoReturn:
@@ -3137,7 +3159,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         format_string = _format_string.as_python_constant()
         format_string = str(format_string)
-        return StringFormatVariable.create(format_string, list(args), kwargs)
+        return StringFormatVariable.create(tx, format_string, list(args), kwargs)
 
     def call_id(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker

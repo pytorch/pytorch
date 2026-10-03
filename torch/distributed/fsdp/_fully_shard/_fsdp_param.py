@@ -221,6 +221,7 @@ class FSDPParam:
     # so the override flag cannot be inferred from the dtype.
     _has_sharded_grad_dtype_override: bool
     sharded_grad_dtype: torch.dtype | None
+    keep_unsharded_storage: bool
 
     def __init__(
         self,
@@ -255,6 +256,7 @@ class FSDPParam:
                 lambda *args, **kwargs: self.reset_sharded_param()
             )
         )
+        self.keep_unsharded_storage = False
 
     @torch.no_grad()
     def _init_sharded_param(
@@ -961,7 +963,8 @@ class FSDPParam:
 
     def to_sharded(self) -> None:
         self._setattr_on_modules(self.sharded_param)
-        self.free_unsharded_param()
+        if not self.keep_unsharded_storage:
+            self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED
 
     def to_sharded_post_forward(self) -> None:
@@ -1001,7 +1004,8 @@ class FSDPParam:
         )
         self._sharded_post_forward_param.grad_dtype = self.sharded_grad_dtype
         self._setattr_on_modules(self._sharded_post_forward_param)
-        self.free_unsharded_param()
+        if not self.keep_unsharded_storage:
+            self.free_unsharded_param()
         self.sharded_state = ShardedState.SHARDED_POST_FORWARD
 
     def to_unsharded(self) -> None:
@@ -1185,6 +1189,29 @@ class FSDPParam:
         param = self.unsharded_param
         return self._get_grad_inner_tensor(
             torch.zeros_like(param, dtype=param.grad_dtype)
+        )
+
+    @property
+    def may_reduce_grad_outside_dp(self) -> bool:
+        """Whether ``_get_grad_inner_tensor`` may reduce the gradient over a
+        non-DP mesh dim, e.g. the TP all-reduce of a SequenceParallel norm
+        weight's ``Partial`` gradient, which runs in the gradient's dtype."""
+        spec = self._unsharded_dtensor_spec
+        if spec is None:
+            return False
+        dp_dims = self._dp_dim_indices if self.mesh_info.is_spmd_mesh else ()
+        if self.is_spmd_types:
+            return any(
+                placement.is_partial()
+                for i, placement in enumerate(self._spmd_grad_placements)
+                if i not in dp_dims
+            )
+        # A replicated parameter's gradient is only known at runtime, and it
+        # can be Partial
+        return any(
+            isinstance(placement, Replicate)
+            for i, placement in enumerate(spec.placements)
+            if i not in dp_dims
         )
 
     def _get_grad_inner_tensor(self, grad: torch.Tensor) -> torch.Tensor:

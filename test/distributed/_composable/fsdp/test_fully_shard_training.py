@@ -275,6 +275,36 @@ class TestFullyShardRegisteredParams(FSDPTestMultiThread):
             self._assert_dtensor_params(model.parameters())
             self._assert_same_params(model.parameters(), ref_model.parameters())
 
+    @skip_if_lt_x_gpu(4, allow_cpu=True)
+    def test_keep_unsharded_storage_with_post_forward_reshard(self):
+        """Tests storage retention when resharding to a smaller mesh."""
+        device = torch.device(device_type.type, 0)
+        model = nn.Linear(8, 8, device=device)
+        fully_shard(model, reshard_after_forward=2)
+        model.set_keep_unsharded_storage(True)
+        # Get unsharded storage pointers to compare against later
+        model.unshard()
+        param_group = model._get_fsdp_state()._fsdp_param_group
+        self.assertIsNotNone(param_group)
+        data_ptrs = [
+            fsdp_param.unsharded_param.data_ptr()
+            for fsdp_param in param_group.fsdp_params
+        ]
+
+        # Trigger a reshard, which should not free the unsharded storage
+        with torch.inference_mode():
+            model(torch.randn(2, 8, device=device))
+        self.assertTrue(param_group.is_sharded_post_forward)
+        model.unshard()
+        # The unsharded storage pointers remain unchanged after resharding
+        self.assertEqual(
+            [
+                fsdp_param.unsharded_param.data_ptr()
+                for fsdp_param in param_group.fsdp_params
+            ],
+            data_ptrs,
+        )
+
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
         device = torch.device(device_type.type, 0)

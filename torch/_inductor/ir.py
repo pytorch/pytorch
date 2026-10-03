@@ -4132,6 +4132,17 @@ class View(GenericView):
 
             raise GuardOnDataDependentSymNode(sympy.Eq(a, b))
 
+        def check_equals_or_raise(a: Expr, b: Expr) -> None:
+            if V.graph.sizevars.statically_known_equals(a, b):
+                return
+            # For unbacked symbols check_equals() adds a runtime assert instead
+            # of raising. That is only safe when both stacks are empty: every
+            # other size has been matched, and for a valid reshape the total
+            # sizes must match, so a == b must hold.
+            if stack_old or stack_new:
+                raise GuardOnDataDependentSymNode(sympy.Eq(a, b))
+            V.graph.sizevars.check_equals(a, b)
+
         # TODO: These symbols may not escape, if they don't assert so and
         # treat them as temporary
         vars = [
@@ -4170,7 +4181,7 @@ class View(GenericView):
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
-                V.graph.sizevars.check_equals(size_new, size_old)
+                check_equals_or_raise(size_new, size_old)
             elif compare_sizes(size_new, size_old) > 0:
                 divisor = sympy.S.One
                 modulus = size_old
@@ -4181,7 +4192,7 @@ class View(GenericView):
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
                     size_old = size_old * modulus
-                V.graph.sizevars.check_equals(size_new, size_old)
+                check_equals_or_raise(size_new, size_old)
             else:
                 raise AssertionError
 
@@ -4240,6 +4251,9 @@ class ReinterpretView(BaseView):
     def get_name(self) -> str:
         return self.data.get_name()
 
+    def get_read_names(self) -> OrderedSet[str]:
+        return OrderedSet([self.get_name()])
+
     def get_device(self) -> torch.device | None:
         return self.layout.device
 
@@ -4259,7 +4273,11 @@ class ReinterpretView(BaseView):
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         def loader(index: Sequence[Expr]) -> OpsValue:
             indexer = self.layout.make_indexer()
-            tmp_loader = ops.load(self.get_name(), indexer(index))
+            name = self.get_name()
+            device = ConstantBuffer.override_device
+            if device is not None and name in V.graph.constants:
+                name = V.graph.constant_name(name, device)
+            tmp_loader = ops.load(name, indexer(index))
             if self.layout.dtype != self.data.dtype:
                 return ops.to_dtype_bitcast(tmp_loader, self.dtype, self.data.dtype)
             else:
@@ -6789,6 +6807,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         supports_epilogue_fusion: bool = False,
         swap_ab: bool = False,
         bias_node: Buffer | None = None,
+        output_scale_node: Buffer | None = None,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -6806,10 +6825,27 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         # When set, the last entry of `inputs` is an addmm bias consumed as a
         # fixed bias-add epilogue; the GEMM operands are the remaining inputs.
         self.bias_node = bias_node
+        # Native scaled-GEMM alpha is kept as a TemplateBuffer input so the
+        # scheduler tracks the dependency, then separated from GEMM operands
+        # when rendering the runtime call.
+        self.output_scale_node = output_scale_node
         # Store kernel metadata for code generation since kernels aren't serializeable yet
+        kernel_impl = getattr(kernel, "impl", None)
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.operator_name,
             "min_cc": kernel.designed_for_min_cc,
+            "supports_output_scale": getattr(kernel, "supports_output_scale", False),
+            "use_prefetch": getattr(
+                kernel_impl,
+                "use_prefetch",
+                getattr(kernel.metadata.design, "use_prefetch", False),
+            ),
+            "use_pdl": getattr(
+                kernel_impl,
+                "use_pdl",
+                getattr(kernel.metadata.design, "use_pdl", False),
+            ),
+            "output_dtype": layout.dtype,
         }
         # Override the instance attribute set by parent with our method
         # This is necessary because TemplateBuffer stores make_kernel_render as instance attr
@@ -6849,6 +6885,11 @@ class NVUniversalGemmBuffer(TemplateBuffer):
                 inp = inp.data
             input_nodes.append(inp)
 
+        output_scale_node = None
+        if self.output_scale_node is not None:
+            output_scale_node = input_nodes[-1]
+            input_nodes = input_nodes[:-1]
+
         # For a baked addmm bias, the bias is the last input and is consumed by
         # the epilogue, not as a GEMM operand.
         bias_node = None
@@ -6874,12 +6915,22 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             local_reduce=local_reduce,
             swap_ab=self.swap_ab,
             bias_node=bias_node,
+            output_scale_node=output_scale_node,
         )
 
         def render():
             return render_kernel.render()
 
         return render_kernel, render
+
+    def gemm_inputs(self) -> Sequence[IRNode]:
+        inputs = cast(Sequence[IRNode], self.inputs)
+        num_auxiliary_inputs = int(self.bias_node is not None) + int(
+            self.output_scale_node is not None
+        )
+        if num_auxiliary_inputs:
+            return inputs[:-num_auxiliary_inputs]
+        return inputs
 
 
 def is_node_sequence(
