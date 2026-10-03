@@ -2914,6 +2914,15 @@ def unsupported_output_tensor(t: torch.Tensor, node=None):
 
 
 def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=True):
+    # These wrappers must be decomposed regardless of tensor type. The resulting
+    # operators are checked independently for unsupported types during lowering.
+    if node.target in (
+        torch.ops.higher_order.auto_functionalized,
+        torch.ops.higher_order.auto_functionalized_v2,
+        torch.ops.higher_order.triton_kernel_wrapper_functional,
+    ):
+        return False
+
     # Custom fallback lowering
     if node.target is aten.view_as_complex.default:
         return False

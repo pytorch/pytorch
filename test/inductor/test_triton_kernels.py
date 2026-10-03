@@ -501,6 +501,83 @@ class KernelTests(torch._inductor.test_case.TestCase):
         self.assertEqual(output, torch.zeros_like(t1))
 
     @requires_gpu
+    @parametrize(
+        "case",
+        ["e8m0", "complex", "meta", "sparse", "fp8", "fp8_uint8", "cpu_output"],
+    )
+    def test_triton_kernel_functional_decomposition_before_type_fallback(self, case):
+        import torch._inductor.codegen.triton_utils as triton_utils
+        import torch._inductor.lowering as lowering
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+        from torch._inductor.fx_passes.post_grad import (
+            decompose_triton_kernel_wrapper_functional,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        kernel_side_table.reset_table()
+        kernel_idx = kernel_side_table.add_kernel(add_kernel_with_optional_param)
+        constant_args_idx = kernel_side_table.add_constant_args(
+            {"n_elements": 16, "ARGS_PASSED": "one", "BLOCK_SIZE": 16}
+        )
+
+        def f(src, output):
+            out = triton_kernel_wrapper_functional(
+                kernel_idx=kernel_idx,
+                constant_args_idx=constant_args_idx,
+                grid=[(1,)],
+                tma_descriptor_metadata={},
+                kwargs={"in_ptr0": src, "in_ptr1": src, "out_ptr": output},
+                tensors_to_clone=["out_ptr"],
+            )
+            return out["out_ptr"]
+
+        dtype = {
+            "e8m0": torch.float8_e8m0fnu,
+            "complex": torch.complex64,
+            "fp8": torch.float8_e4m3fn,
+            "fp8_uint8": torch.float8_e4m3fn,
+        }.get(case, torch.float32)
+        device = {"meta": "meta", "sparse": "cpu", "cpu_output": "cpu"}.get(
+            case, GPU_TYPE
+        )
+        src = torch.empty(16, dtype=dtype, device=device)
+        output = torch.empty(16, device=device)
+        if case == "sparse":
+            src = torch.sparse_coo_tensor([[0]], [1.0], (16,))
+
+        # These inputs exercise wrapper decomposition, not kernel execution.
+        with (
+            inductor_config.patch(disable_cpp_codegen=case == "cpu_output"),
+            contextlib.ExitStack() as stack,
+        ):
+            if case in ("fp8", "fp8_uint8"):
+                stack.enter_context(
+                    mock.patch.object(
+                        lowering,
+                        "is_triton_fp8_dtype_supported",
+                        return_value=False,
+                    )
+                )
+                stack.enter_context(
+                    mock.patch.object(
+                        triton_utils,
+                        "use_uint8_triton_storage_for_cuda_float8_e4m3fn",
+                        return_value=case == "fp8_uint8",
+                    )
+                )
+
+            gm = make_fx(f, tracing_mode="fake")(src, output)
+            functional_nodes = gm.graph.find_nodes(
+                op="call_function", target=triton_kernel_wrapper_functional
+            )
+            self.assertEqual(len(functional_nodes), 1)
+            decompose_triton_kernel_wrapper_functional(gm.graph)
+            mutation_nodes = gm.graph.find_nodes(
+                op="call_function", target=triton_kernel_wrapper_mutation
+            )
+            self.assertEqual(len(mutation_nodes), 1)
+
+    @requires_gpu
     def test_triton_kernel_functionalize(self):
         from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
         from torch._subclasses.functional_tensor import (
