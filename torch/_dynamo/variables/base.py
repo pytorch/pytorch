@@ -499,6 +499,13 @@ def type_qualified_name(type_: type) -> str:
         return qn
 
 
+def getset_read(
+    accessor: Callable[[Any], VariableTracker],
+) -> Getter:
+    """Getter for a GetSet/Member whose value is an already-built VT."""
+    return lambda self, tx: accessor(self)
+
+
 def type_name_no_user_code(type_: type) -> str:
     return type.__dict__["__name__"].__get__(type_, type(type_))
 
@@ -1904,7 +1911,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             elif istype(cur, (list, tuple)):
                 children = list(cur)
             elif istype(cur, (dict, collections.OrderedDict)):
+                # Preserve the existing values-first visitation order, then visit
+                # keys, including VariableTrackers wrapped for hashing.
+                # The local import avoids a base.py <-> hashable.py cycle.
+                from .hashable import HashableTracker
+
                 children = list(cur.values())
+                children.extend(
+                    key.vt if isinstance(key, HashableTracker) else key for key in cur
+                )
             else:
                 continue
             worklist.extend(reversed(children))
