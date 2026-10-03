@@ -7293,6 +7293,17 @@ class TestTorch(TestCase):
             torch.from_numpy(a)
             torch.from_numpy(a)
 
+    def test_grad_scaler_default_device(self):
+        accel = torch.accelerator.current_accelerator()
+        with warnings.catch_warnings():
+            # "CUDA is not available" warning on builds without a usable CUDA device
+            warnings.simplefilter("ignore")
+            scaler = torch.amp.GradScaler()
+        self.assertEqual(scaler._device, accel.type if accel is not None else "cuda")
+        if accel is None:
+            # BC: without an accelerator, GradScaler() still disables itself
+            self.assertFalse(scaler.is_enabled())
+
     def test_newaxis_numpy_comparison(self):
         def run_test(tensor, *idx):
             npt = tensor.numpy()
