@@ -20,7 +20,8 @@ import threading
 import traceback
 import warnings
 from collections.abc import Callable
-from functools import lru_cache
+from enum import auto, Enum
+from functools import cache, lru_cache
 from typing import Any, cast, NewType, Optional, TYPE_CHECKING
 
 import torch
@@ -60,6 +61,7 @@ _HAS_PYNVML = False
 _HAS_AMDSMI = False
 _PYNVML_ERR = None
 _AMDSMI_ERR = None
+
 try:
     from torch import version as _version
 
@@ -82,10 +84,11 @@ try:
             # This creates an ODR violation if the copy of libamd_smi.so from lib
             # is also loaded (via `ld` linking, `LD_LIBRARY_PATH` or `rpath`).
             #
-            # In order to avoid the violation we hook CDLL and try using the
-            # already loaded version of amdsmi, or any version in the processes
-            # rpath/LD_LIBRARY_PATH first, so that we only load a single copy
-            # of the .so.
+            # In order to avoid the violation we hook CDLL and redirect
+            # unversioned requests to the already loaded version of amdsmi, or
+            # any version in the process rpath/LD_LIBRARY_PATH, so that we only
+            # load a single copy of the .so. Versioned paths are not redirected
+            # because current wrappers use them to select a matching library ABI.
             class _amdsmi_cdll_hook:
                 def __init__(self) -> None:
                     self.original_CDLL = ctypes.CDLL  # type: ignore[misc,assignment]
@@ -122,7 +125,11 @@ try:
                 def hooked_CDLL(
                     self, name: str | Path | None, *args: Any, **kwargs: Any
                 ) -> ctypes.CDLL:
-                    if name and Path(name).name.startswith("libamd_smi.so"):
+                    requested = None if name is None else os.fspath(name)
+                    if (
+                        requested is not None
+                        and Path(requested).name == "libamd_smi.so"
+                    ):
                         for path in self.paths:
                             try:
                                 return self.original_CDLL(path, *args, **kwargs)
@@ -145,14 +152,20 @@ try:
                 raise
             except (KeyError, OSError) as err:
                 # The amdsmi python package is installed but its native library
-                # (libamd_smi.so) could not be discovered/loaded -- e.g. TheRock
-                # ROCm wheels lay amdsmi out so that its own find_smi_library()
-                # misses the versioned libamd_smi.so.* and raises KeyError. Treat
-                # this like a missing optional dependency (degrade to
-                # _HAS_AMDSMI=False) instead of aborting `import torch`.
+                # could not be discovered or loaded. For example, some ROCm
+                # wheels lay it out so find_smi_library() raises KeyError.
                 _AMDSMI_ERR = err
                 raise ModuleNotFoundError(
                     "amdsmi is installed but libamd_smi.so could not be loaded"
+                ) from err
+            except AttributeError as err:
+                # ctypes reports a wrapper/library ABI mismatch as an
+                # AttributeError when a symbol expected by the wrapper is absent.
+                if "undefined symbol:" not in str(err):
+                    raise
+                _AMDSMI_ERR = err
+                raise ModuleNotFoundError(
+                    "amdsmi is installed but libamd_smi.so is ABI-incompatible"
                 ) from err
 
         _HAS_PYNVML = True
@@ -789,13 +802,29 @@ def _primary_context_devices() -> list[int]:
     return [d for d in range(device_count()) if torch._C._cuda_hasPrimaryContext(d)]
 
 
+class _StrayContextCheckType(Enum):
+    DISABLED = auto()
+    WARN = auto()
+    ERROR = auto()
+
+
+@cache
+def _get_stray_context_mode() -> _StrayContextCheckType:
+    mode = os.environ.get("TORCH_CUDA_CHECK_STRAY_CONTEXT", "").lower()
+    if mode == "warn":
+        return _StrayContextCheckType.WARN
+    if mode == "error":
+        return _StrayContextCheckType.ERROR
+    return _StrayContextCheckType.DISABLED
+
+
 def _check_stray_context(expected: int) -> None:
     # Diagnostic, off unless TORCH_CUDA_CHECK_STRAY_CONTEXT is "warn" or "error".
     # Invoked from set_device so it runs once when a process pins its device, not
     # on the hot device-guard path. The check is creator-agnostic (it inspects
     # end state), so it catches stray contexts from any source.
-    mode = os.environ.get("TORCH_CUDA_CHECK_STRAY_CONTEXT", "").lower()
-    if mode not in ("warn", "error"):
+    mode = _get_stray_context_mode()
+    if mode == _StrayContextCheckType.DISABLED:
         return
     stray = [d for d in _primary_context_devices() if d != expected]
     if not stray:
@@ -803,11 +832,11 @@ def _check_stray_context(expected: int) -> None:
     msg = (
         f"set_device({expected}) found an existing CUDA primary context on "
         f"device(s) {stray}. Something created a CUDA context before this process "
-        f"pinned its device (e.g. a tensor op or a pin_memory=True allocation run "
+        "pinned its device (e.g. a tensor op or a pin_memory=True allocation run "
         f"before set_device). On a rank whose device is not among {stray}, each "
-        f"stray context wastes hundreds of MB on that shared device."
+        "stray context wastes hundreds of MB on that shared device."
     )
-    if mode == "error":
+    if mode == _StrayContextCheckType.ERROR:
         raise RuntimeError(msg)
     warnings.warn(msg, stacklevel=3)
 
@@ -1420,10 +1449,21 @@ def get_stream_from_external(data_ptr: int, device: Device = None) -> Stream:
 def current_blas_handle():
     r"""Return the ``cublasHandle_t`` pointer for the current device and stream.
 
-    On CUDA, the handle uses cuBLAS's default workspace unless ATen workspace
-    caching is explicitly enabled. When caching is disabled, internal ATen
-    operations may temporarily bind their own workspace, but restore the default
-    workspace before releasing it. ROCm caches workspaces by default.
+    On CUDA, the handle uses the BLAS library's default workspace unless ATen
+    workspace caching is explicitly enabled. When caching is disabled, internal
+    ATen operations may temporarily bind their own workspace to this handle, but
+    restore the default workspace before releasing it. On ROCm they use
+    separate handles, and this function returns a different handle for each
+    stream, because a rocBLAS workspace must not be shared by two streams at
+    once. Each is bound when it is created to a buffer from a caching-allocator
+    pool reserved for these buffers, at least as large as the workspace rocBLAS would allocate, which
+    rocBLAS never grows. A workspace bound with
+    ``rocblas_set_workspace`` stays bound, even after the thread exits and the
+    handle passes to another thread, so unbind it before freeing the buffer.
+    While the current stream is capturing, ROCm returns a capture handle
+    instead, bound to a workspace from the capture's memory pool: call this
+    function inside the capture rather than reusing a handle obtained before
+    it, and do not use the capture handle after the capture ends.
     """
     _lazy_init()
     return torch._C._cuda_getCurrentBlasHandle()
