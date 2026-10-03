@@ -1,9 +1,6 @@
-#include <c10/xpu/XPUFunctions.h>
 
-#include <ATen/ATen.h>
-#include <ATen/core/grad_mode.h>
-#include <ATen/record_function.h>
-#include <c10/core/MemoryFormat.h>
+#include <ATen/core/Tensor.h>
+#include <ATen/ops/empty.h>
 
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>

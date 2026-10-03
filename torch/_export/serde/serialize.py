@@ -443,6 +443,7 @@ def deserialize_torch_artifact(
             "Fallback to weights_only=False succeeded. "
             "Loaded object of type %s after initial failure: %s",
             type(artifact),
+            e,
             exc_info=e,
         )
     if not isinstance(artifact, (tuple, dict)):
@@ -553,7 +554,8 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
             f"expected triton_kernel_wrapper_functional, got {node.target}"
         )
 
-    if not has_triton():
+    # Triton kernel serialization also supports the CPU backend.
+    if not has_triton(include_cpu=True):
         raise AssertionError("triton required to serialize triton kernels")
     from triton.runtime.autotuner import Autotuner
     from triton.runtime.jit import JITFunction
@@ -2406,7 +2408,11 @@ class GraphModuleDeserializer(metaclass=Final):
                     ):
                         self.unbacked_symbols.add(sym)
                 # hints
-                if hint is not None and sym not in self.shape_env.backed_var_to_val:
+                if (
+                    hint is not None
+                    and isinstance(sym, sympy.Symbol)
+                    and sym not in self.shape_env.backed_var_to_val
+                ):
                     self.shape_env.add_backed_var_to_val(sym, hint)  # type: ignore[arg-type]
                 # ValueRanges
                 if vr := self.symbol_name_to_range.get(expr_str):
@@ -2961,10 +2967,6 @@ class GraphModuleDeserializer(metaclass=Final):
                 "Identity": torch.utils._sympy.functions.Identity,
             }
             self.symbol_name_to_symbol: dict[str, sympy.Symbol] = {}
-            self.constants = deserialize_torch_artifact(constants)
-            self.signature = self.deserialize_signature(
-                serialized_graph_module.signature
-            )
 
             # deserialization does analysis with checks on 0/1, so we create fake range constraints and
             # restore the original range constraints afterwards
@@ -2995,6 +2997,13 @@ class GraphModuleDeserializer(metaclass=Final):
                 self.shape_env.unbacked_symfloat_counter += 1
             for _ in range(count_unbacked_symint + 1):
                 self.shape_env.unbacked_symint_counter += 1
+
+            # Fake tensor constants may reconstruct symbolic sizes, which need
+            # the symbol range map initialized above.
+            self.constants = deserialize_torch_artifact(constants)
+            self.signature = self.deserialize_signature(
+                serialized_graph_module.signature
+            )
 
             if example_inputs is not None and len(example_inputs) > 0:
                 self.example_inputs = deserialize_torch_artifact(example_inputs)

@@ -49,6 +49,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
+    subtest,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -170,7 +171,7 @@ class TestPatternMatcher(TestCase):
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
-            "benchmark_epilogue_fusion": False,
+            "benchmark_template_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -269,7 +270,7 @@ class TestPatternMatcher(TestCase):
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
-            "benchmark_epilogue_fusion": False,
+            "benchmark_template_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -316,7 +317,7 @@ class TestPatternMatcher(TestCase):
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
-            "benchmark_epilogue_fusion": False,
+            "benchmark_template_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -364,7 +365,7 @@ class TestPatternMatcher(TestCase):
     @inductor_config.patch(
         {
             "benchmark_fusion": False,
-            "benchmark_epilogue_fusion": False,
+            "benchmark_template_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -400,7 +401,7 @@ class TestPatternMatcher(TestCase):
     @inductor_config.patch(
         {
             "benchmark_fusion": False,
-            "benchmark_epilogue_fusion": False,
+            "benchmark_template_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -424,7 +425,7 @@ class TestPatternMatcher(TestCase):
     @inductor_config.patch(
         {
             "benchmark_fusion": False,
-            "benchmark_epilogue_fusion": False,
+            "benchmark_template_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -456,7 +457,7 @@ class TestPatternMatcher(TestCase):
     @inductor_config.patch(
         {
             "benchmark_fusion": False,
-            "benchmark_epilogue_fusion": False,
+            "benchmark_template_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -506,7 +507,7 @@ class TestPatternMatcher(TestCase):
         with inductor_config.patch(
             {
                 "benchmark_fusion": False,
-                "benchmark_epilogue_fusion": False,
+                "benchmark_template_fusion": False,
                 "max_autotune_gemm_backends": "TRITON",
                 "max_autotune_gemm": True,
             }
@@ -571,6 +572,63 @@ class TestPatternMatcher(TestCase):
 
         self.assertEqual(compiled_fn(x), test_fn(x))
         self.assertEqual(counters["inductor"]["partial_reduction_reuse"], 1)
+
+    @inductor_config.patch(var_std_reduction_dedup=True)
+    def test_var_std_reduction_dedup(self):
+        def test_fn(x):
+            return torch.var(x, dim=-1) + torch.std(x, dim=-1)
+
+        x = torch.randn(64, 32768, dtype=torch.float16)
+        counters.clear()
+        compiled_fn = torch.compile(test_fn)
+        self.assertEqual(compiled_fn(x), test_fn(x))
+        self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 1)
+
+    @inductor_config.patch(var_std_reduction_dedup=True)
+    def test_var_std_reduction_dedup_no_match(self):
+        def test_fn(x):
+            return torch.std(x, dim=-1) + torch.var(x, dim=-1, correction=0)
+
+        x = torch.randn(64, 32768, dtype=torch.float16)
+        counters.clear()
+        compiled_fn = torch.compile(test_fn)
+        self.assertEqual(compiled_fn(x), test_fn(x))
+        self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 0)
+
+    @inductor_config.patch(var_std_reduction_dedup=True)
+    def test_var_std_reduction_dedup_keepdim(self):
+        def test_fn(x):
+            return torch.var(x, dim=-1, keepdim=True) + torch.std(
+                x, dim=-1, keepdim=True
+            )
+
+        x = torch.randn(64, 32768, dtype=torch.float16)
+        counters.clear()
+        compiled_fn = torch.compile(test_fn)
+        self.assertEqual(compiled_fn(x), test_fn(x))
+        self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 1)
+
+    @inductor_config.patch(var_std_reduction_dedup=True)
+    def test_var_std_reduction_dedup_different_dim(self):
+        def test_fn(x):
+            return torch.var(x, dim=-1), torch.std(x, dim=0)
+
+        x = torch.randn(64, 128, dtype=torch.float16)
+        counters.clear()
+        compiled_fn = torch.compile(test_fn)
+        self.assertEqual(compiled_fn(x), test_fn(x))
+        self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 0)
+
+    @inductor_config.patch(var_std_reduction_dedup=True)
+    def test_var_std_reduction_dedup_float32(self):
+        def test_fn(x):
+            return torch.var(x, dim=-1) + torch.std(x, dim=-1)
+
+        x = torch.randn(64, 128, dtype=torch.float32)
+        counters.clear()
+        compiled_fn = torch.compile(test_fn)
+        self.assertEqual(compiled_fn(x), test_fn(x))
+        self.assertEqual(counters["inductor"]["var_std_reduction_dedup"], 0)
 
     def test_addmm(self):
         def fn(a, b, c):
@@ -964,6 +1022,49 @@ class TestPatternMatcher(TestCase):
             self.assertEqual(result, fn())
             self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
             counters.clear()
+
+    @parametrize(
+        "fn",
+        [
+            subtest(lambda: torch.tensor(5.0).cumsum(0), name="float"),
+            subtest(lambda: torch.tensor(5).cumsum(0), name="integer"),
+            subtest(lambda: torch.tensor(True).cumsum(0), name="boolean"),
+            subtest(lambda: torch.zeros(()).cumsum(0), name="zeros"),
+            subtest(lambda: torch.full((), 5.0).cumsum(0), name="full"),
+            subtest(lambda: torch.tensor(5.0).cumsum(-1), name="negative_dim"),
+        ],
+    )
+    def test_pointless_cumsum_scalar(self, fn):
+        expected = fn()
+        result = torch.compile(fn, fullgraph=True)()
+        self.assertEqual(result, expected)
+
+    @dynamo_config.patch(capture_scalar_outputs=True)
+    @parametrize("dtype", [torch.int64, torch.float32, torch.bool])
+    def test_pointless_cumsum_symbolic_fill(self, dtype):
+        # fill_value reaches the pattern as an fx Node either from an unbacked
+        # .item(), or - the second closure below - from a recompile of the same code
+        # object with a different constant in its cell.
+        def unbacked(x):
+            return torch.full((2,), x.item(), dtype=dtype).cumsum(0).sum()
+
+        x = torch.tensor(3)
+        result, (code,) = run_and_get_code(torch.compile(unbacked, fullgraph=True), x)
+        self.assertEqual(result, unbacked(x))
+        if dtype == torch.bool:
+            self.assertNotIn("aten.cumsum", code)  # exempt, so this one still folds
+        else:
+            self.assertIn("aten.cumsum", code)
+
+        def make(fill):
+            def fn():
+                return torch.full((2,), fill, dtype=dtype).cumsum(0).sum()
+
+            return fn
+
+        for fill in (1, 2):
+            fn = make(fill)
+            self.assertEqual(torch.compile(fn, fullgraph=True)(), fn())
 
     def test_reciprocal_sqrt_to_rsqrt(self):
         # reciprocal(sqrt(x)) should fuse into a single rsqrt in the kernel.
@@ -1859,13 +1960,7 @@ class TestPatternMatcher(TestCase):
         joint_graph.lazy_init()
 
         with torch._subclasses.FakeTensorMode() as mode:
-            for (
-                search_fn,
-                example_inputs,
-                trace_fn,
-                scalar_workaround,
-                search_fn_pattern,
-            ) in _known_precompiled_patterns:
+            for precompiled in _known_precompiled_patterns:
                 # Because the example_inputs were saved as fake tensors in a
                 # different FakeTensorMode we need to update them to our
                 # FakeTensorMode().
@@ -1874,24 +1969,29 @@ class TestPatternMatcher(TestCase):
                         return torch._subclasses.FakeTensor.from_tensor(x, mode)
                     return x
 
-                example_inputs = pytree.tree_map(remap_fake_tensor, example_inputs)
+                example_inputs = pytree.tree_map(
+                    remap_fake_tensor, precompiled.example_inputs
+                )
 
                 pattern = gen_pattern(
-                    search_fn, example_inputs, trace_fn, scalar_workaround
+                    precompiled.search_fn,
+                    example_inputs,
+                    precompiled.trace_fn,
+                    precompiled.scalar_workaround,
                 )
                 pattern_pp = PatternPrettyPrinter.run(pattern)
 
                 self.assertEqual(
                     pattern_pp,
-                    PatternPrettyPrinter.run(search_fn_pattern),
-                    msg=lambda msg: f"{msg}\nFound mismatched pattern {search_fn.__name__}. Run torchgen/fuse/gen_patterns.py",
+                    PatternPrettyPrinter.run(precompiled.search_fn_pattern),
+                    msg=lambda msg: f"{msg}\nFound mismatched pattern {precompiled.search_fn.__name__}. Run torchgen/fuse/gen_patterns.py",
                 )
 
                 # Since we've already checked that the serialized patterns match
                 # lets verify the serializer by ensuring the generated patterns
                 # also match (since search_fn_pattern is the serialized version
                 # of search_fn).
-                self.assertTrue(pattern.pattern_eq(search_fn_pattern))
+                self.assertTrue(pattern.pattern_eq(precompiled.search_fn_pattern))
 
     @xfailIfSM89
     @inductor_config.patch(

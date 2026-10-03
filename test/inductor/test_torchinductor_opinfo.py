@@ -22,6 +22,7 @@ from torch._subclasses.fake_tensor import (
 )
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import (
+    dtypes as device_dtypes,
     instantiate_device_type_tests,
     onlyNativeDeviceTypes,
     OpDTypes,
@@ -41,6 +42,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     isRocmArchAnyOf,
     MI200_ARCH,
+    parametrize,
     skipCUDAMemoryLeakCheckIf,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -99,6 +101,13 @@ u16 = torch.uint16  # not tested
 u32 = torch.uint32  # not tested
 u64 = torch.uint64  # not tested
 
+NEXTAFTER_DTYPE_CONFIG = {
+    torch.float16: (torch.int16, 0x7C00, 0x0200),
+    torch.bfloat16: (torch.int16, 0x7F80, 0x0040),
+    torch.float32: (torch.int32, 0x7F800000, 0x00400000),
+    torch.float64: (torch.int64, 0x7FF0000000000000, 0x0008000000000000),
+}
+
 _ops = partial(
     ops,
     dtypes=OpDTypes.supported,
@@ -125,6 +134,8 @@ if START is not None or END is not None:
 else:
     START = 0
     END = len(op_db)
+
+NEXTAFTER_IN_RANGE = any(op.name == "nextafter" for op in op_db[START:END])
 
 seen_failed = defaultdict(set)
 failed_reasons = defaultdict(set)
@@ -251,6 +262,12 @@ inductor_expected_failures_single_sample["cpu"] = {
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
+    # Same reason as "complex"/"view_as_complex" above: check_model runs the
+    # reference with reference_in_float=True, and reference_to_expect only
+    # casts the reference back when y.dtype.is_floating_point -- which is
+    # False for complex, so the f16 reference stays complex64 while the actual
+    # is complex32 and the dtype comparison fails.
+    "polar": {f16},
     ("sparse.mm", "reduce"): {f32, f64, f16},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {
@@ -429,6 +446,8 @@ inductor_override_kwargs["cpu"] = {
         "atol": 1e-3,
         "rtol": 1e-4,
     },
+    ("_unsafe_masked_index_put_accumulate", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("addbmm", f16): {"reference_in_float": False},
     # Following tests are failing with strict comparison but atol=1 is acceptable due roundings errors
     ("nn.functional.interpolate.bilinear", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.upsample_bilinear", u8): {"atol": 1, "rtol": 0},
@@ -573,6 +592,8 @@ inductor_override_kwargs["cuda"] = {
         "grad_atol": 2e-3,
         "grad_rtol": 1e-3,
     },
+    ("special.i1", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
+    ("special.i1e", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
 }
 
 inductor_override_kwargs["xpu"] = {
@@ -586,9 +607,17 @@ inductor_override_kwargs["xpu"] = {
     "randn": {"assert_equal": False},
     "nn.functional.rrelu": {"check_gradient": False},
     # XPU
+    # Mirrors the CUDA override from #189872; the fp16 backward gap is the
+    # same eager-vs-inductor intermediate-precision difference on XPU.
+    ("special.i1", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
+    ("special.i1e", f16): {"grad_atol": 1e-5, "grad_rtol": 1e-2},
     ("cross", f16): {"reference_in_float": True},
     ("addr", f16): {"reference_in_float": True},
     ("baddbmm", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
+    ("combinations", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 0.01,
+    },  # inductor does accum in fp16
     ("angle", f64): {"reference_in_float": True},
     ("asin", f16): {"reference_in_float": True},
     ("asin", f32): {"reference_in_float": True, "atol": 1e-4, "rtol": 1e-4},
@@ -740,6 +769,13 @@ inductor_override_kwargs["xpu"] = {
     ("nn.functional.interpolate.trilinear", f64): {
         "check_gradient": False,
     },
+    # fp16 backward accumulates ~1e-3 rounding across the aten kernel and
+    # inductor decomposition; loosen tolerances to match the CUDA override
+    # added in pytorch/pytorch#190245.
+    ("native_group_norm", f16): {
+        "grad_atol": 2e-3,
+        "grad_rtol": 1e-3,
+    },
 }
 if TEST_WITH_ROCM:
     inductor_override_kwargs["cuda"].update(
@@ -747,6 +783,20 @@ if TEST_WITH_ROCM:
             ("cummin", f16): {"atol": 1e-3, "rtol": 1e-5},
             # See https://github.com/pytorch/pytorch/pull/186595#issuecomment-4849920339
             ("combinations", f16): {"grad_atol": 5e-4, "grad_rtol": 2e-3},
+            # Sample 6 broadcasts the exponent (10, 1, 5) against the base
+            # (10, 5), so the base gradient contains the reduction
+            #   sum(grad * exponent * base ** (exponent - 1), dim=0).
+            # On ROCm, eager and Triton take separate powf paths (system ROCm
+            # OCML versus Triton's bundled OCML), introducing a small difference
+            # before this reduction. The terms at the failing element strongly
+            # cancel, which makes the result sensitive to the FP32 reduction
+            # tree. Persistent-reduction autotuning can legally select different
+            # XBLOCK layouts, and thus different trees, based on timing. Observed
+            # layouts produce relative errors up to 1.396e-5, just above the
+            # generic 1.3e-5 tolerance, across gfx90a, gfx942, and gfx950.
+            # Keep the forward tolerance unchanged and allow modest headroom only
+            # for gradients. See https://github.com/pytorch/pytorch/issues/165296.
+            ("__rpow__", f32): {"grad_atol": 1.5e-5, "grad_rtol": 2e-5},
         }
     )
 
@@ -1262,6 +1312,121 @@ def _inductor_extra_samples(op_name, device, dtype, requires_grad):
     return []
 
 
+if NEXTAFTER_IN_RANGE:
+
+    class TestInductorNextafter(TestCase):
+        @device_dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+        @parametrize("noncontiguous", (False, True))
+        @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+        @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
+        @skipXPUIf(not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler not found")
+        def test_nextafter(self, device, dtype, noncontiguous):
+            int_dtype = NEXTAFTER_DTYPE_CONFIG[dtype][0]
+            int_min = torch.iinfo(int_dtype).min
+            subnormals = torch.tensor(
+                [int_min + 1, 1], device=device, dtype=int_dtype
+            ).view(dtype)
+            values = torch.cat(
+                (
+                    torch.tensor(
+                        [
+                            float("-inf"),
+                            -2.0,
+                            -1.0,
+                            -0.0,
+                            0.0,
+                            1.0,
+                            2.0,
+                            float("inf"),
+                        ],
+                        device=device,
+                        dtype=dtype,
+                    ),
+                    subnormals,
+                    torch.tensor([float("nan")], device=device, dtype=dtype),
+                )
+            )
+            x = values[:, None].repeat(1, values.numel())
+            y = values[None, :].repeat(values.numel(), 1)
+            if noncontiguous:
+                x = x.T
+                y = y.T
+
+            expected = torch.nextafter(x, y)
+            actual = torch.compile(torch.nextafter, fullgraph=True)(x, y)
+            not_nan = ~expected.isnan()
+
+            self.assertEqual(
+                actual[not_nan].view(int_dtype), expected[not_nan].view(int_dtype)
+            )
+            self.assertEqual(actual.isnan(), expected.isnan())
+
+        @device_dtypes(torch.float16, torch.bfloat16)
+        @skipCPUIf(True, "triton.codegen_upcast_to_fp32 only affects Triton backends")
+        @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
+        @skipXPUIf(not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler not found")
+        def test_nextafter_without_load_upcast(self, device, dtype):
+            int_dtype = NEXTAFTER_DTYPE_CONFIG[dtype][0]
+            x = torch.tensor([0.0, 1.0], device=device, dtype=dtype)
+            y = torch.tensor([1.0, 2.0], device=device, dtype=dtype)
+            expected = torch.nextafter(x, y)
+
+            with torch._inductor.config.patch("triton.codegen_upcast_to_fp32", False):
+                actual = torch.compile(torch.nextafter, fullgraph=True)(x, y)
+
+            self.assertEqual(actual.view(int_dtype), expected.view(int_dtype))
+
+        @device_dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+        @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+        @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
+        @skipXPUIf(not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler not found")
+        def test_prims_nextafter(self, device, dtype):
+            int_dtype = NEXTAFTER_DTYPE_CONFIG[dtype][0]
+            x = torch.tensor([0.0, -0.0, 1.0, -1.0], device=device, dtype=dtype)
+            y = torch.tensor([1.0, -1.0, 2.0, -2.0], device=device, dtype=dtype)
+
+            expected = torch.ops.prims.nextafter.default(x, y)
+            actual = torch.compile(torch.ops.prims.nextafter.default, fullgraph=True)(
+                x, y
+            )
+
+            self.assertEqual(actual.view(int_dtype), expected.view(int_dtype))
+
+        @device_dtypes(torch.float16, torch.bfloat16, torch.float32, torch.float64)
+        @skipCPUIf(not HAS_CPU, "Skipped! Supported CPU compiler not found")
+        @skipCUDAIf(not HAS_CUDA_AND_TRITON, "Skipped! Triton not found")
+        @skipXPUIf(not HAS_XPU_AND_TRITON, "Skipped! Supported XPU compiler not found")
+        def test_nextafter_quiets_nan(self, device, dtype):
+            int_dtype, inf_bits, quiet_nan_bit = NEXTAFTER_DTYPE_CONFIG[dtype]
+            int_min = torch.iinfo(int_dtype).min
+            signaling_nan = inf_bits + 1
+            quiet_nan = signaling_nan | quiet_nan_bit
+            nan_bits = torch.tensor(
+                [
+                    signaling_nan,
+                    quiet_nan,
+                    int_min + signaling_nan,
+                    int_min + quiet_nan,
+                ],
+                device=device,
+                dtype=int_dtype,
+            )
+            nan_values = nan_bits.view(dtype)
+            one = torch.ones_like(nan_values)
+            compiled = torch.compile(torch.nextafter, fullgraph=True)
+
+            for actual in (compiled(nan_values, one), compiled(one, nan_values)):
+                self.assertEqual(
+                    actual.isnan(), torch.ones_like(actual, dtype=torch.bool)
+                )
+                self.assertEqual(
+                    torch.bitwise_and(actual.view(int_dtype), quiet_nan_bit),
+                    torch.full_like(nan_bits, quiet_nan_bit),
+                )
+
+    instantiate_device_type_tests(TestInductorNextafter, globals(), allow_xpu=True)
+
+
 @wrapper_noop_set_seed_decorator
 class TestInductorOpInfo(TestCase):
     @classmethod
@@ -1421,7 +1586,7 @@ class TestInductorOpInfo(TestCase):
                 self.has_rng_op = False
 
             def __torch_dispatch__(self, func, types, args, kwargs=None):
-                kwargs = kwargs if kwargs else {}
+                kwargs = kwargs or {}
                 if torch.Tag.nondeterministic_seeded in func.tags:
                     self.has_rng_op = True
 

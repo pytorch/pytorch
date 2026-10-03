@@ -31,7 +31,7 @@ from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
-from .base import VariableTracker
+from .base import GetSet, Method, readonly_setter, VariableTracker
 
 
 if TYPE_CHECKING:
@@ -73,7 +73,7 @@ class DistributedVariable(VariableTracker):
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         return hash(self.value), False
 
-    def richcompare_impl(self, tx, other, op):
+    def tp_richcompare_impl(self, tx, other, op):
         from .object_protocol import object_richcompare
 
         return object_richcompare(self, tx, other, op)
@@ -128,26 +128,32 @@ class WorldMetaClassVariable(DistributedVariable):
     def python_type(self) -> type:
         return type(self.value)
 
-    def getattro_impl(
-        self, tx: "InstructionTranslatorBase", name: str
+    # dynamo-internal getset (not real CPython descriptors): _WorldMeta
+    # exposes the WORLD and NON_GROUP_MEMBER process-group sentinels.
+    def _world_getset(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if not self.source:
+            raise AssertionError(
+                "WorldMetaClassVariable requires a source for WORLD attribute"
+            )
+        source = AttrSource(base=self.source, member="WORLD")
+        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+        return VariableTracker.build(tx, self.value.WORLD, source)
+
+    def _non_group_member_getset(
+        self, tx: "InstructionTranslatorBase"
     ) -> VariableTracker:
-        if name == "WORLD":
-            if not self.source:
-                raise AssertionError(
-                    "WorldMetaClassVariable requires a source for WORLD attribute"
-                )
-            source = AttrSource(base=self.source, member="WORLD")
-            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            return VariableTracker.build(tx, self.value.WORLD, source)
-        elif name == "NON_GROUP_MEMBER":
-            if not self.source:
-                raise AssertionError(
-                    "WorldMetaClassVariable requires a source for NON_GROUP_MEMBER attribute"
-                )
-            source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
-            install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            return VariableTracker.build(tx, self.value.NON_GROUP_MEMBER, source)
-        return super().getattro_impl(tx, name)
+        if not self.source:
+            raise AssertionError(
+                "WorldMetaClassVariable requires a source for NON_GROUP_MEMBER attribute"
+            )
+        source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
+        install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+        return VariableTracker.build(tx, self.value.NON_GROUP_MEMBER, source)
+
+    tp_getset = {
+        "WORLD": GetSet(_world_getset, readonly_setter),
+        "NON_GROUP_MEMBER": GetSet(_non_group_member_getset, readonly_setter),
+    }
 
 
 class BackwardHookVariable(VariableTracker):
@@ -236,16 +242,26 @@ class BackwardHookVariable(VariableTracker):
     def python_type(self) -> type:
         return torch.utils.hooks.BackwardHook
 
-    def call_method(
+    def setup_input_hook(
         self,
         tx: "InstructionTranslatorBase",
-        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name in ("setup_input_hook", "setup_output_hook"):
-            return self._setup_hook(tx, name, *args, **kwargs)
-        return super().call_method(tx, name, args, kwargs)
+        return self._setup_hook(tx, "setup_input_hook", *args, **kwargs)
+
+    def setup_output_hook(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        return self._setup_hook(tx, "setup_output_hook", *args, **kwargs)
+
+    tp_methods = {
+        "setup_input_hook": Method(setup_input_hook),
+        "setup_output_hook": Method(setup_output_hook),
+    }
 
     def _setup_hook(
         self,

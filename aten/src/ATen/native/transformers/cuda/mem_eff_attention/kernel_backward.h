@@ -765,9 +765,9 @@ struct AttentionBackwardKernel {
       // Advance pointers that depend on the total concatenated
       // number of queries, as `num_queries` is modified in the block
       // below
-      dropout_batch_head_rng_offset =
-          batch_id * (num_heads * num_queries * num_keys) +
-          head_id * (num_queries * num_keys);
+      // See NOTE [Mem-efficient attention dropout RNG offset]
+      dropout_batch_head_rng_offset = gemm_kernel_utils::dropout_rng_offset(
+          batch_id, head_id, num_heads, num_queries, num_keys);
       logsumexp_ptr += batch_id * lse_strideB + head_id * lse_strideH;
 
       if (cu_seqlens_q_ptr != nullptr) {
@@ -1656,6 +1656,9 @@ struct AttentionBackwardKernel {
         auto lane_offset = MatmulQK::AccumLambdaIterator::get_lane_offset(
             lane_id, warp_id, output_tile_coords);
         int shift = query_start - key_start - p.window_size;
+        if (p.custom_mask_type == CausalFromBottomRight) {
+          shift += p.num_keys - p.num_queries;
+        }
         // current_key = key_start + accum_m
         // current_query = query_start + accum_n
         // mask if: `current_key < current_query - window_size`
