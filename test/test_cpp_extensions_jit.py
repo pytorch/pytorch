@@ -490,6 +490,66 @@ class TestCppExtensionJIT(common.TestCase):
             y_incorrect = torch.zeros(20, device="cuda", dtype=torch.float32)
             module.cudnn_relu(x, y_incorrect)
 
+    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(TEST_ROCM, "Not supported on ROCm")
+    def test_cudnn_cuda_versioned_layout_paths(self):
+        # cuDNN 9 Windows CUDA 13+ packages nest headers and libs under
+        # include/<cuda>/ and lib/<cuda>/<arch>/. Flat include/cudnn.h is absent.
+        with tempfile.TemporaryDirectory() as root:
+            ver = "13.4"
+            if IS_WINDOWS:
+                arch = (
+                    "arm64"
+                    if sysconfig.get_platform().lower() == "win-arm64"
+                    else "x64"
+                )
+                lib = os.path.join(root, "lib", ver, arch)
+                libname = "cudnn.lib"
+            else:
+                lib = os.path.join(root, "lib", ver)
+                libname = "libcudnn.so"
+            inc = os.path.join(root, "include", ver)
+            os.makedirs(inc)
+            os.makedirs(lib)
+            with open(os.path.join(inc, "cudnn.h"), "w"):
+                pass
+            with open(os.path.join(lib, libname), "w"):
+                pass
+            with (
+                mock.patch.object(torch.utils.cpp_extension, "CUDNN_HOME", root),
+                mock.patch("torch.version.cuda", ver),
+            ):
+                includes = torch.utils.cpp_extension.include_paths(device_type="cuda")
+                libs = torch.utils.cpp_extension.library_paths(device_type="cuda")
+                self.assertIn(inc, includes)
+                self.assertNotIn(os.path.join(root, "include"), includes)
+                self.assertIn(lib, libs)
+
+    def test_cudnn_runtime_dir_requires_cuda_or_cudnn(self):
+        # CPU-only JIT loads must not prepend cuDNN onto PATH / DLL search.
+        with mock.patch.object(
+            torch.utils.cpp_extension, "_add_cudnn_runtime_dir"
+        ) as add:
+            torch.utils.cpp_extension._get_exec_path("mod", ".")
+            add.assert_not_called()
+            torch.utils.cpp_extension._get_exec_path("mod", ".", with_cuda=True)
+            add.assert_called_once()
+            add.reset_mock()
+            torch.utils.cpp_extension._get_exec_path("mod", ".", with_cudnn=True)
+            add.assert_called_once()
+            add.reset_mock()
+            with self.assertRaises(Exception):
+                torch.utils.cpp_extension._import_module_from_library(
+                    "missing", ".", True
+                )
+            add.assert_not_called()
+            add.reset_mock()
+            with self.assertRaises(Exception):
+                torch.utils.cpp_extension._import_module_from_library(
+                    "missing", ".", True, with_cuda=True
+                )
+            add.assert_called_once()
+
     def test_inline_jit_compile_extension_with_functions_as_list(self):
         cpp_source = """
         torch::Tensor tanh_add(torch::Tensor x, torch::Tensor y) {
