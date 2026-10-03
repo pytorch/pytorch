@@ -11943,6 +11943,71 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(compile_fx_inner(gm, xs_compiled)(list(xs_compiled)), expected)
         self.assertEqual(xs_compiled, xs_eager)
 
+    def test_copy_into_realized_buffer_forwarded(self):
+        # a and the view v are only returned after the copy_, so the scheduler
+        # returns the second mm's buffer in their place and drops the copy. b
+        # and the second mm read a before it and keep the old a.
+        from torch._inductor.decomposition import select_decomp_table
+
+        def fn(x):
+            a = x @ x
+            v = a.t()
+            b = a + 1
+            a.copy_(a @ x)
+            return a, v, b
+
+        x = torch.randn(8, 8, device=self.device)
+        gm = make_fx(fn, decomposition_table=select_decomp_table())(x.clone())
+        torch._inductor.metrics.reset()
+        result = compile_fx_inner(gm, [x.clone()])([x.clone()])
+        self.assertEqual(result, fn(x))
+        # v is still a view of a.
+        self.assertEqual(
+            result[1].untyped_storage().data_ptr(),
+            result[0].untyped_storage().data_ptr(),
+        )
+        # Two mms and the add, no copy.
+        self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 3)
+
+    @requires_gpu()
+    def test_copy_into_pinned_buffer_kept(self):
+        # Returning the mm's buffer in place of a would lose a's pinning.
+        if self.device != "cpu":
+            raise unittest.SkipTest("pin_memory is not supported on non-CPU devices")
+        from torch._inductor.decomposition import select_decomp_table
+
+        def fn(x):
+            a = torch.empty(8, 8, pin_memory=True).fill_(1)
+            a.copy_(a @ x)
+            return (a,)
+
+        x = torch.randn(8, 8)
+        gm = make_fx(fn, decomposition_table=select_decomp_table())(x.clone())
+        (result,) = compile_fx_inner(gm, [x.clone()])([x.clone()])
+        self.assertEqual(result, fn(x)[0])
+        self.assertTrue(result.is_pinned())
+
+    def test_copy_from_other_mempool_kept(self):
+        # Returning the second mm's buffer, allocated in a user CUDA MemPool,
+        # in place of a would move the output into that pool.
+        if self.device != "cuda":
+            raise unittest.SkipTest("CUDA MemPool")
+        from torch._inductor.decomposition import select_decomp_table
+
+        def fn(x):
+            a = x @ x
+            a.copy_(a @ x)
+            return (a,)
+
+        x = torch.randn(8, 8, device=self.device)
+        gm = make_fx(fn, decomposition_table=select_decomp_table())(x.clone())
+        mm = gm.graph.find_nodes(op="call_function", target=torch.ops.aten.mm.default)
+        mm[1].meta["custom"] = {"mempool": 0, "mempool_device": 0}
+        torch._inductor.metrics.reset()
+        compile_fx_inner(gm, [x.clone()])
+        # Two mms and the copy.
+        self.assertEqual(torch._inductor.metrics.ir_nodes_pre_fusion, 3)
+
     @config.patch(implicit_fallbacks=True)
     def test_mutable_op_layout_copy_written_back_in_place(self):
         # y is an output, so it is realized with eager's transposed strides.

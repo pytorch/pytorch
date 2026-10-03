@@ -6011,6 +6011,7 @@ class Scheduler:
 
         self.compute_dependencies()
         self.nodes = self.topological_sort_schedule(self.nodes)
+        self.forward_copies_to_outputs()
         self.dead_node_elimination()
         self.name_to_fused_node = {n.get_name(): n for n in self.nodes}
         self.compute_ancestors()
@@ -6837,6 +6838,91 @@ class Scheduler:
             )
 
         self.nodes = new_nodes
+
+    def forward_copies_to_outputs(self) -> None:
+        """
+        Drop a copy dst <- src whose only later uses are graph outputs (e.g. the
+        copy_ lowering of an out-of-place result into a realized buffer) by
+        returning src in place of dst. compute_dependencies renames the uses of
+        dst after the copy to the copy's buffer, so those are its users; uses
+        before the copy still read the old dst.
+        """
+        aliased = OrderedSet[str]()
+        for buf in self.name_to_buf.values():
+            if aliases := buf.get_aliases():
+                aliased.update([buf.get_name(), *aliases])
+        output_positions = collections.defaultdict(list)
+        for i, name in enumerate(V.graph.get_output_names()):
+            output_positions[name].append(i)
+        sizevars = V.graph.sizevars
+
+        for node in self.nodes:
+            if not (
+                isinstance(node, SchedulerNode)
+                and isinstance(node.node, ir.ComputedBuffer)
+                and isinstance(node.node.layout, ir.MutationLayoutSHOULDREMOVE)
+            ):
+                continue
+            (copy_buf,) = node.get_outputs()
+            reads = [d for d in node.read_writes.reads if isinstance(d, MemoryDep)]
+            (write,) = node.read_writes.writes
+            if (
+                not copy_buf.users
+                or not all(isinstance(u.node, OutputNode) for u in copy_buf.users)
+                or len(reads) != 1
+                or not isinstance(write, MemoryDep)
+                or node._body.subblocks
+                or not node._body.root_block.contains_only_ops(("load", "store"))
+            ):
+                continue
+            # Both allocated by this graph, and no other buffer shares either.
+            src = self.name_to_buf.get(reads[0].name)
+            dst = self.name_to_buf.get(node.node.layout.get_buffer().get_name())
+            if (
+                src is None
+                or dst is None
+                or src.get_name() in aliased
+                or dst.get_name() in aliased
+            ):
+                continue
+            # A pure copy writing all of dst's storage in order, from a buffer
+            # that only the copy reads. src's memory replaces dst's: a comm
+            # buffer must not escape the graph, and the pinning and CUDA
+            # MemPool of the output must not change.
+            read, write = reads[0].normalize(), write.normalize()
+            numel = sympy_product(write.size)
+            src_layout, dst_layout = src.node.layout, dst.node.layout
+            if not (
+                write.is_contiguous()
+                and read.index == write.index
+                and read.size == write.size
+                and type(src_layout) is ir.FixedLayout
+                and isinstance(dst_layout, ir.Layout)
+                and src_layout.is_pinned == dst_layout.is_pinned
+                and src.node.mempool == dst.node.mempool
+                and src_layout.dtype == dst_layout.dtype
+                and sizevars.statically_known_equals(numel, src_layout.storage_size())
+                and sizevars.statically_known_equals(numel, dst_layout.storage_size())
+                and all(u.is_weak or u.node is node for u in src.users)
+            ):
+                continue
+
+            for i in output_positions[dst.get_name()]:
+                out = V.graph.graph_outputs[i]
+                _, layout = ir.as_storage_and_layout(out, freeze=False)
+                V.graph.graph_outputs[i] = ir.ReinterpretView(
+                    data=ir.StorageBox(src.node),
+                    layout=ir.FixedLayout(
+                        layout.device,
+                        layout.dtype,
+                        layout.size,
+                        layout.stride,
+                        layout.offset,
+                    ),
+                )
+            src.users = [u for u in src.users if u.node is not node]
+            src.users.append(NodeUser(OutputNode(StarDep(src.get_name()))))
+            copy_buf.users = []
 
     def dead_node_elimination(self) -> None:
         """

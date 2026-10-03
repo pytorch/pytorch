@@ -19,9 +19,12 @@ import torch.distributed._symmetric_memory as symm_mem
 from torch._C import FileCheck
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
+from torch._inductor.compile_fx import compile_fx_inner
+from torch._inductor.decomposition import select_decomp_table
 from torch._inductor.utils import (
     fresh_cache,
     fresh_inductor_cache,
+    run_and_get_code,
     run_and_get_triton_code,
 )
 from torch._prims_common import make_contiguous_strides_for
@@ -39,6 +42,7 @@ from torch.distributed._symmetric_memory._nccl import (
     register_external_nccl_comm,
 )
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import SM100OrLater, SM89OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import (
     e4m3_type,
@@ -2848,6 +2852,50 @@ class LoweringTest(MultiProcContinuousTest):
         eager_result_3 = func_3(arg.clone())
         compiled_result_3 = compiled_3(arg.clone())
         torch.testing.assert_close(eager_result_3, compiled_result_3)
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_cache()
+    def test_lowering_one_shot_all_reduce_in_place(self):
+        # make_fx keeps the all_reduce_ that torch.compile's functionalization
+        # turns into all_reduce. The lowering copies the one-shot output back
+        # into the symm-mem input, and the scheduler drops the copy when
+        # nothing reads the input afterwards.
+        self._init_process()
+        arg = torch.rand(4, 4, device=self.device)
+        c10d = torch.ops._c10d_functional
+
+        def reduce_once(x):
+            reduced = c10d.all_reduce_(x + 1, "sum", "0")
+            return (c10d.wait_tensor(reduced),)
+
+        # The base and a sibling view of the reduced view are read afterwards.
+        def reduce_view(x):
+            base = x + 1
+            c10d.wait_tensor(c10d.all_reduce_(base.view(-1), "sum", "0"))
+            return base, base.t()
+
+        # The second one-shot kernel reads the first one's symm-mem input, so
+        # only the second copy is dropped.
+        def reduce_twice(x):
+            reduced = c10d.wait_tensor(c10d.all_reduce_(x + 1, "sum", "0"))
+            return (c10d.wait_tensor(c10d.all_reduce_(reduced, "sum", "0")),)
+
+        one_shot = "one_shot_all_reduce_out.default("
+        for func, num_reduces, num_copies in (
+            (reduce_once, 1, 0),
+            (reduce_view, 1, 0),
+            (reduce_twice, 2, 1),
+        ):
+            gm = make_fx(func, decomposition_table=select_decomp_table())(arg.clone())
+            compiled_result, (code,) = run_and_get_code(
+                lambda: compile_fx_inner(gm, [arg.clone()])([arg.clone()])
+            )
+            self.assertEqual(compiled_result, func(arg.clone()))
+            self.assertEqual(code.count(one_shot), num_reduces, msg=func.__name__)
+            # Every kernel launched after the first one-shot call is a copy.
+            launches = code[code.index(one_shot) :]
+            self.assertEqual(launches.count(".run("), num_copies, msg=func.__name__)
 
     @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
