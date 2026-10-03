@@ -7,6 +7,7 @@ from typing import Any
 import sympy
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.virtualized import V
 from torch.utils._sympy.functions import FloorDiv, Mod
 
@@ -155,11 +156,9 @@ flex_decoding_template = TritonTemplate(
 )
 
 
-def get_split_k(B: int, H: int, Mk: int) -> int:
-    if torch.xpu.is_available():
-        num_SM = torch.xpu.get_device_properties("xpu").gpu_subslice_count
-    else:
-        num_SM = torch.cuda.get_device_properties("cuda").multi_processor_count
+def get_split_k(B: int, H: int, Mk: int, device: torch.device) -> int:
+    interface = get_interface_for_device(device)
+    num_SM = interface.get_multi_processor_count(device)
     bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
     if not isinstance(bh, (int, sympy.Integer)):
         raise AssertionError("B and H must be concrete integers")
@@ -207,6 +206,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
 
     Bq, Hq, seq_len_q, qk_head_dim = query.get_size()
     Bkv, Hkv, seq_len_kv, v_head_dim = value.get_size()
+    device = query.get_device()
 
     if not V.graph.sizevars.evaluate_expr(sympy.Eq(Bq, Bkv) | sympy.Eq(Bkv, 1)):
         raise AssertionError(
@@ -242,7 +242,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     if not has_full_blocks:
         # Create a placeholder full block list in case it is empty
         full_kv_num_blocks, full_kv_indices = (
-            empty(0, device=query.get_device()) for _ in range(2)
+            empty(0, device=device) for _ in range(2)
         )
 
     (
@@ -273,14 +273,13 @@ def create_flex_decoding_kernel(*args, **kwargs):
     choices: list[Any] = []
     dtype = key.get_dtype()
     head_dim = V.graph.sizevars.guard_int(key.get_size()[-1])
-    configs = V.choices.get_flex_decode_configs(
-        head_dim, dtype, query.get_device().type
-    )
+    configs = V.choices.get_flex_decode_configs(head_dim, dtype, device.type)
 
     # TODO: fix autotuning.
 
     kernel_options.setdefault("SM_SCALE", scale)
-    kernel_options.setdefault("SPLIT_KV", get_split_k(B, Hkv, seq_len_kv))
+    if "SPLIT_KV" not in kernel_options:
+        kernel_options["SPLIT_KV"] = get_split_k(B, Hkv, seq_len_kv, device)
     MAX_SPLIT_KV = kernel_options["SPLIT_KV"]
 
     # create config dependent intermediate buffers
@@ -290,17 +289,17 @@ def create_flex_decoding_kernel(*args, **kwargs):
         buf_ML_shape,
         None,
         dtype=torch.float32,  # The rowmax is always stored in fp32 regardless of the input dtype
-        device=query.get_device(),
+        device=device,
     )
     buf_L = empty_strided(
         buf_ML_shape,
         None,
         dtype=torch.float32,  # The intermediate sumexp is always stored in fp32 regardless of the input dtype
-        device=query.get_device(),
+        device=device,
     )
 
     layout_acc = FixedLayout(
-        query.get_device(),
+        device,
         torch.float32,
         buf_ACC_shape,
         FlexibleLayout.contiguous_strides(buf_ACC_shape),
