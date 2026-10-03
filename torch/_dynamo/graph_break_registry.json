@@ -3826,6 +3826,17 @@
       ]
     }
   ],
+  "GB9890": [
+    {
+      "Gb_type": "bytes() with non-constant arguments",
+      "Context": "bytes(*{args}, **{kwargs})",
+      "Explanation": "Attempted to call bytes() with non-constant args.",
+      "Hints": [
+        "Ensure that the args to bytes() are constant (int, str, etc.).",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0227": [
     {
       "Gb_type": "Attempted to use torch.nn.Parameter constructor with tensor subclass",
