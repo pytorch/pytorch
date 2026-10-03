@@ -430,6 +430,16 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         )
 
     @staticmethod
+    def _has_output_scale(ir_node: Any) -> bool:
+        if isinstance(ir_node, NVUniversalGemmBuffer):
+            return ir_node.output_scale_node is not None
+        return isinstance(ir_node, MultiTemplateBuffer) and any(
+            isinstance(choice, NVUniversalGemmCaller)
+            and choice.output_scale_node is not None
+            for choice in ir_node._choices
+        )
+
+    @staticmethod
     def is_nv_universal_gemm_template(node: BaseSchedulerNode) -> bool:
         """Check if a node is an NVGEMM template SchedulerNode."""
         if not isinstance(node, SchedulerNode):
@@ -597,6 +607,38 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             return False
         return NVUniversalGemmScheduling._is_nvgemm_ir_buffer(node.get_template_node())
 
+    @staticmethod
+    def is_pdl_enabled_template(node: BaseSchedulerNode) -> bool:
+        """Return whether a scheduler node resolves to a PDL-enabled NVGEMM."""
+        if isinstance(node, SchedulerNode):
+            ir_node = node.node
+        elif isinstance(node, FusedSchedulerNode):
+            ir_node = node.get_template_node()
+        else:
+            return False
+
+        if isinstance(ir_node, NVUniversalGemmBuffer):
+            return bool(ir_node.kernel_metadata.get("use_pdl", False))
+        if not isinstance(ir_node, MultiTemplateBuffer):
+            return False
+
+        selected = ir_node._render_caller
+        if selected is None:
+            try:
+                selected, _ = ir_node.get_min_choice()
+            except (RuntimeError, ValueError):
+                return False
+        if not isinstance(selected, NVUniversalGemmCaller):
+            return False
+        kernel_impl = getattr(selected.kernel, "impl", None)
+        return bool(
+            getattr(
+                kernel_impl,
+                "use_pdl",
+                getattr(selected.kernel.metadata.design, "use_pdl", False),
+            )
+        )
+
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
@@ -673,6 +715,8 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
 
         ir_node = gemm_template_node.node
         if not isinstance(ir_node, (NVUniversalGemmBuffer, MultiTemplateBuffer)):
+            return NVGemmVerticalFusionDecision.DEFER
+        if self._has_output_scale(ir_node):
             return NVGemmVerticalFusionDecision.DEFER
 
         if isinstance(ir_node, NVUniversalGemmBuffer):
@@ -1386,6 +1430,19 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             precompile_shapes, precompile_strides, precompile_dtypes = (
                 _nvgemm_precompile_input_metadata(kernel)
             )
+
+            output_scale_name = kernel.epilogue.output_scale
+            if output_scale_name is not None:
+                output_scale = V.graph.get_buffer(output_scale_name)
+                precompile_shapes[output_scale_name] = [
+                    int(s) for s in output_scale.get_size()
+                ]
+                precompile_strides[output_scale_name] = [
+                    int(s) for s in output_scale.get_stride()
+                ]
+                precompile_dtypes[output_scale_name] = str(
+                    output_scale.get_dtype()
+                ).removeprefix("torch.")
 
             out_layout = cast(Layout, ctb.layout)
             precompile_shapes["output"] = [int(s) for s in out_layout.size]

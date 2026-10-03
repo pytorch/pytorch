@@ -26,7 +26,7 @@ from torch.nn import Buffer, Parameter
 from torch.export import Dim, export
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
-    (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_APPLE_M1, IS_CI,
+    (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
      NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier
 from torch.testing import make_tensor
@@ -1526,13 +1526,12 @@ class TestMPS(TestCaseMPS):
 
     @xfailIf(MACOS_VERSION > 15.0)
     def test_conv_raises_error(self, device='mps', dtype=torch.float):
-        conv = nn.Conv1d(1, 65537, 3, padding=1).to('mps')
+        conv = nn.Conv2d(1, 65537, 3, padding=1).to('mps')
 
-        x = torch.ones([1, 1, 3])
+        x = torch.ones([1, 1, 3, 3])
         with self.assertRaises(NotImplementedError):
             y = conv(x.to("mps"))
 
-    @xfailIf(MACOS_VERSION < 15.1)
     def test_conv_high_channel_size(self):
         out_channels = 65537
         weight = torch.randn(out_channels, 1, 1)
@@ -2174,8 +2173,10 @@ class TestMPS(TestCaseMPS):
         tol = 1e-2 if dtype in (torch.float16, torch.bfloat16) else 1e-4
         self.assertEqual(out.cpu(), ref, atol=tol, rtol=tol)
 
-    @xfailIf(MACOS_VERSION < 15.0 or IS_APPLE_M1)
     @parametrize("dtype", [torch.float16, torch.bfloat16])
+    # Upper bound MPS memory usage based on actual measurement
+    @largeTensorTest("10GB", device="mps")
+    @largeMPSBufferTest(int(8.3 * 1024**3), device="mps")
     def test_large_bmm(self, dtype):
         B, M, N = 11, 20064, 128
         batch1 = torch.randn(B, M, N, dtype=dtype, device='mps')
@@ -11761,6 +11762,28 @@ class TestNLLLoss(TestCaseMPS):
             total_weight = torch.tensor(1.0, device=inp.device)
             torch.ops.aten.nll_loss_backward(grad_out, inp, label, None, 1, -100, total_weight)
 
+    @largeTensorTest("8GB", device="mps")
+    @largeMPSBufferTest(int(4.5 * 1024**3), device="mps")
+    def test_nll_loss_large_tensor_indexing(self):
+        # On MPS, F.nll_loss with flat index >= 2**31 used to silently return 0
+        # due to 32-bit indexing in MPSGraph gatherWithUpdatesTensor:
+        # https://github.com/pytorch/pytorch/issues/198471
+        if torch.mps.recommended_max_memory() < 8_000_000_000:
+            raise unittest.SkipTest("Needs at least 8GB of RAM")
+        rows, cols = (1 << 23) + (1 << 16), 256
+        x = torch.zeros((rows, cols), dtype=torch.float16, device="mps")
+        target = torch.full((rows,), 42, dtype=torch.long, device="mps")
+        boundary_row = (1 << 31) // cols
+        x[boundary_row, 42] = -2.5
+        x[-1, 42] = -3.5
+
+        loss = torch.nn.functional.nll_loss(x, target, reduction="none")
+        self.assertEqual(loss[boundary_row].item(), 2.5)
+        self.assertEqual(loss[-1].item(), 3.5)
+        del x, target, loss
+        gc.collect()
+        torch.mps.empty_cache()
+
 
 class TestTopK(TestCase):
     def _test_topk(self, shape, largest):
@@ -12658,6 +12681,33 @@ class TestLinalgMPS(TestCaseMPS):
         self.assertEqual(U.mH @ U, eye.expand(16, k, k), atol=1e-4, rtol=1e-4)
         self.assertEqual(Vh @ Vh.mH, eye.expand(16, k, k), atol=1e-4, rtol=1e-4)
         self.assertEqual(((U * S.unsqueeze(-2)) @ Vh).cpu(), A, atol=1e-4, rtol=1e-4)
+
+    @parametrize("n", [5, 32, 600])
+    @parametrize("left", [True, False])
+    @parametrize("b_row_major", [True, False])
+    @dtypes(torch.float32, torch.complex64)
+    def test_linalg_solve_triangular_out_layouts(self, device, dtype, n, left, b_row_major):
+        # n covers the substitution kernel, the small-matrix kernel and the blocked solve
+        A = torch.randn(2, n, n, dtype=dtype) / n ** 0.5 + 2 * torch.eye(n)
+        L = A.tril()
+        B = torch.randn(2, n, 32, dtype=dtype) if left else torch.randn(2, 32, n, dtype=dtype)
+        B = B if b_row_major else B.mT.contiguous().mT
+        expected = torch.linalg.solve_triangular(L, B, upper=False, left=left)
+        shape = B.shape
+        outs = {
+            "row_major": torch.empty(shape, dtype=dtype, device=device),
+            "column_major": torch.empty(shape[:-2] + shape[:-3:-1], dtype=dtype, device=device).mT,
+            "strided": torch.empty(shape[:-1] + (2 * shape[-1],), dtype=dtype, device=device)[..., ::2],
+        }
+        if dtype.is_complex:
+            outs["conj"] = torch.empty(shape, dtype=dtype, device=device).conj()
+        for name, out in outs.items():
+            result = torch.linalg.solve_triangular(L.to(device), B.to(device), upper=False, left=left, out=out)
+            self.assertIs(result, out)
+            self.assertEqual(out.cpu(), expected, atol=1e-4, rtol=1e-4, msg=name)
+            chol_out = out if left else out.mT
+            torch.cholesky_solve(B.to(device) if left else B.mT.to(device), L.to(device), out=chol_out)
+            self.assertEqual(chol_out.cpu(), torch.cholesky_solve(B if left else B.mT, L), atol=1e-3, rtol=1e-3, msg=name)
 
     def test_linalg_svd_large_batch_conj(self, device="mps"):
         # Regression test for https://github.com/pytorch/pytorch/issues/196113:

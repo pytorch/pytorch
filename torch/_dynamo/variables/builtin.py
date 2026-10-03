@@ -2932,6 +2932,16 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         return variables.SuperVariable(a, b)
 
+    def call_classmethod(
+        self, tx: "InstructionTranslatorBase", func: VariableTracker
+    ) -> VariableTracker:
+        return variables.ClassMethodVariable(func)
+
+    def call_staticmethod(
+        self, tx: "InstructionTranslatorBase", func: VariableTracker
+    ) -> VariableTracker:
+        return variables.StaticMethodVariable(func)
+
     def call_next(
         self,
         tx: "InstructionTranslatorBase",
@@ -3127,7 +3137,7 @@ class BuiltinVariable(BaseBuiltinVariable):
     ) -> VariableTracker:
         format_string = _format_string.as_python_constant()
         format_string = str(format_string)
-        return StringFormatVariable.create(format_string, list(args), kwargs)
+        return StringFormatVariable.create(tx, format_string, list(args), kwargs)
 
     def call_id(
         self, tx: "InstructionTranslatorBase", *args: VariableTracker
