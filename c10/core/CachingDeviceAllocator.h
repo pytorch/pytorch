@@ -110,6 +110,9 @@ struct SegmentInfo {
   size_t expandable_segment_base = 0;
   size_t expandable_reservation_size = 0;
   size_t expandable_segment_size = 0;
+  // The Expandable_Segments_Handle_Type its handles were created shareable as
+  // (c10/cuda/CUDAAllocatorConfig.h), 0 when they are not shareable.
+  int expandable_segment_handle_type = 0;
   MempoolId_t owner_private_pool_id = {0, 0};
   std::vector<BlockInfo> blocks;
   std::shared_ptr<GatheredContext> context_when_allocated;

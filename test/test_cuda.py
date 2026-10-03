@@ -6530,6 +6530,7 @@ except RuntimeError as e:
                     s["expandable_segment_base"],
                     s["expandable_reservation_size"],
                     s["expandable_segment_size"],
+                    s["expandable_segment_handle_type"],
                 )
                 for s in segments
             }
@@ -6542,6 +6543,27 @@ except RuntimeError as e:
             want = (2 if small else 40) * 1024 * 1024
             self.assertEqual(s["expandable_segment_size"], want)
         self.assertEqual(reservations(restored), reservations(saved["segments"]))
+
+    def test_restore_requires_the_saved_handle_type(self):
+        # Memory saved shareable must come back shareable, or a peer importing it
+        # later fails far from the cause.
+        saved = self._run(self._SAVE)
+        if not any(s["expandable_segment_handle_type"] for s in saved["segments"]):
+            self.skipTest("expandable segment IPC handles are off in this build")
+        env = os.environ.copy()
+        env["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+        env["TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC"] = "0"
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
+            json.dump(saved, f)
+            f.flush()
+            proc = subprocess.run(
+                [sys.executable, "-c", self._RESTORE, f.name],
+                env=env,
+                capture_output=True,
+                text=True,
+            )
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("saved with shareable handles", proc.stderr)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
