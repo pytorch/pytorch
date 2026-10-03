@@ -487,30 +487,19 @@ class BaseUserFunctionVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "__setattr__":
-            if args[0].is_constant_match("__annotations__"):
-                return self._set_annotations(tx, args[1])
-            return self.get_dict_vt(tx).call_method(
-                tx, "__setitem__", list(args), kwargs
-            )
-        elif name == "__delattr__":
-            if args[0].is_constant_match("__annotations__"):
-                return self._set_annotations(tx, None)
-            return self.get_dict_vt(tx).call_method(tx, "__delitem__", list(args), {})
+        if name in ("__setattr__", "__delattr__"):
+            # Data descriptors from tp_getset/tp_members win over the instance
+            # dict, as in PyObject_GenericSetAttr.
+            value = args[1] if name == "__setattr__" else None
+            if args[0].is_python_constant():
+                entry = self.lookup_tp_getset_member(args[0].as_python_constant())
+                if entry is not None:
+                    out = entry.setter(self, tx, value)
+                    if out is not None:
+                        return out
+            dict_method = "__setitem__" if value is not None else "__delitem__"
+            return self.get_dict_vt(tx).call_method(tx, dict_method, list(args), {})
         return super().call_method(tx, name, list(args), kwargs)
-
-    def _set_annotations(
-        self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
-    ) -> "VariableTracker":
-        # func_set_annotations: deletion and None both clear the slot, so the
-        # next read lazily rebuilds an empty dict; any other non-dict is a
-        # TypeError.
-        if value is not None and value.is_constant_match(None):
-            value = None
-        if value is not None and not issubclass(maybe_get_python_type(value), dict):
-            raise_type_error(tx, "__annotations__ must be set to a dict object")
-        store_attr_mutation(tx, self, "__annotations__", value)
-        return ConstantVariable.create(None)
 
     def get_filename(self) -> str:
         return self.get_code().co_filename
@@ -856,6 +845,19 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             self.source and AttrSource(self.source, "__annotations__"),
         )
 
+    def _set_annotations(
+        self, tx: "InstructionTranslatorBase", value: "VariableTracker | None"
+    ) -> "VariableTracker":
+        # func_set_annotations: deletion and None both clear the slot, so the
+        # next read lazily rebuilds an empty dict; any other non-dict is a
+        # TypeError.
+        if value is not None and value.is_constant_match(None):
+            value = None
+        if value is not None and not issubclass(maybe_get_python_type(value), dict):
+            raise_type_error(tx, "__annotations__ must be set to a dict object")
+        store_attr_mutation(tx, self, "__annotations__", value)
+        return ConstantVariable.create(None)
+
     def _get_closure(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return VariableTracker.build(
             tx,
@@ -901,9 +903,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             getset_load_or_build(lambda vt: vt.fn.__kwdefaults__, "__kwdefaults__"),
             _set_kwdefaults,
         ),
-        "__annotations__": GetSet(
-            _get_annotations, BaseUserFunctionVariable._set_annotations
-        ),
+        "__annotations__": GetSet(_get_annotations, _set_annotations),
         "__type_params__": GetSet(
             getset_load_or_build(lambda vt: vt.fn.__type_params__, "__type_params__"),
             _set_type_params,
