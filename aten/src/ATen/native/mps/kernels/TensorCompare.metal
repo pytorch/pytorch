@@ -68,9 +68,9 @@ struct where_functor {
   template [[host_name("where_strided_" #T "_bool")]] kernel void \
   c10::metal::ternary_strided<T, where_functor, T, bool>(         \
       device void*,                                               \
-      constant void*,                                             \
-      constant void*,                                             \
-      constant void*,                                             \
+      device const char*,                                         \
+      device const char*,                                         \
+      device const char*,                                         \
       constant long*,                                             \
       constant long*,                                             \
       constant long*,                                             \

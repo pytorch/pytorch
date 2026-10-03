@@ -97,10 +97,12 @@ struct copy_conj_neg_functor {
   }
 };
 
-#define REGISTER_COPY_CASTOUT(DTYPE)              \
-  REGISTER_UNARY_OP(copy_identity, DTYPE, DTYPE); \
-  REGISTER_UNARY_OP(copy_conj, DTYPE, DTYPE);     \
-  REGISTER_UNARY_OP(copy_neg, DTYPE, DTYPE)
+#define REGISTER_COPY_CASTOUT(DTYPE)                    \
+  REGISTER_UNARY_OP_WITH_STRIDED_PTR(                   \
+      copy_identity, DTYPE, DTYPE, device const char*); \
+  REGISTER_UNARY_OP_WITH_STRIDED_PTR(                   \
+      copy_conj, DTYPE, DTYPE, device const char*);     \
+  REGISTER_UNARY_OP_WITH_STRIDED_PTR(copy_neg, DTYPE, DTYPE, device const char*)
 
 REGISTER_COPY_CASTOUT(bool);
 REGISTER_COPY_CASTOUT(uchar);

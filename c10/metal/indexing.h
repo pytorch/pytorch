@@ -128,10 +128,10 @@ kernel void unary_dense(
 // (innermost) dim, grid.y enumerates the product of the remaining outer dims.
 // Saves one div+mod per thread vs the 1D form, and lets the SIMD-group walk
 // consecutive elements on the dense side (better memory coalescing).
-template <typename T, typename F>
+template <typename T, typename F, typename P = constant void*>
 kernel void unary_strided(
     device void* output [[buffer(0)]],
-    constant void* input [[buffer(1)]],
+    P input [[buffer(1)]],
     constant long* sizes [[buffer(2)]],
     constant long* input_strides [[buffer(3)]],
     constant long* output_strides [[buffer(4)]],
@@ -152,10 +152,10 @@ kernel void unary_strided(
 // the contiguous inner run. Sits between unary_dense (fully contiguous) and
 // unary_strided (per-element offset calc). grid.x = inner tile, grid.y = linear
 // outer index; outer_* describe dims [1..ndim), inner is dim 0.
-template <typename T, typename F>
+template <typename T, typename F, typename P = constant void*>
 kernel void unary_inner_contiguous(
     device void* output [[buffer(0)]],
-    constant void* input [[buffer(1)]],
+    P input [[buffer(1)]],
     constant long* outer_sizes [[buffer(2)]],
     constant long* input_outer_strides [[buffer(3)]],
     constant long* output_outer_strides [[buffer(4)]],
@@ -170,8 +170,6 @@ kernel void unary_inner_contiguous(
   const auto in_base = offset_from_coord(pos, input_outer_strides, ndim_outer);
   const auto out_base =
       offset_from_coord(pos, output_outer_strides, ndim_outer);
-  constant T* in = reinterpret_cast<constant T*>(
-      static_cast<constant char*>(input) + in_base);
   device res_t* out = reinterpret_cast<device res_t*>(
       static_cast<device char*>(output) + out_base);
   uint base = thread_pos.x * ILP_PER_THREAD;
@@ -180,7 +178,7 @@ kernel void unary_inner_contiguous(
     array<res_t, ILP_PER_THREAD> tmp_out;
 #pragma unroll
     for (uint j = 0; j < ILP_PER_THREAD; ++j) {
-      tmp_in[j] = in[base + j];
+      tmp_in[j] = val_at_offs<T>(input, in_base + long(base + j) * sizeof(T));
     }
 #pragma unroll
     for (uint j = 0; j < ILP_PER_THREAD; ++j) {
@@ -192,7 +190,7 @@ kernel void unary_inner_contiguous(
     }
   } else {
     for (uint j = base; j < inner; ++j) {
-      out[j] = f(in[j]);
+      out[j] = f(val_at_offs<T>(input, in_base + long(j) * sizeof(T)));
     }
   }
 }
@@ -242,7 +240,11 @@ kernel void unary_inner_contiguous_castout(
 // cross-dtype unary ops. Each (NAME, DTYPE0) pair must be registered at most
 // once across the library, since the castout host_names are keyed only on
 // DTYPE0.
-#define REGISTER_UNARY_OP(NAME, DTYPE0, DTYPE1)                                \
+// Same-dtype strided copies can select an offset-safe input address space.
+#define REGISTER_UNARY_OP(NAME, DTYPE0, DTYPE1) \
+  REGISTER_UNARY_OP_WITH_STRIDED_PTR(NAME, DTYPE0, DTYPE1, constant void*)
+
+#define REGISTER_UNARY_OP_WITH_STRIDED_PTR(NAME, DTYPE0, DTYPE1, STRIDED_PTR)  \
   static_assert(                                                               \
       ::metal::                                                                \
           is_same_v<DTYPE1, ::c10::metal::result_of<NAME##_functor, DTYPE0>>,  \
@@ -260,23 +262,24 @@ kernel void unary_inner_contiguous_castout(
               constant DTYPE0 * input,                                         \
               uint index);                                                     \
   template [[host_name(#NAME "_strided_" #DTYPE1 "_" #DTYPE0)]] kernel void :: \
-      c10::metal::unary_strided<DTYPE0, NAME##_functor>(                       \
+      c10::metal::unary_strided<DTYPE0, NAME##_functor, STRIDED_PTR>(          \
           device void* output,                                                 \
-          constant void* input,                                                \
+          STRIDED_PTR input,                                                   \
           constant long* sizes,                                                \
           constant long* input_strides,                                        \
           constant long* output_strides,                                       \
           constant uint& ndim,                                                 \
           uint2 thread_pos);                                                   \
   template [[host_name(#NAME "_inner_contiguous_" #DTYPE1 "_" #DTYPE0)]]       \
-  kernel void ::c10::metal::unary_inner_contiguous<DTYPE0, NAME##_functor>(    \
-      device void* output,                                                     \
-      constant void* input,                                                    \
-      constant long* outer_sizes,                                              \
-      constant long* input_outer_strides,                                      \
-      constant long* output_outer_strides,                                     \
-      constant uint2& ndim_outer_inner,                                        \
-      uint2 thread_pos);                                                       \
+  kernel void ::c10::metal::                                                   \
+      unary_inner_contiguous<DTYPE0, NAME##_functor, STRIDED_PTR>(             \
+          device void* output,                                                 \
+          STRIDED_PTR input,                                                   \
+          constant long* outer_sizes,                                          \
+          constant long* input_outer_strides,                                  \
+          constant long* output_outer_strides,                                 \
+          constant uint2& ndim_outer_inner,                                    \
+          uint2 thread_pos);                                                   \
   template [[host_name(#NAME "_dense_castout_" #DTYPE0)]] kernel void ::c10::  \
       metal::unary_dense_castout<DTYPE0, NAME##_functor>(                      \
           device void* output,                                                 \
@@ -612,11 +615,16 @@ kernel void unary_inner_contiguous_castout(
 // expressed with `om_t` optional argument (which stands for opmath_type) which
 // is identical to output type but could be something else
 
+// binary_strided, binary_strided_cast and binary_inner_contiguous read tensor
+// inputs through `device const` pointers: Apple GPUs need 4-byte offsets for
+// constant buffers, and a half/bfloat view can start 2 bytes into its storage.
+// A const byte pointee lets Metal reflection identify read-only setBytes
+// arguments; const void pointers are reported as writable.
 template <typename T, typename F, typename om_t = T>
 kernel void binary_strided(
     device void* output [[buffer(0)]],
-    constant void* input [[buffer(1)]],
-    constant void* other [[buffer(2)]],
+    device const char* input [[buffer(1)]],
+    device const char* other [[buffer(2)]],
     constant long* sizes [[buffer(3)]],
     constant long* output_strides [[buffer(4)]],
     constant long* input_strides [[buffer(5)]],
@@ -662,8 +670,8 @@ kernel void binary_alpha_strided(
 template <typename T, typename F, typename om_t = opmath_t<T>>
 kernel void binary_strided_cast(
     device void* output [[buffer(0)]],
-    constant void* input [[buffer(1)]],
-    constant void* other [[buffer(2)]],
+    device const char* input [[buffer(1)]],
+    device const char* other [[buffer(2)]],
     constant long* sizes [[buffer(3)]],
     constant long* output_strides [[buffer(4)]],
     constant long* input_strides [[buffer(5)]],
@@ -808,8 +816,8 @@ kernel void binary_dense_ilp(
 template <typename T, typename F, typename om_t = opmath_t<T>>
 kernel void binary_inner_contiguous(
     device void* output [[buffer(0)]],
-    constant void* input [[buffer(1)]],
-    constant void* other [[buffer(2)]],
+    device const char* input [[buffer(1)]],
+    device const char* other [[buffer(2)]],
     constant long* outer_sizes [[buffer(3)]],
     constant long* output_outer_strides [[buffer(4)]],
     constant long* input_outer_strides [[buffer(5)]],
@@ -828,10 +836,10 @@ kernel void binary_inner_contiguous(
   const auto oth_base = offset_from_coord(pos, other_outer_strides, ndim_outer);
   device res_t* out = reinterpret_cast<device res_t*>(
       static_cast<device char*>(output) + out_base);
-  constant T* a = reinterpret_cast<constant T*>(
-      static_cast<constant char*>(input) + in_base);
-  constant T* b = reinterpret_cast<constant T*>(
-      static_cast<constant char*>(other) + oth_base);
+  device const T* a = reinterpret_cast<device const T*>(
+      static_cast<device const char*>(input) + in_base);
+  device const T* b = reinterpret_cast<device const T*>(
+      static_cast<device const char*>(other) + oth_base);
   uint base = thread_pos.x * ILP_PER_THREAD;
   if (base + ILP_PER_THREAD <= inner) {
     array<T, ILP_PER_THREAD> ta;
@@ -1143,8 +1151,8 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
   template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI)]] kernel void :: \
       c10::metal::binary_strided<DTYPEI, NAME##_functor, OMT>(                 \
           device void* out,                                                    \
-          constant void* input,                                                \
-          constant void* other,                                                \
+          device const char* input,                                            \
+          device const char* other,                                            \
           constant long* sizes,                                                \
           constant long* output_strides,                                       \
           constant long* input_strides,                                        \
@@ -1155,8 +1163,8 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
   kernel void ::c10::metal::                                                   \
       binary_inner_contiguous<DTYPEI, NAME##_functor, OMT>(                    \
           device void* out,                                                    \
-          constant void* input,                                                \
-          constant void* other,                                                \
+          device const char* input,                                            \
+          device const char* other,                                            \
           constant long* outer_sizes,                                          \
           constant long* output_outer_strides,                                 \
           constant long* input_outer_strides,                                  \
@@ -1167,8 +1175,8 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
       [[host_name(#NAME "_strided_cast_" #DTYPEO "_" #DTYPEI)]] kernel void :: \
           c10::metal::binary_strided_cast<DTYPEI, NAME##_functor, OMT>(        \
               device void* out,                                                \
-              constant void* input,                                            \
-              constant void* other,                                            \
+              device const char* input,                                        \
+              device const char* other,                                        \
               constant long* sizes,                                            \
               constant long* output_strides,                                   \
               constant long* input_strides,                                    \
@@ -1520,12 +1528,14 @@ inline long4 ternary_offsets(
 // expressed with `om_t` optional argument (which stands for opmath_type) which
 // is identical to output type but could be something else
 
+// Device-address inputs support subword storage offsets. The cast kernel
+// also has a constant-address variant for inputs bound at offset zero.
 template <typename T, typename F, typename om_t = T, typename T0 = T>
 kernel void ternary_strided(
     device void* output [[buffer(0)]],
-    constant void* input [[buffer(1)]],
-    constant void* other1 [[buffer(2)]],
-    constant void* other2 [[buffer(3)]],
+    device const char* input [[buffer(1)]],
+    device const char* other1 [[buffer(2)]],
+    device const char* other2 [[buffer(3)]],
     constant long* sizes [[buffer(4)]],
     constant long* output_strides [[buffer(5)]],
     constant long* input_strides [[buffer(6)]],
@@ -1550,12 +1560,16 @@ kernel void ternary_strided(
       static_cast<res_t>(f(om_t(a), om_t(b), om_t(c)));
 }
 
-template <typename T, typename F, typename om_t = opmath_t<T>>
+template <
+    typename T,
+    typename F,
+    typename om_t = opmath_t<T>,
+    typename P = constant void*>
 kernel void ternary_strided_cast(
     device void* output [[buffer(0)]],
-    constant void* input [[buffer(1)]],
-    constant void* other1 [[buffer(2)]],
-    constant void* other2 [[buffer(3)]],
+    P input [[buffer(1)]],
+    P other1 [[buffer(2)]],
+    P other2 [[buffer(3)]],
     constant long* sizes [[buffer(4)]],
     constant long* output_strides [[buffer(5)]],
     constant long* input_strides [[buffer(6)]],
@@ -1746,9 +1760,9 @@ kernel void ternary_alpha_dense_cast(
   template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI)]] kernel void :: \
       c10::metal::ternary_strided<DTYPEI, NAME##_functor, OMT>(                \
           device void* out,                                                    \
-          constant void* input,                                                \
-          constant void* other1,                                               \
-          constant void* other2,                                               \
+          device const char* input,                                            \
+          device const char* other1,                                           \
+          device const char* other2,                                           \
           constant long* sizes,                                                \
           constant long* output_strides,                                       \
           constant long* input_strides,                                        \
@@ -1762,6 +1776,21 @@ kernel void ternary_alpha_dense_cast(
           constant void* input,                                                \
           constant void* other1,                                               \
           constant void* other2,                                               \
+          constant long* sizes,                                                \
+          constant long* output_strides,                                       \
+          constant long* input_strides,                                        \
+          constant long* other1_strides,                                       \
+          constant long* other2_strides,                                       \
+          constant uint& ndim,                                                 \
+          constant uint4& types,                                               \
+          uint3 tid);                                                          \
+  template [[host_name(                                                        \
+      #NAME "_strided_cast_offset_" #DTYPEI)]] kernel void ::c10::metal::      \
+      ternary_strided_cast<DTYPEI, NAME##_functor, OMT, device const char*>(   \
+          device void* out,                                                    \
+          device const char* input,                                            \
+          device const char* other1,                                           \
+          device const char* other2,                                           \
           constant long* sizes,                                                \
           constant long* output_strides,                                       \
           constant long* input_strides,                                        \

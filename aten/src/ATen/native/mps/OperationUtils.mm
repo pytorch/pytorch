@@ -1629,8 +1629,20 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
   // from the inputs, goes through the cast kernel.
   const auto cast_needed = other1.scalar_type() != out.scalar_type() || other2.scalar_type() != out.scalar_type() ||
       (input.scalar_type() != out.scalar_type() && !hasFunction(direct_name));
+  // Keep constant-buffer loads for zero-offset inputs; views use device
+  // pointers so their byte offsets need only satisfy the element alignment.
+  // CPU scalars are copied with setBytes and are always bound at offset zero.
+  const char* cast_suffix = "cast";
+  if (cast_needed && !iter.is_contiguous() && !alpha.has_value()) {
+    for (const auto i : c10::irange(1, iter.ntensors())) {
+      if (iter.tensor_base(i).device().type() != kCPU && iter_tensor_offset(iter, i) != 0) {
+        cast_suffix = "cast_offset";
+        break;
+      }
+    }
+  }
   const auto kernel_name = cast_needed
-      ? fmt::format("{}_{}_cast_{}{}", name, suffix, scalarToMetalTypeString(compute_dtype), alpha_suffix)
+      ? fmt::format("{}_{}_{}_{}{}", name, suffix, cast_suffix, scalarToMetalTypeString(compute_dtype), alpha_suffix)
       : direct_name;
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
