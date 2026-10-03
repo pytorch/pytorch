@@ -2179,6 +2179,93 @@ def _gradcheck_helper(
     return True
 
 
+def _gradgradcheck_fwd_over_fwd(
+    func, inputs, eps, atol, rtol, check_grad_dtypes, fast_mode
+):
+    _check_inputs(inputs)
+    input_indices, primals = _get_inp_tensors(inputs)
+    tangents = tuple(torch.randn_like(x) for x in primals)
+    # Real coordinates also cover non-holomorphic functions of complex inputs.
+    real_inputs = tuple(
+        (torch.view_as_real(x.resolve_conj()) if x.is_complex() else x)
+        .detach()
+        .requires_grad_()
+        for x in primals
+    )
+
+    def fn(*args):
+        full_inputs = list(inputs)
+        for i, arg in zip(input_indices, args):
+            full_inputs[i] = arg
+        return tuple(filter(_is_float_or_complex_tensor, _as_tuple(func(*full_inputs))))
+
+    def first_jvp(*args):
+        args = tuple(
+            torch.view_as_complex(arg) if primal.is_complex() else arg
+            for arg, primal in zip(args, primals)
+        )
+        return torch.func.jvp(fn, args, tangents)[1]
+
+    if not fn(*primals):
+        return True
+
+    outputs = first_jvp(*real_inputs)
+    _check_outputs(outputs)
+    all_u = []
+    if fast_mode:
+        _, all_u, _ = _make_vectors(real_inputs, outputs, use_forward_ad=True)
+        numerical = _get_numerical_vJu(
+            first_jvp,
+            real_inputs,
+            range(len(real_inputs)),
+            outputs,
+            all_u,
+            None,
+            eps,
+            is_forward_ad=True,
+        )
+    else:
+        numerical = _get_numerical_jacobian(
+            first_jvp, real_inputs, outputs, eps=eps, is_forward_ad=True
+        )
+
+    outer_tangents = tuple(
+        torch.zeros_like(x, memory_format=torch.contiguous_format) for x in real_inputs
+    )
+    for i, tangent in enumerate(outer_tangents):
+        if tangent.numel() == 0:
+            continue
+        for k in range(1 if fast_mode else tangent.numel()):
+            if fast_mode:
+                tangent.copy_(all_u[i].reshape_as(tangent))
+            else:
+                tangent.view(-1)[k] = 1
+            # Both levels must use torch.func.jvp: low-level dual levels cannot nest.
+            analytical = torch.func.jvp(first_jvp, real_inputs, outer_tangents)[1]
+            for j, (actual, expected) in enumerate(zip(analytical, numerical[i])):
+                if check_grad_dtypes and actual.dtype != outputs[j].dtype:
+                    raise GradcheckError(
+                        "Forward-over-forward AD gradient has dtype mismatch."
+                    )
+                expected = expected if fast_mode else expected[k]
+                actual = actual.reshape(-1)
+                tolerance = _adjusted_atol(atol, all_u[i], None) if fast_mode else atol
+                if not _allclose_with_type_promotion(actual, expected, rtol, tolerance):
+                    raise GradcheckError(
+                        "Forward-over-forward AD: "
+                        + _get_notallclose_msg(
+                            actual,
+                            expected,
+                            j,
+                            input_indices[i],
+                            None,
+                            is_forward_ad=True,
+                        )
+                    )
+            tangent.zero_()
+    return True
+
+
 def gradgradcheck(
     func: Callable[..., _TensorOrTensors],  # See Note [VarArg of Tensors]
     inputs: _TensorOrTensors,
@@ -2195,6 +2282,7 @@ def gradgradcheck(
     check_batched_grad: bool = False,
     check_fwd_over_rev: bool = False,
     check_rev_over_rev: bool = True,
+    check_fwd_over_fwd: bool = False,
     fast_mode: bool = False,
     masked: bool = False,
 ) -> bool:
@@ -2204,7 +2292,9 @@ def gradgradcheck(
     ``requires_grad=True``.
 
     This function checks that backpropagating through the gradients computed
-    to the given :attr:`grad_outputs` are correct.
+    to the given :attr:`grad_outputs` are correct. With :attr:`check_fwd_over_fwd`,
+    it also checks forward derivatives of a JVP with a fixed random input tangent
+    against finite differences of that JVP.
 
     The check between numerical and analytical gradients uses :func:`~torch.allclose`.
 
@@ -2245,6 +2335,12 @@ def gradgradcheck(
             are supported and treated as zeros
         check_batched_grad (bool, optional): if True, check if we can compute
             batched gradients using prototype vmap support. Defaults to False.
+        check_fwd_over_fwd (bool, optional): if True, check forward-over-forward
+            derivatives using :func:`torch.func.jvp`. Only inputs with
+            ``requires_grad=True`` are differentiated. Complex inputs are checked
+            in both real and imaginary directions. This check does not use
+            :attr:`grad_outputs` and requires the function to support nested
+            :func:`torch.func.jvp`. Defaults to False.
         fast_mode (bool, optional): if True, run a faster implementation of gradgradcheck that
             no longer computes the entire jacobian.
         masked (bool, optional): if True, the gradients of unspecified elements of
@@ -2252,9 +2348,9 @@ def gradgradcheck(
     Returns:
         True if all differences satisfy allclose condition
     """
-    if not (check_fwd_over_rev or check_rev_over_rev):
+    if not (check_fwd_over_rev or check_rev_over_rev or check_fwd_over_fwd):
         raise AssertionError(
-            "Expected at least one of check_fwd_over_rev or check_rev_over_rev to be True"
+            "Expected at least one of check_fwd_over_rev, check_rev_over_rev or check_fwd_over_fwd to be True"
         )
     if check_undefined_grad and not check_rev_over_rev:
         raise AssertionError(
@@ -2268,6 +2364,18 @@ def gradgradcheck(
     # assert not (check_batched_forward_grad and not check_fwd_over_rev), (
     #     "Setting check_batched_forward_grad=True requires check_fwd_over_rev to be True")
     tupled_inputs = _as_tuple(inputs)
+
+    if check_fwd_over_fwd:
+        try:
+            _gradgradcheck_fwd_over_fwd(
+                func, tupled_inputs, eps, atol, rtol, check_grad_dtypes, fast_mode
+            )
+        except GradcheckError:
+            if raise_exception:
+                raise
+            return False
+        if not (check_fwd_over_rev or check_rev_over_rev):
+            return True
 
     if grad_outputs is None:
         # If grad_outputs is not specified, create random Tensors of the same shape, type, and device as the outputs

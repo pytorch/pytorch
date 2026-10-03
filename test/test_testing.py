@@ -3136,6 +3136,41 @@ class TestImports(TestCase):
         self.assertEqual(torch.tensor([1, 2]).sum().item(), 3)
 
 class TestOpInfos(TestCase):
+    def test_covariance_derivative_inputs(self):
+        op = next(op for op in op_db if op.name == "cov")
+        for dtype in (torch.double, torch.cdouble):
+            for sample in op.sample_inputs("cpu", dtype, requires_grad=True):
+                aweights = sample.kwargs.get("aweights")
+                if aweights is None:
+                    continue
+                self.assertEqual(aweights.dtype, torch.double)
+                fweights = sample.kwargs.get("fweights")
+                weights = aweights if fweights is None else fweights * aweights
+                normalization = weights.sum() - sample.kwargs["correction"] * (weights * aweights).sum() / weights.sum()
+                self.assertGreater(normalization.item(), 0)
+
+    def test_derivative_inputs(self):
+        def samples(op, device, dtype, requires_grad, **kwargs):
+            yield SampleInput(torch.ones(2, device=device, dtype=dtype, requires_grad=requires_grad))
+
+        def boundaries(op, device, dtype, requires_grad, **kwargs):
+            yield SampleInput(
+                torch.zeros(2, device=device, dtype=dtype, requires_grad=requires_grad), name="zero"
+            )
+
+        op = OpInfo("sin", dtypes=floating_types(), sample_inputs_func=samples)
+        self.assertEqual(list(op.derivative_inputs("cpu", torch.double)), [])
+        op.derivative_inputs_func = boundaries
+        sample, = op.derivative_inputs("cpu", torch.double, requires_grad=True)
+        self.assertEqual(sample.name, "zero")
+        self.assertTrue(sample.input.requires_grad)
+        self.assertEqual(sample.input, torch.zeros(2, dtype=torch.double))
+        ordinary, = op.sample_inputs("cpu", torch.double)
+        self.assertEqual(ordinary.input, torch.ones(2, dtype=torch.double))
+        for sample, subtest_ctx, expectation in op.derivative_inputs("cpu", torch.double, use_subtests=True):
+            with subtest_ctx(self), expectation(self):
+                self.assertEqual(sample.name, "zero")
+
     def test_sample_input(self) -> None:
         a, b, c, d, e = (object() for _ in range(5))
 

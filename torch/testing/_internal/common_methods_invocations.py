@@ -2133,6 +2133,13 @@ def error_inputs_bernoulli(op_info, device, **kwargs):
     yield ErrorInput(SampleInput(torch.rand_like(x), kwargs={'out': x}),
                      error_regex=err_msg)
 
+def derivative_inputs_logcumsumexp(op_info, device, dtype, requires_grad, **kwargs):
+    values = [[-400, 401, -797], [400, -398, -1201]]
+    for dim in (0, 1):
+        t = torch.tensor(values, device=device, dtype=dtype, requires_grad=requires_grad)
+        yield SampleInput(t, args=(dim,), name=f"underflowing_prefix_dim_{dim}")
+
+
 def sample_inputs_logcumsumexp(self, device, dtype, requires_grad, **kwargs):
     inputs = (
         ((S, S, S), 0),
@@ -6542,6 +6549,31 @@ def sample_inputs_ormqr(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(reflectors, tau, other, left=left, transpose=transpose)
 
 
+def derivative_inputs_cholesky(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(torch.tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    for upper in (False, True):
+        factor = make_arg([[2, 0], [1, 3]])
+        if upper:
+            factor = factor.mT.detach().requires_grad_(requires_grad)
+        if op_info.name == 'cholesky_inverse':
+            yield SampleInput(factor, kwargs=dict(upper=upper), name=f"noncommuting_upper_{upper}")
+        else:
+            factor = torch.stack((factor, factor)).detach().requires_grad_(requires_grad)
+            rhs = make_arg([[1, 2], [3, 4]])
+            yield SampleInput(rhs, args=(factor,), kwargs=dict(upper=upper), name=f"broadcast_rhs_upper_{upper}")
+
+
+def derivative_inputs_triangular_solve(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(torch.tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    for upper, transpose, unitriangular in product((False, True), repeat=3):
+        matrix = make_arg([[2, 1], [3, 4]])
+        rhs = make_arg([[1, 2], [3, 4]])
+        yield SampleInput(
+            rhs, args=(matrix,), kwargs=dict(upper=upper, transpose=transpose, unitriangular=unitriangular),
+            name=f"upper_{upper}_transpose_{transpose}_unitriangular_{unitriangular}",
+        )
+
+
 def sample_inputs_cholesky_solve(op_info, device, dtype, requires_grad=False, **kwargs):
     cholesky_inverse_samples = sample_inputs_linalg_cholesky_inverse(
         op_info, device, dtype, requires_grad=False
@@ -6692,8 +6724,14 @@ def sample_inputs_cov(op_info, device, dtype, requires_grad, **kwargs):
         yield SampleInput(t)
         num_observations = t.numel() if t.ndimension() < 2 else t.size(1)
         fweights = make_tensor((num_observations,), dtype=torch.int, device=device, low=1, high=10)
-        aweights = make_tensor((num_observations,), dtype=torch.float, device=device, low=0, high=1, requires_grad=requires_grad)
+        weight_dtype = torch.double if dtype in (torch.double, torch.cdouble) else torch.float
+        aweights = make_tensor((num_observations,), dtype=weight_dtype, device=device, low=0, high=1, requires_grad=requires_grad)
         for correction, fw, aw in product(range(num_observations), [None, fweights], [None, aweights]):
+            if requires_grad and aw is not None:
+                weights = aw if fw is None else fw * aw
+                effective_sample_size = weights.sum().square() / (weights * aw).sum()
+                if correction >= effective_sample_size:
+                    continue
             yield SampleInput(t.clone().requires_grad_(requires_grad),
                               correction=correction, fweights=fw, aweights=aw)
 
@@ -6970,6 +7008,18 @@ def _clamp_numpy(a, min=None, max=None):
     return np.minimum(max, np.maximum(a, min))
 
 
+def derivative_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
+    for values, name in (([[1, 2, 1], [0, 3, 4]], 'single_zero'), ([[0, 2, 0], [1, 3, 4]], 'two_zeros')):
+        t = torch.tensor(values, device=device, dtype=dtype, requires_grad=requires_grad)
+        yield SampleInput(t, args=(1,), name=name)
+
+
+def derivative_inputs_sinc(op_info, device, dtype, requires_grad, **kwargs):
+    for value, name in ((0., 'zero'), (0.01, 'near_zero_positive'), (-0.01, 'near_zero_negative')):
+        t = torch.tensor(value, device=device, dtype=dtype, requires_grad=requires_grad)
+        yield SampleInput(t, name=name)
+
+
 def sample_inputs_cumprod(op_info, device, dtype, requires_grad, **kwargs):
     def make_arg(shape):
         # shrink values to be in the interval [-1, +1] for better precision in gradgradcheck
@@ -7028,6 +7078,19 @@ def error_inputs_complex(op_info, device, is_ref=False, **kwargs):
     yield ErrorInput(SampleInput(make_arg(M, S, dtype=other_dtype), make_arg(M, S, dtype=other_dtype),
                                  out=make_arg(M, S, dtype=torch.complex64)),
                      error_type=RuntimeError, error_regex=error_out)
+
+def sample_inputs_rpow(op_info, device, dtype, requires_grad, **kwargs):
+    for sample in sample_inputs_elementwise_binary(op_info, device, dtype, requires_grad, **kwargs):
+        if requires_grad and not dtype.is_complex:
+            base = (sample.args[0].detach().abs() + 0.5).requires_grad_()
+            sample.args = (base,)
+        yield sample
+
+
+def derivative_inputs_logaddexp(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(torch.tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    yield SampleInput(make_arg([[-798], [1600]]), args=(make_arg([[-401, 803, -1599]]),), name='extreme_logits')
+
 
 def sample_inputs_logaddexp(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -8056,6 +8119,17 @@ def sample_inputs_scatter_add(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(_tensor((M, S)), 1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))
     yield SampleInput(_tensor((M, S)), -1, _gather((M, S // 2), 0, S), _tensor((M, S // 2)))
     yield SampleInput(_tensor(()), 0, zero.detach().clone(), _tensor(()))
+
+def derivative_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(torch.tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    index = torch.tensor([0, 0, 2], device=device)
+    for include_self in (False, True):
+        for values, name in (([2, 3, 4], 'nonzero'), ([0, 3, 4], 'single_zero'), ([0, 0, 4], 'two_zeros')):
+            yield SampleInput(
+                make_arg([2, 3, 4]), args=(0, index, make_arg(values), 'prod'),
+                kwargs=dict(include_self=include_self), name=f"{name}_include_self_{include_self}",
+            )
+
 
 def sample_inputs_scatter_reduce(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device, requires_grad=requires_grad)
@@ -13192,6 +13266,7 @@ op_db: list[OpInfo] = [
                    supports_sparse_bsc=True,
                    assert_autodiffed=True),
     OpInfo('cholesky_inverse',
+           derivative_inputs_func=derivative_inputs_cholesky,
            dtypes=floating_and_complex_types(),
            backward_dtypes=floating_and_complex_types(),
            # https://github.com/pytorch/pytorch/issues/80411
@@ -13237,6 +13312,7 @@ op_db: list[OpInfo] = [
                ),),
            ),
     OpInfo('cholesky_solve',
+           derivative_inputs_func=derivative_inputs_cholesky,
            op=torch.cholesky_solve,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_cholesky_solve,
@@ -13572,6 +13648,7 @@ op_db: list[OpInfo] = [
                # The following dtypes did not work in forward but are listed by the OpInfo: {torch.bool}
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'))),
     OpInfo('cumprod',
+           derivative_inputs_func=derivative_inputs_cumprod,
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            supports_forward_ad=True,
@@ -14538,6 +14615,7 @@ op_db: list[OpInfo] = [
                                      'TestConsistency', 'test_output_grad_match', device_type='mps'),
                     ], ),
     BinaryUfuncInfo('logaddexp',
+           derivative_inputs_func=derivative_inputs_logaddexp,
                     dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
                     dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.complex32),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
@@ -18490,6 +18568,7 @@ op_db: list[OpInfo] = [
                    ),
                    decorators=(precisionOverride({torch.bfloat16: 1e-2}),)),
     UnaryUfuncInfo('sinc',
+           derivative_inputs_func=derivative_inputs_sinc,
                    ref=np_sinc_with_fp16_as_fp32,
                    aliases=('special.sinc',),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -18759,6 +18838,7 @@ op_db: list[OpInfo] = [
                     autodiff_nonfusible_nodes=['aten::remainder'],),
     BinaryUfuncInfo('__rpow__',
                     op=torch.Tensor.__rpow__,
+                    sample_inputs_func=sample_inputs_rpow,
                     dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
                     dtypesIfMPS=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
                     # Reference: https://github.com/pytorch/pytorch/issues/54774
@@ -18965,6 +19045,7 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_dsplit,
            error_inputs_func=error_inputs_dsplit,),
     OpInfo('triangular_solve',
+           derivative_inputs_func=derivative_inputs_triangular_solve,
            op=torch.triangular_solve,
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_legacy_solve,
@@ -21290,6 +21371,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
            )
            ),
     OpInfo('logcumsumexp',
+           derivative_inputs_func=derivative_inputs_logcumsumexp,
            dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
            backward_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
            supports_forward_ad=True,
@@ -22973,6 +23055,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
     OpInfo(
         'scatter_reduce',
         variant_test_name='prod',
+        derivative_inputs_func=derivative_inputs_scatter_reduce,
         # complex not added to dtypes as complex gradients are not properly handled
         # and scatter_reduce hasn't been added to the whitelist in gen_variable_type yet
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),

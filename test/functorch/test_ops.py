@@ -2798,6 +2798,45 @@ class TestOperators(TestCase):
                     expected = mapjvpmap_fn(*batched_args)
                     self.assertEqual(result, expected)
 
+    @ops(
+        [op for op in autograd_function_db if op.supports_forward_ad],
+        allowed_dtypes=(torch.double,),
+    )
+    def test_jacfwd_jacfwd_numerical(self, device, dtype, op):
+        for sample in op.sample_inputs(device, dtype, requires_grad=True):
+            fn, primals = normalize_op_input_output(op, sample)
+            argnums = tuple(range(len(primals)))
+            first_jacobian = torch.func.jacfwd(fn, argnums=argnums)
+            first_blocks = pytree.tree_leaves(first_jacobian(*primals))
+            actual = pytree.tree_leaves(
+                torch.func.jacfwd(first_jacobian, argnums=argnums)(*primals)
+            )
+            eps = 1e-6
+            for i, primal in enumerate(primals):
+                columns = [[] for _ in first_blocks]
+                for k in range(primal.numel()):
+                    positive = list(primals)
+                    negative = list(primals)
+                    positive[i] = primal.detach().clone(
+                        memory_format=torch.contiguous_format
+                    )
+                    negative[i] = primal.detach().clone(
+                        memory_format=torch.contiguous_format
+                    )
+                    positive[i].reshape(-1)[k] += eps
+                    negative[i].reshape(-1)[k] -= eps
+                    plus = pytree.tree_leaves(first_jacobian(*positive))
+                    minus = pytree.tree_leaves(first_jacobian(*negative))
+                    for column, pos, neg in zip(columns, plus, minus):
+                        column.append((pos - neg) / (2 * eps))
+                for j, (block, column) in enumerate(zip(first_blocks, columns)):
+                    expected = torch.stack(column, dim=-1).reshape(
+                        block.shape + primal.shape
+                    )
+                    self.assertEqual(
+                        actual[j * len(primals) + i], expected, atol=1e-5, rtol=1e-3
+                    )
+
     # See NOTE: [three-transform testing]
     @ops(autograd_function_db, allowed_dtypes=(torch.float32,))
     @skipOps(
