@@ -13,10 +13,11 @@ import unittest
 from concurrent.futures import TimeoutError as FuturesTimeoutError
 from concurrent.futures.process import BrokenProcessPool
 from threading import Event
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import torch._inductor.config as config
 from torch._inductor.compile_worker.subproc_pool import (
+    _instrumented_sleep_for_test,
     _recv_msg,
     _SubprocExceptionInfo,
     MsgHeader,
@@ -28,6 +29,7 @@ from torch._inductor.compile_worker.subproc_pool import (
     SubprocPool,
 )
 from torch._inductor.compile_worker.timer import Timer
+from torch._inductor.compile_worker.watchdog import _subtree_pss_kb_for_test
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -786,11 +788,12 @@ class TestSubprocPoolResultHandling(TestCase):
 
 
 class TestCompileWorkerWatchdog(TestCase):
-    # The sidecar runs a watchdog that, every interval (shortened to 1s here via
-    # env), reports jobs still running past that interval to the parent, which
-    # turns them into a "compile_worker_status" structured-trace artifact -- so a
-    # stuck/slow worker leaves a breadcrumb in tlparse instead of silently
-    # wedging. See subproc_pool.SubprocMain._watchdog_loop.
+    # Tests pin TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL=1 so enforcement
+    # fires within a few seconds and elapsed-time assertions hold.  The default
+    # 60s interval is not tested here because a 60s+ test is impractical for CI;
+    # the enforcement logic is the same regardless of interval length -- only
+    # the latency between breach and detection changes.  If the interval coupling
+    # ever matters (e.g. a timer-resolution bug), add a dedicated slow test.
     @skipIfWindows(msg="pass_fds not supported on Windows.")
     def test_watchdog_reports_slow_jobs(self):
         reports = []
@@ -979,6 +982,615 @@ class TestCompileWorkerWatchdog(TestCase):
         self.assertTrue(reports)
         self.assertNotIn("phase", reports[-1])
         self.assertIn("elapsed_s", reports[-1])
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    @config.patch(compile_worker_per_kernel_timeout=2)
+    def test_per_kernel_timeout_kills_worker(self):
+        with patch.dict(
+            os.environ,
+            {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"},
+        ):
+            pool = SubprocPool(2)
+            try:
+                start = time.monotonic()
+                fut = pool.submit(time.sleep, 60)
+                with self.assertRaises(Exception) as cm:
+                    fut.result(timeout=30)
+                elapsed = time.monotonic() - start
+                self.assertNotIsInstance(cm.exception, FuturesTimeoutError)
+                self.assertLess(elapsed, 30)
+                self.assertEqual(pool.submit(operator.add, 100, 1).result(), 101)
+            finally:
+                pool.shutdown()
+
+    @unittest.skipUnless(IS_LINUX, "memory-limit enforcement requires /proc")
+    @config.patch(compile_worker_memory_limit_kb=1)
+    def test_memory_limit_kills_worker(self):
+        with patch.dict(
+            os.environ,
+            {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"},
+        ):
+            pool = SubprocPool(1)
+            try:
+                self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
+                start = time.monotonic()
+                fut = pool.submit(time.sleep, 60)
+                with self.assertRaises(Exception) as cm:
+                    fut.result(timeout=30)
+                elapsed = time.monotonic() - start
+                self.assertNotIsInstance(cm.exception, FuturesTimeoutError)
+                self.assertLess(elapsed, 30)
+                self.assertEqual(pool.submit(operator.add, 2, 3).result(), 5)
+            finally:
+                pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_timeout_kill_preserves_sibling_job(self):
+        # The sibling must finish in the same worker (one START/END, same pid).
+        # With only one watchdog interval as the drain budget, drain_ready fires
+        # on the very next tick and SIGKILLs every worker; the sibling is then
+        # resubmitted and only passes by luck if it finishes before that tick.
+        with tempfile.NamedTemporaryFile(delete=False) as log_file:
+            log_path = log_file.name
+        try:
+            with patch.dict(
+                os.environ,
+                {
+                    "TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1",
+                    "TORCHINDUCTOR_COMPILE_WORKER_DRAIN_TIMEOUT": "10",
+                },
+            ):
+                pool = SubprocPool(2)
+                try:
+                    self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
+                    with config.patch(compile_worker_per_kernel_timeout=2):
+                        offender = pool.submit(time.sleep, 60)
+                    sibling = pool.submit(_instrumented_sleep_for_test, log_path, 4.0)
+                    sibling.result(timeout=30)
+                    with self.assertRaises(Exception) as cm:
+                        offender.result(timeout=30)
+                    self.assertNotIsInstance(cm.exception, FuturesTimeoutError)
+                    self.assertEqual(pool.submit(operator.add, 10, 20).result(), 30)
+                finally:
+                    pool.shutdown()
+
+            with open(log_path) as f:
+                lines = [line for line in f.read().splitlines() if line]
+            starts = [line for line in lines if line.startswith("START")]
+            ends = [line for line in lines if line.startswith("END")]
+            self.assertEqual(len(starts), 1, f"expected one run, got {lines}")
+            self.assertEqual(len(ends), 1, f"expected one run, got {lines}")
+            self.assertEqual(starts[0], ends[0].replace("END", "START"))
+        finally:
+            os.unlink(log_path)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_multi_offender_both_killed(self):
+        with patch.dict(
+            os.environ,
+            {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"},
+        ):
+            pool = SubprocPool(2)
+            try:
+                self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
+                self.assertEqual(pool.submit(operator.add, 3, 4).result(), 7)
+                with config.patch(compile_worker_per_kernel_timeout=2):
+                    off_a = pool.submit(time.sleep, 60)
+                    off_b = pool.submit(time.sleep, 60)
+                for fut in (off_a, off_b):
+                    with self.assertRaises(Exception) as cm:
+                        fut.result(timeout=30)
+                    self.assertNotIsInstance(cm.exception, FuturesTimeoutError)
+                self.assertEqual(pool.submit(operator.add, 10, 20).result(), 30)
+            finally:
+                pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_drain_single_worker_with_queued_job(self):
+        with patch.dict(
+            os.environ,
+            {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"},
+        ):
+            pool = SubprocPool(1)
+            try:
+                self.assertEqual(pool.submit(operator.add, 1, 2).result(), 3)
+                with config.patch(compile_worker_per_kernel_timeout=2):
+                    offender = pool.submit(time.sleep, 60)
+                queued = pool.submit(operator.add, 10, 20)
+                self.assertEqual(queued.result(timeout=30), 30)
+                with self.assertRaises(Exception) as cm:
+                    offender.result(timeout=30)
+                self.assertNotIsInstance(cm.exception, FuturesTimeoutError)
+                self.assertEqual(pool.submit(operator.add, 5, 6).result(), 11)
+            finally:
+                pool.shutdown()
+
+    @unittest.skipUnless(IS_LINUX, "subtree memory accounting is Linux-only")
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_memory_limit_kills_on_child_memory(self):
+        with patch.dict(
+            os.environ,
+            {"TORCHINDUCTOR_COMPILE_WORKER_WATCHDOG_INTERVAL": "1"},
+        ):
+            # Measure baseline in the SAME pool that runs the test so the
+            # worker PSS is consistent (PSS varies across pools because
+            # page-sharing proportions differ).
+            pool = SubprocPool(1)
+            try:
+                baseline_kb = pool.submit(
+                    _subtree_pss_kb_for_test,
+                ).result(timeout=15)
+                self.assertGreater(baseline_kb, 0)
+
+                child_alloc_kb = 200 * 1024
+                limit_kb = baseline_kb + child_alloc_kb // 2
+
+                # Control: a no-child job held in flight as long as the offender
+                # must survive -- rules out baseline PSS drift as the kill cause.
+                with config.patch(compile_worker_memory_limit_kb=limit_kb):
+                    self.assertIsNone(pool.submit(time.sleep, 8).result(timeout=30))
+
+                # Submit a job that forks a 200 MiB child -- the subtree total
+                # should cross the limit and trigger a kill.
+                with config.patch(compile_worker_memory_limit_kb=limit_kb):
+                    start = time.monotonic()
+                    fut = pool.submit(
+                        subprocess.run,
+                        [
+                            sys.executable,
+                            "-c",
+                            "b = bytearray(200 * 1024 * 1024); import time; time.sleep(60)",
+                        ],
+                    )
+                    with self.assertRaises(Exception) as cm:
+                        fut.result(timeout=30)
+                    elapsed = time.monotonic() - start
+                    self.assertNotIsInstance(cm.exception, FuturesTimeoutError)
+                    self.assertLess(elapsed, 30)
+                    self.assertEqual(
+                        pool.submit(operator.add, 2, 3).result(timeout=15), 5
+                    )
+            finally:
+                pool.shutdown()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    @config.patch(
+        compile_worker_memory_limit_kb=1024,
+        worker_start_method="fork",
+    )
+    def test_memory_limit_rejected_for_non_subprocess_pool(self):
+        from torch._inductor.async_compile import AsyncCompile
+
+        with self.assertRaisesRegex(RuntimeError, "worker_start_method='subprocess'"):
+            AsyncCompile.process_pool()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    @config.patch(
+        compile_worker_per_kernel_timeout=10,
+        worker_start_method="fork",
+    )
+    def test_timeout_limit_rejected_for_non_subprocess_pool(self):
+        from torch._inductor.async_compile import AsyncCompile
+
+        with self.assertRaisesRegex(RuntimeError, "worker_start_method='subprocess'"):
+            AsyncCompile.process_pool()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    @config.patch(compile_worker_memory_limit_kb=1024)
+    def test_memory_limit_rejected_for_fx_subprocess_pool(self):
+        from torch._inductor.compile_fx_subproc import _SubprocessFxCompile
+
+        with self.assertRaisesRegex(
+            RuntimeError, "TORCHINDUCTOR_FX_COMPILE_MODE=subprocess"
+        ):
+            _SubprocessFxCompile.process_pool()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    @config.patch(compile_worker_per_kernel_timeout=10)
+    def test_timeout_limit_rejected_for_fx_subprocess_pool(self):
+        from torch._inductor.compile_fx_subproc import _SubprocessFxCompile
+
+        with self.assertRaisesRegex(
+            RuntimeError, "TORCHINDUCTOR_FX_COMPILE_MODE=subprocess"
+        ):
+            _SubprocessFxCompile.process_pool()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    @config.patch(compile_worker_memory_enforcement="cgroup")
+    def test_cgroup_memory_enforcement_rejected(self):
+        from torch._inductor.async_compile import AsyncCompile
+
+        with self.assertRaisesRegex(
+            RuntimeError, "cgroup memory enforcement is not yet supported"
+        ):
+            AsyncCompile.process_pool()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    @config.patch(compile_worker_memory_enforcement="bogus")
+    def test_invalid_memory_enforcement_rejected(self):
+        from torch._inductor.async_compile import AsyncCompile
+
+        with self.assertRaisesRegex(
+            ValueError, "Invalid compile_worker_memory_enforcement"
+        ):
+            AsyncCompile.process_pool()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    @config.patch(
+        compile_worker_memory_limit_kb=1024,
+        compile_worker_watchdog_interval_seconds=0,
+        worker_start_method="subprocess",
+    )
+    def test_limits_require_positive_watchdog_interval(self):
+        from torch._inductor.async_compile import AsyncCompile
+
+        with self.assertRaisesRegex(
+            RuntimeError, "compile_worker_watchdog_interval_seconds"
+        ):
+            AsyncCompile.process_pool()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    @config.patch(
+        compile_worker_drain_timeout_seconds=10,
+        compile_worker_watchdog_interval_seconds=1,
+    )
+    def test_begin_draining_uses_drain_timeout_not_watchdog_interval(self):
+        main = SubprocMain(
+            SubprocPickler(), SubprocKind.FORK, 1, io.BytesIO(), io.BytesIO()
+        )
+        before = time.monotonic()
+        with patch("torch._inductor.compile_worker.subproc_pool.os.killpg"):
+            main._begin_draining(99999, 1, "test")
+        elapsed = main._drain_deadline - before
+        self.assertGreaterEqual(elapsed, 9.5)
+        self.assertLess(elapsed, 10.5)
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_check_job_limits_skips_unfilled_worker_pid(self):
+        # Heartbeat can briefly have job_id set but worker_pid still 0. Must
+        # not scan /proc for pid 0 (walks the whole machine on ppid fallback)
+        # or record a timeout breach that arms _offender_reasons without a kill.
+        main = SubprocMain(
+            SubprocPickler(), SubprocKind.FORK, 1, io.BytesIO(), io.BytesIO()
+        )
+        now_ns = time.monotonic_ns()
+        job_id = 42
+        heartbeats = {
+            job_id: (0, now_ns, 0, now_ns - int(60e9), 1024, 1),
+        }
+        with patch.object(main, "_check_memory_violation") as check_mem:
+            self.assertIsNone(main._check_job_limits(job_id, heartbeats, now_ns))
+            check_mem.assert_not_called()
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_watchdog_loop_ignores_pid_zero_heartbeat(self):
+        from torch._inductor.compile_worker import watchdog
+
+        main = SubprocMain(
+            SubprocPickler(), SubprocKind.FORK, 1, io.BytesIO(), io.BytesIO()
+        )
+        job_id = 7
+        now_ns = time.monotonic_ns()
+        heartbeats = {job_id: (0, now_ns, 0, now_ns - int(60e9), 0, 1)}
+        with main._inflight_lock:
+            main._inflight[job_id] = time.monotonic()
+
+        with patch.object(watchdog, "read_heartbeats", return_value=heartbeats):
+            with patch.object(main._watchdog_stop, "wait", side_effect=[False, True]):
+                main._watchdog_loop(0.01)
+
+        self.assertEqual(main._offenders, {})
+        self.assertEqual(main._offender_reasons, {})
+        self.assertFalse(main._draining)
+
+        # Complete the same job on the main the watchdog loop used. A pid-0
+        # breach must not have armed _offender_reasons, or this would send a
+        # kill error instead of the real result.
+        pickler = SubprocPickler()
+        future = _DoneFuture(result=pickler.dumps(b"ok"))
+        main.pool = _FakePool(future)
+        write_pipe = io.BytesIO()
+        main.write_pipe = write_pipe
+        main._submit_inner(job_id, b"")
+        msg_header, _, data = _recv_msg(io.BytesIO(write_pipe.getvalue()))
+        self.assertEqual(msg_header, MsgHeader.JOB)
+        self.assertEqual(pickler.loads(data), b"ok")
+
+
+@unittest.skipUnless(IS_LINUX, "subtree memory accounting is Linux-only")
+class TestSubtreeMemory(TestCase):
+    def test_pgid_memory_snapshot_groups_subtree(self):
+        from torch._inductor.compile_worker import watchdog
+
+        # Worker 100 (pgid 100) with children 101, 102 in the same group.
+        stat_map = {
+            100: "100 (worker) S 1 100 100 ...",
+            101: "101 (nvcc) S 100 100 100 ...",
+            102: "102 (ptxas) S 101 100 100 ...",
+            200: "200 (other) S 1 200 200 ...",
+        }
+        statm_map = {100: "10 100 0", 101: "10 50 0", 102: "10 30 0", 200: "10 999 0"}
+        pss_map = {100: 1000, 101: 500, 102: 300, 200: 9999}
+
+        real_listdir = os.listdir
+        real_open = open
+
+        def fake_listdir(path):
+            if path == "/proc":
+                return [str(pid) for pid in stat_map]
+            return real_listdir(path)
+
+        def fake_open(path, *args, **kwargs):
+            if not isinstance(path, str) or not path.startswith("/proc/"):
+                return real_open(path, *args, **kwargs)
+            parts = path.split("/")
+            if len(parts) < 4 or not parts[2].isdigit():
+                return real_open(path, *args, **kwargs)
+            pid = int(parts[2])
+            if path.endswith("/stat") and pid in stat_map:
+                return io.StringIO(stat_map[pid])
+            if path.endswith("/statm") and pid in statm_map:
+                return io.StringIO(statm_map[pid])
+            if path.endswith("/smaps_rollup") and pid in pss_map:
+                return io.StringIO(f"Some: 0 kB\nPss: {pss_map[pid]} kB\n")
+            return real_open(path, *args, **kwargs)
+
+        with patch.object(watchdog.os, "listdir", side_effect=fake_listdir):
+            with patch("builtins.open", side_effect=fake_open):
+                snap = watchdog.PgidMemorySnapshot()
+
+        # RSS: summed per pgid from statm field 1 (pages * page_kb).
+        page_kb = watchdog._PAGE_SIZE_KB
+        pgid_100_rss = (100 + 50 + 30) * page_kb
+        pgid_200_rss = 999 * page_kb
+        self.assertEqual(snap._rss_by_pgid[100], pgid_100_rss)
+        self.assertEqual(snap._rss_by_pgid[200], pgid_200_rss)
+        self.assertFalse(snap.is_limit_exceeded(100, pgid_100_rss + 1))
+        self.assertTrue(snap.is_limit_exceeded(100, pgid_100_rss))
+        self.assertFalse(snap.is_limit_exceeded(200, pgid_200_rss + 1))
+        self.assertTrue(snap.is_limit_exceeded(200, pgid_200_rss))
+        self.assertFalse(snap.is_limit_exceeded(300, 1))
+
+    @skipIfWindows(msg="pass_fds not supported on Windows.")
+    def test_watchdog_builds_one_memory_snapshot_per_tick(self):
+        from torch._inductor.compile_worker import watchdog
+
+        main = SubprocMain(
+            SubprocPickler(), SubprocKind.FORK, 1, io.BytesIO(), io.BytesIO()
+        )
+        job_id = 9
+        now_ns = time.monotonic_ns()
+        # Use a fake worker pid -- os.getpid() would SIGSTOP the test runner if the
+        # limit check fires and _begin_draining runs.
+        heartbeats = {job_id: (0, now_ns, 99999, now_ns, 1024, 0)}
+        with main._inflight_lock:
+            main._inflight[job_id] = time.monotonic()
+
+        snapshot = MagicMock()
+        snapshot.is_limit_exceeded.return_value = False
+        with patch.object(
+            watchdog, "build_pgid_memory_snapshot", return_value=snapshot
+        ) as build_snapshot:
+            with patch.object(watchdog, "read_heartbeats", return_value=heartbeats):
+                with patch.object(
+                    main._watchdog_stop, "wait", side_effect=[False, True]
+                ):
+                    main._watchdog_loop(0.01)
+
+        build_snapshot.assert_called_once()
+
+    def test_pss_unreadable_falls_back_to_rss_breach(self):
+        from torch._inductor.compile_worker import watchdog
+
+        stat_map = {100: "100 (worker) S 1 100 100 ..."}
+        statm_map = {100: "10 1000 0"}
+
+        real_listdir = os.listdir
+        real_open = open
+
+        def fake_listdir(path):
+            if path == "/proc":
+                return ["100"]
+            return real_listdir(path)
+
+        def fake_open(path, *args, **kwargs):
+            if not isinstance(path, str) or not path.startswith("/proc/"):
+                return real_open(path, *args, **kwargs)
+            if path == "/proc/100/stat":
+                return io.StringIO(stat_map[100])
+            if path == "/proc/100/statm":
+                return io.StringIO(statm_map[100])
+            if path.endswith("/smaps_rollup"):
+                raise OSError("no such file")
+            return real_open(path, *args, **kwargs)
+
+        orig = watchdog._has_smaps_rollup
+        watchdog._has_smaps_rollup = None
+        try:
+            with patch.object(watchdog.os, "listdir", side_effect=fake_listdir):
+                with patch("builtins.open", side_effect=fake_open):
+                    snap = watchdog.PgidMemorySnapshot()
+                    self.assertTrue(snap.is_limit_exceeded(100, 1))
+        finally:
+            watchdog._has_smaps_rollup = orig
+
+    def test_probe_smaps_rollup_missing_file(self):
+        from torch._inductor.compile_worker import watchdog
+
+        orig = watchdog._has_smaps_rollup
+        watchdog._has_smaps_rollup = None
+        try:
+            real_open = open
+
+            def fake_open(path, *args, **kwargs):
+                if isinstance(path, str) and path.endswith("/smaps_rollup"):
+                    raise OSError("no such file")
+                return real_open(path, *args, **kwargs)
+
+            with self.assertLogs(
+                "torch._inductor.compile_worker.watchdog", level="ERROR"
+            ) as cm:
+                with patch("builtins.open", side_effect=fake_open):
+                    self.assertFalse(watchdog._probe_smaps_rollup())
+            self.assertIn("smaps_rollup not available", cm.output[0])
+            self.assertFalse(watchdog._has_smaps_rollup)
+        finally:
+            watchdog._has_smaps_rollup = orig
+
+    def test_subtree_memory_counts_children(self):
+        import io
+
+        from torch._inductor.compile_worker import watchdog
+        from torch.utils._ordered_set import OrderedSet
+
+        # pid 100 -> children [101, 102], pid 101 -> child [103]
+        children_map = {
+            (100, "100"): "101 102",
+            (101, "101"): "103",
+            (102, "102"): "",
+            (103, "103"): "",
+        }
+        tasks_map = {100: ["100"], 101: ["101"], 102: ["102"], 103: ["103"]}
+
+        real_listdir = os.listdir
+        real_open = open
+
+        def fake_listdir(path):
+            for pid, tasks in tasks_map.items():
+                if path == f"/proc/{pid}/task":
+                    return tasks
+            return real_listdir(path)
+
+        def fake_open(path, *args, **kwargs):
+            if isinstance(path, str) and "/task/" in path and "/children" in path:
+                for (pid, task), txt in children_map.items():
+                    if path == f"/proc/{pid}/task/{task}/children":
+                        return io.StringIO(txt)
+                raise OSError("no such file")
+            return real_open(path, *args, **kwargs)
+
+        def read_fn(pid):
+            return pid * 10
+
+        with patch.object(watchdog, "_has_proc_children", True):
+            with patch.object(watchdog.os, "listdir", side_effect=fake_listdir):
+                with patch("builtins.open", side_effect=fake_open):
+                    result = watchdog._subtree_memory_kb(100, OrderedSet(), read_fn)
+
+        self.assertEqual(result, 100 * 10 + 101 * 10 + 102 * 10 + 103 * 10)
+
+    def test_subtree_memory_survives_unreadable_task(self):
+        import io
+
+        from torch._inductor.compile_worker import watchdog
+        from torch.utils._ordered_set import OrderedSet
+
+        # pid 200 has tasks ['200', '201']; task 201's children file is unreadable.
+        # pid 200/task/200 has child 202. Child 202 should still be counted.
+        tasks_map = {200: ["201", "200"], 202: ["202"]}
+        children_map = {(200, "200"): "202", (202, "202"): ""}
+
+        real_listdir = os.listdir
+        real_open = open
+
+        def fake_listdir(path):
+            for pid, tasks in tasks_map.items():
+                if path == f"/proc/{pid}/task":
+                    return tasks
+            return real_listdir(path)
+
+        def fake_open(path, *args, **kwargs):
+            if isinstance(path, str) and "/task/" in path and "/children" in path:
+                for (pid, task), txt in children_map.items():
+                    if path == f"/proc/{pid}/task/{task}/children":
+                        return io.StringIO(txt)
+                raise OSError("no such file")
+            return real_open(path, *args, **kwargs)
+
+        def read_fn(pid):
+            return 100
+
+        with patch.object(watchdog, "_has_proc_children", True):
+            with patch.object(watchdog.os, "listdir", side_effect=fake_listdir):
+                with patch("builtins.open", side_effect=fake_open):
+                    result = watchdog._subtree_memory_kb(200, OrderedSet(), read_fn)
+
+        # pid 200 (100) + pid 202 (100) = 200; task 201's OSError is swallowed
+        self.assertEqual(result, 200)
+
+    def test_subtree_memory_via_ppid_fallback(self):
+        from torch._inductor.compile_worker import watchdog
+        from torch.utils._ordered_set import OrderedSet
+
+        # pid 100 -> children [101, 102], pid 101 -> child [103]
+        # pid 101 comm contains spaces and ")" -- exercises rfind(")") parsing.
+        stat_map = {
+            100: "100 (parent) S 1 100 100 ...",
+            101: "101 (foo bar)) S 100 100 101 ...",
+            102: "102 (child2) S 100 100 102 ...",
+            103: "103 (grandchild) S 101 100 101 ...",
+        }
+
+        real_listdir = os.listdir
+        real_open = open
+
+        def fake_listdir(path):
+            if path == "/proc":
+                return [str(pid) for pid in stat_map]
+            return real_listdir(path)
+
+        def fake_open(path, *args, **kwargs):
+            if (
+                isinstance(path, str)
+                and path.startswith("/proc/")
+                and path.endswith("/stat")
+            ):
+                pid_str = path.split("/")[2]
+                if pid_str.isdigit():
+                    pid = int(pid_str)
+                    if pid in stat_map:
+                        return io.StringIO(stat_map[pid])
+            return real_open(path, *args, **kwargs)
+
+        def read_fn(pid):
+            return pid * 10
+
+        with patch.object(watchdog, "_has_proc_children", False):
+            with patch.object(watchdog.os, "listdir", side_effect=fake_listdir):
+                with patch("builtins.open", side_effect=fake_open):
+                    result = watchdog._subtree_memory_kb(100, OrderedSet(), read_fn)
+
+        self.assertEqual(result, 100 * 10 + 101 * 10 + 102 * 10 + 103 * 10)
+
+    def test_probe_proc_children_missing_children_file(self):
+        from torch._inductor.compile_worker import watchdog
+
+        orig = watchdog._has_proc_children
+        watchdog._has_proc_children = None
+        try:
+            real_listdir = os.listdir
+            real_open = open
+
+            def fake_listdir(path):
+                if path == f"/proc/{os.getpid()}/task":
+                    return ["1"]
+                return real_listdir(path)
+
+            def fake_open(path, *args, **kwargs):
+                if isinstance(path, str) and path.endswith("/children"):
+                    raise OSError("no such file")
+                return real_open(path, *args, **kwargs)
+
+            with self.assertLogs(
+                "torch._inductor.compile_worker.watchdog", level="ERROR"
+            ) as cm:
+                with patch.object(watchdog.os, "listdir", side_effect=fake_listdir):
+                    with patch("builtins.open", side_effect=fake_open):
+                        self.assertFalse(watchdog._probe_proc_children())
+            self.assertIn("CONFIG_PROC_CHILDREN not available", cm.output[0])
+            self.assertFalse(watchdog._has_proc_children)
+        finally:
+            watchdog._has_proc_children = orig
 
 
 class TestTimer(TestCase):

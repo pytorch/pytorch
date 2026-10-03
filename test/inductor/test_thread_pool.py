@@ -21,7 +21,7 @@ class TestThreadPool(TestCase):
         config.compile_worker_mode = self._orig_mode
         config.compile_threads = self._orig_threads
         AsyncCompile.thread_pool.cache_clear()
-        AsyncCompile.process_pool.cache_clear()
+        AsyncCompile._create_pool.cache_clear()
         shutdown_compile_workers()
         super().tearDown()
 
