@@ -13089,6 +13089,29 @@ class TestNNDeviceType(NNTestCase):
         clip_grad_value_([p2], clip_value, foreach=foreach)
         self.assertEqual(p1.grad, p2.grad)
 
+    @parametrize_test('foreach', (None, False))
+    @parametrize_test('norm_type', (1.0, 2.0))
+    def test_get_total_norm_dtype(self, norm_type, foreach, device):
+        # foreach=None takes the foreach path on the devices that have it and the per-tensor path elsewhere.
+        # By default each per-tensor norm of low-precision inputs is rounded to their dtype
+        # before the norms are combined, so the total depends on how the tensors are split.
+        # With dtype=torch.float32 every norm is accumulated and returned in float32. The
+        # inputs are small integers, so the float32 sums are exact; a total rounded through
+        # bfloat16 would be off by about 1, far outside the float32 tolerance.
+        g = torch.tensor([255.0, 32.0, 1.0], dtype=torch.bfloat16, device=device)
+        whole, split = [g], [g[:2], g[2:]]
+
+        exact = {1.0: 255.0 + 32.0 + 1.0, 2.0: math.sqrt(255.0**2 + 32.0**2 + 1.0**2)}[norm_type]
+        expected = torch.tensor(exact, dtype=torch.float32, device=device)
+        for tensors in (whole, split):
+            total = get_total_norm(tensors, norm_type=norm_type, foreach=foreach, dtype=torch.float32)
+            self.assertEqual(total, expected)
+            default = get_total_norm(tensors, norm_type=norm_type, foreach=foreach)
+            self.assertEqual(default.dtype, torch.bfloat16)
+
+        empty = get_total_norm([], norm_type=norm_type, dtype=torch.float32)
+        self.assertEqual(empty.dtype, torch.float32)
+
     @parametrize_test('foreach', (False, True))
     @parametrize_test('norm_type', (0.5, 1.5, 2, 4, 'inf'))
     def test_clip_grad_norm(self, norm_type, foreach, device):
