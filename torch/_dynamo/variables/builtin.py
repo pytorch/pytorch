@@ -48,6 +48,7 @@ from ..exc import (
     ObservedTypeError,
     ObservedUserStopIteration,
     raise_observed_exception,
+    raise_observed_exception_instance,
     raise_type_error,
     raise_value_error,
     unimplemented,
@@ -2183,7 +2184,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     *[a.as_python_constant() for a in args[1:]],
                 )
             except (TypeError, ValueError) as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
+                raise_observed_exception_instance(tx, e)
             return VariableTracker.build(tx, r)
         else:
             fail(args, kwargs)
