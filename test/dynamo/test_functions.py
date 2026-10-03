@@ -445,12 +445,22 @@ partial_fn = functools.partial(fn, scale=2)
             v = v + x * i
         return v
 
-    def test_itertools_product_args(self):
-        @torch.compile(backend="eager", fullgraph=True)
+    @parametrize(
+        "kwargs",
+        ({"fake_arg": 1}, {"repeat": 1, "fake_arg": 1}, {"foo": 2, "bar": 3}),
+    )
+    def test_itertools_product_args(self, kwargs):
         def fn(*args, **kwargs):
-            return torch.tensor(list(itertools.product(*args, **kwargs)))
+            try:
+                itertools.product(*args, **kwargs)
+            except TypeError as exc:
+                return str(exc)
+            return "no exception"
 
-        self.assertRaises(Unsupported, fn, [1, 2, 3], fake_arg=1)
+        expected = fn([1, 2, 3], **kwargs)
+        self.assertNotEqual(expected, "no exception")
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled([1, 2, 3], **kwargs), expected)
 
     @make_test
     def test_itertools_product_various_iterators(a, b):
