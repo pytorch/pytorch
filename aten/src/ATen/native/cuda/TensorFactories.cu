@@ -35,17 +35,18 @@
 namespace at::native {
 
 Tensor& zero_cuda_(Tensor& self) {
-#if defined(USE_ROCM) && ROCM_VERSION >= 70000 && ROCM_VERSION < 70100
-  // hipMemsetAsync recorded into a HIP graph leaves stale bytes on ROCm
-  // [7.0.0, 7.1.0) (runtime bug, fixed in ROCm/clr 3038c4c3). The bug needs
-  // an active stream capture, so the memset fast path stays sound whenever
-  // no capture is underway; only a captured zero_ must take the fill_
-  // kernel.
+  // cudaMemsetAsync saves ~2 us of host time per call in eager mode, but a
+  // memset recorded into a CUDA graph becomes a memset node, which the GPU
+  // schedules with a higher per-node latency than a kernel node and which
+  // breaks kernel-to-kernel launch pipelining inside the graph. A model that
+  // zeroes one small buffer per layer inside a captured graph (e.g. the
+  // per-layer counter buffer of FlashInfer's TRT-LLM-gen attention under
+  // vLLM) pays several us per node per replay: +4-5% decode latency at batch
+  // size 1 on an 8B model. While capturing, keep the fill_ kernel.
+  // On ROCm [7.0.0, 7.1.0) the captured memset is also incorrect (runtime
+  // bug, fixed in ROCm/clr 3038c4c3), so the same gate is required there.
   const bool memset_safe =
       at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None;
-#else
-  constexpr bool memset_safe = true;
-#endif
   if (memset_safe) {
     void* const ptr = self.mutable_data_ptr();
     if (ptr != nullptr && self.is_non_overlapping_and_dense()) {

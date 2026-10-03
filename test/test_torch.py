@@ -6747,6 +6747,38 @@ class TestTorchCUDA(TestCase):
         names = tuple(event.key for event in prof.key_averages())
         self.assertTrue(any("elementwise_kernel" in name for name in names), names)
 
+    @unittest.skipIf(not torch.autograd.kineto_available(), "Kineto is required")
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCm >= 5.3 required for graphs")
+    def test_zero_dense_inside_graph_capture_emits_fill_kernel(self, device):
+        # A memset recorded into a CUDA graph becomes a memset node, which
+        # replays several microseconds slower than a kernel node and breaks
+        # kernel-to-kernel launch pipelining inside the graph. A model that
+        # zeroes one small buffer per layer inside a captured graph lost 4-5%
+        # decode latency that way, so under capture zero_ keeps the fill kernel.
+        base = torch.ones(64, 96, device=device)
+        graph = torch.cuda.CUDAGraph()
+        stream = torch.cuda.Stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            base.zero_()
+            with torch.cuda.graph(graph):
+                base.zero_()
+        torch.cuda.current_stream().wait_stream(stream)
+
+        # Warm up CUPTI outside the profiled region (early profiler
+        # iterations can drop events), then profile several replays.
+        graph.replay()
+        torch.cuda.synchronize()
+        base.fill_(1)
+        with torch.profiler.profile() as prof:
+            for _ in range(3):
+                graph.replay()
+            torch.cuda.synchronize()
+        names = tuple(event.key for event in prof.key_averages())
+        self.assertTrue(any("elementwise_kernel" in name for name in names), names)
+        self.assertFalse(any("Memset" in name for name in names), names)
+        self.assertEqual(base.count_nonzero().item(), 0)
+
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCm >= 5.3 required for graphs")
     def test_zero_dense_inside_graph_capture(self, device):
         # Whichever path zero_ takes has to survive being captured and replayed.
