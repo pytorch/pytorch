@@ -594,6 +594,49 @@ def _remove_zero_bias_from_efficient_attention(
             node.args = tuple(args)
 
 
+def replace_empty_tensor_ops(gm: torch.fx.GraphModule):
+    """Replace functional ops whose output is statically known to be empty
+    with empty_strided, so their lowerings and fallbacks never run."""
+    graph = gm.graph
+    replaced = False
+    for node in list(graph.nodes):
+        if node.op != "call_function":
+            continue
+        target = node.target
+        if not isinstance(target, torch._ops.OpOverload) or target.namespace != "aten":
+            continue
+        if target in (aten.empty_strided.default, aten.empty.memory_format):
+            continue
+        if torch.Tag.nondeterministic_seeded in target.tags:
+            continue
+        schema = target._schema
+        if schema.is_mutable or any(r.alias_info for r in schema.returns):
+            continue
+        val = node.meta.get("val")
+        if not isinstance(val, torch.Tensor) or val.layout is not torch.strided:
+            continue
+        if val.is_conj() or val.is_neg():
+            continue
+        if not statically_known_true(val.numel() == 0):
+            continue
+        sizes, strides = list(val.size()), list(val.stride())
+        if any(isinstance(x, torch.SymInt) for x in sizes + strides):
+            continue
+        with graph.inserting_after(node):
+            new_node = graph.call_function(
+                aten.empty_strided.default,
+                args=(sizes, strides),
+                kwargs={"dtype": val.dtype, "device": val.device},
+            )
+        new_node.meta.update(node.meta)
+        node.replace_all_uses_with(new_node)
+        graph.erase_node(node)
+        counters["inductor"]["replace_empty_tensor_ops"] += 1
+        replaced = True
+    if replaced:
+        graph.eliminate_dead_code()
+
+
 def constant_fold_uniform_value(gm: torch.fx.GraphModule):
     """Fold uniform constants and algebraic no-ops.
 
@@ -825,6 +868,9 @@ def joint_graph_passes(
     GraphTransformObserver(graph, "remove_noop_ops").apply_graph_pass(remove_noop_ops)
 
     if config.joint_graph_constant_folding:
+        GraphTransformObserver(graph, "replace_empty_tensor_ops").apply_gm_pass(
+            replace_empty_tensor_ops
+        )
         GraphTransformObserver(graph, "constant_fold_uniform_value").apply_gm_pass(
             constant_fold_uniform_value
         )
