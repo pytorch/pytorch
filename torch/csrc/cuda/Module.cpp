@@ -5,6 +5,7 @@
 #include <ATen/native/ConvUtils.h>
 #include <ATen/native/RNN.h>
 #include <c10/core/Device.h>
+#include <c10/core/SafePyObject.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
@@ -35,6 +36,7 @@
 
 #include <torch/csrc/CudaIPCTypes.h>
 #include <torch/csrc/Generator.h>
+#include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/cuda/CUDAPluggableAllocator.h>
 #include <torch/csrc/cuda/GdsFile.h>
 #include <torch/csrc/cuda/THCP.h>
@@ -54,7 +56,6 @@
 #include <sstream>
 #include <thread>
 #include <unordered_map>
-#include <utility>
 
 namespace at::native {
 void* getCurrentCUDASolverDnHandleLazy();
@@ -1327,56 +1328,32 @@ void addStorageDeleterFns(
 
 namespace {
 
-class PythonAllocatorCallbackState {
- public:
-  PythonAllocatorCallbackState(PyObject* alloc_fn, PyObject* free_fn)
-      : alloc_fn_(alloc_fn), free_fn_(free_fn) {
-    Py_INCREF(alloc_fn_);
-    Py_INCREF(free_fn_);
-  }
+using PythonAllocatorCallbackState = c10::SafePyObject;
 
-  ~PythonAllocatorCallbackState() {
-    auto* alloc_fn = std::exchange(alloc_fn_, nullptr);
-    auto* free_fn = std::exchange(free_fn_, nullptr);
-    if (!Py_IsInitialized() || Py_IsFinalizing()) {
-      // Entering Python or decrementing Python references during interpreter
-      // teardown can hang or crash. Process teardown will reclaim them.
-      return;
-    }
-    py::gil_scoped_acquire gil;
-    Py_DECREF(alloc_fn);
-    Py_DECREF(free_fn);
-  }
-
-  PyObject* alloc_fn() const {
-    return alloc_fn_;
-  }
-
-  PyObject* free_fn() const {
-    return free_fn_;
-  }
-
- private:
-  PyObject* alloc_fn_;
-  PyObject* free_fn_;
-};
-
-thread_local bool python_allocator_callback_active = false;
+thread_local bool python_allocator_alloc_callback_active = false;
 
 class PythonAllocatorCallbackGuard {
  public:
   PythonAllocatorCallbackGuard() {
     TORCH_CHECK(
-        !python_allocator_callback_active,
-        "Python MemPool allocator callbacks cannot be re-entered. Callback "
-        "implementations must not allocate from a Python-backed MemPool.");
-    python_allocator_callback_active = true;
+        !python_allocator_alloc_callback_active,
+        "Python MemPool allocation callbacks cannot be re-entered. An "
+        "allocation callback must not allocate from a Python-backed MemPool.");
+    python_allocator_alloc_callback_active = true;
   }
 
   ~PythonAllocatorCallbackGuard() {
-    python_allocator_callback_active = false;
+    python_allocator_alloc_callback_active = false;
   }
 };
+
+PyObject* getPythonAllocatorCallback(
+    const std::shared_ptr<PythonAllocatorCallbackState>& state,
+    Py_ssize_t index) {
+  auto* callbacks = state->ptr(getPyInterpreter());
+  TORCH_INTERNAL_ASSERT(PyTuple_CheckExact(callbacks));
+  return PyTuple_GET_ITEM(callbacks, index);
+}
 
 void* callPythonAllocator(
     const std::shared_ptr<PythonAllocatorCallbackState>& state,
@@ -1390,17 +1367,18 @@ void* callPythonAllocator(
   PythonAllocatorCallbackGuard callback_guard;
   py::gil_scoped_acquire gil;
   try {
-    py::object result = py::reinterpret_borrow<py::object>(state->alloc_fn())(
-        size, device, reinterpret_cast<uintptr_t>(stream));
+    py::object result =
+        py::reinterpret_borrow<py::object>(getPythonAllocatorCallback(
+            state, 0))(size, device, reinterpret_cast<uintptr_t>(stream));
     if (result.is_none()) {
       return nullptr;
     }
     auto address = result.cast<uintptr_t>();
     return reinterpret_cast<void*>(address);
-  } catch (const py::error_already_set& e) {
-    TORCH_CHECK(false, "Python MemPool alloc callback failed: ", e.what());
   } catch (const std::exception& e) {
     TORCH_CHECK(false, "Python MemPool alloc callback failed: ", e.what());
+  } catch (...) {
+    TORCH_CHECK(false, "Python MemPool alloc callback failed");
   }
 }
 
@@ -1416,35 +1394,20 @@ void callPythonDeallocator(
     return;
   }
   try {
-    PythonAllocatorCallbackGuard callback_guard;
     py::gil_scoped_acquire gil;
-    try {
-      py::reinterpret_borrow<py::object>(state->free_fn())(
-          reinterpret_cast<uintptr_t>(ptr),
-          size,
-          device,
-          reinterpret_cast<uintptr_t>(stream));
-    } catch (const py::error_already_set& e) {
-      LOG(ERROR) << "Python MemPool free callback failed for pointer " << ptr
-                 << " (size " << size << ", device " << device
-                 << "): " << e.what();
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "Python MemPool free callback failed for pointer " << ptr
-                 << " (size " << size << ", device " << device
-                 << "): " << e.what();
-    } catch (...) {
-      LOG(ERROR) << "Python MemPool free callback failed for pointer " << ptr
-                 << " (size " << size << ", device " << device
-                 << ") with an unknown exception";
-    }
+    py::reinterpret_borrow<py::object>(getPythonAllocatorCallback(state, 1))(
+        reinterpret_cast<uintptr_t>(ptr),
+        size,
+        device,
+        reinterpret_cast<uintptr_t>(stream));
   } catch (const std::exception& e) {
-    LOG(ERROR) << "Python MemPool free callback was not invoked for pointer "
-               << ptr << " (size " << size << ", device " << device
+    LOG(ERROR) << "Python MemPool free callback failed for pointer " << ptr
+               << " (size " << size << ", device " << device
                << "): " << e.what();
   } catch (...) {
-    LOG(ERROR) << "Python MemPool free callback was not invoked for pointer "
-               << ptr << " (size " << size << ", device " << device
-               << ") because of an unknown exception";
+    LOG(ERROR) << "Python MemPool free callback failed for pointer " << ptr
+               << " (size " << size << ", device " << device
+               << ") with an unknown exception";
   }
 }
 
@@ -1576,8 +1539,9 @@ static void registerCudaPluggableAllocator(PyObject* module) {
         TORCH_CHECK(
             PyCallable_Check(free_fn.ptr()),
             "free_fn must be a Python callable");
+        auto callbacks = py::make_tuple(alloc_fn, free_fn);
         auto state = std::make_shared<PythonAllocatorCallbackState>(
-            alloc_fn.ptr(), free_fn.ptr());
+            callbacks.release().ptr(), getPyInterpreter());
         return torch::cuda::CUDAPluggableAllocator::createPythonAllocator(
             [state](size_t size, int device, cudaStream_t stream) {
               return callPythonAllocator(state, size, device, stream);
