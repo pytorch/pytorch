@@ -97,7 +97,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     IS_X86,
-    MACOS_VERSION,
     NAVI_ARCH,
     parametrize,
     random_matrix_with_scaled_reduction_dim,
@@ -1140,10 +1139,6 @@ class AOTInductorTestsTemplate:
             ep, inductor_configs={"aot_inductor.use_runtime_constant_folding": True}
         )
 
-    @unittest.skipIf(
-        TEST_MPS and MACOS_VERSION < 14.0,
-        "Compilation error",
-    )
     def test_aot_inductor_consts_cpp_build(self):
         class Model(torch.nn.Module):
             def __init__(self, device) -> None:
@@ -1636,10 +1631,6 @@ class AOTInductorTestsTemplate:
             inp = (torch.ones(3, device=self.device), torch.ones(3, device=self.device))
             self.check_model(M(), inp)
 
-    @unittest.skipIf(
-        TEST_MPS and MACOS_VERSION < 14.0,
-        "MPS BFloat16 is only supported on MacOS 14+",
-    )
     def test_empty_cat_dtype_promotion(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -2691,10 +2682,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
-    @unittest.skipIf(
-        TEST_MPS and MACOS_VERSION < 14.0,
-        "bfloat16 is only supported on MacOS 14+",
-    )
     def test_size_with_unbacked_add_expr(self):
         # Tests AOTI autotuning to make sure the correct input tensor sizes
         # are generated for sizes that include an expr such as s0 + u0.
@@ -6508,10 +6495,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
-    @unittest.skipIf(
-        TEST_MPS and MACOS_VERSION < 14.0,
-        "FFT operations are only supported on MacOS 14+",
-    )
     def test_fft_c2c(self):
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -9541,10 +9524,6 @@ class AOTInductorTestsTemplate:
         )
 
     @unittest.skipIf(IS_FBCODE, "Not runnable in fbcode")
-    @unittest.skipIf(
-        TEST_MPS and MACOS_VERSION < 14.0,
-        "FFT operations are only supported on MacOS 14+",
-    )
     def test_stft(self):
         N_FFT = 400
         HOP_LENGTH = 160
