@@ -896,6 +896,42 @@ You can now define a new memory pool by passing this allocator to {class}`torch.
 pool = torch.cuda.MemPool(allocator)
 ```
 
+For allocators implemented in Python, construct the pool directly from
+callables instead of passing `ctypes` callback addresses:
+
+```python
+from cuda.bindings import runtime
+
+
+def alloc(size: int, device: int, stream: int) -> int | None:
+    err, ptr = runtime.cudaMalloc(size)
+    return int(ptr) if err == runtime.cudaError_t.cudaSuccess else None
+
+
+def free(ptr: int, size: int, device: int, stream: int) -> None:
+    runtime.cudaFree(ptr)
+
+
+pool = torch.cuda.MemPool.from_callbacks(alloc, free)
+```
+
+The pool keeps both callables alive until its cached segments have been
+released. Allocation callback exceptions are reported with their Python error
+message. Free callback exceptions are logged and swallowed because cleanup may
+run during destruction. A callback must not allocate from a Python-backed
+MemPool on the same thread; doing so raises a re-entrancy error. Python-backed
+allocators are MemPool-only and cannot be installed with
+{func}`~torch.cuda.change_current_allocator`.
+
+During CUDA graph capture, the allocation callback runs in relaxed capture
+mode. It may call allocation APIs such as `cudaMalloc` or CUDA virtual-memory
+APIs, but it must not launch work on or synchronize the capturing stream,
+synchronize the device, or begin/end capture. The raw stream address passed to
+the callback must not be retained. Also, custom frees selected during OOM
+recovery run only after the current allocation operation unlocks, so that
+operation's retry cannot reuse the returned memory; a later allocation may
+succeed.
+
 
 The pool can then be used with the {class}`torch.cuda.use_mem_pool` context manager to
 allocate tensors into that pool:

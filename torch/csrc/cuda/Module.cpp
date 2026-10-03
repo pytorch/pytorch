@@ -7,6 +7,7 @@
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <pybind11/pytypes.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -46,11 +47,14 @@
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <array>
+#include <cstdint>
 #include <iostream>
 #include <sstream>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 
 namespace at::native {
 void* getCurrentCUDASolverDnHandleLazy();
@@ -1321,6 +1325,131 @@ void addStorageDeleterFns(
   }
 }
 
+namespace {
+
+class PythonAllocatorCallbackState {
+ public:
+  PythonAllocatorCallbackState(PyObject* alloc_fn, PyObject* free_fn)
+      : alloc_fn_(alloc_fn), free_fn_(free_fn) {
+    Py_INCREF(alloc_fn_);
+    Py_INCREF(free_fn_);
+  }
+
+  ~PythonAllocatorCallbackState() {
+    auto* alloc_fn = std::exchange(alloc_fn_, nullptr);
+    auto* free_fn = std::exchange(free_fn_, nullptr);
+    if (!Py_IsInitialized() || Py_IsFinalizing()) {
+      // Entering Python or decrementing Python references during interpreter
+      // teardown can hang or crash. Process teardown will reclaim them.
+      return;
+    }
+    py::gil_scoped_acquire gil;
+    Py_DECREF(alloc_fn);
+    Py_DECREF(free_fn);
+  }
+
+  PyObject* alloc_fn() const {
+    return alloc_fn_;
+  }
+
+  PyObject* free_fn() const {
+    return free_fn_;
+  }
+
+ private:
+  PyObject* alloc_fn_;
+  PyObject* free_fn_;
+};
+
+thread_local bool python_allocator_callback_active = false;
+
+class PythonAllocatorCallbackGuard {
+ public:
+  PythonAllocatorCallbackGuard() {
+    TORCH_CHECK(
+        !python_allocator_callback_active,
+        "Python MemPool allocator callbacks cannot be re-entered. Callback "
+        "implementations must not allocate from a Python-backed MemPool.");
+    python_allocator_callback_active = true;
+  }
+
+  ~PythonAllocatorCallbackGuard() {
+    python_allocator_callback_active = false;
+  }
+};
+
+void* callPythonAllocator(
+    const std::shared_ptr<PythonAllocatorCallbackState>& state,
+    size_t size,
+    int device,
+    cudaStream_t stream) {
+  TORCH_CHECK(
+      Py_IsInitialized() && !Py_IsFinalizing(),
+      "Python MemPool alloc callback is unavailable because the Python "
+      "interpreter is finalizing");
+  PythonAllocatorCallbackGuard callback_guard;
+  py::gil_scoped_acquire gil;
+  try {
+    py::object result = py::reinterpret_borrow<py::object>(state->alloc_fn())(
+        size, device, reinterpret_cast<uintptr_t>(stream));
+    if (result.is_none()) {
+      return nullptr;
+    }
+    auto address = result.cast<uintptr_t>();
+    return reinterpret_cast<void*>(address);
+  } catch (const py::error_already_set& e) {
+    TORCH_CHECK(false, "Python MemPool alloc callback failed: ", e.what());
+  } catch (const std::exception& e) {
+    TORCH_CHECK(false, "Python MemPool alloc callback failed: ", e.what());
+  }
+}
+
+void callPythonDeallocator(
+    const std::shared_ptr<PythonAllocatorCallbackState>& state,
+    void* ptr,
+    size_t size,
+    int device,
+    cudaStream_t stream) noexcept {
+  if (!Py_IsInitialized() || Py_IsFinalizing()) {
+    // The allocation is intentionally leaked. It is unsafe to enter Python
+    // once interpreter finalization has begun.
+    return;
+  }
+  try {
+    PythonAllocatorCallbackGuard callback_guard;
+    py::gil_scoped_acquire gil;
+    try {
+      py::reinterpret_borrow<py::object>(state->free_fn())(
+          reinterpret_cast<uintptr_t>(ptr),
+          size,
+          device,
+          reinterpret_cast<uintptr_t>(stream));
+    } catch (const py::error_already_set& e) {
+      LOG(ERROR) << "Python MemPool free callback failed for pointer " << ptr
+                 << " (size " << size << ", device " << device
+                 << "): " << e.what();
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Python MemPool free callback failed for pointer " << ptr
+                 << " (size " << size << ", device " << device
+                 << "): " << e.what();
+    } catch (...) {
+      LOG(ERROR) << "Python MemPool free callback failed for pointer " << ptr
+                 << " (size " << size << ", device " << device
+                 << ") with an unknown exception";
+    }
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "Python MemPool free callback was not invoked for pointer "
+               << ptr << " (size " << size << ", device " << device
+               << "): " << e.what();
+  } catch (...) {
+    LOG(ERROR) << "Python MemPool free callback was not invoked for pointer "
+               << ptr << " (size " << size << ", device " << device
+               << ") because of an unknown exception";
+  }
+}
+
+} // namespace
+
 static void registerCudaPluggableAllocator(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
@@ -1438,6 +1567,25 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     return torch::cuda::CUDAPluggableAllocator::createCustomAllocator(
         malloc_fn, free_fn);
   });
+  m.def(
+      "_cuda_customAllocatorFromCallbacks",
+      [](py::object alloc_fn, py::object free_fn) {
+        TORCH_CHECK(
+            PyCallable_Check(alloc_fn.ptr()),
+            "alloc_fn must be a Python callable");
+        TORCH_CHECK(
+            PyCallable_Check(free_fn.ptr()),
+            "free_fn must be a Python callable");
+        auto state = std::make_shared<PythonAllocatorCallbackState>(
+            alloc_fn.ptr(), free_fn.ptr());
+        return torch::cuda::CUDAPluggableAllocator::createPythonAllocator(
+            [state](size_t size, int device, cudaStream_t stream) {
+              return callPythonAllocator(state, size, device, stream);
+            },
+            [state](void* ptr, size_t size, int device, cudaStream_t stream) {
+              callPythonDeallocator(state, ptr, size, device, stream);
+            });
+      });
 
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
