@@ -9804,6 +9804,142 @@ for args in ((a, b), (a, b, False)):
         del peer
         torch.cuda.empty_cache()
 
+    @unittest.skipIf(TEST_WITH_ROCM, "requires CUDA runtime bindings")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    @requires_cuda_python_bindings
+    @serialTest()
+    def test_python_mempool_callback_lifetime_and_arguments(self):
+        from cuda.bindings import runtime
+
+        torch.cuda.empty_cache()
+        alloc_calls = []
+        free_calls = []
+        callback_errors = []
+
+        def make_pool():
+            def alloc(size, device, stream):
+                alloc_calls.append((size, device, stream))
+                err, ptr = runtime.cudaMalloc(size)
+                if err != runtime.cudaError_t.cudaSuccess:
+                    callback_errors.append(err)
+                    return None
+                return int(ptr)
+
+            def free(ptr, size, device, stream):
+                free_calls.append((ptr, size, device, stream))
+                (err,) = runtime.cudaFree(ptr)
+                if err != runtime.cudaError_t.cudaSuccess:
+                    callback_errors.append(err)
+
+            alloc_ref = weakref.ref(alloc)
+            free_ref = weakref.ref(free)
+            return torch.cuda.MemPool.from_callbacks(alloc, free), alloc_ref, free_ref
+
+        pool, alloc_ref, free_ref = make_pool()
+        gc.collect()
+        self.assertIsNotNone(alloc_ref())
+        self.assertIsNotNone(free_ref())
+
+        with torch.cuda.use_mem_pool(pool):
+            tensor = torch.empty(1, dtype=torch.uint8, device="cuda")
+
+        self.assertEqual(len(alloc_calls), 1)
+        size, device, stream = alloc_calls[0]
+        self.assertGreater(size, 0)
+        self.assertEqual(device, torch.cuda.current_device())
+        self.assertIsInstance(stream, int)
+
+        del tensor, pool
+        gc.collect()
+
+        self.assertEqual(len(free_calls), 1)
+        free_ptr, free_size, free_device, free_stream = free_calls[0]
+        self.assertGreater(free_ptr, 0)
+        self.assertEqual((free_size, free_device, free_stream), (size, device, stream))
+        self.assertEqual(callback_errors, [])
+        self.assertIsNone(alloc_ref())
+        self.assertIsNone(free_ref())
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    @serialTest()
+    def test_python_mempool_alloc_exception_and_reentrancy(self):
+        def alloc_raises(size, device, stream):
+            raise ValueError("allocation sentinel")
+
+        def free_noop(ptr, size, device, stream):
+            pass
+
+        pool = torch.cuda.MemPool.from_callbacks(alloc_raises, free_noop)
+        with torch.cuda.use_mem_pool(pool):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Python MemPool alloc callback failed:.*allocation sentinel",
+            ):
+                torch.empty(1, dtype=torch.uint8, device="cuda")
+        del pool
+
+        def alloc_reentrant(size, device, stream):
+            return torch.empty(1, dtype=torch.uint8, device="cuda").data_ptr()
+
+        pool = torch.cuda.MemPool.from_callbacks(alloc_reentrant, free_noop)
+        with torch.cuda.use_mem_pool(pool):
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "Python MemPool allocator callbacks cannot be re-entered",
+            ):
+                torch.empty(1, dtype=torch.uint8, device="cuda")
+        del pool
+
+    @unittest.skipIf(TEST_WITH_ROCM, "requires CUDA runtime bindings")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    @requires_cuda_python_bindings
+    @serialTest()
+    def test_python_mempool_free_exception_is_swallowed(self):
+        from cuda.bindings import runtime
+
+        free_calls = []
+
+        def alloc(size, device, stream):
+            err, ptr = runtime.cudaMalloc(size)
+            if err != runtime.cudaError_t.cudaSuccess:
+                return None
+            return int(ptr)
+
+        def free(ptr, size, device, stream):
+            free_calls.append(ptr)
+            (err,) = runtime.cudaFree(ptr)
+            self.assertEqual(err, runtime.cudaError_t.cudaSuccess)
+            raise RuntimeError("free sentinel")
+
+        pool = torch.cuda.MemPool.from_callbacks(alloc, free)
+        with torch.cuda.use_mem_pool(pool):
+            tensor = torch.empty(1, dtype=torch.uint8, device="cuda")
+        del tensor, pool
+        gc.collect()
+        self.assertEqual(len(free_calls), 1)
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    def test_python_mempool_rejects_invalid_and_process_wide_use(self):
+        with self.assertRaisesRegex(RuntimeError, "alloc_fn must be a Python callable"):
+            torch.cuda.MemPool.from_callbacks(
+                None, lambda ptr, size, device, stream: None
+            )
+        with self.assertRaisesRegex(RuntimeError, "free_fn must be a Python callable"):
+            torch.cuda.MemPool.from_callbacks(
+                lambda size, device, stream: None,
+                None,
+            )
+
+        allocator = torch._C._cuda_customAllocatorFromCallbacks(
+            lambda size, device, stream: None,
+            lambda ptr, size, device, stream: None,
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Python-callable CUDA allocators are supported only by.*MemPool",
+        ):
+            torch._C._cuda_changeCurrentAllocator(allocator)
+
     @serialTest()
     def test_tensor_delete_after_allocator_delete(self):
         allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
