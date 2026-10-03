@@ -40,12 +40,27 @@ on:
         default: ""
         type: string
         description: Prefix for runner label
+      lf_runners:
+        required: false
+        default: ""
+        type: string
+        description: |
+          Comma-separated LF allowlist (ci-infra#1081). Empty means
+          unrestricted. Forwarded verbatim to filter_test_configs.py's
+          --lf-runners for the test matrix.
       runner:
         required: false
         type: string
-        default: "linux.c7i.2xlarge"
+        default: "l-x86iavx512-8-64"
         description: |
           Label of the runner this job should run on.
+      flash-attention-large-memory-build:
+        required: false
+        type: boolean
+        default: false
+        description: |
+          Allow a larger FlashAttention compile pool. Only enable this for a
+          reviewed high-memory build runner.
       test-matrix:
         required: false
         type: string
@@ -60,6 +75,11 @@ on:
         required: false
         type: string
         default: ""
+      ignore-test-config-labels:
+        description: Ignore test-config/* PR labels when filtering the test matrix.
+        required: false
+        type: boolean
+        default: false
       s3-bucket:
         description: S3 bucket to download artifact
         required: false
@@ -150,13 +170,13 @@ jobs:
       actions: read
     # Don't run on forked repos
     if: github.repository_owner == 'pytorch'
-    runs-on: ${{ inputs.runner_prefix }}${{ startsWith(inputs.runner, 'l-') && inputs.runner || contains(inputs.runner, 'arm64') && 'l-arm64g4-16-62' || 'l-x86iavx512-8-64' }}
+    runs-on: ${{ inputs.runner_prefix }}${{ inputs.runner }}
     container:
       image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
     timeout-minutes: 480
     outputs:
       docker-image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ inputs.docker-image-name }}${{ inputs.ci-docker-hash && format('-{0}', inputs.ci-docker-hash) || '' }}
-      test-matrix: ${{ steps.map-runners.outputs.test-matrix }}
+      test-matrix: ${{ steps.filter.outputs.test-matrix }}
       build-environment: ${{ inputs.build-environment }}
     steps:
       - name: Setup Linux
@@ -188,22 +208,9 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
           selected-test-configs: ${{ inputs.selected-test-configs }}
+          ignore-test-config-labels: ${{ inputs.ignore-test-config-labels }}
           job-name: ${{ steps.setup-linux.outputs.job-name }}
-
-      - name: Map EC2 runners to ARC runners
-        id: map-runners
-        env:
-          FILTERED_TEST_MATRIX: ${{ steps.filter.outputs.test-matrix }}
-          RUNNER_PREFIX: ${{ inputs.runner_prefix }}
-        shell: bash
-        run: |
-          # Run via uv so pyyaml is provisioned regardless of the build image's
-          # Python setup. Build containers like ubuntu-cross-riscv use the
-          # system apt python3, which doesn't include pyyaml. Matches the
-          # pattern used by parse_ref.py / filter_test_configs.py in
-          # .github/actions/filter-test-configs/action.yml.
-          uv run --no-project --with pyyaml==6.0.2 \
-            python .github/scripts/map_ec2_to_arc.py --prefix "${RUNNER_PREFIX}" "${FILTERED_TEST_MATRIX}"
+          lf-runners: ${{ inputs.lf_runners }}
 
       - name: Configure AWS credentials
         id: aws-creds
@@ -229,11 +236,11 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
+          FLASH_ATTENTION_LARGE_MEMORY_BUILD: ${{ inputs.flash-attention-large-memory-build }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           OUR_GITHUB_JOB_ID: ${{ steps.setup-linux.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           BUILD_ADDITIONAL_PACKAGES: ${{ inputs.build-additional-packages }}
-          RUNNER: ${{ inputs.runner }}
           SKIP_SCCACHE_INITIALIZATION: 1
         shell: bash
         run: |

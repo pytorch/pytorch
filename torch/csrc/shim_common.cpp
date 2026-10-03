@@ -1,10 +1,8 @@
 #include <c10/core/Device.h>
-#include <c10/core/DispatchKey.h>
 #include <c10/core/Stream.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_runtime/utils.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/stable/library.h>
 #include <torch/library.h>
@@ -321,7 +319,7 @@ class StableIValueBoxedKernel : public c10::OperatorKernel {
 
   void operator()(
       const c10::OperatorHandle& op,
-      c10::DispatchKeySet keyset,
+      c10::DispatchKeySet /*keyset*/,
       torch::jit::Stack* stack) {
     const auto& schema = op.schema();
     const auto num_returns = schema.returns().size();

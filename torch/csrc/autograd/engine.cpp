@@ -1,21 +1,15 @@
 #include <torch/csrc/autograd/engine.h>
 
 #include <torch/csrc/autograd/anomaly_mode.h>
-#include <torch/csrc/autograd/autograd.h>
-#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/basic_ops.h>
 #include <torch/csrc/autograd/grad_mode.h>
 #include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/dynamo/compiled_autograd.h>
 
 #include <ATen/Context.h>
 #include <ATen/DeviceAccelerator.h>
 #include <ATen/DeviceGuard.h>
-#include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/detail/PrivateUse1HooksInterface.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -29,6 +23,7 @@
 #include <c10/core/StreamGuard.h>
 #include <c10/util/AbortHandler.h>
 #include <c10/util/Exception.h>
+#include <c10/util/ScopeExit.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/irange.h>
 #include <c10/util/thread_name.h>
@@ -113,6 +108,9 @@ static thread_local bool checkpoint_valid = true;
 
 // Number of nested reentrant backwards calls currently on this thread
 static thread_local int current_depth = 0;
+
+// Whether the current node call has exposed an input gradient buffer.
+static thread_local bool input_grad_buffer_exposed = false;
 
 // For all device threads (i.e. CUDA, XLA), total_depth represents the total
 // nested
@@ -415,6 +413,61 @@ const std::unordered_set<Node*>* get_current_graph_task_nodes_in_graph() {
 
 int get_current_graph_task_id() {
   return current_graph_task ? current_graph_task->id_ : -1;
+}
+
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+variable_list get_current_input_grad_buffers(Node* node) {
+  auto graph_task = current_graph_task;
+  TORCH_CHECK(
+      graph_task,
+      "input_grad_buffers can only be accessed while autograd is executing "
+      "backward()");
+  auto current_node = get_current_node();
+  TORCH_CHECK(
+      current_node && current_node.get() == node,
+      "input_grad_buffers can only be accessed from the currently executing "
+      "autograd.Function backward()");
+  // Final callbacks run while the GraphTask mutex is held. During reentrant
+  // backward, current_node can still refer to the suspended outer node, so
+  // reject post-processing before acquiring that mutex below.
+  TORCH_CHECK(
+      !graph_task->future_completed_.load(),
+      "input_grad_buffers cannot be accessed during backward post-processing");
+  TORCH_CHECK(
+      !graph_task->thread_locals_.get_grad_mode(),
+      "input_grad_buffers does not support create_graph=True");
+  TORCH_CHECK(
+      !AnomalyMode::is_enabled(),
+      "input_grad_buffers does not support anomaly detection");
+  TORCH_CHECK(
+      !at::globalContext().overrideStaleCaptureStream(),
+      "input_grad_buffers does not support "
+      "set_override_stale_capture_stream(True)");
+
+  const auto opt_producer_stream = node->stream();
+
+  variable_list result(node->next_edges().size());
+  std::lock_guard<std::mutex> lock(graph_task->mutex_);
+  for (const auto i : c10::irange(node->next_edges().size())) {
+    const auto& next = node->next_edge(i);
+    if (!next.is_valid()) {
+      continue;
+    }
+    auto input_buffer_it = graph_task->not_ready_.find(next.function.get());
+    if (input_buffer_it == graph_task->not_ready_.end()) {
+      continue;
+    }
+
+    auto& input_buffer = input_buffer_it->second;
+    const auto opt_consumer_stream =
+        input_buffer.opt_overridden_consumer_stream.has_value()
+        ? input_buffer.opt_overridden_consumer_stream
+        : next.function->stream();
+    result[i] = input_buffer.get_for_direct_accumulation(
+        next.input_nr, opt_producer_stream, opt_consumer_stream);
+    input_grad_buffer_exposed |= result[i].defined();
+  }
+  return result;
 }
 
 bool get_current_graph_task_keep_graph() {
@@ -1062,6 +1115,12 @@ static variable_list call_function(
     std::shared_ptr<GraphTask>& graph_task,
     Node* func,
     InputBuffer& inputBuffer) {
+  const bool previous_input_grad_buffer_exposed =
+      std::exchange(input_grad_buffer_exposed, false);
+  auto restore_input_grad_buffer_exposure =
+      c10::make_scope_exit([previous_input_grad_buffer_exposed]() {
+        input_grad_buffer_exposed = previous_input_grad_buffer_exposed;
+      });
   CheckpointValidGuard cpvguard(graph_task);
   auto& fn = *func;
   auto inputs =
@@ -1305,6 +1364,20 @@ auto Engine::compute_dependencies(
   // Computes the number of dependencies for each function which requires grad
   std::vector<Node*> queue{root};
   bool will_use_accelerator = false;
+  // Log (once per process each) backward passes by the devices they span, to
+  // assess reliance on multithreaded autograd before changing its default.
+  // The two cases are independent and may both fire for the same pass: one
+  // for a second distinct non-CPU device (multi-device), one for a non-CPU
+  // device alongside CPU nodes (GPU + CPU).
+  static std::atomic<bool> multidevice_logged{false};
+  static std::atomic<bool> gpu_cpu_logged{false};
+  // Skip the per-node device inspection entirely once both cases have already
+  // been logged for this process; the logs fire at most once anyway.
+  const bool inspect_devices =
+      !multidevice_logged.load(std::memory_order_relaxed) ||
+      !gpu_cpu_logged.load(std::memory_order_relaxed);
+  std::optional<at::Device> first_noncpu_device;
+  bool saw_cpu = false;
 
   // Queue contains all nodes that will start propagating gradients.
   // We no longer have to expand functions that don't require grad.
@@ -1317,6 +1390,22 @@ auto Engine::compute_dependencies(
     }
     if (!will_use_accelerator) {
       will_use_accelerator = fn->stream().has_value();
+    }
+    if (inspect_devices) {
+      auto device = fn->device();
+      if (should_run_in_cpu_ready_queue(device.type())) {
+        saw_cpu = true;
+      } else if (!first_noncpu_device.has_value()) {
+        first_noncpu_device = device;
+      } else if (
+          first_noncpu_device.value() != device &&
+          !multidevice_logged.exchange(true, std::memory_order_relaxed)) {
+        C10_LOG_API_USAGE_ONCE("torch.autograd.multidevice_backward");
+      }
+      if (saw_cpu && first_noncpu_device.has_value() &&
+          !gpu_cpu_logged.exchange(true, std::memory_order_relaxed)) {
+        C10_LOG_API_USAGE_ONCE("torch.autograd.gpu_cpu_backward");
+      }
     }
     for (const auto& edge : fn->next_edges()) {
       if (auto next_ptr = edge.function.get()) {
@@ -1343,6 +1432,10 @@ auto Engine::execute(
     bool create_graph,
     bool accumulate_grad,
     const edge_list& outputs) -> variable_list {
+  TORCH_CHECK(
+      !input_grad_buffer_exposed,
+      "Calling backward or grad reentrantly after accessing a non-None "
+      "ctx.input_grad_buffers entry is not supported");
   validate_outputs(
       root_edges,
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)

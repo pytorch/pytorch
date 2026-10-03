@@ -20,7 +20,7 @@ from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch._C._autograd import _make_saved_tensor, SavedTensor
-from typing import NoReturn
+from typing import NoReturn, overload, ParamSpec, TypeVar
 
 __all__ = [
     "checkpoint",
@@ -43,6 +43,9 @@ __all__ = [
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
+
+_T = TypeVar("_T")
+_P = ParamSpec("_P")
 
 _checkpoint_debug_enabled: bool | None = None
 
@@ -376,6 +379,35 @@ def _make_checkpoint_wrapper(function, **checkpoint_kwargs):
     return _CheckpointedFunction(function, **checkpoint_kwargs)
 
 
+@overload
+def checkpoint(
+    function: Callable[..., _T],
+    *args: Any,
+    use_reentrant: bool | None = None,
+    preserve_rng_state: bool = True,
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
+    determinism_check: str = _DEFAULT_DETERMINISM_MODE,
+    debug: bool = False,
+    early_stop: bool = True,
+    respect_saved_tensors_hooks: bool | None = None,
+    **kwargs: Any,
+) -> _T: ...
+
+
+@overload
+def checkpoint(
+    function: None = None,
+    *,
+    use_reentrant: bool | None = None,
+    preserve_rng_state: bool = True,
+    context_fn: Callable[[], Tuple[ContextManager, ContextManager]] = noop_context_fn,
+    determinism_check: str = _DEFAULT_DETERMINISM_MODE,
+    debug: bool = False,
+    early_stop: bool = True,
+    respect_saved_tensors_hooks: bool | None = None,
+) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]: ...
+
+
 # Note: [torch.compile and checkpoint]
 # TorchDynamo does not step inside utils.checkpoint function.  The flow
 # looks likes this
@@ -426,8 +458,8 @@ def checkpoint(
 
     .. warning::
 
-        The ``use_reentrant`` parameter should be passed explicitly. In version
-        2.9 we will raise an exception if ``use_reentrant`` is not passed.
+        The ``use_reentrant`` parameter should be passed explicitly. In a future
+        release, we will raise an exception if ``use_reentrant`` is not passed.
         If you are using the ``use_reentrant=True`` variant, please refer to the
         note below for important considerations and potential limitations.
 
@@ -491,7 +523,7 @@ def checkpoint(
         use_reentrant(bool):
             specify whether to use the activation checkpoint variant that
             requires reentrant autograd. This parameter should be passed
-            explicitly. In version 2.9 we will raise an exception if
+            explicitly. In a future release, we will raise an exception if
             ``use_reentrant`` is not passed. If ``use_reentrant=False``,
             ``checkpoint`` will use an implementation that does not require
             reentrant autograd. This allows ``checkpoint`` to support additional
@@ -603,7 +635,7 @@ def _checkpoint_impl(
     if use_reentrant is None:
         warnings.warn(
             "torch.utils.checkpoint: the use_reentrant parameter should be "
-            "passed explicitly. Starting in PyTorch 2.9, calling checkpoint "
+            "passed explicitly. In a future release, calling checkpoint "
             "without use_reentrant will raise an exception. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
@@ -676,8 +708,8 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
     be saved for re-running the segment in the backward pass.
 
     .. warning::
-        The ``use_reentrant`` parameter should be passed explicitly. In version
-        2.9 we will raise an exception if ``use_reentrant`` is not passed.
+        The ``use_reentrant`` parameter should be passed explicitly. In a future
+        release, we will raise an exception if ``use_reentrant`` is not passed.
         If you are using the ``use_reentrant=True` variant, please see
         :func:`~torch.utils.checkpoint.checkpoint` for
         the important considerations and limitations of this variant. It is
@@ -718,7 +750,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
         warnings.warn(
             "torch.utils.checkpoint.checkpoint_sequential: the use_reentrant "
             "parameter should be passed explicitly. "
-            "In version 2.9 we will raise an exception if use_reentrant "
+            "In a future release, we will raise an exception if use_reentrant "
             "is not passed. use_reentrant=False is "
             "recommended, but if you need to preserve the current default "
             "behavior, you can pass use_reentrant=True. Refer to docs for more "
@@ -1469,6 +1501,13 @@ class CheckpointPolicy(enum.Enum):
         NOT equivalent to not using checkpointing. Using such a policy would
         save additional tensors not limited to ones that are actually needed for
         gradient computation.
+
+        For example, eager selective checkpointing overrides
+        ``PREFER_RECOMPUTE`` to save the outputs of non-aliasing operators with an
+        ordered effect. An operator may be explicitly registered with an ordered
+        effect through ``torch.library`` or inferred to have one from
+        non-whitelisted TorchBind arguments. This override does not apply to
+        ``MUST_RECOMPUTE`` or operators in the ``c10d`` namespace.
     """
     MUST_SAVE = 0
     PREFER_SAVE = 1
@@ -1478,9 +1517,28 @@ class CheckpointPolicy(enum.Enum):
     PREFER_CPU_OFFLOAD = 5
 
 
+# Policies for which eager SAC actually caches the output. CPU offload policies
+# currently fall through to recomputation, so they are deliberately absent.
+_SAVE_POLICIES = (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE)
+
+
 def _policy_from_bool(b):
     # For backward compatibility
     return CheckpointPolicy.MUST_SAVE if b else CheckpointPolicy.PREFER_RECOMPUTE
+
+
+def _is_cacheable_effect(op) -> bool:
+    """Return whether SAC can cache an effectful op instead of replaying it.
+
+    Raw c10d launches mutate their inputs and return an asynchronous Work handle,
+    so their return value is not a valid cache boundary. They remain unsupported
+    in recomputed eager SAC regions, where they may be launched again during
+    backward. Use functional collectives instead; the AOT partitioner preserves
+    those separately.
+    """
+    from torch._higher_order_ops.effects import has_effects
+
+    return has_effects(op) and op.namespace != "c10d"
 
 
 SAC_IGNORED_OPS = {
@@ -1557,6 +1615,15 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                                 func, *args, **kwargs)
         if isinstance(policy, bool):
             policy = _policy_from_bool(policy)
+        # An ordered effect cannot be replayed safely. MUST_RECOMPUTE is the
+        # sole explicit request to replay; CPU-offload policies are save
+        # policies even though eager SAC does not yet implement their offload.
+        if (
+            policy not in _SAVE_POLICIES
+            and policy is not CheckpointPolicy.MUST_RECOMPUTE
+            and _is_cacheable_effect(func)
+        ):
+            policy = CheckpointPolicy.MUST_SAVE
 
         if is_compiling:
             if proxy_mode is not None:
@@ -1565,7 +1632,7 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
                 for node in itertools.islice(reversed(graph.nodes), num_new):
                     node.meta["recompute"] = policy
 
-        if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
+        if policy in _SAVE_POLICIES or is_compiling:
             # SAC caches these tensors outside the autograd graph, bypassing
             # SavedVariable, so simulate pack/unpack with the user's
             # saved-tensors hooks (if any): hooks like save_on_cpu must see
@@ -1673,6 +1740,29 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
 
     Use this with `torch.utils.checkpoint.checkpoint` to control which
     operations are recomputed during the backward pass.
+
+    .. note::
+
+        This API expresses selective activation checkpointing policies at the
+        level of individual ATen operators. If you would rather define
+        save/recompute decisions over regions of source code, we recommend
+        trying the separate
+        `torch_remat <https://github.com/meta-pytorch/remat>`_ package. Its
+        region-based API lets you:
+
+        * assign different policies to different uses of the same operator;
+        * apply policies to arbitrary multi-operation code, including custom
+          :class:`torch.autograd.Function` implementations, without wrapping
+          the region in a custom operator;
+        * in eager mode, retain only tensors needed for backward or subsequent
+          recomputation instead of caching every output of a selected
+          operator; and
+        * avoid the eager-mode ``TorchDispatchMode`` overhead of per-operator
+          policies.
+
+        ``torch_remat`` also provides eager-mode tracing and memory diagnostics
+        for named regions, while its core save/recompute policy works with
+        :func:`torch.compile`.
 
     Args:
         policy_fn_or_list (Callable or List):
@@ -1893,6 +1983,7 @@ def _checkpoint_without_reentrant_generator_impl(
     )
     error_on_nested_fx_trace = torch._dynamo.config.error_on_nested_fx_trace
     is_non_strict_tracing = torch.compiler._is_non_strict_tracing()
+    is_fx_tracing = torch.fx._symbolic_trace._get_is_fx_tracing()
 
     def recompute_fn(*args) -> None:
         # This will be called later during recomputation. This wrapping enables
@@ -1924,6 +2015,7 @@ def _checkpoint_without_reentrant_generator_impl(
                 recompute_context,
                 device_ctx,
                 nested_fx_trace_ctx,
+                torch.fx._symbolic_trace._is_fx_tracing_context(is_fx_tracing),
             ):  # type: ignore[attr-defined]
                 fn(*args, **kwargs)
 

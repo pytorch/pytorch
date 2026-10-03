@@ -1,10 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/Config.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/cuda/CUDAEvent.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/native/RNN.h>
 #include <c10/util/Exception.h>
@@ -517,6 +515,9 @@ struct RNNDescriptors {
       Tensor hx,
       Tensor cx) {
     rnn_desc = fn.rnn.descriptor(handle, fn.dropout.descriptor(handle));
+    TORCH_INTERNAL_ASSERT(
+        x.is_contiguous() && y.is_contiguous(),
+        "rnn: RNN descriptors assume packed x/y");
     x_descs = fn.tensors.descriptors(x);
     y_descs = fn.tensors.descriptors(y);
     hx_desc.set(hx, 5);
@@ -1819,7 +1820,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
 
   auto x = input.contiguous();
   auto dy = grad_output.contiguous();
-  auto y = output;
+  auto y = output.contiguous();
   auto w = weight_buf;
   auto dx = at::empty(
       input.sizes(), input.options()); // TODO: more compact way of saying this
@@ -2062,7 +2063,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   TORCH_CHECK(!cx.defined() || cx.is_contiguous(), "rnn: cx is not contiguous");
 
   auto x = input.contiguous();
-  const auto& y = output;
+  auto y = output.contiguous();
   auto dw = at::zeros(weight_buf.sizes(), weight_buf.options());
 
   cudnnRNNAlgo_t algo = get_algo(fn.rnn, fn.tensors, input, false);
@@ -2598,11 +2599,6 @@ std::pair<Tensor, hidden_type> _cudnn_impl(
       num_layers,
       bidirectional);
 
-  TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
-  TORCH_CHECK(
-      _batch_sizes.device().is_cpu(),
-      "batch_sizes tensor should be on CPU, but got ",
-      _batch_sizes.device());
   IntArrayRef batch_sizes{
       _batch_sizes.data_ptr<int64_t>(),
       static_cast<size_t>(_batch_sizes.size(0))};

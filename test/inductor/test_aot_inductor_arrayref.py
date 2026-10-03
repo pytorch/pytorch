@@ -1,13 +1,20 @@
 # Owner(s): ["module: inductor"]
+import os
 import sys
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_cpp_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import IS_CI, IS_FBCODE, IS_WINDOWS
+from torch.testing._internal.common_utils import IS_CI, IS_FBCODE, IS_WINDOWS, xfailIf
+
+
+# TORCHINDUCTOR_LITE_MODE=1 (the inductor_aoti_fallback CI config) falls back to
+# ATen for every op; see LITE_MODE_TEST_FAILURES below.
+LITE_MODE = os.environ.get("TORCHINDUCTOR_LITE_MODE") == "1"
 
 
 if IS_WINDOWS and IS_CI:
@@ -27,7 +34,12 @@ try:
             check_model_with_multiple_inputs,
             code_check_count,
         )
-        from .test_torchinductor import copy_tests, TestFailure
+        from .test_torchinductor import (
+            copy_tests,
+            define_custom_op_for_test,
+            target_assert_alignment_regex,
+            TestFailure,
+        )
     except ImportError:
         from test_aot_inductor import (  # @manual
             AOTInductorTestsTemplate,
@@ -38,6 +50,8 @@ try:
         )
         from test_torchinductor import (  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
             copy_tests,
+            define_custom_op_for_test,
+            target_assert_alignment_regex,
             TestFailure,
         )
 except (unittest.SkipTest, ImportError):
@@ -208,6 +222,12 @@ CPU_TEST_FAILURES = {
     "test_duplicate_constant_folding": fail_stack_allocation(is_skip=True),
     "test_aot_inductor_consts_cpp_build": fail_stack_allocation(is_skip=True),
     "test_stride_with_unbacked_expr": fail_minimal_arrayref_interface(is_skip=True),
+    # TODO: error: no member named 'get' in 'ArrayRefTensor<T>' -- a TensorList
+    # fallback renders its elements as `<elem>.get()`, which graph inputs do not
+    # provide under the minimal arrayref interface.
+    "test_aoti_profiler_tensor_list_input_shapes": fail_minimal_arrayref_interface(
+        is_skip=True
+    ),
     # TODO: use of deleted function RAIIAtenTensorHandle
     "test_dup_unbacked_sym_decl": fail_minimal_arrayref_interface(is_skip=True),
     # TODO: use of deleted function RAIIAtenTensorHandle
@@ -303,6 +323,8 @@ CPU_TEST_FAILURES = {
     "test_cond_unbacked_symint_closure_dynamic_False": fail_stack_allocation(
         is_skip=True
     ),
+    # TODO: no match for operator= between RAIIAtenTensorHandle and ArrayRefTensor
+    "test_cond_unbacked_symint_predicate": fail_stack_allocation(),
     "test_empty_cat_dtype_promotion": fail_stack_allocation(is_skip=True),
     "test_pad_fallback": fail_stack_allocation(is_skip=True),
     "test_simple_embed_kernel_binary_False_max_autotune_True": fail_stack_allocation(
@@ -314,6 +336,60 @@ CPU_TEST_FAILURES = {
     # When running test_seq with test_issue_140766, the process segfaults
     "test_seq": fail_stack_allocation(is_skip=True),
 }
+
+# Additional failures under lite mode, tracked in
+# https://github.com/pytorch/pytorch/issues/199205
+LITE_MODE_TEST_FAILURES = {
+    # Unsupported return type SymIntType for aten.sym_numel
+    "test_size_with_unbacked_add_expr": fail_stack_allocation(),
+    # SerializeError: Empty list with type number nyi
+    "test_buffer_mutation_and_force_mmap_weights": fail_stack_allocation(),
+    "test_conv_freezing": fail_stack_allocation(),
+    "test_deconv_freezing": fail_stack_allocation(),
+    "test_freezing": fail_stack_allocation(),
+    "test_linear_freezing": fail_stack_allocation(),
+    # Mismatch between tensors consumed and num of input tensor
+    "test_const_graph_no_autotune_at_compile_time": fail_stack_allocation(),
+    "test_constant_folding": fail_stack_allocation(),
+    # The fbcode proxy executor hits a CHECK here that aborts the process
+    "test_constant_folding_with_update": fail_stack_allocation(is_skip=True),
+    # segfault
+    "test_update_inactive_constant_buffer_with_interleaved_folded_constants": fail_stack_allocation(
+        is_skip=True
+    ),
+    # Runtime assert is not emitted
+    "test_aoti_runtime_asserts_backed_symint": fail_stack_allocation(),
+    # Profiler and debug printer instrumentation is not emitted for fallbacks
+    "test_aoti_debug_printer_codegen": fail_stack_allocation(),
+    "test_aoti_debug_printer_cpp_kernel": fail_stack_allocation(),
+    "test_aoti_profiler_enable_kernel_profile_True_enable_kernel_context_guard_False": fail_stack_allocation(),
+    "test_aoti_profiler_enable_kernel_profile_True_enable_kernel_context_guard_True": fail_stack_allocation(),
+    "test_aoti_profiler_input_shapes": fail_stack_allocation(),
+    "test_aoti_profiler_multi_output_fallback_input_shapes": fail_stack_allocation(),
+    "test_aoti_profiler_tensor_list_input_shapes": fail_stack_allocation(),
+    "test_kernel_profile_every_kernel_has_context": fail_stack_allocation(),
+    "test_kernel_profile_index_put_fallback": fail_stack_allocation(),
+    "test_kernel_profile_scatter_fallback": fail_stack_allocation(),
+    "test_kernel_profile_scatter_fallback_arg_order": fail_stack_allocation(),
+    "test_kernel_profile_template_kernel": fail_stack_allocation(),
+    # C++ compile error
+    "test_quanatized_int8_linear": fail_stack_allocation(),
+    # Wrong results
+    "test_return_view_constant": fail_stack_allocation(),
+    # Expects split/cat merge passes, which lite mode disables
+    "test_simple_split": fail_stack_allocation(),
+}
+
+if LITE_MODE:
+    # These pass in lite mode
+    for name in (
+        "test_cond_unbacked_symint_predicate",
+        "test_while_loop_with_mixed_device_dynamic_False",
+        "test_while_loop_with_mixed_device_dynamic_True",
+        "test_while_loop_with_pytree_inputs",
+    ):
+        del CPU_TEST_FAILURES[name]
+    CPU_TEST_FAILURES.update(LITE_MODE_TEST_FAILURES)
 
 
 class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
@@ -366,6 +442,53 @@ if IS_FBCODE:
 
 
 class TestCppWrapperCpuSelection(TestCase):
+    # https://github.com/pytorch/pytorch/issues/199205
+    @xfailIf(LITE_MODE)
+    @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
+    def test_fallback_alignment_assert_with_stack_allocation(self):
+        def slice2d(x):
+            return (3 * x)[..., 1:-15]
+
+        def slice2d_meta(x):
+            return torch.empty_like(x)[..., 0:-16]
+
+        op_name = "arrayref_slice2d_incorrect_meta_assert"
+        define_custom_op_for_test(op_name, slice2d, slice2d_meta)
+        op = getattr(torch.ops.test, op_name)
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.cos(op(torch.nn.functional.relu(x)))
+
+        sample = (torch.randn(8, 24),)
+        inductor_configs = {
+            "aot_inductor.allow_stack_allocation": True,
+            "aot_inductor.use_minimal_arrayref_interface": False,
+            "alignment_asserts": True,
+            "fx_graph_cache": False,
+            "implicit_fallbacks": True,
+        }
+        package_path, code = run_and_get_cpp_code(
+            AOTIRunnerUtil.compile,
+            Model(),
+            sample,
+            inductor_configs=inductor_configs,
+        )
+        FileCheck().check_regex(
+            target_assert_alignment_regex(
+                cpp_wrapper=True,
+                op_name=f"torch.ops.test.{op_name}.default",
+            )
+        ).run(code)
+
+        aoti_module = torch._inductor.aoti_load_package(package_path)
+        expected_error = (
+            "Expect the tensor to be 16 bytes aligned. "
+            "Fail due to storage_offset=1 itemsize=4"
+        )
+        with self.assertRaisesRegex(RuntimeError, expected_error):
+            aoti_module(*sample)
+
     def test_cpu_cpp_wrapper_follows_current_stack_allocation_config(self):
         # Regression test: the CPU cpp wrapper class (CppWrapperCpu vs
         # CppWrapperCpuArrayRef) must track the current allow_stack_allocation

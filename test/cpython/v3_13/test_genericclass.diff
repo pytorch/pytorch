@@ -1,0 +1,58 @@
+diff --git a/test/cpython/v3_13/test_genericclass.py b/test/cpython/v3_13/test_genericclass.py
+index e530b463966819adf2e0702fb669169eff88c111..2a7a773f5c46f135fb5f75c68217a63571101dbc 100644
+--- a/test/cpython/v3_13/test_genericclass.py
++++ b/test/cpython/v3_13/test_genericclass.py
+@@ -1,9 +1,27 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_genericclass.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++# ======= END DYNAMO PATCH =======
++
+ import unittest
+ from test import support
+ from test.support.import_helper import import_module
+ 
+ 
+-class TestMROEntry(unittest.TestCase):
++class TestMROEntry(CPythonTestCase):
+     def test_mro_entry_signature(self):
+         tested = []
+         class B: ...
+@@ -148,7 +166,7 @@ class TestMROEntry(unittest.TestCase):
+             type('Bad', (c,), {})
+ 
+ 
+-class TestClassGetitem(unittest.TestCase):
++class TestClassGetitem(CPythonTestCase):
+     def test_class_getitem(self):
+         getitem_args = []
+         class C:
+@@ -275,7 +293,8 @@ class TestClassGetitem(unittest.TestCase):
+ 
+ 
+ @support.cpython_only
+-class CAPITest(unittest.TestCase):
++@unittest.skip("imports _testcapi")
++class CAPITest(CPythonTestCase):
+ 
+     def test_c_class(self):
+         _testcapi = import_module("_testcapi")
+@@ -294,4 +313,4 @@ class CAPITest(unittest.TestCase):
+ 
+ 
+ if __name__ == "__main__":
+-    unittest.main()
++    run_tests()

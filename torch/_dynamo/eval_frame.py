@@ -488,6 +488,22 @@ class OptimizedModule(torch.nn.Module):
         "_super_module_initialized",
     }
 
+    @staticmethod
+    def _forward_has_skip_rule(mod: torch.nn.Module) -> bool:
+        return isinstance(mod.forward, types.MethodType) and trace_rules.check(
+            mod.forward
+        )
+
+    @staticmethod
+    def _should_wrap_module_call_impl(fn: Any) -> bool:
+        if getattr(fn, "__name__", "") != "_call_impl":
+            return False
+
+        mod = getattr(fn, "__self__", None)
+        if not isinstance(mod, torch.nn.Module):
+            return False
+        return OptimizedModule._forward_has_skip_rule(mod)
+
     def __init__(self, mod: torch.nn.Module, dynamo_ctx: _TorchDynamoContext) -> None:
         # NOTE: this must go first, because attribute reads/writes of `self`
         # uses `_orig_mod`, and sometimes users override `Module.__init__` to
@@ -519,10 +535,7 @@ class OptimizedModule(torch.nn.Module):
         if isinstance(self.dynamo_ctx, DisableContext):
             # No need to check trace rules
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
-        elif config.wrap_top_frame or (
-            isinstance(self._orig_mod.forward, types.MethodType)
-            and (trace_rules.check(self._orig_mod.forward))
-        ):
+        elif config.wrap_top_frame or self._forward_has_skip_rule(self._orig_mod):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
             # frame we can capture
@@ -531,7 +544,7 @@ class OptimizedModule(torch.nn.Module):
             # Invoke hooks outside of dynamo then pickup the inner frame
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
 
-        if inspect.getattr_static(self._orig_mod, "_initialize_hook", None) is not None:
+        if _static_getattr(self._orig_mod, "_initialize_hook") is not None:
             self._forward = self.forward
             self.forward = self._call_lazy_check
 
@@ -658,9 +671,8 @@ class OptimizedModule(torch.nn.Module):
 
     def _call_lazy_check(self, *args: Any, **kwargs: Any) -> Any:
         if (
-            inspect.getattr_static(self._orig_mod, "_initialize_hook", None) is not None
-            and inspect.getattr_static(self._orig_mod, "_infer_parameters", None)
-            is not None
+            _static_getattr(self._orig_mod, "_initialize_hook") is not None
+            and _static_getattr(self._orig_mod, "_infer_parameters") is not None
             and callable(self._orig_mod._infer_parameters)
         ):
             # In the case of a lazy module, we want to run
@@ -963,6 +975,24 @@ class _TorchDynamoContext:
         return None
 
     def __call__(self, fn: Any) -> Any:
+        if isinstance(fn, staticmethod):
+            return staticmethod(self(fn.__func__))
+
+        if inspect.isclass(fn):
+            # User has wrapped the class with a compile decorator. Apply to
+            # __call__. Must run before the caching_precompile block below,
+            # which would otherwise access fn.__code__ on the class and raise
+            # AttributeError at decoration time.
+            cls_obj = fn
+            call = cls_obj.__call__
+            if config.caching_precompile and not hasattr(call, "__code__"):
+                call = external_utils.wrap_inline(call)
+            cls_obj.__call__ = self(call)
+            if issubclass(cls_obj, torch.nn.Module):
+                # NN module variable tracker directly inlines the _call_impl.
+                cls_obj._call_impl = self(cls_obj._call_impl)
+            return cls_obj
+
         # public api for compiler config/options
         def get_compiler_config() -> CompilerConfig | None:
             return self.compiler_config
@@ -1049,23 +1079,13 @@ class _TorchDynamoContext:
             # when compiling torch.nn.Module,
             # provide public api OptimizedModule.get_compiler_config()
             # check mod, not new_mod: OptimizedModule.__getattr__ delegates to mod
-            if inspect.getattr_static(mod, "get_compiler_config", None) is not None:
+            if _static_getattr(mod, "get_compiler_config") is not None:
                 raise AssertionError(
                     "new_mod already has a get_compiler_config attribute"
                 )
             new_mod.get_compiler_config = get_compiler_config
 
             return new_mod
-
-        if inspect.isclass(fn):
-            # User has wrapped the class with compile/disable decorator. Apply
-            # disable to init/call method.
-            cls_obj = fn
-            cls_obj.__call__ = self(cls_obj.__call__)
-            if issubclass(cls_obj, torch.nn.Module):
-                # NN module variable tracker directly inlines the _call_impl.
-                cls_obj._call_impl = self(cls_obj._call_impl)
-            return cls_obj
 
         if not callable(fn):
             raise AssertionError(
@@ -1090,6 +1110,7 @@ class _TorchDynamoContext:
             filename = inspect.getsourcefile(fn)
         except TypeError:
             filename = None
+        should_wrap_module_call_impl = OptimizedModule._should_wrap_module_call_impl(fn)
         if config.debug_force_nested_calls and filename not in DONT_WRAP_FILES:
             fn = external_utils.wrap_inline(fn)
             # Create a new code object for `fn` so that functions have different
@@ -1109,6 +1130,7 @@ class _TorchDynamoContext:
             and (
                 getattr(fn, "__name__", "")
                 not in ["_call_impl", "_wrapped_call_impl", "_lazy_forward"]
+                or should_wrap_module_call_impl
             )
             and filename not in DONT_WRAP_FILES
         ):
@@ -1257,7 +1279,7 @@ class _TorchDynamoContext:
                     except ShortenTraceback as e:
                         # Failures in the backend likely don't have useful
                         # data in the TorchDynamo frames, so we strip them out.
-                        raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+                        raise e.remove_dynamo_frames() from None
                     finally:
                         # Restore the dynamic layer stack depth if necessary.
                         set_eval_frame(None)
@@ -1594,6 +1616,16 @@ def _optimize_catch_errors(
     )
 
 
+def _maybe_fire_backend_init(backend: Callable[..., Any]) -> None:
+    # _TorchCompileWrapper and AotAutograd forward the attribute to the
+    # backend they wrap via a @property.
+    backend_init = getattr(backend, "_dynamo_backend_init", None)
+    if backend_init is not None:
+        # Fires on every resolution, before any invocation; backends that
+        # need one-time setup deduplicate themselves (e.g. functools.cache).
+        backend_init()
+
+
 def get_compiler_fn(
     compiler_fn: str | Callable[..., Any] | None,
 ) -> WrapBackendDebug:
@@ -1613,6 +1645,7 @@ def get_compiler_fn(
     else:
         compiler_str = None
     compiler_fn = lookup_backend(compiler_fn)  # type: ignore[arg-type]
+    _maybe_fire_backend_init(compiler_fn)
     return wrap_backend_debug(compiler_fn, compiler_str)
 
 
@@ -1713,8 +1746,8 @@ def argument_names(
 
 
 def check_if_dynamo_supported() -> None:
-    if sys.version_info >= (3, 15):
-        raise RuntimeError("Python 3.15+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 16):
+        raise RuntimeError("Python 3.16+ not yet supported for torch.compile")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
@@ -1798,7 +1831,10 @@ def _optimize(
             graph faster.
             One can also provide additional context for the backend, like
             torch.jit.fuser("fuser2"), by setting the backend_ctx_ctor attribute.
-            See AOTAutogradMemoryEfficientFusionWithContext for the usage.
+            Backends can also define a ``_dynamo_backend_init`` no-arg callable
+            for eager initialization; it fires every time the backend is
+            resolved, before any invocation. See the "Eager Backend
+            Initialization" section of torch.compiler_custom_backends.md.
             - Or, a string backend name in `torch._dynamo.list_backends()`
         nopython: If True, graph breaks will be errors and there will
             be a single whole-program graph.

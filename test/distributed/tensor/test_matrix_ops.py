@@ -39,7 +39,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocm,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -1014,7 +1013,6 @@ class DistMatrixOpsTest(DTensorTestBase):
             dist_result_full = dist_result.full_tensor()
             self.assertEqual(local_result, dist_result_full)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @unittest.skipIf(not SM90OrLater, "Grouped gemm supported on SM90")
     @with_comms
     @skip_unless_torch_gpu
@@ -1036,9 +1034,10 @@ class DistMatrixOpsTest(DTensorTestBase):
             },
             {
                 # Case that would have invalid strides on inp * mat1 when sharded
+                # Keep the local BF16 row stride unaligned on 2- and 4-rank meshes
                 "inp_shape": (64, 16),
-                "w1_shape": (2, 16, 16),
-                "w2_shape": (2, 16, 16),
+                "w1_shape": (2, 16, 8),
+                "w2_shape": (2, 8, 16),
                 "inp_placements": [Replicate()],
                 "w1_placements": [Shard(2)],
                 "w2_placements": [Shard(1)],

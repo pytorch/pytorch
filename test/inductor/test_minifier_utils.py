@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 import torch
 from torch._dynamo.debug_utils import NNModuleToString
@@ -8,12 +9,56 @@ from torch._dynamo.repro.aoti import (
     AOTIMinifierError,
     export_for_aoti_minifier,
     get_module_string,
+    repro_minify,
 )
+from torch._functorch.fx_minifier import MinifierSanityCheckFailed
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 class MinifierUtilsTests(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
+    def test_repro_minify_preserves_sanity_failure(self):
+        mod = torch.fx.symbolic_trace(torch.nn.Identity())
+        inputs = [torch.randn(2)]
+        options = SimpleNamespace(
+            accuracy=True,
+            check_str=None,
+            max_granularity=None,
+            minifier_export_mode="python",
+            offload_to_disk=False,
+            save_dir=None,
+            skip_export_error=True,
+            skip_sanity=False,
+            skip_saving_eager_intermediates=False,
+        )
+
+        with (
+            patch(
+                "torch._dynamo.repro.aoti.repro_common",
+                return_value=(mod, inputs, {}),
+            ),
+            patch(
+                "torch._inductor.compile_fx._aoti_flatten_inputs",
+                return_value=(inputs, {}),
+            ),
+            patch(
+                "functorch.compile.minifier",
+                side_effect=MinifierSanityCheckFailed(
+                    "Input graph did not fail the tester"
+                ),
+            ),
+            self.assertRaisesRegex(
+                MinifierSanityCheckFailed, "Input graph did not fail the tester"
+            ),
+        ):
+            repro_minify(options, MagicMock(), None)
+
     def test_invalid_output_user_error_classification(self):
         class SimpleModel(torch.nn.Module):
             def forward(self, x):
