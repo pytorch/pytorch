@@ -3962,6 +3962,7 @@ class SubgraphTracer(fx.Tracer):
         self.dynamic_scalar_nodes: dict[int, torch.SymInt] = {}
 
         self.prev_inst = None
+        self.stack_trace_cache: dict[tuple[tuple[object, ...], ...], str] = {}
         # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
         # during this tracer's tracing. This is currently only used by experimental AC out-of-tree
         # via torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer.
@@ -4254,9 +4255,36 @@ class SubgraphTracer(fx.Tracer):
             # Reverse the frame_summaries, such that the innermost frame is at the last
             filtered_frame_summaries.reverse()
 
-            # official from_list stub doesn't have new-style type
-            msgs = traceback.StackSummary.from_list(filtered_frame_summaries).format()
-            rv.node.stack_trace = "".join(msgs)
+            frame_keys = []
+            for frame in filtered_frame_summaries:
+                # Keep the raw source used by traceback, including indentation
+                # and all lines of a multi-line instruction.
+                source_lines = getattr(frame, "_original_lines", None)
+                if source_lines is None:
+                    source_lines = getattr(frame, "_original_line", None)
+                    if source_lines is None:
+                        source_lines = frame.line
+                frame_keys.append(
+                    (
+                        frame.filename,
+                        frame.lineno,
+                        frame.name,
+                        getattr(frame, "end_lineno", None),
+                        getattr(frame, "colno", None),
+                        getattr(frame, "end_colno", None),
+                        source_lines,
+                    )
+                )
+            cache_key = tuple(frame_keys)
+            stack_trace = self.stack_trace_cache.get(cache_key)
+            if stack_trace is None:
+                # official from_list stub doesn't have new-style type
+                msgs = traceback.StackSummary.from_list(
+                    filtered_frame_summaries
+                ).format()
+                stack_trace = "".join(msgs)
+                self.stack_trace_cache[cache_key] = stack_trace
+            rv.node.stack_trace = stack_trace
 
         if (
             torch._dynamo.config.use_graph_deduplication
