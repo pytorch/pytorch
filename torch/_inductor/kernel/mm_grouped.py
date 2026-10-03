@@ -280,8 +280,8 @@ def has_rocm_fp8_hardware_support() -> bool:
     if not torch.version.hip:
         return False
 
-    # Keep this in sync with torch.testing._internal.common_cuda.PLATFORM_SUPPORTS_FP8;
-    # this is the production-side equivalent used to gate Triton FP8 lowering.
+    # Gates Triton FP8 lowering. When changing it, compare with the ROCm arch list in
+    # at::native::scaled::scaled_mm_arch_allowed (aten/src/ATen/native/cuda/ScaledBlasDeviceUtils.cpp).
     arch = _rocm_gcn_arch()
     rocm_version_str = getattr(torch.version, "rocm", None) or torch.version.hip
     rocm_version = tuple(int(v) for v in rocm_version_str.split(".")[:2])
