@@ -1042,6 +1042,22 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(bool(original_plain), bool(compiled_plain))
         self.assertTrue(bool(compiled_plain))
 
+    def test_compiled_module_custom_bool(self):
+        class FalsyModule(nn.Module):
+            def forward(self, x):
+                return x
+
+            def __bool__(self):
+                return False
+
+            def __len__(self):
+                return 1
+
+        original = FalsyModule()
+        compiled = torch.compile(original, backend="eager")
+        self.assertEqual(bool(original), bool(compiled))
+        self.assertFalse(bool(compiled))
+
     def guard_manager_clone_hook_fn(self, guard_manager_wrapper, f_locals, builder):
         root = guard_manager_wrapper.root
         cloned_root = root.clone_manager(lambda x: True)
