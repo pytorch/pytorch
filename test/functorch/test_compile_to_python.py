@@ -260,7 +260,8 @@ class TestAOTCompileToPython(TestCase):
         # "example_value" read in _graph_has_dynamic_shapes: a dynamic=True Dynamo backend
         # graph keeps its fakes under that key only, so a "val"-only probe read it as static
         # and the artifact specialized to the example sizes (assert_size_stride failed at
-        # every other size). The graph's flat inputs are its SymInt size placeholders, then x.
+        # every other size). The graph's flat inputs keep the placeholder and example-input
+        # orders aligned, but canonicalization may place x before its SymInt sizes.
         recorded = []
 
         def record(gm, example_inputs):
@@ -268,9 +269,10 @@ class TestAOTCompileToPython(TestCase):
             return gm.forward
 
         m = _Pointwise().eval()
-        torch.compile(m, backend=record, dynamic=True)(torch.randn(8, 4))
+        x = torch.randn(8, 4)
+        torch.compile(m, backend=record, dynamic=True)(x)
         ((gm, example_inputs),) = recorded
-        self.assertEqual(
+        self.assertCountEqual(
             [type(v) for v in example_inputs],
             [torch.SymInt, torch.SymInt, torch.Tensor],
         )
@@ -279,8 +281,13 @@ class TestAOTCompileToPython(TestCase):
         fn = _exec(src)
         for n in (8, 16, 5):
             xi = torch.randn(n, 4)
+            new_sizes = dict(zip(x.shape, xi.shape))
+            runtime_inputs = [
+                xi if isinstance(v, torch.Tensor) else new_sizes[int(v)]
+                for v in example_inputs
+            ]
             with torch.no_grad():
-                self.assertEqual(fn([n, 4, xi])[0], m(xi))
+                self.assertEqual(fn(runtime_inputs)[0], m(xi))
 
     def test_multi_output_runs_like_eager(self):
         # Exercises the output epilogue's multi-output count/ordering: the composed module

@@ -5073,9 +5073,9 @@ event={kernel_event} node=add stack_trace=a = s + self.c"""
             str(gm.graph).strip(),
             """\
 graph():
+    %l_x_ : torch.Tensor [num_users=1] = placeholder[target=L_x_]
     %s77 : torch.SymInt [num_users=2] = placeholder[target=s77]
     %s27 : torch.SymInt [num_users=0] = placeholder[target=s27]
-    %l_x_ : torch.Tensor [num_users=1] = placeholder[target=L_x_]
     %add : [num_users=1] = call_function[target=operator.add](args = (%l_x_, 1), kwargs = {})
     %add_1 : [num_users=2] = call_function[target=operator.add](args = (-1, %s77), kwargs = {})
     %mul : [num_users=1] = call_function[target=operator.mul](args = (3, %s77), kwargs = {})

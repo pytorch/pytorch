@@ -359,8 +359,8 @@ class TestOutVariant(TestCase):
             backend.fw_graphs[0].code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops._TestOutVariant.add.out, x = arg0_1, y = arg1_1, _out_size = (3, 4), _out_stride = (4, 1), _out_dtype = torch.float32, _out_device = device(type='cpu'), _all_bases = []);  arg0_1 = arg1_1 = None
-    copy_ = torch.ops.aten.copy_.default(arg2_1, auto_functionalized_v2);  arg2_1 = copy_ = None
+    auto_functionalized_v2 = torch.ops.higher_order.auto_functionalized_v2(torch.ops._TestOutVariant.add.out, x = arg1_1, y = arg2_1, _out_size = (3, 4), _out_stride = (4, 1), _out_dtype = torch.float32, _out_device = device(type='cpu'), _all_bases = []);  arg1_1 = arg2_1 = None
+    copy_ = torch.ops.aten.copy_.default(arg0_1, auto_functionalized_v2);  arg0_1 = copy_ = None
     return (auto_functionalized_v2,)""",
         )
 
