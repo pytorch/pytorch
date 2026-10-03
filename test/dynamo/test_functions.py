@@ -7548,6 +7548,16 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_sys_getdefaultencoding(self):
+        def fn():
+            try:
+                sys.getdefaultencoding(42)
+            except TypeError:
+                return sys.getdefaultencoding()
+            return "no TypeError"
+
+        self.assertEqual(fn(), torch.compile(fn, backend="eager", fullgraph=True)())
+
     def test_keyword(self):
         def fn(x, word):
             if keyword.iskeyword(word):
