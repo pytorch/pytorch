@@ -2530,30 +2530,38 @@ def _write_ninja_file_and_compile_objects(
         # This is like mkdir -p, i.e. will also create parent directories.
         os.makedirs(build_directory, exist_ok=True)
 
-    _write_ninja_file(
-        path=build_file_path,
-        cflags=cflags,
-        post_cflags=post_cflags,
-        cuda_cflags=cuda_cflags,
-        cuda_post_cflags=cuda_post_cflags,
-        cuda_dlink_post_cflags=cuda_dlink_post_cflags,
-        sycl_cflags=sycl_cflags,
-        sycl_post_cflags=sycl_post_cflags,
-        sycl_dlink_post_cflags=sycl_dlink_post_cflags,
-        sources=sources,
-        objects=objects,
-        ldflags=None,
-        library_target=None,
-        with_cuda=with_cuda,
-        with_sycl=with_sycl)
-    if verbose:
-        logger.info('Compiling objects...')
-    _run_ninja_build(
-        build_directory,
-        verbose,
-        # It would be better if we could tell users the name of the extension
-        # that failed to build but there isn't a good way to get it here.
-        error_prefix='Error compiling objects for extension')
+    # `build_ext -j` compiles extensions in threads that all share one
+    # build_temp, so without this two of them write build.ninja and run ninja in
+    # the same directory at once: the second build file replaces the first, and
+    # both processes append to one .ninja_deps, which ninja then reports as
+    # `premature end of file; recovering` and rebuilds from scratch. Ninja is
+    # meant to own its directory, so take the same lock `_jit_compile` takes and
+    # let one extension finish before the next one starts.
+    with FileLock(os.path.join(build_directory, 'lock')):
+        _write_ninja_file(
+            path=build_file_path,
+            cflags=cflags,
+            post_cflags=post_cflags,
+            cuda_cflags=cuda_cflags,
+            cuda_post_cflags=cuda_post_cflags,
+            cuda_dlink_post_cflags=cuda_dlink_post_cflags,
+            sycl_cflags=sycl_cflags,
+            sycl_post_cflags=sycl_post_cflags,
+            sycl_dlink_post_cflags=sycl_dlink_post_cflags,
+            sources=sources,
+            objects=objects,
+            ldflags=None,
+            library_target=None,
+            with_cuda=with_cuda,
+            with_sycl=with_sycl)
+        if verbose:
+            logger.info('Compiling objects...')
+        _run_ninja_build(
+            build_directory,
+            verbose,
+            # It would be better if we could tell users the name of the extension
+            # that failed to build but there isn't a good way to get it here.
+            error_prefix='Error compiling objects for extension')
 
 
 def _write_ninja_file_and_build_library(
