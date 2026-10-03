@@ -7579,6 +7579,35 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dir_function_sees_pending_attrs(self):
+        def helper():
+            pass
+
+        class C:
+            def method(self):
+                pass
+
+        obj = C()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            helper.pending_attr = 1
+            C.method.pending_attr = 2
+            return (
+                "pending_attr" in dir(helper),
+                "pending_attr" in dir(obj.method),
+                "__code__" in dir(obj.method),
+                "__func__" in dir(obj.method),
+                x + 1,
+            )
+
+        on_function, on_method, method_has_code, method_has_func, out = fn(torch.tensor(2))
+        self.assertTrue(on_function)
+        self.assertTrue(on_method)
+        self.assertFalse(method_has_code)
+        self.assertTrue(method_has_func)
+        self.assertEqual(out, torch.tensor(3))
+
     def test_functional_compile(self):
         def get_torch_functional_functions():
             s = set()

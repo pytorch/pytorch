@@ -2509,6 +2509,25 @@ class BuiltinVariable(BaseBuiltinVariable):
             return VariableTracker.build(tx, dir(arg.value))
         if isinstance(arg, BuiltinVariable):
             return VariableTracker.build(tx, dir(arg.fn))
+        if isinstance(arg, (variables.UserFunctionVariable, variables.UserMethodVariable)):
+            # Mirror CPython object.__dir__: copy the object's __dict__, then
+            # merge attributes reachable from its actual class hierarchy.
+            # For a bound method, __dict__ is forwarded to __func__ by
+            # method_getattro, but its class is still MethodType; seeding from
+            # dir(the underlying function) would incorrectly expose
+            # function-only names such as __code__.
+            obj_type = (
+                types.MethodType
+                if isinstance(arg, variables.UserMethodVariable)
+                else types.FunctionType
+            )
+            names = set(dir(obj_type))
+            for key in arg.get_dict_vt(tx).unpack_var_sequence(tx):
+                if key.is_python_constant():
+                    name = key.as_python_constant()
+                    if isinstance(name, str):
+                        names.add(name)
+            return VariableTracker.build(tx, sorted(names))
         # Enable specialized VTs for constants to work with dir()
         if arg.is_python_constant():
             return VariableTracker.build(tx, dir(arg.as_python_constant()))
