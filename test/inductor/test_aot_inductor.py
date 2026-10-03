@@ -3055,6 +3055,20 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_cond_nested_lite_mode(self):
+        # With all ops falling back, the nested subgraphs keep tensor constants,
+        # which the model constructor looks up on the root graph.
+        inputs = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+        )
+        with config.patch(torch._inductor.lite_mode_options):
+            self.check_model_with_multiple_inputs(
+                CondModels.Nested(),
+                prepend_predicates(inputs, num_predicates=3),
+            )
+
     def test_cond_with_parameters(self):
         inputs = (torch.randn((10, 20), device=self.device),)
         dim0_abc = Dim("s0", min=2, max=1024)
