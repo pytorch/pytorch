@@ -482,6 +482,33 @@ test_python_smoke_b200() {
   # Targeted smoke tests for B200 including FlashAttention CuTe coverage
   install_flash_attn_cute
   install_cutlass_operators
+  (
+    if [[ "$BUILD_ENVIRONMENT" == *cuda13.4* ]]; then
+      pip install 'cuda-bindings>=13.4,<14'
+      if [[ "$(python -c 'from torch.cuda.green_contexts import _get_driver_version; print(_get_driver_version())')" -lt 13040 ]]; then
+        local compat_dir compat_package compat_sha256
+        compat_dir=$(mktemp -d)
+        trap 'rm -rf "$compat_dir"' EXIT
+        compat_package=cuda-compat-13-4_615.71.09-2ubuntu1_amd64.deb
+        compat_sha256=1b814aa705b4dfe955420c967bd545f39ef7b67f32bd0f285a005ea296b02831
+        curl -fL --retry 3 "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/$compat_package" -o "$compat_dir/$compat_package"
+        echo "$compat_sha256  $compat_dir/$compat_package" | sha256sum --check
+        dpkg-deb --extract "$compat_dir/$compat_package" "$compat_dir"
+        export LD_LIBRARY_PATH="$compat_dir/usr/local/cuda-13.4/compat${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+      fi
+      python - <<'PY'
+import torch
+from torch.cuda import green_contexts
+
+torch.cuda.init()
+print(f"CUDA driver API version: {green_contexts._get_driver_version()}")
+green_contexts._ensure_locality_supported()
+if not green_contexts.is_localization_supported():
+    raise RuntimeError("B200 CUDA 13.4 smoke tests require locality-domain support")
+PY
+    fi
+    time python test/run_test.py --include test_cuda -k "greencontext or LocalizedAllocator" $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  )
   time python test/run_test.py \
     --include \
       test_matmul_cuda \
