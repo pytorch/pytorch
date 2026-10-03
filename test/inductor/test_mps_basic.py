@@ -62,6 +62,13 @@ class MPSBasicTests(TestCase):
     def test_log(self):
         self.common(lambda x: x.log(), (torch.rand(1024),))
 
+    def test_prims_nextafter(self):
+        x = torch.tensor([0.0, 1.0], device=self.device)
+        y = torch.tensor([1.0, 2.0], device=self.device)
+        expected = torch.ops.prims.nextafter.default(x, y)
+        actual = torch.compile(torch.ops.prims.nextafter.default, fullgraph=True)(x, y)
+        self.assertEqual(actual, expected)
+
     def test_acos(self):
         self.common(lambda x: x.acos(), (torch.rand(1024),))
 
@@ -232,6 +239,13 @@ class MPSBasicTests(TestCase):
                 b,
             ),
         )
+
+    def test_argmax_bf16(self):
+        def fn(x):
+            return x.argmax(-1)
+
+        x = torch.randn(1, 65536, dtype=torch.bfloat16)
+        self.common(fn, (x,), check_lowp=False)
 
     @parametrize("shape", [(4, 5000), (3, 1023), (7, 1025), (5, 32), (1, 30000)])
     def test_welford_reduction_dynamic_shape(self, shape):

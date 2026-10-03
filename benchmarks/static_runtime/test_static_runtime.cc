@@ -2339,6 +2339,10 @@ TEST(StaticRuntime, QuantizedLinear) {
 }
 
 TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  // See https://github.com/pytorch/pytorch/issues/178522.
+  GTEST_SKIP() << "Skipping QuantizedLinearDynamicFp16 on AArch64.";
+#endif
   const std::string quantized_linear_dynamic_fp16_script = R"IR(
     graph(%input: Tensor, %weights: Tensor):
         %bias: None = prim::Constant()
@@ -2360,6 +2364,10 @@ TEST(StaticRuntime, QuantizedLinearDynamicFp16) {
 }
 
 TEST(StaticRuntime, QuantizedLinearReluDynamicFp16) {
+#if defined(__aarch64__) || defined(_M_ARM64)
+  // See https://github.com/pytorch/pytorch/issues/178522.
+  GTEST_SKIP() << "Skipping QuantizedLinearReluDynamicFp16 on AArch64.";
+#endif
   const std::string quantized_linear_relu_dynamic_fp16_script = R"IR(
     graph(%input: Tensor, %weights: Tensor):
         %bias: None = prim::Constant()
@@ -3084,6 +3092,10 @@ namespace {
 
 void maybe_throw(bool should_throw) {
   if (should_throw) {
+    // The ModelCrash* tests below assert EXPECT_THROW(..., std::runtime_error)
+    // on what escapes the runtime. c10::Error derives from std::exception, not
+    // std::runtime_error, so TORCH_CHECK here would stop matching.
+    // @allow-raw-throw: tests below match on std::runtime_error
     throw std::runtime_error("test exception");
   }
 }
