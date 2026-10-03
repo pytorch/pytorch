@@ -231,7 +231,12 @@ from .ctx_manager import (
     PreserveVersionContextVariable,
     RecordFunctionVariable,
 )
-from .dicts import ConstDictVariable, MappingProxyVariable, OrderedDictVariable
+from .dicts import (
+    ConstDictVariable,
+    DictKeysVariable,
+    MappingProxyVariable,
+    OrderedDictVariable,
+)
 from .distributed import WorldMetaClassVariable
 from .functions import (
     BoundBuiltinMethodVariable,
@@ -307,7 +312,6 @@ from .optimizer import OptimizerVariable
 from .script_object import CustomClassObjectVariable, CustomClassVariable
 from .sdpa import SDPAParamsVariable
 from .sets import (
-    DictKeySetVariable,
     FrozensetVariable,
     OrderedSetClassVariable,
     OrderedSetVariable,
@@ -2352,17 +2356,17 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, dict_keys):
             if all(ConstantVariable.is_literal(k) for k in value):
-                # If the dict_keys object is passed from outside the compile region, it must either be passed along with
-                # the corresponding dict object or treated as a set (when only the keys are passed into the compiled region).
-                # - If it is passed along with the dict, the dict object itself is already guarded.
-                # - If only the dict_keys object is passed, we add EQUALS_MATCH and SEQUENCE_LENGTH guards
-                #   to ensure it remains unchanged across multiple runs.
-                items = [SourcelessBuilder.create(self.tx, v) for v in value]
-                install_guard(
-                    self.get_source().make_guard(GuardBuilder.SEQUENCE_LENGTH),
-                    self.get_source().make_guard(GuardBuilder.EQUALS_MATCH),
-                )
-                return DictKeySetVariable(items, source=self.source)
+                # Model the view over its owning dict, reached through the view's
+                # .mapping proxy, so mutations of the dict are visible through it.
+                mapping_vt = VariableBuilder(
+                    self.tx, AttrSource(self.source, "mapping")
+                )(value.mapping)
+                if not (
+                    isinstance(mapping_vt, MappingProxyVariable)
+                    and isinstance(mapping_vt.dv_dict, ConstDictVariable)
+                ):
+                    raise AssertionError(f"Expected a dict proxy, got {mapping_vt}")
+                return DictKeysVariable(mapping_vt.dv_dict, source=self.source)
             else:
                 unimplemented(
                     gb_type="non-const keys in dict_keys",

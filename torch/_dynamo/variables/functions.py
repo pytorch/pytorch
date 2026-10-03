@@ -5270,6 +5270,10 @@ class GetSetDescriptorVariable(DescriptorVariable):
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.source:
             install_guard(self.source.make_guard(GuardBuilder.ID_MATCH))
+            # descr_repr reads __objclass__.__name__, which a heap type can rename.
+            objclass_source = AttrSource(self.source, "__objclass__")
+            name_source = AttrSource(objclass_source, "__name__")
+            install_guard(name_source.make_guard(GuardBuilder.EQUALS_MATCH))
         return ConstantVariable.create(repr(self.as_python_constant()))
 
     def tp_richcompare_impl(

@@ -19,6 +19,7 @@ in sets.py.
 
 import collections
 import functools
+import gc
 import sys
 import types
 import weakref
@@ -1114,12 +1115,34 @@ class MappingProxyVariable(VariableTracker):
     def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.dv_dict.mp_length_impl(tx)
 
+    def _check_class_attr_mutation(self, tx: "InstructionTranslatorBase") -> None:
+        # The wrapped mapping is built from the real object, so it does not see
+        # class attribute writes made earlier in the trace until they replay.
+        side_effects = tx.output.side_effects
+        for vt in side_effects.store_attr_mutations:
+            if not isinstance(vt, variables.UserDefinedClassVariable):
+                continue
+            if not side_effects.has_pending_mutation(vt):
+                continue
+            # type's own __dict__ getter, so a metaclass __dict__ is bypassed.
+            class_dict = type.__dict__["__dict__"].__get__(vt.value)
+            mapping = gc.get_referents(class_dict)[0]
+            if mapping in side_effects and side_effects[mapping] is self.dv_dict:
+                unimplemented(
+                    gb_type="mapping proxy of class with pending attribute mutation",
+                    context=f"class: {vt.value}",
+                    explanation="The class __dict__ does not reflect class attributes set earlier in the traced code.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_class_attr_mutation(tx)
         return VariableTracker.build(
             tx, f"mappingproxy({tracked_repr(tx, self.dv_dict)})"
         )
 
     def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_class_attr_mutation(tx)
         return generic_str(tx, self.dv_dict)
 
     def tp_richcompare_impl(
@@ -1344,6 +1367,22 @@ class DictKeysVariable(DictViewVariable):
         # rather than dispatching on dv_dict's type.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5998-L6005
         return ConstDictVariable.sq_contains_impl(self.dv_dict, tx, item)
+
+    def isdisjoint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create(
+            tx, polyfills.dictview_isdisjoint
+        ).call_function(tx, [self, *args], kwargs)
+
+    tp_methods = {
+        "isdisjoint": Method(isdisjoint),
+    }
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str

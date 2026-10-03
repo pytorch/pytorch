@@ -2148,6 +2148,7 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, MappingProxyMappingSource):
             if not base_guard_manager:  # to make mypy happy
                 raise AssertionError("base_guard_manager must not be None")
+            # TODO: migrate this to a C++ accessor that reads the proxy's mapping.
             out = base_guard_manager.lambda_manager(
                 python_lambda=_mapping_proxy_mapping,
                 source=source_name,
