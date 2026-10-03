@@ -1268,6 +1268,10 @@ class graph:
         For effective memory sharing, if you pass a ``pool`` used by a previous capture and the previous capture
         used an explicit ``stream`` argument, you should pass the same ``stream`` argument to this capture.
 
+    .. note::
+        Python's automatic garbage collection is paused during capture, because finalizers it runs may make
+        CUDA calls that capture does not permit. Explicit :func:`gc.collect` calls still run.
+
     .. warning::
         This API is in beta and may change in future releases.
 
@@ -1308,6 +1312,7 @@ class graph:
         self.capture_error_mode = capture_error_mode
         self._enable_annotations = enable_annotations
         self.check_input_liveness = check_input_liveness
+        self._gc_was_enabled = False
 
     def __enter__(self) -> None:
         # Free as much memory as we can for the graph
@@ -1413,14 +1418,23 @@ class graph:
         # https://stackoverflow.com/questions/26635684/calling-enter-and-exit-manually#39172487
         self.stream_ctx.__enter__()
 
-        self.cuda_graph.capture_begin(
-            # type: ignore[misc]
-            *self.pool,
-            # pyrefly: ignore [bad-keyword-argument]
-            capture_error_mode=self.capture_error_mode,
-            # pyrefly: ignore [bad-keyword-argument]
-            check_input_liveness=self.check_input_liveness,
-        )
+        # A collection during capture can run finalizers whose CUDA calls capture
+        # forbids, such as Triton unloading a dead kernel's module, which invalidates
+        # the capture.
+        self._gc_was_enabled = gc.isenabled()
+        gc.disable()
+        try:
+            self.cuda_graph.capture_begin(
+                # type: ignore[misc]
+                *self.pool,
+                # pyrefly: ignore [bad-keyword-argument]
+                capture_error_mode=self.capture_error_mode,
+                # pyrefly: ignore [bad-keyword-argument]
+                check_input_liveness=self.check_input_liveness,
+            )
+        except BaseException:
+            self._resume_gc()
+            raise
         # The capture stream is now capturing into the top-level graph, and this is the only
         # point where its id is readable (the cudaGraph_t itself does not exist until
         # capture_end). One read serves everything downstream: mark_kernels telling a
@@ -1453,6 +1467,7 @@ class graph:
                 # Already unusable; the original error is the one worth reporting.
                 pass
             self.stream_ctx.__exit__(None, None, None)
+            self._resume_gc()
             raise
 
     def __exit__(self, *args: object) -> None:
@@ -1494,7 +1509,12 @@ class graph:
             # call above (it must not stay armed past this context either way).
             _graph_node_callbacks.disarm()
             _set_annotations_enabled(False)
+            self._resume_gc()
         # returning None should propagate exceptions from either capture_end or stream_ctx.__exit__()
+
+    def _resume_gc(self) -> None:
+        if self._gc_was_enabled:
+            gc.enable()
 
 
 _ModuleOrCallable: TypeAlias = Union["torch.nn.Module", Callable[..., object]]
