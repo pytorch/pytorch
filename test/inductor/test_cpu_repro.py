@@ -7785,6 +7785,40 @@ class CPUReproTests(TestCase):
                 # inf or finite numbers, it shouldn't degrade into unexpected NaNs).
                 self.assertEqual(eager_out, compiled_out)
 
+    @parametrize("device", ("cpu", "cuda"))
+    @config.patch(realize_cpu_max_expanded_ops=8)
+    def test_cpu_expansion_budget(self, device):
+        from torch._inductor.ir import Pointwise
+        from torch._inductor.virtualized import ops
+
+        visits = 0
+
+        def inner_fn(index):
+            nonlocal visits
+            for _ in range(16):
+                visits += 1
+                value = ops.load("first", index[0])
+            return ops.add(value, ops.load("last", index[0]))
+
+        pointwise = Pointwise(
+            device=torch.device(device),
+            dtype=torch.float32,
+            inner_fn=inner_fn,
+            ranges=[16],
+        )
+        self.assertEqual(pointwise.has_large_inner_fn(), device == "cpu")
+        if device == "cpu":
+            self.assertLess(visits, 16)
+        else:
+            self.assertEqual(visits, 16)
+
+        # Repeated loads count toward the budget even though CSE merges them.
+        opcount = pointwise.inner_fn_opcount()
+        self.assertEqual(opcount.num_ops, 3)
+        self.assertEqual(opcount.read_buffers, ["first", "last"])
+        with config.patch(realize_cpu_max_expanded_ops=None):
+            self.assertFalse(pointwise.has_large_inner_fn())
+
     def test_cpu_realization_thresholds(self):
         from torch._inductor.ir import Pointwise, StorageBox
         from torch._inductor.virtualized import ops

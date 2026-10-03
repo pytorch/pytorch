@@ -974,6 +974,10 @@ realize_opusers_threshold = 5
 # materializing moderate CPU expressions can add expensive full-buffer traffic.
 realize_cpu_opcount_threshold = 50
 
+# Bound CPU pointwise expansion before CSE, independently of the store/recompute
+# heuristic. None disables this limit.
+realize_cpu_max_expanded_ops: int | None = 1000
+
 # Threshold to prevent excessive accumulation of ops in one buffer during lowering
 _realize_acc_reads_threshold_default = 8
 realize_acc_reads_threshold: int | None = None

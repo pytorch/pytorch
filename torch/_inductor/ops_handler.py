@@ -1114,19 +1114,33 @@ class OpCountResult(NamedTuple):
     nontrivial_read_count: int
 
 
-class OpCounterCSE(DefaultHandler):
-    """Shim to count how many ops are used"""
+class OpCountLimitExceeded(Exception):
+    """The operation count exceeded its pre-CSE traversal budget."""
 
-    def __init__(self, inner: OpsHandler[Any]):
+
+class OpCounterCSE(DefaultHandler):
+    """Count distinct operations, optionally limiting pre-CSE traversal work."""
+
+    def __init__(self, inner: OpsHandler[Any], *, max_ops: int | None = None):
         super().__init__()
         self.parent_handler = inner
         self.op_count = 0
+        self.expanded_op_count = 0
+        self._max_ops = max_ops
         self.var_names: dict[str, str] = {}
         self._used_ops: OrderedSet[str] = OrderedSet()
         self._read_names: list[str] = []
         self._nontrivial_read_count = 0
 
+    def _count_op(self) -> None:
+        if self._max_ops is None:
+            return
+        self.expanded_op_count += 1
+        if self.expanded_op_count > self._max_ops:
+            raise OpCountLimitExceeded
+
     def _default(self, name: str, args: tuple[Any, ...], kwargs: dict[str, Any]) -> Any:
+        self._count_op()
         self._used_ops.add(name)
         return pytree.tree_map(
             self._update_count, getattr(self.parent_handler, name)(*args, **kwargs)
@@ -1141,10 +1155,12 @@ class OpCounterCSE(DefaultHandler):
         return varname
 
     def indirect_indexing(self, *args, **kwargs):
+        self._count_op()
         self._used_ops.add("indirect_indexing")
         return self.parent_handler.indirect_indexing(*args, **kwargs)
 
     def load(self, name: str, index: sympy.Expr) -> str:
+        self._count_op()
         val = self.parent_handler.load(name, index)
         if val not in self.var_names:
             self._used_ops.add("load")
@@ -1154,6 +1170,7 @@ class OpCounterCSE(DefaultHandler):
         return self._update_count(val)
 
     def load_seed(self, name: str, offset: T):
+        self._count_op()
         val = self.parent_handler.load_seed(name, offset)
         if val not in self.var_names:
             self._used_ops.add("load_seed")
@@ -1173,6 +1190,7 @@ class OpCounterCSE(DefaultHandler):
         """
         See [Note: Inductor bucketize op]
         """
+        self._count_op()
         val = self.parent_handler.bucketize(
             values,
             boundaries,
