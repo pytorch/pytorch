@@ -2350,6 +2350,18 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             cells = []
 
             for cell_var in self.closure.items:  # type: ignore[attr-defined]
+                # A class body can close over a name that is only bound after
+                # the class is created, e.g. a method referring to the class
+                # itself. Hand the real function an empty cell that stays
+                # linked to cell_var.
+                if (
+                    allow_sourced_cells
+                    and cell_var.linked_cell is None
+                    and cell_var._current_contents(tx) is None
+                ):
+                    cells.append(tx.output.side_effects.track_cell_alias(cell_var))
+                    continue
+
                 # Get the cell contents from side_effects or pre_existing_contents
                 # load_cell will replay the side-effects
                 cell_contents = tx.output.side_effects.load_cell(cell_var)

@@ -18237,6 +18237,76 @@ fn
             compiled_fn(t)
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_unbound_name(self):
+        # The methods close over names that are only bound after the class
+        # is created: the class itself and `count`.
+        def fn(t):
+            class C:
+                def same(self):
+                    return isinstance(self, C)
+
+                def bump(self):
+                    nonlocal count
+                    count += 1
+
+            count = 0
+            obj = C()
+            obj.bump()
+            obj.bump()
+            return t + count, obj.same(), C.__name__
+
+        t = torch.tensor(0.0)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled_fn(t), fn(t))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_unbound_name_escapes(self):
+        def fn(t):
+            class C:
+                def get(self):
+                    return C, value
+
+            value = 1
+            return t + 1, C
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        _, cls = compiled_fn(torch.tensor(0.0))
+        # Called outside the compiled region, so the real cells must be set.
+        self.assertEqual(cls().get(), (cls, 1))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_closure_unbound_name_graph_break(self):
+        def fn(t):
+            class C:
+                def get(self):
+                    return C.__name__, value
+
+            value = 1
+            torch._dynamo.graph_break()
+            value = 2
+            return t + 1, C().get()
+
+        t = torch.tensor(0.0)
+        compiled_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(compiled_fn(t), fn(t))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_build_class_body_unbound_name(self):
+        def fn(t):
+            try:
+
+                class C:
+                    C  # noqa: F821
+
+            except NameError:
+                return t + 1
+            return t
+
+        t = torch.tensor(0.0)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled_fn(t), fn(t))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test_return___build_class__(self):
         @torch.compile(fullgraph=True, backend="eager")
         def fn(t):

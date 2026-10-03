@@ -2526,7 +2526,11 @@ class OutputGraph(OutputGraphCommon):
                 freevars = tuple(sorted(cur_tx.cell_and_freevars()))
                 for cell in freevars:
                     if cur_tx is self.root_tx:  # root frame
-                        cg.append_output(cg.create_load_closure(cell))
+                        linked = cur_tx._cellvar(cell).linked_cell  # type: ignore[attr-defined]
+                        if linked is not None:
+                            cg(linked)
+                        else:
+                            cg.append_output(cg.create_load_closure(cell))
                     else:  # nested frame
                         if not cur_tx.post_prune_cell_and_freevars:
                             raise AssertionError(
