@@ -524,9 +524,10 @@ def require_runtimes() -> None:
         raise RuntimeError(
             f"native-AOT stage 2: this {backend} build has AOT toolchains whose "
             f"runtimes are not installed ({detail}). Install the distributions "
-            f"that provide them -- {', '.join(dists)} -- as "
-            f"install_cutlass_dsl in .ci/pytorch/common_utils.sh does (it holds "
-            f"the pinned versions), or set TORCH_NATIVE_AOT=0 to build without "
+            f"that provide them -- {', '.join(dists)} -- using "
+            f"install_cutlass_dsl in .ci/pytorch/common_utils.sh and "
+            f"scripts/install_triton_wheel.sh for the pinned versions, or set "
+            f"TORCH_NATIVE_AOT=0 to build without "
             f"embedded DSL kernels."
         )
 
