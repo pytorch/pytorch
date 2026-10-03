@@ -26,6 +26,7 @@
 #include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
+#include <torch/custom_class.h>
 #include <torch/script.h>
 #include <torch/torch.h>
 
@@ -63,6 +64,7 @@ void ensureTestDataGenerated() {
     }
 
     std::string bindir = STRINGIZE(CMAKE_CURRENT_BINARY_DIR);
+    std::filesystem::create_directories(bindir);
 
     // Calculate path to source directory: build/test_aoti_inference -> build ->
     // pytorch
@@ -1675,6 +1677,11 @@ void test_aoti_record_function(const std::string& device) {
 } // namespace
 
 namespace torch::aot_inductor {
+
+TEST(AotInductorCustomClassTest, Registered) {
+  EXPECT_NE(
+      torch::getCustomClass("__torch__.torch.classes.aoti.MyAOTIClass"), nullptr);
+}
 
 // Test fixture that ensures test data is generated once for all tests
 class AotInductorTest : public ::testing::Test {
