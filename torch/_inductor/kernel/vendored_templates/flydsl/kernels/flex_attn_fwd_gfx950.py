@@ -10,6 +10,7 @@ from flydsl.expr.typing import Vector as Vec
 from .flex_attn_utils import (
     fast_exp2,
     is_causal_document_mask_program,
+    is_sliding_window_mask_program,
     make_global_view,
     make_mask_buffers,
     make_mask_evaluator,
@@ -256,6 +257,11 @@ def build_flex_attn_fwd_module(
         mask_program_output,
         mask_buffer_strides,
     )
+    flat_work_mask = is_sliding_window_mask_program(
+        mask_program,
+        mask_program_output,
+        mask_buffer_strides,
+    )
 
     if pipelined_kv:
 
@@ -343,7 +349,12 @@ def build_flex_attn_fwd_module(
             )
         )
         batch = fx.block_idx.z
-        q_chunk = fx.block_idx.y
+        if const_expr(decode or flat_work_mask):
+            q_chunk = fx.block_idx.y
+        else:
+            # Causal-style masks give query block i about i+1 KV blocks of work, so an
+            # ascending map dispatches the longest CTAs last and leaves a ragged tail.
+            q_chunk = fx.Int32(num_query_chunks - 1) - fx.block_idx.y
         q_base = q_chunk * fx.Int32(query_tile_rows)
         if const_expr(decode):
             kv_head = fx.block_idx.x

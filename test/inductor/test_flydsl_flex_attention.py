@@ -1066,6 +1066,54 @@ class TestFlyDSLFlexAttention(TestCase):
             )
             lower.assert_called_once()
 
+    def test_gfx950_public_api_sliding_window_mask_lowering(self, device):
+        self._require_runtime()
+
+        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils import (
+            is_sliding_window_mask_program,
+        )
+
+        def check_match(mask_mod, expected):
+            matched = []
+
+            def check_window_lowering(*args, **kwargs):
+                program, reason = lower_flydsl_mask_graph(*args, **kwargs)
+                self.assertIsNotNone(program, reason)
+                matched.append(
+                    is_sliding_window_mask_program(
+                        program.instructions, program.output, program.buffer_strides
+                    )
+                )
+                return program, reason
+
+            torch._dynamo.reset()
+            with (
+                torch._inductor.config.patch({"fx_graph_cache": False}),
+                mock.patch(
+                    "torch._inductor.kernel.flex.flex_flydsl_attention.lower_flydsl_mask_graph",
+                    side_effect=check_window_lowering,
+                ) as lower,
+            ):
+                self._compare_created_mask(
+                    mask_mod, device=device, seed=3, return_aux=True
+                )
+                lower.assert_called_once()
+            self.assertEqual(matched, [expected])
+
+        # The two spellings lower to different programs, so both need covering:
+        # and_masks() seeds a const_bool True that the bare lambda never emits.
+        check_match(lambda b, h, q, kv: (q >= kv) & (q - kv < 96), True)
+        check_match(
+            and_masks(
+                lambda b, h, q, kv: q >= kv,
+                lambda b, h, q, kv: q - kv < 96,
+            ),
+            True,
+        )
+        # Unbounded causal must not match: it is the ragged-tail case the reversed
+        # query-block dispatch exists for, and matching here would silently disable it.
+        check_match(lambda b, h, q, kv: q >= kv, False)
+
     def test_gfx950_auto_keeps_flydsl_opt_in(self, device):
         self._require_runtime()
 

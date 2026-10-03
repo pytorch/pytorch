@@ -12,6 +12,36 @@ _CAUSAL_DOCUMENT_MASK_PROGRAM = (
     ("ge", 3, 8),
     ("and", 6, 9),
 )
+# A sliding-window mask reaches the lowering in two shapes: and_masks() seeds a
+# const_bool True and folds each term into it, while a plain (q >= kv) & (q - kv < W)
+# lambda lowers without that prefix. Entries are (program, width_slot, output); the
+# window width is a program constant, so that slot is wildcarded rather than compared.
+_SLIDING_WINDOW_MASK_PROGRAMS = (
+    (
+        (
+            ("const_bool", True),
+            ("ge", 2, 3),
+            ("and", 4, 5),
+            ("sub", 2, 3),
+            ("const_i32", None),
+            ("lt", 7, 8),
+            ("and", 6, 9),
+        ),
+        4,
+        10,
+    ),
+    (
+        (
+            ("ge", 2, 3),
+            ("sub", 2, 3),
+            ("const_i32", None),
+            ("lt", 5, 6),
+            ("and", 4, 7),
+        ),
+        2,
+        8,
+    ),
+)
 _SCHED_GROUP_MASKS = {
     "vmem_read": 0x020,
     "transcendental": 0x400,
@@ -65,6 +95,37 @@ def is_causal_document_mask_program(
         and len(mask_buffer_strides) == 2
         and all(len(strides) == 1 for strides in mask_buffer_strides)
     )
+
+
+def is_sliding_window_mask_program(
+    mask_program,
+    mask_program_output,
+    mask_buffer_strides,
+):
+    """Recognize a causal mask bounded by a fixed lookback window.
+
+    Such a mask gives every query block the same amount of work, so the query-block
+    dispatch reversal that helps triangular masks only costs locality here.
+    """
+    if mask_buffer_strides:
+        return False
+    program = tuple(mask_program)
+    output = int(mask_program_output)
+    for pattern, width_slot, pattern_output in _SLIDING_WINDOW_MASK_PROGRAMS:
+        if len(program) != len(pattern) or output != pattern_output:
+            continue
+        width = program[width_slot]
+        if len(width) != 2 or width[0] != "const_i32":
+            continue
+        if not isinstance(width[1], int) or isinstance(width[1], bool) or width[1] <= 0:
+            continue
+        if all(
+            actual == expected
+            for slot, (actual, expected) in enumerate(zip(program, pattern))
+            if slot != width_slot
+        ):
+            return True
+    return False
 
 
 def evaluate_mask_program(
