@@ -684,6 +684,53 @@ class TestHipify(TestCase):
     def test_import_hipify(self):
         from torch.utils.hipify import hipify_python  # noqa: F401
 
+    def test_hipify_extension_sources(self):
+        from torch.utils.hipify import hipify_python
+
+        with (
+            tempfile.TemporaryDirectory() as src_dir,
+            tempfile.TemporaryDirectory() as build_dir,
+        ):
+            include_dir = os.path.join(src_dir, "includes")
+            os.makedirs(include_dir)
+            with open(os.path.join(include_dir, "helper.cuh"), "w") as f:
+                f.write("#include <cuda_runtime.h>\n")
+            source = os.path.join(src_dir, "kernel.cu")
+            with open(source, "w") as f:
+                f.write('#include <ATen/cuda/CUDAContext.h>\n#include "helper.cuh"\n')
+
+            # Mirrors the hipify call in torch.utils.cpp_extension._jit_compile.
+            result = hipify_python.hipify(
+                project_directory=build_dir,
+                output_directory=build_dir,
+                header_include_dirs=[include_dir],
+                extra_files=[os.path.abspath(source)],
+                show_detailed=False,
+                show_progress=False,
+                is_pytorch_extension=True,
+            )
+
+            hipified = result[os.path.abspath(source)].hipified_path
+            self.assertEqual(hipified, os.path.join(src_dir, "kernel.hip"))
+            with open(hipified) as f:
+                out = f.read()
+            self.assertIn("ATen/hip/HIPContext.h", out)
+            self.assertIn('#include "helper_hip.cuh"', out)
+            self.assertTrue(os.path.exists(os.path.join(include_dir, "helper_hip.cuh")))
+
+    def test_hipify_rel_path_without_common_root(self):
+        from torch.utils.hipify import hipify_python
+
+        # Windows raises ValueError from relpath for paths on different drives.
+        path = os.path.abspath(os.path.join("cuda", "kernel.cu"))
+        with mock.patch.object(
+            hipify_python.os.path, "relpath", side_effect=ValueError
+        ):
+            base, rel = hipify_python._rel_path_for_hipify(path, "unused")
+        self.assertFalse(os.path.isabs(rel))
+        self.assertNotIn("\\", rel)
+        self.assertEqual(os.path.normpath(os.path.join(base, rel)), path)
+
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
