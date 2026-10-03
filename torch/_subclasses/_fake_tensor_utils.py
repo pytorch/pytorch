@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch import SymInt
-from torch.fx.experimental.sym_node import SymNode
+from torch.fx.experimental.sym_node import SymNode, SymNodeTypes
 from torch.types import py_sym_types, PySymType
 
 
@@ -61,7 +61,7 @@ class _DeconstructedSymNode:
 
     # _value_eq to match SymNode
     def _value_eq(self, other: object) -> bool:
-        if isinstance(other, (SymNode, _DeconstructedSymNode)):
+        if isinstance(other, (*SymNodeTypes, _DeconstructedSymNode)):
             return (
                 self._expr == other._expr
                 and self.pytype == other.pytype

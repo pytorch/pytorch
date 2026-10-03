@@ -73,4 +73,26 @@ py::handle get_dynint_class() {
 #endif
 }
 
+py::handle get_native_symnode_class() {
+  // NB: leak
+#if IS_PYBIND_2_13_PLUS
+  PYBIND11_CONSTINIT static py::gil_safe_call_once_and_store<py::object>
+      storage;
+  return storage
+      .call_once_and_store_result([]() -> py::object {
+        return py::module::import("torch._C")
+            .attr("_symbolic")
+            .attr("_NativeSymNode");
+      })
+      .get_stored();
+#else
+  static py::handle native_symnode_class =
+      py::object(py::module::import("torch._C")
+                     .attr("_symbolic")
+                     .attr("_NativeSymNode"))
+          .release();
+  return native_symnode_class;
+#endif
+}
+
 } // namespace torch

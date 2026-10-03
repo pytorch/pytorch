@@ -21,7 +21,7 @@ from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx._compatibility import compatibility
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.proxy_tensor import py_sym_types
-from torch.fx.experimental.sym_node import SymNode
+from torch.fx.experimental.sym_node import SymNodeTypes
 from torch.fx.graph_module import GraphModule
 
 
@@ -425,7 +425,7 @@ def insert_deferred_runtime_asserts(
                 def match_symbol(symint: object, cb: Callable[[], fx.Node]) -> None:
                     if (
                         isinstance(symint, torch.SymInt)
-                        and isinstance(symint.node, SymNode)
+                        and isinstance(symint.node, SymNodeTypes)
                         and isinstance(
                             s := _get_placeholder_expr(symint.node), sympy.Symbol
                         )

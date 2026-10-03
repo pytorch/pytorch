@@ -752,6 +752,9 @@ fake_tensor_cache_crosscheck_enabled = (
 # the inference_mode is still respected.
 fake_tensor_disable_inference_mode = True
 
+# Use the native C++ SymNode for symbolic shapes created by ShapeEnv.
+use_cpp_symnode = os.environ.get("CPP_SYMNODE", "0") == "1"
+
 # Experimental feature for running automatic caching precompile.
 # Enables automatic DynamoCache save/load
 caching_precompile = os.environ.get("TORCH_CACHING_PRECOMPILE", "0") == "1"

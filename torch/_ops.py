@@ -629,6 +629,8 @@ class _ModeStackStateForPreDispatch:
                 f"index {index} out of bounds for infra_modes length {len(self.__infra_modes)}"
             )
         self.__infra_modes[index] = mode
+        if index == 0:
+            torch._C._symbolic._set_pre_dispatch_proxy(mode is not None)
 
     def get(self, index):
         if index >= len(self.__infra_modes):

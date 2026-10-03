@@ -92,6 +92,7 @@
 #include <torch/csrc/multiprocessing/init.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/profiler/python/init.h>
+#include <torch/csrc/symbolic/python_symbolic.h>
 #include <torch/csrc/tensor/python_tensor.h>
 #include <torch/csrc/utils/cpp_stacktraces.h>
 #include <torch/csrc/utils/disable_torch_function.h>
@@ -2604,6 +2605,7 @@ PyObject* initModule() {
   torch::jit::initJITBindings(module);
   torch::monitor::initMonitorBindings(module);
   torch::impl::dispatch::initDispatchBindings(module);
+  torch::symbolic::initSymbolicBindings(module);
   torch::dynamo::initDynamoBindings(module);
   torch::functorch::impl::initFuncTorchBindings(module);
   torch::throughput_benchmark::initThroughputBenchmarkBindings(module);

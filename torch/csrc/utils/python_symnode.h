@@ -13,6 +13,7 @@ TORCH_PYTHON_API py::handle get_symint_class();
 TORCH_PYTHON_API py::handle get_symfloat_class();
 TORCH_PYTHON_API py::handle get_symbool_class();
 TORCH_PYTHON_API py::handle get_dynint_class();
+TORCH_PYTHON_API py::handle get_native_symnode_class();
 
 // NB: These functions must not be called too early, otherwise torch not setup.
 // Alternate design is to have torch "register" the object to us
@@ -174,24 +175,32 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return getPyObj().attr("_graph_repr")().cast<std::string>();
   }
 
+  // The Python object of a Python node, or the pybind wrapper of a native
+  // (torch._C._symbolic) node, which has the attributes Python SymNode ops
+  // read.
+  static py::object as_py_node(const c10::SymNode& n) {
+    if (auto* p = dynamic_cast<PythonSymNodeImpl*>(n.get())) {
+      return py::reinterpret_borrow<py::object>(p->getPyObj());
+    }
+    py::object obj = py::cast(n);
+    TORCH_CHECK(
+        py::isinstance(obj, get_native_symnode_class()),
+        "expected a Python or native SymNode");
+    return obj;
+  }
+
   c10::SymNode dispatch_sym_ite_(
       const char* fname,
       const c10::SymNode& other,
       const c10::SymNode& third) {
-    auto pother = dynamic_cast<PythonSymNodeImpl*>(other.get());
-    auto pthird = dynamic_cast<PythonSymNodeImpl*>(third.get());
-    TORCH_CHECK(pother);
-    TORCH_CHECK(pthird);
     py::gil_scoped_acquire acquire;
-    auto r = getPyObj().attr(fname)(pother->getPyObj(), pthird->getPyObj());
+    auto r = getPyObj().attr(fname)(as_py_node(other), as_py_node(third));
     return c10::make_intrusive<PythonSymNodeImpl>(r);
   }
 
   c10::SymNode dispatch_common_(const char* fname, const c10::SymNode& other) {
-    auto pother = dynamic_cast<PythonSymNodeImpl*>(other.get());
-    TORCH_CHECK(pother);
     py::gil_scoped_acquire acquire;
-    auto r = getPyObj().attr(fname)(pother->getPyObj());
+    auto r = getPyObj().attr(fname)(as_py_node(other));
     return c10::make_intrusive<PythonSymNodeImpl>(r);
   }
 

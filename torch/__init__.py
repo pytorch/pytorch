@@ -1339,6 +1339,11 @@ def sym_sum(
     if found is None:
         return builtins.sum(items)
 
+    if type(found) is _C._symbolic._NativeSymNode:
+        r = _C._symbolic._sym_sum(found, items)
+        if r is not NotImplemented:
+            return r
+
     from torch.fx.experimental.sym_node import to_node, wrap_node
 
     # pyrefly: ignore[missing-attribute, bad-argument-type, bad-return]  # found is a SymNode in practice (LocalIntNode also has sym_sum)
