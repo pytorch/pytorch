@@ -2766,10 +2766,17 @@ class PatternMatcherPass:
                     if (node.op, target) not in self.patterns:
                         continue
 
-                # conservatively not applying pattern for cpu input,
-                # since some of the patterns induce codegen and split nodes.
-                # Note: we will only skip cpu compute if disable_cpp_codegen=True
-                if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
+                # Only builtin ops are codegen'd here, so conservatively skip
+                # patterns whose anchor Inductor cannot codegen (unsupported
+                # dtype, or cpu when disable_cpp_codegen=True) -- some patterns
+                # induce codegen and split nodes.
+                if (
+                    isinstance(target, torch._ops.OpOverload)
+                    and torch._library.utils.is_builtin(target)
+                    and fallback_node_due_to_unsupported_type(
+                        node, allow_cpu_inputs=False
+                    )
+                ):
                     continue
 
                 for entry in self.patterns[(node.op, target)]:
