@@ -2492,6 +2492,28 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    @skipIfNoFBGEMM
+    def test_quanatized_int8_linear_lite_mode(self):
+        # Lite mode skips the decomposition of wrapped_quantized_linear, and
+        # only the ops it decomposes into have C shims.
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device=device)
+                self.bias = torch.randn(10, device=device)
+                self.scale = torch.tensor(0.1)
+                self.zero_point = torch.tensor(0)
+
+            def forward(self, x):
+                s, z = self.scale, self.zero_point
+                return torch.ops._quantized.wrapped_quantized_linear(
+                    x, s, z, self.weight, s, z, self.bias, s, z, 10
+                )
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch(torch._inductor.lite_mode_options):
+            self.check_model(Model(self.device), example_inputs)
+
     def test_zero_grid_with_unbacked_symbols(self):
         class Repro(torch.nn.Module):
             def __init__(self) -> None:
@@ -11385,6 +11407,7 @@ GPU_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_gpu(("cuda", "xpu")),
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
+    "test_quanatized_int8_linear_lite_mode": fail_gpu(("cuda", "xpu")),
     "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
     # This test forces lazy dual-wrapper mode; torch.cond support for that
     # mode is covered by AOTInductorTestDualWrapper skips below.
