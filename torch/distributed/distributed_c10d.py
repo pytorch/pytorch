@@ -6,7 +6,6 @@ import collections.abc
 import contextlib
 import ctypes
 import hashlib
-import importlib.util
 import io
 import itertools
 import logging
@@ -194,88 +193,37 @@ _GLOO_AVAILABLE = True
 _UCC_AVAILABLE = True
 _XCCL_AVAILABLE = True
 
-# find_spec does not import the package. Importing torchcomms here would
-# dlopen the native extension whenever the wheel is installed, including CPU
-# doctests that share a venv with install_torchcomms.
-_TORCHCOMM_AVAILABLE = importlib.util.find_spec("torchcomms") is not None
-_torchcomms_loaded: dict[str, Callable[..., object]] | None = None
-if TYPE_CHECKING:
-    # Real types for checkers only. These imports are not executed, so they
-    # do not dlopen torchcomms.
-    # pyrefly: ignore [missing-import]
-    from torchcomms import new_comm
+try:
+    try:
+        # pyrefly: ignore [missing-import]
+        from torchcomms._comms import (
+            _BackendWrapper,
+            _is_backend_registered as _torchcomms_is_backend_registered,
+        )
+    except ImportError:
+        # pyrefly: ignore [missing-import]
+        from torchcomms._backend_wrapper import _BackendWrapper
+
+        def _torchcomms_is_backend_registered(backend: str) -> bool:
+            return False
 
     # pyrefly: ignore [missing-import]
-    from torchcomms._backend_wrapper import _BackendWrapper
+    from torchcomms import is_backend_built as _torchcomms_is_backend_built, new_comm
 
+    # Aliased: the unqualified name is the c10d hook imported above, which is
+    # attached to a ProcessGroup rather than to a TorchComms comm.
     # pyrefly: ignore [missing-import]
     from torchcomms.hooks import FlightRecorderHook as _TorchCommsFlightRecorderHook
-else:
-    # None until torchcomms is used. Tests may patch these before that.
-    _BackendWrapper = None
-    new_comm = None
-    _TorchCommsFlightRecorderHook = None
 
+    _TORCHCOMM_AVAILABLE = True
+except ImportError:
+    _TORCHCOMM_AVAILABLE = False
 
-def _import_torchcomms() -> dict[str, Callable[..., object]]:
-    """Load torchcomms natives. Only call when torchcomms is actually used.
-
-    A name that is already set is left alone. Tests patch ``new_comm`` and
-    ``_BackendWrapper``; assigning unconditionally replaces those patches.
-    """
-    global _torchcomms_loaded
-    global _BackendWrapper, new_comm, _TorchCommsFlightRecorderHook
-    if _torchcomms_loaded is None:
-        try:
-            # pyrefly: ignore [missing-import]
-            from torchcomms._comms import (
-                _BackendWrapper as BackendWrapper,
-                _is_backend_registered as is_backend_registered,
-            )
-        except ImportError:
-            # pyrefly: ignore [missing-import]
-            from torchcomms._backend_wrapper import _BackendWrapper as BackendWrapper
-
-            def is_backend_registered(backend: str) -> bool:
-                return False
-
-        # pyrefly: ignore [missing-import]
-        from torchcomms import is_backend_built, new_comm as imported_new_comm
-
-        # Aliased: the unqualified name is the c10d hook imported above, which is
-        # attached to a ProcessGroup rather than to a TorchComms comm.
-        # pyrefly: ignore [missing-import]
-        from torchcomms.hooks import FlightRecorderHook as TorchCommsFlightRecorderHook
-
-        _torchcomms_loaded = {
-            "is_backend_built": is_backend_built,
-            "is_backend_registered": is_backend_registered,
-            "BackendWrapper": BackendWrapper,
-            "new_comm": imported_new_comm,
-            "FlightRecorderHook": TorchCommsFlightRecorderHook,
-        }
-    # Fill only unset slots, including after a cached import. mock.patch
-    # restores a name to None, and a later call must bind the real object
-    # without clobbering a patch that is currently installed.
-    if _BackendWrapper is None:
-        _BackendWrapper = _torchcomms_loaded["BackendWrapper"]
-    if new_comm is None:
-        new_comm = _torchcomms_loaded["new_comm"]
-    if _TorchCommsFlightRecorderHook is None:
-        _TorchCommsFlightRecorderHook = _torchcomms_loaded["FlightRecorderHook"]
-    return _torchcomms_loaded
-
-
-def _torchcomms_is_backend_built(backend: str) -> bool:
-    if not _TORCHCOMM_AVAILABLE:
+    def _torchcomms_is_backend_built(backend: str) -> bool:
         return False
-    return bool(_import_torchcomms()["is_backend_built"](backend))
 
-
-def _torchcomms_is_backend_registered(backend: str) -> bool:
-    if not _TORCHCOMM_AVAILABLE:
+    def _torchcomms_is_backend_registered(backend: str) -> bool:
         return False
-    return bool(_import_torchcomms()["is_backend_registered"](backend))
 
 
 def _use_torchcomms_enabled() -> bool:
@@ -417,13 +365,6 @@ def _create_torchcomms_backend(
     """Create a c10d BackendWrapper for one TorchComms backend instance."""
     if not _TORCHCOMM_AVAILABLE:
         raise RuntimeError("TorchComms is not available")
-    # Tests patch ``new_comm`` before this runs. Import fills only unset names.
-    if (
-        new_comm is None
-        or _BackendWrapper is None
-        or _TorchCommsFlightRecorderHook is None
-    ):
-        _import_torchcomms()
 
     torch_device = _resolve_torchcomms_device(device, device_id)
 
@@ -3368,15 +3309,11 @@ def destroy_process_group(
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
     else:
-        # Import only if a torchcomms comm exists, or tests already patched
-        # _BackendWrapper. An installed wheel alone must not dlopen here.
-        if _world.comms or _BackendWrapper is not None:
-            if _BackendWrapper is None:
-                _import_torchcomms()
+        if _TORCHCOMM_AVAILABLE:
             # A single comm may be shared across multiple device types (e.g. a
             # gloo group reports both 'cuda' and 'cpu' device types backed by the
             # same _BackendWrapper). Deduplicate by comm identity so we finalize
-            # each comm exactly once. finalize() is not idempotent and raises
+            # each comm exactly once — finalize() is not idempotent and raises
             # "already finalized" on a second call.
             finalized_comm_ids: set[int] = set()
             for device_type in pg._device_types:
