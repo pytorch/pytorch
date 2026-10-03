@@ -100,7 +100,7 @@ waiting for one of their assigned reviewers.
 Do your review as usual. Once you accept the PR, the author is able to merge it.
 If the PR requires significant changes, use "Request changes".
 If you see patterns that shouldn't happen, update the
-[pr-review skill](https://github.com/pytorch/pytorch/blob/main/.agents/skills/pr-review/SKILL.md) <!-- @lint-ignore --> so that the
+[pr-review skill](https://github.com/pytorch/pytorch/blob/main/.claude/skills/pr-review/SKILL.md) so that the
 automated review catches them in other PRs.
 
 Do not add `in progress` or `ready for review` by hand, except as described in the **TEMPORARY:** notes.

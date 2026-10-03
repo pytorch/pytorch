@@ -153,7 +153,7 @@ review. Instruct it (with maximum reasoning) to:
 7. Flag overly broad `try/except:` blocks that could hide bugs.
 8. Flag overly defensive `getattr`/`hasattr` checks that should instead be
    base class schema updates.
-9. Apply relevant guidelines from `.agents/skills/pr-review/*` in addition
+9. Apply relevant guidelines from `.claude/skills/pr-review/*` in addition
    to the above.
 
 ## Review loop
