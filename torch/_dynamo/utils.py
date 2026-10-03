@@ -5160,17 +5160,15 @@ def build_checkpoint_variable(**options: Any) -> Any:
 
 
 def is_compile_supported(device_type: DeviceLikeType) -> Any:
-    from .eval_frame import is_dynamo_supported
+    from .device_interface import get_interface_for_device
 
     type = torch.device(device_type).type
-    compile_supported = is_dynamo_supported()
-    if type == "cpu":
-        pass
-    elif type in ["cuda", "xpu", "mtia"] and compile_supported:
-        compile_supported = has_triton()
-    else:
-        compile_supported = False
-    return compile_supported
+    try:
+        interface = get_interface_for_device(type)
+    except NotImplementedError:
+        # Unregistered device types keep the legacy conservative answer.
+        return False
+    return interface.is_compile_supported()
 
 
 is_compile_supported._dynamo_marked_constant = True  # type: ignore[attr-defined]
