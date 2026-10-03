@@ -10,7 +10,10 @@ import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     make_dynamo_test,
+    parametrize,
+    subtest,
 )
 
 
@@ -23,6 +26,15 @@ class _OpaqueReprDescriptorObject:
     __repr__ = str.upper
 
 
+class _SetSubclass(set):
+    pass
+
+
+class _FrozenSetSubclass(frozenset):
+    pass
+
+
+@instantiate_parametrized_tests
 class TpReprTests(TestCase):
     hw_classification = HardwareClassification.GENERIC
 
@@ -429,6 +441,25 @@ class TpReprTests(TestCase):
         compiled = torch.compile(fn, backend="eager", fullgraph=False)
         self.assertEqual(compiled(), fn())
 
+    def test_self_ref_userlist_repr(self):
+        def fn():
+            l = collections.UserList([1, 2])
+            l.append(l)
+            return repr(l)
+
+        # fullgraph=True: a graph break would run repr() eagerly and hide a wrong result.
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
+    def test_self_ref_userdict_repr(self):
+        def fn():
+            d = collections.UserDict()
+            d["self"] = d
+            return repr(d)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(), fn())
+
     def test_mutual_ref_repr(self):
         def fn():
             a = [1]
@@ -438,6 +469,32 @@ class TpReprTests(TestCase):
             return repr(a)
 
         compiled = torch.compile(fn, backend="eager", fullgraph=False)
+        self.assertEqual(compiled(), fn())
+
+    # A sourceless set subclass built in the graph loses its type name on the
+    # outer repr: Dynamo prints {SetSubclass(...)} instead of SetSubclass({...}).
+    @parametrize(
+        "set_type",
+        (
+            set,
+            frozenset,
+            subtest(_SetSubclass, decorators=[unittest.expectedFailure]),
+            _FrozenSetSubclass,
+        ),
+        name_fn=lambda t: t.__name__.lstrip("_"),
+    )
+    def test_self_ref_set_repr(self, set_type):
+        class Wrapper:
+            def __repr__(self):
+                return repr(self.value)
+
+        def fn():
+            w = Wrapper()
+            s = set_type([w])
+            w.value = s
+            return repr(s)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled(), fn())
 
     def test_str_of_id_of_compile_time_object(self):
