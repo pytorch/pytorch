@@ -5694,53 +5694,44 @@ def _producer_fusion_enabled_inputs(
     template_node: BaseSchedulerNode,
     choice: Any | None = None,
 ) -> OrderedSet[str]:
-    """Template inputs a producer may fuse into under the current fusion flags.
+    """This function returns template inputs that a producer may fuse into.
 
-    The template's load_input_fusion_allowed_inputs and
-    store_output_fusion_allowed_inputs describe what the template supports.
-    prologue_fusion/allow_prologue_fusion gate producer fusion into load_input().
-    epilogue_fusion/allow_epilogue_fusion gate both producer fusion of
-    store_output() inputs and downstream consumer fusion from template outputs.
+    Fusion support is advertised by two attributes:
+    - load_input_fusion_allowed_inputs: inputs whose producer can be generated
+      in load_input(), i.e. the template prologue. Enabled by
+      prologue_fusion/allow_prologue_fusion.
+    - store_output_fusion_allowed_inputs: inputs whose producer can be generated
+      in store_output(), e.g. the addmm bias. Enabled by
+      epilogue_fusion/allow_epilogue_fusion, which also controls downstream
+      consumer fusion from template outputs.
+
+    The attributes are computed when each Triton autotune choice is rendered and
+    stored on the choice (TritonTemplateCaller). Every template buffer also has
+    them: a template built from a single choice copies that choice's sets, and a
+    MultiTemplateBuffer stores the union over its choices.
+
+    If ``choice`` is given, that autotune choice's attributes are read; this is
+    used by the benchmark filter. Choices without them (e.g. aten, NVGEMM)
+    support no fusion. Otherwise the template's attributes are read. For a
+    MultiTemplateBuffer this means a producer may fuse if some choice supports
+    it; the benchmark filter then only selects a choice that supports every
+    fused input.
     """
     template = template_node.get_template_node()
     if template is None:
         return OrderedSet()
 
-    prologue_enabled = _is_prologue_fusion_enabled(template_node)
-    epilogue_enabled = _is_epilogue_fusion_enabled(template_node)
-
-    def enabled_inputs(candidate: Any) -> OrderedSet[str]:
-        load_inputs = candidate.load_input_fusion_allowed_inputs
-        store_inputs = candidate.store_output_fusion_allowed_inputs
-        enabled = load_inputs | store_inputs
-        if not prologue_enabled:
-            enabled -= load_inputs
-        if not epilogue_enabled:
-            enabled -= store_inputs
-        return enabled
-
-    if choice is not None:
-        return enabled_inputs(choice)
-
-    if isinstance(template, ir.MultiTemplateBuffer):
-        if template._render_caller is not None:
-            if hasattr(
-                template._render_caller, "load_input_fusion_allowed_inputs"
-            ) and hasattr(
-                template._render_caller, "store_output_fusion_allowed_inputs"
-            ):
-                return enabled_inputs(template._render_caller)
-            return OrderedSet()
-
-        result: OrderedSet[str] = OrderedSet()
-        for candidate in template.choices:
-            if hasattr(candidate, "load_input_fusion_allowed_inputs") and hasattr(
-                candidate, "store_output_fusion_allowed_inputs"
-            ):
-                result |= enabled_inputs(candidate)
-        return result
-
-    return enabled_inputs(template)
+    candidate = template if choice is None else choice
+    load_inputs = getattr(candidate, "load_input_fusion_allowed_inputs", OrderedSet())
+    store_inputs = getattr(
+        candidate, "store_output_fusion_allowed_inputs", OrderedSet()
+    )
+    enabled = load_inputs | store_inputs
+    if not _is_prologue_fusion_enabled(template_node):
+        enabled -= load_inputs
+    if not _is_epilogue_fusion_enabled(template_node):
+        enabled -= store_inputs
+    return enabled
 
 
 def is_epilogue_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
@@ -5755,7 +5746,7 @@ def is_producer_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     return (
         node2.is_template()
         and not node1.is_template()
-        and bool(_producer_fusion_enabled_inputs(node2))
+        and len(_producer_fusion_enabled_inputs(node2)) > 0
     )
 
 
@@ -7678,8 +7669,9 @@ class Scheduler:
                 if is_nvgemm and not choice.supports_epilogue_fusion:
                     continue
 
-                # NVGEMM doesn't support producer fusion. Skip NVGEMM choices
-                # when node1 is the input producer and node2 is the template.
+                # NVGEMM doesn't support producer fusion. Skip NVGEMM choices in
+                # the producer direction (consumer_fusion is False when node1 is
+                # the pointwise producer, node2 is the template).
                 if is_nvgemm and not consumer_fusion:
                     continue
 
@@ -10616,6 +10608,9 @@ class Scheduler:
                 why("template has no inputs enabled for producer fusion")
                 return False
 
+            # Reject if the producer writes a buffer that the template reads at an
+            # input that can't take a fused producer: that buffer must stay
+            # materialized because the template still loads it from memory.
             unsupported_producer_args = (
                 OrderedSet(inp.get_name() for inp in template.inputs)  # type: ignore[union-attr]
                 - enabled_producer_inputs

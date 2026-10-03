@@ -2210,31 +2210,6 @@ class TestScheduler(TestCase):
             OrderedSet(expected),
         )
 
-    def test_multi_template_producer_fusion_uses_choice_placements(self):
-        load_choice = Mock()
-        load_choice.load_input_fusion_allowed_inputs = OrderedSet(("x",))
-        load_choice.store_output_fusion_allowed_inputs = OrderedSet()
-        store_choice = Mock()
-        store_choice.load_input_fusion_allowed_inputs = OrderedSet()
-        store_choice.store_output_fusion_allowed_inputs = OrderedSet(("x",))
-
-        template = object.__new__(ir.MultiTemplateBuffer)
-        template._choices = [load_choice, store_choice]
-        template._render_caller = None
-        template.allow_prologue_fusion = True
-        template.allow_epilogue_fusion = False
-
-        template_node = Mock()
-        template_node.get_template_node.return_value = template
-
-        self.assertEqual(
-            _producer_fusion_enabled_inputs(template_node),
-            OrderedSet(("x",)),
-        )
-
-        template._render_caller = object()
-        self.assertEqual(_producer_fusion_enabled_inputs(template_node), OrderedSet())
-
     def test_prologue_fusion_uses_template_aliasing_hook(self):
         def make_prologue_and_template(hook_blocks: bool):
             prologue_node = Mock()

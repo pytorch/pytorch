@@ -748,6 +748,8 @@ class TritonTemplateKernel(TritonKernel):
         # Update each time an input is marked frozen, used to replay the freezing of inputs on a cache hit.
         self.frozen_layouts_cnt = 0
 
+        # When prologue_loads_all_named_inputs is true, load_input_fusion_allowed_inputs
+        # is populated during def_kernel by adding all named inputs.
         self.prologue_loads_all_named_inputs = prologue_loads_all_named_inputs
 
         # When always_freeze_layout is True, get_stride_and_maybe_freeze_layout will
@@ -2318,6 +2320,8 @@ class ExternalTritonTemplateKernel(TritonTemplateKernel):
             def get_name(self) -> str:
                 return template_buffer.get_name()
 
+        # Pass dummy values for TritonTemplateKernel params that are only
+        # relevant for standalone Triton kernel codegen (grid, warps, etc.).
         super().__init__(
             kernel_name="",
             input_nodes=(),
@@ -2861,8 +2865,8 @@ class GeneratedCodeCache:
         # arg) vs mm(a, b) (two). Key the aliasing structure name-insensitively.
         #
         # def_kernel also drops inputs found in V.graph.removed_buffers or in
-        # kernel.load_input_fused_inputs/store_output_fused_inputs, but none need
-        # keying: the cache is
+        # kernel.load_input_fused_inputs/store_output_fused_inputs, but neither
+        # needs keying: the cache is
         # only read and written while lowering generates autotune choices, and
         # both sets are populated only later, during scheduling, whose template
         # renders (SIMDScheduling.codegen_template via make_kernel_render)
@@ -2956,6 +2960,8 @@ class TritonTemplate(KernelTemplate):
         self._cache_codegen_enabled_for_template = cache_codegen_enabled_for_template
         self._generated_code_cache: GeneratedCodeCache = GeneratedCodeCache()
         clear_on_fresh_cache(self._generated_code_cache)
+        # When prologue_loads_all_named_inputs is true, load_input_fusion_allowed_inputs
+        # is populated during def_kernel by adding all named inputs.
         self.prologue_loads_all_named_inputs = prologue_loads_all_named_inputs
         # When always_freeze_layout is True, the kernel will always freeze layouts
         # immediately instead of using layout constraints. This is used by
@@ -3207,8 +3213,12 @@ class TritonTemplate(KernelTemplate):
         mod = PyCodeCache.load(code, extra, set_sys_modules=False)
 
         input_call_args = tuple(kernel.args.input_buffers.keys())
-        load_input_fusion_allowed_inputs = kernel.load_input_fusion_allowed_inputs
-        store_output_fusion_allowed_inputs = kernel.store_output_fusion_allowed_inputs
+        load_input_fusion_allowed_inputs = (
+            kernel.load_input_fusion_allowed_inputs.copy()
+        )
+        store_output_fusion_allowed_inputs = (
+            kernel.store_output_fusion_allowed_inputs.copy()
+        )
         kernel_args_sizevars_keys = tuple(kernel.args.sizevars.keys())
 
         if cache_hit:
