@@ -7,10 +7,11 @@ import unittest.mock
 from collections import defaultdict
 
 import yaml
-from tools.autograd import gen_autograd_functions, load_derivatives
+from tools.autograd import gen_autograd_functions, gen_variable_type, load_derivatives
 from tools.pyi.gen_pyi import generate_type_hints
 
 from torchgen import dest
+from torchgen.api.autograd import match_differentiability_info
 from torchgen.api.python import PythonSignatureGroup, signature
 from torchgen.api.types import CppSignatureGroup, DispatcherSignature
 from torchgen.context import native_function_manager
@@ -28,6 +29,7 @@ from torchgen.gen import (
 from torchgen.model import (
     BackendIndex,
     BackendMetadata,
+    DeviceCheckType,
     DispatchKey,
     FunctionSchema,
     Location,
@@ -141,6 +143,103 @@ class TestCreateDerivative(unittest.TestCase):
                 functions_by_schema={specification: native_function},
                 op_counter=typing.Counter[str](),
                 used_dispatch_keys=set(),
+            )
+
+
+class TestForwardTangentAvailability(unittest.TestCase):
+    def _info(self, specification: str, formula: str):
+        schema = FunctionSchema.parse(specification)
+        native = dataclasses.replace(DEFAULT_NATIVE_FUNCTION, func=schema)
+        _, info = load_derivatives.create_differentiability_info(
+            defn_dict={
+                "name": specification,
+                "dispatch": {
+                    "Default": {"self": "grad", "other": "grad", "result": formula}
+                },
+            },
+            functions_by_signature={schema.signature(): [native]},
+            functions_by_schema={specification: native},
+            op_counter=typing.Counter[str](),
+            used_dispatch_keys=set(),
+        )
+        return native, info
+
+    def test_tangent_availability(self) -> None:
+        for other_type in ("Tensor", "Tensor?"):
+            for formula, availability in (
+                ("helper(self_t, other_t)", False),
+                ("helper(self_t_defined, other_t_defined)", True),
+                ("helper(self_t, other_t, self_t_defined, other_t_defined)", True),
+            ):
+                with self.subTest(other_type=other_type, formula=formula):
+                    native, info = self._info(
+                        f"func(Tensor self, {other_type} other) -> Tensor", formula
+                    )
+                    derivative = info["Default"].forward_derivatives[0]
+                    self.assertEqual(
+                        set(derivative.required_inputs_fw_grad), {"self", "other"}
+                    )
+                    fn = match_differentiability_info([native], {native.func: info})[0]
+                    body = "\n".join(gen_variable_type.emit_body(fn, "Default"))
+                    for name in ("self", "other"):
+                        declaration = f"const bool {name}_t_defined = (_any_has_forward_grad_result) && isFwGradDefined({name});"
+                        if availability:
+                            self.assertIn(declaration, body)
+                            self.assertLess(
+                                body.index(declaration),
+                                body.index("at::redispatch::func("),
+                            )
+                            self.assertEqual(body.count(declaration), 1)
+                        else:
+                            self.assertNotIn(f"{name}_t_defined", body)
+                    self.assertIn(formula, body)
+
+    def test_tangent_availability_before_inplace_update(self) -> None:
+        native, info = self._info(
+            "func(Tensor self, Tensor? other) -> Tensor",
+            "helper(self_t, other_t, self_t_defined, other_t_defined)",
+        )
+        inplace = dataclasses.replace(
+            native,
+            func=FunctionSchema.parse(
+                "func_(Tensor(a!) self, Tensor? other) -> Tensor(a!)"
+            ),
+        )
+        fn = match_differentiability_info([inplace], {native.func: info})[0]
+        body = "\n".join(gen_variable_type.emit_body(fn, "Default"))
+        for name in ("self", "other"):
+            self.assertLess(
+                body.index(f"const bool {name}_t_defined"),
+                body.index("at::redispatch::func_("),
+            )
+        # Availability does not bypass the existing normalized tangent clone.
+        self.assertIn(
+            "self_t = GradMode::is_enabled() ? self_t.clone() : self_t;", body
+        )
+
+    def test_tangent_availability_foreach_reuse_rejected(self) -> None:
+        native, info = self._info(
+            "func(Tensor self, Tensor other) -> Tensor",
+            "helper(self_t, other_t, self_t_defined, other_t_defined)",
+        )
+        foreach = dataclasses.replace(
+            native,
+            func=FunctionSchema.parse(
+                "_foreach_func(Tensor[] self, Tensor[] other) -> Tensor[]"
+            ),
+            device_check=DeviceCheckType.NoCheck,
+        )
+        fn = match_differentiability_info([foreach], {native.func: info})[0]
+        with self.assertRaisesRegex(RuntimeError, "not supported for foreach"):
+            gen_variable_type.emit_body(fn, "Default")
+
+    def test_tangent_availability_tensorlist_rejected(self) -> None:
+        with self.assertRaisesRegex(
+            RuntimeError, "only supported for Tensor and optional Tensor"
+        ):
+            self._info(
+                "func(Tensor self, Tensor[] other) -> Tensor",
+                "helper(self_t, other_t_defined)",
             )
 
 

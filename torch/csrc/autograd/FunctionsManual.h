@@ -599,6 +599,22 @@ at::Tensor sinc_backward(const at::Tensor& grad, const at::Tensor& self);
 at::Tensor sparse_constructor_values_backward(
     const at::Tensor& sparse_grad_out,
     const at::Tensor& indices);
+Tensor embedding_bag_jvp(
+    const Tensor& weight_p,
+    const Tensor& weight_t,
+    bool weight_t_defined,
+    const Tensor& indices,
+    const Tensor& offsets,
+    bool scale_grad_by_freq,
+    int64_t mode,
+    bool sparse,
+    const Tensor& per_sample_weights_p,
+    const Tensor& per_sample_weights_t,
+    bool per_sample_weights_t_defined,
+    bool include_last_offset,
+    int64_t padding_idx,
+    const Tensor& bag_size,
+    const Tensor& maximum_indices);
 at::Tensor embedding_dense_double_backward_symint(
     const at::Tensor& grad,
     const at::Tensor& indices,

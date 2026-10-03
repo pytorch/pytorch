@@ -22046,6 +22046,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
         supports_out=False,
         supports_gradgrad=False,
+        supports_forward_ad=True,
         allow_cow_input_materialize_forward=[0],
     ),
     OpInfo(

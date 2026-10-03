@@ -1249,7 +1249,8 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
                       weight._fw_grad(/*level=*/0).defined() ||
                       (per_sample_weights_opt.has_value() &&
                        per_sample_weights_opt.value().defined() &&
-                       per_sample_weights_opt.value().requires_grad());
+                       (per_sample_weights_opt.value().requires_grad() ||
+                        per_sample_weights_opt.value()._fw_grad(/*level=*/0).defined()));
 
   if (!needs_grad_path) {
     out = at::_embedding_bag_forward_only(
