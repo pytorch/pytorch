@@ -1173,6 +1173,103 @@ class TestViewTensorPickle(TestCase):
         self.assertEqual(restored_val.dtype, original_val.dtype)
 
 
+class TestPinnedTensorPickle(TestCase):
+    """Tests that a pinned CPU tensor keeps is_pinned() across dumps/loads.
+
+    Default tensor pickling materializes pageable storage, which dropped the
+    pinned-ness of constants shipped to inductor's out-of-process FxCompile
+    and broke pin_memory codegen there.
+    """
+
+    def setUp(self):
+        super().setUp()
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx._graph_pickler import GraphPickler
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+        self.GraphPickler = GraphPickler
+        self.fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+
+    def _roundtrip(self, tensor):
+        return self.GraphPickler.loads(self.GraphPickler.dumps(tensor), self.fake_mode)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "pin_memory needs CUDA")
+    def test_pinned_tensor_roundtrips_pinned(self):
+        original = torch.tensor([1, 2, 3], pin_memory=True)
+        self.assertTrue(original.is_pinned())
+        restored = self._roundtrip(original)
+        self.assertTrue(restored.is_pinned())
+        self.assertEqual(restored, original)
+
+    def test_pageable_tensor_roundtrips_pageable(self):
+        original = torch.tensor([1, 2, 3])
+        self.assertFalse(original.is_pinned())
+        restored = self._roundtrip(original)
+        self.assertFalse(restored.is_pinned())
+        self.assertEqual(restored, original)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "pin_memory needs CUDA")
+    def test_pinned_graph_constant_roundtrips_pinned(self):
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        gm._tensor_constant0 = torch.tensor([1, 2, 3], pin_memory=True)
+        restored = self._roundtrip(gm)
+        self.assertTrue(restored._tensor_constant0.is_pinned())
+        self.assertEqual(restored._tensor_constant0, gm._tensor_constant0)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "pin_memory needs CUDA")
+    def test_pinned_parameter_roundtrips_pinned(self):
+        original = torch.nn.Parameter(torch.tensor([1.0, 2.0, 3.0], pin_memory=True))
+        self.assertTrue(original.is_pinned())
+        restored = self._roundtrip(original)
+        self.assertIsInstance(restored, torch.nn.Parameter)
+        self.assertTrue(restored.is_pinned())
+        self.assertEqual(restored.requires_grad, original.requires_grad)
+        self.assertEqual(restored, original)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "pin_memory needs CUDA")
+    def test_pinned_tensor_preserves_python_state(self):
+        pinned = torch.tensor([1, 2, 3], pin_memory=True)
+        pinned._is_frozen_param = True
+        restored = self._roundtrip(pinned)
+        self.assertTrue(restored.is_pinned())
+        self.assertTrue(hasattr(restored, "_is_frozen_param"))
+        pageable = torch.tensor([1, 2, 3])
+        pageable._is_frozen_param = True
+        restored_pageable = self._roundtrip(pageable)
+        self.assertFalse(restored_pageable.is_pinned())
+        self.assertTrue(hasattr(restored_pageable, "_is_frozen_param"))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "pin_memory needs CUDA")
+    def test_pinned_tensor_with_requires_grad_stays_leaf(self):
+        pinned = torch.tensor([1.0, 2.0, 3.0], pin_memory=True).requires_grad_(True)
+        restored = self._roundtrip(pinned)
+        self.assertTrue(restored.is_pinned())
+        self.assertTrue(restored.requires_grad)
+        self.assertTrue(restored.is_leaf)
+        self.assertIsNone(restored.grad_fn)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "pin_memory needs CUDA")
+    def test_pinned_parameter_preserves_dict(self):
+        pinned = torch.nn.Parameter(torch.tensor([1.0, 2.0, 3.0], pin_memory=True))
+        pinned._custom_tag = "keep me"
+        restored = self._roundtrip(pinned)
+        self.assertIsInstance(restored, torch.nn.Parameter)
+        self.assertTrue(restored.is_pinned())
+        self.assertEqual(getattr(restored, "_custom_tag", None), "keep me")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "pin_memory needs CUDA")
+    def test_pinned_aliased_tensors_roundtrip_values_and_flags(self):
+        base = torch.tensor([1, 2, 3, 4], pin_memory=True)
+        view = base[0:2]
+        restored_base, restored_view = self._roundtrip([base, view])
+        self.assertEqual(restored_base, base)
+        self.assertEqual(restored_view, view)
+        self.assertTrue(restored_base.is_pinned())
+        self.assertTrue(restored_view.is_pinned())
+        # Note: storage sharing between distinct-but-aliased tensors is not
+        # preserved across the trip (only values and flags are).
+
+
 if __name__ == "__main__":
     from torch.testing._internal.common_utils import run_tests
 
