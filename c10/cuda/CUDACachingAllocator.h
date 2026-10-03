@@ -154,6 +154,27 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void endAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id) = 0;
+  // Reassigns eligible segments in mempool_id from one allocation stream to
+  // another. A segment is eligible only when every block is inactive, has no
+  // pending events or recorded stream uses, and is not expandable. The whole
+  // segment is transferred to preserve the invariant that adjacent split
+  // blocks have the same allocation stream. The caller must guarantee that
+  // graph topology orders every captured use on from_stream before any use
+  // resulting from allocation on to_stream. No device synchronization is
+  // performed, and active or otherwise ineligible segments remain unchanged.
+  virtual void transferInactiveSegments(
+      c10::DeviceIndex /*device*/,
+      MempoolId_t /*mempool_id*/,
+      cudaStream_t /*from_stream*/,
+      cudaStream_t /*to_stream*/) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not support transferring inactive graph-pool segments");
+  }
+  virtual bool supportsInactiveSegmentTransfer() const {
+    return false;
+  }
   // Notify the allocator that a CUDA stream capture has actually started /
   // ended. Distinct from begin/endAllocateToPool, which only routes
   // allocations into a private mempool and can be invoked without an active
@@ -432,6 +453,18 @@ inline void beginAllocateToPool(
 
 inline void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   get()->endAllocateToPool(device, mempool_id);
+}
+
+inline void transferInactiveSegments(
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id,
+    cudaStream_t from_stream,
+    cudaStream_t to_stream) {
+  get()->transferInactiveSegments(device, mempool_id, from_stream, to_stream);
+}
+
+inline bool supportsInactiveSegmentTransfer() {
+  return get()->supportsInactiveSegmentTransfer();
 }
 
 inline void markCaptureBegin(c10::DeviceIndex device) {
