@@ -7,10 +7,7 @@ import torch
 from torch._inductor.kernel.vendored_templates.flydsl.kernels import (
     build_flex_attn_fwd_module,
 )
-from torch._inductor.runtime.flydsl_cache import (
-    configure_flydsl_cache_dir,
-    run_cached_flydsl,
-)
+from torch._inductor.runtime.cache_dir_utils import cache_dir
 
 
 {{gen_defines()}}
@@ -20,13 +17,13 @@ _launcher = None
 _launcher_lock = threading.Lock()
 
 
-def _get_launcher():
+def _get_launcher(dispatch_args, compile_only):
     global _launcher
     launcher = _launcher
-    if launcher is None:
+    if compile_only or launcher is None:
         with _launcher_lock:
             launcher = _launcher
-            if launcher is None:
+            if compile_only or launcher is None:
                 launcher = build_flex_attn_fwd_module(
                     batch_size=BATCH_SIZE,
                     num_q_heads=NUM_Q_HEADS,
@@ -52,8 +49,14 @@ def _get_launcher():
                     o_stride=O_STRIDE,
                     scale=float(SM_SCALE),
                     output_stats_in_log2=True,
+                    write_max_scores=WRITE_MAX_SCORES,
                 )
-                _launcher = launcher
+                compile_args = tuple(
+                    flyc.from_torch_tensor(tensor) for tensor in dispatch_args[:-1]
+                ) + (dispatch_args[-1],)
+                launcher = flyc.compile(launcher, *compile_args)
+                if not compile_only:
+                    _launcher = launcher
     return launcher
 
 
@@ -89,7 +92,10 @@ def _run_flydsl_forward(
     output,
     stream,
 ):
-    configure_flydsl_cache_dir()
+    if "FLYDSL_RUNTIME_CACHE_DIR" not in os.environ:
+        os.environ["FLYDSL_RUNTIME_CACHE_DIR"] = os.path.join(
+            cache_dir(), "flydsl_compile_cache"
+        )
     dispatch_args = (
         query,
         key,
@@ -106,12 +112,6 @@ def _run_flydsl_forward(
         output,
         stream,
     )
-    launcher = _get_launcher()
-    # The generated module already guards tensor layouts, so only the pointers
-    # and stream vary between calls to the cached dispatcher.
-    compile_args = tuple(
-        flyc.from_torch_tensor(tensor) for tensor in dispatch_args[:-1]
-    ) + (stream,)
     flydsl_compile_only = os.environ.get("FLYDSL_COMPILE_ONLY") == "1"
     compile_only = os.environ.get("COMPILE_ONLY", "").lower() in (
         "1", "true", "yes", "on"
@@ -121,16 +121,9 @@ def _run_flydsl_forward(
             "COMPILE_ONLY and FLYDSL_COMPILE_ONLY must only be enabled together "
             "by the FlyDSL precompile path"
         )
-    if flydsl_compile_only:
-        flyc.compile(launcher, *compile_args)
-    else:
-        run_cached_flydsl(
-            launcher,
-            *compile_args,
-            constexpr_param=compile_args[0],
-            compiler=flyc.compile,
-            dispatch_args=dispatch_args,
-        )
+    launcher = _get_launcher(dispatch_args, flydsl_compile_only)
+    if not flydsl_compile_only:
+        launcher(*dispatch_args)
     return output
 
 

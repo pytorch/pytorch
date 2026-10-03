@@ -24,6 +24,7 @@ from .common import (
 from .flex_flash_attention import is_trivial_mask_graph, is_trivial_score_graph
 from .flex_flydsl_mask import lower_flydsl_mask_graph
 
+
 flex_flydsl_forward_template = FlyDSLTemplate(
     name="flex_flydsl_forward",
     source=load_flex_template("flydsl_forward"),
@@ -355,6 +356,7 @@ def maybe_append_flydsl_flex_attention_choice(
     scale,
     sparse_q_block_size,
     sparse_kv_block_size,
+    write_max_scores=True,
 ) -> tuple[bool, str]:
     config, reason = _get_flydsl_flex_attention_forward_config(
         query=query,
@@ -374,6 +376,8 @@ def maybe_append_flydsl_flex_attention_choice(
     )
     if config is None:
         return False, reason
+
+    config["WRITE_MAX_SCORES"] = bool(write_max_scores)
 
     input_nodes = [
         query,
@@ -444,6 +448,7 @@ def create_flydsl_flex_attention_kernel(
     sparse_kv_block_size,
     subgraph_buffer,
     mask_graph_buffer,
+    write_max_scores=True,
 ):
     """Lower the explicitly selected FlyDSL backend independently of Triton."""
     if (
@@ -468,7 +473,15 @@ def create_flydsl_flex_attention_kernel(
         full_kv_num_blocks,
         full_kv_indices,
     ) = maybe_realize(
-        [query, key, value, kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices]
+        [
+            query,
+            key,
+            value,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+        ]
     )
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
@@ -509,6 +522,7 @@ def create_flydsl_flex_attention_kernel(
         scale=scale,
         sparse_q_block_size=sparse_q_block_size,
         sparse_kv_block_size=sparse_kv_block_size,
+        write_max_scores=write_max_scores,
     )
     if not appended:
         raise RuntimeError(
@@ -519,8 +533,15 @@ def create_flydsl_flex_attention_kernel(
         "flex_attention_flydsl",
         choices,
         [
-            query, key, value, logsumexp, max_scores,
-            kv_num_blocks, kv_indices, full_kv_num_blocks, full_kv_indices,
+            query,
+            key,
+            value,
+            logsumexp,
+            max_scores,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
             *mask_mod_other_buffers,
         ],
         layout,
@@ -531,6 +552,10 @@ def create_flydsl_flex_attention_kernel(
             8: create_indices_fake,
         },
     )
-    out.data.data.subgraph_inps = list(score_mod_other_buffers) + list(mask_mod_other_buffers)
-    out.data.data.subgraph_outs = get_fwd_subgraph_outputs(subgraph_buffer, mask_graph_buffer)
+    out.data.data.subgraph_inps = list(score_mod_other_buffers) + list(
+        mask_mod_other_buffers
+    )
+    out.data.data.subgraph_outs = get_fwd_subgraph_outputs(
+        subgraph_buffer, mask_graph_buffer
+    )
     return out, logsumexp, max_scores

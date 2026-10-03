@@ -3,6 +3,7 @@
 import flydsl.expr as fx
 from flydsl.expr import const_expr
 
+
 _CAUSAL_DOCUMENT_MASK_PROGRAM = (
     ("const_bool", True),
     ("ge", 2, 3),
@@ -68,9 +69,7 @@ def make_qk_shared_layout(rows, columns):
         ((32, 32 * columns), (1, 32 * 32)),
     )
     # Swizzle eight-element packs without changing their 16-byte alignment.
-    return fx.make_composed_layout(
-        fx.static(fx.SwizzleType.get(2, 3, 5)), layout
-    )
+    return fx.make_composed_layout(fx.static(fx.SwizzleType.get(2, 3, 5)), layout)
 
 
 def make_value_shared_layout(rows, columns):
@@ -139,9 +138,15 @@ def evaluate_mask_program(
     head,
     q_pos,
     kv_pos,
+    cached_values=None,
 ):
+    cached_values = {} if cached_values is None else cached_values
     values = [fx.Int32(batch), fx.Int32(head), q_pos, kv_pos]
-    for instruction in mask_program:
+    for instruction_index, instruction in enumerate(mask_program):
+        slot = instruction_index + 4
+        if slot in cached_values:
+            values.append(cached_values[slot])
+            continue
         op = instruction[0]
         if op == "const_i32":
             values.append(fx.Int32(instruction[1]))
@@ -208,9 +213,12 @@ def fast_exp2(value):
     return fx.Float32(fx.rocdl.exp2(fx.Float32.ir_type, value.ir_value()))
 
 
-def schedule_fwd_qk_pipeline(*, reduction_steps: int, vmem_count: int = 0):
+def schedule_fwd_qk_pipeline(
+    *, reduction_steps: int, vmem_count: int = 0, query_in_registers: bool = False
+):
     """Interleave Q/K LDS reads and optional next-tile VMEM with QK MFMAs."""
-    dsrd_preload = min(6, 3 * reduction_steps)
+    reads_per_step = 2 if query_in_registers else 3
+    dsrd_preload = min(4 if query_in_registers else 6, reads_per_step * reduction_steps)
     fx.rocdl.sched_dsrd(dsrd_preload)
     scheduled_vmem = 0
     for step in fx.range_constexpr(reduction_steps):
@@ -220,7 +228,7 @@ def schedule_fwd_qk_pipeline(*, reduction_steps: int, vmem_count: int = 0):
             scheduled_vmem = target_vmem
         fx.rocdl.sched_mfma(2)
         if const_expr(step + 2 < reduction_steps):
-            fx.rocdl.sched_dsrd(3)
+            fx.rocdl.sched_dsrd(reads_per_step)
     schedule_fence()
 
 
@@ -265,7 +273,7 @@ def make_mask_buffers(gview, count, sizes, buffer0, buffer1, buffer2, buffer3):
 
 
 def make_mask_evaluator(program, output, strides, buffers, load_i32, batch, head):
-    def evaluate(q_pos, kv_pos):
+    def evaluate(q_pos, kv_pos, cached_values=None):
         return evaluate_mask_program(
             mask_program=program,
             mask_program_output=output,
@@ -276,6 +284,7 @@ def make_mask_evaluator(program, output, strides, buffers, load_i32, batch, head
             head=head,
             q_pos=q_pos,
             kv_pos=kv_pos,
+            cached_values=cached_values,
         )
 
     return evaluate

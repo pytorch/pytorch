@@ -266,9 +266,13 @@ class TestFlyDSLFlexAttentionBackend(TestCase):
             < torch.arange(4, device=device)[:, None, None]
         )
         keep = (
-            active_blocks
-            & ((positions // 128)[None, None, :] == block_ids[None, :, None])
-        ).any(dim=1).view(1, 4, 1, 2048)
+            (
+                active_blocks
+                & ((positions // 128)[None, None, :] == block_ids[None, :, None])
+            )
+            .any(dim=1)
+            .view(1, 4, 1, 2048)
+        )
         if partial:
             keep = keep & (positions % 2 == 0)
         reference = torch.nn.functional.scaled_dot_product_attention(
@@ -356,9 +360,7 @@ class TestFlyDSLFlexAttentionBackend(TestCase):
     def test_backward_uses_triton_with_flydsl_forward(self, device):
         if not _has_gfx950_flydsl():
             self.skipTest("requires gfx950 and a built FlyDSL runtime")
-        base_inputs = _make_qkv(
-            device=device, seq_q=128, seq_kv=128, seed=23
-        )
+        base_inputs = _make_qkv(device=device, seq_q=128, seq_kv=128, seed=23)
         torch.manual_seed(24)
         grad_output = torch.randn_like(base_inputs[2])
 
@@ -441,7 +443,9 @@ class TestFlyDSLFlexAttentionConfig(TestCase):
             mock.patch.object(
                 inputs["kv_indices"], "get_stride", side_effect=NotImplementedError
             ),
-            mock.patch.object(flex_flydsl_forward_template, "maybe_append_choice") as append,
+            mock.patch.object(
+                flex_flydsl_forward_template, "maybe_append_choice"
+            ) as append,
         ):
             appended, reason = maybe_append_flydsl_flex_attention_choice(
                 [], layout=mock.Mock(), **inputs
@@ -704,11 +708,7 @@ class TestFlyDSLFlexAttention(TestCase):
             subtest(
                 (
                     {},
-                    {
-                        "kv_num_blocks": _FakeNode(
-                            [1, 1, 4], [4, 4, 1], torch.float32
-                        )
-                    },
+                    {"kv_num_blocks": _FakeNode([1, 1, 4], [4, 4, 1], torch.float32)},
                     "requires int32 BlockMask metadata",
                 ),
                 name="count_dtype",
@@ -789,10 +789,13 @@ class TestFlyDSLFlexAttention(TestCase):
         kwargs, reason = _fake_choice_result(inputs)
         self.assertIsNotNone(kwargs, reason)
 
-    def test_gfx950_forward_full_partial_gqa_and_empty_q_block(self, device):
+    @parametrize("q_heads,kv_heads,seq", [(4, 2, 512), (64, 8, 2048)])
+    def test_gfx950_forward_full_partial_gqa_and_empty_q_block(
+        self, device, q_heads, kv_heads, seq
+    ):
         self._require_runtime()
 
-        q_heads, kv_heads, seq, head_dim = 4, 2, 512, 128
+        head_dim = 128
         query, key, value = _make_qkv(
             device=device,
             q_heads=q_heads,
@@ -801,16 +804,16 @@ class TestFlyDSLFlexAttention(TestCase):
             qk_dim=head_dim,
         )
         kv_num_blocks = torch.tensor(
-            [[[1, 1, 1, 0]]], device=device, dtype=torch.int32
+            [[[1, 1, 1, 0] * (seq // 512)]], device=device, dtype=torch.int32
         )
         kv_indices = torch.tensor(
-            [[[[0], [1], [2], [0]]]], device=device, dtype=torch.int32
+            [[[[0], [1], [2], [0]] * (seq // 512)]], device=device, dtype=torch.int32
         )
         full_kv_num_blocks = torch.tensor(
-            [[[0, 1, 1, 0]]], device=device, dtype=torch.int32
+            [[[0, 1, 1, 0] * (seq // 512)]], device=device, dtype=torch.int32
         )
         full_kv_indices = torch.tensor(
-            [[[[0], [0], [0], [0]]]], device=device, dtype=torch.int32
+            [[[[0]] * (seq // 128)]], device=device, dtype=torch.int32
         )
 
         def causal(b, h, q_idx, kv_idx):
@@ -836,9 +839,12 @@ class TestFlyDSLFlexAttention(TestCase):
             enable_gqa=True,
             return_aux=True,
         )
-        self.assertEqual(output[:, :, 384:].abs().max().item(), 0.0)
-        self.assertTrue(torch.isneginf(aux.lse[:, :, 384:]).all())
-        self.assertTrue(torch.isneginf(aux.max_scores[:, :, 384:]).all())
+        for start in range(384, seq, 512):
+            self.assertEqual(output[:, :, start : start + 128].abs().max().item(), 0.0)
+            self.assertTrue(torch.isneginf(aux.lse[:, :, start : start + 128]).all())
+            self.assertTrue(
+                torch.isneginf(aux.max_scores[:, :, start : start + 128]).all()
+            )
 
     def _check_gfx950_public_api_per_kv_head_decode(self, device, seq_q):
         batch, q_heads, kv_heads = 1, 64, 4
@@ -992,8 +998,7 @@ class TestFlyDSLFlexAttention(TestCase):
             ),
             subtest(
                 (
-                    lambda b, h, q, kv: (q + 2044 >= kv)
-                    & (q + 2044 - kv < 96),
+                    lambda b, h, q, kv: (q + 2044 >= kv) & (q + 2044 - kv < 96),
                     {
                         "seq": 4,
                         "seq_kv": 2048,
@@ -1155,9 +1160,7 @@ class TestFlyDSLFlexAttention(TestCase):
         self.assertNotIn("build_flex_attn_fwd_module", "\n".join(code))
 
 
-instantiate_device_type_tests(
-    TestFlyDSLFlexAttention, globals(), only_for=("cuda",)
-)
+instantiate_device_type_tests(TestFlyDSLFlexAttention, globals(), only_for=("cuda",))
 
 
 if __name__ == "__main__":
