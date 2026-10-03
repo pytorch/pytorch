@@ -9,6 +9,7 @@ import itertools
 import logging
 import operator
 import pathlib
+import re
 import sys
 import textwrap
 import traceback
@@ -337,6 +338,38 @@ def _get_node_namespace(node: torch.fx.Node) -> tuple[str, list[str], list[str]]
     return "/".join(namespaces), class_hierarchy, name_scopes
 
 
+_SAFE_ONNX_NODE_NAME_COMPONENT = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
+def _get_semantic_onnx_node_name(
+    name_scopes: Sequence[str], original_name: str
+) -> str:
+    """Create a readable ONNX node name from an FX node's module scopes.
+
+    The final scope is the FX node name. The preceding scope is the deepest
+    owning module, so it carries the useful source location. Retaining the
+    generated node name as a suffix keeps names unique when one FX node lowers
+    to multiple ONNX nodes.
+    """
+    scopes = [scope for scope in name_scopes if scope]
+    if len(scopes) < 2 or not original_name:
+        return original_name
+
+    def sanitize(component: str) -> str:
+        return _SAFE_ONNX_NODE_NAME_COMPONENT.sub("_", component).strip("_")
+
+    module_path = "/".join(
+        component
+        for component in (sanitize(component) for component in scopes[-2].split("."))
+        if component
+    )
+    node_scope = sanitize(scopes[-1])
+    node_suffix = sanitize(original_name)
+    if not module_path or not node_scope or not node_suffix:
+        return original_name
+    return f"/{module_path}/{node_scope}__{node_suffix}"
+
+
 def _set_node_metadata(fx_node: torch.fx.Node, ir_node: ir.Node) -> None:
     """Adds namespace and other node metadata to the ONNX node."""
     namespace, class_hierarchy, name_scopes = _get_node_namespace(fx_node)
@@ -347,6 +380,8 @@ def _set_node_metadata(fx_node: torch.fx.Node, ir_node: ir.Node) -> None:
     ir_node.metadata_props["pkg.torch.onnx.stack_trace"] = fx_node.meta.get(
         "stack_trace", ""
     )
+    if fx_node.meta.get("nn_module_stack"):
+        ir_node.name = _get_semantic_onnx_node_name(name_scopes, ir_node.name)
 
 
 def _handle_getitem_node(
