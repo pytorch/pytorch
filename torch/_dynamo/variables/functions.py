@@ -442,6 +442,11 @@ class BaseUserFunctionVariable(VariableTracker):
             if args[0].is_constant_match("__annotations__"):
                 self.annotations = args[1]
                 return ConstantVariable.create(None)
+            if args[0].is_constant_match("__closure__"):
+                member = self.lookup_tp_getset_member("__closure__")
+                if member is not None:
+                    result = member.setter(self, tx, args[1])
+                    return ConstantVariable.create(None) if result is None else result
             return self.get_dict_vt(tx).call_method(
                 tx, "__setitem__", list(args), kwargs
             )
@@ -449,6 +454,11 @@ class BaseUserFunctionVariable(VariableTracker):
             if args[0].is_constant_match("__annotations__"):
                 self.annotations = None
                 return ConstantVariable.create(None)
+            if args[0].is_constant_match("__closure__"):
+                member = self.lookup_tp_getset_member("__closure__")
+                if member is not None:
+                    result = member.setter(self, tx, None)
+                    return ConstantVariable.create(None) if result is None else result
             return self.get_dict_vt(tx).call_method(tx, "__delitem__", list(args), {})
         return super().call_method(tx, name, list(args), kwargs)
 
