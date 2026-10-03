@@ -1118,6 +1118,7 @@ class ExternKernelOutLine(WrapperLine):
             device,
             self.node.get_stack_traces(),
             profiling_args=profiling_args,
+            tunable_dyn_dims_mask=node.tunable_dyn_dims_mask,
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -2927,9 +2928,11 @@ class PythonWrapperCodegen(CodeGen):
         device: str,
         stack_traces: OrderedSet[str] | None = None,
         profiling_args: Sequence[str | None] | None = None,
+        tunable_dyn_dims_mask: tuple[bool, bool, bool, bool] | None = None,
     ) -> None:
         # profiling_args is consumed only by the CppWrapperCpu override (to
         # record profiling metadata); the Python wrapper ignores it.
+        # tunable_dyn_dims_mask is consumed only by the GPU C++ wrapper.
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(args, kernel, None, None, "extern")

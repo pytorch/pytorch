@@ -611,6 +611,22 @@ aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
+struct CUDATunableOpDynamicDimsGuardOpaque;
+using CUDATunableOpDynamicDimsGuardHandle =
+    CUDATunableOpDynamicDimsGuardOpaque*;
+
+// Returns a new reference, or nullptr when TunableOp tuning is inactive.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_create_cuda_tunableop_dynamic_dims_guard(
+    uint8_t dynamic_dims_mask,
+    CUDATunableOpDynamicDimsGuardHandle* ret_guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_cuda_tunableop_dynamic_dims_guard(
+    CUDATunableOpDynamicDimsGuardHandle guard);
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_15_0
+
 // CUDA memory allocation using CUDACachingAllocator
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_caching_allocator_raw_alloc(
     uint64_t nbytes,
