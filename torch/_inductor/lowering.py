@@ -5266,9 +5266,16 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
 
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
-    if reduce not in (None, "sum", "prod", "mean", "amax", "amin"):
+    """Lower scatter_reduce_ to an ir.Scatter that mutates ``self`` in place.
+
+    Only reductions with a backend atomic (``"sum"``) or no reduction at all
+    (``None``, ``"none"``, ``"last"``) are codegen'd here; ``use_scatter_fallback``
+    sends everything else to the ATen kernel. ``include_self=False`` is handled by
+    emitting a separate Scatter that zeroes the indexed positions first.
+    """
+    if reduce not in (None, "sum", "prod", "mean", "amax", "amin", "none", "last"):
         raise AssertionError(
-            'expected: reduce in (None, "sum", "prod", "mean", "amax", "amin")'
+            'expected: reduce in (None, "sum", "prod", "mean", "amax", "amin", "none", "last")'
         )
     if not (
         len(aten.scatter_reduce_.overloads()) == 1
@@ -5340,11 +5347,10 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     def backend_reduce_str(reduce):
         if reduce == "sum":
             return "atomic_add"
-        else:
-            # TODO: Need to support more reduction type
-            if reduce is not None:
-                raise AssertionError("expected: reduce is None")
-            return None
+        # TODO: Need to support more reduction type
+        if reduce not in (None, "none", "last"):
+            raise AssertionError('expected: reduce in (None, "none", "last")')
+        return None
 
     device = self.get_device()
     if device is None:

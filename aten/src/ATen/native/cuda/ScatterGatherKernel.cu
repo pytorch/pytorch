@@ -722,6 +722,10 @@ void scatter_reduce_two_cuda_kernel(const Tensor& self, const int64_t dim, const
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
             "scatter_reduce_cuda_mean_", reduce_mean);
     break;
+  case ReductionType::NONE :
+    cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
+            "scatter_reduce_cuda_none_", tensor_assign);
+    break;
   }
 }
 
