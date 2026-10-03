@@ -21,7 +21,7 @@ from torch._functorch.vmap import (
     wrap_batched,
 )
 from torch._ops import HigherOrderOperator
-from torch.autograd.forward_ad import _set_fwd_grad_enabled
+from torch.autograd.forward_ad import _set_fwd_grad_enabled, unpack_dual
 
 
 if TYPE_CHECKING:
@@ -152,8 +152,13 @@ def generate_single_level_function(
 
     # jvp is only used if the transform is TransformType.Jvp
     def jvp(ctx: Any, *tangents: Any) -> Any:
-        result = autograd_function.jvp(ctx, *tangents)
-        return result
+        # Only exclude the current level when differentiating the JVP rule.
+        saved_tensors = pytree.tree_map_only(
+            torch.Tensor, lambda x: unpack_dual(x).primal, ctx.saved_tensors
+        )
+        wrapped_ctx = CtxWithSavedTensors(ctx, saved_tensors)
+        with _set_fwd_grad_enabled(True):
+            return autograd_function.jvp(wrapped_ctx, *tangents)
 
     # This is the sequence of magic words to dynamically generate a Subclass with
     # a given name. A Tensor's .grad_fn field has a class name that is the original
