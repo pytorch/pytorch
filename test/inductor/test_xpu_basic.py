@@ -2,8 +2,11 @@
 import importlib
 import os
 import sys
+import unittest
 
 import torch
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 importlib.import_module("filelock")
@@ -22,33 +25,44 @@ from inductor.test_torchinductor import (  # @manual=fbcode//caffe2/test/inducto
 # Will remove this file when pass full test in test/inductor/*.
 
 
+@unittest.skipUnless(torch.xpu.is_available(), "requires XPU")
 class XpuBasicTests(TestCase):
+    hw_classification = HardwareClassification.XPU
+
     common = check_model_gpu
     device = "xpu"
 
-    def test_add(self):
+    def test_add(self, device):
         def fn(a, b):
             return a + b
 
         self.common(fn, (torch.rand(2, 3, 16, 16), torch.rand(2, 3, 16, 16)))
 
-    def test_sub(self):
+    def test_sub(self, device):
         def fn(a, b):
             return a - b
 
         self.common(fn, (torch.rand(2, 3, 16, 16), torch.rand(2, 3, 16, 16)))
 
-    def test_mul(self):
+    def test_mul(self, device):
         def fn(a, b):
             return a * b
 
         self.common(fn, (torch.rand(2, 3, 16, 16), torch.rand(2, 3, 16, 16)))
 
-    def test_div(self):
+    def test_div(self, device):
         def fn(a, b):
             return a / b
 
         self.common(fn, (torch.rand(2, 3, 16, 16), torch.rand(2, 3, 16, 16)))
+
+
+instantiate_device_type_tests(
+    XpuBasicTests,
+    globals(),
+    only_for=("xpu",),
+    allow_xpu=True,
+)
 
 
 if __name__ == "__main__":
