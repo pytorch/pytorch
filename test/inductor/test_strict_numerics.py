@@ -803,8 +803,6 @@ POINTWISE_XFAIL = frozenset(
         ("neg", "bfloat16"),
         ("neg", "float16"),
         ("neg", "float32"),
-        ("nextafter", "bfloat16"),
-        ("nextafter", "float16"),
         ("nn_functional_gelu", "float32"),
         ("nn_functional_hardtanh", "bfloat16"),
         ("nn_functional_hardtanh", "float16"),

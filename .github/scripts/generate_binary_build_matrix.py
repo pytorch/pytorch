@@ -25,7 +25,10 @@ REPO_ROOT = SCRIPT_DIR.parent.parent
 
 
 CUDA_ARCHES = ["13.0", "13.2", "13.4"]
-CUDA_STABLE = "13.0"
+CUDA_STABLE = "13.2"
+# CUDA versions built for Linux only. 13.0 is held on nightly for vLLM's cu130
+# lane (pytorch/test-infra#8989); nothing consumes a Windows cu130 nightly.
+CUDA_ARCHES_NO_WINDOWS = ["13.0"]
 # Only consumed by generate_docker_release_matrix.py, whose Dockerfile installs
 # an already-published torch nightly. A CUDA version belongs here only once its
 # wheels are on the download.pytorch.org index.
@@ -78,7 +81,10 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-nvshmem-cu13==3.7.2; platform_system == 'Linux'"
     ),
     "13.4": (
-        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusolver,cusparse,cublas,cufile,nvjitlink,nvtx]==13.4.1; platform_system == 'Linux' | "
+        # The toolkit's cublas and cusolver extras both pin cuBLAS to 13.7.0.27.
+        "cuda-toolkit[nvrtc,cudart,cupti,cufft,cusparse,cufile,nvjitlink,nvtx]==13.4.1; platform_system == 'Linux' | "
+        "nvidia-cublas>=13.7.0.27,<=13.8.1.7; platform_system == 'Linux' | "
+        "nvidia-cusolver==12.3.2.15; platform_system == 'Linux' | "
         "cuda-bindings>=13.0.3,<14; platform_system == 'Linux' and python_version < '3.15' | "
         "cupti-python==13.4.0; platform_system == 'Linux' and python_version < '3.15' | "
         "nvidia-cudnn-cu13==9.26.0.51; platform_system == 'Linux' | "
@@ -404,7 +410,9 @@ def generate_wheels_matrix(
         if os == "linux":
             arches += CUDA_ARCHES + ROCM_ARCHES + XPU_ARCHES
         elif os == "windows":
-            arches += CUDA_ARCHES + XPU_ARCHES
+            arches += [
+                c for c in CUDA_ARCHES if c not in CUDA_ARCHES_NO_WINDOWS
+            ] + XPU_ARCHES
         elif os == "linux-aarch64":
             # Separate new if as the CPU type is different and
             # uses different build/test scripts
