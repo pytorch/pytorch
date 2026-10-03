@@ -3668,6 +3668,43 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         y = torch.randn(10)
         self.assertTrue(same(f(y), ReLUSquaredActivation()(y + 0.2) + 1))
 
+    @parametrize("alias", ["contiguous", "to_dtype", "to_device", "type", "mul_"])
+    @parametrize("call", ["method", "function"])
+    def test_inplace_view_on_noop_alias_of_input(self, alias, call):
+        # Each alias is x itself, so the in-place view must graph break like x.unsqueeze_(0).
+        make_alias = {
+            "contiguous": lambda x: x.contiguous(),
+            "to_dtype": lambda x: x.to(x.dtype),
+            "to_device": lambda x: x.to(x.device),
+            "type": lambda x: x.type(x.dtype),
+            "mul_": lambda x: x.mul_(1),
+        }[alias]
+
+        def fn(x):
+            v = make_alias(x)
+            if call == "method":
+                v.unsqueeze_(0)
+            else:
+                torch.Tensor.unsqueeze_(v, 0)
+            return x
+
+        x = torch.arange(24).reshape(4, 6)
+        # fullgraph first: a failed compile caches nothing, so the next call traces again.
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "inplace view"):
+            torch.compile(fn, backend="eager", fullgraph=True)(x.clone())
+        ref_x, opt_x = x.clone(), x.clone()
+        self.assertEqual(torch.compile(fn, backend="eager")(opt_x), fn(ref_x))
+        self.assertEqual(opt_x.shape, ref_x.shape)
+
+    def test_inplace_view_on_copy_of_input(self):
+        def fn(x):
+            v = x.clone()
+            v.unsqueeze_(0)
+            return v
+
+        x = torch.arange(24).reshape(4, 6)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
     def test_inplace_unsqueeze_input(self):
         def backend(gm, example_inputs):
             tensor_inputs = [x for x in example_inputs if isinstance(x, torch.Tensor)]
