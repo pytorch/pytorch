@@ -5196,6 +5196,26 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         x = torch.randn(4)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_builtin_class_mro(self):
+        def fn():
+            return int.mro(), bool.mro(), float.mro()
+
+        def invalid_calls():
+            errors = []
+            for call in (lambda: int.mro(1), lambda: int.mro(x=1)):
+                try:
+                    call()
+                except TypeError as exc:
+                    errors.append(str(exc))
+            return errors
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(), fn())
+        opt_invalid_calls = torch.compile(
+            invalid_calls, backend="eager", fullgraph=True
+        )
+        self.assertEqual(opt_invalid_calls(), invalid_calls())
+
     def test_class_duner_mro(self):
         class ModuleA(torch.nn.Module):
             pass

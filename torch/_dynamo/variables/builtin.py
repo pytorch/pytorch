@@ -1976,6 +1976,16 @@ class BuiltinVariable(BaseBuiltinVariable):
                         args=list(e.args),
                     )
 
+        if name == "mro" and type(self.fn) is type and self.fn is not type:
+            cls_name = self.fn.__name__
+            if kwargs:
+                raise_type_error(tx, f"{cls_name}.mro() takes no keyword arguments")
+            if args:
+                raise_type_error(
+                    tx, f"{cls_name}.mro() takes no arguments ({len(args)} given)"
+                )
+            return VariableTracker.build(tx, self.fn.mro())
+
         if self.fn is object and name == "__init__":
             # object.__init__ is a no-op
             return variables.ConstantVariable.create(None)
