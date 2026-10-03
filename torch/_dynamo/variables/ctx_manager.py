@@ -25,7 +25,7 @@ import types
 import warnings
 from collections.abc import Callable, Sequence, Sized
 from contextlib import AbstractContextManager, ExitStack
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import torch._C
 from torch._dynamo import config
@@ -587,7 +587,25 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
         }
         ctx_val = warnings.catch_warnings(**kwargs)
         self.set_cleanup_hook(tx, lambda: ctx_val.__exit__(None, None, None))
-        return variables.VariableTracker.build(tx, ctx_val.__enter__())
+        entered = ctx_val.__enter__()
+        if kwargs.get("record", False):
+            from .lists import WarningRecordListVariable
+
+            return WarningRecordListVariable(cast(list[Any], entered))
+        return variables.VariableTracker.build(tx, entered)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "__enter__" and not args and not kwargs:
+            return self.enter(tx)
+        if name == "__exit__" and len(args) == 3 and not kwargs:
+            return self.exit(tx, *args)
+        return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
