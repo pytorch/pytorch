@@ -1419,13 +1419,15 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   }
   bool inner_strided =
       is_applicable && inner_strided_size && !inner_contiguous && (cast_needed || inner_local) && iter.shape()[0] >= 8;
-  if (auto force = c10::utils::get_env("PYTORCH_BINARY_FORCE_FLAVOR")) {
-    const auto& flavor = *force;
-    if (flavor == "scalar" || flavor == "strided" || flavor == "ilp" || flavor == "inner_contiguous" ||
-        flavor == "inner_strided") {
-      dense_ilp = flavor == "ilp" && ilp_applicable;
-      inner_contiguous = flavor == "inner_contiguous" && ic_applicable;
-      inner_strided = flavor == "inner_strided" && is_applicable;
+  if (ilp_applicable || ic_applicable || is_applicable) {
+    if (auto force = c10::utils::get_env("PYTORCH_BINARY_FORCE_FLAVOR")) {
+      const auto& flavor = *force;
+      if (flavor == "scalar" || flavor == "strided" || flavor == "ilp" || flavor == "inner_contiguous" ||
+          flavor == "inner_strided") {
+        dense_ilp = flavor == "ilp" && ilp_applicable;
+        inner_contiguous = flavor == "inner_contiguous" && ic_applicable;
+        inner_strided = flavor == "inner_strided" && is_applicable;
+      }
     }
   }
 
