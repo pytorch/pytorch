@@ -451,13 +451,14 @@ class AOTInductorTestsTemplate:
             example_inputs = (torch.randn(8, 8, device=self.device),)
             self.check_model(Model(), example_inputs)
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5483")
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     def test_loaded_modules_tracking(self, embed_kernel_binary):
         # Verify that AOTI codegen on CUDA/HIP passes &kernels_.loaded_modules_
         # to loadKernel so CUmodule handles are tracked and unloaded on
         # destruction, preventing GPU code object leaks.
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA/HIP")
+        if self.device not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("requires CUDA/HIP/XPU")
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -4356,8 +4357,8 @@ class AOTInductorTestsTemplate:
 
     @skipIfRocmArch(NAVI_ARCH)  # regression on ROCm 7.2
     def test_repeated_calling(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
+        if self.device not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("requires CUDA/XPU")
 
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -4376,13 +4377,13 @@ class AOTInductorTestsTemplate:
 
         # Warm up to trigger any one-time allocations
         result = optimized(*example_inputs)
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
-        mem_before = torch.cuda.memory_allocated()
+        mem_before = torch.accelerator.memory_allocated()
         for _ in range(10):
             result = optimized(*example_inputs)
-        torch.cuda.synchronize()
-        mem_after = torch.cuda.memory_allocated()
+        torch.accelerator.synchronize()
+        mem_after = torch.accelerator.memory_allocated()
 
         self.assertEqual(result, expected)
         self.assertEqual(mem_before, mem_after)
@@ -6207,8 +6208,8 @@ class AOTInductorTestsTemplate:
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_checks_fp8(self):
-        # cuda only
-        if self.device != "cuda":
+        # cuda/xpu only
+        if self.device not in ["cuda", "xpu"]:
             return
 
         class Model(torch.nn.Module):
@@ -8532,7 +8533,7 @@ class AOTInductorTestsTemplate:
         with torch.profiler.profile(
             activities=[
                 torch.profiler.ProfilerActivity.CPU,
-                torch.profiler.ProfilerActivity.CUDA,
+                getattr(torch.profiler.ProfilerActivity, GPU_TYPE.upper()),
             ],
         ) as prof:
             true_res = aoti_model(input_tensor)
@@ -8543,8 +8544,8 @@ class AOTInductorTestsTemplate:
 
     @requires_multigpu()
     def test_cuda_to_cuda_device_copy(self):
-        if self.device != GPU_TYPE or GPU_TYPE != "cuda":
-            raise unittest.SkipTest("This test requires CUDA")
+        if self.device != GPU_TYPE or GPU_TYPE not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("This test requires CUDA or XPU")
 
         device0 = torch.device(type=GPU_TYPE, index=0)
         device1 = torch.device(type=GPU_TYPE, index=1)
@@ -9178,6 +9179,7 @@ class AOTInductorTestsTemplate:
         for name, tensor in replacement_weights.items():
             self.assertEqual(tensor._use_count(), replacement_use_counts[name])
 
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5484")
     def test_update_user_managed_buffer(self):
         if self.device not in ["cuda", "xpu"]:
             raise unittest.SkipTest("requires CUDA/XPU")
