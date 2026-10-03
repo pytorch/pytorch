@@ -418,6 +418,26 @@ class DeviceTypeTestBase(TestCase):
     #   ignored for now.
     test_exclusions: ClassVar[dict[str, Any] | None] = None
 
+    # An optional mechanism to override the memory footprint declared by
+    # @largeTensorTest for specific test methods within a class.
+    #
+    # Format:
+    #
+    #   test_size_overrides = {
+    #       "TestClassA": {
+    #           "test_a": 2**35,
+    #           "test_b": "32 GB",
+    #       },
+    #   }
+    #
+    # Values are a number of bytes or a string of the form "N GB".
+    #
+    # Note:
+    #   Overrides take precedence over the size declared by @largeTensorTest,
+    #   but apply only to checks for the test class's own device type, not to
+    #   a stacked @largeTensorTest(..., device="cpu") on an accelerator class.
+    test_size_overrides: ClassVar[dict[str, Any] | None] = None
+
     # Returns the capability map used by @requires_capabilities.
     # Subclasses (CPUTestBase, CUDATestBase, etc.) override _capabilities() to
     # declare supported capabilities. This method evaluates the support checks.
@@ -499,6 +519,19 @@ class DeviceTypeTestBase(TestCase):
         return dist.get_default_backend_for_device(cls.device_type)
 
     @classmethod
+    def has_sufficient_memory(cls, size: int) -> bool:
+        """
+        Returns True if there is sufficient memory available for the given size.
+
+        Device-specific test bases should override this to support
+        memory-aware tests. The default implementation raises an error
+        for device types that do not implement this hook.
+        """
+        raise NotImplementedError(
+            f"{cls.__name__}.has_sufficient_memory() is not implemented"
+        )
+
+    @classmethod
     def _get_test_exclusions(cls, test_class_name):
         test_exclusions = getattr(cls, "test_exclusions", None)
         if test_exclusions is not None and test_class_name in test_exclusions:
@@ -552,6 +585,17 @@ class DeviceTypeTestBase(TestCase):
         if dtype_variant is None:
             return _check_method()
         return _check_dtype()
+
+    @classmethod
+    def _get_test_size_override(cls, test_class_name, test_name):
+        """Returns the test size override for a given test method, or None."""
+        size_overrides = getattr(cls, "test_size_overrides", None)
+        if not size_overrides or test_class_name not in size_overrides:
+            return None
+        class_overrides = size_overrides[test_class_name]
+        if not isinstance(class_overrides, Mapping):
+            return None
+        return class_overrides.get(test_name)
 
     @classmethod
     def _apply_op_allowlist(cls, ops):
@@ -628,6 +672,7 @@ class DeviceTypeTestBase(TestCase):
         op_overrides=None,
         op_allowlist=None,
         test_exclusions=None,
+        test_size_overrides=None,
     ):
         """
         Sets or resets the test configuration fields.
@@ -640,10 +685,19 @@ class DeviceTypeTestBase(TestCase):
         cls.op_overrides = op_overrides
         cls.op_allowlist = op_allowlist
         cls.test_exclusions = test_exclusions
+        cls.test_size_overrides = test_size_overrides
 
     # Creates device-specific tests.
     @classmethod
     def instantiate_test(cls, name, test, *, generic_cls=None):
+        # Resolve the size override using the generic test name before
+        # device/dtype suffixes are added.
+        size_override = (
+            cls._get_test_size_override(generic_cls.__name__, name)
+            if generic_cls is not None
+            else None
+        )
+
         def instantiate_test_helper(
             cls, name, *, test, param_kwargs=None, decorator_fn=lambda _: []
         ):
@@ -668,6 +722,7 @@ class DeviceTypeTestBase(TestCase):
                 guard_precision = self.precision
                 guard_rel_tol = self.rel_tol
                 try:
+                    self._test_size_override = size_override
                     self._apply_precision_override_for_test(test, param_kwargs)
                     result = test(self, **param_kwargs)
                 except RuntimeError as rte:
@@ -782,6 +837,24 @@ class DeviceTypeTestBase(TestCase):
 class CPUTestBase(DeviceTypeTestBase):
     device_type = "cpu"
 
+    @classmethod
+    def has_sufficient_memory(cls, size: int) -> bool:
+        if not HAS_PSUTIL:
+            raise RuntimeError("Need psutil to query available system memory")
+
+        # The sanitizers have significant memory overheads
+        if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
+            size *= 10
+
+        # don't try using all RAM on s390x, leave some for service processes
+        if IS_S390X:
+            size *= 2
+
+        available = psutil.virtual_memory().available
+        if available < size:
+            gc.collect()
+        return psutil.virtual_memory().available >= size
+
     # No critical error should stop CPU test suite
     def _should_stop_test_suite(self):
         return False
@@ -843,6 +916,22 @@ class CUDATestBase(DeviceTypeTestBase):
         return [prim_device] + non_primary_devices
 
     @classmethod
+    def has_sufficient_memory(cls, size: int) -> bool:
+        device = torch.cuda.current_device()
+        available = int(
+            torch.cuda.memory.mem_get_info(device)[0]
+            * torch.cuda.memory.get_per_process_memory_fraction(device)
+        )
+        if available < size:
+            gc.collect()
+            torch.cuda.empty_cache()
+            available = int(
+                torch.cuda.memory.mem_get_info(device)[0]
+                * torch.cuda.memory.get_per_process_memory_fraction(device)
+            )
+        return available >= size
+
+    @classmethod
     def setUpClass(cls):
         # has_magma shows up after cuda is initialized
         t = torch.ones(1).cuda()
@@ -892,6 +981,22 @@ class MPSTestBase(DeviceTypeTestBase):
         # currently only one device is supported on MPS backend
         prim_device = cls.get_primary_device()
         return [prim_device]
+
+    @classmethod
+    def has_sufficient_memory(cls, size: int) -> bool:
+        if not HAS_PSUTIL:
+            raise RuntimeError("Need psutil to query available system memory")
+        if TEST_WITH_ASAN or TEST_WITH_TSAN or TEST_WITH_UBSAN:
+            size *= 10
+        if IS_S390X:
+            size *= 2
+        available = psutil.virtual_memory().available
+        if available < size:
+            gc.collect()
+            # Sync and cleanup MPS memory before checking available memory
+            torch.mps.synchronize()
+            torch.mps.empty_cache()
+        return psutil.virtual_memory().available >= size
 
     @classmethod
     def setUpClass(cls):
@@ -945,6 +1050,16 @@ class XPUTestBase(DeviceTypeTestBase):
             if idx != primary_device_idx
         ]
         return [prim_device] + non_primary_devices
+
+    @classmethod
+    def has_sufficient_memory(cls, size: int) -> bool:
+        device = torch.xpu.current_device()
+        available = torch.xpu.memory.mem_get_info(device)[0]
+        if available < size:
+            gc.collect()
+            torch.xpu.empty_cache()
+            available = torch.xpu.memory.mem_get_info(device)[0]
+        return available >= size
 
     @classmethod
     def setUpClass(cls):
@@ -1906,11 +2021,42 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
             size_bytes: int = size(self, *args, **kwargs) if callable(size) else size
             _device = _test_device(self, device)
 
+            # Several @largeTensorTest decorators stacked on one test method each
+            # run this check:
+            #   - cpu + accelerator: the cpu check uses the generic helper, the
+            #     accelerator check uses this class's hook.
+            #   - two accelerators: the one that is not the current accelerator
+            #     also uses the generic helper, which returns True by itself for
+            #     a device that is not the current accelerator.
+            same_device_type = torch.device(_device).type == getattr(
+                self, "device_type", ""
+            )
+            if same_device_type:
+                # A test base may override the footprint its own device type needs
+                # (see test_size_overrides); a check for another device type keeps
+                # the size declared by its decorator.
+                override = getattr(self, "_test_size_override", None)
+                if override is not None:
+                    size_bytes = _parse_size(override)
+
             # If this is running with GPU cpp_wrapper, the autotuning step will generate
             # an additional array of the same size as the input.
             if inductor and torch._inductor.config.cpp_wrapper and _device != "cpu":
                 size_bytes *= 2
-            if not _has_sufficient_memory(_device, size_bytes):
+
+            if same_device_type:
+                # Class hook first (e.g. CUDATestBase.has_sufficient_memory),
+                # falling back to the generic helper.
+                check_fn = getattr(self, "has_sufficient_memory", None)
+                if callable(check_fn):
+                    ok = check_fn(size_bytes)
+                else:
+                    ok = _has_sufficient_memory(_device, size_bytes)
+            else:
+                # Another device type (e.g. device="cpu" on a CUDA test class),
+                # so only the generic helper applies.
+                ok = _has_sufficient_memory(_device, size_bytes)
+            if not ok:
                 raise unittest.SkipTest(f"Insufficient {_device} memory")
 
             return fn(self, *args, **kwargs)
