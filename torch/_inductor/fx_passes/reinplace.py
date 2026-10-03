@@ -630,6 +630,41 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 return True
         return False
 
+    def _may_reinplace_into(user, arg):
+        # Whether the loop below may turn user into an op that mutates arg.
+        if (inplaceable_op := inplaceable_ops.get(user.target)) is not None:
+            return any(
+                i < len(user.args) and user.args[i] is arg
+                for i in inplaceable_op.mutated_args
+            )
+        if user.target in inplaceable_foreach_ops:
+            return arg in user.args[0]
+        if user.target in inplaceable_triton_ops:
+            return arg in user.kwargs["kwargs"].values()
+        if user.target is torch.ops.higher_order.auto_functionalized_v2:
+            return arg in user.kwargs["_all_bases"]
+        if user.target is torch.ops.higher_order.auto_functionalized:
+            return arg in user.kwargs.values()
+        return False
+
+    def _aliases_of_result(node):
+        # The values that share node's buffer once node is reinplaced: node
+        # itself, its views and getitem outputs, and the results of later ops
+        # that may in turn be reinplaced into one of those.
+        aliases = OrderedSet([node])
+        worklist = [node]
+        while worklist:
+            n = worklist.pop()
+            for user in n.users:
+                if user not in aliases and (
+                    user.target is operator.getitem
+                    or _is_view_op(user.target)
+                    or _may_reinplace_into(user, n)
+                ):
+                    aliases.add(user)
+                    worklist.append(user)
+        return aliases
+
     def can_inplace(node, mutated_arg):
         # ls should be a list of tensors that all shares the same storage.
         def _overlap(ls) -> bool:
@@ -674,6 +709,22 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 return False
             if any_use_of_views_after_node(
                 node, shared_view_nodes, copy_node=copy_node, mutated_arg=mutated_arg
+            ):
+                return False
+
+            # If the copy_ epilogue writes something *other* than this node's
+            # result back into the input, the input buffer is overwritten by an
+            # unrelated value after this op. Reinplacing into the input is then
+            # only safe if nothing that would share the input's buffer (see
+            # _aliases_of_result) is used after that copy_, e.g. as an output:
+            #     y = torch.slice_scatter(x, src, ...)   # would be reinplaced into x
+            #     x.zero_()                               # copy_(x, zeros) epilogue
+            #     return y                                # must not see the zeros
+            aliases = _aliases_of_result(node)
+            if copy_node.args[1] not in aliases and any(
+                node_order[user] > node_order[copy_node]
+                for alias in aliases
+                for user in alias.users
             ):
                 return False
 
