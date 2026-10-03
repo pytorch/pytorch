@@ -25,28 +25,29 @@ struct integer_iterator {
   using pointer = I*;
   using reference = I&;
 
-  explicit constexpr integer_iterator(I val) : value(val) {}
+  C10_ALWAYS_INLINE explicit constexpr integer_iterator(I val) : value(val) {}
 
-  constexpr I operator*() const {
+  C10_ALWAYS_INLINE constexpr I operator*() const {
     return value;
   }
 
-  constexpr I const* operator->() const {
+  C10_ALWAYS_INLINE constexpr I const* operator->() const {
     return &value;
   }
 
-  constexpr integer_iterator& operator++() {
+  C10_ALWAYS_INLINE constexpr integer_iterator& operator++() {
     ++value;
     return *this;
   }
 
-  constexpr integer_iterator operator++(int) {
+  C10_ALWAYS_INLINE constexpr integer_iterator operator++(int) {
     const auto copy = *this;
     ++*this;
     return copy;
   }
 
-  constexpr bool operator==(const integer_iterator& other) const {
+  C10_ALWAYS_INLINE constexpr bool operator==(
+      const integer_iterator& other) const {
     if constexpr (one_sided) {
       // Range-for loops' end test is `begin != end`, not `begin <
       // end`. To handle `irange(n)` where n < 0 (which should be
@@ -65,7 +66,8 @@ struct integer_iterator {
     return false; // Horrible hack
   }
 
-  constexpr bool operator!=(const integer_iterator& other) const {
+  C10_ALWAYS_INLINE constexpr bool operator!=(
+      const integer_iterator& other) const {
     return !(*this == other);
   }
 
@@ -81,12 +83,13 @@ template <
     std::enable_if_t<std::is_integral_v<I>, bool> = true>
 struct integer_range {
  public:
-  constexpr integer_range(I begin, I end) : begin_(begin), end_(end) {}
+  C10_ALWAYS_INLINE constexpr integer_range(I begin, I end)
+      : begin_(begin), end_(end) {}
   using iterator = detail::integer_iterator<I, one_sided>;
-  constexpr iterator begin() const {
+  C10_ALWAYS_INLINE constexpr iterator begin() const {
     return begin_;
   }
-  constexpr iterator end() const {
+  C10_ALWAYS_INLINE constexpr iterator end() const {
     return end_;
   }
 
@@ -104,7 +107,9 @@ template <
     typename Integer2,
     std::enable_if_t<std::is_integral_v<Integer1>, bool> = true,
     std::enable_if_t<std::is_integral_v<Integer2>, bool> = true>
-constexpr integer_range<Integer2> irange(Integer1 begin, Integer2 end) {
+C10_ALWAYS_INLINE constexpr integer_range<Integer2> irange(
+    Integer1 begin,
+    Integer2 end) {
   // If end<=begin then the range is empty; we can achieve this effect by
   // choosing the larger of {begin, end} as the loop terminator
   return {
@@ -117,7 +122,7 @@ constexpr integer_range<Integer2> irange(Integer1 begin, Integer2 end) {
 template <
     typename Integer,
     std::enable_if_t<std::is_integral_v<Integer>, bool> = true>
-constexpr integer_range<Integer, true> irange(Integer end) {
+C10_ALWAYS_INLINE constexpr integer_range<Integer, true> irange(Integer end) {
   return {Integer(), end};
 }
 

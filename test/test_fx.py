@@ -77,6 +77,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_ARM64,
     IS_LINUX,
+    IS_CPU_CAPABILITY_SVE256,
     IS_WINDOWS,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
@@ -734,6 +735,30 @@ class TestFX(JitTestCase):
         m = symbolic_trace(to_trace)
         self.assertIn("wrapped_decorated_fn", m.code)
         self.assertEqual(m(1), 1)
+
+    def test_wrap_does_not_keep_caller_frames_alive(self):
+        # A module can be imported lazily from deep inside a running op; wrap()
+        # must not form a frame cycle that pins that stack until the next gc.
+        class Sentinel:
+            pass
+
+        module_globals = {"wrap": wrap}
+
+        def import_module_from_caller():
+            sentinel = Sentinel()
+            exec("wrap('_wrap_frame_leak_target')", module_globals)
+            return weakref.ref(sentinel)
+
+        gc.collect()
+        gc.disable()
+        try:
+            sentinel_ref = import_module_from_caller()
+            self.assertIsNone(sentinel_ref())
+        finally:
+            gc.enable()
+            torch.fx._symbolic_trace._wrapped_fns_to_patch.pop(
+                (id(module_globals), "_wrap_frame_leak_target"), None
+            )
 
     def test_graph_edit_with_proxy(self):
         class M(torch.nn.Module):
@@ -2264,8 +2289,7 @@ def forward(self, x : _torch_Tensor_) -> _torch_Tensor_:
                         f"Expected tensor_meta[1].shape == torch.Size([]), "
                         f"got {tensor_meta[1].shape}"
                     )
-
-    @xfailIf(IS_ARM64 and IS_LINUX) # RuntimeError: label is too far
+    @xfailIf(IS_ARM64 and IS_LINUX and IS_CPU_CAPABILITY_SVE256) # RuntimeError: label is too far
     def test_shape_prop_layout_3d(self):
         class ConvTest3d(torch.nn.Module):
             def __init__(self) -> None:
