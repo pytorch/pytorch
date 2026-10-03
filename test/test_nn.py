@@ -10284,6 +10284,98 @@ class TestNNDeviceType(NNTestCase):
                         self.assertEqual(grad_input, ref_grad_input)
                         self.assertEqual(input.grad, ref_input.grad)
 
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_softmax_backward_low_precision_accumulation(self, device, dtype):
+        output = torch.tensor([[1023 / 1024, 1 / 1024]], dtype=dtype)
+        grad = torch.tensor([[14, -1.5]], dtype=dtype)
+        output_ref, grad_ref = output.double(), grad.double()
+        expected = (output_ref * (grad_ref - (output_ref * grad_ref).sum(-1, keepdim=True))).to(dtype)
+        actual = torch.ops.aten._softmax_backward_data(grad.to(device), output.to(device), -1, dtype)
+        self.assertEqual(actual.cpu(), expected, atol=0, rtol=0)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize_test("shape,dim", [((3, 33), -1), ((3, 4097), -1)])
+    @parametrize_test("offset", [1, 3])
+    @parametrize_test("layout", ["contiguous", "strided"])
+    def test_softmax_backward_offset_inputs(self, device, dtype, shape, dim, offset, layout):
+        cpu_output = torch.zeros(shape, dtype=dtype)
+        cpu_output.narrow(dim, 0, 2).fill_(0.5)
+        count = cpu_output.numel()
+        cpu_grad = torch.arange(count).reshape(shape).remainder(7).sub(3).to(dtype)
+        expected = torch.ops.aten._softmax_backward_data(
+            cpu_grad.float(), cpu_output.float(), dim, torch.float32).to(dtype)
+        for operand in (0, 1):
+            with self.subTest(offset_operand=operand):
+                inputs = []
+                for index, value in enumerate((cpu_grad, cpu_output)):
+                    if index == operand:
+                        step = 1 if layout == "contiguous" else 2
+                        storage = torch.full((count * step + offset + 1,), 99, dtype=dtype)
+                        storage[offset:offset + count * step:step].copy_(value.reshape(-1))
+                        tensor = storage.to(device)[offset:offset + count * step:step].view(shape)
+                        self.assertEqual(tensor.is_contiguous(), layout == "contiguous")
+                        self.assertEqual(tensor.storage_offset(), offset)
+                    else:
+                        tensor = value.to(device)
+                    inputs.append(tensor)
+                actual = torch.ops.aten._softmax_backward_data(*inputs, dim, dtype)
+                self.assertEqual(actual.cpu(), expected, atol=0, rtol=0)
+                # A contiguous view preserves its offset through contiguous().
+                storage = torch.full((count + offset + 1,), 99, dtype=dtype, device=device)
+                target = storage[offset:offset + count].view(shape)
+                torch.ops.aten._softmax_backward_data.out(*inputs, dim, dtype, grad_input=target)
+                expected_storage = torch.full((count + offset + 1,), 99, dtype=dtype)
+                expected_storage[offset:offset + count].copy_(expected.reshape(-1))
+                self.assertEqual(storage.cpu(), expected_storage, atol=0, rtol=0)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize_test("width", [1, 31, 32, 33, 4095, 4096, 4097, 65536])
+    @parametrize_test("layout", ["contiguous", "transposed", "sliced", "broadcast"])
+    def test_softmax_backward_row_boundaries(self, device, dtype, width, layout):
+        output = torch.randn(3, width).softmax(-1).to(device=device, dtype=dtype)
+        grad = torch.randn_like(output)
+        if layout == "transposed":
+            grad = grad.t().contiguous().t()
+            output = output.t().contiguous().t()
+        elif layout == "sliced":
+            grad_storage = torch.randn(3, 2 * width + 1, device=device, dtype=dtype)
+            sliced_grad_cpu = grad_storage.cpu()[:, 1::2]
+            grad = grad_storage[:, 1::2]
+        elif layout == "broadcast":
+            grad = grad[:1].expand_as(output)
+        grad_cpu = sliced_grad_cpu if layout == "sliced" else grad.cpu()
+        expected = torch.ops.aten._softmax_backward_data(
+            grad_cpu.float(), output.cpu().float(), -1, torch.float32).to(dtype)
+        actual = torch.ops.aten._softmax_backward_data(grad, output, -1, dtype)
+        self.assertEqual(actual.cpu(), expected)
+        # Strided output exercises the MPS copy-back path.
+        grad_input = (torch.empty(width, 3, device=device, dtype=dtype).t()
+                      if self.device_type == "mps" else torch.empty_like(output, memory_format=torch.contiguous_format))
+        torch.ops.aten._softmax_backward_data.out(grad, output, -1, dtype, grad_input=grad_input)
+        self.assertEqual(grad_input.cpu(), expected)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize_test("shape, dim", [((), 0), ((0, 7), -1), ((2, 0), -1), ((65536, 2), -1)])
+    def test_softmax_backward_shapes(self, device, dtype, shape, dim):
+        output = torch.randn(shape).softmax(dim).to(device=device, dtype=dtype)
+        grad = torch.randn_like(output)
+        actual = torch.ops.aten._softmax_backward_data(grad, output, dim, dtype)
+        expected = torch.ops.aten._softmax_backward_data(grad.cpu(), output.cpu(), dim, dtype)
+        self.assertEqual(actual.cpu(), expected)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize_test("width", [33, 4097, 65536])
+    @parametrize_test("special", [float("nan"), float("inf"), -float("inf")])
+    def test_softmax_backward_nonfinite(self, device, dtype, width, special):
+        output = torch.randn(2, width).softmax(-1).to(device=device, dtype=dtype)
+        output[:, :width // 2] = 0
+        grad = torch.randn_like(output)
+        grad[0, 0] = special
+        expected = torch.ops.aten._softmax_backward_data(
+            grad.cpu().float(), output.cpu().float(), -1, torch.float32).to(dtype)
+        actual = torch.ops.aten._softmax_backward_data(grad, output, -1, dtype)
+        self.assertEqual(actual.cpu(), expected)
+
     @onlyAccelerator
     @dtypes(torch.half)
     def test_softmax_half_to_float_matches_half(self, device, dtype):
