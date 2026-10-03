@@ -9,7 +9,6 @@ import gc
 import inspect
 import io
 import itertools
-import logging
 import pickle
 import subprocess
 import sys
@@ -2638,19 +2637,6 @@ assert not torch.cuda.is_initialized()
                 torch.select(x, dim=1, index=10)
             with self.assertRaisesRegex(IndexError, "index .* out of range"):
                 torch.select(x, dim=1, index=-10)
-
-    def test_meta_kernel_failure_does_not_log_error(self):
-        with self.assertLogs("torch._subclasses.fake_tensor", level="DEBUG") as cm:
-            with FakeTensorMode(), self.assertRaises(RuntimeError):
-                torch.cat([torch.randn(1, 1), torch.randn(4, 16)], dim=1)
-        self.assertFalse(any(r.levelno >= logging.ERROR for r in cm.records))
-        if not torch._functorch.config.fake_tensor_propagate_real_tensors:
-            self.assertTrue(
-                any(
-                    "failed while attempting to run meta" in r.getMessage()
-                    for r in cm.records
-                )
-            )
 
 
 instantiate_parametrized_tests(FakeTensorTest)

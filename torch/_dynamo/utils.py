@@ -4445,7 +4445,7 @@ def _get_fake_value_impl(
                 hints=[*graph_break_hints.SUPPORTABLE],
                 from_exc=cause,
             )
-        msg = get_concrete_sizes_from_symints(str(e), fake_mode)
+        msg = get_concrete_sizes_from_symints(str(cause), fake_mode)
         from .exc import (
             FakeTensorObservedException,
             ObservedException,
