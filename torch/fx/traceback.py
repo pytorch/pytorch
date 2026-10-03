@@ -377,6 +377,19 @@ def _dynamo_region_activation_memory_budget(budget: float) -> Iterator[None]:
         yield
 
 
+@contextmanager
+def _dynamo_annotate(
+    annotation_items: tuple[tuple[str, Any], ...],
+) -> Iterator[None]:
+    """Re-enter ``annotate`` in code Dynamo generates to resume after a graph break.
+
+    The annotation is passed as a tuple of items so it can be embedded as a
+    bytecode constant.
+    """
+    with annotate(dict(annotation_items)), preserve_node_meta():
+        yield
+
+
 def _get_memory_budget_annotation(node: Node) -> float | None:
     """
     Read the ``region_activation_memory_budget`` annotation off an FX node,
@@ -545,6 +558,12 @@ def set_current_meta(node: Node, pass_name: str = "") -> Iterator[None]:
 @compatibility(is_backward_compatible=False)
 def get_current_meta() -> dict[str, Any]:
     return current_meta
+
+
+def _get_current_annotation() -> dict[str, Any] | None:
+    """Return a copy of the active ``annotate`` metadata, or None when empty."""
+    custom = current_meta.get("custom")
+    return dict(custom) if custom else None
 
 
 @compatibility(is_backward_compatible=False)

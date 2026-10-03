@@ -193,6 +193,8 @@ supported_ctx_manager_classes = dict.fromkeys(
         torch.fx.traceback.annotate.__wrapped__,  # type: ignore[attr-defined]
         torch.fx.traceback._dynamo_region_activation_memory_budget,
         torch.fx.traceback._dynamo_region_activation_memory_budget.__wrapped__,  # type: ignore[attr-defined]
+        torch.fx.traceback._dynamo_annotate,
+        torch.fx.traceback._dynamo_annotate.__wrapped__,  # type: ignore[attr-defined]
         # We'll let Dynamo inline into the contextlib part of these context
         # manager instances, all the way till it invokes the wrapped function
         # itself (at which point we wrap it back to special context manager
@@ -802,6 +804,15 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 )
             return FxTracebackAnnotateVariable(
                 args[0].as_python_constant(), source=self.source
+            )
+        elif self.value in (
+            torch.fx.traceback._dynamo_annotate,
+            torch.fx.traceback._dynamo_annotate.__wrapped__,  # type: ignore[attr-defined]
+        ):
+            if len(args) != 1 or kwargs:
+                raise AssertionError("_dynamo_annotate expects one positional argument")
+            return FxTracebackAnnotateVariable(
+                dict(args[0].as_python_constant()), source=self.source
             )
         elif self.value in (
             torch.fx.traceback._dynamo_region_activation_memory_budget,
