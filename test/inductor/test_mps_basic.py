@@ -15,14 +15,11 @@ from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    MACOS_VERSION,
     parametrize,
 )
 
 
-MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble] + (
-    [torch.bfloat16] if MACOS_VERSION < 14.0 else []
-)
+MPS_UNSUPPORTED_TYPES = [torch.double, torch.cdouble]
 MPS_DTYPES = [t for t in get_all_dtypes() if t not in MPS_UNSUPPORTED_TYPES]
 
 importlib.import_module("filelock")

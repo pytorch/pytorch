@@ -4013,14 +4013,12 @@ class TestSparse(TestSparseBase):
 
     @skipIfTorchDynamo(msg="https://github.com/pytorch/pytorch/issues/183435")
     @dtypes(torch.double, torch.float)
-    @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.softmax, 1, device, dtype)
         self._check_zero_nnz_softmax_op(torch.sparse.softmax, 10, device, dtype)
 
     @dtypes(torch.double, torch.float)
-    @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_log_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 1, device, dtype)

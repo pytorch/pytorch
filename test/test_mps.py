@@ -1,6 +1,5 @@
 # Owner(s): ["module: mps"]
 # ruff: noqa: F841
-import contextlib
 import glob
 import io
 import sys
@@ -43,7 +42,7 @@ from torch.testing._internal.common_methods_invocations import (
     SpectralFuncInfo,
     BinaryUfuncInfo,
 )
-from torch.testing._internal.common_device_type import ops, dtypes, instantiate_device_type_tests, largeMPSBufferTest, largeTensorTest
+from torch.testing._internal.common_device_type import ops, dtypes, dtypesIfMPS, instantiate_device_type_tests, largeMPSBufferTest, largeTensorTest
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_quantization import _group_quantize_tensor, _dynamically_quantize_per_channel
 from torch.utils._cpp_embed_headers import embed_headers
@@ -7973,8 +7972,6 @@ class TestMPS(TestCaseMPS):
         for shape, dim in strided_cases.get(elem_size, []):
             check(make(shape)[:, ::2], dim)
 
-    # xfailIf doesn't catch the SIGABRT from MPSGraph's gather assert
-    @unittest.skipIf(MACOS_VERSION < 15.0, "MPSGraph gather > 4GB assert aborts process on macOS 14")
     @parametrize("dtype", [torch.float32, torch.int32, torch.bfloat16, torch.float16,
                            torch.int16, torch.int8, torch.uint8, torch.bool])
     @parametrize("descending", [False, True])
@@ -12727,7 +12724,6 @@ class TestLinalgMPS(TestCaseMPS):
             torch._compute_linear_combination(xm, cm, out=actual)
         self.assertEqual(actual.cpu(), expected, atol=tol[0], rtol=tol[1])
 
-    @unittest.skipIf(MACOS_VERSION < 15.0, "matrix_exp on MPS requires macOS 15+")
     @dtypes(torch.float32, torch.complex64)
     def test_matrix_exp_invariants(self, device, dtype):
         # Reference-free identities catch systematic MPS bias an MPS-vs-CPU compare misses.
@@ -17728,6 +17724,7 @@ class TestCommon(TestCase):
             self.compare_with_reference(op, op.ref, sample_input)
 
     @dtypes(*get_all_dtypes())
+    @dtypesIfMPS(*get_all_dtypes())
     def test_tensor_creation(self, device, dtype):
         def ones(device):
             return torch.ones((2, 2), dtype=dtype, device=device)
@@ -18043,17 +18040,11 @@ class TestMetalLibrary(TestCaseMPS):
             }
         """
 
-        # Expect compilation error on MacOS 14 / Sonoma
-        ctx = contextlib.nullcontext() if MACOS_VERSION >= 15.0 else self.assertRaises(SyntaxError)
-        with ctx:
-            lib = torch.mps.compile_shader(shader_with_lambda)
-
-        # Run shader on MacOS 15 and above
-        if MACOS_VERSION >= 15.0:
-            x = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps")
-            lib.lambda_test(x)
-            expected = torch.tensor([2.0, 4.0, 6.0, 8.0], device="mps")
-            self.assertEqual(x, expected)
+        lib = torch.mps.compile_shader(shader_with_lambda)
+        x = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps")
+        lib.lambda_test(x)
+        expected = torch.tensor([2.0, 4.0, 6.0, 8.0], device="mps")
+        self.assertEqual(x, expected)
 
     def test_metal_error_buffer(self):
         # Test that error_buf_idx parameter works correctly
