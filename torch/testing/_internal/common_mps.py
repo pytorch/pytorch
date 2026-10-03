@@ -225,14 +225,6 @@ if torch.backends.mps.is_available():
                 torch.int32,
                 torch.int16,
             ],
-            "nn.functional.nll_loss": [
-                torch.int16,
-                torch.int32,
-                torch.int64,
-                torch.uint8,
-                torch.bool,
-                torch.int8,
-            ],
             "nn.functional.pdist": None,
             "nn.functional.rrelu": None,
             "nn.functional.silu": [
