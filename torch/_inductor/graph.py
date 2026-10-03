@@ -1717,6 +1717,7 @@ class GraphLowering(torch.fx.Interpreter):
             sympy.Expr,
             sympy.logic.boolalg.Boolean,
             int,
+            float,
             ir.EffectfulKernel,
             ir.ShapeAsConstantBuffer,
             TorchBindObject,
