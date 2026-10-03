@@ -15,6 +15,11 @@ from ._attention import (
     set_rotate_method,
 )
 from ._cp_custom_ops import flex_cp_allgather
+from ._gated_delta import (
+    all_to_all_head_to_seq,
+    all_to_all_seq_to_head,
+    gated_delta_rule_cp,
+)
 from ._load_balancer import (
     _HeadTailLoadBalancer,
     _LoadBalancer,
@@ -38,6 +43,10 @@ __all__ = [
     "set_rotate_method",
     # From _cp_custom_ops
     "flex_cp_allgather",
+    # From _gated_delta
+    "all_to_all_head_to_seq",
+    "all_to_all_seq_to_head",
+    "gated_delta_rule_cp",
     # From _load_balancer
     "_HeadTailLoadBalancer",
     "_LoadBalancer",

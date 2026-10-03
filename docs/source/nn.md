@@ -268,6 +268,7 @@ Global Hooks For Module
     nn.TransformerDecoder
     nn.TransformerEncoderLayer
     nn.TransformerDecoderLayer
+    nn.GatedDeltaNet
 ```
 
 ## Linear Layers
