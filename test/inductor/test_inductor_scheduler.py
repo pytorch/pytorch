@@ -46,7 +46,11 @@ from torch._inductor.scheduler import (
     SubParentOutputGroup,
 )
 from torch._inductor.sizevars import SizeVarAllocator
-from torch._inductor.utils import fresh_inductor_cache, snode_args_kwargs
+from torch._inductor.utils import (
+    fresh_inductor_cache,
+    run_and_get_code,
+    snode_args_kwargs,
+)
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_cuda import SM70OrLater
 from torch.testing._internal.common_device_type import (
@@ -1952,9 +1956,12 @@ class TestScheduler(TestCase):
         )
 
     @inductor_config.patch(reorder_for_peak_memory=True)
+    @parametrize("cpp_wrapper", (False, True))
     @dtypes(torch.complex64, torch.complex128)
     @xfailIfNoAcceleratorTriton
-    def test_mutating_fallback_returned_alias_ordering(self, device, dtype):
+    def test_mutating_fallback_returned_alias_ordering(
+        self, device, dtype, cpp_wrapper
+    ):
         def fn(x, index, values, replacement):
             x.index_put_((index,), values)
             result = x.real[:, None].expand(-1, 128).square()
@@ -1968,10 +1975,20 @@ class TestScheduler(TestCase):
             torch.full((16,), 3 + 4j, device=device, dtype=dtype),
         )
         expected = fn(*(arg.clone() for arg in args))
-        torch._dynamo.reset()
-        with fresh_inductor_cache():
-            actual = torch.compile(fn, fullgraph=True)(*(arg.clone() for arg in args))
+        with (
+            fresh_inductor_cache(),
+            inductor_config.patch(cpp_wrapper=cpp_wrapper),
+        ):
+            actual, code = run_and_get_code(
+                torch.compile(fn, fullgraph=True), *(arg.clone() for arg in args)
+            )
         self.assertEqual(actual, expected)
+        fallback_call = (
+            'findSchemaOrThrow("aten::index_put_", "")'
+            if cpp_wrapper
+            else "= torch.ops.aten.index_put_.default("
+        )
+        self.assertIn(fallback_call, "\n".join(code))
 
     def test_partition_signature_cleaning_only_removes_current_codegen_buffers(self):
         scheduler = Scheduler.__new__(Scheduler)

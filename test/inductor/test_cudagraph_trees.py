@@ -5304,9 +5304,19 @@ if HAS_CUDA_AND_TRITON:
 
             fn_c = torch.compile(fn, mode="reduce-overhead", fullgraph=True)
             index = torch.arange(16, device="cuda").flip(0)
-            for _ in range(3):
+            for i in range(3):
                 x = torch.randn(4, 16, device="cuda", dtype=dtype)
-                self.assertEqual(fn_c(x, index), fn(x, index), exact_device=True)
+                if i == 0:
+                    actual, code = run_and_get_code(fn_c, x, index)
+                    self.assertIn(
+                        "= torch.ops.aten.index_put_.default(", "\n".join(code)
+                    )
+                    self.assertEqual(get_num_partitions(code), 1)
+                else:
+                    actual = fn_c(x, index)
+                self.assertEqual(actual, fn(x, index), exact_device=True)
+                del actual
+            self.assertEqual(self.get_manager().new_graph_id().id, 1)
 
         @torch._inductor.config.patch("graph_partition", True)
         @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "needs flash attention")

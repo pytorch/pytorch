@@ -9704,14 +9704,15 @@ class FallbackKernel(ExternKernelAlloc):
         # AOTAutograd functionalized them away); the only way for an in-place
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
-            # Partition signatures resolve mutation buffers to their original names.
-            # Track the mutation separately so the returned alias keeps its own name.
+            # The returned tensor aliases arg0; it is not a rename of it.
+            # Track the write separately via a MutationOutput.
             arg = tensor_args[0]
             mutation_output = MutationOutput(
                 NoneLayout(device=arg.get_device()), arg, self
             )
             self.mutation_outputs.append(mutation_output)
-            # Share readers with the mutation version so later writes wait for them.
+            # Include the sibling mutation version so compute_dependencies merges
+            # its reader list with those of arg0 and the returned alias.
             self.alias_names.extend((arg.get_name(), mutation_output.get_name()))
             return
 
