@@ -1001,6 +1001,17 @@ static unsigned bindInnerContiguousOuter(id<MTLComputeCommandEncoder> encoder,
   return idx;
 }
 
+// CPU scalars use setBytes at offset zero. Only GPU buffer bindings can
+// violate Metal's four-byte alignment for constant-address arguments.
+static bool hasUnalignedBufferInput(const TensorIteratorBase& iter) {
+  for (const auto i : c10::irange(iter.noutputs(), iter.ntensors())) {
+    if (iter.tensor_base(i).device().type() != kCPU && iter_tensor_offset(iter, i) % 4 != 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
                                            const std::string& name,
                                            std::optional<c10::Scalar> alpha,
@@ -1105,6 +1116,14 @@ void MetalShaderLibrary::exec_unary_kernel(TensorIteratorBase& iter,
     }
     dense_ilp = false;
     kernel_name = fmt::format("{}_{}_{}", name, dense_suffix, scalarToMetalTypeString(inputTensor));
+  }
+  if (!cast_needed && !is_contiguous && !alpha.has_value() && !byte_copy &&
+      (name == "copy_identity" || name == "copy_conj" || name == "copy_neg") && hasUnalignedBufferInput(iter)) {
+    kernel_name = fmt::format("{}_{}_offset_{}_{}",
+                              name,
+                              dense_suffix,
+                              scalarToMetalTypeString(outputTensor),
+                              scalarToMetalTypeString(inputTensor));
   }
   // The byte-erased copy kernel is type-agnostic (one kernel, not per-dtype).
   if (byte_copy) {
@@ -1452,8 +1471,10 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
     // TODO: Implicitly pass both input and output types to non-cast kernels
     // The ILP suffix carries the unroll width (e.g. dense_ilp4) so future
     // variants (ilp8, ...) can coexist; see C10_METAL_ILP_PER_THREAD_STR.
+    const bool offset_inputs = !iter.is_contiguous() && !alpha.has_value() && hasUnalignedBufferInput(iter);
     const auto suffix = iter.is_contiguous() ? (dense_ilp ? "dense_ilp" C10_METAL_ILP_PER_THREAD_STR : "dense")
-                                             : (inner_contiguous ? "inner_contiguous" : "strided");
+        : inner_contiguous                   ? (offset_inputs ? "inner_contiguous_offset" : "inner_contiguous")
+                                             : (offset_inputs ? "strided_offset" : "strided");
     kernel_name = cast_needed ? fmt::format("{}_{}_cast_{}{}", name, suffix, cast_suffix_type, alpha_suffix)
                               : fmt::format("{}_{}_{}_{}{}",
                                             name,
@@ -1617,7 +1638,8 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
   // promote_inputs_to_common_dtype/cast_common_dtype_to_outputs pair means on
   // a backend that does not materialize the temporaries.
   const auto compute_dtype = iter.maybe_common_dtype().value_or(out.scalar_type());
-  const auto suffix = iter.is_contiguous() ? "dense" : "strided";
+  const bool offset_inputs = !iter.is_contiguous() && !alpha.has_value() && hasUnalignedBufferInput(iter);
+  const auto suffix = iter.is_contiguous() ? "dense" : (offset_inputs ? "strided_offset" : "strided");
   const auto alpha_type = scalar_arg_type.value_or(compute_dtype);
   const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
   // TODO: Implicitly pass both input and output types to non-cast kernels
@@ -1629,20 +1651,8 @@ void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter,
   // from the inputs, goes through the cast kernel.
   const auto cast_needed = other1.scalar_type() != out.scalar_type() || other2.scalar_type() != out.scalar_type() ||
       (input.scalar_type() != out.scalar_type() && !hasFunction(direct_name));
-  // Keep constant-buffer loads for zero-offset inputs; views use device
-  // pointers so their byte offsets need only satisfy the element alignment.
-  // CPU scalars are copied with setBytes and are always bound at offset zero.
-  const char* cast_suffix = "cast";
-  if (cast_needed && !iter.is_contiguous() && !alpha.has_value()) {
-    for (const auto i : c10::irange(1, iter.ntensors())) {
-      if (iter.tensor_base(i).device().type() != kCPU && iter_tensor_offset(iter, i) != 0) {
-        cast_suffix = "cast_offset";
-        break;
-      }
-    }
-  }
   const auto kernel_name = cast_needed
-      ? fmt::format("{}_{}_{}_{}{}", name, suffix, cast_suffix, scalarToMetalTypeString(compute_dtype), alpha_suffix)
+      ? fmt::format("{}_{}_cast_{}{}", name, suffix, scalarToMetalTypeString(compute_dtype), alpha_suffix)
       : direct_name;
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {

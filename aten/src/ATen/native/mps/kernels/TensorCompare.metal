@@ -61,22 +61,35 @@ struct where_functor {
   }
 };
 
-#define REGISTER_WHERE_OP(T)                                      \
-  template [[host_name("where_dense_" #T "_bool")]] kernel void   \
-  c10::metal::ternary_dense<T, where_functor, T, bool>(           \
-      device T*, constant bool*, constant T*, constant T*, uint); \
-  template [[host_name("where_strided_" #T "_bool")]] kernel void \
-  c10::metal::ternary_strided<T, where_functor, T, bool>(         \
-      device void*,                                               \
-      device const char*,                                         \
-      device const char*,                                         \
-      device const char*,                                         \
-      constant long*,                                             \
-      constant long*,                                             \
-      constant long*,                                             \
-      constant long*,                                             \
-      constant long*,                                             \
-      constant uint&,                                             \
+#define REGISTER_WHERE_OP(T)                                                  \
+  template [[host_name("where_dense_" #T "_bool")]] kernel void               \
+  c10::metal::ternary_dense<T, where_functor, T, bool>(                       \
+      device T*, constant bool*, constant T*, constant T*, uint);             \
+  template [[host_name("where_strided_" #T "_bool")]] kernel void             \
+  c10::metal::ternary_strided<T, where_functor, T, bool>(                     \
+      device void*,                                                           \
+      constant void*,                                                         \
+      constant void*,                                                         \
+      constant void*,                                                         \
+      constant long*,                                                         \
+      constant long*,                                                         \
+      constant long*,                                                         \
+      constant long*,                                                         \
+      constant long*,                                                         \
+      constant uint&,                                                         \
+      uint3);                                                                 \
+  template [[host_name("where_strided_offset_" #T "_bool")]] kernel void      \
+  c10::metal::ternary_strided<T, where_functor, T, bool, device const char*>( \
+      device void*,                                                           \
+      device const char*,                                                     \
+      device const char*,                                                     \
+      device const char*,                                                     \
+      constant long*,                                                         \
+      constant long*,                                                         \
+      constant long*,                                                         \
+      constant long*,                                                         \
+      constant long*,                                                         \
+      constant uint&,                                                         \
       uint3)
 
 REGISTER_WHERE_OP(bool);

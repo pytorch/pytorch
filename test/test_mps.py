@@ -11211,7 +11211,7 @@ class TestStridedBufferAlignment(TestCaseMPS):
     @dtypes(torch.float32, torch.float16, torch.bfloat16, torch.int8, torch.uint8, torch.bool)
     @parametrize("inner", [1, 17])
     @parametrize("step", [1, 2])
-    @parametrize("offset", [1, 3])
+    @parametrize("offset", [0, 1, 2, 3, 4])
     def test_same_dtype_copy_offset(self, device, dtype, inner, step, offset):
         row_stride = step * inner + 2
         cpu_storage = torch.arange(offset + 3 * row_stride + 1).remainder(11).to(dtype)
@@ -11232,7 +11232,7 @@ class TestStridedBufferAlignment(TestCaseMPS):
     @dtypes(torch.float16, torch.bfloat16, torch.int8, torch.uint8)
     @parametrize("op", [torch.minimum, torch.clamp, torch.where])
     @parametrize("inner", [7, 17])
-    @parametrize("offset", [1, 3])
+    @parametrize("offset", [0, 1, 2, 3, 4])
     def test_strided_buffer_alignment(self, device, dtype, op, inner, offset):
         width = inner + offset + 1
         values = torch.arange(3 * width).reshape(3, width).remainder(17).to(dtype)
@@ -11264,7 +11264,7 @@ class TestStridedBufferAlignment(TestCaseMPS):
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("op", [torch.minimum, torch.clamp])
     @parametrize("inner", [7, 17])
-    @parametrize("offset", [1, 3])
+    @parametrize("offset", [0, 1, 2, 3, 4])
     def test_strided_buffer_alignment_cast(self, device, dtype, op, inner, offset):
         width = inner + offset + 1
         values = torch.arange(3 * width).reshape(3, width).remainder(17).to(dtype)
