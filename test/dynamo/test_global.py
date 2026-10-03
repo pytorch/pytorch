@@ -253,6 +253,26 @@ class TestGlobals(torch._dynamo.test_case.TestCase):
         fn(torch.ones(2, 2))
         self.assertFalse(mock_store_global_crossfile_inline.global_flag)
 
+    def test_pending_module_global_shadows_builtin(self):
+        module = sys.modules[__name__]
+
+        class ShadowSuper:
+            msg = "shadowed"
+
+        class C:
+            def method(self):
+                return super().msg
+
+        def fn():
+            setattr(module, "super", ShadowSuper)
+            return C().method()
+
+        self.addCleanup(globals().pop, "super", None)
+        globals().pop("super", None)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(), "shadowed")
+
     def test_unregistered_importlib_module_globals(self):
         module_name = "test_dynamo_unregistered_module_181243"
         self.assertNotIn(module_name, sys.modules)
