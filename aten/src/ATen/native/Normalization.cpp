@@ -40,6 +40,7 @@
 #include <ATen/ops/cudnn_batch_norm_backward.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like.h>
+#include <ATen/ops/group_norm.h>
 #include <ATen/ops/instance_norm_native.h>
 #include <ATen/ops/linalg_vector_norm.h>
 #include <ATen/ops/mean.h>
@@ -54,9 +55,11 @@
 #include <ATen/ops/renorm_native.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/sqrt.h>
+#include <ATen/ops/var_mean.h>
 #endif
 
 #include <c10/core/SymIntArrayRef.h>
+#include <array>
 #include <utility>
 #include <vector>
 
@@ -726,6 +729,94 @@ Tensor batch_norm(
   // }
 }
 
+static bool is_cuda_channels_last_3d(const Tensor& input) {
+  return input.is_cuda() && input.dim() == 5 &&
+      input.is_contiguous(MemoryFormat::ChannelsLast3d);
+}
+
+static bool has_mixed_dtype_affine(
+    const Tensor& input,
+    const Tensor& weight,
+    const Tensor& bias) {
+  return (weight.defined() && weight.scalar_type() != input.scalar_type()) ||
+      (bias.defined() && bias.scalar_type() != input.scalar_type());
+}
+
+static void update_instance_norm_running_stats(
+    const Tensor& input,
+    const Tensor& running_mean,
+    const Tensor& running_var,
+    ScalarType stats_dtype,
+    double momentum) {
+  if (!running_mean.defined() && !running_var.defined()) {
+    return;
+  }
+
+  const auto stats_input = input.detach().to(stats_dtype);
+  constexpr std::array<int64_t, 3> spatial_dims = {2, 3, 4};
+  auto [instance_var, instance_mean] = at::var_mean(
+      stats_input,
+      spatial_dims,
+      /*correction=*/Scalar(1),
+      /*keepdim=*/false);
+  if (running_mean.defined()) {
+    auto running_mean_alias = at::alias(running_mean);
+    running_mean_alias.mul_(1 - momentum).add_(
+        instance_mean.mean(0, false).to(running_mean.scalar_type()),
+        momentum);
+  }
+  if (running_var.defined()) {
+    auto running_var_alias = at::alias(running_var);
+    running_var_alias.mul_(1 - momentum).add_(
+        instance_var.mean(0, false).to(running_var.scalar_type()),
+        momentum);
+  }
+}
+
+static std::optional<Tensor> instance_norm_channels_last_3d(
+    const Tensor& input,
+    const std::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& bias_opt,
+    const Tensor& weight,
+    const Tensor& bias,
+    const Tensor& running_mean,
+    const Tensor& running_var,
+    bool use_input_stats,
+    double momentum,
+    double eps,
+    bool cudnn_enabled,
+    ScalarType stats_dtype,
+    bool channels_last_3d_input) {
+  if (!channels_last_3d_input ||
+      (use_input_stats && has_mixed_dtype_affine(input, weight, bias))) {
+    return std::nullopt;
+  }
+
+  if (!use_input_stats) {
+    return at::batch_norm(
+        input,
+        weight,
+        bias,
+        running_mean,
+        running_var,
+        false,
+        momentum,
+        eps,
+        cudnn_enabled);
+  }
+
+  auto out = at::group_norm(
+      input,
+      input.sym_size(1).guard_int(__FILE__, __LINE__),
+      weight_opt,
+      bias_opt,
+      eps,
+      cudnn_enabled);
+  update_instance_norm_running_stats(
+      input, running_mean, running_var, stats_dtype, momentum);
+  return out;
+}
+
 Tensor instance_norm(
     const Tensor& input, const std::optional<Tensor>& weight_opt /* optional */, const std::optional<Tensor>& bias_opt /* optional */, const std::optional<Tensor>& running_mean_opt /* optional */, const std::optional<Tensor>& running_var_opt /* optional */,
     bool use_input_stats, double momentum, double eps, bool cudnn_enabled) {
@@ -748,6 +839,24 @@ Tensor instance_norm(
   const auto stats_dtype = weight.defined() ? weight.scalar_type() : input.scalar_type();
   const bool mixed_dtype_stats = running_mean.defined() &&
                                  running_mean.scalar_type() != stats_dtype;
+  const bool channels_last_3d_input = is_cuda_channels_last_3d(input);
+  const auto channels_last_output = instance_norm_channels_last_3d(
+      input,
+      weight_opt,
+      bias_opt,
+      weight,
+      bias,
+      running_mean,
+      running_var,
+      use_input_stats,
+      momentum,
+      eps,
+      cudnn_enabled,
+      stats_dtype,
+      channels_last_3d_input);
+  if (channels_last_output.has_value()) {
+    return *channels_last_output;
+  }
 
   Tensor weight_ = repeat_if_defined(weight, b);
   Tensor bias_ = repeat_if_defined(bias, b);
@@ -783,7 +892,10 @@ Tensor instance_norm(
     }
   }
 
-  return out.view_symint(input.sym_sizes());
+  const auto output = out.view_symint(input.sym_sizes());
+  return channels_last_3d_input
+      ? output.contiguous(MemoryFormat::ChannelsLast3d)
+      : output;
 }
 
 std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(

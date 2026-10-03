@@ -334,7 +334,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
 
   auto& ctx = at::globalContext();
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && !defined(__aarch64__) && !defined(_M_ARM64)
   if (ctx.qEngine() == at::QEngine::X86) {
 #if AT_MKLDNN_ENABLED()
     bool use_onednn = onednn_utils::should_use_onednn_quant(
@@ -365,7 +365,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   } // x86
 #endif
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && !defined(__aarch64__) && !defined(_M_ARM64)
   if (ctx.qEngine() == at::QEngine::FBGEMM) {
     return PackedConvWeight<kSpatialDim>::prepack(
       std::move(weight.value()),
@@ -398,7 +398,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   }
 #endif // USE_PYTORCH_QNNPACK
 #if AT_MKLDNN_ENABLED()
-  if (ctx.qEngine() == at::QEngine::ONEDNN) {
+  if (ctx.qEngine() == at::QEngine::ONEDNN ||
+      ctx.qEngine() == at::QEngine::X86) {
     return PackedConvWeightsOnednn<kSpatialDim>::prepack(
       std::move(weight.value()),
       std::move(bias),
