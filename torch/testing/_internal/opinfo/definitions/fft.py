@@ -12,10 +12,7 @@ from torch.testing._internal.common_dtype import (
     all_types_and,
     all_types_and_complex_and,
 )
-from torch.testing._internal.common_utils import (
-    TEST_SCIPY,
-    TEST_WITH_ROCM,
-)
+from torch.testing._internal.common_utils import TEST_SCIPY, TEST_WITH_ROCM
 from torch.testing._internal.opinfo.core import (
     DecorateInfo,
     ErrorInput,

@@ -118,7 +118,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     isRocmArchAnyOf,
-    MACOS_VERSION,
     MI200_ARCH,
     NAVI3_ARCH,
     NAVI_ARCH,
@@ -232,9 +231,6 @@ requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, f"requires multiple {GPU_TYPE} devices"
 )
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
-skip_if_x86_mac = functools.partial(
-    unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
-)
 vec_dtypes = [torch.float, torch.bfloat16, torch.float16]
 
 libtest = torch.library.Library("test", "FRAGMENT")  # noqa: SCOPED_LIBRARY
@@ -263,7 +259,7 @@ test_int_dtypes = [
     torch.int64,
 ]
 
-if SM80OrLater or MACOS_VERSION >= 14.0 or GPU_TYPE == "xpu":
+if SM80OrLater or torch.backends.mps.is_built() or GPU_TYPE == "xpu":
     test_dtypes.append(torch.bfloat16)
 
 
@@ -2573,7 +2569,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.tensor([float("-inf"), 0.0, float("inf")]),))
 
-    @skip_if_x86_mac()
     def test_reduction2(self):
         def fn(a):
             # FIXME: a.argmax
@@ -2581,7 +2576,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.full((4,), float("inf")),))
 
-    @skip_if_x86_mac()
     def test_reduction3(self):
         def fn(a):
             # FIXME: a.argmin
@@ -10334,7 +10328,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn([3, 3, 6, 12]),))
 
-    @skip_if_x86_mac()
     def test_upsample_bilinear2d_a(self):
         def fn(a):
             return (
