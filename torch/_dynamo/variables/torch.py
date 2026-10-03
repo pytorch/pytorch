@@ -2964,6 +2964,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 if not _coor_enabled():
                     device_index = 0
 
+            tx.output.check_input_mutation_on_current_stream(tx)
             tx.output.check_device_barrier_after_input_mutation(
                 torch.device(device.type, device_index)
                 if device_index is not None
@@ -3899,11 +3900,23 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ),
             )
 
-        # Function variants such as torch.add(..., out=input) can mutate a
-        # graph input without going through TensorVariable's method handler.
-        # Record their fake-tensor version changes on the stream that executed
-        # the call, before a later user barrier can leave that stream context.
-        tx.output.check_input_mutation_on_current_stream(tx)
+        # Batch norm updates running statistics during training, but fake
+        # tensor propagation does not bump their versions. AOT functionalizes
+        # those input writes into deferred copies, so record their stream here.
+        if fn_ in (torch.nn.functional.batch_norm, torch.batch_norm):
+            training = kwargs.get("training")
+            if training is None and len(args) > 5:
+                training = args[5]
+            if training is not None and training.as_python_constant():
+                stat_indices = (
+                    (1, 2) if fn_ is torch.nn.functional.batch_norm else (3, 4)
+                )
+                for index, name in zip(stat_indices, ("running_mean", "running_var")):
+                    stat = args[index] if len(args) > index else kwargs.get(name)
+                    if stat is not None and stat.is_tensor():
+                        tx.output.record_input_mutation_on_current_stream(
+                            tx, stat.as_proxy().node.meta.get("example_value")
+                        )
 
         # Handle e.g., `torch.ones(10, requires_grad=True)`
         if (

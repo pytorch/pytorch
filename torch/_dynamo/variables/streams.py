@@ -366,6 +366,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     ) -> VariableTracker:
         # to stream, from stream is the order of the arguments
         # we are entering the target, and leaving the initial stream
+        tx.output.check_input_mutation_on_current_stream(tx)
         tx.symbolic_stream_state.enter_stream(self.get_stream())
         return super().enter(tx)
 
@@ -374,6 +375,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     ) -> VariableTracker:
         # to stream, from stream is the order of the arguments
         # we are leaving the target, and entering the initial stream
+        tx.output.check_input_mutation_on_current_stream(tx)
         tx.symbolic_stream_state.exit_stream()
         return super().exit(tx, *args)
 
@@ -474,6 +476,7 @@ class StreamVariable(StreamContextVariable):
         for stream in (self, other_stream):
             if stream.source:
                 install_guard(stream.source.make_guard(GuardBuilder.EQUALS_MATCH))
+        tx.output.check_input_mutation_on_current_stream(tx)
         if _stream_identity(self.value) != _stream_identity(other_stream.value):
             tx.output.check_stream_barrier_after_input_mutation(other_stream.value)
         tx.output.create_proxy(
@@ -494,6 +497,7 @@ class StreamVariable(StreamContextVariable):
 
         if self.source:
             install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+        tx.output.check_input_mutation_on_current_stream(tx)
         tx.output.check_stream_barrier_after_input_mutation(self.value)
         tx.output.create_proxy(
             "call_function",

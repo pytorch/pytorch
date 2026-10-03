@@ -1341,7 +1341,6 @@ class OutputGraph(OutputGraphCommon):
         for input_idx, version in enumerate(tracer._input_versions_at_beginning):
             self._last_checked_input_versions.setdefault(input_idx, version)
 
-        cur_stream_index = tx.symbolic_stream_state.cur_stream_id()
         input_idx = 0
         for node in tracer.graph.nodes:
             if node.op != "placeholder":
@@ -1352,37 +1351,49 @@ class OutputGraph(OutputGraphCommon):
             prev_version = self._last_checked_input_versions.get(input_idx)
             cur_version = example_value._version
             if prev_version is not None and cur_version > prev_version:
-                if cur_stream_index not in self._input_mutation_streams:
-                    self._input_mutation_streams[cur_stream_index] = (
-                        TracingContext.extract_stack()
-                    )
-                    stream = tx.symbolic_stream_state.cur_stream()
-                    if stream.source:
-                        install_guard(
-                            stream.source.make_guard(GuardBuilder.EQUALS_MATCH)
-                        )
-                accelerator = torch.accelerator.current_accelerator()
-                if (
-                    accelerator is not None
-                    and example_value.device.type == accelerator.type
-                ):
-                    stream = tx.symbolic_stream_state.cur_stream(example_value.device)
-                    if stream.device == example_value.device:
-                        stream_value = stream.value
-                    else:
-                        stream_value = torch.accelerator.current_stream(
-                            example_value.device
-                        )
-                        install_guard(
-                            CurrentStreamSource(example_value.device).make_guard(
-                                GuardBuilder.EQUALS_MATCH
-                            )
-                        )
-                    self._input_mutation_stream_handles.add(
-                        _stream_identity(stream_value)
-                    )
+                self._record_input_mutation_on_current_stream(tx, example_value)
                 self._last_checked_input_versions[input_idx] = cur_version
             input_idx += 1
+
+    def record_input_mutation_on_current_stream(
+        self, tx: "InstructionTranslatorBase", example_value: torch.Tensor
+    ) -> None:
+        """Record an input write that fake-tensor versions cannot observe."""
+        if not isinstance(example_value, torch.Tensor):
+            return
+        if not tx.symbolic_stream_state.in_stream_context():
+            return
+        for node in self.root_tracer.graph.nodes:
+            if node.op != "placeholder":
+                break
+            if node.meta.get("example_value") is example_value:
+                self._record_input_mutation_on_current_stream(tx, example_value)
+                return
+
+    def _record_input_mutation_on_current_stream(
+        self, tx: "InstructionTranslatorBase", example_value: torch.Tensor
+    ) -> None:
+        cur_stream_index = tx.symbolic_stream_state.cur_stream_id()
+        if cur_stream_index not in self._input_mutation_streams:
+            self._input_mutation_streams[cur_stream_index] = (
+                TracingContext.extract_stack()
+            )
+            stream = tx.symbolic_stream_state.cur_stream()
+            if stream.source:
+                install_guard(stream.source.make_guard(GuardBuilder.EQUALS_MATCH))
+        accelerator = torch.accelerator.current_accelerator()
+        if accelerator is not None and example_value.device.type == accelerator.type:
+            stream = tx.symbolic_stream_state.cur_stream(example_value.device)
+            if stream.device == example_value.device:
+                stream_value = stream.value
+            else:
+                stream_value = torch.accelerator.current_stream(example_value.device)
+                install_guard(
+                    CurrentStreamSource(example_value.device).make_guard(
+                        GuardBuilder.EQUALS_MATCH
+                    )
+                )
+            self._input_mutation_stream_handles.add(_stream_identity(stream_value))
 
     def _has_deferred_input_writeback(self) -> bool:
         from .backends.debugging import eager

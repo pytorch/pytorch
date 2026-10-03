@@ -2931,7 +2931,9 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         assign_epilogue_copy_streams(gm)
 
     @parametrize("backend", ("aot_eager", "inductor"))
-    @parametrize("mutation", ("out", "aten_inplace"))
+    @parametrize(
+        "mutation", ("out", "aten_inplace", "functional_inplace", "inplace_positional")
+    )
     def test_function_input_mutation_before_join_errors(
         self, backend, mutation
     ) -> None:
@@ -2939,8 +2941,12 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
             with torch.cuda.stream(side):
                 if mutation == "out":
                     torch.add(x, 1, out=x)
-                else:
+                elif mutation == "aten_inplace":
                     torch.ops.aten.add_.Tensor(x, 1)
+                elif mutation == "inplace_positional":
+                    torch.nn.functional.relu(x, True)
+                else:
+                    torch.nn.functional.relu(x, inplace=True)
             side.synchronize()
             return small + 1
 
@@ -2952,6 +2958,46 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
             torch.compile(fn, backend=backend, fullgraph=True)(x, small, side)
         torch.cuda.synchronize()
         self.assertEqual(x, torch.ones_like(x))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("implementation", ("functional", "native"))
+    def test_function_updates_running_stats_before_join_errors(
+        self, backend, implementation
+    ) -> None:
+        def fn(x, running_mean, running_var, small, side):
+            with torch.cuda.stream(side):
+                if implementation == "functional":
+                    torch.nn.functional.batch_norm(
+                        x, running_mean, running_var, training=True
+                    )
+                else:
+                    torch.batch_norm(
+                        x,
+                        None,
+                        None,
+                        running_mean,
+                        running_var,
+                        True,
+                        0.1,
+                        1e-5,
+                        torch.backends.cudnn.enabled,
+                    )
+            side.synchronize()
+            return small + 1
+
+        x = torch.ones(4, 8, device="cuda")
+        running_mean = torch.zeros(8, device="cuda")
+        running_var = torch.ones(8, device="cuda")
+        small = torch.zeros_like(x)
+        side = torch.cuda.Stream()
+        torch.cuda.synchronize()
+        with self.assertRaisesRegex(RuntimeError, "input mutation write-back"):
+            torch.compile(fn, backend=backend, fullgraph=True)(
+                x, running_mean, running_var, small, side
+            )
+        torch.cuda.synchronize()
+        self.assertEqual(running_mean, torch.zeros_like(running_mean))
+        self.assertEqual(running_var, torch.ones_like(running_var))
 
     @parametrize("backend", ("aot_eager", "inductor"))
     def test_late_graph_input_mutation_before_join_errors(self, backend) -> None:
