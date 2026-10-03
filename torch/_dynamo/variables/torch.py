@@ -2994,6 +2994,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 if not _coor_enabled():
                     device_index = 0
 
+            tx.output.check_input_mutation_on_current_stream(tx)
+            tx.output.check_device_barrier_after_input_mutation(
+                torch.device(device.type, device_index)
+                if device_index is not None
+                else device
+            )
+
             tx.output.create_proxy(
                 "call_function",
                 torch.ops.streams.synchronize_device,
@@ -3926,6 +3933,34 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     *proxy_args_kwargs(args, kwargs),
                 ),
             )
+
+        # Batch norm updates running statistics during training, but fake
+        # tensor propagation does not bump their versions. AOT functionalizes
+        # those input writes into deferred copies, so record their stream here.
+        # The native_batch_norm schema does not mark its input writes, either.
+        batch_norm_functions = (
+            torch.nn.functional.batch_norm,
+            torch.batch_norm,
+            torch.native_batch_norm,
+            torch._native_batch_norm_legit,
+            torch.ops.aten.batch_norm.default,
+            torch.ops.aten.native_batch_norm.default,
+            torch.ops.aten._native_batch_norm_legit.default,
+        )
+        if fn_ in batch_norm_functions:
+            training = kwargs.get("training")
+            if training is None and len(args) > 5:
+                training = args[5]
+            if training is not None and training.as_python_constant():
+                stat_indices = (
+                    (1, 2) if fn_ is torch.nn.functional.batch_norm else (3, 4)
+                )
+                for index, name in zip(stat_indices, ("running_mean", "running_var")):
+                    stat = args[index] if len(args) > index else kwargs.get(name)
+                    if stat is not None and stat.is_tensor():
+                        tx.output.record_input_mutation_on_current_stream(
+                            tx, stat.as_proxy().node.meta.get("example_value")
+                        )
 
         # Handle e.g., `torch.ones(10, requires_grad=True)`
         if (

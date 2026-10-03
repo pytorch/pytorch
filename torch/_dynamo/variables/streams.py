@@ -83,6 +83,15 @@ def _get_stream_by_index(index: int) -> torch.Stream:
     return stream
 
 
+def _stream_identity(stream: torch.Stream) -> tuple[torch.device, int]:
+    if stream.device.type == "cpu":
+        # The CPU has a single stream and no native accelerator handle.
+        return stream.device, 0
+    # Accelerator streams expose native handles; the base torch.Stream type
+    # stub does not yet declare the attribute.
+    return stream.device, stream.native_handle  # pyrefly: ignore[missing-attribute]
+
+
 def _get_event_by_index(index: int) -> torch.Event:
     event = get_external_object_by_index(index)
     if not isinstance(event, torch.Event):
@@ -358,6 +367,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     ) -> VariableTracker:
         # to stream, from stream is the order of the arguments
         # we are entering the target, and leaving the initial stream
+        tx.output.check_input_mutation_on_current_stream(tx)
         tx.symbolic_stream_state.enter_stream(self.get_stream())
         return super().enter(tx)
 
@@ -366,6 +376,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
     ) -> VariableTracker:
         # to stream, from stream is the order of the arguments
         # we are leaving the target, and entering the initial stream
+        tx.output.check_input_mutation_on_current_stream(tx)
         tx.symbolic_stream_state.exit_stream()
         return super().exit(tx, *args)
 
@@ -497,9 +508,17 @@ class StreamVariable(StreamContextVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from ..guards import GuardBuilder, install_guard
+
         other_stream = args[0]
         if not isinstance(other_stream, StreamVariable):
             raise AssertionError(f"Expected StreamVariable, got {type(other_stream)}")
+        for stream in (self, other_stream):
+            if stream.source:
+                install_guard(stream.source.make_guard(GuardBuilder.EQUALS_MATCH))
+        tx.output.check_input_mutation_on_current_stream(tx)
+        if _stream_identity(self.value) != _stream_identity(other_stream.value):
+            tx.output.check_stream_barrier_after_input_mutation(other_stream.value)
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.wait_stream,
@@ -514,6 +533,12 @@ class StreamVariable(StreamContextVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from ..guards import GuardBuilder, install_guard
+
+        if self.source:
+            install_guard(self.source.make_guard(GuardBuilder.EQUALS_MATCH))
+        tx.output.check_input_mutation_on_current_stream(tx)
+        tx.output.check_stream_barrier_after_input_mutation(self.value)
         tx.output.create_proxy(
             "call_function",
             torch.ops.streams.synchronize_stream,

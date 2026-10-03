@@ -130,6 +130,7 @@ from .source import (
     AttrSource,
     BackwardStateSource,
     ConstantSource,
+    CurrentStreamSource,
     DictGetItemSource,
     GetItemSource,
     GlobalStateSource,
@@ -178,6 +179,7 @@ from .variables.functions import ClosureConversionError, VariableTracker
 from .variables.lists import BaseListVariable
 from .variables.misc import NullVariable
 from .variables.nn_module import NNModuleVariable
+from .variables.streams import _stream_identity
 from .variables.tensor import (
     NumpyNdarrayVariable,
     SymNodeVariable,
@@ -897,6 +899,7 @@ class OutputGraph(OutputGraphCommon):
         # wouldn't be captured).  We key by id() of the underlying
         # torch.Stream so we can peek lazy variables without realizing them.
         self._input_mutation_streams: dict[int, traceback.StackSummary] = {}
+        self._input_mutation_stream_handles: set[tuple[torch.device, int]] = set()
         self._last_checked_input_versions: dict[int, int] | None = None
 
         # A list of register_finalizer_fns to apply to the output graph module
@@ -1343,11 +1346,13 @@ class OutputGraph(OutputGraphCommon):
 
         tracer = self.root_tracer
         if self._last_checked_input_versions is None:
-            self._last_checked_input_versions = dict(
-                enumerate(tracer._input_versions_at_beginning)
-            )
+            self._last_checked_input_versions = {}
+        # Dynamo creates placeholders when their inputs are first used. An
+        # input introduced after the first mutation check still needs its
+        # original version as the baseline for this stream's write.
+        for input_idx, version in enumerate(tracer._input_versions_at_beginning):
+            self._last_checked_input_versions.setdefault(input_idx, version)
 
-        cur_stream_index = tx.symbolic_stream_state.cur_stream_id()
         input_idx = 0
         for node in tracer.graph.nodes:
             if node.op != "placeholder":
@@ -1358,12 +1363,98 @@ class OutputGraph(OutputGraphCommon):
             prev_version = self._last_checked_input_versions.get(input_idx)
             cur_version = example_value._version
             if prev_version is not None and cur_version > prev_version:
-                if cur_stream_index not in self._input_mutation_streams:
-                    self._input_mutation_streams[cur_stream_index] = (
-                        TracingContext.extract_stack()
-                    )
+                self._record_input_mutation_on_current_stream(tx, example_value)
                 self._last_checked_input_versions[input_idx] = cur_version
             input_idx += 1
+
+    def record_input_mutation_on_current_stream(
+        self, tx: "InstructionTranslatorBase", example_value: torch.Tensor
+    ) -> None:
+        """Record an input write that fake-tensor versions cannot observe."""
+        if not isinstance(example_value, torch.Tensor):
+            return
+        if not tx.symbolic_stream_state.in_stream_context():
+            return
+        for node in self.root_tracer.graph.nodes:
+            if node.op != "placeholder":
+                break
+            input_value = node.meta.get("example_value")
+            if isinstance(input_value, torch.Tensor) and (
+                input_value is example_value
+                or torch._C._is_alias_of(  # pyrefly: ignore[missing-attribute]
+                    input_value, example_value
+                )
+            ):
+                self._record_input_mutation_on_current_stream(tx, input_value)
+                return
+
+    def _record_input_mutation_on_current_stream(
+        self, tx: "InstructionTranslatorBase", example_value: torch.Tensor
+    ) -> None:
+        cur_stream_index = tx.symbolic_stream_state.cur_stream_id()
+        if cur_stream_index not in self._input_mutation_streams:
+            self._input_mutation_streams[cur_stream_index] = (
+                TracingContext.extract_stack()
+            )
+            stream = tx.symbolic_stream_state.cur_stream()
+            if stream.source:
+                install_guard(stream.source.make_guard(GuardBuilder.EQUALS_MATCH))
+        accelerator = torch.accelerator.current_accelerator()
+        if accelerator is not None and example_value.device.type == accelerator.type:
+            stream = tx.symbolic_stream_state.cur_stream(example_value.device)
+            if stream.device == example_value.device:
+                stream_value = stream.value
+            else:
+                stream_value = torch.accelerator.current_stream(example_value.device)
+                install_guard(
+                    CurrentStreamSource(example_value.device).make_guard(
+                        GuardBuilder.EQUALS_MATCH
+                    )
+                )
+            self._input_mutation_stream_handles.add(_stream_identity(stream_value))
+
+    def _has_deferred_input_writeback(self) -> bool:
+        from .backends.debugging import eager
+        from .eval_frame import innermost_backend
+
+        backend = (
+            get_backend_override_for_compile_id(
+                self.dynamo_compile_id, config.debug_backend_override
+            )
+            or self.compiler_fn
+        )
+        if backend is None:
+            return True
+        backend = innermost_backend(backend)
+        if isinstance(backend, torch._TorchCompileWrapper):
+            backend = backend.compiler_fn
+        return backend is not eager
+
+    def check_stream_barrier_after_input_mutation(self, stream: torch.Stream) -> None:
+        if (
+            _stream_identity(stream) in self._input_mutation_stream_handles
+            and self._has_deferred_input_writeback()
+        ):
+            raise RuntimeError(
+                "Cannot safely place an input mutation write-back after a user "
+                "stream barrier inside torch.compile. Move the join after "
+                "the compiled call or avoid side-stream input mutation."
+            )
+
+    def check_device_barrier_after_input_mutation(self, device: torch.device) -> None:
+        if (
+            any(
+                mutated.type == device.type
+                and (device.index is None or mutated.index == device.index)
+                for mutated, _ in self._input_mutation_stream_handles
+            )
+            and self._has_deferred_input_writeback()
+        ):
+            raise RuntimeError(
+                "Cannot safely place an input mutation write-back after a user "
+                "stream barrier inside torch.compile. Move the join after "
+                "the compiled call or avoid side-stream input mutation."
+            )
 
     _EVENT_INPUT_MUTATION_FIX = (
         "To fix this, either:\n"
