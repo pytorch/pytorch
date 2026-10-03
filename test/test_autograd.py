@@ -13374,6 +13374,93 @@ class TestAutogradForwardMode(TestCase):
 class TestAutogradDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.complex64, torch.complex128)
+    @dtypesIfMPS(torch.complex64)
+    @parametrize("real_input", (0, 1))
+    def test_dist_mixed_dtype_backward(self, device, dtype, real_input):
+        real_dtype = torch.float64 if dtype == torch.complex128 else torch.float32
+        inputs = [
+            torch.randn(3, 2, device=device, dtype=dtype).t().conj(),
+            torch.randn(6, device=device, dtype=real_dtype)[::2],
+        ]
+        if real_input == 0:
+            inputs.reverse()
+        for p, mask in product(
+            (0, 0.5, 1, 2, 3, inf, -inf),
+            ((True, True), (True, False), (False, True)),
+        ):
+            with self.subTest(p=p, mask=mask):
+                a, b = (x.detach().requires_grad_(m) for x, m in zip(inputs, mask))
+                active = tuple(x for x in (a, b) if x.requires_grad)
+                result = torch.dist(a, b, p)
+                reference = torch.linalg.vector_norm(a - b, p)
+                self.assertEqual(result, reference)
+                actual = torch.autograd.grad(
+                    result, active, create_graph=True, allow_unused=True
+                )
+                expected = torch.autograd.grad(
+                    reference, active, create_graph=True, allow_unused=True
+                )
+                self.assertEqual(actual, expected)
+                if p != 0:
+                    actual_loss = sum(g.abs().square().sum() for g in actual)
+                    expected_loss = sum(g.abs().square().sum() for g in expected)
+                    self.assertEqual(
+                        torch.autograd.grad(actual_loss, active),
+                        torch.autograd.grad(expected_loss, active),
+                    )
+
+    @dtypes(torch.complex128)
+    @parametrize("real_input", (0, 1))
+    def test_dist_mixed_dtype_gradcheck(self, device, dtype, real_input):
+        inputs = [
+            torch.randn(2, 3, device=device, dtype=dtype, requires_grad=True),
+            torch.randn(3, device=device, dtype=torch.double, requires_grad=True),
+        ]
+        if real_input == 0:
+            inputs.reverse()
+        for p in (0.5, 1, 2, 3):
+            with self.subTest(p=p):
+
+                def fn(a, b):
+                    return torch.dist(a, b, p)
+
+                def reference(a, b):
+                    return torch.linalg.vector_norm(a - b, p)
+
+                self.assertTrue(gradcheck(fn, inputs, check_forward_ad=True))
+                self.assertTrue(gradgradcheck(fn, inputs))
+                tangents = tuple(torch.randn_like(x) for x in inputs)
+                self.assertEqual(
+                    torch.func.jvp(
+                        torch.func.grad(fn, argnums=(0, 1)), tuple(inputs), tangents
+                    ),
+                    torch.func.jvp(
+                        torch.func.grad(reference, argnums=(0, 1)),
+                        tuple(inputs),
+                        tangents,
+                    ),
+                )
+
+    @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
+    @dtypesIfMPS(torch.float32, torch.complex64)
+    def test_dist_backward_zero_and_ties(self, device, dtype):
+        a = torch.tensor([1, -1, 1, -1], device=device, dtype=dtype, requires_grad=True)
+        b = torch.zeros((), device=device, dtype=dtype, requires_grad=True)
+        for p in (0, 1, 2, inf, -inf):
+            for first in (a, b.expand_as(a)):
+                with self.subTest(p=p, coincident=first is not a):
+                    self.assertEqual(
+                        torch.autograd.grad(
+                            torch.dist(first, b, p), (a, b), allow_unused=True
+                        ),
+                        torch.autograd.grad(
+                            torch.linalg.vector_norm(first - b, p),
+                            (a, b),
+                            allow_unused=True,
+                        ),
+                    )
+
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
