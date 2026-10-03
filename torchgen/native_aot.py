@@ -6,6 +6,8 @@ validating loader torchgen/native_aot_decl.py. torchgen consumes the declaration
 generate NativeAotStubs.h -- one at::native DispatchStub per declared op,
 signature-matched to the structured impl, with no kernel registered by default -- and
 to emit a stub consultation between op.meta() and op.impl() in the generated wrapper.
+Unstructured functional declarations instead return allocated tensors through an
+output parameter, before the wrapper calls the ordinary backend implementation.
 
 Only the identity torchgen needs is modeled here: the precompile grid belongs to the
 export tool and to torch._native.aot_manifest, the C++-generating hooks to
@@ -39,6 +41,7 @@ class NativeAotManifest:
     # consultation gates on the private mask instead of the user-facing
     # switch (see gen_stub_consultation).
     unconditional: bool = False
+    structured: bool = True
 
     @property
     def decl_id(self) -> str:
@@ -86,13 +89,18 @@ def parse_native_aot_manifests(
     manifests: dict[tuple[DispatchKey, str], NativeAotManifest] = {}
     if not os.path.isdir(ops_dir):
         return manifests
-    # Beyond the (dispatch_key, op) keys, only UNCONDITIONAL is read here --
-    # it picks the gate in the generated wrapper. The rest of each
-    # declaration is for the export tool and gen_aot_lib.
+    # STRUCTURED picks the wrapper ABI; UNCONDITIONAL picks its enablement gate.
+    # The rest of each declaration is for the export tool and gen_aot_lib.
     for (key_str, op), d in discover_declarations(ops_dir).items():
         key = DispatchKey.parse(key_str)
+        structured = getattr(d, "STRUCTURED", True)
+        if not isinstance(structured, bool):
+            raise RuntimeError(f"{op}: STRUCTURED must be a bool")
         manifests[(key, op)] = NativeAotManifest(
-            op=op, dispatch_key=key, unconditional=is_unconditional(d)
+            op=op,
+            dispatch_key=key,
+            unconditional=is_unconditional(d),
+            structured=structured,
         )
     return manifests
 
@@ -105,9 +113,26 @@ def _impl_bindings(g: NativeFunctionsGroup) -> list:
         return structured.impl_arguments(g)
 
 
-def gen_stub_declaration(m: NativeAotManifest, g: NativeFunctionsGroup) -> str:
-    bindings = _impl_bindings(g)
-    params = ", ".join(b.decl() for b in bindings)
+def functional_stub_params(f: NativeFunction) -> str:
+    from torchgen.api.types import DispatcherSignature
+    from torchgen.context import native_function_manager
+
+    with native_function_manager(f):
+        sig = DispatcherSignature.from_schema(f.func)
+        params = [b.decl() for b in sig.arguments()]
+        params.append(f"{sig.returns_type().cpp_type()}& aot_result")
+    return ", ".join(params)
+
+
+def gen_stub_declaration(
+    m: NativeAotManifest, g: NativeFunction | NativeFunctionsGroup
+) -> str:
+    from torchgen.model import NativeFunctionsGroup
+
+    if isinstance(g, NativeFunctionsGroup):
+        params = ", ".join(b.decl() for b in _impl_bindings(g))
+    else:
+        params = functional_stub_params(g)
     return f"""\
 using {m.fn_type_name()} = bool (*)({params});
 DECLARE_DISPATCH({m.fn_type_name()}, {m.stub_name()})
@@ -175,21 +200,42 @@ def validate_native_aot_manifests(
     manifests: dict[tuple[DispatchKey, str], NativeAotManifest],
     grouped_native_functions: Sequence[NativeFunction | NativeFunctionsGroup],
 ) -> None:
-    """Every manifest op must resolve to exactly one structured op group:
-    the stub call site is emitted in the structured wrapper (between meta
-    and impl), so an unstructured op has nowhere to put it, and an
-    ambiguous base name would hook the wrong overload silently."""
+    """Resolve structured groups or explicitly declared unstructured functions.
+
+    Functional hooks require fresh Tensor returns so the result parameter cannot
+    introduce mutation or aliasing. Structured base names must be unambiguous.
+    """
     from collections import defaultdict
 
-    from torchgen.model import NativeFunctionsGroup
+    from torchgen.model import BaseTy, BaseType, NativeFunctionsGroup, SchemaKind
 
     structured_by_base: dict[str, list[str]] = defaultdict(list)
+    functional_by_name = {}
     for g in grouped_native_functions:
         if isinstance(g, NativeFunctionsGroup) and g.structured:
             structured_by_base[g.functional.func.name.name.base].append(
                 str(g.functional.func.name)
             )
-    for key, op in manifests:
+        else:
+            f = g.functional if isinstance(g, NativeFunctionsGroup) else g
+            functional_by_name[str(f.func.name)] = f
+    for (key, op), manifest in manifests.items():
+        if not manifest.structured:
+            f = functional_by_name.get(op)
+            if (
+                f is None
+                or f.func.kind() != SchemaKind.functional
+                or not f.func.returns
+                or any(
+                    r.type != BaseType(BaseTy.Tensor) or r.annotation is not None
+                    for r in f.func.returns
+                )
+            ):
+                raise RuntimeError(
+                    f"native-aot declaration for {op}@{key}: STRUCTURED=False "
+                    "requires an exact functional overload returning fresh tensors"
+                )
+            continue
         base = op.split(".")[0]
         names = structured_by_base.get(base, [])
         if "." in op:
@@ -202,11 +248,8 @@ def validate_native_aot_manifests(
         elif not names:
             raise RuntimeError(
                 f"native-aot declaration for {op}@{key}: {op} is not a "
-                f"structured op in native_functions.yaml. The stub is "
-                f"consulted between meta() and impl(), so unstructured ops "
-                f"are served by the JIT layer only; to embed, structure the "
-                f"op upstream first (preferred; e.g. var.correction is a "
-                f"candidate)"
+                f"structured op in native_functions.yaml. Use STRUCTURED=False "
+                f"for an exact functional overload returning fresh tensors."
             )
         elif len(names) > 1:
             raise RuntimeError(
