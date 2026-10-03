@@ -262,6 +262,7 @@ class ListTests(TupleTests):
     def test_copy(self):
         p = self.thetype("abc")
         self.assertEqual(p.copy(), p)
+        self.assertEqual(list.copy(p), p)
 
         # Wrong number of arguments
         self.assertRaises(TypeError, p.copy, 1)

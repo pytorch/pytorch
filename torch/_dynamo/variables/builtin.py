@@ -4153,6 +4153,17 @@ class ListBuiltinVariable(BaseBuiltinVariable):
                     tx=tx,
                 )
 
+        if args and name == "copy":
+            # Unbound list.copy.  Subclasses come first: UserDefinedListVariable
+            # is also a ListVariable, and its call_method would resolve through
+            # the MRO to a Python override, while methoddescr_call runs the C
+            # slot of list itself.
+            obj = args[0]
+            if isinstance(obj, UserDefinedObjectVariable):
+                return obj.call_base_method(tx, name, args[1:], kwargs)
+            if isinstance(obj, ListVariable):
+                return obj.call_method(tx, name, args[1:], kwargs)
+
         return super().call_method(tx, name, args, kwargs)
 
 
