@@ -2194,6 +2194,7 @@ def _cuda_restoreExpandableSegment(
     address: _int,
     reserve_size: _int,
     segment_size: _int,
+    handle_type: _int,
     mapped_ranges: list[tuple[_int, _int]],
 ) -> None: ...
 def _cuda_beginAllocateCurrentThreadToPool(
