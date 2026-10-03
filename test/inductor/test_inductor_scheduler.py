@@ -1951,6 +1951,28 @@ class TestScheduler(TestCase):
             None,
         )
 
+    @inductor_config.patch(reorder_for_peak_memory=True)
+    @dtypes(torch.complex64, torch.complex128)
+    @xfailIfNoAcceleratorTriton
+    def test_mutating_fallback_returned_alias_ordering(self, device, dtype):
+        def fn(x, index, values, replacement):
+            x.index_put_((index,), values)
+            result = x.real[:, None].expand(-1, 128).square()
+            x.copy_(torch.cat((replacement, replacement)))
+            return result, x
+
+        args = (
+            torch.zeros(32, device=device, dtype=dtype),
+            torch.arange(0, 32, 2, device=device),
+            torch.full((16,), 1 + 2j, device=device, dtype=dtype),
+            torch.full((16,), 3 + 4j, device=device, dtype=dtype),
+        )
+        expected = fn(*(arg.clone() for arg in args))
+        torch._dynamo.reset()
+        with fresh_inductor_cache():
+            actual = torch.compile(fn, fullgraph=True)(*(arg.clone() for arg in args))
+        self.assertEqual(actual, expected)
+
     def test_partition_signature_cleaning_only_removes_current_codegen_buffers(self):
         scheduler = Scheduler.__new__(Scheduler)
 

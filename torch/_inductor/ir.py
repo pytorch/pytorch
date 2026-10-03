@@ -9673,7 +9673,7 @@ class FallbackKernel(ExternKernelAlloc):
             raise AssertionError("Expected self.python_kernel_name is not None")
         V.graph.warn_fallback(self.python_kernel_name)
 
-        # args that are aliased
+        # Aliased arguments and their mutation versions.
         self.alias_names: list[str] = []
 
         if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
@@ -9707,12 +9707,12 @@ class FallbackKernel(ExternKernelAlloc):
             # Partition signatures resolve mutation buffers to their original names.
             # Track the mutation separately so the returned alias keeps its own name.
             arg = tensor_args[0]
-            self.mutation_outputs.append(
-                MutationOutput(NoneLayout(device=arg.get_device()), arg, self)
+            mutation_output = MutationOutput(
+                NoneLayout(device=arg.get_device()), arg, self
             )
-            # Record aliasing relationship so memory planning doesn't wrongly
-            # reuse its storage.
-            self.alias_names.append(arg.get_name())
+            self.mutation_outputs.append(mutation_output)
+            # Share readers with the mutation version so later writes wait for them.
+            self.alias_names.extend((arg.get_name(), mutation_output.get_name()))
             return
 
         def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:
