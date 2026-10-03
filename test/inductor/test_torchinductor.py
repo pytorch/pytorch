@@ -8562,6 +8562,19 @@ for dtype in (torch.int32, torch.int64):
 
         self.common(fn, (x,), exact_stride=True, check_lowp=False)
 
+    def test_view_as_complex_copy_non_contiguous(self):
+        # Regression test for #199350: view_as_complex_copy fell back without
+        # require_contiguous, so the kernel got the pool's non-stride-1 layout.
+        def fn(x):
+            t = torch.linalg.cholesky_ex(x)[0]
+            t = torch.nn.functional.adaptive_max_pool2d(t, (2, 2))
+            return torch.view_as_complex_copy(t)
+
+        a = torch.randn(4, 4, 4, 4, device=self.device)
+        x = a @ a.transpose(-1, -2) + 4 * torch.eye(4, device=self.device)
+
+        self.common(fn, (x,), check_lowp=False)
+
     def test_view_as_real(self):
         def fn(x):
             y = torch.view_as_real(x)
