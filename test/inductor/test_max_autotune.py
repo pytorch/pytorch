@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import contextlib
+import dataclasses
 import functools
 import inspect
 import json
@@ -42,13 +43,12 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.codegen.common import WorkspaceArg
 from torch._inductor.graph import GraphLowering
-from torch._inductor.heuristics.registry import override_template_heuristics
+from torch._inductor.heuristics.registry import (
+    get_registered_heuristic_class,
+    override_template_heuristics,
+)
 from torch._inductor.heuristics.template.triton import (
     BlackwellGPUGemmConfig,
-    CUDAAddmmPersistentTMATemplateConfigHeuristic,
-    CUDAAddMMTemplateConfigHeuristic,
-    CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
-    CUDABlackwellPersistentTMATemplateConfigHeuristic,
     CUDAMMTemplateConfigHeuristic,
     CUDAPersistentTMATemplateConfigHeuristic,
     GemmConfig,
@@ -58,6 +58,12 @@ from torch._inductor.heuristics.template.triton import (
     XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
+from torch._inductor.kernel.mm import (
+    blackwell_ws_persistent_tma_mm_template,
+    mm_template,
+    persistent_mm_template,
+    persistent_tma_mm_template,
+)
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.runtime.hints import DeviceProperties
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner, pointwise
@@ -935,6 +941,18 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
+    def test_addmm_0d_bias_max_autotune(self):
+        torch._dynamo.reset()
+        bias = torch.tensor(0.5)
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+
+        eager_out = torch.addmm(bias, x, y)
+        with config.patch({"max_autotune": True, "max_autotune_gemm": True}):
+            compiled_out = torch.compile(torch.addmm)(bias, x, y)
+
+        self.assertEqual(compiled_out, eager_out)
+
     @fresh_cache()
     def test_addmm_1d_bias_no_reinterpret_tensor(self):
         """
@@ -1604,7 +1622,7 @@ class TestMaxAutotune(TestCase):
     @config.patch(
         {
             "max_autotune_gemm_backends": "TRITON",
-            "benchmark_epilogue_fusion": False,
+            "benchmark_template_fusion": False,
         }
     )
     def test_cat_max_autotune_triton(self):
@@ -1764,7 +1782,7 @@ class TestMaxAutotune(TestCase):
         b = torch.zeros([16, 16], device=GPU_TYPE)
         with (
             patch.object(AlgorithmSelectorCache, "lookup", mock_lookup),
-            config.patch(benchmark_epilogue_fusion=multi_template),
+            config.patch(benchmark_template_fusion=multi_template),
         ):
             with self.assertRaises(BackendCompilerFailed) as context:
                 torch.compile(lambda a, b: a.matmul(b))(a, b)
@@ -2576,7 +2594,8 @@ class TestMaxAutotune(TestCase):
                         'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                         'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
                         'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},
-                        'hint_override':None,'triton_meta':None}"""
+                        'hint_override':None,'emulate_precision_casts':False,
+                        'triton_meta':None}"""
 
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
@@ -2618,7 +2637,9 @@ class TestMaxAutotune(TestCase):
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
                     'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                     'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,
-                    'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},'hint_override':None,'triton_meta':None}"""
+                    'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},
+                    'hint_override':None,'emulate_precision_casts':False,
+                    'triton_meta':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
                     remove_white_space(cache_key),
@@ -3721,7 +3742,7 @@ class TestMaxAutotune(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "Triton",
                 "epilogue_fusion": True,
-                "benchmark_epilogue_fusion": False,
+                "benchmark_template_fusion": False,
             }
         ):
             if use_addmm:
@@ -3769,7 +3790,7 @@ class TestMaxAutotune(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "Triton",
                 "epilogue_fusion": False,
-                "benchmark_epilogue_fusion": False,
+                "benchmark_template_fusion": False,
             }
         ):
             if use_addmm:
@@ -3811,7 +3832,7 @@ class TestMaxAutotune(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "Triton",
                 "epilogue_fusion": True,
-                "benchmark_epilogue_fusion": False,
+                "benchmark_template_fusion": False,
             }
         ):
             if use_addmm:
@@ -3841,19 +3862,34 @@ class TestTemplateConfigPruning(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        # Initialize heuristics once for all tests
-        cls.addmm_heuristic = CUDAAddMMTemplateConfigHeuristic()
-        cls.mm_heuristic = CUDAMMTemplateConfigHeuristic()
 
-        tma_addmm_heuristic_cls = CUDAAddmmPersistentTMATemplateConfigHeuristic
-        tma_mm_heuristic_cls = CUDAPersistentTMATemplateConfigHeuristic
-        if has_datacenter_blackwell_tma_device():
-            tma_addmm_heuristic_cls = (
-                CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic
+        # Initialize heuristics once for all tests. Registration is
+        # device-conditional, so the registry is the only reliable source for
+        # the heuristic class the compiler will actually use.
+        def _registered_heuristic(template_uid, op_name):
+            heuristic_cls = get_registered_heuristic_class(
+                template_uid, GPU_TYPE, op_name
             )
-            tma_mm_heuristic_cls = CUDABlackwellPersistentTMATemplateConfigHeuristic
-        cls.addmm_tma_heuristic = tma_addmm_heuristic_cls()
-        cls.mm_tma_heuristic = tma_mm_heuristic_cls()
+            return heuristic_cls() if heuristic_cls is not None else None
+
+        # Mirrors the persistent-template selection in tuned_mm/tuned_addmm.
+        if has_datacenter_blackwell_tma_device():
+            cls.persistent_template_uid = blackwell_ws_persistent_tma_mm_template.uid
+        elif torch.version.hip is not None:
+            cls.persistent_template_uid = persistent_mm_template.uid
+        else:
+            cls.persistent_template_uid = persistent_tma_mm_template.uid
+
+        cls.addmm_heuristic = _registered_heuristic(mm_template.uid, "addmm")
+        cls.mm_heuristic = _registered_heuristic(mm_template.uid, "mm")
+        cls.addmm_persistent_heuristic = _registered_heuristic(
+            cls.persistent_template_uid, "addmm"
+        )
+        cls.mm_persistent_heuristic = _registered_heuristic(
+            cls.persistent_template_uid, "mm"
+        )
+
+        cls.pinned_heuristic_classes = {}
 
         block_sizes = [64, 128, 256]
         num_stages = [4, 5]
@@ -3877,21 +3913,45 @@ class TestTemplateConfigPruning(TestCase):
             if BLOCK_M + BLOCK_N + BLOCK_K < 512 and BLOCK_M + BLOCK_N + BLOCK_K > 192
         ]
 
-    def setUp(self):
-        super().setUp()
-        # Save original configs to restore in tearDown
-        self.original_tma_mm_configs = self.mm_tma_heuristic.mm_configs
-        self.original_mm_mm_configs = self.mm_heuristic.mm_configs
-        self.original_addmm_tma_configs = self.addmm_tma_heuristic.mm_configs
-        self.original_addmm_configs = self.addmm_heuristic.mm_configs
+    @staticmethod
+    def has_persistent_template_support():
+        """Whether the compiler will select a persistent GEMM template here.
 
-    def tearDown(self):
-        # Restore original configs
-        self.addmm_tma_heuristic.mm_configs = self.original_addmm_tma_configs
-        self.addmm_heuristic.mm_configs = self.original_addmm_configs
-        self.mm_tma_heuristic.mm_configs = self.original_tma_mm_configs
-        self.mm_heuristic.mm_configs = self.original_mm_mm_configs
-        super().tearDown()
+        HIP has no device-side TMA but still runs a non-TMA persistent kernel,
+        so the persistent path is live there despite has_triton_cuda_tma_device().
+        """
+        return torch.version.hip is not None or has_triton_cuda_tma_device()
+
+    def pinned_heuristic_class(self, heuristic):
+        """Return the pinned subclass of ``heuristic``'s class, built once.
+
+        BaseHeuristicSingleton keys its instance cache on the class object and
+        never evicts, so a class per test method would leak an entry per method.
+        """
+        base_cls = type(heuristic)
+        pinned = self.pinned_heuristic_classes.get(base_cls)
+        if pinned is None:
+            pinned = type(f"Pinned{base_cls.__name__}", (base_cls,), {})
+            self.pinned_heuristic_classes[base_cls] = pinned
+        return pinned
+
+    def template_pairs(self, op_name, use_persistent):
+        """Return the (active, disabled) template/op pairs for this variant.
+
+        Every GEMM template other than the one under test is disabled so that a
+        single config reaches the autotuner. The uids are deduplicated because
+        the persistent template is ``persistent_mm_template`` on HIP.
+        """
+        active_uid = self.persistent_template_uid if use_persistent else mm_template.uid
+        all_uids = dict.fromkeys(
+            (
+                mm_template.uid,
+                self.persistent_template_uid,
+                persistent_mm_template.uid,
+            )
+        )
+        disabled = [(uid, op_name) for uid in all_uids if uid != active_uid]
+        return (active_uid, op_name), disabled
 
     @contextlib.contextmanager
     def pruning_config_context(self):
@@ -3964,7 +4024,11 @@ class TestTemplateConfigPruning(TestCase):
     ):
         """Test shared memory pruning for addmm operation."""
 
-        if use_tma and (dtype == torch.float32 or not has_triton_cuda_tma_device()):
+        # use_tma selects the persistent variant, which on ROCm is not TMA.
+        # Parametrize name kept so test ids in slow_tests.json stay valid.
+        if use_tma and (
+            dtype == torch.float32 or not self.has_persistent_template_support()
+        ):
             return
 
         def addmm_op(bias, mat1, mat2):
@@ -3982,12 +4046,11 @@ class TestTemplateConfigPruning(TestCase):
         )
         dtype_size = mat1.dtype.itemsize
 
-        if use_tma:
-            self.addmm_heuristic.mm_configs = []
-            heuristic = self.addmm_tma_heuristic
-        else:
-            self.addmm_tma_heuristic.mm_configs = []
-            heuristic = self.addmm_heuristic
+        heuristic = self.addmm_persistent_heuristic if use_tma else self.addmm_heuristic
+        active_pair, disabled_pairs = self.template_pairs("addmm", use_tma)
+
+        if heuristic is None:
+            self.skipTest(f"No heuristic registered for {active_pair} on {GPU_TYPE}")
 
         shared_memory_checker_opts = get_shared_memory_checker_opts("addmm", dtype_size)
 
@@ -3997,6 +4060,8 @@ class TestTemplateConfigPruning(TestCase):
             (bias_1d, mat1, mat2),
             dtype_size,
             shared_memory_checker_opts,
+            active_pair,
+            disabled_pairs,
         )
 
     @skipIfXpu(msg="Missing device_properties shared_memory_per_block on xpu.")
@@ -4011,7 +4076,9 @@ class TestTemplateConfigPruning(TestCase):
         mat2_transposed: bool,
         use_tma: bool,
     ):
-        if use_tma and (dtype == torch.float32 or not has_triton_cuda_tma_device()):
+        if use_tma and (
+            dtype == torch.float32 or not self.has_persistent_template_support()
+        ):
             return
 
         def mm_op(mat1, mat2):
@@ -4029,40 +4096,66 @@ class TestTemplateConfigPruning(TestCase):
         )
         dtype_size = mat1.dtype.itemsize
 
-        if use_tma:
-            self.mm_heuristic.mm_configs = []
-            heuristic = self.mm_tma_heuristic
-        else:
-            self.mm_tma_heuristic.mm_configs = []
-            heuristic = self.mm_heuristic
+        heuristic = self.mm_persistent_heuristic if use_tma else self.mm_heuristic
+        active_pair, disabled_pairs = self.template_pairs("mm", use_tma)
+
+        if heuristic is None:
+            self.skipTest(f"No heuristic registered for {active_pair} on {GPU_TYPE}")
 
         shared_memory_checker_opts = get_shared_memory_checker_opts("mm", dtype_size)
 
         self.run_op_shared_mem_pruning_check(
-            heuristic, mm_op, (mat1, mat2), dtype_size, shared_memory_checker_opts
+            heuristic,
+            mm_op,
+            (mat1, mat2),
+            dtype_size,
+            shared_memory_checker_opts,
+            active_pair,
+            disabled_pairs,
         )
 
     def run_op_shared_mem_pruning_check(
-        self, heuristic, op, inputs, dtype_size, shared_memory_checker_opts
+        self,
+        heuristic,
+        op,
+        inputs,
+        dtype_size,
+        shared_memory_checker_opts,
+        active_pair,
+        disabled_pairs,
     ):
         exceeds_checker = heuristic._get_exceeding_shared_memory_checker(
             **shared_memory_checker_opts
         )
         if exceeds_checker is None:
             self.skipTest("Device does not support shared memory size query")
+        pinned_heuristic_cls = self.pinned_heuristic_class(heuristic)
+        seen_pinned = set()
         for c in self.gemm_configs:
+            # ROCmConfigHeuristic._filter_configs rewrites num_stages in place (to 2
+            # on HIP), so measure the post-filter copy: that is what gets compiled.
+            filtered = heuristic._filter_configs([dataclasses.replace(c)])
+            if not filtered:
+                continue
+            pinned = filtered[0]
+            # On ROCm that collapses the [4, 5] stage axis into duplicates.
+            key = dataclasses.astuple(pinned)
+            if key in seen_pinned:
+                continue
+            seen_pinned.add(key)
+
             smem_estimation = heuristic.get_shared_memory_estimation(
-                c, dtype_size, **shared_memory_checker_opts
+                pinned, dtype_size, **shared_memory_checker_opts
             )
-            # Configure heuristics to use only this specific config
-            heuristic.mm_configs = [c]
-            exceeds = exceeds_checker(c, dtype_size)
+            pinned_heuristic_cls().mm_configs = [pinned]
+            exceeds = exceeds_checker(pinned, dtype_size)
 
             original_precompile = CachingAutotuner.precompile
             original_autotune = AlgorithmSelectorCache.autotune
 
             captured_smem = 0
             triton_compilation_fails = True
+            triton_choice_count = 0
 
             def mock_precompile(self, *args, **kwargs):
                 original_precompile(self, *args, **kwargs)
@@ -4076,11 +4169,16 @@ class TestTemplateConfigPruning(TestCase):
                         else kernel.metadata.shared
                     )
                     nonlocal captured_smem
-                    captured_smem = shared_mem
+                    captured_smem = max(captured_smem, shared_mem)
 
             def mock_autotune(self, *args, **kwargs):
                 timings = original_autotune(self, *args, **kwargs)
-                nonlocal triton_compilation_fails
+                nonlocal triton_compilation_fails, triton_choice_count
+                # max, so a second autotune call cannot mask a first.
+                triton_choice_count = max(
+                    triton_choice_count,
+                    sum(isinstance(caller, TritonTemplateCaller) for caller in timings),
+                )
                 for caller, t in timings.items():
                     if isinstance(caller, TritonTemplateCaller) and t != float("inf"):
                         triton_compilation_fails = False
@@ -4088,6 +4186,18 @@ class TestTemplateConfigPruning(TestCase):
 
             with (
                 self.pruning_config_context(),
+                # Swaps the registry entry and clears the heuristic cache; this
+                # is what makes the pinned config reach the compiler.
+                override_template_heuristics(
+                    device_type=GPU_TYPE,
+                    template_op_pairs=[active_pair],
+                    override_heuristic_class=pinned_heuristic_cls,
+                ),
+                # Disable sibling templates so only the config under test runs.
+                override_template_heuristics(
+                    device_type=GPU_TYPE,
+                    template_op_pairs=disabled_pairs,
+                ),
                 mock.patch.object(CachingAutotuner, "precompile", mock_precompile),
                 mock.patch.object(AlgorithmSelectorCache, "autotune", mock_autotune),
             ):
@@ -4096,16 +4206,27 @@ class TestTemplateConfigPruning(TestCase):
                 compiled_fn = torch.compile(op, mode="max-autotune")
                 run_and_get_code(compiled_fn, *inputs)
 
+            # Guard the restriction itself; if it silently stops applying, the
+            # assertions below compare against an unrelated kernel. Not ==1:
+            # a config that overflows shared memory fails to precompile and is
+            # pruned before benchmarking, which is what the branch below tests.
+            self.assertLessEqual(
+                triton_choice_count,
+                1,
+                f"Config restriction stopped applying: got {triton_choice_count} "
+                f"Triton choices for config {pinned}, expected at most 1",
+            )
+
             if triton_compilation_fails:
                 self.assertTrue(
                     exceeds,
-                    lambda msg: f"{msg}\nConfig {c} failed to compile due to shared memory, "
+                    lambda msg: f"{msg}\nConfig {pinned} failed to compile due to shared memory, "
                     "but the checker predicted it would NOT exceed shared memory limits.",
                 )
             else:
                 self.assertTrue(
                     captured_smem <= smem_estimation,
-                    lambda msg: f"{msg}\nEstimated maximum smem should exceed actual smem used for config {c}",
+                    lambda msg: f"{msg}\nEstimated maximum smem should exceed actual smem used for config {pinned}",
                 )
 
 
@@ -4998,7 +5119,7 @@ class TestPrologueFusion(TestCase):
                 {
                     "max_autotune": True,
                     "prologue_fusion": True,
-                    "benchmark_epilogue_fusion": False,
+                    "benchmark_template_fusion": False,
                     "shape_padding": False,
                     "max_autotune_gemm_backends": "TRITON",
                     "test_configs.max_mm_configs": 4,  # significantly speeds up tests
@@ -5048,8 +5169,8 @@ class TestPrologueFusion(TestCase):
 
     @config.patch(
         {
-            "benchmark_epilogue_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
         }
     )
     def test_addmm_shared_prefix_and_input_prologue_fusion(self):
@@ -5194,8 +5315,8 @@ class TestPrologueFusion(TestCase):
 
     @config.patch(
         {
-            "benchmark_epilogue_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
         }
     )
     @parametrize("prologue_fusion", (True, False))
@@ -5246,8 +5367,8 @@ class TestPrologueFusion(TestCase):
         {
             "prologue_fusion": False,
             "epilogue_fusion": True,
-            "benchmark_epilogue_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
         }
     )
     def test_baddbmm_store_output_producer_fusion(self):
@@ -5272,8 +5393,8 @@ class TestPrologueFusion(TestCase):
     @config.patch(enable_caching_generated_triton_templates=True)
     @config.patch(
         {
-            "benchmark_epilogue_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
         }
     )
     def test_addmm_shared_nonfusible_prefix_and_input_prologue(self):
@@ -5323,8 +5444,8 @@ class TestPrologueFusion(TestCase):
     )
     @config.patch(
         {
-            "benchmark_epilogue_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
         }
     )
     def test_addmm_shared_prefix_requires_both_placements(
@@ -5353,8 +5474,8 @@ class TestPrologueFusion(TestCase):
 
     @config.patch(
         {
-            "benchmark_epilogue_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
         }
     )
     def test_addmm_shared_intermediate_prefix_and_input_prologue_fusion(self):
@@ -5380,8 +5501,8 @@ class TestPrologueFusion(TestCase):
 
     @config.patch(
         {
-            "benchmark_epilogue_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
         }
     )
     def test_addmm_indirect_indexing_bias_fusion(self):
@@ -5407,8 +5528,8 @@ class TestPrologueFusion(TestCase):
 
     @config.patch(
         {
-            "benchmark_epilogue_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
         }
     )
     def test_addmm_prefix_prologue_fusion_multi_use(self):
@@ -5433,8 +5554,8 @@ class TestPrologueFusion(TestCase):
     @config.patch(
         {
             "max_autotune_gemm_backends": "Triton",
-            "benchmark_epilogue_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
         }
     )
     @parametrize("use_async_compile", (True, False))
@@ -5487,8 +5608,8 @@ class TestPrologueFusion(TestCase):
     @config.patch(
         {
             "max_autotune_gemm_backends": "Triton",
-            "benchmark_epilogue_fusion": True,
-            "max_epilogue_benchmarked_choices": 3,
+            "benchmark_template_fusion": True,
+            "max_template_fusion_benchmarked_choices": 3,
         }
     )
     @parametrize("use_async_compile", (True, False))
@@ -5655,7 +5776,7 @@ class TestPrologueFusion(TestCase):
         if use_async_compile:
             torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
 
-        with config.patch(benchmark_epilogue_fusion=benchmark_fusion):
+        with config.patch(benchmark_template_fusion=benchmark_fusion):
             x = torch.rand([M, K], dtype=torch.float, device=GPU_TYPE)
 
             out, code = run_and_get_code(torch.compile(foo), x)
@@ -5692,7 +5813,7 @@ class TestPrologueFusion(TestCase):
     @config.patch(
         {
             "max_autotune": True,
-            "benchmark_epilogue_fusion": True,
+            "benchmark_template_fusion": True,
             "epilogue_fusion": True,
             "prologue_fusion": True,
         }
@@ -5827,7 +5948,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 {
                     "max_autotune": True,
                     "autotune_fallback_to_aten": False,
-                    "benchmark_epilogue_fusion": False,
+                    "benchmark_template_fusion": False,
                     "prologue_fusion": False,
                 }
             )
@@ -6019,9 +6140,9 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 return fut, mod
 
             # Different paths:
-            # benchmark_epilogue_fusion: True -> always multi_template
+            # benchmark_template_fusion: True -> always multi_template
             # causes benchmarking always
-            # benchmark_epilogue_fusion: False -> TritonTemplateBuffer
+            # benchmark_template_fusion: False -> TritonTemplateBuffer
             # returns speedup_from_fusion automatically as True
             # What we want: force multi template -> no benchmarking with safety
             try:
@@ -7413,7 +7534,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAna
         cls._async_config = config.patch(
             {
                 "pipeline_max_autotune_gemm": True,
-                "benchmark_epilogue_fusion": False,
+                "benchmark_template_fusion": False,
                 "test_configs.max_mm_configs": 1,
             }
         )

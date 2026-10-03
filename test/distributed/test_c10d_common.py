@@ -1706,17 +1706,66 @@ class CommonDistributedDataParallelTest:
                     ddp_model.finalize_backward()
 
     @skip_if_lt_x_gpu(2)
-    def test_manual_backward_finalization_pickle_compatibility(self):
-        ddp_model = self._create_ddp_model()
+    def test_lazy_bucket_allocation_with_gradient_as_bucket_view(self):
+        process_group = self._get_process_group()
+
+        for set_to_none in (True, False):
+            with self.subTest(set_to_none=set_to_none):
+                model = Net()
+                eager_model = self._create_ddp_model(
+                    model=copy.deepcopy(model),
+                    process_group=process_group,
+                    gradient_as_bucket_view=True,
+                )
+                lazy_model = self._create_ddp_model(
+                    model=copy.deepcopy(model),
+                    process_group=process_group,
+                    gradient_as_bucket_view=True,
+                    lazy_bucket_allocation=True,
+                )
+                lazy_model.require_manual_backward_finalization = True
+                input = torch.full(
+                    (4, 2),
+                    self.rank + 1.0,
+                    device=self.rank,
+                )
+
+                for _ in range(2):
+                    eager_model.zero_grad(set_to_none=set_to_none)
+                    lazy_model.zero_grad(set_to_none=set_to_none)
+                    eager_model(input)[:, 0].sum().backward()
+                    lazy_model(input)[:, 0].sum().backward()
+                    lazy_model.finalize_backward()
+
+                    for eager_param, lazy_param in zip(
+                        eager_model.parameters(), lazy_model.parameters()
+                    ):
+                        self.assertIsNotNone(eager_param.grad)
+                        self.assertIsNotNone(lazy_param.grad)
+                        self.assertTrue(lazy_param.grad._is_view())
+                        self.assertEqual(eager_param.grad, lazy_param.grad)
+
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_pickle_compatibility(self):
+        ddp_model = self._create_ddp_model(
+            batched_grad_copy=True,
+            lazy_bucket_allocation=True,
+        )
         old_state = ddp_model.__getstate__()
         old_state.pop("_require_manual_backward_finalization")
+        old_state.pop("batched_grad_copy")
+        old_state.pop("lazy_bucket_allocation")
         restored_old = DistributedDataParallel.__new__(DistributedDataParallel)
         restored_old.__setstate__(old_state)
         self.assertFalse(restored_old.require_manual_backward_finalization)
+        self.assertFalse(restored_old.batched_grad_copy)
+        self.assertFalse(restored_old.lazy_bucket_allocation)
 
         ddp_model.require_manual_backward_finalization = True
         restored = pickle.loads(pickle.dumps(ddp_model))
         self.assertTrue(restored.require_manual_backward_finalization)
+        self.assertTrue(restored.batched_grad_copy)
+        self.assertTrue(restored.lazy_bucket_allocation)
 
         restored(torch.randn(4, 2, device=self.rank)).sum().backward()
         restored.finalize_backward()
@@ -1965,6 +2014,10 @@ class AbstractCommTest:
             dist.get_global_rank(DummyProcessGroup(self.rank, self.world_size), 0)
 
         self.assertEqual(dist.get_process_group_ranks(group), [1])
+
+        # init_process_group can return on one rank while its peer is still
+        # connecting; tearing down before the peer is done makes its init fail.
+        dist.barrier()
 
     def _test_tensor_dtype_mismatch(self, backend):
         store = dist.FileStore(self.file_name, self.world_size)
