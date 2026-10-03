@@ -1439,6 +1439,19 @@ class _LazyConvXdMixin(LazyModuleMixin):
             super().reset_parameters()  # type: ignore[misc]
 
     # Signature of "initialize_parameters" is incompatible with the definition in supertype LazyModuleMixin
+    def _initialize_parameters_from_state_dict(self):
+        if (
+            type(self).initialize_parameters
+            is not _LazyConvXdMixin.initialize_parameters
+        ):
+            return False
+        self.in_channels = (
+            self.weight.shape[0]
+            if self.transposed
+            else self.weight.shape[1] * self.groups
+        )
+        return True
+
     def initialize_parameters(self, input: Tensor, *args, **kwargs) -> None:  # type: ignore[override]
         # defined by parent class but using a protocol
         if self.has_uninitialized_params():  # type: ignore[misc]

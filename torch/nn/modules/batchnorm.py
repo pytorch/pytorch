@@ -277,6 +277,17 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
         if not self.has_uninitialized_params() and self.num_features != 0:
             super().reset_parameters()
 
+    def _initialize_parameters_from_state_dict(self):
+        if type(self).initialize_parameters is not _LazyNormBase.initialize_parameters:
+            return False
+        if self.affine and self.weight is not None:
+            self.num_features = self.weight.shape[0]
+        elif self.track_running_stats and self.running_mean is not None:
+            self.num_features = self.running_mean.shape[0]
+        else:
+            return False
+        return True
+
     def initialize_parameters(self, input) -> None:  # type: ignore[override]
         # pyrefly: ignore [bad-argument-type]
         if self.has_uninitialized_params():
