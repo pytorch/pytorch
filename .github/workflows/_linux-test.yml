@@ -155,6 +155,19 @@ jobs:
       contents: read
       actions: read
     steps:
+      # TEMPORARY: remove before merging. setup-linux is pinned @main, so its
+      # chmod runs unchanged here -- this records who owns what before it, to
+      # show whether the runner uid still matches the image's jenkins user.
+      - name: TEMPORARY uid debug
+        shell: bash
+        run: |
+          echo "runner process: $(id)"
+          for d in "${RUNNER_TEMP}" "${RUNNER_TEMP}/_runner_file_commands" "${GITHUB_WORKSPACE}"; do
+            echo "--- ${d}"
+            stat -c 'uid=%u gid=%g mode=%a %n' "${d}" 2>&1 || true
+          done
+          echo "sudo -n true: $(sudo -n true 2>&1 && echo ok || echo FAILED)"
+
       - name: Setup Linux
         id: setup-linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
