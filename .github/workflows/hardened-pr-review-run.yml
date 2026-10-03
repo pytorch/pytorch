@@ -757,6 +757,11 @@ jobs:
         uses: anthropics/claude-code-action@9ca9355b36297178e28d37c799d1c9c8a28e6507 # Claude Code 2.1.280
         with:
           use_bedrock: "true"
+          # The actor is whoever applied the `in progress` label in Stage 1.
+          # pytorch-bot applies it on `@pytorchbot pre-review accept` once
+          # every assigned reviewer has accepted, and the action rejects bot
+          # actors unless listed here. Name it exactly; never "*".
+          allowed_bots: "pytorch-bot[bot]"
           settings: |
             {
               "hooks": {
@@ -1137,9 +1142,11 @@ jobs:
           echo "--- terminal.json ---"
           cat terminal.json
 
-          # Export the EFFECTIVE status -- the override when there is one --
-          # so the label step cannot reach a different answer than the row.
-          EFFECTIVE_STATUS="${STATUS_OVERRIDE:-$(jq -r '.status // "unknown"' out/verdict.json 2>/dev/null || echo unknown)}"
+          # Export the status the ROW recorded, so the label step cannot reach
+          # a different answer than the row. emit_row.py applies the override
+          # and can itself refuse a verdict as sanitizer_rejected, so reading
+          # out/verdict.json here let the row and the label disagree.
+          EFFECTIVE_STATUS="$(jq -r '.status // "unknown"' terminal.json 2>/dev/null || echo unknown)"
           echo "effective_status=${EFFECTIVE_STATUS}" >> "$GITHUB_OUTPUT"
 
           aws s3 cp terminal.json \
@@ -1169,8 +1176,9 @@ jobs:
           set -euo pipefail
 
           STATUS="${EFFECTIVE_STATUS:-unknown}"
-          # Read the SANITIZED verdict, never the model's own file.
-          VERDICT=$(jq -r '.verdict // "none"' out/verdict.json 2>/dev/null || echo none)
+          # Read the verdict the ROW recorded: sanitized, re-checked, and null
+          # whenever the row refused it. Never the model's own file.
+          VERDICT=$(jq -r '.verdict // "none"' terminal.json 2>/dev/null || echo none)
 
           # Tolerate the 404 that means the label is already gone — a normal
           # concurrent state — and WARN on anything else. `|| true` on the whole
