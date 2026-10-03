@@ -12607,12 +12607,16 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize_test("out_dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize_test("grad_dtype", [torch.float32, torch.float16, torch.bfloat16])
-    @parametrize_test("noncontiguous", [False, True])
-    def test_threshold_out_dtype(self, device, dtype, out_dtype, grad_dtype, noncontiguous):
-        cpu_x = torch.tensor([[-2, 0, 0.25], [1, 2, float("nan")]], dtype=dtype)
-        if noncontiguous:
-            cpu_x = cpu_x.t()
-        x = cpu_x.to(device)
+    @parametrize_test("layout", ["contiguous", "transposed", "offset", "strided_offset"])
+    def test_threshold_out_dtype(self, device, dtype, out_dtype, grad_dtype, layout):
+        offset = int(layout in ("offset", "strided_offset"))
+        step = 2 if layout == "strided_offset" else 1
+        cpu_storage = torch.full((offset + 6 * step,), -42, dtype=dtype)
+        cpu_x = cpu_storage[offset::step].reshape(2, 3)
+        cpu_x.copy_(torch.tensor([[-2, 0, 0.25], [1, 2, float("nan")]], dtype=dtype))
+        x = cpu_storage.to(device)[offset::step].reshape(2, 3)
+        if layout == "transposed":
+            cpu_x, x = cpu_x.t(), x.t()
         expected = torch.empty_like(cpu_x, dtype=out_dtype)
         actual = torch.empty_like(x, dtype=out_dtype)
         torch.ops.aten.threshold.out(cpu_x, 0.25, 0.125, out=expected)
