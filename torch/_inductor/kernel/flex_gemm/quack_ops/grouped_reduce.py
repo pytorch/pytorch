@@ -178,8 +178,8 @@ if _COMBINE_FNS.keys() != LOCAL_REDUCE_COMBINE_NAMES:
 
 
 def feed_main_capable(axis: int, group: int) -> bool:
-    """Whether a feed can be reduced in-pass (same-warp M groups only, mirroring
-    ``constraints.validate_local_reduce_feed_main_capability``)."""
+    """Whether a feed can be reduced in-pass (same-warp M groups only; per-config
+    legality is ``GroupedLocalReduceFeed.supports_config``)."""
     return axis == 0 and group <= GROUPED_FRAGMENT_WIDTH
 
 
@@ -1251,19 +1251,49 @@ class GroupedLocalReduce(GroupedReduceBase):
             gemm.epilogue_barrier.arrive_and_wait()
 
 
+# sm_120's mma.sync epilogue has 8 M lanes per warp, each owning rows r and r + 8
+# of a 16-row group; grouped feed-main reduces across lanes only, so its M groups
+# must not exceed the lane count there.
+SM120_FEED_MAIN_MAX_GROUP = 8
+
+
 class GroupedLocalReduceFeed(GroupedReduceBase):
     """Same-pass grouped M reduction fed back into the fn (apply port).
 
     The fn calls the op (``r = gsum(acc)``) and receives the group reduction
     broadcast to every row lane of the group - no second accumulator pass and no
-    smem, which is why it is limited to groups inside one warp's row lanes
-    (FlexGEMM's ``validate_local_reduce_feed_main_capability``). Passing a
+    smem, which is why it is limited to groups inside one warp's row lanes, with
+    exactly one group row per M lane: the butterfly in ``reduce_broadcast`` only
+    combines across lanes and never folds rows the same lane owns. sm_120's
+    mma.sync epilogue gives a lane rows ``r`` and ``r + 8`` of a 16-row group
+    (8 M lanes), so M groups above ``SM120_FEED_MAIN_MAX_GROUP`` are rejected
+    there at config selection (``supports_config``); ``reduce_broadcast`` keeps a
+    layout-derived assertion as the backstop for hand-written mixins. Passing a
     compressed aux tensor also stores the reduced values; ``keep_tensorless``
     keeps the op active without one.
     """
 
     fn_port = "apply"
     keep_tensorless = True
+
+    def supports_config(self, config) -> bool:
+        if (
+            getattr(config, "device_capacity", None) == 12
+            and self.group > SM120_FEED_MAIN_MAX_GROUP
+        ):
+            return False
+        return super().supports_config(config)
+
+    def config_support_error(self, configs) -> str:
+        if self.group > SM120_FEED_MAIN_MAX_GROUP and all(
+            getattr(config, "device_capacity", None) == 12 for config in configs
+        ):
+            return (
+                "grouped feed-main on sm_120 supports M groups up to "
+                f"{SM120_FEED_MAIN_MAX_GROUP} (one group row per M lane); "
+                f"requested group={self.group}"
+            )
+        return super().config_support_error(configs)
 
     def __init__(self, name, *, axis=0, group, combine="add", finalize=None):
         if not feed_main_capable(axis, group):
@@ -1284,6 +1314,18 @@ class GroupedLocalReduceFeed(GroupedReduceBase):
         """Group reduction of one register value, broadcast to the group's row
         lanes. The primitive the apply port calls per element, and the entry
         point for a hand-written mixin (loop it over the fragment)."""
+        # Backstop for the host gate: the butterfly needs one group row per lane.
+        if const_expr(self.group > geom.lanes_m):
+            raise AssertionError(
+                f"grouped feed-main: group {self.group} exceeds the {geom.lanes_m} "
+                "M lanes of this epilogue layout"
+            )
+        if const_expr(any(len(chunk) > 1 for chunk in geom.row_chunks)):
+            raise AssertionError(
+                "grouped feed-main: a lane owns "
+                f"{max(len(chunk) for chunk in geom.row_chunks)} rows of a "
+                f"{self.group}-row group in this epilogue layout"
+            )
         combine_fn = const_expr(self.combine_fn)
         rows = const_expr(self.group // 2)
         while rows > 0:
