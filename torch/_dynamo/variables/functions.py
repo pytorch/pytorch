@@ -25,6 +25,7 @@ import _collections  # type: ignore[import-not-found]
 import builtins
 import collections
 import functools
+import importlib
 import importlib.metadata
 import importlib.util
 import inspect
@@ -3904,8 +3905,10 @@ class SysFunctionVariable(VariableTracker):
 
 
 from torch._higher_order_ops.triton_kernel_wrap import (
+    bind_tma_descriptor_factory_call,
     create_tma_experimental_metadata,
     create_tma_stable_metadata,
+    get_importable_tma_descriptor_path,
     TMADescriptorMetadata,
     TritonHOPifier,
 )
@@ -4227,6 +4230,8 @@ class TMADescriptorStableVariable(VariableTracker):
         self,
         tensor: "TensorVariable",
         block_shape: "ListVariable",
+        descriptor_module: str,
+        descriptor_class: str,
         **kwargs: Any,
     ) -> None:
         if not tensor.is_tensor():
@@ -4234,16 +4239,20 @@ class TMADescriptorStableVariable(VariableTracker):
         super().__init__(**kwargs)
         self.tensor = tensor
         self.block_shape = block_shape
+        self.descriptor_module = descriptor_module
+        self.descriptor_class = descriptor_class
 
     def to_metadata(self) -> Any:
         return create_tma_stable_metadata(
             self.block_shape.as_proxy(),
+            self.descriptor_module,
+            self.descriptor_class,
         )
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.load_import_from(
-            "triton.tools.tensor_descriptor",
-            "TensorDescriptor",
+            self.descriptor_module,
+            self.descriptor_class,
         )
         codegen.load_method("from_tensor")
         codegen(self.tensor)
@@ -4330,9 +4339,80 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
         )
 
 
+def _get_tma_descriptor_import_path(
+    tx: "InstructionTranslatorBase",
+    descriptor_type: type[Any],
+    factory: Callable[..., Any],
+) -> tuple[str, str]:
+    descriptor_module = descriptor_type.__module__
+    descriptor_class = descriptor_type.__name__
+    descriptor_path = f"{descriptor_module}.{descriptor_class}"
+
+    if get_importable_tma_descriptor_path(descriptor_type) is None:
+        unimplemented(
+            gb_type="TMA descriptor class is not importable",
+            context=f"descriptor_type={descriptor_type!r}, path={descriptor_path}",
+            explanation=(
+                f"Triton tensor descriptor class {descriptor_type.__qualname__} must "
+                f"be importable as {descriptor_path} so compiled code can reconstruct it."
+            ),
+            hints=[
+                "Define the descriptor class at module scope and export it under its class name."
+            ],
+        )
+
+    descriptor_source = AttrSource(
+        tx.import_source(descriptor_module), descriptor_class
+    )
+    # The class may already be tracked under another source, so build can reuse it.
+    install_guard(descriptor_source.make_guard(GuardBuilder.ID_MATCH))
+    VariableTracker.build(tx, descriptor_type, descriptor_source).realize()
+
+    reconstruction_factory = descriptor_type.from_tensor
+    reconstruction_function = getattr(
+        reconstruction_factory, "__func__", reconstruction_factory
+    )
+    captured_function = getattr(factory, "__func__", factory)
+    reconstruction_owner = getattr(reconstruction_factory, "__self__", None)
+    captured_owner = getattr(factory, "__self__", None)
+    if (
+        reconstruction_function is not captured_function
+        or reconstruction_owner is not captured_owner
+    ):
+        unimplemented(
+            gb_type="TMA descriptor reconstruction factory mismatch",
+            context=f"descriptor_type={descriptor_type!r}, factory={factory!r}",
+            explanation=(
+                "The captured TMA descriptor factory no longer matches the class's "
+                "from_tensor attribute used to reconstruct compiled descriptors."
+            ),
+            hints=["Use the descriptor class's current from_tensor factory."],
+        )
+
+    factory_source = AttrSource(descriptor_source, "from_tensor")
+    if isinstance(factory, types.MethodType):
+        install_guard(
+            AttrSource(factory_source, "__self__").make_guard(GuardBuilder.ID_MATCH)
+        )
+        factory_source = AttrSource(factory_source, "__func__")
+    install_guard(factory_source.make_guard(GuardBuilder.FUNCTION_MATCH))
+    install_guard(factory_source.make_guard(GuardBuilder.CLOSURE_MATCH))
+    return descriptor_module, descriptor_class
+
+
 class CreateTMADescriptorStableVariable(VariableTracker):
+    def __init__(
+        self,
+        descriptor_type: type[Any],
+        factory: Callable[..., Any],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.descriptor_type = descriptor_type
+        self.factory = factory
+
     def python_type(self) -> type:
-        return types.FunctionType
+        return type(self.factory)
 
     def call_function(
         self,
@@ -4340,12 +4420,48 @@ class CreateTMADescriptorStableVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        tensor = kwargs["tensor"] if "tensor" in kwargs else args[0]
-        block_shape = kwargs["block_shape"] if "block_shape" in kwargs else args[1]
+        bound_call = bind_tma_descriptor_factory_call(self.factory, args, kwargs)
+        if bound_call is None:
+            unimplemented(
+                gb_type="Unsupported TMA descriptor factory call",
+                context="from_tensor() arguments must match its signature and defaults",
+                explanation=(
+                    "Dynamo supports stable TMA descriptor factories with tensor and "
+                    "block_shape, plus optional scalar arguments equal to their defaults."
+                ),
+                hints=[
+                    "Call from_tensor(tensor, block_shape) or pass only default values "
+                    "for optional arguments."
+                ],
+            )
 
+        tensor, block_shape, supplied_options = bound_call
+        descriptor_module, descriptor_class = _get_tma_descriptor_import_path(
+            tx, self.descriptor_type, self.factory
+        )
+        factory_source = AttrSource(
+            AttrSource(tx.import_source(descriptor_module), descriptor_class),
+            "from_tensor",
+        )
+        if isinstance(self.factory, types.MethodType):
+            factory_source = AttrSource(factory_source, "__func__")
+        if any(default_index is not None for _, default_index in supplied_options):
+            install_guard(
+                AttrSource(factory_source, "__defaults__").make_guard(
+                    GuardBuilder.SEQUENCE_LENGTH
+                )
+            )
+        for name, default_index in supplied_options:
+            if default_index is None:
+                default_source = DefaultsSource(factory_source, name, is_kw=True)
+            else:
+                default_source = DefaultsSource(factory_source, default_index)
+            install_guard(default_source.make_guard(GuardBuilder.CONSTANT_MATCH))
         return TMADescriptorStableVariable(
-            tensor=tensor,  # type: ignore[arg-type]
-            block_shape=block_shape,  # type: ignore[arg-type]
+            tensor=cast("TensorVariable", tensor),
+            block_shape=cast("ListVariable", block_shape),
+            descriptor_module=descriptor_module,
+            descriptor_class=descriptor_class,
         )
 
 
