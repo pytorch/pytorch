@@ -2176,8 +2176,8 @@ class outer_fn(torch.nn.Module):
             out.sum().backward()
 
     @unittest.skipUnless(
-        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip,
-        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED,
+        "Requires CUDA with SM >= 8.0, and Triton",
     )
     def test_nested_compile_transformer_with_flex_attention_compiled_layers(
         self,
@@ -2430,9 +2430,9 @@ class outer_fn(torch.nn.Module):
         dist.destroy_process_group()
 
     @unittest.skipUnless(
-        (IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED and not torch.version.hip)
+        IS_FLEX_ATTENTION_CUDA_PLATFORM_SUPPORTED
         or IS_FLEX_ATTENTION_XPU_PLATFORM_SUPPORTED,
-        "Requires CUDA with SM >= 8.0, Triton, and not ROCm",
+        "Requires CUDA with SM >= 8.0, and Triton",
     )
     def test_2tier_blockmask_tensor_closure_nested_compile_aot_export(self):
         """2-tier AOT export with BlockMask whose mask_mod captures tensors.
@@ -2456,7 +2456,11 @@ class outer_fn(torch.nn.Module):
             create_block_mask,
             flex_attention,
         )
-        from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+        from torch.utils._pytree import (
+            _deregister_pytree_node,
+            register_pytree_node,
+            SUPPORTED_NODES,
+        )
 
         # Register BlockMask as pytree node (same as sixlib/attention_mask.py)
         if BlockMask not in SUPPORTED_NODES:
@@ -2467,6 +2471,7 @@ class outer_fn(torch.nn.Module):
                 flatten_with_keys_fn=BlockMask._flatten_with_keys,
                 serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
             )
+            self.addCleanup(_deregister_pytree_node, BlockMask)
 
         d_model, n_heads = 64, 4
         batch_size, seq_len = 2, 32
