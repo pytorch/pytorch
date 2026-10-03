@@ -340,14 +340,6 @@ CPU_TEST_FAILURES = {
 # Additional failures under lite mode, tracked in
 # https://github.com/pytorch/pytorch/issues/199205
 LITE_MODE_TEST_FAILURES = {
-    # Can not find the original value for <subgraph>_constant0
-    "test_cond_nested": fail_stack_allocation(),
-    "test_cond_with_multiple_outputs": fail_stack_allocation(),
-    "test_cond_with_parameters": fail_stack_allocation(),
-    "test_while_loop_with_conv_dynamic_False": fail_stack_allocation(),
-    "test_while_loop_with_conv_dynamic_True": fail_stack_allocation(),
-    "test_while_loop_with_unbacked_symint_closure_dynamic_False": fail_stack_allocation(),
-    "test_while_loop_with_unbacked_symint_closure_dynamic_True": fail_stack_allocation(),
     # AssertionError: got <class 'torch.SymInt'>
     "test_while_loop_with_sym_expr_cond_dynamic_False": fail_stack_allocation(),
     "test_while_loop_with_sym_expr_cond_dynamic_True": fail_stack_allocation(),
@@ -392,8 +384,14 @@ LITE_MODE_TEST_FAILURES = {
 }
 
 if LITE_MODE:
-    # Passes in lite mode
-    del CPU_TEST_FAILURES["test_cond_unbacked_symint_predicate"]
+    # These pass in lite mode
+    for name in (
+        "test_cond_unbacked_symint_predicate",
+        "test_while_loop_with_mixed_device_dynamic_False",
+        "test_while_loop_with_mixed_device_dynamic_True",
+        "test_while_loop_with_pytree_inputs",
+    ):
+        del CPU_TEST_FAILURES[name]
     CPU_TEST_FAILURES.update(LITE_MODE_TEST_FAILURES)
 
 
