@@ -56,6 +56,7 @@ from .flex_flash_attention import (
 )
 from .flex_flydsl_attention import create_flydsl_flex_attention_kernel
 
+
 if TYPE_CHECKING:
     from ...heuristics.template.triton import FlexBwDConfig, FlexConfig
 
@@ -299,6 +300,7 @@ def flex_attention(
             sparse_kv_block_size=SPARSE_KV_BLOCK_SIZE,
             subgraph_buffer=subgraph_buffer,
             mask_graph_buffer=mask_graph_buffer,
+            write_max_scores=kernel_options.get("OUTPUT_MAX", True),
         )
 
     can_use_decode = _use_flex_decoding(
