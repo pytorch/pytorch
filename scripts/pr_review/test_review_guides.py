@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for review_guides.py, which lists the trusted REVIEW.md guides.
+"""Tests for review_guides.py, which combines the trusted REVIEW.md guides.
 
 Run: python3 -m unittest discover -s scripts/pr_review -t .
 """
@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from _suite_manifest import run_this_suite, TestTheSuiteIsWhole  # noqa: E402,F401
-from review_guides import applicable_guides, covering_dirs  # noqa: E402
+from review_guides import applicable_guides, combine, covering_dirs  # noqa: E402
 
 
 SCRIPT = Path(__file__).resolve().parent / "review_guides.py"
@@ -101,6 +101,33 @@ class TestApplicableGuides(unittest.TestCase):
         self.assertIsNone(applicable_guides(str(self.root), ["ok.py", "../x.py"]))
 
 
+class TestCombine(unittest.TestCase):
+    def test_each_guide_is_a_section_headed_by_its_scope(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "a").mkdir()
+            (root / "REVIEW.md").write_text("root rules\n")
+            # No trailing newline: the end marker still starts its own line.
+            (root / "a" / "REVIEW.md").write_text("## a rules")
+            text = combine(td, ["REVIEW.md", "a/REVIEW.md"]).decode()
+        self.assertIn(
+            "## `REVIEW.md`: applies to every changed file\n\n"
+            "<!-- begin REVIEW.md -->\nroot rules\n<!-- end REVIEW.md -->\n",
+            text,
+        )
+        self.assertIn(
+            "## `a/REVIEW.md`: applies to changed files under `a/`\n\n"
+            "<!-- begin a/REVIEW.md -->\n## a rules\n<!-- end a/REVIEW.md -->\n",
+            text,
+        )
+        self.assertLess(text.index("begin REVIEW.md"), text.index("begin a/REVIEW.md"))
+
+    def test_no_guide_says_so(self):
+        text = combine("/nonexistent", []).decode()
+        self.assertIn("no guide applies", text)
+        self.assertNotIn("<!-- begin", text)
+
+
 class TestTheCommandLine(unittest.TestCase):
     def run_script(self, root: Path, paths: bytes, out: Path):
         changed = root.parent / "paths.z"
@@ -111,36 +138,36 @@ class TestTheCommandLine(unittest.TestCase):
             text=True,
         )
 
-    def test_it_writes_absolute_trusted_paths_one_per_line(self):
+    def test_it_writes_the_combined_guides(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / "trusted"
             (root / "a").mkdir(parents=True)
             (root / "REVIEW.md").write_text("root\n")
             (root / "a" / "REVIEW.md").write_text("a\n")
-            out = Path(td) / "guides.txt"
+            out = Path(td) / "guides.md"
             proc = self.run_script(root, b"a/x.py\0b/y.py\0", out)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             self.assertEqual(
-                out.read_text().splitlines(),
-                [str(root / "REVIEW.md"), str(root / "a" / "REVIEW.md")],
+                out.read_bytes(), combine(str(root), ["REVIEW.md", "a/REVIEW.md"])
             )
+            self.assertIn("review guides that apply: 2", proc.stdout)
 
-    def test_no_changed_path_writes_an_empty_list(self):
+    def test_no_changed_path_says_no_guide_applies(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / "trusted"
             root.mkdir()
             (root / "REVIEW.md").write_text("root\n")
-            out = Path(td) / "guides.txt"
+            out = Path(td) / "guides.md"
             proc = self.run_script(root, b"", out)
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertEqual(out.read_text(), "")
+            self.assertIn("no guide applies", out.read_text())
 
     def test_a_malformed_path_fails_without_echoing_it(self):
         """The path is PR data, and stderr goes to a log parsed for commands."""
         with tempfile.TemporaryDirectory() as td:
             root = Path(td) / "trusted"
             root.mkdir()
-            out = Path(td) / "guides.txt"
+            out = Path(td) / "guides.md"
             proc = self.run_script(root, b"../::add-mask::x\0", out)
             self.assertEqual(proc.returncode, 2)
             self.assertNotIn("::", proc.stdout + proc.stderr)
@@ -148,7 +175,7 @@ class TestTheCommandLine(unittest.TestCase):
 
     def test_an_unreadable_path_list_fails(self):
         with tempfile.TemporaryDirectory() as td:
-            out = Path(td) / "guides.txt"
+            out = Path(td) / "guides.md"
             proc = subprocess.run(
                 [
                     sys.executable,
