@@ -694,6 +694,7 @@ def save(
                         "expandable_segment_base",
                         "expandable_reservation_size",
                         "expandable_segment_size",
+                        "expandable_segment_handle_type",
                     )
                 },
                 # Reproducing each block's state is what keeps an address the graph
