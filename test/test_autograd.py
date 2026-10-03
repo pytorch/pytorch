@@ -57,7 +57,9 @@ from torch.testing._internal.common_device_type import (
     expectedFailureMPS,
     instantiate_device_type_tests,
     onlyAccelerator,
+    onlyCPU,
     skipMeta,
+    skipMPS,
     skipXPUIf,
 )
 from torch.testing._internal.common_dtype import floating_types_and
@@ -13373,6 +13375,158 @@ class TestAutogradForwardMode(TestCase):
 # Generic device type autograd tests.
 class TestAutogradDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double, torch.half, torch.bfloat16)
+    @parametrize("layout", ("transpose", "channels_last", "sliced"))
+    def test_masked_softmax_noncontiguous_forward(self, device, dtype, layout):
+        x = torch.randn((2, 2, 3, 3), device=device, dtype=dtype)
+        if layout == "transpose":
+            x = x.transpose(-1, -2)
+        elif layout == "channels_last":
+            x = x.contiguous(memory_format=torch.channels_last)
+        else:
+            x = x.repeat_interleave(2, dim=-1)[..., ::2]
+        original = x.clone()
+        for mask_type in (0, 1, 2):
+            with self.subTest(mask_type=mask_type):
+                shape = {0: (3, 3), 1: (2, 3), 2: x.shape}[mask_type]
+                mask = torch.zeros(shape, device=device, dtype=torch.bool)
+                mask[..., 0] = True
+                full_mask = (
+                    mask.reshape(2, 1, 1, 3) if mask_type == 1 else mask
+                ).expand_as(x)
+                actual = torch._masked_softmax(x, mask, -1, mask_type)
+                expected = torch._masked_softmax(x.contiguous(), mask, -1, mask_type)
+                self.assertEqual(actual, expected, rtol=0, atol=0)
+                if dtype in (torch.float, torch.double):
+                    self.assertEqual(
+                        actual, x.masked_fill(full_mask, -math.inf).softmax(-1)
+                    )
+                self.assertTrue(actual.is_contiguous())
+                self.assertNotEqual(
+                    actual.untyped_storage().data_ptr(), x.untyped_storage().data_ptr()
+                )
+                self.assertEqual(x, original)
+
+    @skipMPS
+    @dtypes(torch.float, torch.double)
+    @parametrize("mask_type", (0, 1, 2))
+    def test_masked_softmax_forward_ad(self, device, dtype, mask_type):
+        shape = (2, 2, 3, 3)
+        mask_shape = {0: (3, 3), 1: (2, 3), 2: shape}[mask_type]
+        mask = (
+            torch.arange(math.prod(mask_shape), device=device).reshape(mask_shape) % 3
+            == 0
+        )
+        mask = mask.repeat_interleave(2, dim=-1)[..., ::2]
+        expanded_mask = mask
+        if mask_type == 1:
+            expanded_mask = mask.reshape(2, 1, 1, 3)
+        expanded_mask = expanded_mask.expand(shape)
+        x = torch.randn(shape, device=device, dtype=dtype).transpose(-1, -2)
+        tangent = torch.randn(shape, device=device, dtype=dtype).transpose(-1, -2)
+        for dim in (0, 2, 3, -1, None):
+            with self.subTest(dim=dim):
+                fn = partial(
+                    torch._masked_softmax, mask=mask, dim=dim, mask_type=mask_type
+                )
+                actual, actual_tangent = torch.func.jvp(fn, (x,), (tangent,))
+                axis = -1 if dim is None else dim
+
+                def reference(x):
+                    return x.masked_fill(expanded_mask, -math.inf).softmax(axis)
+
+                expected, expected_tangent = torch.func.jvp(reference, (x,), (tangent,))
+                all_masked = expanded_mask.all(axis, keepdim=True)
+                self.assertEqual(
+                    actual.masked_fill(all_masked, 0),
+                    expected.masked_fill(all_masked, 0),
+                )
+                self.assertEqual(
+                    actual_tangent, expected_tangent.masked_fill(expanded_mask, 0)
+                )
+                backward = torch.ops.aten._masked_softmax_backward(
+                    tangent.contiguous(), actual, expanded_mask, dim
+                )
+                self.assertEqual(actual_tangent, backward)
+
+    @skipMPS
+    @dtypes(torch.float, torch.double)
+    @parametrize("shape", ((), (0, 3), (2, 3)))
+    def test_masked_softmax_forward_ad_shapes(self, device, dtype, shape):
+        x = torch.randn(shape, device=device, dtype=dtype)
+        tangent = torch.randn_like(x)
+        for masked in (False, True):
+            with self.subTest(masked=masked):
+                mask = torch.full(shape, masked, device=device, dtype=torch.bool)
+                fn = partial(
+                    torch._masked_softmax,
+                    mask=mask,
+                    dim=0 if not shape else -1,
+                    mask_type=2,
+                )
+                actual, actual_tangent = torch.func.jvp(fn, (x,), (tangent,))
+                self.assertEqual(actual_tangent.shape, x.shape)
+                if masked:
+                    self.assertEqual(actual_tangent, torch.zeros_like(x))
+                else:
+                    expected, expected_tangent = torch.func.jvp(
+                        lambda x: x.softmax(-1), (x,), (tangent,)
+                    )
+                    self.assertEqual(actual, expected)
+                    self.assertEqual(actual_tangent, expected_tangent)
+
+    @skipMPS
+    @dtypes(torch.float, torch.double)
+    def test_masked_softmax_forward_ad_noncontiguous_tangent(self, device, dtype):
+        shape = (2, 2, 3, 3)
+        x = torch.randn(shape, device=device, dtype=dtype)
+        tangent = torch.randn(shape, device=device, dtype=dtype).transpose(-1, -2)
+        self.assertFalse(tangent.is_contiguous())
+        mask = torch.zeros(shape, device=device, dtype=torch.bool)
+        mask[..., 0] = True
+        fn = partial(torch._masked_softmax, mask=mask, dim=3, mask_type=2)
+        actual, actual_tangent = torch.func.jvp(fn, (x,), (tangent,))
+        expected, expected_tangent = torch.func.jvp(
+            lambda x: x.masked_fill(mask, -math.inf).softmax(3), (x,), (tangent,)
+        )
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_tangent, expected_tangent)
+
+    @skipMPS
+    @dtypes(torch.half, torch.bfloat16)
+    def test_masked_softmax_forward_ad_low_precision(self, device, dtype):
+        x = torch.randn((2, 3), device=device, dtype=dtype)
+        tangent = torch.randn_like(x)
+        mask = torch.tensor([[True, False, False], [True, True, True]], device=device)
+        fn = partial(torch._masked_softmax, mask=mask, dim=-1, mask_type=2)
+        actual, actual_tangent = torch.func.jvp(fn, (x,), (tangent,))
+        self.assertEqual(actual, fn(x))
+        expected_tangent = torch.ops.aten._masked_softmax_backward(
+            tangent, actual, mask, -1
+        )
+        self.assertEqual(actual_tangent, expected_tangent, atol=0, rtol=0)
+
+    @skipMPS
+    @dtypes(torch.double)
+    @parametrize("mask_type", (0, 1, 2))
+    def test_masked_softmax_forward_ad_gradcheck(self, device, dtype, mask_type):
+        x = torch.randn((2, 2, 3, 3), device=device, dtype=dtype, requires_grad=True)
+        mask_shape = {0: (3, 3), 1: (2, 3), 2: x.shape}[mask_type]
+        mask = torch.zeros(mask_shape, device=device, dtype=torch.bool)
+        mask[..., 0] = True
+        fn = partial(torch._masked_softmax, mask=mask, dim=-1, mask_type=mask_type)
+        self.assertTrue(
+            gradcheck(
+                fn,
+                (x,),
+                check_backward_ad=False,
+                check_forward_ad=True,
+                check_batched_grad=False,
+                check_batched_forward_grad=True,
+            )
+        )
 
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor

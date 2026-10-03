@@ -2807,6 +2807,22 @@ Tensor log_sigmoid_double_backward(const Tensor& grad, const Tensor& input) {
   return grad * (z - 1) * z;
 }
 
+Tensor masked_softmax_jvp(
+    const Tensor& self_t,
+    const Tensor& result,
+    const Tensor& mask,
+    std::optional<int64_t> dim,
+    std::optional<int64_t> mask_type) {
+  auto expanded_mask = mask;
+  if (mask.dim() == 2 && result.dim() == 4 && mask_type == 1) {
+    expanded_mask =
+        mask.reshape_symint({mask.sym_size(0), 1, 1, mask.sym_size(1)});
+  }
+  return at::_masked_softmax_backward(
+             self_t.contiguous(), result, expanded_mask.expand_as(result), dim)
+      .reshape_as(result);
+}
+
 Tensor softmax_double_backward(
     const Tensor& grad,
     const Tensor& grad_output,
