@@ -3003,7 +3003,10 @@
 
 # PackedSequence helpers
 - name: _pack_padded_sequence(Tensor input, Tensor lengths, bool batch_first) -> (Tensor, Tensor)
+  output_differentiability: [True, False]
   input: _pack_padded_sequence_backward_symint(grad, input.sym_sizes(), result1, batch_first)
+  lengths: non_differentiable
+  result0: std::get<0>(at::_pack_padded_sequence(input_t, lengths, batch_first))
 
 # TH wrappers
 - name: eq.Scalar(Tensor self, Scalar other) -> Tensor
