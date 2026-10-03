@@ -660,7 +660,8 @@ def _restore_expandable_segments(
 
     ``segments`` are entries from :func:`memory_snapshot` taken in the earlier
     process. Each is re-reserved at the address, size and segment size it had,
-    whatever this process's settings, which the driver honors because the
+    with handles shareable the way the originals were, whatever this process's
+    settings, which the driver honors because the
     reservation is large (see Note [Expandable Segment
     Reserved Address]); the address does not have to have been predictable when
     it was recorded. The restored ranges become free blocks in ``mempool_id``, so
@@ -678,7 +679,7 @@ def _restore_expandable_segments(
     # Group the snapshot's per-mapped-run entries back into whole segments: a
     # segment with holes is reported as several runs sharing one base address.
     runs: dict[tuple[bool, int], list[tuple[int, int]]] = {}
-    reservations: dict[tuple[bool, int], tuple[int, int]] = {}
+    reservations: dict[tuple[bool, int], tuple[int, int, int]] = {}
     for seg in segments:
         if not seg["is_expandable"]:
             raise ValueError(
@@ -691,6 +692,7 @@ def _restore_expandable_segments(
         reservations[key] = (
             seg["expandable_reservation_size"],
             seg["expandable_segment_size"],
+            seg["expandable_segment_handle_type"],
         )
 
     for (is_small, base), ranges in runs.items():
