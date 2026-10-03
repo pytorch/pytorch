@@ -13,6 +13,7 @@
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
 
+#include <c10/core/SymBool.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymFloat.h>
 #include <cmath>
@@ -92,6 +93,40 @@ inline bool has_for_dense_inputs(sdp_params const& params) {
 
 inline bool has_only_dense_inputs(sdp_params const& params) {
   return !params.query.is_nested() && !params.key.is_nested() && !params.value.is_nested();
+}
+
+// The CUDA caching allocator returns base pointers aligned to >= 256 bytes,
+// which exceeds the alignment_bytes the kernels require. So pointer
+// alignment is determined by storage_offset * element_size. Computing it
+// symbolically avoids touching data_ptr() (which calls numel() and would
+// throw on FakeTensors with symbolic shapes during tracing). Externally
+// allocated storages (e.g. from DLPack) may have a misaligned base; the
+// kernels' runtime checks reject those.
+inline bool is_aligned_for_sdpa(
+    const at::Tensor& tensor,
+    int64_t alignment_bytes,
+    bool check_strides) {
+  // Empty tensors need no alignment. For symbolic offsets and strides
+  // (FakeTensors), assume aligned so tracing does not regress; the eager
+  // runtime call re-checks.
+  if (TORCH_GUARD_OR_FALSE(tensor.sym_numel().sym_eq(0))) {
+    return true;
+  }
+  const auto is_aligned = [&](const c10::SymInt& elements) {
+    return TORCH_GUARD_OR_TRUE(
+        (elements * tensor.element_size() % alignment_bytes).sym_eq(0));
+  };
+  if (!is_aligned(tensor.sym_storage_offset())) {
+    return false;
+  }
+  // Every row, not just the first, must start at an aligned address.
+  for (int64_t dim = 0; check_strides && dim < tensor.dim() - 1; ++dim) {
+    if (TORCH_GUARD_OR_FALSE(tensor.sym_size(dim).sym_gt(1)) &&
+        !is_aligned(tensor.sym_stride(dim))) {
+      return false;
+    }
+  }
+  return true;
 }
 
 template <typename dtype_vector>

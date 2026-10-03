@@ -2763,6 +2763,30 @@ class CudaReproTests(TestCase):
             for actual_input, expected_input in zip(compiled_inputs, eager_inputs):
                 self.assertEqual(actual_input.grad, expected_input.grad)
 
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    def test_flash_attention_misaligned_input(self):
+        # The input's data pointer is misaligned while its strides are aligned.
+        B, H, S, D = 2, 2, 128, 64
+        storage = torch.randn(
+            B * H * S * D + 1, dtype=torch.float16, device=device_type
+        )
+        q = storage[1:].view(B, H, S, D).requires_grad_()
+        k = torch.randn(B, H, S, D, dtype=torch.float16, device=device_type)
+        v = torch.randn(B, H, S, D, dtype=torch.float16, device=device_type)
+
+        def fn(q, k, v):
+            return F.scaled_dot_product_attention(q, k, v)
+
+        with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+            actual = torch.compile(fn)(q, k, v)
+            (actual_grad,) = torch.autograd.grad(actual.sum(), q)
+            expected = fn(q, k, v)
+            (expected_grad,) = torch.autograd.grad(expected.sum(), q)
+        self.assertEqual(actual, expected)
+        self.assertEqual(actual_grad, expected_grad)
+
     def test_non_contiguous_unaligned_input_indices(self):
         from torch._inductor.compile_fx import remove_unaligned_input_idxs
 

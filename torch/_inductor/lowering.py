@@ -3676,6 +3676,11 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             and idx == 3
         )
 
+        # SDPA kernels require 16-byte aligned data pointers, which the stride
+        # checks below do not cover.
+        if ir.is_unaligned(arg):
+            arg = ir.ExternKernel.copy_input(arg)
+            arg = ir.ExternKernel.require_stride_order(arg, stride_order)
         if not (isinstance(arg, TensorBox)):
             raise AssertionError("expected: isinstance(arg, TensorBox)")
         if len(arg.get_size()) not in (3, 4):
