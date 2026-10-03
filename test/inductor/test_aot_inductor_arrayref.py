@@ -340,8 +340,6 @@ CPU_TEST_FAILURES = {
 # Additional failures under lite mode, tracked in
 # https://github.com/pytorch/pytorch/issues/199205
 LITE_MODE_TEST_FAILURES = {
-    # Can not find the original value for <subgraph>_constant0
-    "test_cond_with_parameters": fail_stack_allocation(),
     # Unsupported return type SymIntType for aten.sym_numel
     "test_size_with_unbacked_add_expr": fail_stack_allocation(),
     # SerializeError: Empty list with type number nyi
@@ -372,8 +370,9 @@ LITE_MODE_TEST_FAILURES = {
 }
 
 if LITE_MODE:
-    # Passes in lite mode
+    # These pass in lite mode
     del CPU_TEST_FAILURES["test_cond_unbacked_symint_predicate"]
+    del CPU_TEST_FAILURES["test_while_loop_with_mixed_device_dynamic_True"]
     CPU_TEST_FAILURES.update(LITE_MODE_TEST_FAILURES)
 
 
