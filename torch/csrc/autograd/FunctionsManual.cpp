@@ -6242,7 +6242,6 @@ std::tuple<Tensor, Tensor, Tensor> ormqr_backward(
     const Tensor& result,
     const Tensor& self,
     const Tensor& tau,
-    const Tensor& other,
     bool left,
     bool transpose,
     std::array<bool, 3> grad_output_mask) {

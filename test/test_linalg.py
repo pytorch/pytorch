@@ -5496,6 +5496,69 @@ class TestLinalg(TestCase):
             run_test(batch, m, n, fortran_contiguous)
 
     @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(*floating_and_complex_types())
+    @parametrize("left", [False, True])
+    @parametrize("transpose", [False, True])
+    def test_ormqr_does_not_save_other(self, device, dtype, left, transpose):
+        for batch, noncontiguous, grad_mask in product(
+            [(), (2,)], [False, True], product([False, True], repeat=3)
+        ):
+            if not any(grad_mask):
+                continue
+            with self.subTest(batch=batch, noncontiguous=noncontiguous, grad_mask=grad_mask):
+                reflectors, tau = torch.geqrf(torch.randn(*batch, 4, 4, device=device, dtype=dtype))
+                other_shape = (*batch, 4, 3) if left else (*batch, 3, 4)
+                other = torch.randn(*other_shape, device=device, dtype=dtype)
+                if noncontiguous:
+                    other = other.mT.contiguous().mT
+                    self.assertFalse(other.is_contiguous())
+                inputs = tuple(
+                    value.detach().requires_grad_(requires_grad)
+                    for value, requires_grad in zip((reflectors, tau, other), grad_mask)
+                )
+                reflectors, tau, other = inputs
+                other_storage = other.untyped_storage().data_ptr()
+                saved_storages = []
+
+                def pack(tensor):
+                    saved_storages.append(tensor.untyped_storage().data_ptr())
+                    return tensor
+
+                with torch.autograd.graph.saved_tensors_hooks(pack, lambda tensor: tensor):
+                    actual = torch.ormqr(reflectors, tau, other, left=left, transpose=transpose)
+                self.assertNotIn(other_storage, saved_storages)
+                q = torch.linalg.householder_product(reflectors, tau)
+                if transpose:
+                    q = q.mH
+                expected = q @ other if left else other @ q
+                self.assertEqual(actual, expected)
+                grad = torch.randn_like(actual)
+                differentiable_inputs = tuple(value for value in inputs if value.requires_grad)
+                self.assertEqual(
+                    torch.autograd.grad(actual, differentiable_inputs, grad),
+                    torch.autograd.grad(expected, differentiable_inputs, grad),
+                )
+
+    @skipCPUIfNoLapack
+    @skipCUDAIfNoCusolver
+    @dtypes(torch.float64, torch.complex128)
+    @parametrize("left", [False, True])
+    @parametrize("transpose", [False, True])
+    def test_ormqr_backward_higher_order(self, device, dtype, left, transpose):
+        reflectors, tau = torch.geqrf(torch.randn(3, 3, device=device, dtype=dtype))
+        other = torch.randn(3, 2, device=device, dtype=dtype)
+        if not left:
+            other = other.mT
+        inputs = tuple(value.detach().requires_grad_() for value in (reflectors, tau, other))
+
+        def fn(reflectors, tau, other):
+            return torch.ormqr(reflectors, tau, other, left=left, transpose=transpose)
+
+        self.assertTrue(torch.autograd.gradcheck(fn, inputs, fast_mode=True))
+        self.assertTrue(torch.autograd.gradgradcheck(fn, inputs, fast_mode=True))
+
+    @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
     def test_ormqr_errors_and_warnings(self, device, dtype):
         test_cases = [
