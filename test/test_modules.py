@@ -24,7 +24,7 @@ if TEST_WITH_ROCM:
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM"] = "1"
 
-class TestModule(TestCase):
+class TestModuleDevice(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
@@ -983,7 +983,7 @@ class TestModule(TestCase):
                 self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
 
 
-class TestModuleCPUOnly(TestCase):
+class TestModuleCPU(TestCase):
     hw_classification = HardwareClassification.CPU
 
     @modules(module_db)
@@ -1285,8 +1285,8 @@ class TestJitReplaceSubmodule(TestCase):
             torch._C._jit_replace_submodule(root._c, "mid..leaf", new_leaf._c)
 
 
-instantiate_device_type_tests(TestModule, globals(), allow_mps=True, allow_xpu=True)
-instantiate_device_type_tests(TestModuleCPUOnly, globals(), only_for="cpu")
+instantiate_device_type_tests(TestModuleDevice, globals(), allow_mps=True, allow_xpu=True)
+instantiate_device_type_tests(TestModuleCPU, globals(), only_for="cpu")
 
 if __name__ == '__main__':
     run_tests()
