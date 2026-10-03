@@ -301,7 +301,10 @@ def _single_tensor_adamax(
             bias_correction = 1 - beta1 ** _get_value(step_t)
             clr = lr / bias_correction
 
-            param.addcdiv_(exp_avg, exp_inf, value=-clr)  # type: ignore[arg-type]
+            if differentiable:
+                param.addcdiv_(exp_avg.clone() * -clr, exp_inf.clone())
+            else:
+                param.addcdiv_(exp_avg, exp_inf, value=-clr)  # type: ignore[arg-type]
 
 
 def _multi_tensor_adamax(
