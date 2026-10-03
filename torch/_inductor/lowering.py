@@ -11,7 +11,7 @@ import os
 import sys
 import warnings
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from typing import Any, cast, Literal, TYPE_CHECKING, TypeGuard, TypeVar
 from typing_extensions import ParamSpec
 from unittest.mock import patch
@@ -7750,7 +7750,25 @@ def pow(a, b):
     return pow_native(a, b)
 
 
+def _materialize_destination_backed_view(val, destination_names: Collection[str]):
+    src_data = val
+    while isinstance(src_data, MutableBox):
+        src_data = src_data.data
+    if isinstance(src_data, BaseView) and any(
+        name in val.get_read_names() for name in destination_names
+    ):
+        # A destination-backed view may read different indices than the mutation writes.
+        val = clone(val)
+        val.realize()
+    return val
+
+
 def mutate_to(changed, val, unsafe_alias=False, share_value=True):
+    changed_name = changed.maybe_get_name()
+    val = _materialize_destination_backed_view(
+        val, (changed_name,) if changed_name is not None else ()
+    )
+
     if isinstance(changed, TensorBox):
         changed_data = changed.data
     else:
@@ -9017,9 +9035,45 @@ register_foreach_inplace(
 register_foreach_inplace(
     aten._foreach_div_.Scalar, aten._foreach_div.Scalar, foreach_div_scalar
 )
-register_foreach_inplace(
-    aten._foreach_copy_.default, aten._foreach_copy.default, foreach_copy
+inplaceable_foreach_ops[aten._foreach_copy.default] = aten._foreach_copy_.default
+inplace_foreach_ops.add(aten._foreach_copy_.default)
+foreach_copy_inplace_fallback = fallback_handler(
+    aten._foreach_copy_.default, add_to_fallback_set=False
 )
+
+
+def foreach_copy_inplace(destinations, sources, non_blocking=False):
+    destination_names = [destination.maybe_get_name() for destination in destinations]
+    named_destinations = OrderedSet(
+        name for name in destination_names if name is not None
+    )
+    has_ambiguous_or_repeated_destination = len(named_destinations) != len(
+        destination_names
+    )
+    has_cross_destination_read = any(
+        (named_destinations & source.get_read_names()) - OrderedSet([destination_name])
+        for destination_name, source in zip(destination_names, sources, strict=True)
+    )
+    if has_ambiguous_or_repeated_destination or has_cross_destination_read:
+        materialized_sources = [
+            _materialize_destination_backed_view(source, named_destinations)
+            for source in sources
+        ]
+        foreach_copy_inplace_fallback(destinations, materialized_sources, non_blocking)
+        return destinations
+
+    results = foreach_copy(destinations, sources, non_blocking)
+    mut_results = []
+    for destination_name, destination, result in zip(
+        destination_names, destinations, results, strict=True
+    ):
+        if destination_name is not None and destination_name in result.get_read_names():
+            result.realize()
+        mut_results.append(mutate_to(destination, result))
+    return mut_results
+
+
+_register_foreach_lowering(aten._foreach_copy_.default, foreach_copy_inplace)
 register_foreach_inplace(
     aten._foreach_addcmul_.Scalar,
     aten._foreach_addcmul.Scalar,
