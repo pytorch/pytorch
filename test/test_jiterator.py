@@ -172,7 +172,7 @@ class TestPythonJiterator(TestCase):
         "template <typename T> Tmy_kernel(T x) { return x; }",
     ])
     def test_invalid_function_name(self, code_string):
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             create_jit_fn(code_string)
 
     def test_corrupt_kernel_cache_recompiles(self, device):

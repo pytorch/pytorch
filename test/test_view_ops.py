@@ -1428,11 +1428,11 @@ class TestOldViewOpsDeviceType(TestCase):
             x.narrow(0, torch.tensor(0, device=device), 1),
             torch.tensor([[0, 1, 2]], device=device),
         )
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             x.narrow(0, torch.tensor(0.0, device=device), 1)
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             x.narrow(0, torch.tensor([0], device=device), 1)
-        with self.assertRaises(Exception):
+        with self.assertRaises(RuntimeError):
             x.narrow(0, torch.tensor([0, 1], device=device), 1)
 
     def test_t(self, device):
