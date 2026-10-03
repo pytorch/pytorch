@@ -11857,10 +11857,12 @@ class TestCppWrapperFallbackProfiling(TestCase):
         """Test profiling for GPU non-Triton kernel call path (CUTLASS/ROCm templates).
 
         Non-Triton GPU kernels use kernels.{name}() direct calls. This path requires
-        max_autotune with CUTLASS backend availability (SM80+).
+        max_autotune with CUTLASS backend availability (SM90+).
         """
-        if not SM80OrLater:
-            raise unittest.SkipTest("CUTLASS requires SM80+")
+        # Dense mm only uses CUTLASS 3.x kernels, which need SM90+; on SM80 the
+        # CUTLASS backend has no choices and autotuning raises NoValidChoicesError.
+        if not SM90OrLater:
+            raise unittest.SkipTest("CUTLASS mm templates require SM90+")
         from torch._inductor.codegen.cutlass.utils import try_import_cutlass
 
         if not try_import_cutlass():
