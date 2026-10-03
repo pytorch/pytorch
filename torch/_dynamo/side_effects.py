@@ -210,6 +210,7 @@ _MUTABLE_GETATTRIBUTES: tuple[Any, ...] = (
     tuple.__getattribute__,
     collections.deque.__getattribute__,
     BaseException.__getattribute__,
+    property.__getattribute__,
 )
 if sys.version_info < (3, 13):
     # SimpleNamespace names tp_getattro in its static struct before 3.13, so
@@ -854,6 +855,8 @@ class SideEffects:
             variable_cls = variables.UserDefinedListVariable
         elif issubclass(user_cls, collections.deque):
             variable_cls = variables.UserDefinedDequeVariable
+        elif issubclass(user_cls, property):
+            variable_cls = variables.UserDefinedPropertyVariable
         elif issubclass(user_cls, MutableMapping):
             variable_cls = variables.MutableMappingVariable
         elif is_frozen_dataclass(user_cls):
@@ -1303,6 +1306,9 @@ class SideEffects:
 
                 cg.add_cache(var)
                 var.source = TempLocalSource(cg.tempvars[var])
+
+                if isinstance(var, variables.UserDefinedPropertyVariable):
+                    var.codegen_init(cg)
 
                 # For frozen dataclasses, we must emit object.__setattr__
                 # immediately after __new__ — before any other code can
