@@ -1917,8 +1917,10 @@ class VariableBuilder:
             # A method_descriptor reached as a plain value, e.g.
             # `copier = list.copy`.  MethodDescriptorVariable mirrors
             # methoddescr_call: check the receiver against __objclass__, then
-            # dispatch the call on it.  The descriptor identity is what those
-            # traced semantics depend on, hence the guard.
+            # dispatch the call on it.  Descriptors that carry a trace rule of
+            # their own (the object.__reduce_ex__ polyfill, say) are dispatched
+            # earlier in _wrap, and the guard keeps the traced semantics tied to
+            # the descriptor identity.
             self.install_guards(GuardBuilder.ID_MATCH)
             return MethodDescriptorVariable(
                 value,

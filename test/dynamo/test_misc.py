@@ -5516,6 +5516,23 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         result = torch.compile(wrong_receiver, fullgraph=True, backend="eager")(x)
         self.assertEqual(result, wrong_receiver(x))
 
+    def test_unbound_method_descriptor_guard(self):
+        # The descriptor identity is guarded, so rebinding the source recompiles
+        # instead of reusing the semantics traced from the old value.
+        dispatch = {dict: dict.get}
+
+        def call(d):
+            return dispatch[dict](d, 1)
+
+        cf = torch.compile(call, backend="eager", fullgraph=True)
+        self.assertEqual(cf({1: 2}), 2)
+
+        def forty_two(d, k):
+            return 42
+
+        dispatch[dict] = forty_two
+        self.assertEqual(cf({1: 2}), 42)
+
     def test_deepcopy_set(self):
         MY_SET = {1, 2, 3}
 
