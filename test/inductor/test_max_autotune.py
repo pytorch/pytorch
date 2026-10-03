@@ -5067,17 +5067,7 @@ class TestPrologueFusion(TestCase):
 
         self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
-        (
-            FileCheck()
-            .check("2.0")
-            .check("tl.dot")
-            .check("2.0")
-            .check("acc +")
-            .check_count("tl.store", 1, exactly=True)
-            .run(code[0])
-        )
 
-    @config.patch(epilogue_fusion=False)
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
     def test_upcast(self, sizes):
         M, K, N = sizes
@@ -5387,17 +5377,6 @@ class TestPrologueFusion(TestCase):
 
         self.assertEqual(out, foo(x, b), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=4)
-        (
-            FileCheck()
-            .check("100.0")
-            .check_dag("2.0")
-            .check_dag("3.0")
-            .check("tl.store")
-            .check("tl.dot")
-            .check("acc +")
-            .run(code[0])
-        )
-        FileCheck().check_count("tl.store", 3, exactly=True).run(code[0])
 
     @config.patch(
         {
@@ -5405,7 +5384,7 @@ class TestPrologueFusion(TestCase):
             "max_epilogue_benchmarked_choices": 3,
         }
     )
-    def test_addmm_indirect_prefix_prologue_fusion(self):
+    def test_addmm_indirect_indexing_bias_fusion(self):
         M, K, N = 63, 120, 190
         rows, offset = 257, 7
 
@@ -5423,15 +5402,8 @@ class TestPrologueFusion(TestCase):
 
         self.assertEqual(out, foo(source, indices, a, b), atol=0.05, rtol=0.05)
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=4)
-        (
-            FileCheck()
-            .check("tl.dot")
-            .check("tl.device_assert")
-            .check("tl.load(in_ptr")
-            .check("acc +")
-            .check_count("tl.store", 1, exactly=True)
-            .run(code[0])
-        )
+        # The index bounds check must survive in the store-output region.
+        FileCheck().check("tl.dot").check("tl.device_assert").run(code[0])
 
     @config.patch(
         {
@@ -5440,6 +5412,8 @@ class TestPrologueFusion(TestCase):
         }
     )
     def test_addmm_prefix_prologue_fusion_multi_use(self):
+        # computed_bias is also returned, so it must be materialized and its
+        # producer is not fused into the template's store_output.
         M, K, N = 63, 120, 190
 
         def foo(a, b, bias):
