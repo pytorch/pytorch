@@ -348,8 +348,6 @@ LITE_MODE_TEST_FAILURES = {
     "test_deconv_freezing": fail_stack_allocation(),
     "test_freezing": fail_stack_allocation(),
     "test_linear_freezing": fail_stack_allocation(),
-    # Mismatch between tensors consumed and num of input tensor
-    "test_const_graph_no_autotune_at_compile_time": fail_stack_allocation(),
     # Runtime assert is not emitted
     "test_aoti_runtime_asserts_backed_symint": fail_stack_allocation(),
     # Profiler and debug printer instrumentation is not emitted for fallbacks
