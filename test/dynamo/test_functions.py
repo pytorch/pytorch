@@ -5041,6 +5041,44 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
         self.assertEqual(opt_fn([1, 2, 3], [4, 5, 6]), [1, 2, 3, 4, 5, 6])
 
+    def test_operator_concat_iconcat_reduce(self):
+        # Regression test for the functools.reduce pattern reported in #116396.
+        def fn_concat(seqs):
+            return functools.reduce(operator.concat, seqs, [])
+
+        def fn_iconcat(seqs):
+            return functools.reduce(operator.iconcat, seqs, [])
+
+        seqs = [[1, 2], [3], [4, 5, 6]]
+        for fn in (fn_concat, fn_iconcat):
+            with self.subTest(fn=fn.__name__):
+                opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+                self.assertEqual(opt_fn(seqs), fn(seqs))
+
+    def test_operator_iconcat_inplace_mutation(self):
+        # operator.iconcat mutates its first argument in place and returns it.
+        def fn(a, b):
+            return operator.iconcat(a, b)
+
+        opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+        a = [1, 2, 3]
+        b = [4, 5]
+        self.assertEqual(opt_fn(a, b), [1, 2, 3, 4, 5])
+        self.assertEqual(a, [1, 2, 3, 4, 5])
+
+    def test_operator_concat_iconcat_empty(self):
+        def fn_concat(a, b):
+            return operator.concat(a, b)
+
+        def fn_iconcat(a, b):
+            return operator.iconcat(a, b)
+
+        for fn in (fn_concat, fn_iconcat):
+            with self.subTest(fn=fn.__name__):
+                opt_fn = torch.compile(fn, fullgraph=True)  # noqa: UNSPECIFIED_BACKEND
+                self.assertEqual(opt_fn([], [1, 2]), [1, 2])
+                self.assertEqual(opt_fn([1, 2], []), [1, 2])
+
     def test_attrgetter(self):
         for attrs in (
             ("shape",),
