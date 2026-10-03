@@ -72,6 +72,7 @@ from torch.testing._internal.common_quantized import (
     qengine_is_qnnpack,
 )
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     raise_on_run_directly,
     set_default_dtype,
 )
@@ -87,6 +88,8 @@ from torch.testing._internal.jit_utils import (
 
 class TestQuantizeJitPasses(QuantizationTestCase):
     """Test graph mode quantization passes used by quantize_jit"""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_skip_dequant_constant_prop(self):
         class M(torch.nn.Module):
@@ -1681,6 +1684,8 @@ class TestQuantizeJitOps(QuantizationTestCase):
     for individual ops end to end.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     @skipIfNoFBGEMM
     def test_linear(self):
         class ModuleLinear(torch.nn.Module):
@@ -3088,6 +3093,8 @@ class TestQuantizeJitOps(QuantizationTestCase):
 
 
 class TestQuantizeDynamicJitPasses(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_prepare_dynamic(self):
         class M(torch.nn.Module):
             def __init__(self) -> None:
@@ -3422,6 +3429,8 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
     for individual ops end to end.
     """
 
+    hw_classification = HardwareClassification.GENERIC
+
     @override_qengines
     def test_linear(self):
         class FunctionalLinear(torch.nn.Module):
@@ -3607,6 +3616,8 @@ class TestQuantizeDynamicJitOps(QuantizationTestCase):
 
 
 class TestQuantizeJit(QuantizationTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @override_qengines
     def test_single_linear(self):
         r"""Compare the result of quantizing single linear layer in
