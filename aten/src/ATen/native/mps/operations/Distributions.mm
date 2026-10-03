@@ -208,11 +208,15 @@ static Tensor& bernoulli_tensor_mps_impl(Tensor& self, const Tensor& p_, std::op
 // still the inplace target (TensorIterator uses the same idiom).
 static void bernoulli_scalar_kernel_mps(const TensorBase& self, double p, std::optional<Generator> gen) {
   // 0 <= p <= 1 is already enforced by `bernoulli_impl_` before the stub is dispatched.
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()),
+                              "bernoulli is not implemented for complex types on MPS");
   auto iter = at::TensorIterator::borrowing_nullary_op(self);
   distribution_kernel_mps_impl(iter, p, 0.0, "bernoulli_scalar", 1, gen);
 }
 
 static void bernoulli_tensor_kernel_mps(const TensorBase& self, const TensorBase& p_, std::optional<Generator> gen) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()),
+                              "bernoulli is not implemented for complex types on MPS");
   Tensor& self_t = const_cast<Tensor&>(static_cast<const Tensor&>(self));
   const Tensor& p_t = static_cast<const Tensor&>(p_);
   bernoulli_tensor_mps_impl(self_t, p_t, gen);

@@ -85,10 +85,12 @@ from .ir import (
     validate_ir,
     View,
 )
+from .ops_handler import register_pointwise_op
 from .utils import (
     ceildiv,
     convert_symint_to_expr,
     decode_device,
+    get_current_backend,
     is_dynamic,
     is_gpu,
     is_nvidia_sm100_or_later,
@@ -981,6 +983,26 @@ def to_dtype(
     return make_pointwise(_to_dtype, override_return_dtype=dtype)(x)
 
 
+register_pointwise_op("to_dtype")
+
+# Reached through custom lowerings or codegen itself rather than
+# register_pointwise; they commute with broadcasting all the same.
+for _pointwise_name in (
+    "where",
+    "pow",
+    "floor",
+    "round",
+    "trunc",
+    "fmod",
+    "remainder",
+    "identity",
+    "isnan",
+    "isinf",
+    "signbit",
+):
+    register_pointwise_op(_pointwise_name)
+
+
 _FLOAT8_E8M0FNU_TO_FLOAT_DTYPES = (
     torch.float32,
     torch.float64,
@@ -1149,6 +1171,7 @@ def register_pointwise(
 ):
     """A pointwise function that maps ops.{name} to inputs"""
     name = name or aten_fn.__name__
+    register_pointwise_op(name)
     fn = ops_wrapper(name)
 
     register_op_dtype_propagation_rules(
@@ -1802,6 +1825,31 @@ def as_strided(
         [sympy.expand(s) for s in stride],
         sympy.expand(storage_offset),
     )
+    # aten.as_strided offsets are storage-relative, but a realized buffer holds only
+    # what was allocated for it: whatever else the original tensor aliased is simply
+    # not there, so reinterpreting past the buffer would codegen an unmasked
+    # out-of-bounds read. The bound is the allocation and not the layout, because
+    # inplace padding deliberately over-allocates and records that in
+    # buffer_to_padded_size, which is what codegen sizes the buffer by. InputBuffers
+    # are exempt -- their real storage may legitimately extend past the layout, and
+    # the adjustment above has already rebased the offset onto the incoming pointer.
+    needed = new_layout.storage_size()
+    buffer = storage_data if isinstance(storage_data, ir.Buffer) else None
+    if buffer is not None and not isinstance(buffer, ir.InputBuffer):
+        allocated = V.graph.get_allocation_storage_size(buffer)
+        if V.graph.sizevars.statically_known_gt(needed, allocated):
+            raise NotImplementedError(
+                f"as_strided({size}, {stride}, {storage_offset}) requires {needed} "
+                f"elements but {buffer.get_name()} holds only {allocated}. This "
+                f"happens when a tensor aliasing a larger storage is realized as its own "
+                f"buffer; clone the base and re-derive the view instead."
+            )
+        # Symbolic extents are not always statically comparable: check_leq raises
+        # when the shape env can refute this, and otherwise defers a runtime
+        # assertion. A warm FX graph cache replays the artifact without re-running
+        # this lowering, so the deferred half does not survive a cache hit -- backed
+        # shapes fail loudly either way, an unbacked over-extent may not.
+        V.graph.sizevars.check_leq(needed, allocated)
     return TensorBox(ir.ReinterpretView(data=storage, layout=new_layout))
 
 
@@ -3721,6 +3769,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d, override_decomp=True)
 make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
+make_fallback(aten._scaled_addmm.default, warn=False)
+make_fallback(aten._scaled_addmm_.default, warn=False)
 
 
 # 1) Easy
@@ -3852,6 +3902,7 @@ make_fallback(aten.unique_dim_consecutive.default, warn=False)
 
 # Misc
 make_fallback(aten.gcd.default, warn=False)
+make_fallback(aten.split_with_sizes_copy.out, override_decomp=True)
 make_fallback(aten._thnn_fused_lstm_cell, require_dense)
 make_fallback(torch._prims.rng_prims.run_and_save_rng_state)
 make_fallback(torch._prims.rng_prims.run_with_rng_state)
@@ -5520,7 +5571,7 @@ def inplace_constant_pad_nd(
         return None
 
     npad = padding[1]
-    if npad == 0:
+    if not V.graph.sizevars.statically_known_gt(npad, 0):
         return None
 
     stride0 = strides[0]
@@ -5788,6 +5839,24 @@ def max_pool_checks(
     return kernel_size, stride, padding, dilation, use_fallback
 
 
+def _pool_argmax_inner_fn(x, kernel_size, inner_fn):
+    # Loop reordering runs after lowering and may permute the reduction ranges, so
+    # the offset is returned as an explicit row-major index into the window.
+    supports_logical_index_argreduce = (
+        is_triton(x)
+        or ir.get_device_type(x) == "mps"
+        or (ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp")
+    )
+    if len(kernel_size) == 1 or not supports_logical_index_argreduce:
+        return inner_fn
+
+    def inner_fn_with_index(idx, reduction_idx):
+        logical_index = inductor_prims._flatten_index(reduction_idx, kernel_size)
+        return inner_fn(idx, reduction_idx), ops.index_expr(logical_index, torch.int64)
+
+    return inner_fn_with_index
+
+
 def _max_pool_with_offsets(
     x,
     kernel_size,
@@ -5849,7 +5918,7 @@ def _max_pool_with_offsets(
         device=x.get_device(),
         dst_dtype=torch.int64,
         src_dtype=dtype,
-        inner_fn=fn_inner,
+        inner_fn=_pool_argmax_inner_fn(x, kernel_size, fn_inner),
         ranges=new_size,
         reduction_ranges=kernel_size,
     )
@@ -6580,7 +6649,7 @@ def _fractional_max_pool(x, kernel_size, output_size, random_samples, n_dim):
             device=x.get_device(),
             dst_dtype=torch.int64,
             src_dtype=dtype,
-            inner_fn=fn_inner,
+            inner_fn=_pool_argmax_inner_fn(x, kernel_size, fn_inner),
             ranges=new_size,
             reduction_ranges=kernel_size,
         )
@@ -7275,12 +7344,14 @@ def _make_reduction_inner(
             kept_idx.append(i)
             kept_sizes.append(size[i])
 
-    # For argmax/argmin compute logical indices when the tensor has non-contiguous layout.
-    should_compute_logical_index = False
-    supports_logical_index_argreduce = is_triton(x) or (
-        ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+    # Loop reordering happens after lowering, so the input IR cannot reliably predict
+    # when the physical reduction order will differ from the logical order.
+    supports_logical_index_argreduce = (
+        is_triton(x)
+        or ir.get_device_type(x) == "mps"
+        or (ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp")
     )
-    if (
+    should_compute_logical_index = (
         reduction_type
         in (
             "argmax",
@@ -7292,16 +7363,7 @@ def _make_reduction_inner(
         )
         and len(reduced_sizes) > 1
         and supports_logical_index_argreduce
-    ):
-        if isinstance(x.data, PermuteView):
-            should_compute_logical_index = True
-        elif isinstance(x.data, ir.ReinterpretView) or (
-            isinstance(x.data, ir.StorageBox) and isinstance(x.data.data, ir.Buffer)
-        ):
-            layout = x.get_layout()
-            should_compute_logical_index = (
-                layout.is_transposed() or not layout.is_contiguous()
-            )
+    )
 
     def loader(index, reduction_index):
         if len(reduction_index) != len(reduced_idx):
@@ -7675,7 +7737,7 @@ def pow(a, b):
     return pow_native(a, b)
 
 
-def mutate_to(changed, val, unsafe_alias=False):
+def mutate_to(changed, val, unsafe_alias=False, share_value=True):
     if isinstance(changed, TensorBox):
         changed_data = changed.data
     else:
@@ -7683,8 +7745,34 @@ def mutate_to(changed, val, unsafe_alias=False):
     if isinstance(val, TensorBox):
         val = val.data
 
-    if not isinstance(val, ir.StorageBox):
-        # introduce a copy to handle views
+    # Fast path, just swing the data pointer. Not for a realized StorageBox
+    # (inputs and module buffers included): it may already be referenced by
+    # name (views, extern kernel inputs), so its data can't be replaced.
+    # Except an empty buffer nothing has written yet: it holds no data, and
+    # its views only need the new value in its layout.
+    swing: ir.StorageBox | None = None
+    empty: ir.ComputedBuffer | None = None
+    if isinstance(changed_data, ir.StorageBox):
+        target = changed_data.data
+        if (
+            not unsafe_alias
+            and isinstance(target, ir.ComputedBuffer)
+            and target.is_no_op()
+            and changed_data.get_name() not in V.graph.mutated_buffers
+        ):
+            empty = target
+        if empty is not None or not IRNode.is_realized_node(target):
+            swing = changed_data
+
+    # Introduce a copy to handle views, and on the fast path to lay the value
+    # out as the empty buffer is, or when val is another tensor's (the copy_
+    # lowerings pass share_value=False): if changed took its buffer, an
+    # in-place write to either would change both.
+    if (
+        not isinstance(val, ir.StorageBox)
+        or empty is not None
+        or (swing is not None and not share_value)
+    ):
         node = Pointwise.create(
             device=changed.get_device(),
             dtype=changed.get_dtype(),
@@ -7697,15 +7785,13 @@ def mutate_to(changed, val, unsafe_alias=False):
         if not (isinstance(val, ir.StorageBox)):
             raise AssertionError("expected: isinstance(val, ir.StorageBox)")
 
-    if isinstance(changed_data, ir.StorageBox) and not (
-        changed_data.is_input_buffer()
-        # In AOTI, module parameters and buffers are not lifted as graph inputs
-        or changed_data.is_module_buffer()
-        or isinstance(changed_data.data, ir.NopKernel)
-    ):
-        # Fast path, just swing the data pointer
+    if swing is not None:
         val.realize()
-        changed_data.data = val.data
+        if empty is not None:
+            if not isinstance(val.data, ir.ComputedBuffer):
+                raise AssertionError("expected: isinstance(val.data, ComputedBuffer)")
+            val.data.layout = empty.layout
+        swing.data = val.data
         return changed
 
     ir.MutationLayoutSHOULDREMOVE.realize_into(
@@ -7727,7 +7813,7 @@ def copy_(dst, src, non_blocking=False):
     src = to_device(src, dst.get_device())
     src = to_dtype(src, dst.get_dtype())
     src = expand(src, dst.get_size())
-    return mutate_to(dst, src)
+    return mutate_to(dst, src, share_value=False)
 
 
 @make_pointwise
@@ -7815,6 +7901,9 @@ def mul(a, b):
         return make_pointwise(fn)(a, b)
 
 
+register_pointwise_op("mul")
+
+
 def get_constant_value(x: ir.IRNode) -> ir.Constant | None:
     """Try convert an arbitrary IR node into an ir.Constant value"""
 
@@ -7872,6 +7961,9 @@ def div_prim(a, b):
         return ops.truediv(*args)
 
     return make_pointwise(fn)(a, b)
+
+
+register_pointwise_op("truediv")
 
 
 @register_lowering(
@@ -8752,7 +8844,51 @@ register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.log2)
-register_pointwise_numeric(aten.nextafter)
+
+register_op_dtype_propagation_rules(
+    "nextafter",
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+    override_return_dtype=None,
+)
+register_pointwise_op("nextafter")
+
+
+def nextafter(x, y):
+    dtype = x.get_dtype()
+    is_low_precision = dtype in (torch.float16, torch.bfloat16)
+    device = x.get_device()
+    is_halide = (
+        device.type in ("cpu", "cuda") and get_current_backend(device.type) == "halide"
+    )
+    if dtype not in (
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+    ) or (
+        device.type == "mps"
+        or is_halide
+        or (is_low_precision and not is_triton(device))
+    ):
+        return fallback_handler(aten.nextafter.default, add_to_fallback_set=False)(x, y)
+
+    def inner_fn(x, y):
+        if is_low_precision:
+            x = ops.to_dtype(x, dtype, use_compute_types=False)
+            y = ops.to_dtype(y, dtype, use_compute_types=False)
+            return ops.to_dtype(ops.nextafter(x, y), dtype)
+        return ops.nextafter(x, y)
+
+    return make_pointwise(inner_fn)(x, y)
+
+
+register_lowering(
+    aten.nextafter,
+    broadcast=True,
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
+)(nextafter)
+register_lowering(prims.nextafter, broadcast=True, type_promotion_kind=None)(nextafter)
+
 
 from .codegen.common import BackendFeature, pointwise_overrides_data
 
@@ -9056,7 +9192,7 @@ if hasattr(torch.ops.fsdp, "copy_"):
         src = to_device(src, dst.get_device())
         src = to_dtype(src, dst.get_dtype())
         src = expand(src, dst.get_size())
-        return mutate_to(dst, src)
+        return mutate_to(dst, src, share_value=False)
 
 
 @register_lowering(torch.ops.aten.resize)
@@ -9524,6 +9660,25 @@ def with_effects(token, op, *args, **kwargs):
                         raise AssertionError("Multiple effects NYI")
                     effect_type = next(iter(effects))
 
+    # An effectful op may retain its tensor inputs in state inductor cannot see
+    # (e.g. pushing a tensor onto a torchbind queue), so the input buffers must
+    # never have their storage recycled for another buffer. This is retention,
+    # not ordering: no dependency edge can express "the callee kept a reference",
+    # so the ordering dep below (deliberately weak) does not cover it. We pin the
+    # inputs of every ORDERED op rather than only those that can actually retain
+    # them, since there is no reliable "retains inputs" signal: retention happens
+    # inside the op implementation, so it is absent from the schema (queue_push
+    # reports alias_info=None), the EffectType enum only encodes ordering, and a
+    # ScriptObject argument merely triggers the default effect. Under-pinning
+    # silently miscompiles, so the bounded over-pinning is the intended tradeoff.
+    # never_reuse_but_free_buffers rather than never_reuse_buffers: dropping
+    # inductor's own reference is safe here, only recycling the storage is not.
+    if effect_type:
+        for arg in pytree.tree_leaves((args, kwargs)):
+            if isinstance(arg, TensorBox):
+                arg.realize()
+                V.graph.never_reuse_but_free_buffers.add(arg.get_name())
+
     # Track operations before
     operation_len = len(V.graph.operations)
 
@@ -9541,8 +9696,13 @@ def with_effects(token, op, *args, **kwargs):
             wrap_tensors, ir.FallbackKernel.create(op, *args, **kwargs)
         )
 
-    # Get all the operations created during the lowering above, and add StarDeps
-    # to the previous node with the same effect
+    # Get all the operations created during the lowering above, and order them
+    # after the previous op with the same effect. This is an ordering constraint
+    # only: an effect edge says nothing about whether this op reads the previous
+    # one's buffer, so it goes through additional_buffer_deps, which the
+    # scheduler installs as WeakDep(is_fake=True). A strong dep would be counted
+    # as a real read and would extend the previous buffer's lifetime past its
+    # last true use, defeating both reuse and deallocation.
     if len(V.graph.operations[operation_len:]) <= 0:
         raise AssertionError(
             f"No operation nodes were generated when lowering effectful operator {op}."
@@ -9553,8 +9713,12 @@ def with_effects(token, op, *args, **kwargs):
             # Patch has_side_effects to return True
             new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
-                V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
+                op_name = (
+                    new_op.get_operation_name()
+                )  # pyrefly: ignore[missing-attribute]
+                V.graph.additional_buffer_deps[op_name].add(
+                    prev_effect_buffer.get_name()
+                )
         # Update the effectful ops chain to point to the latest operation
         V.graph.effectful_ops[effect_type] = (
             new_op  # pyrefly: ignore[unsupported-operation]
@@ -9682,32 +9846,41 @@ def lower_inline_asm_elementwise(
     inputs = broadcast_tensors(*inputs)
 
     input_dtypes = tuple(inp.get_dtype() for inp in inputs)
+    output_dtypes = dtype if isinstance(dtype, tuple) else (dtype,)
     loaders = [inp.make_loader() for inp in inputs]
 
-    def inner_fn(idx):
-        vals = tuple(loader(idx) for loader in loaders)
-        result = ops.inline_asm_elementwise(
-            *vals,
-            asm=asm_str,
-            constraints=constraints,
-            dtype=dtype,
-            is_pure=is_pure,
-            pack=pack,
-            input_dtypes=input_dtypes,
-        )
-        # Inductor computes in fp32 for bf16/fp16. Upcast so fused downstream
-        # ops (reductions, etc.) see fp32 values. The Pointwise's storage dtype
-        # handles the final downcast on store.
-        if dtype in (torch.float16, torch.bfloat16):
-            result = ops.to_dtype(result, torch.float32)
-        return result
+    def make_output(output_index):
+        output_dtype = output_dtypes[output_index]
 
-    return ir.Pointwise.create(
-        device=inputs[0].get_device(),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=list(inputs[0].get_size()),
-    )
+        def inner_fn(idx):
+            vals = tuple(loader(idx) for loader in loaders)
+            result = ops.inline_asm_elementwise(
+                *vals,
+                asm=asm_str,
+                constraints=constraints,
+                dtype=output_dtype,
+                is_pure=is_pure,
+                pack=pack,
+                input_dtypes=input_dtypes,
+                output_dtypes=output_dtypes if len(output_dtypes) > 1 else None,
+                output_index=output_index,
+            )
+            # Inductor computes bf16/fp16 in fp32. Upcast so fused downstream
+            # ops (reductions, etc.) see fp32 values. The Pointwise's storage dtype
+            # handles the final downcast on store.
+            if output_dtype in (torch.float16, torch.bfloat16):
+                result = ops.to_dtype(result, torch.float32)
+            return result
+
+        return ir.Pointwise.create(
+            device=inputs[0].get_device(),
+            dtype=output_dtype,
+            inner_fn=inner_fn,
+            ranges=list(inputs[0].get_size()),
+        )
+
+    outputs = tuple(make_output(i) for i in range(len(output_dtypes)))
+    return outputs if isinstance(dtype, tuple) else outputs[0]
 
 
 # populate lowerings defined in kernel/*

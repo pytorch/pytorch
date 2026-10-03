@@ -1,10 +1,21 @@
 # Owner(s): ["module: dynamo"]
 """Tests for tp_getattro_impl: unified attribute access protocol in Dynamo."""
 
+import collections
+import inspect
+import sys
+import traceback
+import types
+import unittest
+
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch.testing._internal.common_utils import HardwareClassification
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    make_dynamo_test,
+)
+from torch.utils._triton import has_triton_package
 
 
 class TpGetattroTests(torch._dynamo.test_case.TestCase):
@@ -461,6 +472,92 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager")(obj)
         self.assertEqual(result, 1)
 
+    def test_user_descriptor_get_on_class(self):
+        calls = []
+
+        class Desc:
+            def __get__(self, obj, objtype=None):
+                calls.append(objtype)
+                return len(calls) * 10
+
+        class Base:
+            d = Desc()
+
+        class Sub(Base):
+            pass
+
+        def fn(cls, x):
+            return x + cls.d, cls.d
+
+        x = torch.ones(3)
+        for cls in (Base, Sub):
+            torch._dynamo.reset()
+            calls.clear()
+            expected = fn(cls, x)
+            expected_calls = list(calls)
+            calls.clear()
+            result = torch.compile(fn, backend="eager", fullgraph=True)(cls, x)
+            self.assertEqual(result, expected)
+            self.assertEqual(calls, expected_calls)
+
+    def test_user_descriptor_untraceable_get_on_class(self):
+        calls = []
+
+        class Desc:
+            def __get__(self, obj, objtype=None):
+                calls.append(objtype)
+                traceback.extract_stack()
+                return len(calls) * 10
+
+        class Base:
+            d = Desc()
+
+        def fn(x):
+            return x + 1, Base.d, Base.d
+
+        x = torch.ones(3)
+        expected = fn(x)
+        expected_calls = list(calls)
+        for nested in (False, True):
+            with torch._dynamo.config.patch(nested_graph_breaks=nested):
+                torch._dynamo.reset()
+                calls.clear()
+                result = torch.compile(fn, backend="eager")(x)
+                self.assertEqual(result, expected)
+                self.assertEqual(calls, expected_calls)
+
+                torch._dynamo.reset()
+                with self.assertRaises(torch._dynamo.exc.Unsupported):
+                    torch.compile(fn, backend="eager", fullgraph=True)(x)
+
+    @torch._dynamo.config.patch(nested_graph_breaks=False)
+    def test_user_descriptor_get_on_class_graph_break(self):
+        # A graph break inside __get__ must graph break the attribute load,
+        # not call __get__ at compile time and guard on its result.
+        calls = []
+
+        class Desc:
+            def __get__(self, obj, objtype=None):
+                calls.append(1)
+                torch._dynamo.graph_break()
+                return len(calls)
+
+        class C:
+            a = Desc()
+
+        def fn(x):
+            return x + C.a
+
+        x = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        for _ in range(2):
+            calls.clear()
+            expected = fn(x)
+            expected_calls = list(calls)
+            calls.clear()
+            self.assertEqual(opt_fn(x), expected)
+            self.assertEqual(calls, expected_calls)
+
     def test_staticmethod_descriptor(self):
         class MyObj:
             @staticmethod
@@ -500,6 +597,262 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(result, 10)
+
+    def test_staticmethod_constructor_func_attr(self):
+        def fn():
+            def f():
+                pass
+
+            return staticmethod(f).__func__ is f
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_classmethod_constructor_func_attr(self):
+        def fn():
+            def f(cls):
+                pass
+
+            return classmethod(f).__func__ is f
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_staticmethod_constructor_wrapped_attr(self):
+        def fn():
+            def f():
+                pass
+
+            return staticmethod(f).__wrapped__ is f
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_classmethod_constructor_wrapped_attr(self):
+        def fn():
+            def f(cls):
+                pass
+
+            return classmethod(f).__wrapped__ is f
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_staticmethod_constructor_doc_attr(self):
+        """functools_wraps copies __doc__ into the descriptor's instance dict,
+        which shadows the staticmethod type's own docstring.
+        """
+
+        def fn():
+            def f():
+                "fdoc"
+
+            return staticmethod(f).__doc__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "fdoc")
+
+    def test_classmethod_constructor_doc_attr(self):
+        def fn():
+            def f(cls):
+                "fdoc"
+
+            return classmethod(f).__doc__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "fdoc")
+
+    def test_staticmethod_constructor_undocumented_doc_attr(self):
+        """An undocumented callable's __doc__ is None, not the type's docstring."""
+
+        def fn():
+            def f():
+                pass
+
+            return staticmethod(f).__doc__ is None
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_classmethod_constructor_undocumented_doc_attr(self):
+        def fn():
+            def f(cls):
+                pass
+
+            return classmethod(f).__doc__ is None
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_staticmethod_constructor_name_attr(self):
+        """functools_wraps copies __name__, not __qualname__."""
+
+        def fn():
+            def f():
+                pass
+
+            return staticmethod(f).__name__
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, "f")
+
+    def test_staticmethod_constructor_with_builtin(self):
+        def fn():
+            return staticmethod(len).__func__ is len
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_staticmethod_constructor_reconstruct(self):
+        """The descriptor must survive being returned out of the graph."""
+
+        def fn():
+            def f():
+                return 1
+
+            return staticmethod(f)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIsInstance(result, staticmethod)
+        self.assertEqual(result.__func__(), 1)
+
+    def test_classmethod_constructor_reconstruct(self):
+        """The descriptor must survive being returned out of the graph."""
+
+        def fn():
+            def f(cls):
+                return 1
+
+            return classmethod(f)
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertIsInstance(result, classmethod)
+        self.assertEqual(result.__func__(int), 1)
+
+    def test_classmethod_constructor_get_binds_to_owner(self):
+        """A constructed classmethod has no attribute path on the owner class,
+        so binding it must not resolve the wrapped function through the class.
+        """
+
+        class C:
+            g = staticmethod(lambda: 2)
+
+        def g(cls):
+            return 7
+
+        def fn():
+            m = classmethod(g).__get__(None, C)
+            torch._dynamo.graph_break()
+            return m()
+
+        result = torch.compile(fn, backend="eager")()
+        self.assertEqual(result, 7)
+
+    def test_classmethod_constructor_get_hash(self):
+        class C:
+            pass
+
+        def g(cls):
+            return 7
+
+        expected = hash(classmethod(g).__get__(None, C))
+
+        def fn():
+            return hash(classmethod(g).__get__(None, C))
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(result, expected)
+
+    def test_staticmethod_constructor_of_opaque_callable(self):
+        """A callable with no Python constant form still wraps and unwraps."""
+
+        class Callable:
+            def __call__(self):
+                return 1
+
+        obj = Callable()
+
+        def fn():
+            return staticmethod(obj).__func__ is obj
+
+        result = torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertTrue(result)
+
+    def test_classmethod_constructor_get_nested_function(self):
+        """A function defined inside the traced region is a
+        NestedUserFunctionVariable, which is not a UserFunctionVariable but
+        still binds like one.
+        """
+
+        class C:
+            pass
+
+        def fn(x):
+            def h(cls):
+                return cls
+
+            return x + 1, classmethod(h).__get__(None, C)() is C
+
+        expected = fn(torch.ones(1))
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+        self.assertEqual(result, expected)
+
+    def test_classmethod_wrapped_callable_name_differs_from_attr(self):
+        """The bound method is sourced by the class attribute, not by the
+        wrapped callable's name: functools.wraps makes them differ, and
+        `D.wrapper` does not exist.
+        """
+        import functools
+
+        def deco(fn):
+            @functools.wraps(fn)
+            def wrapper(*args, **kwargs):
+                return fn(*args, **kwargs)
+
+            return wrapper
+
+        class D:
+            @classmethod
+            @deco
+            def create(cls):
+                return cls.__name__
+
+        def fn(x):
+            return x + 1, D().create()
+
+        expected = fn(torch.ones(1))
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+        self.assertEqual(result, expected)
+
+    def test_class_attr_stored_descriptor_applies_descr_get(self):
+        """Storing a descriptor onto a class and reading it back in the same
+        region must run tp_descr_get, as type_getattro does for the real
+        __dict__ entry.
+        """
+
+        def gl(x):
+            return x + 1
+
+        def gc(cls, x):
+            return cls.__name__, x + 1
+
+        class G:
+            pass
+
+        def fn(x):
+            G.h = staticmethod(gl)
+            G.k = classmethod(gc)
+            return (
+                x + 1,
+                type(G.h).__name__,
+                G.h(1),
+                type(G.k).__name__,
+                G.k(1),
+            )
+
+        expected = fn(torch.ones(1))
+        result = torch.compile(fn, backend="eager", fullgraph=True)(torch.ones(1))
+        self.assertEqual(result, expected)
 
     def test_property_setter(self):
         class MyObj:
@@ -567,6 +920,28 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
 
         result = torch.compile(fn, backend="eager", fullgraph=True)()
         self.assertEqual(sorted(result), ["a", "b"])
+
+    def test_nonstandard_c_method_descriptor_graph_break_binding(self):
+        if not has_triton_package():
+            self.skipTest("requires Triton package")
+
+        from triton._C.libtriton import ir
+
+        context = ir.context()
+        ir.load_dialects(context)
+        builder = ir.builder(context)
+        descriptor = inspect.getattr_static(type(builder), "get_loc")
+        if not inspect.ismethoddescriptor(descriptor) or isinstance(
+            descriptor, types.MethodDescriptorType
+        ):
+            self.skipTest("requires a nonstandard C method descriptor")
+        bound_method_type = type(builder.get_loc)
+
+        def fn():
+            builder.get_loc()
+            return isinstance(builder.get_loc, bound_method_type)
+
+        self.assertTrue(torch.compile(fn, backend="eager")())
 
     def test_classmethod_descriptor_dict_fromkeys(self):
         """dict.fromkeys is a classmethod_descriptor."""
@@ -1346,6 +1721,543 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         result = torch.compile(fn, backend="eager")(torch.tensor(1))
         self.assertEqual(result, torch.tensor(2))
         self.assertFalse(hasattr(MyClass, "y"))
+
+    def test_property_get_explicit_via_class_dict(self):
+        # VariableTracker has no tp_descr_get_impl default (unlike
+        # tp_descr_set_impl), and SlotDef resolves the impl by name, so a VT
+        # without an override raises AttributeError instead of graph breaking.
+        class MyClass:
+            def __init__(self):
+                self._v = 1
+
+            @property
+            def v(self):
+                return self._v
+
+        def fn():
+            return MyClass.__dict__["v"].__get__(MyClass(), MyClass)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_property_fget_is_guarded(self):
+        # PropertyVariable guards only type(p) (TYPE_MATCH); its tp_members
+        # getters must attach their own AttrSource or a second property with a
+        # different fget silently reuses the first one's compiled body.
+        def g1(obj):
+            return 1
+
+        def g2(obj):
+            return 2
+
+        class MyClass:
+            pass
+
+        def fn(p, obj):
+            return p.fget(obj)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        obj = MyClass()
+        self.assertEqual(opt_fn(property(g1), obj), 1)
+        self.assertEqual(opt_fn(property(g2), obj), 2)
+
+    def test_property_fset_is_guarded(self):
+        # Same sourceless-getter hazard as fget, for fset.
+        def getter(self):
+            return None
+
+        def s1(self, v):
+            self.tag = "s1"
+
+        def s2(self, v):
+            self.tag = "s2"
+
+        class MyClass:
+            pass
+
+        def fn(p, obj):
+            p.fset(obj, 1)
+            return obj.tag
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(property(getter, s1), MyClass()), "s1")
+        self.assertEqual(opt_fn(property(getter, s2), MyClass()), "s2")
+
+    def test_property_fdel_is_guarded(self):
+        # Same sourceless-getter hazard as fget, for fdel.
+        def getter(self):
+            return None
+
+        def d1(self):
+            self.tag = "d1"
+
+        def d2(self):
+            self.tag = "d2"
+
+        class MyClass:
+            pass
+
+        def fn(p, obj):
+            p.fdel(obj)
+            return obj.tag
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(property(getter, None, d1), MyClass()), "d1")
+        self.assertEqual(opt_fn(property(getter, None, d2), MyClass()), "d2")
+
+    def test_property_doc_is_guarded(self):
+        # Same sourceless-getter hazard as fget, for __doc__.
+        def getter(self):
+            return None
+
+        def fn(p):
+            return p.__doc__
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(property(getter, doc="A")), "A")
+        self.assertEqual(opt_fn(property(getter, doc="B")), "B")
+
+    def test_property_isabstractmethod_is_guarded(self):
+        # Same sourceless-getter hazard as fget, for __isabstractmethod__.
+        def g1(self):
+            return 1
+
+        g1.__isabstractmethod__ = True
+
+        def g2(self):
+            return 1
+
+        def fn(p):
+            return p.__isabstractmethod__
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(property(g1)), True)
+        self.assertEqual(opt_fn(property(g2)), False)
+
+    def test_property_fget_set_readonly(self):
+        # fget is a readonly Member (property_members); the write must reach
+        # PropertyVariable.tp_members["fget"]'s setter and raise
+        # PyMember_SetOne's wording, not fall through to store_attr.
+        # property(...) is built outside the traced function and passed in --
+        # calling the `property` builtin from within traced code is a
+        # separate, unrelated tracing limitation.
+        def fn(p):
+            try:
+                property.__dict__["fget"].__set__(p, lambda self: 2)
+            except AttributeError as e:
+                return str(e)
+            return "no error"
+
+        p = property(lambda self: 1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(p), fn(p))
+
+    def test_property_fset_set_readonly(self):
+        # Same as fget, for the fset Member.
+        def fn(p):
+            try:
+                property.__dict__["fset"].__set__(p, lambda self, v: None)
+            except AttributeError as e:
+                return str(e)
+            return "no error"
+
+        p = property(lambda self: 1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(p), fn(p))
+
+    def test_property_fdel_set_readonly(self):
+        # Same as fget, for the fdel Member.
+        def fn(p):
+            try:
+                property.__dict__["fdel"].__set__(p, lambda self: None)
+            except AttributeError as e:
+                return str(e)
+            return "no error"
+
+        p = property(lambda self: 1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(p), fn(p))
+
+    def test_property_isabstractmethod_set_readonly(self):
+        # __isabstractmethod__ is a readonly GetSet (property_getsetlist); the
+        # write must reach tp_getset["__isabstractmethod__"]'s setter and
+        # raise getset_set's wording, not fall through to store_attr.
+        def fn(p):
+            try:
+                property.__dict__["__isabstractmethod__"].__set__(p, True)
+            except AttributeError as e:
+                return str(e)
+            return "no error"
+
+        p = property(lambda self: 1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(p), fn(p))
+
+    def test_property_doc_set_writable(self):
+        # __doc__ is a writable Member; the write must reach
+        # tp_members["__doc__"]'s setter (getset_set) and actually take
+        # effect, not raise. Separate property instances for the compiled and
+        # eager calls so the mutation from one doesn't leak into the other.
+        def fn(p):
+            property.__dict__["__doc__"].__set__(p, "updated")
+            return p.__doc__
+
+        p_compiled = property(lambda self: 1, doc="original")
+        p_eager = property(lambda self: 1, doc="original")
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(p_compiled),
+            fn(p_eager),
+        )
+
+    @unittest.skipIf(
+        sys.version_info < (3, 13),
+        "property.__name__ (and its setter) does not exist before 3.13",
+    )
+    def test_property_name_set_writable(self):
+        # __name__ is a writable GetSet added in 3.13; the write must reach
+        # tp_getset["__name__"]'s setter (getset_set) and actually take
+        # effect, not raise. Separate property instances, as with __doc__.
+        def fn(p):
+            property.__dict__["__name__"].__set__(p, "renamed")
+            return p.__name__
+
+        p_compiled = property(lambda self: 1)
+        p_eager = property(lambda self: 1)
+        self.assertEqual(
+            torch.compile(fn, backend="eager", fullgraph=True)(p_compiled),
+            fn(p_eager),
+        )
+
+    def test_getset_descriptor_get_explicit(self):
+        # object.__class__ is a getset modeled in tp_getset, so this exercises
+        # the entry.getter branch.  The value must be non-None: an attribute
+        # that is None either way cannot tell a returned value from a dropped
+        # one.
+        def fn():
+            e = ValueError("q")
+            return object.__dict__["__class__"].__get__(e, ValueError)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    @unittest.expectedFailure
+    def test_member_descriptor_get_explicit(self):
+        # The slot write performed by __init__ is not visible to
+        # MemberDescriptorVariable.tp_descr_get_impl, so the read raises.
+        class MyClass:
+            __slots__ = ("x",)
+
+            def __init__(self):
+                self.x = 1
+
+        def fn():
+            return MyClass.__dict__["x"].__get__(MyClass(), MyClass)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_getset_descriptor_set_explicit(self):
+        # __cause__ is a getset modeled in tp_getset (ExceptionVariable), so
+        # this exercises the entry.setter branch of
+        # GetSetDescriptorVariable.tp_descr_set_impl.
+        def fn():
+            e = ValueError("x")
+            BaseException.__dict__["__cause__"].__set__(e, KeyError("c"))
+            return type(e.__cause__).__name__
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_member_descriptor_set_readonly_entry(self):
+        # SliceVariable models start/stop/step as readonly Members; the write must
+        # raise PyMember_SetOne's wording, not fall through to store_attr.
+        def fn():
+            s = slice(1, 2, 3)
+            try:
+                slice.__dict__["start"].__set__(s, 9)
+            except AttributeError as e:
+                return str(e)
+            return "no error"
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_member_descriptor_set_writable_entry(self):
+        # __suppress_context__ is a writable Member on ExceptionVariable, so this
+        # exercises the entry.setter branch of
+        # MemberDescriptorVariable.tp_descr_set_impl.
+        def fn():
+            e = ValueError("x")
+            BaseException.__dict__["__suppress_context__"].__set__(e, True)
+            return e.__suppress_context__
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_getset_descriptor_set_readonly_entry(self):
+        # deque.maxlen is a readonly GetSet (deque_get_maxlen, no setter); the
+        # write must raise AttributeError (getset_set), not fall through to
+        # store_attr. CPython's getset_set formats the message with tp_name,
+        # which is qualified for a C type outside builtins -- not
+        # __objclass__.__name__.
+        def fn():
+            d = collections.deque([1, 2, 3], maxlen=5)
+            try:
+                collections.deque.__dict__["maxlen"].__set__(d, 7)
+            except AttributeError as e:
+                return str(e)
+            return "no error"
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    @torch._dynamo.config.patch(
+        enable_trace_unittest=True, enable_trace_load_build_class=True
+    )
+    @make_dynamo_test
+    def test_member_descriptor_set_incompatible_type(self):
+        # descr_setcheck: __set__ on a member descriptor with an obj whose
+        # type isn't a subtype of the descriptor's __objclass__ must raise
+        # TypeError from the set path itself, not silently apply the write.
+        class Alien:
+            __slots__ = ("x",)
+
+        class Borrower:
+            pass
+
+        with self.assertRaises(TypeError):
+            Alien.__dict__["x"].__set__(Borrower(), 1)
+
+    def test_property_set_explicit_via_class_attr(self):
+        # property has tp_descr_set (property_descr_set), but PropertyVariable
+        # has no tp_descr_set_impl.
+        class MyClass:
+            def __init__(self):
+                self._v = 1
+
+            @property
+            def v(self):
+                return self._v
+
+            @v.setter
+            def v(self, val):
+                self._v = val
+
+        def fn():
+            obj = MyClass()
+            MyClass.v.__set__(obj, 11)
+            return obj.v
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_property_set_explicit_via_class_dict(self):
+        # Same missing tp_descr_set_impl as via the class attribute; kept as a
+        # separate case because a bare property value reaches PropertyVariable
+        # through the builder rather than through descriptor resolution.
+        class MyClass:
+            def __init__(self):
+                self._v = 1
+
+            @property
+            def v(self):
+                return self._v
+
+            @v.setter
+            def v(self, val):
+                self._v = val
+
+        def fn():
+            obj = MyClass()
+            MyClass.__dict__["v"].__set__(obj, 11)
+            return obj.v
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    # The implicit paths (obj.x = v, del obj.x) already raise the right
+    # AttributeError; these cover the explicit dunder calls, which reach
+    # PropertyVariable.tp_descr_set_impl instead.
+
+    def test_property_set_explicit_no_setter(self):
+        # fset is None: property_descr_set raises before calling anything.
+        class MyClass:
+            @property
+            def v(self):
+                return 1
+
+        def fn():
+            try:
+                MyClass.__dict__["v"].__set__(MyClass(), 5)
+                return "no-raise"
+            except AttributeError:
+                return "AttributeError"
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_property_delete_explicit_no_deleter(self):
+        # fdel is None on an otherwise writable property -- the common case.
+        class MyClass:
+            def __init__(self):
+                self._v = 0
+
+            @property
+            def v(self):
+                return self._v
+
+            @v.setter
+            def v(self, val):
+                self._v = val
+
+        def fn():
+            try:
+                MyClass.__dict__["v"].__delete__(MyClass())
+                return "no-raise"
+            except AttributeError:
+                return "AttributeError"
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_property_delete_explicit_with_deleter(self):
+        # fdel is present: property_descr_set routes __delete__ through it.
+        class MyClass:
+            def __init__(self):
+                self._v = 1
+
+            @property
+            def v(self):
+                return self._v
+
+            @v.setter
+            def v(self, val):
+                self._v = val
+
+            @v.deleter
+            def v(self):
+                self._v = "deleted"
+
+        def fn():
+            obj = MyClass()
+            MyClass.__dict__["v"].__delete__(obj)
+            return obj._v
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_property_name(self):
+        # __name__ is recorded via __set_name__ at class-body assignment
+        # time; the tp_getset getter must surface it (and, on < 3.13 where
+        # property.__name__ does not exist at all, decline the same way
+        # eager does).
+        class MyClass:
+            @property
+            def v(self):
+                return 1
+
+        p = MyClass.__dict__["v"]
+
+        def fn(p):
+            return hasattr(p, "__name__"), getattr(p, "__name__", None)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(p), fn(p))
+
+    def test_property_name_missing(self):
+        # A property with no fget and no __set_name__ has no __name__ on any
+        # version -- below 3.13 because the attribute does not exist at all,
+        # and on 3.13+ because there is nothing to fall back to. Reading it
+        # must surface as a catchable AttributeError, not an internal error.
+        def fn(p):
+            return hasattr(p, "__name__")
+
+        p = property()
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(p), fn(p))
+
+    @unittest.skipIf(
+        sys.version_info < (3, 13),
+        "PropertyVariable cannot read the __set_name__-assigned name before "
+        "3.13 (no public accessor exists), so it always reports no name -- "
+        "a documented divergence from eager's real message pre-3.13",
+    )
+    def test_property_set_no_setter_message_getter_name_differs(self):
+        # property_descr_set's message names the property itself (via
+        # __set_name__), not fget -- exercised here via a getter whose name
+        # ("<lambda>") differs from the class attribute name ("x").
+        class MyClass:
+            x = property(lambda self: 1)
+
+        def fn():
+            try:
+                MyClass.__dict__["x"].__set__(MyClass(), 5)
+                return "no-raise"
+            except AttributeError as e:
+                return str(e)
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_getset_descriptor_set_unmodeled_attribute(self):
+        # type.__name__ is a writable getset with no tp_getset entry on
+        # TypeVariable, so Dynamo cannot tell whether the C setter would
+        # accept the write, reject it as read-only, or reject it by type --
+        # it graph breaks rather than guessing "writable".
+        class Target:
+            pass
+
+        def fn():
+            type.__dict__["__name__"].__set__(Target, "Renamed")
+            return Target.__name__
+
+        self.assertEqual(fn(), "Renamed")
+        Target.__name__ = "Target"
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
+    def test_builtin_type_and_func_getattr_missing_attr(self):
+        # Issue #198197: getattr on builtin types and functions must raise
+        # observed AttributeError when the attribute is missing.
+        missing_attr = "__nonexistent__"
+        pos_type_attr = "from_bytes"
+        pos_func_attr = "__name__"
+
+        def try_getattr(obj, name):
+            try:
+                getattr(obj, name)
+                return "present"
+            except AttributeError:
+                return "missing"
+
+        def try_load_attr_int():
+            try:
+                return int.__nonexistent__
+            except AttributeError:
+                return "missing"
+
+        def try_load_attr_len():
+            try:
+                return len.__nonexistent__
+            except AttributeError:
+                return "missing"
+
+        def fn(x):
+            results = [
+                # Builtin types missing attributes
+                try_getattr(int, missing_attr),
+                try_getattr(str, missing_attr),
+                try_getattr(list, missing_attr),
+                try_getattr(dict, missing_attr),
+                try_getattr(type, missing_attr),
+                try_getattr(object, missing_attr),
+                try_getattr(float, missing_attr),
+                try_getattr(bool, missing_attr),
+                try_getattr(tuple, missing_attr),
+                try_getattr(set, missing_attr),
+                # Builtin functions missing attributes
+                try_getattr(len, missing_attr),
+                try_getattr(abs, missing_attr),
+                try_getattr(print, missing_attr),
+                # Direct LOAD_ATTR
+                try_load_attr_int(),
+                try_load_attr_len(),
+                # hasattr check
+                "present" if hasattr(int, missing_attr) else "missing",
+                "present" if hasattr(len, missing_attr) else "missing",
+                # Positive check on existing attributes
+                getattr(int, pos_type_attr) is not None,
+                getattr(len, pos_func_attr),
+            ]
+            return results
+
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        expected = fn(x)
+        actual = compiled_fn(x)
+        self.assertEqual(actual, expected)
 
 
 if __name__ == "__main__":

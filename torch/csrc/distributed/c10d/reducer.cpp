@@ -655,7 +655,10 @@ void Reducer::delay_all_reduce() {
     all_reduce_bucket(bucket);
   }
 
-  finalize_backward();
+  next_bucket_ = buckets_.size();
+  if (!is_manual_finalization_required_) {
+    finalize_backward();
+  }
 }
 
 void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
@@ -947,14 +950,10 @@ void Reducer::mark_variable_ready(size_t variable_index) {
       if (should_collect_runtime_stats()) {
         record_backward_compute_end_time();
       }
-      // Check that all buckets were completed and had their work kicked off.
-      TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
-      if (static_graph_after_first_iteration() && should_rebuild_buckets()) {
-        for (const auto& unused_index : unused_parameters_) {
-          push_rebuilt_params(unused_index);
-        }
+      if (!is_manual_finalization_required_) {
+        this->prepare_for_backward_finalization();
+        this->finalize_backward();
       }
-      this->finalize_backward();
     });
   }
 }
@@ -1630,6 +1629,24 @@ std::vector<size_t> Reducer::getUnmarkedParamIndicesForIteration() {
 
 // A bucket with one or more dense tensors needs to be unflattened.
 void Reducer::finalize_bucket_dense(Bucket& bucket) {
+  // When batched_grad_copy_ is enabled, the per-parameter copies from the
+  // reduced bucket back into each .grad are deferred and flushed as a single
+  // _foreach_copy_ below. Only safe when grads are the parameters' own .grad
+  // tensors, i.e. not under distributed autograd (which manages grads through
+  // an rpc context and writes them back per callback).
+#ifdef _WIN32
+  const bool in_rpc_context = false;
+#else
+  const bool in_rpc_context = rpc_context_.context_ptr.load() != nullptr;
+#endif
+  const bool batch_copy_out = batched_grad_copy_ && !gradient_as_bucket_view_ &&
+      !optim_in_backward_ && !in_rpc_context;
+  std::vector<at::Tensor> batched_grad_dsts;
+  std::vector<at::Tensor> batched_grad_srcs;
+  if (batch_copy_out) {
+    batched_grad_dsts.reserve(bucket.variables.size());
+    batched_grad_srcs.reserve(bucket.variables.size());
+  }
   for (const auto intra_bucket_index : c10::irange(bucket.variables.size())) {
     auto& variable = bucket.variables[intra_bucket_index];
 
@@ -1674,6 +1691,25 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       if (optim_in_backward_) {
         // Return early if optimizer has already run.
         runGradCallbackForVariable(variable, [&](auto& grad) { return true; });
+      } else if (batch_copy_out) {
+        const auto& bucket_view = bucket.bucket_views_out[intra_bucket_index];
+        runGradCallbackForVariable(variable, [&](auto& grad) {
+          if (global_unused) {
+            // Keep a globally unused parameter's grad untouched.
+            return false;
+          }
+          if (!grad.defined()) {
+            // Creates grad according to the "Gradient Layout Contract".
+            grad = torch::autograd::utils::clone_obey_contract(
+                bucket_view, variable);
+          } else if (grad.requires_grad()) {
+            grad.copy_(bucket_view);
+          } else {
+            batched_grad_dsts.push_back(grad);
+            batched_grad_srcs.push_back(bucket_view);
+          }
+          return true;
+        });
       } else {
         RECORD_FUNCTION(
             "torch.distributed.ddp.reducer::copy_bucket_to_grad",
@@ -1719,6 +1755,24 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
         // The grad is not modified.
         return false;
       });
+    }
+  }
+
+  if (!batched_grad_dsts.empty()) {
+    RECORD_FUNCTION(
+        "torch.distributed.ddp.reducer::copy_bucket_to_grad_batched",
+        std::vector<c10::IValue>());
+    at::_foreach_copy_(batched_grad_dsts, batched_grad_srcs);
+  }
+}
+
+void Reducer::prepare_for_backward_finalization() {
+  // Check that all buckets were completed and had their work kicked off.
+  TORCH_INTERNAL_ASSERT(next_bucket_ == buckets_.size());
+
+  if (static_graph_after_first_iteration() && should_rebuild_buckets()) {
+    for (const auto& unused_index : unused_parameters_) {
+      push_rebuilt_params(unused_index);
     }
   }
 }
@@ -2112,6 +2166,14 @@ void Reducer::ensure_prior_reduction_finished() {
     // Collect unmarked parameter indices, additionally, in debug mode retrieve
     // parameter names.
     auto unmarked_param_indices = getUnmarkedParamIndicesForIteration();
+
+    REDUCER_CHECK(
+        !is_manual_finalization_required_ || !unmarked_param_indices.empty(),
+        logger_,
+        "Expected to have finalized the prior backward pass before starting "
+        "a new one. Call finalize_backward() after backward() when "
+        "require_manual_backward_finalization is true.");
+
     // We should have some unmarked parameter indices, otherwise we would not
     // have run into this error branch.
     TORCH_INTERNAL_ASSERT(!unmarked_param_indices.empty());
@@ -2195,6 +2257,13 @@ void Reducer::ensure_prior_reduction_finished() {
           ": ",
           unmarkedParamInfo);
       kBaseErrorMsg += unmarked_param_indices_info;
+    }
+
+    if (is_manual_finalization_required_) {
+      kBaseErrorMsg +=
+          "\nManual backward finalization is enabled. After resolving the "
+          "unmarked parameters above, call finalize_backward() before "
+          "starting the next forward.";
     }
     REDUCER_CHECK(false, logger_, kBaseErrorMsg);
   }
@@ -2551,6 +2620,55 @@ void Reducer::update_process_group(
     c10::intrusive_ptr<c10d::ProcessGroup> new_process_group) {
   std::lock_guard<std::mutex> lock(mutex_);
   process_group_ = std::move(new_process_group);
+}
+
+void Reducer::set_manual_finalization_required(bool required) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (required == is_manual_finalization_required_) {
+    return;
+  }
+  REDUCER_CHECK(
+      !expect_autograd_hooks_,
+      logger_,
+      "set_manual_finalization_required cannot be called after "
+      "forward while a backward pass is expected or in progress. Call it "
+      "before forward or after backward finalization.");
+  is_manual_finalization_required_ = required;
+}
+
+bool Reducer::should_finalize_after_backward() const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return should_rebuild_buckets();
+}
+
+void Reducer::finalize_backward_manual() {
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  REDUCER_CHECK(
+      is_manual_finalization_required_,
+      logger_,
+      "finalize_backward() called but manual backward finalization is not "
+      "required. Set require_manual_backward_finalization to true first.");
+
+  REDUCER_CHECK(
+      require_finalize_,
+      logger_,
+      "finalize_backward() called but no gradient reduction requires "
+      "finalization. This can happen if no_sync() is active or "
+      "finalize_backward() was already called for this backward pass.");
+  REDUCER_CHECK(
+      next_bucket_ == buckets_.size(),
+      logger_,
+      "finalize_backward() called before all DDP buckets were ready. "
+      "next_bucket_=",
+      next_bucket_,
+      " buckets_.size()=",
+      buckets_.size(),
+      ". Call finalize_backward() only after all DDP-managed parameters have "
+      "computed gradients.");
+
+  prepare_for_backward_finalization();
+  finalize_backward();
 }
 
 void Reducer::reset_state() {
