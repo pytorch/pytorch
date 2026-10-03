@@ -7177,7 +7177,7 @@ class TestDevicePrecision(TestCase):
         self.assertEqual(x[3], y)
 
     # FIXME: move to an elementwise ternary test suite
-    @dtypes(torch.int64, torch.float32, torch.float64)
+    @dtypes(torch.bool, torch.int64, torch.float32, torch.float64)
     def test_clamp(self, device, dtype):
         test_args = [
             *product(
@@ -7218,6 +7218,12 @@ class TestDevicePrecision(TestCase):
             expect = x[..., :1].max(lb).min(ub)
             actual = x[..., :1].clamp(lb, ub)
             self.assertEqual(expect, actual)
+
+            # Test scalar min & max
+            lo, hi = lb.flatten()[0], ub.flatten()[0]
+            self.assertEqual(x.max(lo).min(hi), x.clamp(lo.item(), hi.item()))
+            self.assertEqual(x.max(lo), x.clamp(min=lo.item()))
+            self.assertEqual(x.min(hi), x.clamp(max=hi.item()))
 
     def test_cuda_device_idx(self, device):
         x = torch.zeros(3, device=device)

@@ -13318,7 +13318,7 @@ op_db: list[OpInfo] = [
     OpInfo('clamp',
            aliases=('clip',),
            ref=_clamp_numpy,
-           dtypes=all_types_and(torch.bfloat16, torch.half),
+           dtypes=all_types_and(torch.bool, torch.bfloat16, torch.half),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32, torch.int8, torch.bool),
            sample_inputs_func=sample_inputs_clamp,
            reference_inputs_func=partial(reference_inputs_elementwise_ternary, sample_inputs_func=sample_inputs_clamp),
@@ -13336,8 +13336,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure,
                             'TestCommon',
                             'test_numpy_ref_mps'),
-               # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )),
     UnaryUfuncInfo('positive',
                    ref=np.positive,
