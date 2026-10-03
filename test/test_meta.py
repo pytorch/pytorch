@@ -1142,7 +1142,6 @@ class MetaCrossRefDispatchMode(torch.utils._python_dispatch.TorchDispatchMode):
         return expected
 
 class _TestMetaBase(TestCase):
-    hw_classification = HardwareClassification.GENERIC
 
     # Copies inputs to inplace operations to avoid inplace modifications
     #   to leaves requiring gradient
@@ -1526,7 +1525,6 @@ class TestMeta(_TestMetaBase):
 
     def test_meta__fused_moving_avg_obs_fq_helper(self, device):
         from torch.ao.quantization import FusedMovingAvgObsFakeQuantize
-
         to_meta = MetaConverter()
 
         x = torch.randn(5, 5, device=device)
@@ -1568,9 +1566,7 @@ class TestMeta(_TestMetaBase):
 
         for kwargs in kwargss:
             ref_out = aten._fused_moving_avg_obs_fq_helper.default(*args, **kwargs)
-            meta_out = aten._fused_moving_avg_obs_fq_helper.default(
-                *meta_args, **kwargs
-            )
+            meta_out = aten._fused_moving_avg_obs_fq_helper.default(*meta_args, **kwargs)
 
             self.assertEqual(ref_out[0].size(), meta_out[0].size())
             self.assertEqual(ref_out[0].stride(), meta_out[0].stride())
@@ -1585,7 +1581,7 @@ class TestMeta(_TestMetaBase):
         for compute_mode in (None, 1, 2):
             ref = aten._cdist_forward.default(x1, x2, p, compute_mode)
             res = aten._cdist_forward.default(to_meta(x1), to_meta(x2), p, compute_mode)
-            self.assertEqual(res.device.type, "meta")
+            self.assertEqual(res.device.type, 'meta')
             self.assertEqual(ref.shape, res.shape)
 
 
