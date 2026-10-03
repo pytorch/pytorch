@@ -49,7 +49,9 @@ from .wrapper import (
     _get_profiling_args,
     _rewrite_symbol_solution_for_int_codegen,
     codegen_reinterpret_view_helper,
+    EnterKernelProfileScopeLine,
     EnterSubgraphLine,
+    ExitKernelProfileScopeLine,
     ExitSubgraphLine,
     HasWriteLine,
     kernel_profile_enabled,
@@ -289,6 +291,77 @@ def _ivalue_conversion(ivalue_var: str, to_ivalue_call: str) -> list[str]:
     ]
 
 
+def _record_function_var(kernel_name: str) -> str:
+    """The C++ identifier stem for a recorded kernel name."""
+    return kernel_name.replace("::", "_").replace(".", "_")
+
+
+def _record_function_handle_line(
+    kernel_name: str, inputs_vec: str | None = None
+) -> str:
+    """The RAIIAtenRecordFunctionHandle declaration for one kernel call.
+
+    Every path that records a kernel builds its declaration here, so the name a
+    trace shows and the name of the handle holding it cannot drift apart
+    between the paths.
+    """
+    inputs = f", {inputs_vec}" if inputs_vec else ""
+    return (
+        "RAIIAtenRecordFunctionHandle "
+        f'record_{_record_function_var(kernel_name)}_("{kernel_name}", nullptr{inputs});'
+    )
+
+
+def _profiling_ivalue_lines(
+    kernel_name: str,
+    profiling_args: Sequence[str | None],
+    output_handle: str | None = None,
+) -> tuple[list[str], str]:
+    """The IValue conversions a RecordFunction's argument metadata needs, and
+    the name of the vector they are collected into.
+
+    Recorded order is the operator's schema order, with `out` last where the
+    caller records one, matching the eager trace layout. It is not the shim's
+    argument order, which passes `out` first, so consumers must not zip "Input
+    Dims" against the shim signature. Tensors and placeholders are numbered
+    independently so a name identifies which kind of argument it holds.
+    """
+    lines: list[str] = []
+    ivalue_names: list[str] = []
+    num_inputs = 0
+    num_scalars = 0
+
+    for profiling_arg in profiling_args:
+        if profiling_arg is None:
+            # A non-tensor argument only has to hold its schema position, so
+            # record a dummy int64.
+            ivalue_var = f"tmp_{kernel_name}_scalar_{num_scalars}"
+            num_scalars += 1
+            to_ivalue = f"aoti_torch_int64_to_ivalue(0, &{ivalue_var})"
+        else:
+            ivalue_var = f"tmp_{kernel_name}_input_{num_inputs}"
+            num_inputs += 1
+            to_ivalue = f"aoti_torch_tensor_to_ivalue({profiling_arg}, &{ivalue_var})"
+        lines.extend(_ivalue_conversion(ivalue_var, to_ivalue))
+        ivalue_names.append(ivalue_var)
+
+    if output_handle:
+        ivalue_var = f"tmp_{kernel_name}_output"
+        lines.extend(
+            _ivalue_conversion(
+                ivalue_var,
+                f"aoti_torch_tensor_to_ivalue({output_handle}, &{ivalue_var})",
+            )
+        )
+        ivalue_names.append(ivalue_var)
+
+    inputs_vec_var = f"{kernel_name}_inputs_"
+    lines.append(
+        f"std::vector<C10IValueHandle> {inputs_vec_var}({{{', '.join(ivalue_names)}}});"
+    )
+    return lines, inputs_vec_var
+
+
 class CppWrapperCpu(PythonWrapperCodegen):
     """
     Generates cpp wrapper for running on CPU and calls cpp kernels
@@ -343,6 +416,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # which returns a var name whose declaration was written into the dead buffer.
         # Pin the targets for the lifetime of codegen so their ids stay unique.
         self._int_array_writeline_targets: list[Any] = []
+        self._kernel_profile_scope_state: list[dict[Any, Any]] = []
         self.needs_vec_isa = self.device == "cpu"
 
     @contextlib.contextmanager
@@ -1938,49 +2012,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 if has_profiling_inputs:
                     # Generate IValue conversions so that tensor shapes
                     # and scalar types are recorded by the profiler.
-                    # Recorded order is the operator's schema order, with `out`
-                    # last where the caller records one, matching the eager
-                    # trace layout. It is not the shim's argument order, which
-                    # passes `out` first, so consumers must not zip "Input
-                    # Dims" against the shim signature.
-                    ivalue_lines: list[str] = []
-                    ivalue_names: list[str] = []
-                    # Tensors and placeholders are numbered independently so a
-                    # name identifies which kind of argument it holds.
-                    num_inputs = 0
-                    num_scalars = 0
-
-                    for profiling_arg in profiling_args or ():
-                        if profiling_arg is None:
-                            # A non-tensor argument only has to hold its schema
-                            # position, so record a dummy int64.
-                            ivalue_var = f"tmp_{shim_fn}_scalar_{num_scalars}"
-                            num_scalars += 1
-                            to_ivalue = f"aoti_torch_int64_to_ivalue(0, &{ivalue_var})"
-                        else:
-                            ivalue_var = f"tmp_{shim_fn}_input_{num_inputs}"
-                            num_inputs += 1
-                            to_ivalue = (
-                                f"aoti_torch_tensor_to_ivalue({profiling_arg}, "
-                                f"&{ivalue_var})"
-                            )
-                        ivalue_lines.extend(_ivalue_conversion(ivalue_var, to_ivalue))
-                        ivalue_names.append(ivalue_var)
-
-                    if output_handle:
-                        ivalue_var = f"tmp_{shim_fn}_output"
-                        ivalue_lines.extend(
-                            _ivalue_conversion(
-                                ivalue_var,
-                                f"aoti_torch_tensor_to_ivalue({output_handle}, "
-                                f"&{ivalue_var})",
-                            )
-                        )
-                        ivalue_names.append(ivalue_var)
-
-                    inputs_vec_var = f"{shim_fn}_inputs_"
-                    ivalue_lines.append(
-                        f"std::vector<C10IValueHandle> {inputs_vec_var}({{{', '.join(ivalue_names)}}});"
+                    ivalue_lines, inputs_vec_var = _profiling_ivalue_lines(
+                        shim_fn, profiling_args or (), output_handle
                     )
 
                     shim_fn_codes = ["{", *ivalue_lines]
@@ -2163,9 +2196,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
         # call the ABI shim function instead of the ATen one
         self.add_device_include(device)
-        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, device)
-        # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
-        cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
+        cpp_kernel_name = self.scatter_fallback_kernel_name(
+            self.get_c_shim_func_name(cpp_kernel_name, device)
+        )
         # str(output) ensures that CppWrapperCpuArrayRef borrows the output tensor
         args_wrapped = self._generate_scatter_fallback_args((str(output), *inputs))
         # Wrap in AOTI_TORCH_ERROR_CODE_CHECK so a shim failure
@@ -3638,13 +3671,16 @@ class CppWrapperCpu(PythonWrapperCodegen):
             outputs,
         )
 
-    def generate_scoped_gil_acquire(self, declarations_before_scope, lines_in_scope):
+    def generate_scoped_gil_acquire(
+        self, declarations_before_scope, lines_in_scope, lines_before_acquire=()
+    ):
         scoped_lines = IndentedBuffer()
         for declaration in declarations_before_scope:
             scoped_lines.writeline(declaration)
 
         scoped_lines.writeline("{")
         with scoped_lines.indent():
+            scoped_lines.writelines(lines_before_acquire)
             scoped_lines.writeline("py::gil_scoped_acquire_simple acquire;")
             scoped_lines.writelines(lines_in_scope.split("\n"))
         scoped_lines.writelines("}")
@@ -3837,6 +3873,8 @@ if (!custom_op_wrapper) {
         dispatch_lines.writeline("{")
 
         with dispatch_lines.indent():
+            if kernel_profile_enabled():
+                dispatch_lines.writeline(_record_function_handle_line(str(op_overload)))
             tmp_var_number = count()
 
             def parse_arg(arg_type: torch.JitType, codegen_arg: str) -> str:
@@ -4277,8 +4315,16 @@ if (!custom_op_wrapper) {
                 for output_arg in output_args  # type: ignore[arg-type]
                 if output_arg is not None
             ]
+        # The record opens the block ahead of the GIL acquisition: acquiring the
+        # GIL is often the dominant cost of this fallback, so an event starting
+        # after it would hide the very thing being profiled.
+        lines_before_acquire = (
+            [_record_function_handle_line(str(op_overload))]
+            if kernel_profile_enabled()
+            else []
+        )
         scope_gil_acquire = self.generate_scoped_gil_acquire(
-            declarations_before_scope, lines
+            declarations_before_scope, lines, lines_before_acquire
         )
         self.writelines(scope_gil_acquire)
 
@@ -4311,6 +4357,10 @@ if (!custom_op_wrapper) {
         )
 
         extern_kernel_node_index = len(V.extern_kernel_nodes) - 1
+        enable_kernel_profile = kernel_profile_enabled()
+        if enable_kernel_profile:
+            self.writeline(EnterKernelProfileScopeLine(self))
+            self.write_record_function_handle(str(op_overload))
         self.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_proxy_executor_call_function(proxy_executor, "
             f"{extern_kernel_node_index}, "
@@ -4319,6 +4369,8 @@ if (!custom_op_wrapper) {
             f"{len(tensor_call_args)}, "
             f"{tensor_call_str}));"
         )
+        if enable_kernel_profile:
+            self.writeline(ExitKernelProfileScopeLine(self))
 
     def codegen_runtime_lookup_tensor_call_args(
         self, tensor_call_args: Sequence[str]
@@ -4537,17 +4589,42 @@ if (!custom_op_wrapper) {
         """
         if enabled is None:
             enabled = config.cpp.enable_kernel_profile
+        # `config.memory_planning` routes allocations through MemoryPlanner
+        # instead of memory_plan_reuse, and only the latter treats these braces
+        # as a boundary. A pool first created inside a block would be declared
+        # there and named by a line after it, so leave the block unopened
+        # rather than emit code that cannot compile.
+        enabled = enabled and not config.memory_planning
         try:
             if enabled:
                 self.kernel_profile_scope_depth += 1
-                self.writeline("{")
+                before = len(self.lines)
+                self.writeline(EnterKernelProfileScopeLine(self))
+                if self.kernel_profile_scope_depth == 1 and len(self.lines) > before:
+                    # Only meaningful while lines are still being collected.
+                    # Once they are being codegen'd, writeline emits straight
+                    # into the output buffer and there is nothing to insert in
+                    # front of -- nor any caller left that would want to.
+                    self.kernel_profile_scope_hoist_index = before
                 if config.cpp.enable_kernel_context_guard:
                     self.write_kernel_context_guard(kernel_name, node_schedule)
             yield
         finally:
             if enabled:
                 self.kernel_profile_scope_depth -= 1
-                self.writeline("}")
+                self.writeline(ExitKernelProfileScopeLine(self))
+                if self.kernel_profile_scope_depth == 0:
+                    self.kernel_profile_scope_hoist_index = None
+
+    def push_kernel_profile_scope_state(self):
+        # A cache hit returns a var name without redeclaring it, so an entry
+        # first declared inside the block would be handed to a caller after it.
+        # declared_int_array_vars is left alone: names are freshly generated
+        # and the set only dedups, so an extra declaration outside is harmless.
+        self._kernel_profile_scope_state.append(dict(self.codegen_int_array_var_cache))
+
+    def pop_kernel_profile_scope_state(self):
+        self.codegen_int_array_var_cache = self._kernel_profile_scope_state.pop()
 
     def write_kernel_context_guard(
         self,
@@ -4582,3 +4659,24 @@ if (!custom_op_wrapper) {
             stack_trace_str += "\n"
         stack_trace_str += ')"'
         self.writeline(f'KernelContextGuard _ctx("{kernel_name}", {stack_trace_str});')
+
+    def records_profiling_args(self) -> bool:
+        return True
+
+    def scatter_fallback_kernel_name(self, kernel_name: str) -> str:
+        # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
+        return kernel_name.replace("__", "_") + "_out"
+
+    def write_record_function_handle(
+        self,
+        kernel_name: str,
+        profiling_args: Sequence[str | None] | None = None,
+    ):
+        if profiling_args:
+            ivalue_lines, inputs_vec = _profiling_ivalue_lines(
+                _record_function_var(kernel_name), profiling_args
+            )
+            self.writelines(ivalue_lines)
+            self.writeline(_record_function_handle_line(kernel_name, inputs_vec))
+        else:
+            self.writeline(_record_function_handle_line(kernel_name))
