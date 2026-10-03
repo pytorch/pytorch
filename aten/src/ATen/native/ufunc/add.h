@@ -1,6 +1,8 @@
 #pragma once
 
 #include <c10/macros/Macros.h>
+#include <cstdint>
+#include <type_traits>
 
 #if !defined(__CUDACC__) && !defined(__HIPCC__)
 #include <ATen/cpu/vec/functional.h>
@@ -13,7 +15,12 @@ namespace at::native::ufunc {
 
 template <typename T>
 C10_HOST_DEVICE C10_ALWAYS_INLINE T add(T self, T other, T alpha) __ubsan_ignore_undefined__ {
-  return self + alpha * other;
+  if constexpr (std::is_same_v<T, uint16_t>) {
+    // Otherwise, uint16_t multiplication promotes to signed int and can overflow.
+    return self + static_cast<uint32_t>(alpha) * other;
+  } else {
+    return self + alpha * other;
+  }
 }
 
 #if !defined(__CUDACC__) && !defined(__HIPCC__)
