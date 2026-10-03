@@ -1234,7 +1234,13 @@ class GraphLowering(torch.fx.Interpreter):
         #     y = x.view(torch.int32) * 2; y.sub_(-4); x[:, 2:5] = 2
         #     return y.view(torch.int64)      # was computed from the mutated x
         for buf in self.buffers[self._buffer_aliases_indexed_upto :]:
-            for aliased in buf.get_inputs_that_alias_output():
+            aliases = buf.get_inputs_that_alias_output()
+            # A NoneLayout node that lists several aliases (e.g. an in-place
+            # coalesced collective) does not make them alias one another, so
+            # skip it like Scheduler.compute_dependencies does.
+            if isinstance(buf.layout, ir.NoneLayout) and len(aliases) > 1:
+                continue
+            for aliased in aliases:
                 self._buffer_aliases[aliased].append(buf.get_name())
                 self._buffer_aliases[buf.get_name()].append(aliased)
         self._buffer_aliases_indexed_upto = len(self.buffers)
