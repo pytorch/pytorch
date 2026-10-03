@@ -3033,6 +3033,40 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(running_var, torch.ones_like(running_var))
 
     @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("implementation", ("functional", "native"))
+    def test_batch_norm_inference_before_join_compiles(
+        self, backend, implementation
+    ) -> None:
+        def fn(x, running_mean, running_var, small, side):
+            with torch.cuda.stream(side):
+                if implementation == "functional":
+                    out = torch.nn.functional.batch_norm(
+                        x, running_mean, running_var, training=False
+                    )
+                else:
+                    out = torch.native_batch_norm(
+                        x, None, None, running_mean, running_var, False, 0.1, 1e-5
+                    )[0]
+            side.synchronize()
+            return out + small
+
+        x = torch.ones(4, 8, device="cuda")
+        running_mean = torch.zeros(8, device="cuda")
+        running_var = torch.ones(8, device="cuda")
+        small = torch.zeros_like(x)
+        side = torch.cuda.Stream()
+        torch.cuda.synchronize()
+        expected = fn(x, running_mean, running_var, small, side)
+        torch.cuda.synchronize()
+        actual = torch.compile(fn, backend=backend, fullgraph=True)(
+            x, running_mean, running_var, small, side
+        )
+        torch.cuda.synchronize()
+        self.assertEqual(actual, expected)
+        self.assertEqual(running_mean, torch.zeros_like(running_mean))
+        self.assertEqual(running_var, torch.ones_like(running_var))
+
+    @parametrize("backend", ("aot_eager", "inductor"))
     def test_late_graph_input_mutation_before_join_errors(self, backend) -> None:
         def fn(x, y, first_stream, second_stream):
             with torch.cuda.stream(first_stream):
