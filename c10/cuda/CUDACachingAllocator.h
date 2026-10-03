@@ -314,6 +314,7 @@ class CUDAAllocator : public DeviceAllocator {
       size_t address,
       size_t reserve_size,
       size_t segment_size,
+      Expandable_Segments_Handle_Type handle_type,
       const std::vector<std::pair<size_t, size_t>>& mapped_ranges) {
     TORCH_CHECK(
         false,
@@ -446,6 +447,7 @@ inline void restoreExpandableSegment(
     size_t address,
     size_t reserve_size,
     size_t segment_size,
+    Expandable_Segments_Handle_Type handle_type,
     const std::vector<std::pair<size_t, size_t>>& mapped_ranges) {
   get()->restoreExpandableSegment(
       device,
@@ -455,6 +457,7 @@ inline void restoreExpandableSegment(
       address,
       reserve_size,
       segment_size,
+      handle_type,
       mapped_ranges);
 }
 

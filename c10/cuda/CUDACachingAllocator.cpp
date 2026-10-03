@@ -580,26 +580,7 @@ struct ExpandableSegment {
       return rangeFromHandles(begin, end);
     }
 
-#ifdef _WIN32
-    // No Win32 IPC handle type implemented; share() still errors clearly
-    // for cross-process use.
-    constexpr bool enable_ipc_handles = false;
-#else
-    // In fbcode, IPC handle types for expandable segments are disabled by
-    // default because some jobs were failing (see
-    // https://github.com/pytorch/pytorch/pull/132890), but can be explicitly
-    // enabled via environment variable when IPC functionality is required
-    // (e.g., for multi-process communication with CTran). In non-fbcode
-    // builds, IPC handle types are enabled by default.
-#ifdef FBCODE_CAFFE2
-    constexpr bool default_enable_ipc = false;
-#else
-    constexpr bool default_enable_ipc = true;
-#endif
-    static const bool enable_ipc_handles =
-        c10::utils::check_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC")
-            .value_or(default_enable_ipc);
-#endif // _WIN32
+    const bool enable_ipc_handles = ipcHandlesEnabled();
 
     // Determine IPC handle type upfront based on config and device capability.
     // Resolve once per segment lifetime: fromShared() pre-sets handle_type_
@@ -943,6 +924,34 @@ struct ExpandableSegment {
     return segment_size_;
   }
 
+  Expandable_Segments_Handle_Type getHandleType() const {
+    return handle_type_;
+  }
+
+  static bool ipcHandlesEnabled() {
+#ifdef _WIN32
+    // No Win32 IPC handle type implemented; share() still errors clearly
+    // for cross-process use.
+    return false;
+#else
+    // In fbcode, IPC handle types for expandable segments are disabled by
+    // default because some jobs were failing (see
+    // https://github.com/pytorch/pytorch/pull/132890), but can be explicitly
+    // enabled via environment variable when IPC functionality is required
+    // (e.g., for multi-process communication with CTran). In non-fbcode
+    // builds, IPC handle types are enabled by default.
+#ifdef FBCODE_CAFFE2
+    constexpr bool default_enable_ipc = false;
+#else
+    constexpr bool default_enable_ipc = true;
+#endif
+    static const bool enabled =
+        c10::utils::check_env("TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC")
+            .value_or(default_enable_ipc);
+    return enabled;
+#endif // _WIN32
+  }
+
   void addPeer(c10::DeviceIndex device) {
     peers_.push_back(device);
     forEachAllocatedRange(
@@ -1214,6 +1223,9 @@ struct ExpandableSegment {
 
   size_t getSegmentSize() const {
     return 0;
+  }
+  Expandable_Segments_Handle_Type getHandleType() const {
+    return Expandable_Segments_Handle_Type::UNSPECIFIED;
   }
   void addPeer(c10::DeviceIndex device) {}
 };
@@ -3159,6 +3171,8 @@ class DeviceCachingAllocator {
             head_block->expandable_segment_->size();
         segment_info.expandable_segment_size =
             head_block->expandable_segment_->getSegmentSize();
+        segment_info.expandable_segment_handle_type =
+            static_cast<int>(head_block->expandable_segment_->getHandleType());
       }
       segment_info.context_when_allocated =
           head_block->context_when_segment_allocated;
@@ -3452,7 +3466,11 @@ class DeviceCachingAllocator {
   // `reserve_size` and `segment_size` are the original reservation's, reused
   // rather than taken from this process's settings: a downsized reservation
   // stays downsized, and one mapped in, say, 40 MB segments keeps mapping in
-  // 40 MB segments. `mapped_ranges` are (offset from the segment base, length)
+  // 40 MB segments. `handle_type` is the type the original handles were
+  // exportable as, required again so that memory which could be shared with
+  // another process (fabric for multi-node NVLink) still can be, rather than
+  // failing later when a peer tries to import it; UNSPECIFIED leaves the choice
+  // to this process. `mapped_ranges` are (offset from the segment base, length)
   // pairs and must be sorted, non-overlapping and segment_size-aligned.
   void restore_expandable_segment(
       cudaStream_t stream,
@@ -3461,6 +3479,7 @@ class DeviceCachingAllocator {
       size_t address,
       size_t reserve_size,
       size_t segment_size,
+      Expandable_Segments_Handle_Type handle_type,
       const std::vector<std::pair<size_t, size_t>>& mapped_ranges) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     TORCH_CHECK(
@@ -3507,12 +3526,29 @@ class DeviceCachingAllocator {
           segment_size,
           " byte segment size");
     }
+    if (handle_type != Expandable_Segments_Handle_Type::UNSPECIFIED) {
+      TORCH_CHECK(
+          ExpandableSegment::ipcHandlesEnabled(),
+          "the expandable segment at ",
+          address,
+          " was saved with shareable handles, but this process creates none; "
+          "set TORCH_CUDA_EXPANDABLE_SEGMENTS_IPC=1");
+    }
+    if (handle_type == Expandable_Segments_Handle_Type::FABRIC_HANDLE) {
+      TORCH_CHECK(
+          cuda::get_fabric_access(device_id),
+          "the expandable segment at ",
+          address,
+          " was saved with fabric handles, but device ",
+          static_cast<int>(device_id),
+          " has no fabric access here");
+    }
     expandable_segments_.emplace_back(new ExpandableSegment(
         device_id,
         stream,
         segment_size,
         devices_with_peer_access_,
-        Expandable_Segments_Handle_Type::UNSPECIFIED,
+        handle_type,
         reserve_size / segment_size,
         std::optional<CUdeviceptr>(address)));
     ExpandableSegment* es = expandable_segments_.back();
@@ -4979,6 +5015,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       size_t address,
       size_t reserve_size,
       size_t segment_size,
+      Expandable_Segments_Handle_Type handle_type,
       const std::vector<std::pair<size_t, size_t>>& mapped_ranges) override {
     TORCH_INTERNAL_ASSERT(
         0 <= device && static_cast<size_t>(device) < device_allocator.size(),
@@ -4992,6 +5029,7 @@ class NativeCachingAllocator : public CUDAAllocator {
         address,
         reserve_size,
         segment_size,
+        handle_type,
         mapped_ranges);
   }
 
