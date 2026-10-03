@@ -429,6 +429,7 @@ class TestPublicBindings(TestCase):
             cuda_dep_prefixes = (
                 "torch._native.cutedsl.",
                 "torch._native.ops.reductions.traits",
+                "torch._native.ops.bmm_outer_product.aot_kernel",
                 "torch._native.ops.foreach_mm.",
                 "torch._native.ops.linear_cross_entropy.fused_grad_logits_kernel",
                 "torch._native.ops.polar.",
