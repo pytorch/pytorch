@@ -1917,13 +1917,6 @@ optim_db: list[OptimizerInfo] = [
         supports_param_groups=False,
         supports_multiple_devices=False,
         skips=(
-            # Fails on MacOS 13.2.1 in CI https://github.com/pytorch/pytorch/issues/117094
-            DecorateInfo(
-                skipIfMPS,
-                "TestOptimRenewed",
-                "test_can_load_older_state_dict",
-                device_type="mps",
-            ),
             DecorateInfo(
                 toleranceOverride(
                     {
