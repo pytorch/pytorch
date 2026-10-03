@@ -47,6 +47,54 @@ struct ExtendedAllocatorConfig {
 
 REGISTER_ALLOCATOR_CONFIG_PARSE_HOOK(ExtendedAllocatorConfig)
 
+class MalformedAllocatorConfigTest
+    : public ::testing::TestWithParam<const char*> {};
+
+TEST_P(MalformedAllocatorConfigTest, reports_configuration_value) {
+  const std::string config = GetParam();
+  try {
+    c10::CachingAllocator::setAllocatorSettings(config);
+    FAIL() << "Expected a malformed allocator configuration error";
+  } catch (const c10::ValueError& error) {
+    const std::string message = error.what_without_backtrace();
+    EXPECT_NE(message.find("PYTORCH_ALLOC_CONF"), std::string::npos);
+    EXPECT_NE(message.find(config), std::string::npos);
+    EXPECT_EQ(message.find("INTERNAL ASSERT"), std::string::npos);
+  }
+  c10::CachingAllocator::setAllocatorSettings("");
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Truncated,
+    MalformedAllocatorConfigTest,
+    ::testing::Values(
+        "expandable_segments",
+        "expandable_segments:",
+        "max_split_size_mb:",
+        "garbage_collection_threshold:",
+        "roundup_power2_divisions:",
+        "roundup_power2_divisions:[",
+        "roundup_power2_divisions:[64:",
+        "roundup_power2_divisions:[64:8",
+        "roundup_power2_divisions:[64:8,",
+        "device_specific_option_mb",
+        "device_specific_option_mb:",
+        "device_specific_option_mb:[64:8"));
+
+TEST(AllocatorConfigTest, tokenizer_bounds_report_configuration_value) {
+  const std::string config = "expandable_segments:True";
+  ConfigTokenizer tokenizer(config);
+  const auto end = tokenizer.size();
+  EXPECT_THROW(tokenizer[end], c10::ValueError);
+  EXPECT_THROW(tokenizer.checkToken(end, ":"), c10::ValueError);
+  EXPECT_THROW(tokenizer.toSizeT(end), c10::ValueError);
+  EXPECT_THROW(tokenizer.toDouble(end), c10::ValueError);
+  EXPECT_THROW(tokenizer.toBool(end), c10::ValueError);
+  EXPECT_EQ(tokenizer[0], "expandable_segments");
+  EXPECT_TRUE(tokenizer.checkToken(1, ":"));
+  EXPECT_TRUE(tokenizer.toBool(2));
+}
+
 TEST(AllocatorConfigTest, allocator_config_test) {
   std::string env =
       "max_split_size_mb:40,"
