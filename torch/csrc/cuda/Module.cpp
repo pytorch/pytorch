@@ -790,6 +790,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str expandable_segment_base_s = "expandable_segment_base";
   py::str expandable_reservation_size_s = "expandable_reservation_size";
   py::str expandable_segment_size_s = "expandable_segment_size";
+  py::str expandable_segment_handle_type_s = "expandable_segment_handle_type";
   py::str frames_s = "frames";
   py::str forward_frames_s = "forward_frames";
   py::str time_us_s = "time_us";
@@ -833,6 +834,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
         segmentInfo.expandable_reservation_size;
     segmentDict[expandable_segment_size_s] =
         segmentInfo.expandable_segment_size;
+    segmentDict[expandable_segment_handle_type_s] =
+        segmentInfo.expandable_segment_handle_type;
     add_frame_key(segmentDict, segmentInfo.context_when_allocated);
 
     auto address = segmentInfo.address;
@@ -1012,6 +1015,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       segmentDict[expandable_segment_base_s] = size_t(0);
       segmentDict[expandable_reservation_size_s] = size_t(0);
       segmentDict[expandable_segment_size_s] = size_t(0);
+      segmentDict[expandable_segment_handle_type_s] = 0;
       add_frame_key(segmentDict, seg.context_when_allocated);
 
       py::dict blockDict;
@@ -1545,6 +1549,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
          size_t address,
          size_t reserve_size,
          size_t segment_size,
+         int handle_type,
          const std::vector<std::pair<size_t, size_t>>& mapped_ranges) {
         auto stream = at::cuda::getCurrentCUDAStream(device);
         c10::cuda::CUDACachingAllocator::restoreExpandableSegment(
@@ -1555,6 +1560,8 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             address,
             reserve_size,
             segment_size,
+            static_cast<c10::cuda::CUDACachingAllocator::
+                            Expandable_Segments_Handle_Type>(handle_type),
             mapped_ranges);
       });
 
