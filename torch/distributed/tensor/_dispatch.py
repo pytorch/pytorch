@@ -385,7 +385,7 @@ class OpDispatcher:
                             "the same seed on all ranks before compiling DTensor random ops.",
                             stacklevel=2,
                         )
-                    random._rng_tracker = random.OffsetBasedRNGTracker(
+                    random._rng_tracker = random._get_or_create_rng_tracker(
                         mesh, run_state_sync
                     )
 
