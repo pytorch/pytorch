@@ -180,6 +180,7 @@ class NumpyExp_(torch.autograd.Function):
     def forward(x):
         x_np = to_numpy(x)
         np.exp(x_np, x_np)
+        x.copy_(torch.from_numpy(x_np))
         return x
 
     @staticmethod

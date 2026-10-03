@@ -6358,10 +6358,10 @@ class TestGradients(TestCase):
         return _fn
 
     def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False, check_backward_ad=True,
-                      check_batched_grad=None, check_batched_forward_grad=False):
-        if check not in ('gradcheck', 'bwgrad_bwgrad', 'fwgrad_bwgrad'):
+                      check_batched_grad=None, check_batched_forward_grad=False, samples=None):
+        if check not in ('gradcheck', 'bwgrad_bwgrad', 'fwgrad_bwgrad', 'fwgrad_fwgrad'):
             raise AssertionError(
-                f"check must be one of ('gradcheck', 'bwgrad_bwgrad', 'fwgrad_bwgrad'), got {check!r}"
+                f"check must be one of ('gradcheck', 'bwgrad_bwgrad', 'fwgrad_bwgrad', 'fwgrad_fwgrad'), got {check!r}"
             )
         # NB: check_backward_ad does not affect gradgradcheck (always True)
         if variant is None:
@@ -6376,8 +6376,9 @@ class TestGradients(TestCase):
 
         include_conjugated_inputs = op.test_conjugated_samples and dtype.is_complex
 
-        samples = op.sample_inputs(device, dtype, requires_grad=True, include_conjugated_inputs=include_conjugated_inputs,
-                                   small_inputs_only=TEST_WITH_SLOW_GRADCHECK)
+        if samples is None:
+            samples = op.sample_inputs(device, dtype, requires_grad=True, include_conjugated_inputs=include_conjugated_inputs,
+                                       small_inputs_only=TEST_WITH_SLOW_GRADCHECK)
 
         for sample in samples:
             if sample.broadcasts_input and is_inplace(variant):
@@ -6454,6 +6455,16 @@ class TestGradients(TestCase):
                                           check_backward_ad=check_backward_ad,
                                           check_undefined_grad=True,
                                           check_batched_forward_grad=check_batched_forward_grad))
+            elif check == 'fwgrad_fwgrad':
+                self.assertTrue(gradgradcheck(
+                    fn, gradcheck_args,
+                    check_fwd_over_fwd=True,
+                    check_rev_over_rev=False,
+                    check_undefined_grad=False,
+                    check_batched_grad=False,
+                    check_grad_dtypes=True,
+                    fast_mode=op.gradcheck_fast_mode,
+                ))
             elif check in ('bwgrad_bwgrad', 'fwgrad_bwgrad'):  # gradgrad check
                 self.assertFalse(check_forward_ad, msg="Cannot run forward AD check for gradgradcheck")
                 for gen_non_contig_grad_outputs in (False, True):

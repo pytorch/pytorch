@@ -13374,6 +13374,210 @@ class TestAutogradForwardMode(TestCase):
 class TestAutogradDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.double, torch.cdouble)
+    @parametrize("fast_mode", (False, True))
+    def test_gradgradcheck_forward_over_forward_empty_input(
+        self, device, dtype, fast_mode
+    ):
+        x = torch.empty(0, device=device, dtype=dtype, requires_grad=True)
+        self.assertTrue(
+            gradgradcheck(
+                lambda x: torch.linalg.vector_norm(x, ord=0.5),
+                x,
+                check_fwd_over_fwd=True,
+                check_rev_over_rev=False,
+                check_undefined_grad=False,
+                check_batched_grad=False,
+                fast_mode=fast_mode,
+            )
+        )
+
+    @dtypes(torch.double, torch.cdouble)
+    @parametrize("fast_mode", (False, True))
+    @parametrize("shape", ((), (0,), (2, 3)))
+    def test_gradgradcheck_forward_over_forward(self, device, dtype, fast_mode, shape):
+        x, y, unused = (
+            make_tensor(
+                shape,
+                dtype=dtype,
+                device=device,
+                requires_grad=True,
+                noncontiguous=True,
+            )
+            for _ in range(3)
+        )
+        constant = make_tensor(shape, dtype=dtype, device=device)
+        before = tuple(t.clone() for t in (x, y, unused, constant))
+
+        def fn(x, y, unused, constant, scale):
+            return (
+                x * x.conj() * y + constant * x,
+                scale * (x * y).sum(),
+                x.real.to(torch.int64),
+            )
+
+        self.assertTrue(
+            gradgradcheck(
+                fn,
+                (x, y, unused, constant, 2),
+                check_fwd_over_fwd=True,
+                check_rev_over_rev=False,
+                check_undefined_grad=False,
+                check_batched_grad=False,
+                check_grad_dtypes=True,
+                fast_mode=fast_mode,
+            )
+        )
+        self.assertEqual((x, y, unused, constant), before)
+        for t in (x, y, unused):
+            self.assertTrue(t.requires_grad)
+            self.assertIsNone(t.grad)
+        self.assertFalse(constant.requires_grad)
+
+    @dtypes(torch.double, torch.cdouble)
+    @parametrize("fast_mode", (False, True))
+    @parametrize("output_kind", ("linear", "constant", "integer", "empty"))
+    def test_gradgradcheck_forward_over_forward_zero(
+        self, device, dtype, fast_mode, output_kind
+    ):
+        x = make_tensor((2,), dtype=dtype, device=device, requires_grad=True)
+
+        def fn(x):
+            if output_kind == "linear":
+                return 2 * x
+            if output_kind == "constant":
+                return torch.ones_like(x)
+            if output_kind == "integer":
+                return x.real.to(torch.int64)
+            return ()
+
+        self.assertTrue(
+            gradgradcheck(
+                fn,
+                x,
+                check_fwd_over_fwd=True,
+                check_rev_over_rev=False,
+                check_undefined_grad=False,
+                check_batched_grad=False,
+                fast_mode=fast_mode,
+            )
+        )
+
+    @dtypes(torch.double, torch.cdouble)
+    @parametrize("fast_mode", (False, True))
+    def test_gradgradcheck_forward_over_forward_bad_jvp(self, device, dtype, fast_mode):
+        class Cube(Function):
+            @staticmethod
+            def forward(x):
+                return x**3
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                ctx.save_for_forward(*inputs)
+
+            @staticmethod
+            def jvp(ctx, tangent):
+                (x,) = ctx.saved_tensors
+                return 3 * x.detach() ** 2 * tangent
+
+        x = torch.tensor([1.0, 2.0], dtype=dtype, device=device, requires_grad=True)
+        self.assertTrue(
+            gradcheck(
+                Cube.apply,
+                x,
+                check_forward_ad=True,
+                check_backward_ad=False,
+                check_batched_grad=False,
+                fast_mode=fast_mode,
+            )
+        )
+        kwargs = dict(
+            check_fwd_over_fwd=True,
+            check_rev_over_rev=False,
+            check_undefined_grad=False,
+            check_batched_grad=False,
+            fast_mode=fast_mode,
+        )
+        self.assertFalse(gradgradcheck(Cube.apply, x, raise_exception=False, **kwargs))
+        with self.assertRaisesRegex(RuntimeError, "Forward-over-forward AD"):
+            gradgradcheck(Cube.apply, x, **kwargs)
+
+    @dtypes(torch.cdouble)
+    @parametrize("fast_mode", (False, True))
+    def test_gradgradcheck_forward_over_forward_imaginary(
+        self, device, dtype, fast_mode
+    ):
+        def abs_squared(x):
+            real, imag = x.real, x.imag
+            # The first derivative is correct, but its imaginary dependence is detached.
+            return (
+                real**2
+                + imag.detach() ** 2
+                + 2 * imag.detach() * (imag - imag.detach())
+            )
+
+        x = torch.tensor(
+            [1 + 2j, 2 - 3j], dtype=dtype, device=device, requires_grad=True
+        )
+        self.assertTrue(
+            gradcheck(
+                abs_squared,
+                x,
+                check_forward_ad=True,
+                check_backward_ad=False,
+                check_batched_grad=False,
+                fast_mode=fast_mode,
+            )
+        )
+        with self.assertRaisesRegex(RuntimeError, "Forward-over-forward AD"):
+            gradgradcheck(
+                abs_squared,
+                x,
+                check_fwd_over_fwd=True,
+                check_rev_over_rev=False,
+                check_undefined_grad=False,
+                check_batched_grad=False,
+                fast_mode=fast_mode,
+            )
+
+    @dtypes(torch.double, torch.cdouble)
+    @parametrize("fast_mode", (False, True))
+    @parametrize("check_fwd_over_rev", (False, True))
+    @parametrize("check_rev_over_rev", (False, True))
+    def test_gradgradcheck_forward_over_forward_modes(
+        self, device, dtype, fast_mode, check_fwd_over_rev, check_rev_over_rev
+    ):
+        x = make_tensor((2,), dtype=dtype, device=device, requires_grad=True)
+        self.assertTrue(
+            gradgradcheck(
+                lambda x: x**3,
+                x,
+                check_fwd_over_fwd=True,
+                check_fwd_over_rev=check_fwd_over_rev,
+                check_rev_over_rev=check_rev_over_rev,
+                check_undefined_grad=check_rev_over_rev,
+                check_batched_grad=False,
+                fast_mode=fast_mode,
+            )
+        )
+
+    @dtypes(torch.cdouble)
+    @parametrize("fast_mode", (False, True))
+    def test_gradgradcheck_forward_over_forward_no_grad(self, device, dtype, fast_mode):
+        x = make_tensor((2, 3), dtype=dtype, device=device, requires_grad=True).conj().T
+        with torch.no_grad():
+            self.assertTrue(
+                gradgradcheck(
+                    torch.sin,
+                    x,
+                    check_fwd_over_fwd=True,
+                    check_rev_over_rev=False,
+                    check_undefined_grad=False,
+                    check_batched_grad=False,
+                    fast_mode=fast_mode,
+                )
+            )
+
     def test_min_max_aminmax_median_backprops_to_all_values(self, device):
         # 1) Test min/max/median/nanmedian on both a non NaN and all NaN tensor
         for f in [torch.min, torch.max, torch.median, torch.nanmedian]:
