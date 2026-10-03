@@ -44,10 +44,6 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   CUDAPluggableAllocator(
       std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
       std::function<void(void*, size_t, int, cudaStream_t)> free_fn);
-  CUDAPluggableAllocator(
-      std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-      std::function<void(void*, size_t, int, cudaStream_t)> free_fn,
-      bool is_python_allocator);
 
   CUDAPluggableAllocator(CUDAPluggableAllocator& other);
   CUDAPluggableAllocator(CUDAPluggableAllocator&& other) = delete;
@@ -156,10 +152,6 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   std::string name() override;
   void copy_data(void* dest, const void* src, std::size_t count) const final;
 
-  bool is_python_allocator() const {
-    return is_python_allocator_;
-  }
-
  protected:
   std::function<void*(size_t, int, cudaStream_t)> alloc_fn_;
   std::function<void(void*, size_t, int, cudaStream_t)> free_fn_;
@@ -176,8 +168,6 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   std::mutex allocator_mutex_;
   // We do the bookkeeping here in order to simplify custom allocators
   std::unordered_map<void*, _AllocationMetadata> allocation_metadata_;
-
   bool initialized_ = false;
-  bool is_python_allocator_ = false;
 };
 } // namespace torch::cuda::CUDAPluggableAllocator

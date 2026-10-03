@@ -26,15 +26,7 @@ _AllocationMetadata::_AllocationMetadata(
 CUDAPluggableAllocator::CUDAPluggableAllocator(
     std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
     std::function<void(void*, size_t, int, cudaStream_t)> free_fn)
-    : CUDAPluggableAllocator(std::move(alloc_fn), std::move(free_fn), false) {}
-
-CUDAPluggableAllocator::CUDAPluggableAllocator(
-    std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
-    std::function<void(void*, size_t, int, cudaStream_t)> free_fn,
-    bool is_python_allocator)
-    : alloc_fn_(std::move(alloc_fn)),
-      free_fn_(std::move(free_fn)),
-      is_python_allocator_(is_python_allocator) {}
+    : alloc_fn_(std::move(alloc_fn)), free_fn_(std::move(free_fn)) {}
 
 CUDAPluggableAllocator::CUDAPluggableAllocator(CUDAPluggableAllocator& other)
     : alloc_fn_(other.alloc_fn_),
@@ -46,8 +38,7 @@ CUDAPluggableAllocator::CUDAPluggableAllocator(CUDAPluggableAllocator& other)
       record_stream_fn_(other.record_stream_fn_),
       begin_allocate_to_pool_fn_(other.begin_allocate_to_pool_fn_),
       end_allocate_to_pool_fn_(other.end_allocate_to_pool_fn_),
-      relase_pool_fn_(other.relase_pool_fn_),
-      is_python_allocator_(other.is_python_allocator_) {}
+      relase_pool_fn_(other.relase_pool_fn_) {}
 
 void CUDAPluggableAllocator::set_init_fn(std::function<void(int)> init_fn) {
   init_fn_ = std::move(init_fn);
@@ -381,6 +372,14 @@ void CUDAPluggableAllocator::copy_data(
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
     current_custom_allocator;
 
+namespace {
+
+struct PythonCUDAPluggableAllocator : CUDAPluggableAllocator {
+  using CUDAPluggableAllocator::CUDAPluggableAllocator;
+};
+
+} // namespace
+
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
 getCurrentAllocator() {
   return current_custom_allocator;
@@ -401,8 +400,8 @@ std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
 createPythonAllocator(
     std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
     std::function<void(void*, size_t, int, cudaStream_t)> free_fn) {
-  auto allocator = std::make_shared<CUDAPluggableAllocator>(
-      std::move(alloc_fn), std::move(free_fn), true);
+  auto allocator = std::make_shared<PythonCUDAPluggableAllocator>(
+      std::move(alloc_fn), std::move(free_fn));
   allocator->init(device_count);
   return allocator;
 }
@@ -410,13 +409,13 @@ createPythonAllocator(
 void changeCurrentAllocator(
     const std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>&
         allocator) {
-  auto pluggable_allocator =
-      std::dynamic_pointer_cast<CUDAPluggableAllocator>(allocator);
   TORCH_CHECK(
-      !pluggable_allocator || !pluggable_allocator->is_python_allocator(),
+      !std::dynamic_pointer_cast<PythonCUDAPluggableAllocator>(allocator),
       "Python-callable CUDA allocators are supported only by "
       "torch.cuda.MemPool.from_callbacks() and cannot be installed as the "
-      "process-wide allocator");
+      "process-wide allocator, where callbacks could run for every CUDA "
+      "allocation, from threads without an existing Python context, and "
+      "during interpreter teardown");
   TORCH_CHECK(
       !c10::cuda::CUDACachingAllocator::allocator.load()->initialized(),
       "Can't swap an already initialized allocator");

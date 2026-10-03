@@ -918,19 +918,26 @@ pool = torch.cuda.MemPool.from_callbacks(alloc, free)
 The pool keeps both callables alive until its cached segments have been
 released. Allocation callback exceptions are reported with their Python error
 message. Free callback exceptions are logged and swallowed because cleanup may
-run during destruction. A callback must not allocate from a Python-backed
-MemPool on the same thread; doing so raises a re-entrancy error. Python-backed
-allocators are MemPool-only and cannot be installed with
-{func}`~torch.cuda.change_current_allocator`.
+run during destruction. Return `None` or zero from the allocation callback to
+report out-of-memory and allow the caching allocator's release-and-retry path
+and OOM observers to run. Raising an exception, including `MemoryError`, reports
+a non-OOM callback failure immediately instead. An allocation callback must not
+allocate from a Python-backed MemPool on the same thread; doing so raises a
+re-entrancy error. Python-backed allocators are MemPool-only and cannot be
+installed with {func}`~torch.cuda.change_current_allocator`.
+
+Allocation and free callbacks may run concurrently on multiple native threads,
+including threads that did not previously hold the Python GIL. The wrappers
+acquire the GIL before entering Python, but callback implementations and any
+native libraries they call must still be thread-safe.
 
 During CUDA graph capture, the allocation callback runs in relaxed capture
 mode. It may call allocation APIs such as `cudaMalloc` or CUDA virtual-memory
 APIs, but it must not launch work on or synchronize the capturing stream,
 synchronize the device, or begin/end capture. The raw stream address passed to
-the callback must not be retained. Also, custom frees selected during OOM
-recovery run only after the current allocation operation unlocks, so that
-operation's retry cannot reuse the returned memory; a later allocation may
-succeed.
+the callback must not be retained. Custom frees selected during OOM recovery
+run without the caching allocator lock after reclamation finishes and before
+the allocation retry, so the retry can reuse the returned memory.
 
 
 The pool can then be used with the {class}`torch.cuda.use_mem_pool` context manager to
