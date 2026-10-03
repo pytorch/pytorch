@@ -5425,6 +5425,25 @@ class GetSetDescriptorVariable(DescriptorVariable):
         _check_descriptor_obj_type(tx, self.descriptor, obj)
         name = self.descriptor.__name__
         entry = obj.lookup_tp_getset_member(name)
+        if (
+            entry is None
+            and self.descriptor is type.__dict__["__doc__"]
+            and obj.is_python_constant()
+        ):
+            obj_value = obj.as_python_constant()
+            if isinstance(obj_value, type) and obj_value.__module__ == "builtins":
+                try:
+                    if value is None:
+                        self.descriptor.__delete__(obj_value)
+                    else:
+                        self.descriptor.__set__(
+                            obj_value,
+                            value.as_python_constant()
+                            if value.is_python_constant()
+                            else None,
+                        )
+                except TypeError as e:
+                    raise_observed_exception(TypeError, tx, args=list(e.args))
         if entry is None:
             # No model for this getset. Dynamo cannot see whether the C setter
             # accepts the write, rejects it as read-only, or type-checks the

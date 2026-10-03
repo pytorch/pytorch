@@ -384,6 +384,45 @@ class UserDefinedClassVariable(UserDefinedVariable):
         # is no way to reflect it in the created MappingProxyVariable.
         self.ban_mutation = False
 
+    def _get_doc(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, "__doc__"):
+            return tx.output.side_effects.load_attr(self, "__doc__")
+        source = AttrSource(self.source, "__doc__") if self.source else None
+        return VariableTracker.build(
+            tx, type.__getattribute__(self.value, "__doc__"), source
+        )
+
+    def _set_doc(
+        self,
+        tx: "InstructionTranslatorBase",
+        value: VariableTracker | None,
+    ) -> None:
+        descriptor = type.__dict__["__doc__"]
+        try:
+            if value is None:
+                descriptor.__delete__(self.value)
+                return
+            if self.source is None:
+                if not value.is_python_constant():
+                    unimplemented(
+                        gb_type="setattr() on sourceless class __doc__",
+                        context=f"{self}.__doc__ = {value}",
+                        explanation="Dynamo cannot replay a dynamic __doc__ write to a sourceless class.",
+                        hints=[*graph_break_hints.SUPPORTABLE],
+                    )
+                descriptor.__set__(self.value, value.as_python_constant())
+                return
+            descriptor.__set__(self.value, type.__getattribute__(self.value, "__doc__"))
+        except TypeError as e:
+            raise_observed_exception(TypeError, tx, args=list(e.args))
+
+        side_effects = tx.output.side_effects
+        if not side_effects.is_attribute_mutation(self):
+            side_effects.track_object_existing(self.value, self)
+        side_effects.store_attr(self, "__doc__", value)
+
+    tp_getset = {"__doc__": GetSet(_get_doc, _set_doc)}
+
     def get_value_for_setattr(self) -> object | None:
         mod = getattr(self.value, "__module__", None) or ""
         if mod == "torch" or mod.startswith(("torch.", "torch_")):
@@ -716,6 +755,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.TupleVariable(items, source=source)
         if name == "__base__":
             return VariableTracker.build(tx, self.value.__base__, source)
+        if name == "__doc__":
+            return self._get_doc(tx)
         # __name__, __qualname__, __doc__, __module__,
         # __abstractmethods__, etc. — all C-level getset descriptors on type.
         resolved = type.__getattribute__(self.value, name)

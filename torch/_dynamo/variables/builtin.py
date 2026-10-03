@@ -3906,6 +3906,19 @@ class SetAttrBuiltinVariable(BaseBuiltinVariable):
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
         elif (
+            isinstance(obj, variables.UserDefinedClassVariable)
+            and obj.source is None
+            and type(obj.value) is type
+            and name_var.is_python_constant()
+            and name_var.as_python_constant() == "__doc__"
+            and val.is_python_constant()
+        ):
+            try:
+                obj.value.__doc__ = val.as_python_constant()
+            except TypeError as e:
+                raise_observed_exception(TypeError, tx, args=list(e.args))
+            return val
+        elif (
             not tx.output.side_effects.is_attribute_mutation(obj)
             and obj.source is not None
             and (underlying := obj.get_value_for_setattr()) is not None

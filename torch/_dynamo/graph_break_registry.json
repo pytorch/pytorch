@@ -2402,6 +2402,16 @@
       "Hints": []
     }
   ],
+  "GB3542": [
+    {
+      "Gb_type": "setattr() on sourceless class __doc__",
+      "Context": "{self}.__doc__ = {value}",
+      "Explanation": "Dynamo cannot replay a dynamic __doc__ write to a sourceless class.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0150": [
     {
       "Gb_type": "Unsupported hasattr call",
