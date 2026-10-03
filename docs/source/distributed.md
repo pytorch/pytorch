@@ -520,6 +520,68 @@ an opaque group handle that can be given as a `group` argument to all collective
 .. autodata:: torch.distributed.distributed_c10d.GroupName
 ```
 
+(backend-options)=
+
+## Backend options
+
+The process group constructors {func}`~torch.distributed.init_process_group`,
+{func}`~torch.distributed.new_group`, {func}`~torch.distributed.split_group`,
+`new_subgroups`, `new_subgroups_by_enumeration` and
+{func}`~torch.distributed.distributed_c10d.shrink_group` all accept a
+`pg_options` argument carrying backend-specific configuration.
+
+There is no single concrete options type. `pg_options` takes an instance of the
+`Options` class belonging to the backend being constructed, and each backend
+defines its own nested `Options` class deriving from a shared base.
+
+:::{note}
+That shared base is `Backend.Options`, where `Backend` is the C++ backend base
+class `torch._C._distributed_c10d.Backend` — imported inside
+`torch/distributed/distributed_c10d.py` under the alias `C10DBackend`. It is
+**not** {class}`torch.distributed.Backend`, which is the class of backend *name*
+strings such as `"nccl"` and `"gloo"` and which has no `Options` attribute.
+:::
+
+### Available option classes
+
+| Backend | Options class | Backend-specific fields |
+| --- | --- | --- |
+| `nccl` | `torch.distributed.ProcessGroupNCCL.Options` | `config`, `is_high_priority_stream`, `split_from`, `split_color` |
+| `gloo` | `torch.distributed.ProcessGroupGloo.Options` | `devices`, `threads` |
+| `xccl` | `torch.distributed.ProcessGroupXCCL.Options` | `is_high_priority_stream` |
+
+Each class is importable only when the corresponding backend was compiled into
+your PyTorch build, so guard on {func}`~torch.distributed.is_nccl_available` and
+friends if you need to stay portable.
+
+Third-party backends registered through `Backend.register_backend` supply
+their own `Options` subclass; consult that backend's documentation for its
+fields.
+
+### Fields inherited from the base class
+
+`backend` is a read-only string naming the backend the options belong to. The
+remaining inherited fields — including `_timeout`, `global_ranks_in_group` and
+`group_name` — are populated by PyTorch while the group is being constructed.
+Set the timeout through the `timeout` argument of the constructing function
+rather than on the options object.
+
+### Example
+
+```python
+import torch.distributed as dist
+
+# NCCL: ask the backend for high-priority CUDA streams.
+nccl_opts = dist.ProcessGroupNCCL.Options()
+nccl_opts.is_high_priority_stream = True
+dist.init_process_group("nccl", pg_options=nccl_opts)
+
+# Gloo: pin the number of worker threads on a subgroup.
+gloo_opts = dist.ProcessGroupGloo.Options()
+gloo_opts.threads = 4
+pg = dist.new_group(ranks=[0, 1], backend="gloo", pg_options=gloo_opts)
+```
+
 ## DeviceMesh
 
 DeviceMesh is a higher level abstraction that manages process groups (or NCCL communicators).
