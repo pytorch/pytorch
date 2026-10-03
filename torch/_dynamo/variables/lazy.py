@@ -106,7 +106,16 @@ class ComputedLazyCache:
             if isinstance(lazy_var.realize(), SymNodeVariable):
                 any_symbolic = True
 
-        if any_symbolic:
+        if any_symbolic and self.op in (str, operator.invert):
+            # SymNodeVariable has no tp_repr_impl/nb_invert_impl; specialize instead
+            (arg,) = (arg.realize() for arg in self.args)
+            value = (
+                arg.evaluate_expr()
+                if isinstance(arg, SymNodeVariable)
+                else arg.as_python_constant()
+            )
+            self.vt = ConstantVariable.create(self.op(value))
+        elif any_symbolic:
             # The precomputed constant is stale; recompute symbolically
             from .builtin import BuiltinVariable
 
