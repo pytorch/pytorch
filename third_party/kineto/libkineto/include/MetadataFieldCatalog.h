@@ -187,6 +187,7 @@ inline constexpr MetadataField<uint64_t> kCorrelation{"correlation"};
 inline constexpr MetadataField<int64_t> kDevice{"device"};
 inline constexpr MetadataField<uint64_t> kEngineIndex{"engine_index"};
 inline constexpr MetadataField<uint64_t> kEngineOrdinal{"engine_ordinal"};
+inline constexpr MetadataField<int64_t> kFromDevice{"fromDevice"};
 inline constexpr MetadataField<uint64_t> kKernelId{"kernel_id"};
 inline constexpr MetadataField<double> kMemoryBandwidthGbps{
     "memory bandwidth (GB/s)"};
@@ -203,4 +204,5 @@ inline constexpr MetadataField<uint64_t> kSyclInvocationId{
     "sycl_invocation_id"};
 inline constexpr MetadataField<uint64_t> kSyclNodeId{"sycl_node_id"};
 inline constexpr MetadataField<uint64_t> kSyclQueue{"sycl queue"};
+inline constexpr MetadataField<int64_t> kToDevice{"toDevice"};
 } // namespace libkineto::XpuMetadataFields

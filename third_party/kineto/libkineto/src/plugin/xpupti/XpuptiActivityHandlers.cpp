@@ -207,7 +207,9 @@ void XpuptiActivityProfilerSession::handleRuntimeKernelMemcpyMemsetActivities(
       std::is_same_v<pti_view_memory_record_type, pti_view_record_api_t>;
   constexpr bool handleKernelActivities =
       std::is_same_v<pti_view_memory_record_type, pti_view_record_kernel_t>;
-  constexpr bool handleMemcpyActivities =
+  constexpr bool handleMemcpyP2PActivities =
+      std::is_same_v<pti_view_memory_record_type, pti_view_record_memcpy_p2p_t>;
+  constexpr bool handleMemcpyActivities = handleMemcpyP2PActivities ||
       std::is_same_v<pti_view_memory_record_type, pti_view_record_memcpy_t>;
   constexpr bool handleMemsetActivities =
       std::is_same_v<pti_view_memory_record_type, pti_view_record_memfill_t>;
@@ -257,7 +259,17 @@ void XpuptiActivityProfilerSession::handleRuntimeKernelMemcpyMemsetActivities(
     trace_activity->device = activity->_process_id;
     trace_activity->resource = activity->_thread_id;
   } else {
-    trace_activity->device = getDeviceIdxFromUUID(activity->_device_uuid);
+    if constexpr (handleMemcpyP2PActivities) {
+      // The copy is submitted to, and runs on an engine of, the source device.
+      trace_activity->device = getDeviceIdxFromUUID(activity->_src_uuid);
+      trace_activity->addMetadata(
+          XpuFields::kFromDevice, static_cast<int64_t>(trace_activity->device));
+      trace_activity->addMetadata(
+          XpuFields::kToDevice,
+          static_cast<int64_t>(getDeviceIdxFromUUID(activity->_dst_uuid)));
+    } else {
+      trace_activity->device = getDeviceIdxFromUUID(activity->_device_uuid);
+    }
     trace_activity->resource = activity->_sycl_queue_id;
 
     if constexpr (handleKernelActivities) {
@@ -610,6 +622,12 @@ void XpuptiActivityProfilerSession::handlePtiActivity(
       handleRuntimeKernelMemcpyMemsetActivities(
           ActivityType::GPU_MEMCPY,
           reinterpret_cast<const pti_view_record_memcpy_t*>(record),
+          logger);
+      break;
+    case PTI_VIEW_DEVICE_GPU_MEM_COPY_P2P:
+      handleRuntimeKernelMemcpyMemsetActivities(
+          ActivityType::GPU_MEMCPY,
+          reinterpret_cast<const pti_view_record_memcpy_p2p_t*>(record),
           logger);
       break;
     case PTI_VIEW_DEVICE_GPU_MEM_FILL:
