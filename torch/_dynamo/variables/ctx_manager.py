@@ -1137,12 +1137,29 @@ class AutocastModeVariable(ContextWrappingVariable):
         args: Sequence[Any],
         kwargs: dict[str, Any],
     ) -> "AutocastModeVariable":
+        if not (
+            isinstance(func, type)
+            and issubclass(func, torch.amp.autocast_mode.autocast)
+        ):
+            raise AssertionError(f"unexpected autocast function: {func}")
         if func not in [
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,
             torch.cpu.amp.autocast,
         ]:
-            raise AssertionError(f"unexpected autocast function: {func}")
+            signature = inspect.signature(func)
+            bound_args = signature.bind(*args, **kwargs)
+            bound_args.apply_defaults()
+            arguments = dict(bound_args.arguments)
+            arguments["device_type"] = torch._C._get_privateuse1_backend_name()
+            target_values = []
+            for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
+                arg = arguments[key]
+                if isinstance(arg, VariableTracker):
+                    target_values.append(arg.as_python_constant())
+                else:
+                    target_values.append(arg)
+            return AutocastModeVariable(target_values, initial_values=None)
         # device_type : str,
         # dtype : Optional[_dtype] = None,
         # enabled : bool = True,
@@ -1150,7 +1167,6 @@ class AutocastModeVariable(ContextWrappingVariable):
         bound_args = inspect.signature(func).bind(*args, **kwargs)
         bound_args.apply_defaults()
         target_values = []
-        kwargs.clear()
 
         for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
             if key == "device_type" and func in [
@@ -1166,7 +1182,7 @@ class AutocastModeVariable(ContextWrappingVariable):
             else:
                 target_values.append(arg)
 
-        var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
+        var = AutocastModeVariable(target_values, initial_values=None)
         return var
 
     def __init__(
