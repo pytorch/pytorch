@@ -8,6 +8,7 @@ import operator
 import torch
 from torch._dynamo.utils import counters
 from torch.fx.node import map_arg
+from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..lowering import lowerings as L, require_channels_last
@@ -1131,10 +1132,37 @@ def _register_quantization_reshape():
     )
 
 
+# Device types on which the weight-only-quant (WOQ) int8 fusions may fire.
+# Third-party backends that implement aten._weight_int8pack_mm can opt in
+# via the register_* functions below.
+_concat_linear_int8_woq_devices: OrderedSet[str] = OrderedSet(["cpu", "cuda"])
+# Device types explicitly registered via register_concat_linear_int8_woq_device:
+# registration is a complete opt-in that does not require
+# config.cpp.enable_concat_linear, which stays the profitability gate for the
+# default cpu/cuda device types (mirrors check_concat_weights in
+# freezing_patterns, which only applies the config gate to cpu).
+_concat_linear_int8_woq_optins: OrderedSet[str] = OrderedSet()
+_woq_int8pack_fusion_devices: OrderedSet[str] = OrderedSet(["cpu", "cuda", "xpu"])
+
+
+def register_concat_linear_int8_woq_device(device_type: str) -> None:
+    """Enable the concat-linear int8 WOQ fusion on ``device_type``.
+
+    Registration is an explicit opt-in and does not additionally require
+    ``config.cpp.enable_concat_linear``, which remains the profitability
+    gate for the default cpu/cuda device types.
+    """
+    _concat_linear_int8_woq_devices.add(device_type)
+    _concat_linear_int8_woq_optins.add(device_type)
+
+
+def register_woq_int8pack_fusion_device(device_type: str) -> None:
+    """Enable the WOQ int8pack-mm fusion on ``device_type``."""
+    _woq_int8pack_fusion_devices.add(device_type)
+
+
 def _is_valid_concat_linear_int8_woq_optimization_pattern():
     def fn(match):
-        if not config.cpp.enable_concat_linear:
-            return False
         if not all(k in match.kwargs for k in ("x", "w1", "w2", "w3", "scales")):
             raise AssertionError("expected x, w1, w2, w3, scales in match kwargs")
         if not all(
@@ -1143,6 +1171,17 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
         ):
             return False
         x = match.kwargs["x"].meta["val"]
+        # config.cpp.enable_concat_linear is a CPU profitability gate (it
+        # defaults to False; see config.py) that additionally gates the int4
+        # concat-linear pass and the CPU concat-linear weight patterns.
+        # Device types registered via register_concat_linear_int8_woq_device()
+        # opt in explicitly and do not need it, so an out-of-tree backend
+        # does not have to flip a CPU-oriented global config option.
+        if (
+            x.device.type not in _concat_linear_int8_woq_optins
+            and not config.cpp.enable_concat_linear
+        ):
+            return False
         w1 = match.kwargs["w1"].meta["val"]
         w2 = match.kwargs["w2"].meta["val"]
         w3 = match.kwargs["w3"].meta["val"]
@@ -1161,7 +1200,7 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
             and w2.dtype == torch.int8
             and w3.dtype == torch.int8
             and scales.dtype == torch.bfloat16
-            and x.device.type in ("cpu", "cuda")
+            and x.device.type in _concat_linear_int8_woq_devices
             and x.device == w1.device
             and w1.device == w2.device
             and w2.device == w3.device
@@ -1189,7 +1228,7 @@ def _is_valid_woq_optimization_pattern():
             x.dtype == torch.bfloat16
             and weight.dtype == torch.int8
             and scales.dtype == torch.bfloat16
-            and x.device.type in ("cpu", "cuda", "xpu")
+            and x.device.type in _woq_int8pack_fusion_devices
             and x.device == weight.device
             and x.device == scales.device
         )
@@ -1498,6 +1537,8 @@ def concat_linear_woq_int4(gm: torch.fx.GraphModule):
         if (
             not node._erased
             and isinstance(node.meta.get("val"), torch.Tensor)
+            # Intentionally CPU-only: the fused op
+            # aten._weight_int4pack_mm_for_cpu is a CPU-specific ATen op.
             and node.meta["val"].device.type == "cpu"
         ):
             act = node.args[0]
