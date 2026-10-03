@@ -30,7 +30,12 @@ from torch._inductor.runtime.triton_heuristics import (
 )
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    IS_WINDOWS,
+    skipIfRocm,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 from torch.utils._triton import has_triton_tma_device
@@ -51,6 +56,8 @@ def _patched_getitem(self, grid):
 
 
 class TestStaticTritonLauncherUnit(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @staticmethod
     def _global_scratch_kernel(kernel_cls=StaticallyLaunchedCudaKernel):
         fn = SimpleNamespace(__name__="scratch_kernel", arg_names=["out"], params=[])
