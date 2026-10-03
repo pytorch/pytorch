@@ -4329,6 +4329,24 @@ class AOTInductorTestsTemplate:
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
 
+    def test_return_view_constant_lite_mode(self):
+        # The transpose falls back to ATen, so the output aliases the constant
+        # through an ExternKernel rather than an IR view.
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.cst = torch.randn(5, 5, device=device)
+
+            def forward(self, x):
+                return (x, torch.transpose(self.cst, 0, 1))
+
+        x = torch.randn(5, device=self.device)
+        with config.patch(torch._inductor.lite_mode_options):
+            self.check_model(Model(self.device), (x,))
+            # check_model only notices a missing clone if the freed constant's
+            # memory gets overwritten.
+            self.code_check_count(Model(self.device), (x,), "aoti_torch_clone(", 1)
+
     def test_profile_benchmark_harness(self):
         batch_size = 32
         seq_length = 50
