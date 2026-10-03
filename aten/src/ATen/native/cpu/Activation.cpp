@@ -232,8 +232,8 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
         [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec, is_result](Vectorized<scalar_t> a, Vectorized<scalar_t> b) -> Vectorized<scalar_t> {
           auto [a0, a1] = convert_to_float<scalar_t>(a);
           auto [b0, b1] = convert_to_float<scalar_t>(b);
-          auto cmp0 = (b0 > zero_vec);
-          auto cmp1 = (b1 > zero_vec);
+          auto cmp0 = ~(b0 <= zero_vec);
+          auto cmp1 = ~(b1 <= zero_vec);
           auto get_res_masked = [&](Vectorized<float>& cmp, Vectorized<float>& a, Vectorized<float>& b) {
             if (is_result) {
               return !cmp.zero_mask() ? a * poscoef_vec :
@@ -267,7 +267,7 @@ void elu_backward_kernel(TensorIteratorBase& it, const Scalar& alpha, const Scal
             }
           },
           [&negcoef_vec, &negiptcoef_vec, &poscoef_vec, &zero_vec, is_result](Vec a, Vec b) -> Vec {
-            auto cmp = (b > zero_vec);
+            auto cmp = ~(b <= zero_vec);
             if (is_result) {
               if (!cmp.zero_mask()) {  // only a * poscoef (which is very quick) needs to be computed
                 return a * poscoef_vec;
@@ -690,7 +690,7 @@ void shrink_backward_kernel(TensorIteratorBase& iter, const Scalar& lambd) {
                                                                    : grad_val;
         },
         [=](Vectorized<scalar_t> grad_val, Vectorized<scalar_t> self_val) {
-          return ((self_val < -lambd_val) | (self_val > lambd_val)) & grad_val;
+          return (~((self_val >= -lambd_val) & (self_val <= lambd_val))) & grad_val;
         });
   });
 }
@@ -709,8 +709,8 @@ void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Sca
             auto [grad_val0, grad_val1] = convert_to_float<scalar_t>(grad_val);
             auto [self_val0, self_val1] = convert_to_float<scalar_t>(self_val);
             return convert_from_float<scalar_t>(
-              ((self_val0 > min_val) & (self_val0 < max_val)) & grad_val0,
-              ((self_val1 > min_val) & (self_val1 < max_val)) & grad_val1
+              (~((self_val0 <= min_val) | (self_val0 >= max_val))) & grad_val0,
+              (~((self_val1 <= min_val) | (self_val1 >= max_val))) & grad_val1
             );
           });
     });
@@ -724,7 +724,7 @@ void hardtanh_backward_kernel(TensorIterator& iter, const Scalar& min, const Sca
           return (self_val <= min_val || self_val >= max_val) ? scalar_t(0) : grad_val;
         },
         [=](Vectorized<scalar_t> grad_val, Vectorized<scalar_t> self_val) {
-          return ((self_val > min_val) & (self_val < max_val)) & grad_val;
+          return (~((self_val <= min_val) | (self_val >= max_val))) & grad_val;
         });
   });
   }
@@ -813,7 +813,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
           Vec::blendv(
             grad_val0 * ((self_val0 / kThreeVec) + kOneHalfVec),
             grad_val0,
-            self_val0 >= kThreeVec
+            ~(self_val0 < kThreeVec)
           ),
           kZeroVec,
           self_val0 <= kNegThreeVec
@@ -822,7 +822,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
           Vec::blendv(
             grad_val1 * ((self_val1 / kThreeVec) + kOneHalfVec),
             grad_val1,
-            self_val1 >= kThreeVec
+            ~(self_val1 < kThreeVec)
           ),
           kZeroVec,
           self_val1 <= kNegThreeVec
@@ -857,7 +857,7 @@ void hardswish_backward_kernel(TensorIterator& iter) {
           Vec::blendv(
             grad_val * ((self_val / kThreeVec) + kOneHalfVec),
             grad_val,
-            self_val >= kThreeVec
+            ~(self_val < kThreeVec)
           ),
           kZeroVec,
           self_val <= kNegThreeVec
