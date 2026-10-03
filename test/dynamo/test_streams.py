@@ -2963,7 +2963,15 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
     @parametrize("stat_views", (False, True))
     @parametrize(
         "implementation",
-        ("functional", "native", "aten", "native_aten", "native_aten_legit"),
+        (
+            "functional",
+            "native",
+            "aten",
+            "native_builtin",
+            "legit_builtin",
+            "native_aten",
+            "native_aten_legit",
+        ),
     )
     def test_function_updates_running_stats_before_join_errors(
         self, backend, stat_views, implementation
@@ -2993,6 +3001,13 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
                     torch.ops.aten.batch_norm.default(
                         x, None, None, running_mean, running_var, True, 0.1, 1e-5, True
                     )
+                elif implementation in ("native_builtin", "legit_builtin"):
+                    op = (
+                        torch.native_batch_norm
+                        if implementation == "native_builtin"
+                        else torch._native_batch_norm_legit
+                    )
+                    op(x, None, None, running_mean, running_var, True, 0.1, 1e-5)
                 else:
                     op = (
                         torch.ops.aten._native_batch_norm_legit.default

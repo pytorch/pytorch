@@ -3907,6 +3907,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         batch_norm_functions = (
             torch.nn.functional.batch_norm,
             torch.batch_norm,
+            torch.native_batch_norm,
+            torch._native_batch_norm_legit,
             torch.ops.aten.batch_norm.default,
             torch.ops.aten.native_batch_norm.default,
             torch.ops.aten._native_batch_norm_legit.default,
