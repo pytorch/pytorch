@@ -2,6 +2,7 @@
 
 import contextlib
 import dataclasses
+import gc
 import operator
 import sys
 import unittest
@@ -13,10 +14,11 @@ import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
-from torch._dynamo.exc import Unsupported
+from torch._dynamo.exc import get_dynamo_observed_exception, Unsupported
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import (
+    disable_gc,
     instantiate_parametrized_tests,
     make_dynamo_test,
     parametrize,
@@ -128,6 +130,58 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires LOAD_FAST_CHECK")
+    def test_exception_target_cleanup(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            try:
+                return exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_exception_target_cleanup_double_delete(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            try:
+                del exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+            return x
+
+        x = torch.ones(1)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    @unittest.skipIf(sys.version_info < (3, 12), "requires LOAD_FAST_CHECK")
+    def test_exception_target_cleanup_graph_break(self):
+        def fn(x):
+            try:
+                raise ValueError
+            except ValueError as exc:  # noqa: F841
+                pass
+            x = x * 2
+            torch._dynamo.graph_break()
+            try:
+                return exc  # noqa: F821
+            except UnboundLocalError:
+                return x + 1
+
+        x = torch.ones(1)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt)
+        self.assertEqual(opt_fn(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_exception4(self):
         def fn(x):
@@ -477,6 +531,18 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         inp = torch.ones(3)
         out = f(inp)
         self.assertTrue(torch.equal(out, inp + 1))
+
+    def test_observed_exception_with_non_string_args(self):
+        def fn(x):
+            try:
+                type("A", (), {"__doc__": "x\udcdcy"})
+            except UnicodeEncodeError:
+                return x + 1
+            return x
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
     @make_dynamo_test
     def test_isinstance_CustomException(self):
@@ -1924,12 +1990,10 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(comparable(opt_fn(x)[0]), comparable(fn(x)[0]))
 
-    # A write is routed to the wrapped ExceptionVariable, but side_effects sends
-    # only a bare ExceptionVariable through reconstruct(), so a
-    # UserDefinedExceptionObjectVariable is rebuilt via __new__ and the write is
-    # dropped at the boundary.
-    @unittest.expectedFailure
-    @parametrize("attr", WRITABLE_BASE_EXCEPTION_ATTRS)
+    @parametrize(
+        "attr",
+        [a for a in WRITABLE_BASE_EXCEPTION_ATTRS if a != "__suppress_context__"],
+    )
     def test_exception_attr_write_survives_escape(self, attr):
         def fn(x):
             e = CustomException("x")
@@ -1980,6 +2044,33 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(got.__suppress_context__, expected.__suppress_context__)
         self.assertIsNone(got.__cause__)
         self.assertIsNone(got.__context__)
+
+    def test_observed_exception_no_reference_cycle(self):
+        # An ObservedException unwinding out of an inlined frame owns a
+        # traceback spanning the whole Python stack, so a cycle through it pins
+        # arbitrary user frames (and everything they reference) until the next
+        # gc pass. Refcounting alone must be enough to reclaim it.
+        class Boom(Exception):
+            pass
+
+        def inner():
+            raise Boom
+
+        def fn(x):
+            inner()
+            return x + 1
+
+        observed_cls = get_dynamo_observed_exception(Boom)
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.randn(4)
+
+        torch._dynamo.reset()
+        gc.collect()
+        with disable_gc():
+            with self.assertRaises(Boom):
+                opt_fn(x)
+            alive = sum(type(o) is observed_cls for o in gc.get_objects())
+        self.assertEqual(alive, 0)
 
     def test_exception_subclass_super_init_with_kwargs(self):
         class MyError(RuntimeError):

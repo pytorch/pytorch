@@ -561,6 +561,15 @@ inline T tri_opA(
   return conj ? c10::metal::conj(v) : v;
 }
 
+// Offset of element (row, col) of an n x k right-hand side or solution.
+inline ulong rhs_offset(
+    uint row,
+    ulong col,
+    constant TriangularSolveParams& p,
+    bool col_major) {
+  return col_major ? row + col * p.n : ulong(row) * p.k + col;
+}
+
 // Batched triangular solve by forward/back substitution. One threadgroup owns
 // one right-hand side and walks the n substitution steps serially; the dot
 // product against the already-solved prefix is split across the group and
@@ -596,8 +605,11 @@ kernel void triangular_solve(
   // A is upper before op; a transpose flips the effective triangle, and a lower
   // one substitutes forward.
   const bool forward = p.upper == p.transpose;
-  device const T* b = B + batch * n * k + vec;
-  device T* x = X + batch * n * k + vec;
+  // Keep layout handling off the serial per-step path below.
+  device const T* b = B + batch * n * k + (p.b_col_major ? vec * n : vec);
+  device T* x = X + batch * n * k + (p.x_col_major ? vec * n : vec);
+  const uint b_stride = p.b_col_major ? 1 : k;
+  const uint x_stride = p.x_col_major ? 1 : k;
 
   for (uint step = 0; step < n; ++step) {
     const uint t = forward ? step : n - 1 - step;
@@ -615,14 +627,14 @@ kernel void triangular_solve(
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     if (lid == 0) {
-      T sum = b[t * k];
+      T sum = b[t * b_stride];
       for (uint s = 0; s < nsimd; ++s) {
         sum = sum - red[s];
       }
       const T xt =
           p.unit ? sum : c10::metal::div(sum, tri_opA(Ab, t, t, n, tr, cj));
       xs[t] = xt;
-      x[t * k] = xt;
+      x[t * x_stride] = xt;
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
@@ -680,8 +692,15 @@ METAL_FUNC bool apply_triangular_inverse(
   const uint frag_col = (quad & 2) * 2 + (lane % 2) * 2;
   bool nonfinite = false;
   for (tile_index_t tile = sg; tile < groups * col_tiles; tile += groups) {
-    const uint row = tile / col_tiles;
-    const uint col = tile % col_tiles * tile_size;
+    // Each pass of the simdgroups covers one row block of x when it is
+    // row-major, or one column block when it is column-major, so that stores
+    // walk the contiguous dimension. The column-major order rotates the rows
+    // so every simdgroup does the same amount of work.
+    const tile_index_t col_tile =
+        p.x_col_major ? tile / groups : tile % col_tiles;
+    const uint row =
+        p.x_col_major ? (tile + col_tile) % groups : tile / col_tiles;
+    const uint col = col_tile * tile_size;
     const bool scalar_io = general && (reverse || p.k - col < tile_size);
     simdgroup_float8x8 lhs_tile, rhs_tile, result_tile(0);
     for (uint j = 0; j <= row; ++j) {
@@ -692,11 +711,17 @@ METAL_FUNC bool apply_triangular_inverse(
 #pragma unroll
         for (uint i = 0; i < 2; ++i) {
           const uint c = col + frag_col + i;
-          rhs_tile.thread_elements()[i] =
-              c < p.k ? b[ulong(reverse ? n - 1 - r : r) * p.k + c] : 0;
+          rhs_tile.thread_elements()[i] = c < p.k
+              ? b[rhs_offset(reverse ? n - 1 - r : r, c, p, p.b_col_major)]
+              : 0;
         }
       } else {
-        simdgroup_load(rhs_tile, b + ulong(j * tile_size) * p.k + col, p.k);
+        simdgroup_load(
+            rhs_tile,
+            b + rhs_offset(j * tile_size, col, p, p.b_col_major),
+            p.b_col_major ? n : p.k,
+            ulong2(0),
+            p.b_col_major);
       }
       simdgroup_multiply_accumulate(
           result_tile, lhs_tile, rhs_tile, result_tile);
@@ -712,51 +737,70 @@ METAL_FUNC bool apply_triangular_inverse(
       for (uint i = 0; i < 2; ++i) {
         const uint c = col + frag_col + i;
         if (c < p.k) {
-          x[ulong(reverse ? n - 1 - r : r) * p.k + c] =
+          x[rhs_offset(reverse ? n - 1 - r : r, c, p, p.x_col_major)] =
               result_tile.thread_elements()[i];
         }
       }
     } else {
-      simdgroup_store(result_tile, x + ulong(row * tile_size) * p.k + col, p.k);
+      simdgroup_store(
+          result_tile,
+          x + rhs_offset(row * tile_size, col, p, p.x_col_major),
+          p.x_col_major ? n : p.k,
+          ulong2(0),
+          p.x_col_major);
     }
   }
   return nonfinite;
 }
 
 #if C10_METAL_HAS_MPP
-template <uint n, bool general>
-METAL_FUNC bool apply_triangular_inverse(
-    bool_constant<true>,
+// MPP tensors need a unit stride along their first dimension, so a
+// column-major x is produced as x^T = b^T inv(L)^T, whose tiles are row-major.
+// The matrix inputs are then (col, row) of x and the operands swap sides.
+// b is loaded in its own layout and transposed by the matmul when it differs
+// from x's.
+template <uint n, bool general, bool x_col_major, bool b_col_major>
+METAL_FUNC bool apply_triangular_inverse_mpp(
     threadgroup const float* inverse,
     device const float* b,
     device float* x,
     constant TriangularSolveParams& p,
-    uint,
     uint sg) {
-  constexpr uint tile_size = kTriangularSolveTileSize;
-  constexpr uint groups = n / tile_size;
+  constexpr uint groups = n / kTriangularSolveTileSize;
   const bool reverse = general && (p.upper != p.transpose);
   bool nonfinite = false;
   constexpr uint mpp_rows = kTriangularSolveMppRows;
   constexpr uint mpp_cols = kTriangularSolveMppCols;
+  constexpr bool transpose_b = x_col_major != b_col_major;
   constexpr auto desc = mpp::tensor_ops::matmul2d_descriptor(
+      x_col_major ? mpp_cols : mpp_rows,
+      x_col_major ? mpp_rows : mpp_cols,
       mpp_rows,
-      mpp_cols,
-      mpp_rows,
-      false,
-      false,
+      x_col_major && transpose_b,
+      !x_col_major && transpose_b,
       false,
       mpp::tensor_ops::matmul2d_descriptor::mode::multiply_accumulate);
   mpp::tensor_ops::matmul2d<desc, execution_simdgroup> op;
   const uint col_tiles = c10::metal::ceil_div(p.k, mpp_cols);
-  for (uint tile = sg; tile < (n / mpp_rows) * col_tiles; tile += groups) {
-    const uint row = tile / col_tiles * mpp_rows;
-    const uint col = tile % col_tiles * mpp_cols;
+  constexpr uint row_tiles = n / mpp_rows;
+  const int x_ld = x_col_major ? int(n) : int(p.k);
+  const int b_ld = b_col_major ? int(n) : int(p.k);
+  for (uint tile = sg; tile < row_tiles * col_tiles; tile += groups) {
+    // Same traversal as the simdgroup_matrix overload, but a pass spans
+    // groups / row_tiles column tiles, so rotate by the pass, not the column.
+    const uint col_tile = x_col_major ? tile / row_tiles : tile % col_tiles;
+    const uint row =
+        (x_col_major ? (tile + tile / groups) % row_tiles : tile / col_tiles) *
+        mpp_rows;
+    const uint col = col_tile * mpp_cols;
     const int cols = min(mpp_cols, p.k - col);
+    // (unit-stride, outer) extents of a row block by column block tile
+    const auto row_inner = dextents<int32_t, 2>(mpp_rows, cols);
+    const auto col_inner = dextents<int32_t, 2>(cols, mpp_rows);
     tensor<device float, dextents<int32_t, 2>, tensor_inline> out(
-        x + ulong(row) * p.k + col,
-        dextents<int32_t, 2>(cols, mpp_rows),
-        array<int32_t, 2>{1, int(p.k)});
+        x + rhs_offset(row, col, p, x_col_major),
+        x_col_major ? row_inner : col_inner,
+        array<int32_t, 2>{1, x_ld});
     auto lhs =
         op.template get_left_input_cooperative_tensor<float, float, float>();
     auto rhs =
@@ -765,32 +809,51 @@ METAL_FUNC bool apply_triangular_inverse(
         decltype(lhs),
         decltype(rhs),
         float>();
+    // inv(L) is the left operand of a row-major x and inv(L)^T the right
+    // operand of a column-major one; b (or b^T) is the other.
+    thread auto& inv_op = [&]() -> thread auto& {
+      if constexpr (x_col_major) {
+        return rhs;
+      } else {
+        return lhs;
+      }
+    }();
+    thread auto& b_op = [&]() -> thread auto& {
+      if constexpr (x_col_major) {
+        return lhs;
+      } else {
+        return rhs;
+      }
+    }();
 #pragma unroll
     for (uint16_t i = 0; i < result.get_capacity(); ++i) {
       result[i] = 0;
     }
     for (uint j = 0; j <= row; j += mpp_rows) {
 #pragma unroll
-      for (uint16_t i = 0; i < lhs.get_capacity(); ++i) {
-        auto idx = lhs.get_multidimensional_index(i);
-        const uint r = row + idx[1];
-        const uint c = j + idx[0];
-        lhs[i] = r >= c ? inverse[triangular_elem_offset(r, c)] : 0;
+      for (uint16_t i = 0; i < inv_op.get_capacity(); ++i) {
+        auto idx = inv_op.get_multidimensional_index(i);
+        const uint r = row + idx[x_col_major ? 0 : 1];
+        const uint c = j + idx[x_col_major ? 1 : 0];
+        inv_op[i] = r >= c ? inverse[triangular_elem_offset(r, c)] : 0;
       }
-      if (reverse) {
+      if (!reverse) {
+        tensor<device float, dextents<int32_t, 2>, tensor_inline> in(
+            const_cast<device float*>(b + rhs_offset(j, col, p, b_col_major)),
+            b_col_major ? row_inner : col_inner,
+            array<int32_t, 2>{1, b_ld});
+        b_op.load(in);
+      } else {
 #pragma unroll
-        for (uint16_t i = 0; i < rhs.get_capacity(); ++i) {
-          auto idx = rhs.get_multidimensional_index(i);
-          rhs[i] = idx[0] < cols
-              ? b[ulong(n - 1 - j - idx[1]) * p.k + col + idx[0]]
+        for (uint16_t i = 0; i < b_op.get_capacity(); ++i) {
+          // Indices follow the stored layout, which is b's.
+          auto idx = b_op.get_multidimensional_index(i);
+          const uint r = j + idx[b_col_major ? 0 : 1];
+          const uint c = idx[b_col_major ? 1 : 0];
+          b_op[i] = int(c) < cols
+              ? b[rhs_offset(reverse ? n - 1 - r : r, col + c, p, b_col_major)]
               : 0;
         }
-      } else {
-        tensor<device float, dextents<int32_t, 2>, tensor_inline> in(
-            const_cast<device float*>(b + ulong(j) * p.k + col),
-            dextents<int32_t, 2>(cols, mpp_rows),
-            array<int32_t, 2>{1, int(p.k)});
-        rhs.load(in);
       }
       op.run(lhs, rhs, result);
     }
@@ -802,8 +865,10 @@ METAL_FUNC bool apply_triangular_inverse(
 #pragma unroll
       for (uint16_t i = 0; i < result.get_capacity(); ++i) {
         auto idx = result.get_multidimensional_index(i);
-        if (idx[0] < cols) {
-          x[ulong(n - 1 - row - idx[1]) * p.k + col + idx[0]] = result[i];
+        const uint r = row + idx[x_col_major ? 0 : 1];
+        const uint c = idx[x_col_major ? 1 : 0];
+        if (int(c) < cols) {
+          x[rhs_offset(n - 1 - r, col + c, p, x_col_major)] = result[i];
         }
       }
     } else {
@@ -811,6 +876,28 @@ METAL_FUNC bool apply_triangular_inverse(
     }
   }
   return nonfinite;
+}
+
+template <uint n, bool general>
+METAL_FUNC bool apply_triangular_inverse(
+    bool_constant<true>,
+    threadgroup const float* inverse,
+    device const float* b,
+    device float* x,
+    constant TriangularSolveParams& p,
+    uint,
+    uint sg) {
+  if (p.x_col_major) {
+    return p.b_col_major
+        ? apply_triangular_inverse_mpp<n, general, true, true>(
+              inverse, b, x, p, sg)
+        : apply_triangular_inverse_mpp<n, general, true, false>(
+              inverse, b, x, p, sg);
+  }
+  return p.b_col_major ? apply_triangular_inverse_mpp<n, general, false, true>(
+                             inverse, b, x, p, sg)
+                       : apply_triangular_inverse_mpp<n, general, false, false>(
+                             inverse, b, x, p, sg);
 }
 #endif
 
@@ -949,18 +1036,18 @@ kernel void triangular_solve_small(
     for (ulong col = tid; col < p.k; col += threads) {
       for (uint step = 0; step < n; ++step) {
         const uint row = reverse ? n - 1 - step : step;
-        float value = b[ulong(row) * p.k + col];
+        float value = b[rhs_offset(row, col, p, p.b_col_major)];
         for (uint j = 0; j < step; ++j) {
           const uint prior = reverse ? n - 1 - j : j;
           value =
               fma(-tri_opA(a, row, prior, n, transpose, p.conj),
-                  x[ulong(prior) * p.k + col],
+                  x[rhs_offset(prior, col, p, p.x_col_major)],
                   value);
         }
         if (!unit) {
           value /= tri_opA(a, row, row, n, transpose, p.conj);
         }
-        x[ulong(row) * p.k + col] = value;
+        x[rhs_offset(row, col, p, p.x_col_major)] = value;
       }
     }
   }
@@ -3042,6 +3129,123 @@ kernel void luApplyPivotsRHS(
 INSTANTIATE_LU_APPLY_PIVOTS_RHS(float)
 INSTANTIATE_LU_APPLY_PIVOTS_RHS(float2)
 
+// Small-matrix inverse (luInvSmall): one thread per matrix, the matrix and
+// its inverse live in registers. Every array index must stay a compile-time
+// constant after unrolling, so row swaps scan for r == p instead of indexing
+// a[p] directly.
+template <short N>
+kernel void luInvSmall(
+    device const float* A [[buffer(0)]],
+    device float* X [[buffer(1)]],
+    device int* info [[buffer(2)]],
+    constant LUSmallInvParams<>& params [[buffer(3)]],
+    uint tid [[thread_position_in_grid]]) {
+  device const float* Ab = A + long(tid) * params.A_bstride;
+  device float* Xb = X + long(tid) * params.X_bstride;
+
+  float a[N][N];
+  float x[N][N];
+#pragma unroll
+  for (short r = 0; r < N; r++) {
+#pragma unroll
+    for (short c = 0; c < N; c++) {
+      a[r][c] = Ab[long(r) * params.A_rstride + long(c) * params.A_cstride];
+      x[r][c] = (r == c) ? 1.0f : 0.0f;
+    }
+  }
+
+  int inf = 0;
+#pragma unroll
+  for (short j = 0; j < N; j++) {
+    float bv = -1.0f;
+    short p = j;
+#pragma unroll
+    for (short r = 0; r < N; r++) {
+      if (r >= j) {
+        const float v = luPivotMag(a[r][j]);
+        if (v > bv) {
+          bv = v;
+          p = r;
+        }
+      }
+    }
+    if (bv == 0.0f && inf == 0) {
+      inf = j + 1;
+    }
+#pragma unroll
+    for (short r = 0; r < N; r++) {
+      if (r > j && r == p) {
+#pragma unroll
+        for (short c = 0; c < N; c++) {
+          const float ta = a[j][c];
+          a[j][c] = a[r][c];
+          a[r][c] = ta;
+          const float tx = x[j][c];
+          x[j][c] = x[r][c];
+          x[r][c] = tx;
+        }
+      }
+    }
+    if (bv != 0.0f) {
+      const float rp = luRecip(a[j][j]);
+#pragma unroll
+      for (short r = 0; r < N; r++) {
+        if (r > j) {
+          const float l = a[r][j] * rp;
+#pragma unroll
+          for (short c = 0; c < N; c++) {
+            if (c > j) {
+              a[r][c] = fma(-l, a[j][c], a[r][c]);
+            }
+            x[r][c] = fma(-l, x[j][c], x[r][c]);
+          }
+        }
+      }
+    }
+  }
+#pragma unroll
+  for (short c = N - 1; c >= 0; c--) {
+#pragma unroll
+    for (short k = 0; k < N; k++) {
+      x[c][k] = x[c][k] / a[c][c];
+    }
+#pragma unroll
+    for (short i = 0; i < N; i++) {
+      if (i < c) {
+#pragma unroll
+        for (short k = 0; k < N; k++) {
+          x[i][k] = fma(-a[i][c], x[c][k], x[i][k]);
+        }
+      }
+    }
+  }
+  info[tid] = inf;
+
+#pragma unroll
+  for (short r = 0; r < N; r++) {
+#pragma unroll
+    for (short c = 0; c < N; c++) {
+      Xb[long(r) * params.X_rstride + long(c) * params.X_cstride] = x[r][c];
+    }
+  }
+}
+
+#define INSTANTIATE_LU_INV_SMALL(N)                      \
+  template [[host_name("luInvSmall_" #N)]]               \
+  kernel void luInvSmall<N>(                             \
+      device const float* A [[buffer(0)]],               \
+      device float* X [[buffer(1)]],                     \
+      device int* info [[buffer(2)]],                    \
+      constant LUSmallInvParams<>& params [[buffer(3)]], \
+      uint tid [[thread_position_in_grid]]);
+
+// exact sizes 1..kLUSmallInvMax picked by lu_inv_small_encode
+INSTANTIATE_LU_INV_SMALL(1)
+INSTANTIATE_LU_INV_SMALL(2)
+INSTANTIATE_LU_INV_SMALL(3)
+INSTANTIATE_LU_INV_SMALL(4)
+static_assert(kLUSmallInvMax == 4, "update luInvSmall instantiations");
+
 kernel void applyPivots(
     device float* P [[buffer(0)]],
     device const int* pivots [[buffer(1)]],
@@ -3107,6 +3311,66 @@ half2 bool_to_float(bool b) {
 template <>
 float2 bool_to_float(bool b) {
   return float2(b ? 1 : 0, 0);
+}
+
+constant constexpr auto kMaxThreadsPerThreadgroup = 1024;
+constant constexpr auto kMaxSIMDGroups =
+    kMaxThreadsPerThreadgroup / c10::metal::simdgroup_size;
+
+// Combines a block of reflectors into one factor, one column per threadgroup,
+// so the host can apply the whole block with two matmuls.
+template <typename T>
+kernel void householder_block(
+    device const T* A,
+    device const T* tau,
+    device T* V,
+    device T* W,
+    constant GeqrfParams<>& params,
+    uint tid [[thread_position_in_threadgroup]],
+    uint tptg [[threads_per_threadgroup]],
+    uint tgid [[threadgroup_position_in_grid]]) {
+  auto dims = params.num_batch_dims;
+  auto m = params.A_sizes[dims];
+  auto n = params.A_sizes[dims + 1];
+  auto row_stride = params.A_strides[dims];
+  auto col_stride = params.A_strides[dims + 1];
+  auto tau_stride = params.tau_strides[dims];
+  auto batch = tgid / n;
+  for (int dim = dims - 1; dim >= 0; --dim) {
+    auto index = batch % params.A_sizes[dim];
+    A += index * params.A_strides[dim];
+    tau += index * params.tau_strides[dim];
+    batch /= params.A_sizes[dim];
+  }
+  auto col = tgid % n;
+  V += uint64_t(tgid) * m;
+  W += uint64_t(tgid) * m;
+  threadgroup T scratch[kMaxSIMDGroups];
+  for (auto row = tid; row < m; row += tptg) {
+    auto value = row > col ? A[row * row_stride + col * col_stride]
+                           : bool_to_float<T>(row == col);
+    V[row] = value;
+    W[row] = c10::metal::mul(tau[col * tau_stride], value);
+  }
+  threadgroup_barrier(mem_flags::mem_device);
+  // H_0 ... H_{n-1} = I - W V^H.
+  for (int i = int(col) - 1; i >= 0; --i) {
+    T dot = 0;
+    for (auto row = uint(i) + tid; row < m; row += tptg) {
+      auto value = row == uint(i) ? bool_to_float<T>(true)
+                                  : A[row * row_stride + i * col_stride];
+      dot += c10::metal::mul(c10::metal::conj(value), W[row]);
+    }
+    auto factor = c10::metal::mul(
+        tau[i * tau_stride],
+        c10::metal::threadgroup_sum(scratch, dot, tid, tptg));
+    for (auto row = uint(i) + tid; row < m; row += tptg) {
+      auto value = row == uint(i) ? bool_to_float<T>(true)
+                                  : A[row * row_stride + i * col_stride];
+      W[row] -= c10::metal::mul(value, factor);
+    }
+    threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+  }
 }
 
 template <typename T>
@@ -3291,6 +3555,118 @@ kernel void unpack_pivots(
   }
 }
 
+// Unblocked QR of a panel held entirely in registers, RowsPerThread rows per
+// lane, so every reduction stays within one SIMD group.
+template <uint RowsPerThread>
+[[max_total_threads_per_threadgroup(kMaxThreadsPerThreadgroup)]]
+kernel void geqrf_panel(
+    device float* A,
+    device float* tau,
+    constant GeqrfParams<>& params,
+    uint tid [[thread_position_in_threadgroup]],
+    uint batch [[threadgroup_position_in_grid]]) {
+  auto dims = params.num_batch_dims;
+  auto m = params.A_sizes[dims];
+  auto n = params.A_sizes[dims + 1];
+  for (int dim = dims - 1; dim >= 0; --dim) {
+    auto index = batch % params.A_sizes[dim];
+    A += index * params.A_strides[dim];
+    tau += index * params.tau_strides[dim];
+    batch /= params.A_sizes[dim];
+  }
+  auto lane = tid % c10::metal::simdgroup_size;
+  auto col = tid / c10::metal::simdgroup_size;
+  auto row_stride = params.A_strides[dims];
+  auto col_stride = params.A_strides[dims + 1];
+  threadgroup float v[RowsPerThread * c10::metal::simdgroup_size];
+  threadgroup float tau_shared;
+  // One SIMD group per column; n <= SIMD width keeps each pivot in r[0].
+  float r[RowsPerThread];
+  for (uint j = 0; j < RowsPerThread; ++j) {
+    auto row = lane + c10::metal::simdgroup_size * j;
+    r[j] = row < m ? A[row * row_stride + col * col_stride] : 0;
+  }
+  for (uint k = 0; k < n; ++k) {
+    if (col == k) {
+      float norm_sq = 0;
+      float max_abs = 0;
+      for (uint j = 0; j < RowsPerThread; ++j) {
+        if (lane + c10::metal::simdgroup_size * j >= k) {
+          norm_sq = fma(r[j], r[j], norm_sq);
+          max_abs = c10::metal::max(max_abs, fabs(r[j]));
+        }
+      }
+      norm_sq = simd_sum(norm_sq);
+      constexpr auto safe_min =
+          numeric_limits<float>::min() / numeric_limits<float>::epsilon();
+      float scale = 1;
+      if (norm_sq < m * safe_min || !isfinite(norm_sq)) {
+        scale = c10::metal::simd_max(max_abs);
+        scale = scale == 0 ? 1 : scale;
+        norm_sq = 0;
+        for (uint j = 0; j < RowsPerThread; ++j) {
+          if (lane + c10::metal::simdgroup_size * j >= k) {
+            r[j] /= scale;
+            norm_sq = fma(r[j], r[j], norm_sq);
+          }
+        }
+        norm_sq = simd_sum(norm_sq);
+      }
+      auto norm = precise::sqrt(norm_sq);
+      auto alpha = simd_broadcast(r[0], k);
+      auto beta = copysign(norm, alpha);
+      auto t = norm == 0 ? 0 : 1 + fabs(alpha) / norm;
+      auto inv = t == 0 ? 0 : 1 / (alpha + beta);
+      if (lane == 0) {
+        tau[k * params.tau_strides[dims]] = t;
+        tau_shared = t;
+      }
+      for (uint j = 0; j < RowsPerThread; ++j) {
+        auto row = lane + c10::metal::simdgroup_size * j;
+        v[row] = row == k ? 1 : row > k ? r[j] * inv : 0;
+        if (t != 0 && row >= k) {
+          r[j] = row == k ? -beta * scale : v[row];
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (col > k && tau_shared != 0) {
+      float dot = 0;
+      for (uint j = 0; j < RowsPerThread; ++j) {
+        auto row = lane + c10::metal::simdgroup_size * j;
+        if (row >= k) {
+          dot = fma(r[j], v[row], dot);
+        }
+      }
+      auto factor = tau_shared * simd_sum(dot);
+      for (uint j = 0; j < RowsPerThread; ++j) {
+        auto row = lane + c10::metal::simdgroup_size * j;
+        if (row >= k) {
+          r[j] -= v[row] * factor;
+        }
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  for (uint j = 0; j < RowsPerThread; ++j) {
+    auto row = lane + c10::metal::simdgroup_size * j;
+    if (row < m) {
+      A[row * row_stride + col * col_stride] = r[j];
+    }
+  }
+}
+
+// geqrf_kernel_mps picks the smallest of these that holds the whole panel.
+#define REGISTER_GEQRF_PANEL(Rows)                                            \
+  template [[host_name("geqrf_panel_" #Rows)]] kernel void geqrf_panel<Rows>( \
+      device float*, device float*, constant GeqrfParams<>&, uint, uint);
+REGISTER_GEQRF_PANEL(8);
+REGISTER_GEQRF_PANEL(16);
+REGISTER_GEQRF_PANEL(32);
+
+// Unblocked Householder QR with one threadgroup per matrix. Reflectors are
+// normalized in parallel, and each trailing column gets as many simdgroups as
+// the threadgroup can spare.
 template <typename T>
 kernel void geqrf(
     device T* R [[buffer(0)]],
@@ -3334,96 +3710,108 @@ kernel void geqrf(
   const uint32_t R_stride_r = params.A_strides[params.num_batch_dims];
   const uint32_t R_stride_c = params.A_strides[params.num_batch_dims + 1];
 
-  constexpr auto kMaxThreadsPerThreadgroup = 1024;
-  constexpr auto kMaxSIMDGroups =
-      kMaxThreadsPerThreadgroup / c10::metal::simdgroup_size;
-
   threadgroup opmath_t scratch[kMaxSIMDGroups];
   threadgroup opmath_t tau_shared;
+  threadgroup opmath_t inv_u1;
 
   for (uint32_t k = 0; k < K; k++) {
     uint32_t R_k_offset = k * R_stride_c;
     uint32_t tau_k_offset = k * tau_stride;
-    // Step 1: compute norm of R[k:m, k] and copy to v_batch
-    opmath_t norm_sq = 0.0;
+    opmath_t norm_sq = 0;
+    opmath_t max_abs = 0;
     for (uint32_t i = k + tid; i < m; i += group_size) {
-      T r_ik = R_batch[i * R_stride_r + R_k_offset];
-      v_batch[i] = r_ik;
-      const auto val = static_cast<opmath_t>(r_ik);
-      norm_sq = fma(val, val, norm_sq);
+      auto value = static_cast<opmath_t>(R_batch[i * R_stride_r + R_k_offset]);
+      v_batch[i] = static_cast<T>(value);
+      norm_sq = fma(value, value, norm_sq);
+      max_abs = c10::metal::max(max_abs, fabs(value));
     }
-    const auto norm = precise::sqrt(
-        c10::metal::threadgroup_sum(scratch, norm_sq, tid, group_size));
+    norm_sq = c10::metal::threadgroup_sum(scratch, norm_sq, tid, group_size);
+    // Recompute with scaling only when squaring overflowed or underflowed.
+    constexpr auto safe_min =
+        numeric_limits<opmath_t>::min() / numeric_limits<opmath_t>::epsilon();
+    opmath_t scale = 1;
+    if (norm_sq < m * safe_min || !isfinite(norm_sq)) {
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      scale = c10::metal::threadgroup_max(scratch, max_abs, tid, group_size);
+      scale = scale == 0 ? 1 : scale;
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      norm_sq = 0;
+      for (uint32_t i = k + tid; i < m; i += group_size) {
+        auto value = static_cast<opmath_t>(v_batch[i]) / scale;
+        v_batch[i] = static_cast<T>(value);
+        norm_sq = fma(value, value, norm_sq);
+      }
+      norm_sq = c10::metal::threadgroup_sum(scratch, norm_sq, tid, group_size);
+    }
+    const auto norm = precise::sqrt(norm_sq);
 
-    // scale norm_eps by matrix dimension to handle accumulated error
-    const auto norm_eps = numeric_limits<opmath_t>::epsilon() * m;
-    constexpr auto tau_eps = numeric_limits<opmath_t>::epsilon();
-
-    // Step 2: compute Householder vector and tau
     if (tid == 0) {
-      // LAPACK convention: skip reflection for last row to preserve natural
-      // sign When k == m - 1, there's only one element in the column, so
-      // reflection would just flip its sign. Instead, preserve whatever value
-      // emerged from prior transformations to match LAPACK's behavior.
-      if (fabs(norm) < norm_eps || k == m - 1) {
-        tau_shared = 0.0;
+      // LAPACK leaves the last row's sign unchanged.
+      if (norm == 0 || k == m - 1) {
+        tau_shared = 0;
       } else {
-        opmath_t alpha = static_cast<opmath_t>(v_batch[k]);
-        opmath_t sign_alpha = (alpha >= 0.0) ? 1.0 : -1.0;
-        opmath_t beta = sign_alpha * norm;
-        opmath_t u1 = alpha + beta;
-
-        tau_shared = 1.0 + fabs(alpha) / norm;
-
-        v_batch[k] = static_cast<T>(1.0); // always 1 by construction
-        for (uint32_t i = k + 1; i < m; i++) {
-          v_batch[i] = static_cast<T>(static_cast<opmath_t>(v_batch[i]) / u1);
-        }
-
-        R_batch[k * R_stride_r + R_k_offset] = static_cast<T>(-beta);
+        auto alpha = static_cast<opmath_t>(v_batch[k]);
+        auto beta = copysign(norm, alpha);
+        tau_shared = 1 + fabs(alpha) / norm;
+        inv_u1 = 1 / (alpha + beta);
+        R_batch[k * R_stride_r + R_k_offset] = static_cast<T>(-beta * scale);
       }
       tau_batch[tau_k_offset] = static_cast<T>(tau_shared);
     }
-    threadgroup_barrier(mem_flags::mem_device);
+    threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
 
     const auto tau_val = tau_shared;
-
-    // Store the essential part of the Householder vector, below the diagonal.
-    // The implicit leading 1 at row k is not stored.
-    for (uint32_t i = k + 1 + tid; i < m; i += group_size) {
-      R_batch[i * R_stride_r + R_k_offset] = v_batch[i];
-    }
-
-    if (tau_val < tau_eps) {
-      threadgroup_barrier(mem_flags::mem_device);
+    if (tau_val == 0) {
       continue;
     }
+    if (tid == 0) {
+      v_batch[k] = static_cast<T>(1.0);
+    }
+    for (uint32_t i = k + 1 + tid; i < m; i += group_size) {
+      auto value = static_cast<T>(static_cast<opmath_t>(v_batch[i]) * inv_u1);
+      v_batch[i] = value;
+      R_batch[i * R_stride_r + R_k_offset] = value;
+    }
+    threadgroup_barrier(mem_flags::mem_device);
 
     // Step 3: apply reflection to trailing columns of R
-    // Parallelize across columns: each SIMD group (32 threads) handles one
-    // column
-    uint32_t simd_lane = tid % c10::metal::simdgroup_size;
-    uint32_t simd_group_id = tid / c10::metal::simdgroup_size;
-    uint32_t num_simd_groups = group_size / c10::metal::simdgroup_size;
+    uint32_t threads_per_col = c10::metal::simdgroup_size;
+    while (uint64_t(threads_per_col) * 2 * max(n - k - 1, 1u) <= group_size) {
+      threads_per_col *= 2;
+    }
+    uint32_t col_lane = tid % threads_per_col;
+    uint32_t col_group = tid / threads_per_col;
+    uint32_t num_col_groups = group_size / threads_per_col;
+    uint32_t simds_per_col = threads_per_col / c10::metal::simdgroup_size;
 
-    for (uint32_t j_base = k + 1; j_base < n; j_base += num_simd_groups) {
-      uint32_t j = j_base + simd_group_id;
+    for (uint32_t j_base = k + 1; j_base < n; j_base += num_col_groups) {
+      uint32_t j = j_base + col_group;
       uint32_t R_j_offset = j * R_stride_c;
+      opmath_t dot = 0.0;
       if (j < n) {
-        // Each SIMD group computes dot product for its column
-        // Use SIMD reduction within the group
-        opmath_t dot = 0.0;
-        for (uint32_t i = k + simd_lane; i < m; i += 32) {
+        for (uint32_t i = k + col_lane; i < m; i += threads_per_col) {
           opmath_t v_i = static_cast<opmath_t>(v_batch[i]);
           opmath_t r_ij =
               static_cast<opmath_t>(R_batch[i * R_stride_r + R_j_offset]);
           dot = fma(v_i, r_ij, dot);
         }
-        opmath_t vt_col = simd_sum(dot);
+      }
+      opmath_t vt_col = simd_sum(dot);
+      if (simds_per_col > 1) {
+        if (tid % c10::metal::simdgroup_size == 0) {
+          scratch[tid / c10::metal::simdgroup_size] = vt_col;
+        }
+        threadgroup_barrier(mem_flags::mem_threadgroup);
+        vt_col = 0;
+        for (uint32_t s = 0; s < simds_per_col; ++s) {
+          vt_col += scratch[col_group * simds_per_col + s];
+        }
+      }
+      if (j < n) {
         opmath_t factor = tau_val * vt_col;
 
         // Update column
-        for (uint32_t i = k + simd_lane; i < m; i += 32) {
+        for (uint32_t i = k + col_lane; i < m; i += threads_per_col) {
           opmath_t v_i = static_cast<opmath_t>(v_batch[i]);
           opmath_t r_ij =
               static_cast<opmath_t>(R_batch[i * R_stride_r + R_j_offset]);
@@ -3433,7 +3821,7 @@ kernel void geqrf(
       }
     }
 
-    threadgroup_barrier(mem_flags::mem_device);
+    threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
   }
 }
 
@@ -3549,6 +3937,21 @@ REGISTER_ORGQR(half);
 REGISTER_ORGQR(bfloat);
 REGISTER_ORGQR(float2);
 REGISTER_ORGQR(half2);
+
+#define REGISTER_HOUSEHOLDER_BLOCK(T)             \
+  template [[host_name("householder_block_" #T)]] \
+  kernel void householder_block<T>(               \
+      device const T*,                            \
+      device const T*,                            \
+      device T*,                                  \
+      device T*,                                  \
+      constant GeqrfParams<>&,                    \
+      uint,                                       \
+      uint,                                       \
+      uint);
+
+REGISTER_HOUSEHOLDER_BLOCK(float);
+REGISTER_HOUSEHOLDER_BLOCK(float2);
 
 #define REGISTER_UNPACK_PIVOTS(TO, TI)                    \
   template [[host_name("unpack_pivots_" #TO "_" #TI)]]    \
@@ -3725,7 +4128,9 @@ kernel void svd_jacobi(
         }
         float apq_abs = precise::sqrt(svd_abs2(apq_acc));
         float off = precise::sqrt(app * aqq);
-        if (off < eps || apq_abs <= params.tol * off) {
+        // Test relative column correlation even for small column norms:
+        // an absolute epsilon cutoff leaves small columns non-orthogonal.
+        if (off == 0.0f || apq_abs <= params.tol * off) {
           continue;
         }
         if (simd_lane == 0) {
