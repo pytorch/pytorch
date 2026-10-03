@@ -2960,14 +2960,18 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
         self.assertEqual(x, torch.ones_like(x))
 
     @parametrize("backend", ("aot_eager", "inductor"))
+    @parametrize("stat_views", (False, True))
     @parametrize(
         "implementation",
-        ("functional", "native", "native_aten", "native_aten_legit"),
+        ("functional", "native", "aten", "native_aten", "native_aten_legit"),
     )
     def test_function_updates_running_stats_before_join_errors(
-        self, backend, implementation
+        self, backend, stat_views, implementation
     ) -> None:
         def fn(x, running_mean, running_var, small, side):
+            if stat_views:
+                running_mean = running_mean.view(-1)
+                running_var = running_var.view(-1)
             with torch.cuda.stream(side):
                 if implementation == "functional":
                     torch.nn.functional.batch_norm(
@@ -2984,6 +2988,10 @@ class TestStreamsCUDASpecific(torch._dynamo.test_case.TestCase):
                         0.1,
                         1e-5,
                         torch.backends.cudnn.enabled,
+                    )
+                elif implementation == "aten":
+                    torch.ops.aten.batch_norm.default(
+                        x, None, None, running_mean, running_var, True, 0.1, 1e-5, True
                     )
                 else:
                     op = (
