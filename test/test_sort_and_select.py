@@ -377,6 +377,126 @@ class TestSortAndSelectDevice(TestCase):
             self.assertEqual(indices, indices_cont)
             self.assertEqual(values, values_cont)
 
+    # The tests below target aten/src/ATen/native/TopKImpl.h's unit-stride
+    # partial_sort fast path (tmp_values_stride == 1 and k * 64 <= dim_size),
+    # which sorts an index vector instead of (value, index) pairs. CPU-only:
+    # CUDA topk uses a separate kernel and never reaches this guard.
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16, torch.int64)
+    def test_topk_fastpath_matches_reference(self, device, dtype):
+        # k values straddle the k * 64 <= dim_size guard on both sides
+        # (63/64 inside, 65 outside) so both the fast path and the
+        # pair-based fallback run and are checked against a sort-based
+        # reference. Ties are allowed to break differently, so indices are
+        # verified by gathering rather than compared directly.
+        dim_size = 4096
+        for k in (1, 63, 64, 65, 512, dim_size):
+            if dtype.is_floating_point:
+                t = torch.randn(dim_size, device=device, dtype=dtype)
+            else:
+                t = torch.randint(-1000, 1000, (dim_size,), device=device, dtype=dtype)
+            for largest in (True, False):
+                values, indices = t.topk(k, largest=largest)
+                ref_values, _ = t.sort(descending=largest, stable=True)
+                self.assertEqual(values, ref_values[:k], atol=0, rtol=0)
+                self.assertEqual(t.gather(0, indices), values, atol=0, rtol=0)
+
+    @onlyCPU
+    @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
+    def test_topk_fastpath_nan_and_ties(self, device, dtype):
+        # NaN-ordering ("nan sorts as top for numpy compatibility") and
+        # duplicate-value tie handling, in both the fast path (k=5) and
+        # the fallback (k=dim_size), since the fast path's comparator was
+        # rewritten to index through tmp_values instead of reading pair.first.
+        dim_size = 2048
+        base = (torch.arange(dim_size, device=device) % 17).to(dtype)
+        nan_positions = torch.randint(0, dim_size, (dim_size // 20,), device=device)
+        base[nan_positions] = float("nan")
+        for k in (5, dim_size):
+            for largest in (True, False):
+                values, indices = base.topk(k, largest=largest)
+                ref_values, _ = base.sort(descending=largest, stable=True)
+                self.assertEqual(values, ref_values[:k], atol=0, rtol=0, equal_nan=True)
+                self.assertEqual(
+                    base.gather(0, indices), values, atol=0, rtol=0, equal_nan=True
+                )
+
+    @onlyCPU
+    @dtypes(torch.float32)
+    def test_topk_fastpath_noncontiguous_stride(self, device, dtype):
+        # torch.topk(x, k, dim=0) on a contiguous 2D tensor gives a
+        # non-unit tmp_values_stride, which must always take the
+        # pair-based fallback -- including when k * 64 <= dim_size, where
+        # the fallback must still choose partial_sort internally rather
+        # than always falling through to nth_element.
+        dim_size = 4096
+        cols = 8
+        t = torch.randn(dim_size, cols, device=device, dtype=dtype)
+        for k in (1, 63, 64, 65, dim_size):
+            for largest in (True, False):
+                for sorted_flag in (True, False):
+                    values, indices = t.topk(
+                        k, dim=0, largest=largest, sorted=sorted_flag
+                    )
+                    ref_values, _ = t.sort(dim=0, descending=largest, stable=True)
+                    if sorted_flag:
+                        self.assertEqual(values, ref_values[:k], atol=0, rtol=0)
+                    else:
+                        # order is unspecified for sorted=False; compare as sets
+                        self.assertEqual(
+                            values.sort(dim=0).values,
+                            ref_values[:k].sort(dim=0).values,
+                            atol=0,
+                            rtol=0,
+                        )
+                    self.assertEqual(t.gather(0, indices), values, atol=0, rtol=0)
+
+        # Transposed input is a second common source of non-unit stride:
+        # .t() on a (dim_size, cols)-contiguous tensor makes dim=1 the
+        # size-dim_size axis with stride cols (not 1).
+        t2 = torch.randn(dim_size, cols, device=device, dtype=dtype).t()
+        for k in (1, 64, 65):
+            values, indices = t2.topk(k, dim=1)
+            ref_values, _ = t2.sort(dim=1, descending=True, stable=True)
+            self.assertEqual(values, ref_values[:, :k], atol=0, rtol=0)
+            self.assertEqual(t2.gather(1, indices), values, atol=0, rtol=0)
+
+    @onlyCPU
+    @dtypes(torch.float32)
+    def test_topk_fastpath_output_discontiguous(self, device, dtype):
+        # Same intent as test_topk_1d_output_discontiguous, but at a size
+        # that actually exercises the fast path: mode_values/mode_indices
+        # strides are independent of tmp_values_stride, so a discontiguous
+        # out= must still work when the input itself is unit-stride.
+        dim_size = 4096
+        tensor = torch.randn(dim_size, device=device, dtype=dtype)
+        k = 32  # k * 64 = 2048 <= 4096: fast path
+        for sorted_flag in (True, False):
+            values = torch.empty(2 * k, device=device, dtype=dtype)[::2]
+            indices = torch.empty(3 * k, device=device, dtype=torch.long)[::3]
+            torch.topk(tensor, k, sorted=sorted_flag, out=(values, indices))
+            values_cont, indices_cont = tensor.topk(k, sorted=sorted_flag)
+            self.assertEqual(values, values_cont)
+            self.assertEqual(indices, indices_cont)
+
+    @onlyCPU
+    @dtypes(torch.float32)
+    def test_topk_fastpath_values_out_is_self(self, device, dtype):
+        # The fast path's materialize loop reads tmp_values[idx[j]] and
+        # writes mode_values[j] in the same iteration, unlike the fallback,
+        # which fully copies into a private buffer before writing any
+        # output. If `values` could ever alias `self`, an in-place write
+        # could corrupt a later read. TensorIterator's overlap checks are
+        # expected to reject this; assert that expectation explicitly
+        # instead of silently relying on it.
+        dim_size = 4096
+        t = torch.randn(dim_size, device=device, dtype=dtype)
+        k = 32
+        indices = torch.empty(k, device=device, dtype=torch.long)
+        with self.assertRaises(RuntimeError):
+            torch.topk(t, k, out=(t[:k], indices))
+
     @dtypes(*all_types_and(torch.bool, torch.half, torch.bfloat16))
     def test_stable_sort_against_numpy(self, device, dtype):
         if dtype in floating_types_and(torch.float16, torch.bfloat16):

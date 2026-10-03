@@ -1,6 +1,7 @@
 #pragma once
-#include <ATen/core/TensorAccessor.h>
 #include <ATen/NumericUtils.h>
+#include <ATen/core/TensorAccessor.h>
+#include <numeric>
 
 namespace at::native {
 
@@ -27,6 +28,53 @@ void topk_impl_loop(
   if (k == 0) {
     return;
   }
+
+  // Fast path: unit-stride input, selecting via partial_sort. Sorting an
+  // index vector (8 bytes/element) instead of (value, index) pairs
+  // (16 bytes/element) halves the working set, and partial_sort's tail
+  // scan still reads tmp_values sequentially since idx[i] == i for any
+  // position not yet touched by the heap. Restricted to unit stride,
+  // because a non-unit stride turns tmp_values[idx[j]] into a scattered
+  // gather; restricted to partial_sort, because nth_element's swaps
+  // scramble idx and remove the sequential-read property this relies on.
+  if (tmp_values_stride == 1 && k * 64 <= dim_size) {
+    static thread_local std::vector<int64_t> idx;
+    idx.resize(dim_size);
+    for (const auto i : c10::irange(n)) {
+      TensorAccessor<scalar_t, 1> mode_values(
+          reinterpret_cast<scalar_t*>(data[0] + i * strides[0]),
+          &k, &mode_values_stride);
+      TensorAccessor<int64_t, 1> mode_indices(
+          reinterpret_cast<int64_t*>(data[1] + i * strides[1]),
+          &k, &mode_indices_stride);
+      const scalar_t* tmp_values =
+          reinterpret_cast<const scalar_t*>(data[2] + i * strides[2]);
+
+      std::iota(idx.begin(), idx.end(), int64_t{0});
+
+      // we want nan to be sorted as top for numpy compatibility
+      if (largest) {
+        std::partial_sort(idx.begin(), idx.begin() + k, idx.end(),
+          [tmp_values](int64_t a, int64_t b) -> bool {
+            accscalar_t va = tmp_values[a], vb = tmp_values[b];
+            return (_isnan<accscalar_t>(va) && !_isnan<accscalar_t>(vb)) || (va > vb);
+          });
+      } else {
+        std::partial_sort(idx.begin(), idx.begin() + k, idx.end(),
+          [tmp_values](int64_t a, int64_t b) -> bool {
+            accscalar_t va = tmp_values[a], vb = tmp_values[b];
+            return (!_isnan<accscalar_t>(va) && _isnan<accscalar_t>(vb)) || (va < vb);
+          });
+      }
+
+      for (const auto j : c10::irange(k)) {
+        mode_values[j] = tmp_values[idx[j]];
+        mode_indices[j] = idx[j];
+      }
+    }
+    return;
+  }
+
   using elem_t = std::pair<accscalar_t, int64_t>;
   std::vector<elem_t> queue(dim_size);
   for (const auto i : c10::irange(n)) {
