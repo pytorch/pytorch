@@ -249,7 +249,7 @@ Tensor& range_cuda_out(const Scalar& start, const Scalar& end, const Scalar& ste
 }
 
 Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "arange_cuda", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "arange_cuda", [&]() {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto xstart = start.to<accscalar_t>();
     auto xstep = step.to<accscalar_t>();
@@ -268,12 +268,20 @@ Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& st
     }
     bool is_contiguous = result.is_contiguous();
     Tensor r = !is_contiguous ? at::empty_like(result, LEGACY_CONTIGUOUS_MEMORY_FORMAT) : result;
-
-    gpu_kernel_with_index(r, [xstart, xstep]GPU_LAMBDA(int64_t ind) -> scalar_t {
-        accscalar_t inc = xstep * static_cast<accscalar_t>(ind);
-        accscalar_t val = xstart + inc;
-        return static_cast<scalar_t>(val);
-    });
+    if(isComplexType(result.scalar_type())) {
+      if(size <= 1) {
+        r.fill_(start);
+      } else {
+        Scalar endc = start.to<c10::complex<double>>() + step.to<c10::complex<double>>() * static_cast<double>(size - 1);
+        linspace_cuda_out(start, endc, size, r);
+      }
+    } else {
+      gpu_kernel_with_index(r, [xstart, xstep]GPU_LAMBDA(int64_t ind) -> scalar_t {
+          accscalar_t inc = xstep * static_cast<accscalar_t>(ind);
+          accscalar_t val = xstart + inc;
+          return static_cast<scalar_t>(val);
+      });
+    }
 
     if(!is_contiguous) {
       result.copy_(r);
