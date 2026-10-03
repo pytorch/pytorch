@@ -20,6 +20,7 @@ from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import CompileCounterWithBackend, rand_strided
 from torch._dynamo.utils import same
+from torch._inductor import config
 from torch._inductor import config, cpu_vec_isa, metrics, test_operators
 from torch._inductor.codegen.cpp import (
     CppKernelProxy,
@@ -1635,6 +1636,44 @@ class CPUReproTests(TestCase):
             # Use same criterion as test_inplace_squeeze_needed
             # for parallel reduction.
             self.common(mod, (x, weight), atol=5e-1, rtol=5e-1)
+
+    @requires_vectorization
+    def test_tile2d_reduction_masked_tail_store(self):
+        # Fix issue: https://github.com/pytorch/pytorch/issues/196681
+        # The output-axis tail (66 at width 4) must be stored masked; a
+        # pointwise level between the tiled axes used to misread the layout.
+        def fn(x):
+            v = (x * 0.5) * (torch.erf(x * 0.7071067811865476) + 1)
+            a = v.permute(3, 2, 1, 0)
+            p = F.pad(a, (0, 0, 0, 58), value=0.5)
+            q = F.pad(v, (0, 0, 0, 0, 0, 58), value=0.5)
+            return torch.matmul(q, p)
+
+        torch.manual_seed(0)
+        x = torch.randn(1, 8, 66, 66).contiguous(memory_format=torch.channels_last)
+        # AVX2/AVX512 decline to vectorize this kernel and emit a plain
+        # scalar loop instead, so the masked tail store only exists on
+        # narrower ISAs; check numerics everywhere and the store shape
+        # where the kernel actually vectorizes.
+        isa = cpu_vec_isa.pick_vec_isa()
+        kernel_vectorizes = (
+            isa != cpu_vec_isa.invalid_vec_isa and isa.bit_width() <= 128
+        )
+        for tail_vec in (True, False):
+            with config.patch({"cpp.enable_loop_tail_vec": tail_vec}):
+                opt_fn = torch.compile(fn)
+                actual, code = run_and_get_cpp_code(opt_fn, x)
+                self.assertEqual(actual, fn(x))
+                if not kernel_vectorizes:
+                    continue
+                if tail_vec:
+                    FileCheck().check(
+                        "tmp_acc0_vec.store(out_ptr0 + static_cast<int64_t>(x0 + 66LL*x1), static_cast<int64_t>(2LL))"
+                    ).run(code)
+                else:
+                    FileCheck().check(
+                        "out_ptr0[static_cast<int64_t>(x0_tail + 66LL*x1)] = tmp_acc0_arr[x0_tail - static_cast<int64_t>(64LL)];"
+                    ).run(code)
 
     @requires_vectorization
     def test_max_parallel_depth_sub_vector_width_loop(self):
