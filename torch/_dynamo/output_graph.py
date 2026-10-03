@@ -1369,7 +1369,9 @@ class OutputGraph(OutputGraphCommon):
             input_value = node.meta.get("example_value")
             if isinstance(input_value, torch.Tensor) and (
                 input_value is example_value
-                or torch._C._is_alias_of(input_value, example_value)
+                or torch._C._is_alias_of(  # pyrefly: ignore[missing-attribute]
+                    input_value, example_value
+                )
             ):
                 self._record_input_mutation_on_current_stream(tx, input_value)
                 return
