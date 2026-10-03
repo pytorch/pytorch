@@ -78,6 +78,12 @@ for a brief introduction to all features related to distributed training.
 .. currentmodule:: torch.distributed
 ```
 
+.. warning::
+    **Autograd Support for Collective Operations:**
+    Functions under the standard ``torch.distributed`` namespace (e.g., ``torch.distributed.all_reduce``) do **not** propagate gradients. Using these default paths directly within a model's forward pass can result in a subtle error where you silently get incorrect gradients during the backward pass.
+    
+    If you require gradients to propagate through collective communications, use the alternatives provided in the ``torch.distributed.nn`` namespace (e.g., ``torch.distributed.nn.all_reduce``). These alternative functions automatically wrap the distributed operations to support autograd.
+
 ## Backends
 
 `torch.distributed` supports four built-in backends, each with
