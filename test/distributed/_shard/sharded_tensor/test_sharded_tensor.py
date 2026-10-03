@@ -2532,7 +2532,6 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 shard = remote_shard.to_here()
                 self.assertEqual((5, 5), shard.tensor.size())
 
-    @skipIfRocm
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -2587,7 +2586,6 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             with self.assertRaises(ValueError):
                 st = sharded_tensor.init_from_local_shards(local_shards)
 
-    @skipIfRocm
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -2621,7 +2619,6 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
         with self.assertRaises(ValueError):
             sharded_tensor.init_from_local_shards(local_shards, 0, 0)
 
-    @skipIfRocm
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -2716,7 +2713,6 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             self.assertEqual((5, 5), shard_metadata.shard_sizes)
             self.assertEqual(f"rank:{rank}/cuda:{rank}", str(shard_metadata.placement))
 
-    @skipIfRocm
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -2791,7 +2787,6 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             self.assertEqual((0, 0), shard_metadata.shard_sizes)
             self.assertEqual(f"rank:{rank}/cuda:{rank}", str(shard_metadata.placement))
 
-    @skipIfRocm
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()

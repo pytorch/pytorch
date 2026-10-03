@@ -73,6 +73,7 @@
 # /torch/_functorch/compilers.py
 # /torch/_functorch/partitioners.py
 /torch/_functorch/_aot_autograd/*.py @bdhirsh @aorenste
+/torch/_functorch/_aot_autograd/complex_decomposition.py @hameerabbasi @amjames
 #
 # [core_aten_linalg]
 /aten/src/ATen/native/**/*LinearAlgebra* @lezcano @nikitaved
@@ -410,7 +411,7 @@
 /test/allowlist_for_publicAPI.json @albanD
 # /test/backends/
 # /test/bench_mps_ops.py
-# /test/complex_tensor/
+/test/complex_tensor/ @hameerabbasi @amjames
 # /test/conftest.py
 # /test/create_dummy_torchscript_model.py
 # /test/error_messages/
@@ -489,6 +490,8 @@
 # /test/mkldnn_verbose.py
 # /test/pytest_shard_custom.py
 # /test/python_native/
+/test/python_native/test_lce_fused_grad_logits_kernel.py @slayton58 @pearu
+/test/python_native/test_linear_cross_entropy_override.py @slayton58 @pearu
 # /test/run_doctests.sh
 # /test/simulate_nccl_errors.py
 # /test/slow_tests.json
@@ -629,12 +632,12 @@
 #
 # [backend_mps]
 # /aten/src/ATen/metal/
-/aten/src/ATen/mps/ @malfet
-/aten/src/ATen/native/mps/ @malfet
-/c10/metal/ @malfet
+/aten/src/ATen/mps/ @malfet @Isalia20
+/aten/src/ATen/native/mps/ @malfet @Isalia20
+/c10/metal/ @malfet @Isalia20
 # /test/metal/
 # /test/test_metal.py
-/test/test_mps.py @malfet
+/test/test_mps.py @malfet @Isalia20
 # /torch/backends/mps/
 # /torch/csrc/mps/
 # /torch/mps/
@@ -681,6 +684,7 @@
 # /torch/_lowrank.py
 # /torch/_meta_registrations.py
 /torch/_native/ @slayton58 @drisspg
+/torch/_native/ops/linear_cross_entropy/ @slayton58 @pearu
 # /torch/_numpy/
 # /torch/_opaque_base.py
 # /torch/_prims/
@@ -693,6 +697,7 @@
 # /torch/_streambase.py
 # /torch/_strobelight/
 # /torch/_subclasses/
+/torch/_subclasses/complex_tensor/ @hameerabbasi @amjames
 # /torch/_tensor.py
 # /torch/_tensor_docs.py
 # /torch/_tensor_iterator.py
@@ -744,6 +749,7 @@
 #
 # [python_nn_api]
 /torch/nn/ @albanD @jbschlosser
+/torch/nn/modules/linear_cross_entropy*.py @slayton58 @pearu
 /torch/nn/utils/parametriz*.py @lezcano
 /torch/nn/attention/flex_attention.py @drisspg
 #
@@ -916,7 +922,7 @@
 /.github/ @pytorch/pytorch-dev-infra
 #
 # [infra_build_packaging]
-# /.ci/manywheel/
+# /.ci/wheel/
 # /.coveragerc
 # /.ctags.d/
 # /.dockerignore
@@ -1045,10 +1051,12 @@
 #
 # [infra_test]
 # /test/benchmark_utils/
+# /test/junit_xml_testdata/
 # /test/scripts/
 # /test/spincli/
 # /test/strobelight/
 /test/test_public_bindings.py @albanD
+# /test/test_reuse_old_whl.py
 # /test/test_testing.py
 # /test/test_utils.py
 # /test/test_utils_config_module.py
@@ -1125,6 +1133,7 @@
 # [compiler_dynamo]
 # /test/distributed/test_dynamo_distributed.py
 # /test/dynamo/
+/test/dynamo/test_complex.py @hameerabbasi @amjames
 # /test/dynamo_expected_failures/
 # /test/dynamo_skips/
 # /test/export/test_dynamic_shapes.py
@@ -1163,6 +1172,7 @@
 # /torch/nativert/
 #
 # [ai_agent_tooling]
+# /.agents/
 # /.claude/
 # /.github/copilot-instructions.md
 # /.github/workflows/claude-autorevert-advisor.yml
