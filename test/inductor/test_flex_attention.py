@@ -3338,6 +3338,75 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             self.assertEqual(a, b, atol=1e-2, rtol=1e-2)
 
     @supported_platform
+    @skip_on_cpu
+    def test_torch_func_grad(self, device):
+        """flex_attention under torch.func.grad should match a plain backward(). See #144810."""
+        torch.manual_seed(0)
+        shape = (2, 4, 128, 64)
+        q, k, v = (
+            torch.randn(shape, device=device, dtype=torch.float64) for _ in range(3)
+        )
+
+        grads = torch.func.grad(
+            lambda *args: flex_attention(*args).sum(), argnums=(0, 1, 2)
+        )(q, k, v)
+
+        refs = tuple(t.detach().clone().requires_grad_() for t in (q, k, v))
+        flex_attention(*refs).sum().backward()
+
+        for grad, ref, name in zip(grads, refs, "qkv"):
+            self.assertEqual(grad, ref.grad, msg=f"gradient mismatch for {name}")
+
+    @supported_platform
+    @skip_on_cpu
+    def test_torch_func_grad_block_mask(self, device):
+        """block_mask holds tensors that also need unwrapping. See #144810."""
+        torch.manual_seed(0)
+        B, H, S, D = 2, 4, 128, 64
+        q, k, v = (
+            torch.randn((B, H, S, D), device=device, dtype=torch.float64)
+            for _ in range(3)
+        )
+        block_mask = create_block_mask(
+            lambda b, h, q_idx, kv_idx: q_idx >= kv_idx, B, H, S, S, device=device
+        )
+
+        grad_q = torch.func.grad(
+            lambda x: flex_attention(x, k, v, block_mask=block_mask).sum()
+        )(q)
+
+        q_ref = q.detach().clone().requires_grad_()
+        flex_attention(q_ref, k, v, block_mask=block_mask).sum().backward()
+
+        self.assertEqual(grad_q, q_ref.grad)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_torch_func_grad_captured_buffer(self, device):
+        """torch.func.grad should also reach tensors captured by score_mod. See #144810."""
+        torch.manual_seed(0)
+        shape = (2, 4, 128, 64)
+        q, k, v = (
+            torch.randn(shape, device=device, dtype=torch.float64) for _ in range(3)
+        )
+        bias = torch.randn(shape[1], device=device, dtype=torch.float64)
+
+        def run(bias, q):
+            def score_mod(score, b, h, q_idx, kv_idx):
+                return score + bias[h]
+
+            return flex_attention(q, k, v, score_mod=score_mod).sum()
+
+        grad_bias, grad_q = torch.func.grad(run, argnums=(0, 1))(bias, q)
+
+        bias_ref = bias.detach().clone().requires_grad_()
+        q_ref = q.detach().clone().requires_grad_()
+        run(bias_ref, q_ref).backward()
+
+        self.assertEqual(grad_bias, bias_ref.grad)
+        self.assertEqual(grad_q, q_ref.grad)
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
