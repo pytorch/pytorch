@@ -102,6 +102,42 @@ REGISTER_BINARY_OP(hardswish_backward, float, float);
 REGISTER_BINARY_OP(hardswish_backward, half, half);
 REGISTER_BINARY_OP(hardswish_backward, bfloat, bfloat);
 
+// The shared stub uses other=self for forward and other=grad for backward.
+struct threshold_functor {
+  template <typename T, enable_if_t<is_scalar_floating_point_v<T>, bool> = true>
+  inline T operator()(
+      const T self,
+      const T other,
+      const ThresholdParams<float> params) {
+    return float(self) <= params.threshold ? static_cast<T>(params.value)
+                                           : other;
+  }
+
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline T operator()(
+      const T self,
+      const T other,
+      const ThresholdParams<T> params) {
+    return self <= params.threshold ? params.value : other;
+  }
+};
+
+typedef ThresholdParams<float> ThresholdParams_float;
+REGISTER_BINARY_ALPHA_OP(threshold, float, ThresholdParams_float, float);
+REGISTER_BINARY_ALPHA_OP(threshold, half, ThresholdParams_float, half);
+REGISTER_BINARY_ALPHA_OP(threshold, bfloat, ThresholdParams_float, bfloat);
+
+#define REGISTER_THRESHOLD_INT_OP(T)              \
+  typedef ThresholdParams<T> ThresholdParams_##T; \
+  REGISTER_BINARY_ALPHA_OP(threshold, T, ThresholdParams_##T, T);
+
+REGISTER_THRESHOLD_INT_OP(long);
+REGISTER_THRESHOLD_INT_OP(int);
+REGISTER_THRESHOLD_INT_OP(short);
+REGISTER_THRESHOLD_INT_OP(char);
+REGISTER_THRESHOLD_INT_OP(uchar);
+REGISTER_THRESHOLD_INT_OP(bool);
+
 struct elu_functor {
   template <typename T>
   inline T operator()(const T self_, const ELUParams<T> params) {

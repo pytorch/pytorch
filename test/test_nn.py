@@ -12604,6 +12604,35 @@ class TestNNDeviceType(NNTestCase):
         with self.assertRaisesRegex(RuntimeError, "Lower bound should be less than or equal to the upper bound"):
             F.rrelu(x, lower=0.5, upper=0.3)
 
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize_test("out_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize_test("grad_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize_test("noncontiguous", [False, True])
+    def test_threshold_out_dtype(self, device, dtype, out_dtype, grad_dtype, noncontiguous):
+        cpu_x = torch.tensor([[-2, 0, 0.25], [1, 2, float("nan")]], dtype=dtype)
+        if noncontiguous:
+            cpu_x = cpu_x.t()
+        x = cpu_x.to(device)
+        expected = torch.empty_like(cpu_x, dtype=out_dtype)
+        actual = torch.empty_like(x, dtype=out_dtype)
+        torch.ops.aten.threshold.out(cpu_x, 0.25, 0.125, out=expected)
+        torch.ops.aten.threshold.out(x, 0.25, 0.125, out=actual)
+        self.assertEqual(actual, expected)
+        cpu_grad = torch.arange(1, 7, dtype=grad_dtype).reshape(cpu_x.shape)
+        torch.ops.aten.threshold_backward.grad_input(cpu_grad, cpu_x, 0.25, grad_input=expected)
+        torch.ops.aten.threshold_backward.grad_input(cpu_grad.to(device), x, 0.25, grad_input=actual)
+        self.assertEqual(actual, expected)
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_threshold_scalar_precision(self, device, dtype):
+        if self.device_type not in ("cpu", "mps"):
+            self.skipTest("This test covers CPU/MPS float32 scalar comparison")
+        x = torch.ones(1, device=device, dtype=dtype)
+        self.assertEqual(torch.threshold(x, 0.9999, 0), x)
+        value = 1e10 if dtype == torch.float16 else 1e100
+        with self.assertRaisesRegex(RuntimeError, "cannot be converted.*without overflow"):
+            torch.threshold(x, 0.5, value)
+
     def test_threshold_inplace_overlap(self, device):
         # Inplace threshold is okay, because it is idempotent
         x = torch.randn((1, 6), device=device).expand((6, 6))
