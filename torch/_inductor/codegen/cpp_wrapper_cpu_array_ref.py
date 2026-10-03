@@ -16,7 +16,9 @@ from .cpp_utils import DTYPE_TO_CPP
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import (
     BufferLike,
+    EnterKernelProfileScopeLine,
     EnterSubgraphLine,
+    ExitKernelProfileScopeLine,
     ExitSubgraphLine,
     MemoryPlanningLine,
     MemoryPlanningState,
@@ -806,6 +808,14 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
             elif isinstance(line, EnterSubgraphLine):
                 planning_states.append(MemoryPlanningState())
             elif isinstance(line, ExitSubgraphLine):
+                past_planning_states.append(planning_states.pop())
+            elif isinstance(line, EnterKernelProfileScopeLine):
+                # A profiling block is a C++ scope, so a buffer reused across
+                # one of its braces would be declared on the wrong side of it.
+                # This mirrors the base wrapper; the two loops differ only in
+                # what they do with the resulting states.
+                planning_states.append(MemoryPlanningState())
+            elif isinstance(line, ExitKernelProfileScopeLine):
                 past_planning_states.append(planning_states.pop())
         past_planning_states.append(planning_states.pop())
         if len(planning_states) != 0:

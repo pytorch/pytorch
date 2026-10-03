@@ -154,6 +154,12 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 - [ ] **_make_wrapper_subclass** — PR creates tensor subclasses by calling `torch.Tensor.__new__()` directly instead of using `torch.Tensor._make_wrapper_subclass()` which properly sets up the subclass wrapper
 - [ ] **__tensor_flatten__ / __tensor_unflatten__** — PR adds a tensor subclass without implementing `__tensor_flatten__()` and `__tensor_unflatten__()`, breaking serialization and `torch.compile` support
 
+### CI Runner Labels
+
+When a PR adds CI (a workflow, job, matrix or matrix entry) or changes a CI runner label, even if only its prefix changes:
+
+- [ ] **Runner naming standard** — PR adds or changes a runner label, or adds CI that inherits one from an input, matrix or dispatch default or option, and the label breaks the runner naming standard in [ci-runner-naming.md](ci-runner-naming.md). If no other CI in this repo uses that label, this always means **Request Changes**; if other CI already uses it, give a short non-blocking heads-up instead (an exception to "Everything is a must-fix")
+
 ### Miscellaneous
 
 - [ ] **torch._check** — PR uses `assert` or `if not cond: raise` in Python op implementations instead of `torch._check()` / `torch._check_is_size()` which work correctly with meta tensors and symbolic shapes
@@ -197,14 +203,6 @@ When a PR touches code in the scope of any item below, **stop and investigate** 
 - [ ] **No duplicated test logic** - Similar tests share a private helper method called from individual tests with different configs
 - [ ] **Prefer xfail over skip** - PR disables a test on a platform/config with `skip` (e.g. `@skipIf`, `@unittest.skip`, `self.skipTest`, `DecorateInfo(unittest.skip, ...)`) when the test merely fails rather than crashing. Prefer expected-failure (`@unittest.expectedFailure`, `DecorateInfo(unittest.expectedFailure, ...)`, or PyTorch's `xfailIf`/`expectedFailure*` helpers) instead. A skip silently hides the test forever — once the underlying bug is fixed or the platform gains support, the test stays disabled and the new coverage is lost. An xfail flips to a hard failure the moment the test starts passing, forcing the author to remove the marker and re-enable the test. Only accept a `skip` when the test would hard-crash the process (segfault, fatal abort that takes down the whole test binary), hang, or is genuinely flaky (non-deterministic pass/fail); in those cases the author should say so explicitly. A plain deterministic assertion failure or unsupported-op error is always an xfail, never a skip
 - [ ] **Use weakref for lifetime testing** - PR uses `sys.getrefcount()` to test whether objects are kept alive. Use `weakref.ref()` instead — create a weak reference, delete the strong references, then check if the weakref is dead (`wr() is None`). `sys.getrefcount` is a CPython implementation detail that varies across versions and is fragile
-
-### viable/strict CI Job Placement
-
-`pull.yml` and `trunk.yml` gate every PR merge and the progression of `viable/strict` (the stable branch), so slow or flaky jobs impose a significant cost on all contributors — `docs/source/community/viable_strict.md` is the policy for keeping this blocking set healthy. The items below are advisory and do not on their own prevent **Approve**; skip them if the PR does not modify one of these workflows.
-
-- [ ] **New jobs prove reliability and latency before gating** - PR adds a job with no run history: a new hardware target, a new test config, or a job with no analog already in the workflow. Prefer jobs relocated from an existing workflow with history, or a variation of a job already in the workflow; otherwise recommend `unstable.yml`, which runs on every main push, to get an initial read. Hold this line hardest for scarce or partner-operated runners (`linux.dgx.b200`, `linux.rocm.gpu.*`, etc.), rather than a scalable instance family such as `linux.g4dn.*` or `linux.g6.*`. Fixed inventory pools may result in additional queueing; staging in `unstable.yml` first surfaces that cost on main pushes before the job gates every PR. Skip when the job replaces one deleted in the same PR (rename, OS or toolchain bump) or is build-only
-- [ ] **New jobs surface novel breakages** - PR adds a job running the same tests as an existing job in the same workflow, differing only in environment. The PR should say what breakage it catches that the existing job does not
-- [ ] **Cadence matches cost** - PR gates every commit on a job that does not need per-commit latency, or widens what an existing gating job builds. Jobs that broaden coverage rather than catch fast-moving regressions should consider placement in `periodic.yml`, which runs on cron and does not block
 
 ## Security
 
