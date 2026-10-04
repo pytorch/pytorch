@@ -888,7 +888,16 @@ constexpr std::array rt_binary_specializations = {
     std::array<c10::ScalarType, 3>(
         {c10::CppTypeToScalarType<Half>::value,
          c10::CppTypeToScalarType<Half>::value,
-         c10::CppTypeToScalarType<float>::value})};
+         c10::CppTypeToScalarType<float>::value}),
+    // Integer true division promotes to the default dtype (float32 unless
+    // changed), so int32/int32 otherwise lands on the manual-unroll path with a
+    // runtime ScalarType switch per element. int32 is listed alone among the
+    // integer widths because can_vectorize_up_to keys off the functor's
+    // argument type (float), which matches int32 byte for byte.
+    std::array<c10::ScalarType, 3>(
+        {c10::CppTypeToScalarType<float>::value,
+         c10::CppTypeToScalarType<int32_t>::value,
+         c10::CppTypeToScalarType<int32_t>::value})};
 
 bool check_binary_rt_types_for_specialization(TensorIteratorBase& iter) {
   if (iter.ninputs() != 2)
