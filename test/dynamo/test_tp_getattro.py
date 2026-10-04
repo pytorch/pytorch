@@ -631,6 +631,8 @@ class TpGetattroTests(torch._dynamo.test_case.TestCase):
         for fn in (both_none, bad_obj, owner_not_type, wrong_owner_type):
             with self.subTest(fn=fn.__name__):
                 with self.assertRaises(TypeError):
+                    fn()
+                with self.assertRaises(torch._dynamo.exc.Unsupported):
                     torch.compile(fn, backend="eager", fullgraph=True)()
 
     def test_staticmethod_constructor_func_attr(self):
