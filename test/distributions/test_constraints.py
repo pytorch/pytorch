@@ -4,8 +4,7 @@ import pytest
 
 import torch
 from torch.distributions import biject_to, constraints, transform_to
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, maybe_to_accelerator, TEST_ACCELERATOR
 
 
 EXAMPLES = [
@@ -81,29 +80,26 @@ CONSTRAINTS = [
     (constraints.positive_definite,),
 ]
 
-
-def build_constraint(constraint_fn, args, is_cuda=False):
+def build_constraint(constraint_fn, args, is_accelerator=False):
     if not args:
         return constraint_fn
-    t = torch.cuda.DoubleTensor if is_cuda else torch.DoubleTensor
-    return constraint_fn(*(t(x) if isinstance(x, list) else x for x in args))
+    return constraint_fn(*(maybe_to_accelerator(torch.DoubleTensor(x)) if isinstance(x, list) else x for x in args))
 
 
 @pytest.mark.parametrize(("constraint_fn", "result", "value"), EXAMPLES)
 @pytest.mark.parametrize(
-    "is_cuda",
+    "is_accelerator",
     [
         False,
         pytest.param(
-            True, marks=pytest.mark.skipif(not TEST_CUDA, reason="CUDA not found.")
+            True, marks=pytest.mark.skipif(not TEST_ACCELERATOR, reason="Accelerator not found.")
         ),
     ],
 )
-def test_constraint(constraint_fn, result, value, is_cuda):
-    t = torch.cuda.DoubleTensor if is_cuda else torch.DoubleTensor
+def test_constraint(constraint_fn, result, value, is_accelerator):
     if constraint_fn.check(t(value)).all() != result:
         raise AssertionError(
-            f"Expected {result}, got {constraint_fn.check(t(value)).all()}"
+            f"Expected {result}, got {constraint_fn.check(maybe_to_accelerator(torch.DoubleTensor(value))).all()}"
         )
 
 
@@ -111,16 +107,16 @@ def test_constraint(constraint_fn, result, value, is_cuda):
     ("constraint_fn", "args"), [(c[0], c[1:]) for c in CONSTRAINTS]
 )
 @pytest.mark.parametrize(
-    "is_cuda",
+    "is_accelerator",
     [
         False,
         pytest.param(
-            True, marks=pytest.mark.skipif(not TEST_CUDA, reason="CUDA not found.")
+            True, marks=pytest.mark.skipif(not TEST_ACCELERATOR, reason="Accelerator not found.")
         ),
     ],
 )
-def test_biject_to(constraint_fn, args, is_cuda):
-    constraint = build_constraint(constraint_fn, args, is_cuda=is_cuda)
+def test_biject_to(constraint_fn, args, is_accelerator):
+    constraint = build_constraint(constraint_fn, args, is_accelerator=is_accelerator)
     try:
         t = biject_to(constraint)
     except NotImplementedError:
@@ -132,8 +128,8 @@ def test_biject_to(constraint_fn, args, is_cuda):
         x = torch.randn(6, 6, dtype=torch.double)
     else:
         x = torch.randn(5, 5, dtype=torch.double)
-    if is_cuda:
-        x = x.cuda()
+    if is_accelerator:
+        x = x.to(torch.accelerator.current_accelerator())
     y = t(x)
     if not constraint.check(y).all():
         raise AssertionError(
@@ -160,24 +156,24 @@ def test_biject_to(constraint_fn, args, is_cuda):
     ("constraint_fn", "args"), [(c[0], c[1:]) for c in CONSTRAINTS]
 )
 @pytest.mark.parametrize(
-    "is_cuda",
+    "is_accelerator",
     [
         False,
         pytest.param(
-            True, marks=pytest.mark.skipif(not TEST_CUDA, reason="CUDA not found.")
+            True, marks=pytest.mark.skipif(not TEST_ACCELERATOR, reason="Accelerator not found.")
         ),
     ],
 )
-def test_transform_to(constraint_fn, args, is_cuda):
-    constraint = build_constraint(constraint_fn, args, is_cuda=is_cuda)
+def test_transform_to(constraint_fn, args, is_accelerator):
+    constraint = build_constraint(constraint_fn, args, is_accelerator=is_accelerator)
     t = transform_to(constraint)
     if constraint_fn is constraints.corr_cholesky:
         # (D * (D-1)) / 2 (where D = 4) = 6 (size of last dim)
         x = torch.randn(6, 6, dtype=torch.double)
     else:
         x = torch.randn(5, 5, dtype=torch.double)
-    if is_cuda:
-        x = x.cuda()
+    if is_accelerator:
+        x = x.to(torch.accelerator.current_accelerator())
     y = t(x)
     if not constraint.check(y).all():
         raise AssertionError(f"Failed to transform_to({constraint})")
