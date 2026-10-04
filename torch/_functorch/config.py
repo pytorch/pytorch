@@ -472,11 +472,11 @@ force_autograd_cache = False
 selective_decompose: bool = False
 
 # Complex Support
-# This config disallows decomposition of complex-valued Tensors using
+# This config allows decomposition of complex-valued Tensors using
 # `torch._subclasses.complex_tensor.ComplexTensor` by decomposing everything into
 # real-valued operations, passing through the regular pipeline as necessary,
 # then converting back to a regular tensor.
-enable_complex_wrapper: bool = False
+enable_complex_wrapper: bool = True
 
 
 if TYPE_CHECKING:
