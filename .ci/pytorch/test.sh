@@ -404,6 +404,8 @@ if [[ $TEST_CONFIG == 'nogpu_NO_AVX2' ]]; then
   export ATEN_CPU_CAPABILITY=default
 elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx512
+  # valgrind cannot decode AVX-512 instructions
+  export VALGRIND=OFF
 fi
 
 test_tsan() {
@@ -1324,7 +1326,7 @@ version = importlib.metadata.version("flydsl")
 print(f"FlyDSL {version} runtime available on {arch}")
 PY
   )
-  python test/run_test.py --include inductor/test_flydsl_template.py --verbose
+  python test/run_test.py --include inductor/test_flydsl_template.py inductor/test_flydsl_grouped_scheduler.py --verbose
   assert_git_not_dirty
 }
 
