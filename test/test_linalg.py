@@ -5810,6 +5810,8 @@ class TestLinalg(TestCase):
             tau = (2 / (1 + t * t)).reshape(1)
             return torch.linalg.householder_product(a, tau).sum()
 
+        # Based on original repro described in
+        # https://github.com/pytorch/pytorch/issues/196698
         def reference(t):
             return 1 - 2 * (1 + t) / (1 + t * t)
 
