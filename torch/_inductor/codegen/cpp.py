@@ -1622,10 +1622,11 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def atanh(x):
-        # For real x, atanh(x) = 1/2 * log((1+x)/(1-x))
-        vec_one = f"decltype({x})(1)"
-        vec_one_half = f"decltype({x})(0.5)"
-        return f"{vec_one_half} * (({vec_one} + {x})/({vec_one} - {x})).log()"
+        # For real x, atanh(x) = 0.5 * log((1+x)/(1-x)). Using the direct
+        # log form causes catastrophic cancellation for small |x| (when
+        # (1+x)/(1-x) ≈ 1) leading to large ULP errors. Fall back to
+        # scalar std::atanh for accuracy.
+        return f"std::atanh({x})"
 
     @staticmethod
     def asinh(x):
