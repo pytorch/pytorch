@@ -343,7 +343,14 @@ class MetaTensorDescriber:
                 # stale _base link; a genuine view still shares its base's
                 # storage, so a mismatch means the view metadata is stale and
                 # the tensor must be built standalone from its own storage.
-                if base.untyped_storage()._cdata != t.untyped_storage()._cdata:
+                # Only meaningful for plain dense tensors: a nested tensor
+                # repacks values/offsets, so a genuine NT view need not share
+                # its base's storage.
+                if (
+                    not is_nested
+                    and not base.is_nested
+                    and base.untyped_storage()._cdata != t.untyped_storage()._cdata
+                ):
                     is_view = False
 
         stride = None

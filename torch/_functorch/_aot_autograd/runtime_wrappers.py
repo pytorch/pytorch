@@ -1852,8 +1852,15 @@ class AOTDedupeWrapper(CompilerWrapper):
 def _view_base_sharing_storage(arg: torch.Tensor) -> torch.Tensor | None:
     # set_() can rebind a tensor's storage without clearing the stale _base
     # link, so only trust _base when it still shares storage with the tensor.
+    # The storage test is only meaningful for plain dense tensors: a nested
+    # tensor repacks values/offsets, so a genuine NT view need not share its
+    # base's storage; keep trusting _base there.
     base = arg._base
-    if base is not None and base.untyped_storage()._cdata == arg.untyped_storage()._cdata:
+    if base is None:
+        return None
+    if arg.is_nested or base.is_nested:
+        return base
+    if base.untyped_storage()._cdata == arg.untyped_storage()._cdata:
         return base
     return None
 
