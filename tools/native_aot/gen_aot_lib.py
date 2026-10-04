@@ -64,17 +64,19 @@ FILE_TMPL = """\
 // AT_PER_OPERATOR_HEADERS exists to avoid. TensorIterator.h and ops/empty.h are
 // unconditional because preludes commonly need them and there is no
 // per-declaration include hook yet; a body calling another at:: FACTORY needs its
-// op header added here. torch/library.h is emitted only for ops with cpp_covers,
-// its sole consumer being the covers registration below, and it pulls the whole
-// dispatcher (~110 headers).
+// op header added here. torch/library.h registers the embedded architectures and
+// optional coverage predicate.
 #include <ATen/core/Tensor.h>
 #include <ATen/NativeAotStubs.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/ops/empty.h>
 #include <c10/cuda/CUDAStream.h>
-{covers_include}#include <algorithm>
+#include <torch/library.h>
+
+#include <algorithm>
 #include <limits>
+#include <vector>
 
 {kernel_includes}
 
@@ -94,7 +96,13 @@ bool {op}_{key_lc}_aot_kernel({params}) {{
 namespace at::native {{
 REGISTER_{key_uc}_DISPATCH({op}_aot_stub, &::{op}_{key_lc}_aot_kernel)
 }} // namespace at::native
-{covers_reg}"""
+TORCH_LIBRARY_FRAGMENT(_native_aot, m) {{
+  m.def("archs_{op}() -> int[]", []() -> std::vector<int64_t> {{
+    return {{{archs}}};
+  }});
+{covers_reg}
+}}
+"""
 
 # Emitted only into files whose kind narrows shapes (see
 # Toolchain.NARROWS_SHAPES_TO_INT32); an unused inline function would
@@ -121,11 +129,7 @@ bool {op}_{key_lc}_covers({params}) {{
 }}
 """
 
-COVERS_REG_TMPL = """
-TORCH_LIBRARY_FRAGMENT(_native_aot, m) {{
-  m.def("{schema}", &::{op}_{key_lc}_covers);
-}}
-"""
+COVERS_REG_TMPL = '  m.def("{schema}", &::{op}_{key_lc}_covers);'
 
 
 from tools.native_aot import toolchains
@@ -462,9 +466,7 @@ def gen_op(
         precompute_note=note,
         covers_fn=covers_fn,
         covers_reg=covers_reg,
-        covers_include=(
-            "#include <torch/library.h>\n\n" if covers is not None else "\n"
-        ),
+        archs=", ".join(str(major * 10 + minor) for major, minor in groups),
         kernel_includes="\n".join(
             dict.fromkeys(  # ordered dedup across sidecars
                 line
