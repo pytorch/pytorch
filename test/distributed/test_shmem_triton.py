@@ -31,6 +31,7 @@ import torch.distributed._symmetric_memory._shmem_triton as shmem_triton
 from torch._inductor.runtime.triton_compat import triton
 from torch.distributed._symmetric_memory._shmem_triton import requires_shmem
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -282,6 +283,8 @@ def my_reduce_kernel(
 
 @instantiate_parametrized_tests
 class SHMEMTritonTest(MultiProcContinuousTest):
+    hw_classification = HardwareClassification.CUDA
+
     def _init_device(self) -> None:
         # TODO: relieve this (seems to hang if without)
         device_module.set_device(self.device)
