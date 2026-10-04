@@ -694,6 +694,139 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
         )
         torch.testing.assert_close(out[:out_numel], expected)
 
+    @skip_if_lt_x_gpu(2)
+    def test_all_to_all_vdev_repeat(self) -> None:
+        # Stress the op's device-side completion barrier: reuse the SAME symmetric
+        # buffers across many calls with different splits, running them back-to-back
+        # with NO collective between calls, so the barrier is the only cross-rank
+        # synchronization. References are precomputed up front; the hot loop then
+        # captures each call's received data and verifies after a single sync. If
+        # the barrier were missing or wrong, peers would drift and clobber the data
+        # buffer and the captured results would diverge from the references.
+        #
+        # Only the received data is checked. out_splits_offsets holds each call's
+        # metadata, but a peer racing ahead to the next call overwrites its
+        # output_splits slot (a remote round-A write gated only by the completion
+        # barrier), so capturing the metadata after the fact in a barrier-free loop
+        # is racy; metadata correctness is covered by test_all_to_all_vdev. The
+        # received data is safe to capture: a peer's next-call write into `out` is
+        # gated by the return-offset signal this rank sends only after the clone.
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        dtype = torch.float
+        k = 16
+        max_inp_numel = k * self.world_size
+        max_out_numel = max_inp_numel * self.world_size
+
+        inp = symm_mem.empty(max_inp_numel, dtype=dtype, device=self.device)
+        out = symm_mem.empty(max_out_numel, dtype=dtype, device=self.device)
+        in_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        out_splits_offsets = symm_mem.empty(
+            (2, self.world_size), dtype=torch.int64, device=self.device
+        )
+        for t in (inp, out, in_splits, out_splits_offsets):
+            symm_mem.rendezvous(t, group=group_name)
+
+        torch.manual_seed(1234 + self.rank)
+        iters = 10
+        plans = []
+        for _ in range(iters):
+            inp_splits = torch.randint(k, (self.world_size,), device=self.device)
+            out_splits = torch.zeros_like(inp_splits)
+            dist.all_to_all_single(out_splits, inp_splits)
+            inp_numel = inp_splits.sum().item()
+            out_numel = out_splits.sum().item()
+            data = torch.randn(max_inp_numel, dtype=dtype, device=self.device)
+            expected = torch.empty(out_numel, dtype=dtype, device=self.device)
+            dist.all_to_all_single(
+                expected, data[:inp_numel], out_splits.tolist(), inp_splits.tolist()
+            )
+            plans.append((inp_splits, data, out_numel, expected))
+
+        dist.barrier()  # one alignment before the collective-free hot loop
+
+        captured = []
+        for inp_splits, data, out_numel, _ in plans:
+            inp.copy_(data)
+            in_splits.copy_(inp_splits)
+            torch.ops.symm_mem.all_to_all_vdev(
+                inp, out, in_splits, out_splits_offsets, group_name
+            )
+            captured.append(out[:out_numel].clone())
+        torch.cuda.synchronize()
+
+        for got, (_, _, _, expected) in zip(captured, plans):
+            torch.testing.assert_close(got, expected)
+
+    @skip_if_lt_x_gpu(2)
+    @skip_but_pass_in_sandcastle_if(
+        not TEST_WITH_ROCM,
+        "CUDA/NVSHMEM does not handle uneven bytes: its all_to_all_vdev kernel "
+        "asserts block_size * blocks_per_peer == peer_size, so a per-peer byte "
+        "count that is not a multiple of blocks_per_peer device-asserts. Only "
+        "rocSHMEM absorbs the remainder.",
+    )
+    def test_all_to_all_vdev_multiblock_stride(self) -> None:
+        # Regression for the multi-block remainder (rocSHMEM only). When a peer is
+        # served by more than one block, the push splits that peer's byte range
+        # across its blocks; a previous version used integer division and dropped
+        # the tail bytes when the count was not a multiple of blocks_per_peer.
+        #
+        # get_a2a_nblocks derives the block count from the input buffer size
+        # (16B/thread * THREADS_PER_BLOCK * 8 = 64KiB per block, rounded up to a
+        # multiple of world_size); sizing the per-rank input so its byte count is
+        # in (world*64KiB, 2*world*64KiB] yields exactly 2 blocks per peer for any
+        # world_size, without relying on the (process-cached) TORCH_SYMMMEM_NBLOCKS
+        # override. nsend*D = 32767*3 = 98301 bytes/peer is odd, so it is not a
+        # multiple of 2 and the buggy version drops its tail byte.
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+        dtype = torch.int8
+        D = 3
+        nsend = 32767
+
+        max_inp_numel = nsend * self.world_size
+        max_out_numel = nsend * self.world_size  # uniform splits: recv nsend/peer
+
+        inp = symm_mem.empty(max_inp_numel, D, dtype=dtype, device=self.device)
+        out = symm_mem.empty(max_out_numel, D, dtype=dtype, device=self.device)
+        in_splits = symm_mem.empty(
+            self.world_size, dtype=torch.int64, device=self.device
+        )
+        out_splits_offsets = symm_mem.empty(
+            (2, self.world_size), dtype=torch.int64, device=self.device
+        )
+        for t in (inp, out, in_splits, out_splits_offsets):
+            symm_mem.rendezvous(t, group=group_name)
+
+        torch.manual_seed(7 + self.rank)
+        # values in [1, 127] so no data byte collides with the -1 (0xff) fill
+        inp.copy_(
+            torch.randint(1, 128, (max_inp_numel, D), dtype=dtype, device=self.device)
+        )
+        out.fill_(-1)
+        inp_splits = torch.full(
+            (self.world_size,), nsend, dtype=torch.int64, device=self.device
+        )
+        in_splits.copy_(inp_splits)
+        out_splits = torch.zeros_like(inp_splits)
+        dist.all_to_all_single(out_splits, inp_splits)
+        inp_numel = inp_splits.sum().item()
+        out_numel = out_splits.sum().item()
+        dist.barrier()
+
+        torch.ops.symm_mem.all_to_all_vdev(
+            inp, out, in_splits, out_splits_offsets, group_name
+        )
+
+        expected = torch.empty(out_numel, D, dtype=dtype, device=self.device)
+        dist.all_to_all_single(
+            expected, inp[:inp_numel], out_splits.tolist(), inp_splits.tolist()
+        )
+        torch.testing.assert_close(out[:out_numel], expected)
+
     @parametrize("align", [1, 8, 16])  # `major_align` of output
     def test_all_to_all_vdev_2d(self, align: int) -> None:
         torch.manual_seed(42 + self.rank)
