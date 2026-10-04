@@ -14325,6 +14325,39 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(fn0, [torch.rand(10, 3, 10), torch.rand(3, 10, 10)])
         self.common(fn1, [torch.rand(3, 10, 10), torch.rand(3, 10, 10)])
 
+        # https://github.com/pytorch/pytorch/issues/197105: lerp.Tensor with a
+        # 0-d weight promotes start/end/weight to the common dtype (matching
+        # eager's TensorIterator), so the decomposed `end - start` never runs
+        # on raw bool tensors.
+        def fn2(start, end, weight):
+            return torch.lerp(start, end, weight)
+
+        bool_start = torch.randint(0, 2, (3, 4)).bool()
+        bool_end = torch.randint(0, 2, (3, 4)).bool()
+        self.common(fn2, (bool_start, bool_end, torch.tensor(0.3)))
+        self.common(fn2, (bool_start, bool_end, torch.tensor(0.3, dtype=torch.float16)))
+
+        # integer start/end with a 0-d float weight
+        int_start = torch.randint(0, 10, (3, 4))
+        int_end = torch.randint(0, 10, (3, 4))
+        self.common(fn2, (int_start, int_end, torch.tensor(0.3)))
+
+        # low-precision start/end with a higher-precision 0-d weight: eager
+        # rounds the weight to the common dtype (e.g. bf16) before computing,
+        # so the compiled result must round it the same way. 0.3 is not exactly
+        # representable in float16/bfloat16, so the rounding is observable.
+        for lowp in (torch.float16, torch.bfloat16):
+            if not self.is_dtype_supported(lowp):
+                continue
+            self.common(
+                fn2,
+                (
+                    torch.randn(3, 4, dtype=lowp),
+                    torch.randn(3, 4, dtype=lowp),
+                    torch.tensor(0.3),
+                ),
+            )
+
     @parametrize(
         "dtype",
         test_dtypes,
