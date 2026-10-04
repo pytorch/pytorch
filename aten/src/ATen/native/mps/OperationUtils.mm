@@ -1406,7 +1406,7 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   // coordinate once per ILP tile. Scalar, broadcast, alpha and castout paths
   // retain their existing dispatch and buffer contracts.
   const bool is_applicable = !use_scalar_kernel && !use_broadcast_kernel && !alpha.has_value() && !output_cast_needed &&
-      !iter.is_contiguous() && iter.ndim() > 0 && iter.strides(0)[0] != 0;
+      !iter.is_contiguous() && iter.strides(0)[0] != 0;
   // Keep the generic path for small tensors, where the extra dispatch and
   // per-row tile setup cost more than the saved outer-coordinate work.
   const bool inner_strided_size = iter.numel() >= (1 << 16);
