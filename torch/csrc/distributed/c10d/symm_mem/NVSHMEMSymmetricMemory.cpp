@@ -14,6 +14,7 @@
 #include <c10/util/error.h>
 #include <c10/util/flat_hash_map.h>
 
+#include <cstdlib>
 #include <mutex>
 #include <utility>
 
@@ -417,6 +418,25 @@ static void initialize_nvshmem_with_store(
       "nvshmemx_init_attr failed");
 
   is_initialized = true;
+
+  // IBRC's atexit handler dlclose()s libmlx5 while its proxy progress thread
+  // may still be polling inside it, which segfaults. nvshmem_finalize() stops
+  // that thread; atexit is LIFO, so registering here runs it before IBRC's.
+  //
+  // finalize() resolves its state from the current CUDA device and aborts if
+  // that is not the device NVSHMEM was initialized on, so restore it first.
+  // Its device barrier also aborts on a sticky error (e.g. a device-side
+  // assert); skip finalization there rather than turning an already-failing
+  // exit into an NVSHMEM abort.
+  static int nvshmem_device_idx = device_idx;
+  std::atexit([]() {
+    if (cudaSetDevice(nvshmem_device_idx) != cudaSuccess ||
+        cudaDeviceSynchronize() != cudaSuccess) {
+      (void)cudaGetLastError();
+      return;
+    }
+    nvshmem_finalize();
+  });
 
   // Print version
 #if !defined(USE_ROCM)
