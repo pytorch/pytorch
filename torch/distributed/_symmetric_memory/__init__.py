@@ -8,7 +8,8 @@ from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
-from typing import Any, Literal
+from functools import wraps
+from typing import Any, Literal, ParamSpec, TypeVar
 from typing_extensions import deprecated
 
 import torch
@@ -159,6 +160,23 @@ def _get_backend_stream(priority: int = 0) -> torch.Stream:
     return _backend_streams[priority]
 
 
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _record_function(name: str) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    def decorator(func: Callable[_P, _R]) -> Callable[_P, _R]:
+        @wraps(func)
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+            with torch.profiler.record_function(name):
+                return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+@_record_function("symm_mem::_pipelined_multi_all_gather_and_consume")
 def _pipelined_multi_all_gather_and_consume(
     shard: list[torch.Tensor],
     shard_consumer: Callable[[list[torch.Tensor], int], None],
@@ -309,6 +327,7 @@ def _pipelined_multi_all_gather_and_consume(
     symm_mem.barrier(channel=0)
 
 
+@_record_function("symm_mem::_pipelined_all_gather_and_consume")
 def _pipelined_all_gather_and_consume(
     shard: torch.Tensor,
     shard_consumer: Callable[[torch.Tensor, int], None],
@@ -338,6 +357,7 @@ def _pipelined_all_gather_and_consume(
     )
 
 
+@_record_function("symm_mem::_pipelined_produce_and_all2all")
 def _pipelined_produce_and_all2all(
     chunk_producer: Callable[[int, torch.Tensor], None],
     output: torch.Tensor,
@@ -782,6 +802,7 @@ def _fused_all_gather_matmul_impl(
     return A, [unflatten(output) for output in outputs]
 
 
+@_record_function("symm_mem::_pipelined_all_gather_and_consume_last_dim")
 def _pipelined_all_gather_and_consume_last_dim(
     shard: torch.Tensor,
     shard_consumer: Callable[[torch.Tensor, int], None],
@@ -2251,6 +2272,7 @@ def _resolve_group_name(group: c10d.GroupName | ProcessGroup) -> c10d.GroupName:
     raise TypeError(f"unsupported group type: {type(group)}")
 
 
+@_record_function("symm_mem::rendezvous")
 def rendezvous(
     tensor: torch.Tensor, group: c10d.GroupName | ProcessGroup
 ) -> _SymmetricMemory:
@@ -2503,6 +2525,7 @@ def get(
         raise ValueError(f"get: unsupported backend: {backend}")
 
 
+@_record_function("symm_mem::put_signal")
 def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
     r"""
     put_signal(src, hdl, peer) -> None
@@ -2526,6 +2549,7 @@ def put_signal(src: torch.Tensor, hdl: _SymmetricMemory, peer: int) -> None:
         raise ValueError(f"put_signal: unsupported backend: {backend}")
 
 
+@_record_function("symm_mem::wait_signal")
 def wait_signal(hdl: _SymmetricMemory, peer: int) -> None:
     r"""
     wait_signal(hdl, peer) -> None
@@ -2546,6 +2570,7 @@ def wait_signal(hdl: _SymmetricMemory, peer: int) -> None:
         raise ValueError(f"wait_signal: unsupported backend: {backend}")
 
 
+@_record_function("symm_mem::reduce_scatter_offset")
 def reduce_scatter_offset(
     input: torch.Tensor,
     out: list[torch.Tensor],
@@ -2637,6 +2662,7 @@ def is_symm_mem_tensor(tensor: torch.Tensor) -> bool:
     return _SymmetricMemory.is_symm_mem_tensor(tensor)
 
 
+@_record_function("symm_mem::all_to_all_nd")
 def all_to_all_nd(
     input: torch.Tensor,
     out: torch.Tensor,
