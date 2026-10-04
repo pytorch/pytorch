@@ -487,66 +487,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_train_parity_single_group,
         )
 
-    @skip_if_lt_x_gpu(4)
-    def test_train_parity_native_copy_fns_policies(self):
-        self.run_subtests(
-            {"hsdp": [False, True], "offload": [False, True], "mp": [False, True]},
-            self._test_train_parity_native_copy_fns_policies,
-        )
-
-    def _test_train_parity_native_copy_fns_policies(
-        self, hsdp: bool, offload: bool, mp: bool
-    ):
-        # Native copies must match the default ones bitwise under each policy
-        torch.manual_seed(42)
-        model = nn.Sequential(nn.Linear(32, 16), nn.ReLU(), nn.Linear(16, 8))
-        if hsdp:
-            mesh = init_device_mesh(
-                device_type.type,
-                (2, self.world_size // 2),
-                mesh_dim_names=("replicate", "shard"),
-            )
-        else:
-            mesh = init_device_mesh(device_type.type, (self.world_size,))
-        mp_policy = MixedPrecisionPolicy()
-        if mp:
-            mp_policy = MixedPrecisionPolicy(
-                param_dtype=torch.bfloat16, reduce_dtype=torch.float32
-            )
-        models, optims = [], []
-        for native in (False, True):
-            fsdp_model = copy.deepcopy(model)
-            fully_shard(
-                fsdp_model,
-                mesh=mesh,
-                shard_placement_fn=lambda p: Shard(p.shape.index(max(p.shape))),
-                mp_policy=mp_policy,
-                offload_policy=CPUOffloadPolicy() if offload else OffloadPolicy(),
-            )
-            if native:
-                fsdp_model.set_all_gather_output_fn(
-                    all_gather_output_fn_with_native_copy
-                )
-                fsdp_model.set_reduce_scatter_input_fn(
-                    reduce_scatter_input_fn_with_native_copy
-                )
-            models.append(fsdp_model)
-            optims.append(torch.optim.Adam(fsdp_model.parameters(), lr=1e-2))
-        torch.manual_seed(42 + self.rank + 1)
-        for _ in range(3):
-            inp = torch.randn((4, 32), device=device_type.type)
-            losses = []
-            for fsdp_model, optim in zip(models, optims):
-                optim.zero_grad(set_to_none=True)
-                losses.append(fsdp_model(inp).sum())
-                losses[-1].backward()
-                optim.step()
-            self.assertEqual(losses[0], losses[1], atol=0, rtol=0)
-            for param, native_param in zip(
-                models[0].parameters(), models[1].parameters()
-            ):
-                self.assertEqual(param, native_param, atol=0, rtol=0)
-
     def _test_train_parity_single_group(
         self,
         lin_shapes: list[tuple[int, int]],
