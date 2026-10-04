@@ -2458,14 +2458,13 @@ def generic_getattr(
     if obj.is_tensor() and name == "_grad":
         name = "grad"
 
-    # Side effects: check for pending attribute mutations. A tp_getset/tp_members
-    # entry is a data descriptor and wins over the pending value, as in
-    # PyObject_GenericGetAttr; its getter reads the pending mutation itself
-    # (e.g. cell_contents raises for an emptied cell).
-    getset = obj.lookup_tp_getset_member(name)
-    if getset is None and tx.output.side_effects.has_pending_mutation_of_attr(
+    # Side effects: check for pending attribute mutations. The cell_contents
+    # getter reads its own pending mutation and raises for an emptied cell.
+    # Other tp_getset getters (e.g. OptimizerVariable.param_groups) do not read
+    # pending mutations, so they must not shadow one.
+    if tx.output.side_effects.has_pending_mutation_of_attr(
         obj, name
-    ):
+    ) and not isinstance(obj, variables.CellVariable):
         if not isinstance(obj, variables.UserDefinedObjectVariable):
             return tx.output.side_effects.load_attr(obj, name)
         if tx.output.side_effects.has_pending_mutation_of_attr(
@@ -2490,6 +2489,7 @@ def generic_getattr(
 
     # tp_getset/tp_members are data descriptors: resolve ahead of the VT's
     # tp_getattro so a tp_getattro_impl override need not repeat the consult.
+    getset = obj.lookup_tp_getset_member(name)
     if getset is not None:
         result = getset.getter(obj, tx)
         if result is not None:
