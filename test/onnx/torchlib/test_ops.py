@@ -39,6 +39,7 @@ import parameterized
 
 import torch
 from torch.testing._internal import common_device_type, common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.utils import _pytree as pytree
 
 
@@ -101,6 +102,8 @@ def _should_skip_xfail_test_sample(
 
 
 class TestFunctionValidity(common_utils.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parameterized.parameterized.expand(
         [
             (info.op.name, info)
@@ -296,6 +299,8 @@ class TestOutputConsistencyFullGraph(common_utils.TestCase):
 
     This is a parameterized test suite.
     """
+
+    hw_classification = HardwareClassification.CPU
 
     def setUp(self) -> None:
         torch.manual_seed(42)
