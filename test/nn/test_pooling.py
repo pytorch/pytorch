@@ -1296,9 +1296,9 @@ torch.{device_type}.synchronize()
 
     @expectedFailureMPS  # TODO: fixme
     @gcIfJetson
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.bfloat16, torch.float, torch.double)
     @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
-    @dtypesIfXPU(torch.half, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.bfloat16, torch.float, torch.double)
     def test_avg_pool2d_nhwc(self, device, dtype):
         def helper(
             n,
@@ -1520,8 +1520,8 @@ torch.{device_type}.synchronize()
 
     @expectedFailureMPS  # TODO: Fixme
     @dtypes(torch.half, torch.bfloat16, torch.float, torch.double)
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
-    @dtypesIfXPU(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
+    @dtypesIfXPU(torch.half, torch.bfloat16, torch.float, torch.double)
     @gcIfJetson
     def test_max_pool2d_nhwc(self, device, dtype):
         def helper(n, c, h, w, kernel_size, stride=None):
