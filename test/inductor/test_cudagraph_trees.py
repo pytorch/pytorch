@@ -236,6 +236,28 @@ class CUDAGraphAPIOnlyTests(TestCase):
         self.assertEqual(tuple(containers), existing_devices)
 
 
+@instantiate_parametrized_tests
+class LinalgCaptureSafetyTests(TestCase):
+    @parametrize("driver", (None, "gesvd", "gesvdj", "gesvda"))
+    @parametrize("keyword", (False, True))
+    def test_issue_195731_svd_classification(self, driver, keyword):
+        from torch._inductor.utils import is_cudagraph_unsafe_fx_node
+
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        kwargs = {"driver": driver}
+        args = (x, False, True)
+        if keyword:
+            kwargs.update(A=x, full_matrices=False, compute_uv=True)
+            args = ()
+        svd = graph.call_function(torch.ops.aten._linalg_svd.default, args, kwargs)
+        self.assertTrue(is_cudagraph_unsafe_fx_node(svd))
+        safe = graph.call_function(
+            torch.ops.aten.linalg_inv_ex.default, (x,), {"check_errors": False}
+        )
+        self.assertFalse(is_cudagraph_unsafe_fx_node(safe))
+
+
 if HAS_CUDA_AND_TRITON:
 
     def get_all_cudagraph_segments():
@@ -347,6 +369,47 @@ if HAS_CUDA_AND_TRITON:
 
         def num_checkpoints(self):
             return self.get_manager().debug_checkpointing_counter
+
+        @parametrize("driver", (None, "gesvd", "gesvdj", "gesvda"))
+        @parametrize("partition", (False, True))
+        @config.patch(implicit_fallbacks=True)
+        def test_issue_195731_svd_streams(self, driver, partition):
+            def fn(x):
+                u, s, vh = torch.linalg.svd(x.sin(), full_matrices=False, driver=driver)
+                return (u * s.unsqueeze(-2)) @ vh
+
+            counters.clear()
+            with config.patch(graph_partition=partition):
+                compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+                default = torch.cuda.current_stream()
+                streams = [default, torch.cuda.Stream(), torch.cuda.Stream(), default]
+                for stream in streams:
+                    stream.wait_stream(default)
+                    with torch.cuda.stream(stream):
+                        for _ in range(3):
+                            x = torch.randn(16, 8, device="cuda")
+                            torch.compiler.cudagraph_mark_step_begin()
+                            actual = compiled(x).clone()
+                            self.assertEqual(actual, x.sin(), atol=1e-4, rtol=1e-4)
+                    default.wait_stream(stream)
+                if partition:
+                    self.assertGreater(counters["inductor"]["cudagraph_partitions"], 0)
+                    self.assertGreater(self.get_manager().new_graph_id().id, 0)
+                else:
+                    self.assertGreater(counters["inductor"]["cudagraph_skips"], 0)
+                    self.assertIsNone(self.get_manager())
+
+        @config.patch(implicit_fallbacks=True)
+        def test_issue_195731_arithmetic_capture_control(self):
+            def fn(x):
+                return x.sin().cos()
+
+            compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+            x = torch.randn(32, device="cuda")
+            for _ in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                self.assertEqual(compiled(x), fn(x))
+            self.assertGreater(self.get_manager().new_graph_id().id, 0)
 
         def test_run_simple(self):
             def foo(x):
