@@ -228,16 +228,20 @@ __device__ __forceinline__ bool wait_wrap_ge_u32(
   return true;
 }
 
+// The arrival counters live in the barrier state, which is indexed like the
+// signal pad but separate from it, so a pending signal is never counted as an
+// arrival. `local_barrier_state` and `mc_barrier_state` are its base through
+// this rank's mapping and the multicast one.
 [[maybe_unused]] static __global__ void multimem_barrier_kernel(
-    uint32_t* local_signal_pad,
-    uint32_t* mc_signal_pad,
+    uint32_t* local_barrier_state,
+    uint32_t* mc_barrier_state,
     int channel,
     int rank,
     int world_size,
     size_t timeout_ms) {
   if (threadIdx.x == 0) {
-    auto local_flag_ptr = local_signal_pad + world_size * channel;
-    auto mc_flag_ptr = mc_signal_pad + world_size * channel;
+    auto local_flag_ptr = local_barrier_state + world_size * channel;
+    auto mc_flag_ptr = mc_barrier_state + world_size * channel;
     multimem_red_add1_release_u32(mc_flag_ptr);
     auto wait_success = wait_wrap_ge_u32(
         local_flag_ptr, static_cast<uint32_t>(world_size), timeout_ms);
