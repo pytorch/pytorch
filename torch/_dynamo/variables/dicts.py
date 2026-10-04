@@ -19,6 +19,7 @@ in sets.py.
 
 import collections
 import functools
+import gc
 import sys
 import types
 import weakref
@@ -42,6 +43,7 @@ from ..source import (
     DictGetItemSource,
     is_constant_source,
     is_from_local_source,
+    TypeDictSource,
 )
 from ..utils import (
     _item_debug_repr,
@@ -71,6 +73,7 @@ from .object_protocol import (
     _is_method_type,
     generic_getitem,
     generic_richcompare_bool,
+    generic_str,
     mro_lookup,
 )
 
@@ -1037,11 +1040,9 @@ class MappingProxyVariable(VariableTracker):
     # PyDictProxy_Type: https://github.com/python/cpython/blob/v3.13.0/Objects/descrobject.c#L1995
     _cpython_type = types.MappingProxyType
 
-    # proxies to the original dict_vt
-    def __init__(self, dv_dict: ConstDictVariable, **kwargs: Any) -> None:
+    # proxies to the VariableTracker of the wrapped mapping
+    def __init__(self, dv_dict: VariableTracker, **kwargs: Any) -> None:
         super().__init__(**kwargs)
-        if not isinstance(dv_dict, ConstDictVariable):
-            raise AssertionError(f"Expected ConstDictVariable, got {type(dv_dict)}")
         self.dv_dict = dv_dict
 
     def python_type(self) -> type:
@@ -1084,28 +1085,6 @@ class MappingProxyVariable(VariableTracker):
         codegen(self.dv_dict)
         codegen.extend_output(create_call_function(1, False))
 
-    def _check_mutation_guard(self, tx: "InstructionTranslatorBase") -> None:
-        if self.source and tx.output.side_effects.has_existing_dict_mutation():
-            msg = (
-                "A dict has been modified while we have an existing mappingproxy object. "
-                "A mapping proxy object, as the name suggest, proxies a mapping "
-                "object (usually a dict). If the original dict object mutates, it "
-                "is reflected in the proxy object as well. For an existing proxy "
-                "object, we do not know the original dict it points to. Therefore, "
-                "for correctness we graph break when there is dict mutation and we "
-                "are trying to access a proxy object."
-            )
-
-            unimplemented(
-                gb_type="mapping proxy affected by dictionary mutation",
-                context=f"Source: {self.source}, Dict mutation detected",
-                explanation=msg,
-                hints=[
-                    "Avoid modifying dictionaries that might be referenced by mapping proxy objects",
-                    "Or avoid using the mapping proxy objects after modifying its underlying dictionary",
-                ],
-            )
-
     def mp_subscript_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -1113,7 +1092,6 @@ class MappingProxyVariable(VariableTracker):
     ) -> VariableTracker:
         # mappingproxy_getitem: https://github.com/python/cpython/blob/62a6e898e01/Objects/descrobject.c#L1052-L1056
         # TODO(follow-up): add tests for invalid key type, missing key
-        self._check_mutation_guard(tx)
         return self.dv_dict.mp_subscript_impl(tx, key)
 
     def call_method(
@@ -1123,7 +1101,6 @@ class MappingProxyVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        self._check_mutation_guard(tx)
         return self.dv_dict.call_method(tx, name, args, kwargs)
 
     def tp_iter_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
@@ -1137,6 +1114,36 @@ class MappingProxyVariable(VariableTracker):
 
     def mp_length_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.dv_dict.mp_length_impl(tx)
+
+    def _check_class_attr_mutation(self, tx: "InstructionTranslatorBase") -> None:
+        # The wrapped mapping is built from the real object, so it does not see
+        # class attribute writes made earlier in the trace until they replay.
+        side_effects = tx.output.side_effects
+        for vt in side_effects.store_attr_mutations:
+            if not isinstance(vt, variables.UserDefinedClassVariable):
+                continue
+            if not side_effects.has_pending_mutation(vt):
+                continue
+            # type's own __dict__ getter, so a metaclass __dict__ is bypassed.
+            class_dict = type.__dict__["__dict__"].__get__(vt.value)
+            mapping = gc.get_referents(class_dict)[0]
+            if mapping in side_effects and side_effects[mapping] is self.dv_dict:
+                unimplemented(
+                    gb_type="mapping proxy of class with pending attribute mutation",
+                    context=f"class: {vt.value}",
+                    explanation="The class __dict__ does not reflect class attributes set earlier in the traced code.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+
+    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_class_attr_mutation(tx)
+        return VariableTracker.build(
+            tx, f"mappingproxy({tracked_repr(tx, self.dv_dict)})"
+        )
+
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        self._check_class_attr_mutation(tx)
+        return generic_str(tx, self.dv_dict)
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
@@ -1360,6 +1367,22 @@ class DictKeysVariable(DictViewVariable):
         # rather than dispatching on dv_dict's type.
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L5998-L6005
         return ConstDictVariable.sq_contains_impl(self.dv_dict, tx, item)
+
+    def isdisjoint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        return SourcelessBuilder.create(
+            tx, polyfills.dictview_isdisjoint
+        ).call_function(tx, [self, *args], kwargs)
+
+    tp_methods = {
+        "isdisjoint": Method(isdisjoint),
+    }
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
@@ -1628,6 +1651,10 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             # contents explicitly.
 
         example_value_dict = SideEffectsProxyDict.get_example_value_dict(vt)
+        dict_source = vt.source and AttrSource(vt.source, "__dict__")
+        if vt.source and issubclass(vt.python_type(), type):
+            # A class __dict__ is a mappingproxy; guard its items through tp_dict.
+            dict_source = TypeDictSource(vt.source)
 
         for key in example_value_dict:
             # DictGetItemSource and ConstantVariable model instance dict keys as
@@ -1644,8 +1671,7 @@ class SideEffectsProxyDict(collections.abc.MutableMapping[kV, VariableTracker]):
             key: VariableTracker.build(
                 tx,
                 value,
-                source=vt.source
-                and DictGetItemSource(AttrSource(vt.source, "__dict__"), key),
+                source=dict_source and DictGetItemSource(dict_source, key),
             )
             for key, value in example_value_dict.items()
         }

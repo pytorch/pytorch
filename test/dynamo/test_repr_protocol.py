@@ -3,6 +3,7 @@
 
 import collections
 import enum
+import types
 import typing
 import unittest
 
@@ -32,6 +33,17 @@ class _SetSubclass(set):
 
 class _FrozenSetSubclass(frozenset):
     pass
+
+
+class _CustomReprDict(dict):
+    def __repr__(self):
+        return "custom repr"
+
+    def __str__(self):
+        return "custom str"
+
+
+_global_dict = {"a": 1}
 
 
 @instantiate_parametrized_tests
@@ -295,6 +307,136 @@ class TpReprTests(TestCase):
 
         compiled = torch.compile(fn, backend="eager")
         self.assertEqual(compiled(x), repr({"x": x}))
+
+    @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
+    def test_mappingproxy_repr_and_str(self, stringify):
+        d = {"descriptor": object.__dict__["__class__"]}
+        proxy = types.MappingProxyType(d)
+
+        def fn(x):
+            return x + 1, stringify(proxy)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+        d["descriptor"] = type.__dict__["__dict__"]
+        self.assertEqual(compiled(x), fn(x))
+
+        proxy = types.MappingProxyType(collections.OrderedDict(a=1))
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_mappingproxy_after_dict_mutation(self):
+        d = {"a": 1}
+        proxy = types.MappingProxyType(d)
+
+        def fn(x):
+            d["b"] = 2
+            return x + 1, repr(proxy)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        got = compiled(x)
+        del d["b"]
+        self.assertEqual(got, fn(x))
+
+    def test_mappingproxy_cyclic_repr(self):
+        def fn(x):
+            d = {}
+            proxy = types.MappingProxyType(d)
+            d["proxy"] = proxy
+            return x + 1, repr(proxy), repr(d)
+
+        x = torch.randn(4)
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(compiled(x), fn(x))
+
+    def test_class_dict_repr_after_class_rename(self):
+        class C:
+            pass
+
+        def fn(x):
+            return x + 1, repr(C.__dict__)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(compiled(x), fn(x))
+        C.__name__ = "D"
+        self.assertEqual(compiled(x), fn(x))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
+    @parametrize(
+        "make_mapping",
+        (
+            lambda: collections.OrderedDict(a=1),
+            lambda: collections.defaultdict(int, a=1),
+            lambda: _CustomReprDict(a=1),
+            lambda: types.MappingProxyType({"a": 1}),
+        ),
+        name_fn=lambda fn: type(fn()).__name__,
+    )
+    def test_mappingproxy_of_mapping_subclass(self, stringify, make_mapping):
+        proxy = types.MappingProxyType(make_mapping())
+
+        def fn(x):
+            return x + 1, stringify(proxy)
+
+        x = torch.randn(4)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
+    @parametrize(
+        "captured", (False, True), name_fn=lambda c: "captured" if c else "attr"
+    )
+    def test_class_dict_after_class_setattr(self, stringify, captured):
+        class C:
+            y = 1
+
+        proxy = C.__dict__
+
+        def fn(x):
+            C.z = 3
+            return x + 1, stringify(proxy if captured else C.__dict__)
+
+        x = torch.randn(4)
+        got = torch.compile(fn, backend="eager")(x)
+        del C.z
+        self.assertEqual(got, fn(x))
+
+    def test_mappingproxy_of_global_dict_passed_as_input(self):
+        def fn(x, proxy):
+            return x + 1, _global_dict["a"], repr(proxy)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+        x = torch.randn(4)
+        proxy = types.MappingProxyType(_global_dict)
+        self.assertEqual(compiled(x, proxy), fn(x, proxy))
+        self.assertEqual(compiled(x, proxy), fn(x, proxy))
+        self.assertEqual(cnt.frame_count, 1)
+
+        other = types.MappingProxyType({"a": 5})
+        self.assertEqual(compiled(x, other), fn(x, other))
+
+    @parametrize("stringify", (repr, str), name_fn=lambda fn: fn.__name__)
+    def test_dict_keys_mapping_repr(self, stringify):
+        def fn(x, keys):
+            return x + 1, stringify(keys.mapping)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled = torch.compile(fn, backend=cnt)
+        x = torch.randn(4)
+        self.assertEqual(compiled(x, {"a": 1}.keys()), fn(x, {"a": 1}.keys()))
+        self.assertEqual(compiled(x, {"a": 1}.keys()), fn(x, {"a": 1}.keys()))
+        self.assertEqual(cnt.frame_count, 1)
+
+        for keys in ({"a": 2}.keys(), collections.defaultdict(int, a=2).keys()):
+            self.assertEqual(compiled(x, keys), fn(x, keys))
 
     def test_nn_module_repr(self):
         mod = torch.nn.Sequential(torch.nn.ReLU(), torch.nn.Linear(4, 4))
