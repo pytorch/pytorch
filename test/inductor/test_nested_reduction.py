@@ -815,6 +815,184 @@ class _NestedReductionBase:
         self.check_nested_matches_unnested(f, (x, w))
         self.check_fusion()
 
+    def test_sub_parent_pack2_followup_after_reorder(self):
+        """Fuse a half-domain adjacent-lane pack after reorder fusion."""
+
+        B, D, G = 32, 4096, 32
+
+        def f(x):
+            grouped = x.view(B, D // G, G)
+            amax = grouped.abs().amax(dim=-1)
+            scale = (amax / 6.0).clamp(min=1e-6)
+            scale_full = scale.unsqueeze(-1).expand_as(grouped).reshape(B, D)
+            ones = torch.ones_like(x, dtype=torch.uint8)
+            zeros = torch.zeros_like(x, dtype=torch.uint8)
+            encoded = torch.where(scale_full > 0, ones, zeros)
+            encoded = torch.ops._inductor_test.realize(encoded)
+            flat = encoded.reshape(-1)
+            return flat[::2] | (flat[1::2] << 4)
+
+        x = torch.ones(B, D, device=GPU_TYPE, dtype=torch.bfloat16)
+        actual, generated = run_and_get_code(torch.compile(f), x)
+
+        self.assertEqual(actual, f(x))
+        generated_text = "\n\n".join(
+            str(part)
+            for part in (
+                generated if isinstance(generated, (tuple, list)) else [generated]
+            )
+        )
+        self.check_fusion()
+        self.assertEqual(generated_text.count(".run("), 1)
+        self.assertNotRegex(generated_text, r"empty_strided_xpu\(\(32,\s*4096\)")
+
+    def test_dynamic_m_mxfp4_standalone_quant_fuses(self):
+        """Symbolic (dynamic) M standalone MXFP4 quant fuses pack2 to 1 kernel.
+
+        Regression guard for dynamic-M pack2 fusion: the normalized pack index is
+        wrapped as ModularIndexing(base, 1, symbolic_extent). A concrete extent
+        simplified to a concrete sub-parent lane, but a symbolic extent (dynamic
+        M) did not, so the pack split into a second kernel. Reuses the faithful
+        decomposed mxfp4_quant sequence (not a simplified pattern: the iteration
+        domain must match the real MXFP4 reduction + pack topology).
+        """
+
+        FP4_EBITS, FP4_MBITS = 2, 1
+        MBITS_F32, EBITS_F32, F32_EXP_BIAS = 23, 8, 127
+
+        def _n_ones(n):
+            return (1 << n) - 1
+
+        def _f32_to_floatx_unpacked(x, ebits, mbits):
+            exp_bias = _n_ones(ebits - 1)
+            max_int = _n_ones(ebits + mbits)
+            sign_mask = 1 << (ebits + mbits)
+            magic_adder = _n_ones(MBITS_F32 - mbits - 1)
+            max_normal = 2 ** (_n_ones(ebits) - exp_bias) * (_n_ones(mbits + 1) / (2**mbits))
+            min_normal = 2 ** (1 - exp_bias)
+            denorm_exp = (F32_EXP_BIAS - exp_bias) + (MBITS_F32 - mbits) + 1
+            denorm_mask_int = denorm_exp << MBITS_F32
+            denorm_mask_float = torch.tensor(denorm_mask_int, dtype=torch.int32).view(
+                torch.float32
+            )
+            sx = x.view(torch.int32)
+            sign = sx & 0x80000000
+            x2 = (sx ^ sign).view(torch.float)
+            saturate_mask = x2 >= max_normal
+            denormal_mask = torch.logical_and(~saturate_mask, x2 < min_normal)
+            normal_mask = ~(saturate_mask | denormal_mask)
+            dmf = denorm_mask_float.to(x2.device)
+            denormal_x = ((x2 + dmf).view(torch.int32) - denorm_mask_int).to(torch.uint8)
+            nx = x2.view(torch.int32)
+            mant_odd = (nx >> (MBITS_F32 - mbits)) & 1
+            nx += ((exp_bias - F32_EXP_BIAS) << MBITS_F32) + magic_adder + mant_odd
+            normal_x = (nx >> (MBITS_F32 - mbits)).to(torch.uint8)
+            out = torch.full_like(x2, max_int, dtype=torch.uint8)
+            out = torch.where(denormal_mask, denormal_x, out)
+            out = torch.where(normal_mask, normal_x, out)
+            sign_lp = (
+                (sign >> (MBITS_F32 + EBITS_F32 - mbits - ebits)).to(torch.uint8)
+            ) & sign_mask
+            return out | sign_lp
+
+        def _pack_uint4(u8):
+            shape = u8.shape
+            flat = u8.contiguous().view(-1)
+            return (flat[1::2] << 4 | flat[::2]).view(*shape[:-1], shape[-1] // 2)
+
+        def mxfp4_quant(x, G):
+            batch, dim = x.shape
+            xb = x.view(batch, dim // G, G)
+            ma = xb.abs().amax(-1).unsqueeze(-1)
+            xb32 = xb.to(torch.float32)
+            ma32 = ma.to(torch.float32)
+            descale = ma32 / 6.0
+            exponent = torch.where(
+                torch.isnan(descale),
+                0xFF,
+                (torch.clamp(torch.ceil(torch.log2(descale)), min=-127, max=127) + 127).to(
+                    torch.uint8
+                ),
+            )
+            dfp = torch.where(exponent == 0, 1.0, torch.exp2(127 - exponent.to(torch.float32)))
+            dl = torch.clamp(xb32 * dfp, min=-6.0, max=6.0)
+            dl = _pack_uint4(
+                _f32_to_floatx_unpacked(dl.to(torch.bfloat16).float(), FP4_EBITS, FP4_MBITS)
+            )
+            out = dl.view(batch, dim // 2)
+            sc = exponent.view(torch.float8_e8m0fnu).squeeze(-1)
+            return out.view(torch.float4_e2m1fn_x2), sc
+
+        G = 32
+        shapes = [
+            torch.randn(batch, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+            for batch in (4, 32, 240)
+        ]
+        torch._dynamo.mark_dynamic(shapes[0], 0)
+        compiled = torch.compile(mxfp4_quant)
+        # Capture generated code + kernel inventory first so metrics/generated
+        # count reflects exactly one compile (multiple dynamic shapes then reuse
+        # the same graph and must not inflate generated_kernel_count).
+        metrics.reset()
+        _, generated = run_and_get_code(compiled, shapes[0], G)
+        for x in shapes:
+            self.assertEqual(compiled(x, G), mxfp4_quant(x, G))
+
+        generated_text = "\n\n".join(str(part) for part in generated)
+        self.check_fusion()
+        self.assertEqual(generated_text.count(".run("), 1)
+        # Sufficiency guard: the fused single kernel must not materialize a
+        # full-resolution intermediate. The 2-kernel path allocated a
+        # [M, K/32, 32] uint8 DRAM spill (shape ends ", 128, 32)"). The fused
+        # path keeps only the compressed scale (s,128,1) and the pack2 qdata
+        # (s,2048); assert the spill shape is gone and only 2 real XPU
+        # buffers are allocated.
+        self.assertNotIn("128, 32)", generated_text)
+        self.assertEqual(generated_text.count("= empty_strided_xpu(("), 2)
+
+    def test_dynamic_m_mxfp4_pack2_rejects_non_divisible(self):
+        """Dynamic-M reduction pack that cannot project onto a lane falls back.
+
+        Negative/soundness guard opposite to
+        test_dynamic_m_mxfp4_standalone_quant_fuses. That positive case packs
+        adjacent elements produced by a ``group=32`` reduction, which expresses
+        ``parent_r * 2 + lane``. Here the epilogue interleaves elements across
+        the reduction-group boundary (a 2-wide interleave out of a group of 4),
+        so the child index is not a constant lane w.r.t. the parent reduction
+        index. The sub-parent planner must reject (no sub-parent epilogue), for
+        which soundness demands a clean fallback to separate kernels rather
+        than an illegal unplanned-lane codegen.
+        """
+
+        def f(x):
+            # Deterministic integer transform of a grouped reduction so that the
+            # compiled result is bit-exact vs eager. The pack interleaves a
+            # 2-wide pair that spans the reduction-group boundary (group of 4),
+            # so the child index is not a constant lane of the parent reduction
+            # index -> the sub-parent planner must not fuse it.
+            B, D = x.shape
+            grouped = x.view(B, D // 4, 4)
+            amax = grouped.abs().amax(dim=-1)  # [B, D/4]
+            # Bit-level mask: even group -> 0x0F pattern, odd -> toggle.
+            sel = (amax > 0).to(torch.int8)  # deterministic 0/1 per group
+            expanded = sel.unsqueeze(-1).expand(B, D // 4, 4).reshape(B, D)
+            u8 = (expanded & 0x0F).to(torch.uint8).contiguous()
+            flat = u8.reshape(-1)
+            # 2-wide interleave across the full flattened buffer (group-1 size
+            # is 1 here, so pairs span group boundaries -> non-constant lane).
+            packed = flat[::2] | (flat[1::2] << 4)
+            return packed.reshape(B, D // 2)
+
+        x = torch.randn(16, 4096, device=GPU_TYPE, dtype=torch.bfloat16)
+        torch._dynamo.mark_dynamic(x, 0)
+        metrics.reset()
+        _, generated = run_and_get_code(torch.compile(f), x)
+        self.assertEqual(torch.compile(f)(x), f(x))
+        # Reject the non-lane-projection pack rather than fuse unsoundly: no
+        # sub-parent epilogue may be claimed. Guards the "unplanned lane" crash
+        # class exposed by the ablation study (Case C).
+        self.assertEqual(metrics.codegen_nested_reduction, 0)
+
     def test_grouped_reduction_with_weight_mul(self):
         """Grouped reduction input involves element-wise weight multiply."""
         B, D, G = 128, 4096, 32
