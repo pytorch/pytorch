@@ -1,22 +1,42 @@
 # Mypy will not try inferring the types of any 3rd party libraries installed.
 # mypy: ignore-errors
 
+import concurrent.futures
 import io
+import itertools
 import os
+import sys
+import warnings
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import fsspec
+import fsspec.asyn
 from fsspec.core import url_to_fs
+from fsspec.implementations.cached import CachingFileSystem
 
+import torch
+import torch._weights_only_unpickler as _weights_only_unpickler
+from torch import Tensor
+from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint._extension import StreamTransformExtension
+from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
 from torch.distributed.checkpoint.filesystem import (
     FileSystemBase,
     FileSystemReader,
     FileSystemWriter,
     SerializationFormat,
 )
+from torch.distributed.checkpoint.planner import (
+    LoadItemType,
+    LoadPlan,
+    LoadPlanner,
+    ReadItem,
+)
+from torch.futures import Future
+from torch.serialization import _load, _open_zipfile_reader
 
 
 if TYPE_CHECKING:
@@ -151,11 +171,275 @@ class FsspecWriter(FileSystemWriter):
         return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
+def _destinations_disjoint(targets: list[Tensor]) -> bool:
+    """Whether every destination is a contiguous plain CPU tensor with disjoint bytes.
+
+    Overlap means two items would race, which happens when items narrow into
+    overlapping regions of the same tensor. Non-contiguous, non-CPU, or
+    custom tensor subclasses are rejected so ``[data_ptr, data_ptr + nbytes)``
+    is always an exact host memory extent.
+    """
+    spans = []
+    for t in targets:
+        try:
+            if not (type(t) is Tensor and t.is_cpu and t.is_contiguous()):
+                return False
+            start = t.data_ptr()
+            nbytes = t.numel() * t.element_size()
+            if start == 0 and nbytes > 0:
+                return False
+            spans.append((start, start + nbytes))
+        except Exception:
+            return False
+    spans.sort()
+    return all(end <= nxt for (_, end), (nxt, _) in itertools.pairwise(spans))
+
+
+def _load_aliased(buf: bytes | bytearray | memoryview) -> Tensor:
+    """Deserialize one DCP tensor record, aliasing ``buf`` if the byte order matches.
+
+    A foreign byte order is swapped in place, so that case still gets a copy.
+    """
+    with _open_zipfile_reader(io.BytesIO(buf)) as zf:
+        storage = None
+        if (
+            zf.has_record("byteorder")
+            and zf.get_record("byteorder") == sys.byteorder.encode()
+        ):
+            storage = torch.frombuffer(buf, dtype=torch.uint8).untyped_storage()
+        return _load(
+            zf,
+            "cpu",
+            _weights_only_unpickler,
+            overall_storage=storage,
+            weights_only=True,
+            encoding="utf-8",
+        )
+
+
 class FsspecReader(FileSystemReader):
-    def __init__(self, path: str | os.PathLike, **kwargs) -> None:
+    def __init__(
+        self,
+        path: str | os.PathLike,
+        *,
+        max_batch_size: int = 1024,
+        max_batch_bytes: int = 256 * 1024 * 1024,
+        cpu_workers: int | None = None,
+        **kwargs,
+    ) -> None:
+        """
+        Initialize the FsspecReader pointing to `path`.
+
+        Args:
+            path: directory or URL where the checkpoint will be read from.
+            max_batch_size: Maximum number of read items per batched cat_ranges call.
+                Defaults to 1024, so batches are normally bounded by bytes. Small
+                items, such as per-parameter optimizer steps spread over every
+                rank's file, then share one call instead of paying for opening
+                their files in each of several calls.
+            max_batch_bytes: Maximum cumulative byte size requested per batched
+                cat_ranges call. Defaults to 256 MiB. This caps one request, not
+                resident memory: the next two batches are fetched while the current
+                one is still being decoded and copied, so expect a small multiple of
+                this to be live at peak.
+            cpu_workers: Number of worker threads for parallel CPU deserialization.
+                Defaults to min(4, max(1, cpu_count // local_world_size)).
+            **kwargs: Additional storage options passed to fsspec url_to_fs.
+        """
         super().__init__(path)
+        self.max_batch_size = max(1, max_batch_size)
+        self.max_batch_bytes = max(1, max_batch_bytes)
+        if cpu_workers is None:
+            local_world_size = max(1, int(os.environ.get("LOCAL_WORLD_SIZE") or 1))
+            total_cpus = os.cpu_count() or 4
+            cpu_workers = min(4, max(1, total_cpus // local_world_size))
+        self.cpu_workers = max(1, cpu_workers)
         self.fs = FileSystem()
         self.path = self.fs.init_path(path, **kwargs)
+
+    def _supports_batched_cat_ranges(self) -> bool:
+        # read_data runs two cat_ranges calls at once, which only an
+        # AsyncFileSystem is guaranteed to handle. Wrappers such as
+        # DirFileSystem are async even over a sync or caching filesystem, so
+        # the innermost filesystem decides.
+        curr_fs = self.fs.fs
+        if not isinstance(curr_fs, fsspec.asyn.AsyncFileSystem):
+            return False
+        seen: set[int] = set()
+        while True:
+            if isinstance(curr_fs, CachingFileSystem):
+                return False
+            seen.add(id(curr_fs))
+            inner = getattr(curr_fs, "fs", None)
+            if not isinstance(inner, fsspec.AbstractFileSystem):
+                break
+            if id(inner) in seen:
+                return False
+            curr_fs = inner
+        return bool(getattr(curr_fs, "async_impl", True))
+
+    def read_data(self, plan: LoadPlan, planner: LoadPlanner) -> Future[None]:
+        if not plan.items or not self._supports_batched_cat_ranges():
+            return super().read_data(plan, planner)
+
+        reqs = sorted(
+            plan.items,
+            key=lambda req: (
+                self.storage_data[req.storage_index].relative_path,
+                self.storage_data[req.storage_index].offset,
+            ),
+        )
+
+        batches = []
+        batch = []
+        batch_bytes = 0
+        for req in reqs:
+            length = self.storage_data[req.storage_index].length
+            if batch and (
+                len(batch) >= self.max_batch_size
+                or batch_bytes + length > self.max_batch_bytes
+            ):
+                batches.append(batch)
+                batch = []
+                batch_bytes = 0
+            batch.append(req)
+            batch_bytes += length
+        if batch:
+            batches.append(batch)
+
+        def fetch_batch(b_reqs):
+            mds = [self.storage_data[req.storage_index] for req in b_reqs]
+            paths = [self.fs.concat_path(self.path, md.relative_path) for md in mds]
+            starts = [md.offset for md in mds]
+            ends = [md.offset + md.length for md in mds]
+            chunks = self.fs.fs.cat_ranges(paths, starts, ends, on_error="raise")
+            # A short list means some ranges were dropped (``on_error="omit"``).
+            # Left unchecked, the zip below would silently skip those items and
+            # leave their tensors at whatever the caller initialized them to.
+            if len(chunks) != len(b_reqs):
+                raise RuntimeError(
+                    f"cat_ranges returned {len(chunks)} chunks for {len(b_reqs)} ranges"
+                )
+            # ``on_error`` is advisory: fsspec honors it only since 2026.6.0 and
+            # other backends may ignore it, returning exceptions in-band.
+            for path, start, end, chunk in zip(paths, starts, ends, chunks):
+                if isinstance(chunk, BaseException):
+                    raise RuntimeError(
+                        f"Failed to read bytes [{start}, {end}) from {path}"
+                    ) from chunk
+                if len(chunk) != end - start:
+                    raise RuntimeError(
+                        f"Read {len(chunk)} bytes for [{start}, {end}) from {path}"
+                    )
+            return chunks
+
+        def decode(req, chunk):
+            if self.storage_data[req.storage_index].transform_descriptors:
+                return self._decode_item(req, io.BytesIO(chunk))
+            if req.type == LoadItemType.BYTE_IO:
+                return io.BytesIO(chunk)
+            tensor = _load_aliased(chunk)
+            return narrow_tensor_by_index(tensor, req.storage_offsets, req.lengths)
+
+        inference_mode = torch.is_inference_mode_enabled()
+
+        def _copy(dst: Tensor, src: Tensor) -> None:
+            with torch.inference_mode(inference_mode):
+                dst.copy_(src)
+
+        # Resolving a whole batch before committing any of it is only safe
+        # when resolve_tensor and commit_tensor keep their default behavior.
+        planner_cls = type(planner)
+        parallel_copy = (
+            isinstance(planner, DefaultLoadPlanner)
+            and planner_cls.resolve_tensor is DefaultLoadPlanner.resolve_tensor
+            and planner_cls.commit_tensor is DefaultLoadPlanner.commit_tensor
+        )
+
+        with (
+            warnings.catch_warnings(),
+            concurrent.futures.ThreadPoolExecutor(
+                max_workers=self.cpu_workers, thread_name_prefix="FsspecReader-cpu"
+            ) as cpu_executor,
+            concurrent.futures.ThreadPoolExecutor(
+                max_workers=2, thread_name_prefix="FsspecReader-io"
+            ) as io_executor,
+        ):
+            # _load_aliased wraps the read-only fetched bytes without copying.
+            # The filter is process-wide so that it also covers the pool threads.
+            warnings.filterwarnings(
+                "ignore",
+                message=".*The given buffer is not writable.*",
+                category=UserWarning,
+            )
+            # Two fetches run at once, so one batch's slowest streams overlap
+            # the next batch's start instead of idling the connection.
+            inflight = [io_executor.submit(fetch_batch, b) for b in batches[:2]]
+            try:
+                for idx, b_reqs in enumerate(batches):
+                    chunks = inflight.pop(0).result()
+                    if idx + 2 < len(batches):
+                        inflight.append(
+                            io_executor.submit(fetch_batch, batches[idx + 2])
+                        )
+
+                    decoded = [
+                        cpu_executor.submit(decode, req, chunk)
+                        for req, chunk in zip(b_reqs, chunks)
+                    ]
+                    del chunks
+
+                    # Every planner hook runs on this thread, so planners need
+                    # not be thread safe. Only decoding above and the copies
+                    # below go to the pool.
+                    if parallel_copy:
+                        pending: list[tuple[ReadItem, Tensor, Tensor]] = []
+                        for i, req in enumerate(b_reqs):
+                            f = decoded[i]
+                            decoded[i] = None
+                            item = f.result()
+                            if req.type == LoadItemType.BYTE_IO:
+                                planner.load_bytes(req, item)
+                            else:
+                                pending.append(
+                                    (req, self._resolve_item(req, item, planner), item)
+                                )
+
+                        if len(pending) > 1 and _destinations_disjoint(
+                            [dst for _, dst, _ in pending]
+                        ):
+                            copies = [
+                                cpu_executor.submit(_copy, dst, src)
+                                for _, dst, src in pending
+                            ]
+                            for c in copies:
+                                c.result()
+                            for req, dst, _ in pending:
+                                planner.commit_tensor(req, dst)
+                        else:
+                            for req, dst, src in pending:
+                                _copy(dst, src)
+                                planner.commit_tensor(req, dst)
+                    else:
+                        for i, req in enumerate(b_reqs):
+                            f = decoded[i]
+                            decoded[i] = None
+                            item = f.result()
+                            if req.type == LoadItemType.BYTE_IO:
+                                planner.load_bytes(req, item)
+                            else:
+                                dst = self._resolve_item(req, item, planner)
+                                _copy(dst, item)
+                                planner.commit_tensor(req, dst)
+            finally:
+                for fut in inflight:
+                    fut.cancel()
+                cpu_executor.shutdown(wait=False, cancel_futures=True)
+                io_executor.shutdown(wait=False, cancel_futures=True)
+
+        fut: Future[None] = Future()
+        fut.set_result(None)
+        return fut
 
     @classmethod
     def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
