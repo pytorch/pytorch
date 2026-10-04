@@ -282,6 +282,23 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_gb=48.0,
     ),
     # Source:
+    # @lint-ignore https://www.amd.com/en/products/graphics/workstations/radeon-pro/w7900.html
+    "AMD RADEON PRO W7900": DeviceInfo(
+        tops={
+            # RDNA3 runs fp64 at 1/32 of the fp32 rate quoted here
+            torch.float64: 1.92,
+            torch.float32: 61.3,
+            # TF32 is not specified; fall back to the FP32 throughput.
+            "torch.tf32": 61.3,
+            torch.bfloat16: 123.0,
+            torch.float16: 123.0,
+            # RDNA3 WMMA runs int8 at the fp16 rate
+            torch.int8: 123.0,
+        },
+        dram_bw_gbs=864.0,
+        dram_gb=48.0,
+    ),
+    # Source:
     # @lint-ignore https://www.amd.com/en/products/graphics/desktops/radeon/7000-series/amd-radeon-rx-7900xt.html
     "AMD RADEON RX 7900 XT": DeviceInfo(
         tops={
