@@ -2209,6 +2209,11 @@ def is_valid_addmm_fusion(match):
     ):
         return False
 
+    # The addmm patterns don't bind the add's alpha kwarg, so fusing would
+    # silently reset it to aten.addmm's default of 1.
+    if not statically_known_true(match.output_node().kwargs.get("alpha", 1) == 1):
+        return False
+
     mat1, mat2 = match.args
     inp = match.kwargs["inp"]
 

@@ -692,6 +692,26 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(expect, actual)
         self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
 
+    def test_addmm_non_default_alpha_not_fused(self):
+        # The addmm fusion patterns don't bind the add's alpha kwarg; fusing
+        # would silently drop it. See https://github.com/pytorch/pytorch/issues/199698
+        def fn(a, b, c):
+            return torch.add(a, torch.mm(b, c), alpha=0.5), torch.add(
+                torch.mm(b, c), a, alpha=0.5
+            )
+
+        args = (
+            torch.randn(16, 16, device=GPU_TYPE),
+            torch.randn(16, 16, device=GPU_TYPE),
+            torch.randn(16, 16, device=GPU_TYPE),
+        )
+        counters.clear()
+        e1, e2 = fn(*args)
+        a1, a2 = torch.compile(fn)(*args)
+        torch.testing.assert_close(a1, e1)
+        torch.testing.assert_close(a2, e2)
+        self.assertEqual(counters["inductor"]["pattern_matcher_count"], 0)
+
     def test_addmm_broadcasting_bias(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
