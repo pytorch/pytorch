@@ -5859,6 +5859,31 @@ class CPUReproTests(TestCase):
 
         torch.testing.assert_close(actual, expected, equal_nan=True)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @config.patch(_use_fp64_for_unbacked_floats=True)
+    def test_unbacked_float_kernel_arg_keeps_fp64(self):
+        # item() on an intermediate gives an unbacked float, passed to the
+        # kernel as an argument. 2**24 + 1 is not representable in float32,
+        # so the fp64, int64, s + 1 and int(s)-sized results match eager only
+        # if the kernel gets the value unrounded; the fp32 fill still rounds
+        # it, as eager does. s % 1.0 failed to compile with a float argument.
+        def fn(t, x):
+            s = (t * 2).item()
+            return (
+                torch.full((4,), s, dtype=torch.float64),
+                torch.full((4,), s, dtype=torch.int64),
+                torch.full((4,), s + 1, dtype=torch.float32),
+                torch.full((4,), s, dtype=torch.float32) * x,
+                torch.full((4,), s % 1.0, dtype=torch.float64),
+                torch.ones(int(s), dtype=torch.int8).sum(),
+            )
+
+        t = torch.tensor(2**23 + 0.5, dtype=torch.float64)
+        x = torch.randn(4)
+        actual, code = run_and_get_cpp_code(torch.compile(fn, fullgraph=True), t, x)
+        self.assertEqual(actual, fn(t, x), atol=0, rtol=0)
+        FileCheck().check("const double ks").run(code)
+
     @config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_cpp_backend_no_error(self):
         """
