@@ -92,9 +92,7 @@ class Laplace(Distribution):
     def cdf(self, value):
         if self._validate_args:
             self._validate_sample(value)
-        # Select between the two sides instead of using sign(z), whose zero
-        # gradient made d(cdf)/d(value) vanish at the median. The inner where
-        # keeps the unselected side from overflowing and producing nan grads.
+        # Mask the unselected side so expm1 cannot overflow and yield nan grads.
         z = (value - self.loc) / self.scale
         neg = z < 0
         return torch.where(

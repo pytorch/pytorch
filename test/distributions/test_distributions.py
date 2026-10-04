@@ -3636,6 +3636,11 @@ class TestDistributions(DistributionsTestCase):
         self.assertTrue(gradcheck(lambda x, s: Laplace(0.0, s).cdf(x), (x, s)))
         self.assertTrue(gradcheck(lambda q, s: Laplace(0.0, s).icdf(q), (q, s)))
 
+        # Far in the tails the unselected side of cdf would overflow without the inner mask.
+        tails = torch.tensor([-1e4, 1e4], requires_grad=True)
+        (tail_grad,) = grad(Laplace(0.0, 1.0).cdf(tails).sum(), [tails])
+        self.assertTrue(torch.isfinite(tail_grad).all())
+
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     @set_default_dtype_if_supported(torch.double)
     def test_laplace_sample(self):
