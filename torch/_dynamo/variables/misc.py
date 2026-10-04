@@ -66,6 +66,7 @@ from ..utils import (
     check_positional,
     check_unspec_or_constant_args,
     identity,
+    is_namedtuple_cls,
     istype,
     no_keywords,
     proxy_args_kwargs,
@@ -1579,6 +1580,28 @@ class TypingVariable(VariableTracker):
     def __init__(self, value: object, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
+
+    def call_function(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .builder import SourcelessBuilder
+
+        if type(self.value) is types.GenericAlias:
+            origin = self.value.__origin__
+            if (
+                is_namedtuple_cls(origin)
+                and type(origin) is type
+                and origin.__dictoffset__ == 0
+                and origin.__setattr__ is object.__setattr__
+                and all("__orig_class__" not in cls.__dict__ for cls in origin.__mro__)
+            ):
+                return SourcelessBuilder.create(tx, origin).call_function(
+                    tx, args, kwargs
+                )
+        return super().call_function(tx, args, kwargs)
 
     def mp_subscript_impl(
         self,

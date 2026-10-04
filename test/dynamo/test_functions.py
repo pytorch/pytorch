@@ -2819,6 +2819,21 @@ partial_fn = functools.partial(fn, scale=2)
         tmp = mytuple(a, xy=b)
         return mytuple(tmp.x, tmp[1], tmp.xy + b)
 
+    def test_parameterized_namedtuple_constructor(self):
+        def fn():
+            Group = collections.namedtuple("Group", "key group")
+            alias = Group[int, list[int]]
+            instance = alias(1, [2])
+            by_keyword = alias(key=3, group=[4])
+            return (
+                type(instance) is Group,
+                instance,
+                type(by_keyword) is Group,
+                by_keyword,
+            )
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
     @make_test
     def test_namedtuple_replace_1(a, b):
         mytuple = collections.namedtuple("mytuple", ["x", "y"])
