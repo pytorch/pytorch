@@ -246,6 +246,7 @@ from .functions import (
     SysFunctionVariable,
     TritonKernelVariable,
     TritonSetAllocatorVariable,
+    UserDefinedPropertyVariable,
     UserFunctionVariable,
     WrapperUserFunctionVariable,
 )
@@ -2436,6 +2437,8 @@ class VariableBuilder:
             result = GenericContextWrappingVariable(value, source=self.source)
         elif SimpleNamespaceVariable.is_matching_cls(type(value)):
             result = SimpleNamespaceVariable(value, source=self.source)
+        elif isinstance(value, property):
+            result = UserDefinedPropertyVariable(value, source=self.source)
         else:
             result = UserDefinedObjectVariable(value, source=self.source)
         if not SideEffects.cls_supports_mutation_side_effects(type(value)):

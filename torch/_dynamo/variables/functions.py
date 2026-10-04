@@ -55,7 +55,9 @@ from ..exc import (
     CompileOnOneRankUnsupported,
     format_frame_info,
     get_dynamo_observed_exception,
+    handle_observed_exception,
     InfiniteGeneratorError,
+    ObservedAttributeError,
     ObservedException,
     ObservedGeneratorExit,
     ObservedUserStopIteration,
@@ -5599,6 +5601,14 @@ class PropertyVariable(VariableTracker):
     def as_python_constant(self) -> property:
         return self.descriptor
 
+    def _get_accessor(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        source = self.source and AttrSource(self.source, name)
+        return VariableTracker.build(
+            tx, getattr(self.descriptor, name), source, realize=True
+        )
+
     def tp_descr_set_impl(
         self,
         tx: "InstructionTranslatorBase",
@@ -5606,9 +5616,9 @@ class PropertyVariable(VariableTracker):
         value: VariableTracker | None,
     ) -> VariableTracker:
         attr = "fset" if value is not None else "fdel"
-        fn = getattr(self.descriptor, attr)
+        fn = self._get_accessor(tx, attr)
 
-        if fn is None:
+        if fn.is_constant_none():
             display_name = getattr(self.descriptor, "__name__", None)
             kind = "setter" if value is not None else "deleter"
             if sys.version_info >= (3, 11):
@@ -5634,9 +5644,7 @@ class PropertyVariable(VariableTracker):
             raise_attribute_error(tx, msg)
 
         args = [obj] if value is None else [obj, value]
-        VariableTracker.build(
-            tx, fn, source=self.source and AttrSource(self.source, attr)
-        ).call_function(tx, args, {})
+        fn.call_function(tx, args, {})
         return ConstantVariable.create(None)
 
     def tp_descr_get_impl(
@@ -5649,11 +5657,173 @@ class PropertyVariable(VariableTracker):
         # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c#L1660-L1693
         if obj is None:
             return self
-        fget_source = AttrSource(self.source, "fget") if self.source else None
-        fget_vt = VariableTracker.build(
-            tx, self.descriptor.fget, source=fget_source, realize=True
-        )
+        fget_vt = self._get_accessor(tx, "fget")
         return fget_vt.call_function(tx, [obj], {})
+
+
+class UserDefinedPropertyVariable(UserDefinedObjectVariable, PropertyVariable):
+    _nonvar_fields = {
+        *UserDefinedObjectVariable._nonvar_fields,
+        *PropertyVariable._nonvar_fields,
+    }
+
+    def __init__(self, value: property, **kwargs: Any) -> None:
+        super().__init__(value, descriptor=value, **kwargs)
+        self._base_methods = {
+            property.__init__,
+            property.__get__,
+            property.__set__,
+            property.__delete__,
+        }
+        self.property_args: list[VariableTracker] | None = None
+
+    def _get_accessor(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        if self.property_args is not None:
+            return self.property_args[("fget", "fset", "fdel").index(name)]
+        source = self.source and AttrSource(self.source, name)
+        return VariableTracker.build(tx, getattr(self.value, name), source)
+
+    tp_members = {
+        "fget": Member(lambda s, tx: s._get_accessor(tx, "fget"), readonly_setter),
+        "fset": Member(lambda s, tx: s._get_accessor(tx, "fset"), readonly_setter),
+        "fdel": Member(lambda s, tx: s._get_accessor(tx, "fdel"), readonly_setter),
+    }
+
+    def call_method(
+        self,
+        tx: "InstructionTranslatorBase",
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if (
+            name != "__init__"
+            or self._maybe_get_baseclass_method(name) is not property.__init__
+        ):
+            return super().call_method(tx, name, args, kwargs)
+        from .object_protocol import generic_getattr
+
+        if sys.version_info < (3, 12) or not isinstance(
+            self.mutation_type, AttributeMutationNew
+        ):
+            return VariableTracker.call_method(self, tx, name, args, kwargs)
+        # Validate the C constructor's argument binding without invoking user code.
+        try:
+            property(*([None] * len(args)), **dict.fromkeys(kwargs))
+        except TypeError as exc:
+            raise_type_error(tx, str(exc))
+        names = ("fget", "fset", "fdel", "doc")
+        bound = dict.fromkeys(names, ConstantVariable.create(None))
+        bound.update(zip(names, args))
+        bound.update(kwargs)
+        bound = {name: value.realize() for name, value in bound.items()}
+        doc = bound["doc"]
+        getter_doc = False
+        if doc.is_constant_none() and not bound["fget"].is_constant_none():
+            try:
+                fget = bound["fget"]
+                if isinstance(
+                    fget, UserFunctionVariable
+                ) and not tx.output.side_effects.has_pending_mutation_of_attr(
+                    fget, "__doc__"
+                ):
+                    source = fget.source and AttrSource(fget.source, "__doc__")
+                    doc = VariableTracker.build(tx, fget.get_function().__doc__, source)
+                else:
+                    doc = generic_getattr(tx, fget, "__doc__")
+                doc = doc.realize()
+                getter_doc = not doc.is_constant_none()
+            except ObservedAttributeError:
+                handle_observed_exception(tx)
+        self.property_args = [bound[name] for name in names]
+        doc_attr = inspect.getattr_static(self.python_type(), "__doc__", None)
+        if not self.python_type().__dictoffset__ and not isinstance(
+            doc_attr, types.MemberDescriptorType
+        ):
+            if getter_doc:
+                raise_attribute_error(
+                    tx,
+                    f"'{self.python_type_name()}' object attribute '__doc__' is read-only",
+                )
+            return ConstantVariable.create(None)
+        try:
+            VariableTracker.build(tx, setattr).call_function(
+                tx, [self, ConstantVariable.create("__doc__"), doc], {}
+            )
+        except ObservedAttributeError:
+            if getter_doc:
+                raise
+            handle_observed_exception(tx)
+        return ConstantVariable.create(None)
+
+    def tp_init_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if self.inherits_base_slot("__init__"):
+            return self.call_method(tx, "__init__", args, kwargs)
+        return super().tp_init_impl(tx, args, kwargs)
+
+    def _name_getter(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        from .base import load_pending_mutation
+        from .object_protocol import generic_getattr
+
+        pending = load_pending_mutation(tx, self, "__name__")
+        if pending is not None:
+            return pending
+        if self.property_args is not None:
+            try:
+                return generic_getattr(tx, self._get_accessor(tx, "fget"), "__name__")
+            except ObservedAttributeError:
+                handle_observed_exception(tx)
+                raise_attribute_error(
+                    tx, "'property' object has no attribute '__name__'"
+                )
+        return PropertyVariable._name_getter(self, tx)
+
+    tp_getset = {
+        **PropertyVariable.tp_getset,
+        "__name__": GetSet(_name_getter, PropertyVariable.tp_getset["__name__"].setter),
+    }
+
+    def tp_descr_get_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker | None,
+        owner: VariableTracker,
+    ) -> VariableTracker:
+        if self.inherits_base_slot("__get__"):
+            return PropertyVariable.tp_descr_get_impl(self, tx, obj, owner)
+        return super().tp_descr_get_impl(tx, obj, owner)
+
+    def tp_descr_set_impl(
+        self,
+        tx: "InstructionTranslatorBase",
+        obj: VariableTracker,
+        value: VariableTracker | None,
+    ) -> VariableTracker:
+        if self.inherits_base_slot("__delete__" if value is None else "__set__"):
+            return PropertyVariable.tp_descr_set_impl(self, tx, obj, value)
+        return super().tp_descr_set_impl(tx, obj, value)
+
+    def codegen_init(self, cg: "PyCodegen") -> None:
+        if self.property_args is None:
+            return
+
+        def load_init() -> None:
+            cg.load_import_from("builtins", "property")
+            cg.extend_output([cg.create_load_attr("__init__")])
+
+        cg.add_push_null(load_init)
+        cg(self)
+        for arg in self.property_args:
+            cg(arg)
+        cg.extend_output(create_call_function(5, False))
+        cg.pop_top()
 
 
 class TupleGetterVariable(VariableTracker):
