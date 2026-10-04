@@ -629,6 +629,10 @@ if rank == 0:
 
 ## Collective functions
 
+:::{note}
+Collective operations in `torch.distributed` (such as {func}`torch.distributed.all_reduce`) are not autograd-aware and do not propagate gradients during the backward pass. If you require differentiable collective communication where gradients propagate across processes, use the corresponding autograd-aware operations in {mod}`torch.distributed.nn.functional` (for example, {func}`torch.distributed.nn.functional.all_reduce`).
+:::
+
 ```{eval-rst}
 .. autofunction:: broadcast
 ```
