@@ -12,9 +12,11 @@
 #include <functional>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <vector>
 
 #include <pti/pti.h>
+#include <pti/pti_metrics.h>
 #include <pti/pti_metrics_scope.h>
 
 namespace KINETO_NAMESPACE {
@@ -62,5 +64,9 @@ class XpuptiScopeProfilerApi {
 std::vector<pti_device_handle_t> selectDeviceHandles(
     std::span<const pti_device_handle_t> handles,
     std::span<const int> indices);
+
+// Devices PTI can collect metrics on. errorHint is appended to PTI errors.
+std::vector<pti_device_properties_t> getMetricsDevices(
+    std::string_view errorHint = "");
 
 } // namespace KINETO_NAMESPACE

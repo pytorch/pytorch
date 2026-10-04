@@ -9,9 +9,12 @@
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/cuspy/cuspy_python.h>
+#include <torch/csrc/profiler/kineto_shim.h>
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
+
+#include <algorithm>
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 struct THPCapturedTraceback {
@@ -724,6 +727,41 @@ void initPythonBindings(PyObject* module) {
       .def(py::init<>())
       .def("to_unix_ns", &ApproximateClockPyConverter::to_unix_ns);
   m.def("_get_approximate_time", []() { return c10::getApproximateTime(); });
+  m.def("_xpu_available_metrics", [](const py::bytes& device_uuid) {
+#ifdef USE_KINETO
+    const std::string uuid_str = device_uuid;
+    libkineto::XpuDeviceUuid uuid{};
+    TORCH_CHECK(
+        uuid_str.size() == uuid.size(),
+        "Expected a ",
+        uuid.size(),
+        "-byte XPU device UUID, got ",
+        uuid_str.size(),
+        " bytes");
+    std::copy(uuid_str.begin(), uuid_str.end(), uuid.begin());
+    py::list groups;
+    for (const auto& group :
+         torch::profiler::impl::kineto::xpuAvailableMetrics(uuid)) {
+      py::list metrics;
+      for (const auto& metric : group.metrics) {
+        metrics.append(py::dict(
+            py::arg("name") = metric.name,
+            py::arg("description") = metric.description,
+            py::arg("unit") = metric.unit,
+            py::arg("metric_type") = metric.metricType,
+            py::arg("value_type") = metric.valueType));
+      }
+      groups.append(py::dict(
+          py::arg("name") = group.name,
+          py::arg("description") = group.description,
+          py::arg("scope_compatible") = group.scopeCompatible,
+          py::arg("metrics") = metrics));
+    }
+    return groups;
+#else
+    TORCH_CHECK(false, "XPU metric queries require PyTorch built with Kineto");
+#endif // USE_KINETO
+  });
   initCuspyBindings(m);
   TORCH_CHECK_PYTHON(PyModule_AddType(m.ptr(), &THPCapturedTracebackType) >= 0);
   m.def(

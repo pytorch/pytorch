@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 // Skip Kineto dependency on mobile unless explicitly asked for.
 // When is it explicitly asked for?
@@ -18,6 +19,8 @@
 #include <torch/csrc/profiler/api.h>
 
 #ifdef USE_KINETO
+#include <XpuptiMetricQuery.h>
+
 // Forward declarations so we don't have to include `libkineto.h` in a header.
 namespace libkineto {
 class GenericTraceActivity;
@@ -136,6 +139,11 @@ void logInvariantViolation(
     const std::string& error,
     const std::string& profile_id,
     const std::string& group_profile_id);
+
+#ifdef USE_KINETO
+TORCH_API std::vector<libkineto::XpuMetricGroupInfo> xpuAvailableMetrics(
+    const libkineto::XpuDeviceUuid& deviceUuid);
+#endif
 
 } // namespace impl::kineto
 
