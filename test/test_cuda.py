@@ -11304,7 +11304,9 @@ class TestGDS(TestCase):
         # local filesystem (ext4/xfs) for the temp file the transfer targets.
         if not torch.cuda.gds.is_available():
             self.skipTest("GDS (cuFile/hipFile) not built into this install")
-        if self._get_tmp_dir_fs_type() not in ("ext4", "xfs"):
+        # hipFile's fallback path can work with filesystems that the fast path does
+        # not support.
+        if self._get_tmp_dir_fs_type() not in ("ext4", "xfs") and not TEST_WITH_ROCM:
             self.skipTest("GPUDirect Storage requires ext4/xfs for local filesystem")
 
     def test_gds_is_available(self):
@@ -11394,6 +11396,68 @@ class TestGDS(TestCase):
             file.register_handle()
             self.assertIsNotNone(file.handle)
             file.save_storage(storage)
+
+    def test_gds_explicit_stream(self):
+        # Transfers are ordered after work already enqueued on the given stream,
+        # for race condition regression test.
+        self._require_gds()
+        stream = torch.cuda.Stream()
+        src = torch.empty(4096, device="cuda")
+        dest = torch.empty_like(src)
+        with torch.cuda.stream(stream):
+            # Sleep the GPU, host proceeds.
+            torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+            src.normal_()
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            # Since the GPU is sleeping, if `save_storage` or `load_storage`
+            # were not stream-ordered, this would race with the initialization
+            # done by `src.normal_()`.
+            file.save_storage(src.untyped_storage(), stream=stream)
+            file.load_storage(dest.untyped_storage(), stream=stream)
+        self.assertEqual(src, dest)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    def test_gds_stream_device_mismatch(self):
+        self._require_gds()
+        storage = torch.randn(1024, device="cuda:0").untyped_storage()
+        stream = torch.cuda.Stream(device="cuda:1")
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            for transfer in (file.save_storage, file.load_storage):
+                with self.assertRaisesRegex(
+                    RuntimeError, "Expected a stream on cuda:0"
+                ):
+                    transfer(storage, stream=stream)
+
+    def test_gds_graph_capture_unsupported(self):
+        self._require_gds()
+        storage = torch.randn(1024, device="cuda").untyped_storage()
+        torch.cuda.synchronize()
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            for transfer in (file.save_storage, file.load_storage):
+                with self.assertRaisesRegex(
+                    RuntimeError, "not supported during CUDA graph capture"
+                ):
+                    with torch.cuda.graph(torch.cuda.CUDAGraph()):
+                        transfer(storage)
+
+    def test_gds_graph_capture_unsupported_explicit_stream(self):
+        # Same rejection, but through the explicit `stream=` argument rather
+        # than the default current-stream lookup, exercising getGdsStream's
+        # stream.has_value() branch.
+        self._require_gds()
+        storage = torch.randn(1024, device="cuda").untyped_storage()
+        torch.cuda.synchronize()
+        with TemporaryFileName() as f:
+            file = torch.cuda.gds.GdsFile(f, os.O_CREAT | os.O_RDWR)
+            for transfer in (file.save_storage, file.load_storage):
+                with self.assertRaisesRegex(
+                    RuntimeError, "not supported during CUDA graph capture"
+                ):
+                    with torch.cuda.graph(torch.cuda.CUDAGraph()):
+                        transfer(storage, stream=torch.cuda.current_stream())
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
