@@ -3,6 +3,7 @@
 
 import ast
 import inspect
+import math
 import textwrap
 import threading
 import unittest
@@ -5680,6 +5681,60 @@ class TestNVUniversalGemmEpilogueFusion(TestCase):
         torch.cuda.synchronize()
         expected = a.float() @ b.float()
         torch.testing.assert_close(out2.float(), expected, atol=1e-2, rtol=1e-2)
+
+    def test_workspace_runtime_integration(self):
+        """Exercise a fused NVGEMM's nonzero workspace through autotuning."""
+        import cutlass.operators
+        from cutlass.operators.workspace import AllocationRequirement
+
+        from torch._inductor.codegen.cuda_combined_scheduling import (
+            CUDACombinedScheduling,
+        )
+
+        a = torch.randn(self.M, self.K, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(self.K, self.N, device="cuda", dtype=torch.bfloat16)
+
+        def fn(a, b):
+            return torch.relu(a @ b)
+
+        bench_results: list[tuple[float, str]] = []
+        orig_bench = CUDACombinedScheduling._benchmark_nvgemm_module
+
+        def capturing_bench(self, module):
+            ms, path = orig_bench(self, module)
+            bench_results.append((ms, path))
+            return ms, path
+
+        torch._dynamo.reset()
+        with (
+            patch.object(
+                cutlass.operators.Operator,
+                "get_workspace_size",
+                lambda self, args: AllocationRequirement(
+                    size_bytes=4096, ptr_alignment=1
+                ),
+            ),
+            mock.patch.object(
+                CUDACombinedScheduling, "_benchmark_nvgemm_module", capturing_bench
+            ),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "NVGEMM",
+                    "nvgemm_max_profiling_configs": 2,
+                    "benchmark_template_fusion": True,
+                    "force_disable_caches": True,
+                }
+            ),
+        ):
+            result = torch.compile(fn)(a, b)
+
+        self.assertEqual(result, fn(a, b), atol=1e-2, rtol=1e-2)
+        self.assertTrue(bench_results, "_benchmark_nvgemm_module never invoked")
+        self.assertTrue(
+            any(math.isfinite(ms) for ms, _ in bench_results),
+            f"No finite NVGEMM benchmarks: {bench_results}",
+        )
 
 
 if __name__ == "__main__":
