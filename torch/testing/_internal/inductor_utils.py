@@ -13,6 +13,7 @@ import torch
 import torch._inductor.config as config
 
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.exc import TritonUnavailableError
 from torch._inductor import compile_fx  # noqa: F401
 from torch._inductor.utils import (
     _device_is_available,
@@ -71,11 +72,23 @@ HAS_PALLAS = LazyVal(has_pallas_package)
 
 HAS_HELION = has_helion()
 
+
+def _triton_backend_built(device_type: str) -> bool:
+    try:
+        get_interface_for_device(device_type).raise_if_triton_unavailable()
+    except TritonUnavailableError:
+        return False
+    return True
+
+
+# HAS_TRITON is True if any accelerator has Triton; XPU also needs Triton's XPU backend.
+TRITON_HAS_XPU = HAS_TRITON and _triton_backend_built("xpu")
+
 HAS_CUDA_AND_TRITON = torch.cuda.is_available() and HAS_TRITON
 
 HAS_MTIA_AND_TRITON = torch.mtia.is_available() and HAS_TRITON
 
-HAS_XPU_AND_TRITON = torch.xpu.is_available() and HAS_TRITON
+HAS_XPU_AND_TRITON = torch.xpu.is_available() and TRITON_HAS_XPU
 
 HAS_MPS = torch.mps.is_available()
 
