@@ -1130,18 +1130,25 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         return contextlib._GeneratorContextManager
 
 
+# Legacy device-specific autocast entry points (e.g. torch.cuda.amp.autocast)
+# that omit device_type from their signature, mapped to their device_type.
+# Third-party backends (e.g. PrivateUse1 devices) extend this through
+# torch._dynamo.variables.torch.register_device_autocast_entry at import time.
+_autocast_entries: dict[Any, str | None] = {
+    torch.amp.autocast_mode.autocast: None,
+    torch.cuda.amp.autocast: "cuda",
+    torch.cpu.amp.autocast: "cpu",
+}
+
+
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
     def create(
-        func: torch.amp.autocast_mode.autocast,
+        func: Callable[..., Any],
         args: Sequence[Any],
         kwargs: dict[str, Any],
     ) -> "AutocastModeVariable":
-        if func not in [
-            torch.amp.autocast_mode.autocast,
-            torch.cuda.amp.autocast,
-            torch.cpu.amp.autocast,
-        ]:
+        if func not in _autocast_entries:
             raise AssertionError(f"unexpected autocast function: {func}")
         # device_type : str,
         # dtype : Optional[_dtype] = None,
@@ -1153,12 +1160,10 @@ class AutocastModeVariable(ContextWrappingVariable):
         kwargs.clear()
 
         for key in ["device_type", "dtype", "enabled", "cache_enabled"]:
-            if key == "device_type" and func in [
-                torch.cuda.amp.autocast,
-                torch.cpu.amp.autocast,
-            ]:
-                # pyrefly: ignore [unnecessary-comparison]
-                arg = "cuda" if func is torch.cuda.amp.autocast else "cpu"
+            if key == "device_type" and _autocast_entries.get(func) is not None:
+                # legacy cuda/cpu and registered third-party autocast functions
+                # omit device_type from their signature; use the registered one.
+                arg = _autocast_entries[func]
             else:
                 arg = bound_args.arguments[key]
             if isinstance(arg, VariableTracker):
