@@ -125,6 +125,8 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
                 tensor = torch.zeros(numel, dtype=dtype, device=self.device)
 
         symm_mem.rendezvous(tensor, group=group_name)
+        # Every rank must finish writing its buffer before peers access it
+        dist.barrier()
         torch.ops.symm_mem.nvshmem_broadcast(tensor, src_rank, group_name)
         self.assertEqual(tensor, torch.arange(numel, dtype=dtype, device=self.device))
 
@@ -169,6 +171,8 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
             x = x0 + self.rank
             y = torch.mm(x, w)
 
+        # Every rank must finish writing its buffer before peers access it
+        dist.barrier()
         # y should be a symm tensor
         torch.ops.symm_mem.nvshmem_broadcast(y, 0, group_name)
         expected = torch.mm(x0, w)
@@ -261,6 +265,8 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         hdl = symm_mem.rendezvous(tensor, group=group_name)
         signal_pad = hdl.get_signal_pad(self.rank)
         signal_val = 5
+        # Every rank must finish writing its buffer before peers access it
+        dist.barrier()
 
         if self.rank == 0:
             torch.ops.symm_mem.nvshmem_put_with_signal(
@@ -280,6 +286,8 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         numel = 1024
         tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
         hdl = symm_mem.rendezvous(tensor, group=group_name)
+        # Every rank must finish writing its buffer before peers access it
+        dist.barrier()
 
         if self.rank == 0:
             torch.ops.symm_mem.nvshmem_get(tensor, 1)
@@ -315,6 +323,8 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         tensor = symm_mem.empty(numel, dtype=torch.float32, device=self.device)
         tensor.fill_(-1)
         hdl = symm_mem.rendezvous(tensor, group=group_name)
+        # Every rank must finish writing its buffer before peers access it
+        dist.barrier()
 
         if self.rank == 0:
             hdl.wait_signal(src_rank=1)
@@ -624,6 +634,8 @@ class NVSHMEMAll2AllTest(MultiProcContinuousTest):
 
         symm_mem.rendezvous(inp, group=group_name)
         symm_mem.rendezvous(out, group=group_name)
+        # Every rank must finish writing its buffer before peers access it
+        dist.barrier()
         torch.ops.symm_mem.nvshmem_all_to_all(inp, out, group_name)
 
         expected = torch.cat(
