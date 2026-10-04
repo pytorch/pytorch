@@ -3157,6 +3157,27 @@ class BuiltinVariable(BaseBuiltinVariable):
         *args: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        if self.fn is format:
+            # builtins.format and str.format share this handler by name.
+            # format(value, spec="") is type(value).__format__(value, spec).
+            if kwargs:
+                raise_type_error(tx, "format() takes no keyword arguments")
+            if len(args) > 1:
+                raise_type_error(
+                    tx, f"format expected at most 2 arguments, got {len(args) + 1}"
+                )
+            spec = args[0] if args else ConstantVariable.create("")
+            spec_type = spec.python_type_name()
+            if spec.is_python_constant() and spec_type != "str":
+                msg = f"format() argument 2 must be str, not {spec_type}"
+                raise_type_error(tx, msg)
+            result = _format_string.call_method(tx, "__format__", [spec], {})
+            if not issubclass(maybe_get_python_type(result), str):
+                raise_type_error(
+                    tx,
+                    f"__format__ must return a str, not {result.python_type_name()}",
+                )
+            return result
         format_string = _format_string.as_python_constant()
         format_string = str(format_string)
         return StringFormatVariable.create(tx, format_string, list(args), kwargs)
