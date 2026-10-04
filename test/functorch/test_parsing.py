@@ -35,7 +35,11 @@ from functorch.einops._parsing import (
     ParsedExpression,
     validate_rearrange_expressions,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 
 
 def mock_anonymous_axis_eq(self: AnonymousAxis, other: object) -> bool:
@@ -43,6 +47,8 @@ def mock_anonymous_axis_eq(self: AnonymousAxis, other: object) -> bool:
 
 
 class TestAnonymousAxis(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_anonymous_axes(self) -> None:
         a, b = AnonymousAxis("2"), AnonymousAxis("2")
         self.assertNotEqual(a, b)
@@ -57,6 +63,8 @@ class TestAnonymousAxis(TestCase):
 
 
 class TestParsedExpression(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_elementary_axis_name(self) -> None:
         for name in [
             "a",
@@ -205,6 +213,8 @@ class TestParsedExpression(TestCase):
 
 
 class TestParsingUtils(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_parse_pattern_number_of_arrows(self) -> None:
         axes_lengths: dict[str, int] = {}
 
@@ -253,6 +263,8 @@ class MaliciousRepr:
 
 
 class TestValidateRearrangeExpressions(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_validate_axes_lengths_are_integers(self) -> None:
         axes_lengths: dict[str, Any] = {"a": 1, "b": 2, "c": 3}
         pattern = "a b c -> c b a"
