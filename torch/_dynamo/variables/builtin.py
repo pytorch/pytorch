@@ -19,6 +19,7 @@ handled during symbolic execution, either by executing them directly when safe
 or by creating appropriate graph nodes when needed.
 """
 
+import __future__
 import abc
 import ast
 import builtins
@@ -32,6 +33,7 @@ import operator
 import sys
 import types
 import typing
+import warnings
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, NoReturn, TYPE_CHECKING
@@ -289,6 +291,13 @@ BUILTIN_TO_TENSOR_RFN_MAP: dict[Callable[..., Any], Callable[..., Any]] = {}
 # "attribute absent" from "attribute is None" (e.g. `__reversed__ = None`
 # opt-out).
 _MISSING_SENTINEL = object()
+
+# Compiler flags of every __future__ feature; compile() inherits these from
+# its caller.
+_FUTURE_FLAGS = functools.reduce(
+    operator.or_,
+    (getattr(__future__, name).compiler_flag for name in __future__.all_feature_names),
+)
 
 # Runtime-raising ops (e.g. truediv) excluded: recompute escapes traced handlers
 _COMPUTED_LAZY_CONSTANT_OPS_BY_ARITY: dict[int, frozenset[Callable[..., Any]]] = {
@@ -1338,6 +1347,8 @@ class BuiltinVariable(BaseBuiltinVariable):
                     return variables.AttributeErrorVariable(fn, args, kwargs)
                 elif fn is NameError:
                     return variables.NameErrorVariable(fn, args, kwargs)
+                elif issubclass(fn, SyntaxError):
+                    return variables.SyntaxErrorVariable(fn, args, kwargs)
                 return variables.ExceptionVariable(fn, args, kwargs)
 
             return create_exception_class_object
@@ -1610,6 +1621,115 @@ class BuiltinVariable(BaseBuiltinVariable):
             raise_observed_exception(SyntaxError, tx, args=[exc.msg])
 
         return self._constant_eval_result(tx, tree, "<torch._dynamo.eval>")
+
+    @staticmethod
+    def _compile_constant_source(
+        tx: "InstructionTranslatorBase",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> types.CodeType | BaseException | None:
+        # Compiling constant source is pure, so do it while tracing. Returns the
+        # code object or the exception compile() raised, or None when the
+        # arguments are not constants or compiling would emit a warning.
+        if not all(
+            x.is_python_constant() for x in itertools.chain(args, kwargs.values())
+        ):
+            return None
+        try:
+            bound = inspect.signature(compile).bind(
+                *[x.as_python_constant() for x in args],
+                **{k: v.as_python_constant() for k, v in kwargs.items()},
+            )
+        except TypeError:
+            return None
+        bound.apply_defaults()
+        flags = bound.arguments["flags"]
+        if not isinstance(flags, int) or flags & ast.PyCF_ONLY_AST:
+            return None
+        # compile() inherits the __future__ flags of its caller, which is the
+        # traced frame and not this module.
+        if not bound.arguments["dont_inherit"]:
+            bound.arguments["flags"] = flags | (tx.f_code.co_flags & _FUTURE_FLAGS)
+            bound.arguments["dont_inherit"] = True
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            try:
+                result = compile(*bound.args, **bound.kwargs)
+            except Exception as exc:
+                result = exc
+        if caught:
+            return None
+        return result
+
+    def call_compile(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        result = self._compile_constant_source(tx, args, kwargs)
+        if isinstance(result, BaseException):
+            raise_observed_exception(type(result), tx, args=list(result.args))
+        if result is None:
+            return None
+        return VariableTracker.build(tx, result)
+
+    def call_exec(
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        # exec() compiles str/bytes source before running anything, so source
+        # that does not compile raises without executing. Running code is not
+        # supported.
+        try:
+            bound = inspect.signature(exec).bind(*args, **kwargs)
+        except TypeError:
+            return None
+        if "closure" in bound.arguments:
+            return None
+        source = bound.arguments["source"]
+        if not source.is_python_constant() or not isinstance(
+            source.as_python_constant(), (str, bytes)
+        ):
+            return None
+        globals_vt = bound.arguments.get("globals")
+        if globals_vt is not None and globals_vt.is_constant_none():
+            globals_vt = None
+        locals_vt = bound.arguments.get("locals")
+        if locals_vt is not None and locals_vt.is_constant_none():
+            locals_vt = None
+        for ns in (globals_vt, locals_vt):
+            if ns is not None and not (
+                isinstance(ns, ConstDictVariable) and ns.python_type() is dict
+            ):
+                return None
+        result = self._compile_constant_source(
+            tx,
+            [
+                source,
+                ConstantVariable.create("<string>"),
+                ConstantVariable.create("exec"),
+            ],
+            {},
+        )
+        if not isinstance(result, BaseException):
+            return None
+        # CPython adds __builtins__ to the globals dict before compiling.
+        if globals_vt is not None:
+            from .lazy import LazyVariableTracker
+
+            key = ConstantVariable.create("__builtins__")
+            if not globals_vt.call_method(
+                tx, "__contains__", [key], {}
+            ).as_python_constant():
+                builtins_vt = LazyVariableTracker.create(
+                    tx.f_builtins,
+                    GlobalSource(tx.output.name_of_builtins_dict_key_in_fglobals),
+                )
+                globals_vt.call_method(tx, "__setitem__", [key, builtins_vt], {})
+        raise_observed_exception(type(result), tx, args=list(result.args))
 
     def call_vars(
         self,

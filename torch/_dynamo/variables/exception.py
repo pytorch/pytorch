@@ -9,6 +9,8 @@ Key classes include:
 - FrameSummaryVariable: Tracks frame summary objects
 """
 
+import os
+import sys
 import traceback
 import types
 from typing import Any, TYPE_CHECKING, Union
@@ -576,3 +578,84 @@ class NameErrorVariable(_KwargAttrExceptionVariable):
     tp_members = {
         "name": Member(lambda s, _: s._attrs["name"], _set_kwarg_attr("name")),
     }
+
+
+def _syntax_error_member(name: str) -> Member:
+    return Member(lambda s, _: s._attrs[name], _set_kwarg_attr(name))
+
+
+class SyntaxErrorVariable(ExceptionVariable):
+    # SyntaxError_init in CPython Objects/exceptions.c: msg is args[0], and a
+    # second argument is unpacked into the location fields.
+    # https://github.com/python/cpython/blob/v3.13.0/Objects/exceptions.c#L2387
+    _location_attrs = (
+        "filename",
+        "lineno",
+        "offset",
+        "text",
+        "end_lineno",
+        "end_offset",
+    ) + (("_metadata",) if sys.version_info >= (3, 14) else ())
+    _attr_names = ("msg", *_location_attrs, "print_file_and_line")
+
+    def __init__(
+        self,
+        exc_type: Any,
+        args: list[VariableTracker],
+        init_kwargs: dict[str, VariableTracker] | None = None,
+        source: Source | None = None,
+        mutation_type: MutationType | None = None,
+    ) -> None:
+        super().__init__(exc_type, args, init_kwargs, source, mutation_type)
+        none = ConstantVariable.create(None)
+        self._attrs: dict[str, VariableTracker] = dict.fromkeys(self._attr_names, none)
+        if args:
+            self._attrs["msg"] = args[0]
+        if len(args) == 2:
+            info = args[1]
+            if not (
+                isinstance(info, variables.BaseListVariable)
+                and 4 <= len(info.items) <= len(self._location_attrs)
+            ):
+                unimplemented(
+                    gb_type="Unsupported SyntaxError location argument",
+                    context=f"{self} with location {info}",
+                    explanation="Dynamo only models a SyntaxError location given "
+                    "as a list or tuple of the right length.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            self._attrs.update(zip(self._location_attrs, info.items))
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        super().reconstruct(codegen)
+        for name, val in self._attrs.items():
+            if not (istype(val, ConstantVariable) and val.value is None):
+                codegen.dup_top()
+                codegen(val)
+                codegen.extend_output(codegen.rot_n(2))
+                codegen.store_attr(name)
+
+    tp_members = {name: _syntax_error_member(name) for name in _attr_names}
+
+    def tp_str_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # SyntaxError_str: "msg (filename, line N)", dropping whichever of the
+        # file basename and the line number is missing.
+        # https://github.com/python/cpython/blob/v3.13.0/Objects/exceptions.c#L2496
+        filename = self._attrs["filename"]
+        lineno = self._attrs["lineno"]
+        parts: list[str] = []
+        if filename.is_python_constant() and isinstance(
+            filename.as_python_constant(), str
+        ):
+            parts.append(filename.as_python_constant().rpartition(os.sep)[2])
+        if istype(lineno, ConstantVariable) and type(lineno.value) is int:
+            parts.append(f"line {lineno.value}")
+        msg = generic_str(tx, self._attrs["msg"])
+        if not parts:
+            return msg
+        fmt = "{} (" + ", ".join(["{}"] * len(parts)) + ")"
+        return variables.BuiltinVariable(str.format).call_function(
+            tx,
+            [ConstantVariable.create(fmt), msg, *map(ConstantVariable.create, parts)],
+            {},
+        )

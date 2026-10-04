@@ -75,6 +75,7 @@ from .exception import (
     FrameSummaryVariable,
     NameErrorVariable,
     StopIterationVariable,
+    SyntaxErrorVariable,
     TracebackVariable,
 )
 from .functions import (
@@ -303,6 +304,7 @@ __all__ = [
     "StringFormatVariable",
     "StructSequenceVariable",
     "SuperVariable",
+    "SyntaxErrorVariable",
     "TemporarilyPopInterpreterStackCtxManagerVariable",
     "TensorVariable",
     "TMADescriptorExperimentalVariable",
