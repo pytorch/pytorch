@@ -815,8 +815,9 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
         num_init_leaves = len(fx_init)
         _, ys_outputs = _extract_carry_and_out(cur_node.meta["val"], num_init_leaves)
 
-        # The outer tuple makes replace_by_example treat the list as the scan node's
-        # unpacked outputs; a bare one-element list would replace the node 1:1.
+        # The nesting is what makes replace_by_example treat the list as the scan node's
+        # unpacked outputs. Otherwise, a single flat output (one carry,
+        # no ys) looks like a 1:1 replacement and leaves getitem on a tensor.
         # TODO: error-prone for any tuple-valued node; disambiguate on its meta["val"].
         def lower_to_while_loop(*args, **kwargs):
             """
