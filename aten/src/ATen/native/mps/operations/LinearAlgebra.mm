@@ -2600,17 +2600,6 @@ static void lstsq_kernel_mps(const Tensor& a,
   const bool sets_rank = (driver_name != "gels");
   const bool sets_singular_values = (driver_name == "gelsd" || driver_name == "gelss");
 
-  // Without singular values the minimum-norm solution is zero and the rank is 0.
-  // b keeps the right-hand sides, which are then all residual.
-  if (std::min(m, n) == 0) {
-    b.narrow(-2, 0, n).zero_();
-    if (sets_rank) {
-      rank.zero_();
-    }
-    infos.zero_();
-    return;
-  }
-
   const double rcond_value =
       rcond > 0 ? rcond : _get_epsilon(real_dtype) * static_cast<double>(std::max<int64_t>(m, n));
 
