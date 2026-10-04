@@ -1066,7 +1066,15 @@ class TestCommon(TestCase):
     # Case 3 and 4 are slightly different when the op is a factory function:
     #   - if device, dtype are NOT passed, any combination of dtype/device should be OK for out
     #   - if device, dtype are passed, device and dtype should match
-    @skipXPU
+    @skipOps(
+        {
+            # Skipping cholesky_inverse and ormqr on XPU due global xfail in common_methods_invocations
+            # while when executed on XPU, CPU fallback makes it pass unexpectedly.
+            skip("cholesky_inverse", device_type="xpu"),
+            skip("ormqr", device_type="xpu"),
+            xfail("histc", device_type="xpu"),
+        }
+    )
     @ops(ops_and_refs, dtypes=OpDTypes.any_one)
     def test_out(self, device, dtype, op):
         # Prefers running in float32 but has a fallback for the first listed supported dtype
