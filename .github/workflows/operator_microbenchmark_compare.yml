@@ -55,15 +55,14 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: linux.12xlarge.memory
       build-environment: linux-jammy-cuda12.8-py3.11-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
       cuda-arch-list: '8.0 9.0'
       test-matrix: |
         { include: [
-          { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "${{ inputs.gpu == 'H100' && 'linux.aws.h100' || 'linux.aws.a100' }}" },
-          { config: "operator_microbenchmark_${{ inputs.operator }}_baseline", shard: 1, num_shards: 1, runner: "${{ inputs.gpu == 'H100' && 'linux.aws.h100' || 'linux.aws.a100' }}" }
+          { config: "operator_microbenchmark_${{ inputs.operator }}_test", shard: 1, num_shards: 1, runner: "${{ inputs.gpu == 'H100' && 'mt-l-x86iamx-22-225-h100' || 'mt-l-x86iavx512-11-125-a100' }}" },
+          { config: "operator_microbenchmark_${{ inputs.operator }}_baseline", shard: 1, num_shards: 1, runner: "${{ inputs.gpu == 'H100' && 'mt-l-x86iamx-22-225-h100' || 'mt-l-x86iavx512-11-125-a100' }}" }
         ]}
     secrets: inherit
 
@@ -87,7 +86,6 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "mt-"
-      runner: linux.r7i.4xlarge
       build-environment: linux-jammy-cuda12.8-py3.11-gcc11-sm100
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
@@ -187,8 +185,8 @@ jobs:
         id: runner
         run: |
           case "$GPU" in
-            H100)   echo "runner=linux.aws.h100" >> "$GITHUB_OUTPUT" ;;
-            A100)   echo "runner=linux.aws.a100" >> "$GITHUB_OUTPUT" ;;
+            H100)   echo "runner=mt-l-x86iamx-22-225-h100" >> "$GITHUB_OUTPUT" ;;
+            A100)   echo "runner=mt-l-x86iavx512-11-125-a100" >> "$GITHUB_OUTPUT" ;;
             B200)   echo "runner=linux.dgx.b200" >> "$GITHUB_OUTPUT" ;;
             MI300X) echo "runner=linux.rocm.gpu.gfx950.1" >> "$GITHUB_OUTPUT" ;;
           esac

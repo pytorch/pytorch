@@ -59,6 +59,7 @@ from .utils import (
 )
 from .variables import (
     BuiltinVariable,
+    ByteArrayBuiltinVariable,
     DictBuiltinVariable,
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
@@ -711,6 +712,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._dispatch_tls_set_dispatch_key_excluded",
         "torch._C._dispatch_tls_set_dispatch_key_included",
         "torch._C._dist_autograd_init",
+        "torch._C._dynamo.utils.get_current_stream",
         "torch._C._dump_local_tls_set",
         "torch._C._dump_upgraders_map",
         "torch._C._enable_mobile_interface_call_export",
@@ -4137,6 +4139,7 @@ Main entry point for looking up the trace rule (the Dynamo variable) for a given
 """
 
 BUILTIN_CALLABLES = {
+    bytearray: ByteArrayBuiltinVariable,
     dict: DictBuiltinVariable,
     getattr: GetAttrBuiltinVariable,
     hasattr: HasAttrBuiltinVariable,

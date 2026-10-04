@@ -158,6 +158,16 @@
       ]
     }
   ],
+  "GB3780": [
+    {
+      "Gb_type": "non-literal key in object __dict__",
+      "Context": "key={key}, type={type(key)}",
+      "Explanation": "Dynamo models object __dict__ keys as literal constants.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0010": [
     {
       "Gb_type": "Attempted to read a deleted variable",
@@ -2075,6 +2085,16 @@
       ]
     }
   ],
+  "GB1472": [
+    {
+      "Gb_type": "classmethod of non-Python function",
+      "Context": "tp_descr_get {self} on {owner}",
+      "Explanation": "Dynamo can only bind a classmethod wrapping a Python function to its class.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0133": [
     {
       "Gb_type": "Unsupported arguments for itertools.accumulate",
@@ -2870,6 +2890,14 @@
     }
   ],
   "GB0172": [
+    {
+      "Gb_type": "async_op=True for distributed collectives",
+      "Context": "{self.fn}, args={args}, kwargs={kwargs}",
+      "Explanation": "_ASYNC_OP_REMAP_ERROR",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "async_op=True for distributed collectives",
       "Context": "{self.fn}, args={args}, kwargs={kwargs}",
@@ -3798,6 +3826,17 @@
       ]
     }
   ],
+  "GB9890": [
+    {
+      "Gb_type": "bytes() with non-constant arguments",
+      "Context": "bytes(*{args}, **{kwargs})",
+      "Explanation": "Attempted to call bytes() with non-constant args.",
+      "Hints": [
+        "Ensure that the args to bytes() are constant (int, str, etc.).",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0227": [
     {
       "Gb_type": "Attempted to use torch.nn.Parameter constructor with tensor subclass",
@@ -4324,6 +4363,26 @@
       "Explanation": "Dynamo does not support tracing TypedDict with optional keys",
       "Hints": [
         "Avoid using TypedDict with optional keys",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3837": [
+    {
+      "Gb_type": "bytearray constructor",
+      "Context": "arg type: {type(arg).__name__}",
+      "Explanation": "Dynamo cannot trace bytearray() with this argument type.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB5460": [
+    {
+      "Gb_type": "bytearray constructor with non-constant args",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Dynamo cannot trace bytearray() with non-constant arguments.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

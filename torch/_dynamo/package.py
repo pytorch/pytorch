@@ -1197,6 +1197,11 @@ class CompilePackage:
             code_source=code_source,
         )
 
+    @property
+    def current_entry(self) -> _DynamoCodeCacheEntry | None:
+        """The entry of the code object being compiled inside ``code_context``."""
+        return self._current_entry
+
     @contextlib.contextmanager
     def code_context(self, code: types.CodeType) -> Generator[None, None, None]:
         if self._current_entry is not None:
