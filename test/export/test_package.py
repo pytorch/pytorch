@@ -97,6 +97,34 @@ class TestPackage(TestCase):
         self.assertEqual(len(package.methods["fn"].overloads), 3)
 
 
+class TestAOTIPackageCMake(TestCase):
+    def _cmake(self, hip, use_libtorch, device="cpu"):
+        from torch._inductor.config import test_configs
+        from torch.export.experimental._utils import _get_make_file
+
+        with (
+            mock.patch.object(torch.version, "hip", hip, create=True),
+            mock.patch.object(test_configs, "use_libtorch", use_libtorch),
+        ):
+            return _get_make_file("pkg", ["Plus__default"], device)
+
+    def test_rocm_links_therock_sdk_dirs(self):
+        text = self._cmake("6.0", True, device="cuda")
+        for rel in (
+            "../_rocm_sdk_core/lib/host-math/lib",
+            "../_rocm_sdk_core/lib/rocm_sysdeps/lib",
+            "../_rocm_sdk_devel/lib/host-math/lib",
+            "../_rocm_sdk_devel/lib/rocm_sysdeps/lib",
+        ):
+            self.assertIn(f'"{rel}"', text)
+        self.assertIn('"LINKER:-rpath-link,${_rocm_dir}"', text)
+        self.assertIn('"LINKER:-rpath,${_rocm_dir}"', text)
+
+    def test_rocm_sdk_link_dirs_require_hip_and_libtorch(self):
+        self.assertNotIn("rpath-link", self._cmake(None, True))
+        self.assertNotIn("rpath-link", self._cmake("6.0", False))
+
+
 class TestAOTIPackageStreamAffinity(TestCase):
     def test_aoti_load_package_forwards_stream_affinity_options(self):
         compiled_model = object()
