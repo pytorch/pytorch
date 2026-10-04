@@ -18130,6 +18130,180 @@ fn
         self.assertEqual(fn(x, get_foo()), opt_fn(x, get_foo()))
 
     @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___metaclass_global_read(self):
+        class Meta(type):
+            def __new__(cls, name, bases, ns):
+                ns["tag"] = _build_class_meta_tag
+                # Read through a helper too: guards must follow the call.
+                ns["scale"] = _build_class_meta_scale()
+                return super().__new__(cls, name, bases, ns)
+
+        def fn(t):
+            class A(metaclass=Meta):
+                pass
+
+            return t * A.scale + A.tag
+
+        t = torch.ones(1)
+        globals()["_build_class_meta_tag"] = 2
+        globals()["_build_class_meta_factor"] = 5
+        globals()["_build_class_meta_scale"] = lambda: _build_class_meta_factor
+        try:
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+            self.assertEqual(opt_fn(t), fn(t))
+            self.assertEqual(opt_fn(t), fn(t))
+            self.assertEqual(cnt.frame_count, 1)
+            # Rebinding a global the metaclass read recompiles.
+            globals()["_build_class_meta_tag"] = 3
+            self.assertEqual(opt_fn(t), fn(t))
+            self.assertEqual(cnt.frame_count, 2)
+            globals()["_build_class_meta_factor"] = 7
+            self.assertEqual(opt_fn(t), fn(t))
+            self.assertEqual(cnt.frame_count, 3)
+        finally:
+            del globals()["_build_class_meta_tag"]
+            del globals()["_build_class_meta_factor"]
+            del globals()["_build_class_meta_scale"]
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___metaclass_kwargs(self):
+        class Outer:
+            factor = 2
+
+        outer = Outer()
+
+        def fn(t):
+            class Meta(type):
+                def __new__(cls, name, bases, ns, scale):
+                    # Closing over an unmodified outer object is allowed.
+                    ns["scale"] = scale * outer.factor
+                    return super().__new__(cls, name, bases, ns)
+
+            class A(metaclass=Meta, scale=3):
+                pass
+
+            return t * A.scale, type(A).__name__
+
+        t = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), fn(t))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___falsy_metaclass(self):
+        def fn(t):
+            class Meta(type):
+                def __len__(cls):
+                    return 0
+
+            class A(metaclass=Meta):
+                pass
+
+            class B(A):
+                pass
+
+            return t.sin(), bool(B), isinstance(B(), A), issubclass(B, A)
+
+        t = torch.randn(2)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(t), fn(t))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___bad_classcell_raises(self):
+        def missing():
+            class Meta(type):
+                def __new__(cls, name, bases, ns):
+                    ns.pop("__classcell__", None)
+                    return super().__new__(cls, name, bases, ns)
+
+            class A(metaclass=Meta):
+                def f(self):
+                    return __class__
+
+        def overwrite():
+            class Meta(type):
+                def __new__(cls, name, bases, ns):
+                    ns["__classcell__"] = 0
+                    return super().__new__(cls, name, bases, ns)
+
+            class A(metaclass=Meta):
+                pass
+
+        def wrong_cell():
+            class Meta(type):
+                def __new__(cls, name, bases, ns):
+                    cls = super().__new__(cls, name, bases, ns)
+                    type("B", (), ns)
+                    return cls
+
+            class A(metaclass=Meta):
+                def f(self):
+                    return __class__
+
+        t = torch.randn(2)
+        for build, exc in [
+            (missing, RuntimeError),
+            (overwrite, TypeError),
+            (wrong_cell, TypeError),
+        ]:
+
+            def fn(t):
+                try:
+                    build()
+                except exc as e:
+                    return t.sin(), str(e)
+                return t.cos(), "no error"
+
+            with self.subTest(build.__name__):
+                torch._dynamo.reset()
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(opt_fn(t), fn(t))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___metaclass_closure_graph_breaks(self):
+        # Metaclass methods run eagerly inside __build_class__ and would write
+        # to a detached copy of the traced closure cell.
+        def fn(t):
+            created = None
+
+            class Meta(type):
+                def __new__(cls, name, bases, ns):
+                    nonlocal created
+                    created = super().__new__(cls, name, bases, ns)
+                    return created
+
+            class A(metaclass=Meta):
+                pass
+
+            return t.sin(), created is A
+
+        self.assertEqual(fn(torch.randn(2))[1], True)
+        with self.assertRaisesRegex(Unsupported, "__build_class__"):
+            torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(2))
+        self.assertEqual(torch.compile(fn, backend="eager")(torch.randn(2))[1], True)
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test___build_class___metaclass_closure_read_after_write(self):
+        def fn():
+            value = 1
+
+            class Meta(type):
+                def __new__(cls, name, bases, ns):
+                    ns["value"] = value
+                    return super().__new__(cls, name, bases, ns)
+
+            value = 2
+
+            class A(metaclass=Meta):
+                pass
+
+            return A.value
+
+        self.assertEqual(fn(), 2)
+        self.assertEqual(torch.compile(fn, backend="eager")(), 2)
+        torch._dynamo.reset()
+        with self.assertRaisesRegex(Unsupported, "__build_class__"):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
     def test___build_class__(self):
         @torch.compile(fullgraph=True, backend="eager")
         def fn(t):
@@ -18944,7 +19118,9 @@ assert functorch_config.error_on_custom_op_aliasing is True
         self.assertEqual(
             default_result.returncode,
             0,
-            msg=lambda msg: f"{msg}\nstdout:\n{default_result.stdout}\nstderr:\n{default_result.stderr}",
+            msg=lambda msg: (
+                f"{msg}\nstdout:\n{default_result.stdout}\nstderr:\n{default_result.stderr}"
+            ),
         )
 
         script = """
@@ -18986,7 +19162,9 @@ with torch.library._scoped_library("mylib_ci", "FRAGMENT") as lib:
         self.assertEqual(
             result.returncode,
             0,
-            msg=lambda msg: f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+            msg=lambda msg: (
+                f"{msg}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+            ),
         )
 
     def test_make_contiguous_strides_for_under_compile(self):

@@ -23,6 +23,7 @@ import abc
 import ast
 import builtins
 import contextlib
+import dis
 import functools
 import inspect
 import itertools
@@ -2156,13 +2157,61 @@ class BuiltinVariable(BaseBuiltinVariable):
             ],
         )
 
+    @staticmethod
+    def _guard_metaclass_globals(tx: "InstructionTranslatorBase", meta: type) -> bool:
+        # The metaclass runs eagerly, so the class it builds is baked into the
+        # graph. Guard every module global its functions (and the functions
+        # those reach) read, so rebinding one recompiles instead of reusing a
+        # stale class. Returns False if some global cannot be sourced.
+        seen_code: set[types.CodeType] = set()
+        guarded: set[tuple[int, str]] = set()
+        pending = [
+            (f.__code__, f.__globals__)
+            for klass in meta.__mro__
+            for v in vars(klass).values()
+            if isinstance(f := getattr(v, "__func__", v), types.FunctionType)
+        ]
+        while pending:
+            code, f_globals = pending.pop()
+            if code in seen_code:
+                continue
+            seen_code.add(code)
+            pending.extend(
+                (c, f_globals) for c in code.co_consts if isinstance(c, types.CodeType)
+            )
+            for inst in dis.get_instructions(code):
+                if inst.opname != "LOAD_GLOBAL" or inst.argval not in f_globals:
+                    continue
+                name = inst.argval
+                if (id(f_globals), name) in guarded:
+                    continue
+                guarded.add((id(f_globals), name))
+                if tx.output.global_scope is f_globals:
+                    source: Source = GlobalSource(name)
+                else:
+                    module_name = f_globals.get("__name__")
+                    module = sys.modules.get(module_name)  # type: ignore[arg-type]
+                    if module is None or module.__dict__ is not f_globals:
+                        return False
+                    source = AttrSource(tx.import_source(module_name), name)
+                value = f_globals[name]
+                if variables.ConstantVariable.is_literal(value):
+                    install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
+                else:
+                    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+                if isinstance(value, types.FunctionType):
+                    pending.append((value.__code__, value.__globals__))
+        return True
+
     def call___build_class__(self, tx, *args, **kwargs):
-        def fail(args, kwargs) -> NoReturn:
+        def fail(args, kwargs, *, skip_frame=False) -> NoReturn:
             unimplemented(
                 gb_type="Invalid call to __build_class__",
                 context=f"Non-constant args to __build_class__: {args} {kwargs}",
                 explanation="Cannot trace class definition: the class body function is unsupported or the base class argument are not compile-time constants",
                 hints=[*graph_break_hints.SUPPORTABLE],
+                skip_frame=skip_frame,
+                preserve_skip_frame_after_inline=skip_frame,
             )
 
         if not torch._dynamo.config.enable_trace_load_build_class:
@@ -2170,6 +2219,14 @@ class BuiltinVariable(BaseBuiltinVariable):
 
         try:
             if isinstance(args[0], variables.NestedUserFunctionVariable):
+                class_code = args[0].get_code()
+                # get_function copies these cells before later local writes.
+                if any(
+                    inst.opname in ("STORE_DEREF", "DELETE_DEREF")
+                    and inst.argval in class_code.co_freevars
+                    for inst in tx.instructions[tx.instruction_pointer :]
+                ):
+                    fail(args, kwargs, skip_frame=True)
                 fn = args[0].get_function(allow_sourced_cells=True)
             else:
                 fn = args[0].get_function()
@@ -2177,12 +2234,34 @@ class BuiltinVariable(BaseBuiltinVariable):
             fail(args, kwargs)
 
         if check_constant_args(args[1:], kwargs):
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            # The metaclass runs eagerly below. A closure cell of its methods
+            # that side_effects does not track (e.g. a copy made when the
+            # metaclass itself was built in this trace) is detached from the
+            # traced cell, so reads could be stale and writes would be lost.
+            meta = const_kwargs.get("metaclass")
+            side_effects = tx.output.side_effects
+            if isinstance(meta, type) and any(
+                name != "__class__"
+                and (
+                    cell not in side_effects
+                    or side_effects.is_modified(side_effects[cell])
+                )
+                for klass in meta.__mro__
+                for v in vars(klass).values()
+                if isinstance(f := getattr(v, "__func__", v), types.FunctionType)
+                for name, cell in zip(f.__code__.co_freevars, f.__closure__ or ())
+            ):
+                fail(args, kwargs, skip_frame=True)
+            if isinstance(meta, type) and not self._guard_metaclass_globals(tx, meta):
+                fail(args, kwargs, skip_frame=True)
             try:
                 r = builtins.__build_class__(
                     fn,  # type: ignore[possibly-undefined]
                     *[a.as_python_constant() for a in args[1:]],
+                    **const_kwargs,
                 )
-            except (TypeError, ValueError) as e:
+            except (TypeError, ValueError, RuntimeError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
             return VariableTracker.build(tx, r)
         else:

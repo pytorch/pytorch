@@ -2522,16 +2522,16 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return generic_hash(tx, self)
 
         if name == "__subclasscheck__" and len(args) == 1 and not kwargs:
-            if (self_py := self.as_python_constant()) and (
-                derived_py := args[0].as_python_constant()
+            # Not truthiness: a metaclass may define __len__/__bool__.
+            self_py = self.as_python_constant()
+            derived_py = args[0].as_python_constant()
+            if (
+                inspect.getattr_static(self_py, "__subclasscheck__", None)
+                is type.__subclasscheck__
             ):
-                if (
-                    inspect.getattr_static(self_py, "__subclasscheck__", None)
-                    is type.__subclasscheck__
-                ):
-                    return variables.ConstantVariable.create(
-                        issubclass(derived_py, self_py)
-                    )
+                return variables.ConstantVariable.create(
+                    issubclass(derived_py, self_py)
+                )
         # __reduce_ex__ is a C builtin (object.__reduce_ex__) that Dynamo
         # cannot trace into.  Constant-fold it for VTs backed by a real
         # Python object so that copy.deepcopy can trace through.
