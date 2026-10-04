@@ -74,6 +74,42 @@ def call(f, *args, **kwargs):
     return f(*args, **kwargs)
 
 
+class PatternKeys:
+    KEY = "a"
+
+
+class PatternParent:
+    __match_args__ = ("a", "b")
+
+
+class PatternChild(PatternParent):
+    __match_args__ = ("c", "d")
+
+
+def match_range_positional():
+    match range(10):
+        case range(10):
+            return "matched"
+    return "unmatched"
+
+
+def match_pattern_parent():
+    obj = PatternChild()
+    obj.a = 0
+    obj.b = 1
+    match obj:
+        case PatternParent(x, y):
+            return x, y
+    return None
+
+
+def match_duplicate_mapping_keys():
+    match {"a": 0, "b": 1}:
+        case {PatternKeys.KEY: x, "a": y}:
+            return x, y
+    return None
+
+
 _variable = 0
 
 
@@ -3183,6 +3219,29 @@ partial_fn = functools.partial(fn, scale=2)
                 return x * param
             case {"b": param}:
                 return x / param
+
+    def test_match_class_rejects_range_positional_pattern(self):
+        with self.assertRaises(TypeError) as eager:
+            match_range_positional()
+        with self.assertRaises(Unsupported) as compiled:
+            torch.compile(match_range_positional, backend="eager", fullgraph=True)()
+        self.assertIn(str(eager.exception), str(compiled.exception))
+
+    def test_match_class_uses_pattern_class_match_args(self):
+        self.assertEqual(match_pattern_parent(), (0, 1))
+        self.assertEqual(
+            torch.compile(match_pattern_parent, backend="eager", fullgraph=True)(),
+            match_pattern_parent(),
+        )
+
+    def test_match_mapping_rejects_duplicate_keys(self):
+        with self.assertRaises(ValueError) as eager:
+            match_duplicate_mapping_keys()
+        with self.assertRaises(Unsupported) as compiled:
+            torch.compile(
+                match_duplicate_mapping_keys, backend="eager", fullgraph=True
+            )()
+        self.assertIn(str(eager.exception), str(compiled.exception))
 
     @parametrize("name, expected", (("ceil", 42), ("floor", 7), ("trunc", 3)))
     def test_math_ceil_floor_trunc_custom_object(self, name, expected):
