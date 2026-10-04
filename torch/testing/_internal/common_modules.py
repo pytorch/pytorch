@@ -2442,6 +2442,14 @@ def module_inputs_torch_nn_LayerNorm(module_info, device, dtype, requires_grad, 
             forward_input=FunctionInput(make_input((4, 2, 2, 5))),
             desc='3d_no_elementwise_affine'),
         ModuleInput(
+            constructor_input=FunctionInput([3], 1e-3, dim=1),
+            forward_input=FunctionInput(make_input((4, 3, 2, 5))),
+            desc='1d_elementwise_affine_dim'),
+        ModuleInput(
+            constructor_input=FunctionInput([3, 2], 1e-3, dim=[1, 2]),
+            forward_input=FunctionInput(make_input((4, 3, 2, 5))),
+            desc='2d_elementwise_affine_dim'),
+        ModuleInput(
             constructor_input=FunctionInput([5], 1e-3),
             forward_input=FunctionInput(make_input((0, 5))),
             desc='1d_empty_elementwise_affine'),
