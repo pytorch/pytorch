@@ -59,6 +59,50 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
+  linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build:
+    if: github.repository_owner == 'pytorch'
+    name: linux-jammy-aarch64-cuda13.2-py3.12-gcc13
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: l-arm64g4-16-62
+      build-environment: linux-jammy-aarch64-cuda13.2-py3.12-gcc13
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13
+      ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
+      cuda-arch-list: '10.0'
+      max-jobs: "8"
+      test-matrix: |
+        { include: [
+          { config: "smoke_b200", shard: 1, num_shards: 1, runner: "nv-l-arm64grace-16-200-gb300" },
+        ]}
+      python-version: "3.12"
+      compiler: gcc13
+      cuda-version: "13.2"
+    secrets: inherit
+
+  linux-jammy-aarch64-cuda13_2-py3_12-gcc13-sm100-test:
+    if: github.repository_owner == 'pytorch'
+    name: linux-jammy-aarch64-cuda13.2-py3.12-gcc13-sm100
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build
+      - get-label-type
+    with:
+      build-environment: ${{ needs.linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build.outputs.build-environment }}
+      # This runner uses the public equivalent of the build's CI image.
+      docker-image: ghcr.io/pytorch/ci-image:pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.12-gcc13-${{ needs.get-label-type.outputs.ci-docker-hash }}
+      force-keep-going: true
+      force-no-td: true
+      python-version: "3.12"
+      rootless-setup: true
+      test-matrix: ${{ needs.linux-jammy-aarch64-cuda13_2-py3_12-gcc13-build.outputs.test-matrix }}
+      tests-to-include: inductor/test_nv_universal_gemm python_native/test_native_aot
+      timeout-minutes: 120
+      compiler: gcc13
+      cuda-version: "13.2"
+    secrets: inherit
+
   # B200 CUDA 13.2 sm100 smoke coverage, staged here to gauge B200 runner
   # reliability/availability on every main commit before it graduates to trunk.
   linux-jammy-cuda13_2-py3_12-gcc11-sm100-build:

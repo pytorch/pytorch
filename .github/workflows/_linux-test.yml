@@ -98,6 +98,11 @@ on:
         type: string
         default: ""
         description: Python version to use for the OSDC test.
+      rootless-setup:
+        required: false
+        type: boolean
+        default: false
+        description: Use the rootless Linux setup path.
       compiler:
         required: false
         type: string
@@ -155,7 +160,48 @@ jobs:
       contents: read
       actions: read
     steps:
+      - name: Prepare rootless home
+        if: inputs.rootless-setup
+        shell: bash
+        run: |
+          WRITABLE_HOME="${RUNNER_TEMP}/home"
+          mkdir -p "$WRITABLE_HOME"
+          echo "HOME=$WRITABLE_HOME" >> "$GITHUB_ENV"
+
+      - name: Check out PyTorch for rootless setup
+        if: inputs.rootless-setup
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+          checkout-mode: treeless
+          submodules: 'false'
+
+      - name: Prepare writable Python environment
+        if: inputs.rootless-setup
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_VENV="/opt/python-${{ inputs.python-version }}-venv"
+          SITE_PACKAGES=$("$BASE_VENV/bin/python3" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+          if [[ -w "$SITE_PACKAGES" ]]; then
+            exit 0
+          fi
+
+          WRITABLE_VENV="${RUNNER_TEMP}/python-venv"
+          "$BASE_VENV/bin/python3" -m venv "$WRITABLE_VENV"
+          WRITABLE_SITE_PACKAGES=$("$WRITABLE_VENV/bin/python3" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')
+          printf '%s\n' "$SITE_PACKAGES" > "$WRITABLE_SITE_PACKAGES/pytorch-ci-base.pth"
+          cp -R "$SITE_PACKAGES/numba" "$WRITABLE_SITE_PACKAGES/numba"
+          chmod -R u+w "$WRITABLE_SITE_PACKAGES/numba"
+          test -w "$WRITABLE_SITE_PACKAGES/numba/cuda/cudadrv/driver.py"
+          {
+            echo "VIRTUAL_ENV=$WRITABLE_VENV"
+            echo "VENV_PATH=$WRITABLE_VENV"
+          } >> "$GITHUB_ENV"
+          echo "$WRITABLE_VENV/bin" >> "$GITHUB_PATH"
+
       - name: Setup Linux
+        if: ${{ !inputs.rootless-setup }}
         id: setup-linux
         uses: pytorch/pytorch/.github/actions/setup-linux@main
         with:
@@ -164,6 +210,19 @@ jobs:
           compiler: ${{ inputs.compiler }}
           cuda-version: ${{ inputs.cuda-version }}
           submodules: 'false'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Linux rootless
+        if: inputs.rootless-setup
+        id: setup-linux-rootless
+        uses: arjkesh/pytorch/.github/actions/setup-linux@975ec45c34432277556f6521b22f5aa3efd7abad
+        with:
+          use-arc: true
+          python-version: ${{ inputs.python-version }}
+          compiler: ${{ inputs.compiler }}
+          cuda-version: ${{ inputs.cuda-version }}
+          submodules: 'false'
+          skip-checkout: 'true'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configure AWS credentials
@@ -249,7 +308,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
-          job-name: ${{ steps.setup-linux.outputs.job-name }}
+          job-name: ${{ steps.setup-linux.outputs.job-name || steps.setup-linux-rootless.outputs.job-name }}
 
       - name: Set test step time
         id: test-timeout
@@ -287,9 +346,9 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
           GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
-          JOB_ID: ${{ steps.setup-linux.outputs.job-id }}
-          JOB_NAME: ${{ steps.setup-linux.outputs.job-name }}
-          BRANCH: ${{ steps.setup-linux.outputs.branch }}
+          JOB_ID: ${{ steps.setup-linux.outputs.job-id || steps.setup-linux-rootless.outputs.job-id }}
+          JOB_NAME: ${{ steps.setup-linux.outputs.job-name || steps.setup-linux-rootless.outputs.job-name }}
+          BRANCH: ${{ steps.setup-linux.outputs.branch || steps.setup-linux-rootless.outputs.branch }}
           SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
           TEST_CONFIG: ${{ matrix.config }}
@@ -319,7 +378,7 @@ jobs:
           HF_CACHE: /mnt/hf_cache
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-          ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
+          ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id || steps.setup-linux-rootless.outputs.job-id }}
           TORCH_TPU_TEXT_FILE: /var/lib/jenkins/workspace/.github/ci_commit_pins/torch_tpu.txt
           USE_ARC: "1"
         shell: bash
@@ -404,7 +463,7 @@ jobs:
         uses: pytorch/pytorch/.github/actions/upload-test-artifacts@main
         if: always() && steps.test.conclusion && steps.test.conclusion != 'skipped'
         with:
-          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id }}
+          file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.setup-linux.outputs.job-id || steps.setup-linux-rootless.outputs.job-id }}
           use-gha: ${{ inputs.use-gha }}
           s3-bucket: ${{ inputs.s3-bucket }}
 
