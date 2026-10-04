@@ -38,8 +38,6 @@ from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
 
 __all__ = [
     "AllGatherInput",
-    "AllGatherOutputFn",
-    "PrepareReduceScatterInputsFn",
     "all_gather_output_fn_with_native_copy",
     "reduce_scatter_input_fn_with_native_copy",
 ]
