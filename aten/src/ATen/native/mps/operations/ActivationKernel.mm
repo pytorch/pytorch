@@ -98,9 +98,10 @@ static void prelu_kernel(TensorIterator& iter) {
   const auto& self = iter.input(0);
   const auto& weight = iter.input(1);
   const auto dtype = self.scalar_type();
+  // empty_like and TensorIterator preserve the physical order of dense scalar-weight inputs.
   // Contiguous input with a scalar weight already uses the shared dense scalar kernel.
   const bool layout_ok = weight.numel() == 1
-      ? !self.is_contiguous() && self.is_non_overlapping_and_dense() && out.strides() == self.strides()
+      ? !self.is_contiguous() && self.is_non_overlapping_and_dense()
       : self.dim() >= 3 && self.is_contiguous() && out.is_contiguous() && weight.is_contiguous() &&
           weight.dim() == self.dim() && weight.size(1) == self.size(1) && weight.numel() == self.size(1);
   if (!layout_ok || self.numel() == 0 || !iter.can_use_32bit_indexing() ||

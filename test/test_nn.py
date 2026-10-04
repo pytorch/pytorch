@@ -12663,6 +12663,33 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(actual.stride(), expected.stride())
 
     @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @parametrize_test("layout", ["transposed", "channels_last", "permuted", "singleton_stride"])
+    @parametrize_test("offset", [0, 1])
+    def test_prelu_kernel_scalar_broadcast_output(self, device, dtype, layout, offset):
+        layouts = {
+            "transposed": ((4, 3), (1, 4)),
+            "channels_last": ((2, 3, 4, 5), (60, 1, 15, 3)),
+            "permuted": ((5, 2, 3), (1, 15, 5)),
+            "singleton_stride": ((3, 1, 4), (1, 29, 3)),
+        }
+        shape, strides = layouts[layout]
+        storage = ((torch.arange(math.prod(shape) + offset) % 7) - 3).to(dtype) * 0.125
+        weight_storage = torch.full((offset + 1,), 0.25, dtype=dtype)
+        cpu_x = storage.as_strided(shape, strides, offset)
+        x = storage.to(device).as_strided(shape, strides, offset)
+        # An extra unit dimension resizes the output without changing its element count.
+        weight_shape = (1,) * (len(shape) + 1)
+        cpu_w = weight_storage[offset:].reshape(weight_shape)
+        w = weight_storage.to(device)[offset:].reshape(weight_shape)
+        op = torch.ops.aten._prelu_kernel.default
+        warning = "An output with one or more elements was resized"
+        with self.assertWarnsOnceRegex(UserWarning, warning):
+            expected = op(cpu_x, cpu_w)
+        with self.assertWarnsOnceRegex(UserWarning, warning):
+            actual = op(x, w)
+        self.assertEqual(actual, expected, rtol=0, atol=0)
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize_test("layout", [
         "scalar_input", "scalar_weight", "channel", "transposed", "expanded_input", "strided_weight",
         "scalar_0d", "channels_last", "narrowed",
