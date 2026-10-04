@@ -11602,7 +11602,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
 
-        if self.device == "cuda":
+        # SM90+ CUDA accumulates with BF16 atomics, which round after every update.
+        if self.device == "cuda" and (
+            torch.version.hip or torch.cuda.get_device_capability() < (9, 0)
+        ):
 
             def bf16_fn(x):
                 idx = torch.zeros(1000, device=x.device, dtype=torch.int64)
