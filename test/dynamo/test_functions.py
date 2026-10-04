@@ -6114,6 +6114,109 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(fn())
 
+    def test_property_isabstractmethod_bool_raises(self):
+        class NotBool:
+            def __bool__(self):
+                raise ValueError("not bool")
+
+        class Flag:
+            def __init__(self, v):
+                self.v = v
+
+            def __bool__(self):
+                return self.v
+
+        def getter(self):
+            pass
+
+        class Foo:
+            p = property(getter)
+            q = property(None, None, getter)
+
+        def fn(x):
+            try:
+                return x + 1, Foo.p.__isabstractmethod__, Foo.q.__isabstractmethod__
+            except ValueError as e:
+                return x - 1, str(e), None
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        for val in (Flag(True), Flag(False), NotBool()):
+            getter.__isabstractmethod__ = val
+            self.assertEqual(opt_fn(x), fn(x))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_property_isabstractmethod_bool_raises_local_class(self):
+        class NotBool:
+            def __bool__(self):
+                raise ValueError("not bool")
+
+        def fn(x, val):
+            class Foo:
+                def p(self):
+                    pass
+
+                p.__isabstractmethod__ = val
+                p = property(p)
+
+            try:
+                return x + 1, Foo.p.__isabstractmethod__
+            except ValueError as e:
+                return x - 1, str(e)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        for val in ([1], "", NotBool()):
+            self.assertEqual(opt_fn(x, val), fn(x, val))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_property_isabstractmethod_user_exception_local_class(self):
+        class TwoArgError(Exception):
+            def __init__(self, a, b):
+                super().__init__(f"{a}-{b}")
+
+        class NotBool:
+            def __bool__(self):
+                raise TwoArgError(1, 2)
+
+        def fn(x, val):
+            class Foo:
+                def p(self):
+                    pass
+
+                p.__isabstractmethod__ = val
+                p = property(p)
+
+            try:
+                return x + 1, Foo.p.__isabstractmethod__
+            except Exception as e:
+                return x - 1, f"{type(e).__name__}: {e}"
+
+        x = torch.ones(2)
+        val = NotBool()
+        self.assertEqual(torch.compile(fn, backend="eager")(x, val), fn(x, val))
+
+    @torch._dynamo.config.patch(enable_trace_load_build_class=True)
+    def test_property_subclass_slots_docstring_copy_raises(self):
+        class PropertySubSlots(property):
+            __slots__ = ()
+
+        def fn(x):
+            try:
+
+                class Foo:
+                    @PropertySubSlots
+                    def spam(self):
+                        """doc"""
+
+            except AttributeError as e:
+                return x - 1, str(e)
+            return x + 1, None
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.ones(2)
+        self.assertEqual(opt_fn(x), fn(x))
+
     def test_tuplegetter_on_instance(self):
         from collections import namedtuple
 

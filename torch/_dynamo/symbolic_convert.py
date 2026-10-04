@@ -3520,7 +3520,7 @@ class InstructionTranslatorBase(
         obj = self.pop().realize()
         try:
             result = generic_getattr(self, obj, attr)
-        except Unsupported:
+        except Unsupported as unsupported:
             if not obj.is_python_constant():
                 raise
             # An eager getattr would run a user-defined __get__ at trace time
@@ -3533,9 +3533,14 @@ class InstructionTranslatorBase(
             ):
                 raise
             source = AttrSource(obj.source, attr) if obj.source else None
-            result = VariableTracker.build(
-                self, getattr(obj.as_python_constant(), attr), source=source
-            )
+            try:
+                value = getattr(obj.as_python_constant(), attr)
+            except Exception as e:
+                # Only builtin exceptions can be rebuilt faithfully from args.
+                if type(e).__module__ != "builtins":
+                    raise unsupported from e
+                raise_observed_exception(type(e), self, args=list(e.args))
+            result = VariableTracker.build(self, value, source=source)
         self.push(result)
 
     def LOAD_ATTR(self, inst: Instruction) -> None:

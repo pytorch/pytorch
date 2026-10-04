@@ -2182,7 +2182,7 @@ class BuiltinVariable(BaseBuiltinVariable):
                     fn,  # type: ignore[possibly-undefined]
                     *[a.as_python_constant() for a in args[1:]],
                 )
-            except (TypeError, ValueError) as e:
+            except (AttributeError, TypeError, ValueError) as e:
                 raise_observed_exception(type(e), tx, args=list(e.args))
             return VariableTracker.build(tx, r)
         else:
