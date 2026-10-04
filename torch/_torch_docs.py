@@ -13798,7 +13798,7 @@ shape (1, 1, 4, 2).
 
 Args:
     input (Tensor): the tensor whose elements to repeat.
-    dims (tuple): the number of repetitions per dimension.
+    dims (int or tuple): the number of repetitions per dimension.
 
 Example::
 
