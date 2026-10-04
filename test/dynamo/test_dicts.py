@@ -52,6 +52,11 @@ class SimpleDict(dict):
     pass
 
 
+class UnionOverrideDict(dict):
+    def __or__(self, other):
+        return {"subclass_or": True, **other}
+
+
 class DummyUserDict(UserDict):
     pass
 
@@ -1139,6 +1144,42 @@ class DictTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertTrue(type(res) is types.MappingProxyType)
+
+    def test_mapping_proxy_union(self):
+        def fn():
+            mapping = {"a": 0, "b": 1}
+            view = types.MappingProxyType(mapping)
+            other = {"b": 2, "c": 3}
+            other_view = types.MappingProxyType(other)
+            error = "no exception"
+            try:
+                view |= other
+            except TypeError as exc:
+                error = str(exc)
+            return view | other, other | view, view | other_view, mapping, other, error
+
+        self.assertEqual(fn(), torch.compile(fn, backend="eager", fullgraph=True)())
+
+    def test_mapping_proxy_union_dict_subclass(self):
+        def fn():
+            return types.MappingProxyType(UnionOverrideDict(a=1)) | {"b": 2}
+
+        def read():
+            return types.MappingProxyType(UnionOverrideDict(a=1))["a"]
+
+        self.assertEqual(read(), torch.compile(read, backend="eager", fullgraph=True)())
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)()
+        self.assertEqual(fn(), torch.compile(fn, backend="eager", fullgraph=False)())
+
+    def test_mapping_proxy_union_existing_subclass(self):
+        def fn(proxy):
+            return proxy | {"b": 2}
+
+        proxy = types.MappingProxyType(UnionOverrideDict(a=1))
+        with self.assertRaises(Unsupported):
+            torch.compile(fn, backend="eager", fullgraph=True)(proxy)
+        self.assertEqual(fn(proxy), torch.compile(fn, backend="eager", fullgraph=False)(proxy))
 
     def test_mapping_proxy_for_nonlocal(self):
         d = {"a": 2, "b": 3, "c": 5}

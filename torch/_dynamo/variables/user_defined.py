@@ -1894,6 +1894,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # types.MappingProxyType is a read-only proxy of the dict. If the
             # original dict changes, the changes are reflected in proxy as well.
             dict_arg = args[0]
+            if isinstance(dict_arg, variables.UserDefinedDictVariable):
+                # A dict subclass may override __or__; MappingProxyVariable
+                # graph breaks on union instead of using dict semantics.
+                return variables.MappingProxyVariable(dict_arg, union_unsafe=True)
             if isinstance(dict_arg, ConstDictVariable):
                 return variables.MappingProxyVariable(dict_arg)
         elif SideEffects.cls_supports_mutation_side_effects(self.value) and (
