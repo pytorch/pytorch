@@ -106,14 +106,6 @@ case "$tag" in
     TRITON=yes
     INSTALL_MINGW=yes
     ;;
-  pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11)
-    CUDA_VERSION=13.0.3
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
-    KATEX=yes
-    TRITON=yes
-    INSTALL_MINGW=yes
-    ;;
   pytorch-linux-jammy-cuda13.2-cudnn9-py3-gcc11)
     CUDA_VERSION=13.2.2
     ANACONDA_PYTHON_VERSION=3.10
@@ -162,32 +154,16 @@ case "$tag" in
     TRITON=yes
     INSTALL_MINGW=yes
     ;;
-  pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11)
-    CUDA_VERSION=13.0.3
-    ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=11
-    KATEX=yes
-    TRITON=yes
-    INSTALL_MINGW=yes
-    ;;
-  pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks)
-    CUDA_VERSION=13.0.3
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
-    KATEX=yes
-    TRITON=yes
-    INDUCTOR_BENCHMARKS=yes
-    ;;
-  pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-inductor-benchmarks)
-    CUDA_VERSION=13.0.3
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11-inductor-benchmarks)
+    CUDA_VERSION=13.2.2
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     KATEX=yes
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda13.0-cudnn9-py3.12-gcc11-vllm)
-    CUDA_VERSION=13.0.3
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3.12-gcc11-vllm)
+    CUDA_VERSION=13.2.2
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     KATEX=yes
@@ -204,6 +180,10 @@ case "$tag" in
   pytorch-linux-jammy-py3.11-clang21)
     ANACONDA_PYTHON_VERSION=3.11
     CLANG_VERSION=21
+    GCC_VERSION=11
+    KATEX=yes
+    DOCS=yes
+    ONNX=yes
     TVM=yes
     ;;
   pytorch-linux-jammy-py3.12-clang21)
@@ -310,20 +290,20 @@ case "$tag" in
     PYTHON_VERSION=3.10
     CLANG_VERSION=18
     ;;
-  pytorch-linux-jammy-cuda13.0-cudnn9-py3.10-linter)
+  pytorch-linux-jammy-cuda13.2-cudnn9-py3.10-linter)
     PYTHON_VERSION=3.10
-    CUDA_VERSION=13.0.3
+    CUDA_VERSION=13.2.2
     CLANG_VERSION=18
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-gcc13)
-    ANACONDA_PYTHON_VERSION=3.10
+  pytorch-linux-jammy-aarch64-py3.11-gcc13)
+    ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=13
     ACL=yes
     OPENBLAS=yes
     ;;
-  pytorch-linux-jammy-aarch64-cuda13.0-cudnn9-py3.10-gcc13)
-    CUDA_VERSION=13.0.3
-    ANACONDA_PYTHON_VERSION=3.10
+  pytorch-linux-jammy-aarch64-cuda13.2-cudnn9-py3.11-gcc13)
+    CUDA_VERSION=13.2.2
+    ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=13
     ACL=yes
     KATEX=yes
@@ -345,8 +325,8 @@ case "$tag" in
     KATEX=yes
     TRITON=yes
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks)
-    ANACONDA_PYTHON_VERSION=3.10
+  pytorch-linux-jammy-aarch64-py3.11-gcc13-inductor-benchmarks)
+    ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=13
     ACL=yes
     OPENBLAS=yes
@@ -366,6 +346,10 @@ case "$tag" in
     ;;
   pytorch-linux-noble-riscv64-py3.12-gcc14-cross-build)
     GCC_VERSION=14
+    # Pre-built RISC-V wheels for the target side of the cross environment
+    # See https://riseproject-dev.github.io/python-wheels/
+    PIP_EXTRA_INDEX_URL=https://pypi.riseproject.dev/simple
+    PIP_PREFER_BINARY=1
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
