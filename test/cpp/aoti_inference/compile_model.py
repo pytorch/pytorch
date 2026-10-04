@@ -1,10 +1,11 @@
 import torch
 from torch.export import Dim
+from torch.testing._internal.common_utils import find_library_location
 
 
 # custom op that loads the aot-compiled model
 AOTI_CUSTOM_OP_LIB = "libaoti_custom_class.so"
-torch.classes.load_library(AOTI_CUSTOM_OP_LIB)
+torch.classes.load_library(find_library_location(AOTI_CUSTOM_OP_LIB))
 
 
 class TensorSerializer(torch.nn.Module):
