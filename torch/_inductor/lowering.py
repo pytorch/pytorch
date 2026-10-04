@@ -8252,7 +8252,12 @@ def _current_node_uses_all_tuple_outputs(indices: tuple[int, ...]) -> bool:
 
 @register_lowering(aten.any)
 def reduce_any(x, dim=None, keepdim=False):
+    input_dtype = x.get_dtype()
     x = to_dtype(x, torch.bool)
+    if isinstance(dim, (list, tuple)) and len(dim) == 0:
+        if input_dtype == torch.uint8:
+            x = to_dtype(x, torch.uint8)
+        return clone(x)
     return make_reduction("any")(x, axis=dim, keepdims=keepdim)
 
 
