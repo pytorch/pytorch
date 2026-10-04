@@ -2705,7 +2705,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "group-2 grouped main outputs require an SM100 or SM110 config",
+    )
     @parametrize(
         "case",
         (
@@ -2767,7 +2770,135 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(not SM120OrLater, "SM120 required")
+    @parametrize("group", (2, 4))
+    def test_mm_output_contraction_rejects_sm120(self, group):
+        def epilogue_fn(acc):
+            grouped = acc.view(acc.shape[0], acc.shape[1] // group, group)
+            lanes = tuple(grouped.select(-1, index) for index in range(group))
+            return sum(lanes[1:], lanes[0])
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK"},
+            )
+
+        a = torch.randn(128, 64, device="cuda", dtype=torch.bfloat16)
+        b = torch.randn(64, 256, device="cuda", dtype=torch.bfloat16)
+        error = (
+            "group-2 grouped main outputs require an SM100 or SM110 config"
+            if group == 2
+            else "group-4 grouped main outputs require an SM100 config"
+        )
+        with self.assertRaisesRegex(InductorError, error):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM120OrLater, "SM120 required")
+    @parametrize("tuned", (False, True))
+    def test_mm_local_m_reduce_rejects_group_above_sm120_limit(self, tuned):
+        m, n, k, group = 256, 128, 64, 32
+
+        def epilogue_fn(acc):
+            return acc, acc.float().view(-1, group, n).sum(1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": tuned},
+            )
+
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        error = "requested group=32, max supported group=16 for axis=0"
+        with self.assertRaisesRegex(InductorError, error):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM120OrLater, "SM120 required")
+    def test_mm_local_m_reduce_rejects_group_straddling_sm120_warps(self):
+        import torch._inductor.kernel.flex_gemm.quack_ops.grouped_reduce as gr
+
+        m, n, k, group = 256, 128, 64, 32
+        config = {
+            "tile_m": 128,
+            "tile_n": 128,
+            "cluster_m": 1,
+            "cluster_n": 1,
+            "pingpong": True,
+            "is_dynamic_persistent": True,
+            "swap_ab": False,
+        }
+
+        def epilogue_fn(acc):
+            return acc, acc.float().view(-1, group, n).sum(1)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "config": config},
+            )
+
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        error = "group 32 is not covered by one row run per thread"
+        with (
+            mock.patch.object(gr, "grouped_reduce_supports_config", return_value=True),
+            self.assertRaisesRegex(NotImplementedError, error),
+        ):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(not SM120OrLater, "SM120 required")
+    @parametrize("mode", ("default", "tuned", "forced_legal"))
+    def test_mm_local_m_reduce_feed_main_rejects_group_above_sm120_lanes(self, mode):
+        import torch._inductor.kernel.flex_gemm.quack_ops.grouped_reduce as gr
+
+        m, n, k, group = 128, 64, 64, 16
+
+        def epilogue_fn(acc):
+            x = acc.float().view(-1, group, n)
+            return (x * x.sum(1, keepdim=True).reciprocal()).view(m, n)
+
+        def fn(a, b):
+            return flex_gemm(
+                torch.mm,
+                (a, b),
+                epilogue_fn,
+                kernel_options={"backend": "QUACK", "tuned": mode == "tuned"},
+            )
+
+        a = self.makeTensor(m, k)
+        b = self.makeTensor(k, n)
+        if mode == "forced_legal":
+            legality = mock.patch.object(
+                gr.GroupedLocalReduceFeed, "supports_config", return_value=True
+            )
+            error_type = NotImplementedError
+            error = "grouped feed-main: group 16 needs one row per thread"
+        else:
+            legality = contextlib.nullcontext()
+            error_type = InductorError
+            error = "requested group=16, max supported feed-main group=8 for axis=0"
+        with legality, self.assertRaisesRegex(error_type, error):
+            torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
+
+    @skipIfNoCuteDSL
+    @unittest.skipIf(not TEST_CUDA, "CUDA required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "group-2 grouped main outputs require an SM100 or SM110 config",
+    )
     def test_mm_output_contraction_uint8(self):
         m = n = k = 64
         group = 2
@@ -3700,7 +3831,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "group-2 grouped main outputs require an SM100 or SM110 config",
+    )
     @parametrize("chunked", (False, True))
     def test_mm_output_contraction_dynamic_m(self, chunked):
         group, n, k = 2, 256, 64
@@ -3740,7 +3874,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "group-2 grouped main outputs require an SM100 or SM110 config",
+    )
     def test_mm_output_contraction_dynamic_n(self):
         m = k = 64
 
@@ -3767,7 +3904,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "group-2 grouped main outputs require an SM100 or SM110 config",
+    )
     def test_mm_output_contraction_dynamic_n_guards_tile_n(self):
         # GroupedMainStore requires tile_n <= physical N. A pinned tile_n=256
         # selected at N=512 must not be reused when N shrinks below it.
@@ -3798,7 +3938,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "group-2 grouped main outputs require an SM100 or SM110 config",
+    )
     @parametrize("split_size", (64, 128))
     def test_mm_output_contraction_specializes_split_size(self, split_size):
         torch._dynamo.reset()
@@ -3888,7 +4031,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "group-2 grouped main outputs require an SM100 or SM110 config",
+    )
     def test_mm_output_contraction_chunked_view(self):
         m, n, k = 128, 128, 64
 
@@ -3916,7 +4062,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "group-2 grouped main outputs require an SM100 or SM110 config",
+    )
     @parametrize("indices", ((0, 1), (1, 0), (-1, -2)))
     def test_mm_output_contraction_specializes_select_indices(self, indices):
         m, n, k = 128, 128, 64
@@ -3973,7 +4122,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "group-2 grouped main outputs require an SM100 or SM110 config",
+    )
     def test_mm_chunked_output_contraction_rejects_contiguous_b(self):
         def epilogue_fn(acc):
             lhs, rhs = acc.chunk(2, dim=-1)
@@ -4131,6 +4283,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         name_fn=lambda case: case[0],
     )
     def test_mm_tuple_aux_local_m_reduce_compiled_matches_reference(self, case, group):
+        if group > 16 and SM120OrLater:
+            self.skipTest("SM120 caps grouped M reductions at 16")
         _, reduce_fn, code_check = case
         m = 128
         n = 128
@@ -4239,7 +4393,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "SM120 caps grouped M reductions at 16",
+    )
     def test_mm_tuple_aux_physical_local_reduce_supports_finalize_expression(self):
         m = 128
         n = 128
@@ -4963,7 +5120,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "SM120 caps grouped M reductions at 16",
+    )
     @parametrize("group", (64, 128))
     @parametrize(
         "case",
@@ -5400,6 +5560,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("group", (2, 4, 8, 16, 32))
     def test_mm_local_m_reduce_result_feeds_main_output(self, group):
+        if group > 8 and SM120OrLater:
+            self.skipTest("SM120 caps grouped feed-main M reductions at 8")
         m = 128
         n = 64
 
@@ -5801,7 +5963,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "SM120 caps grouped feed-main M reductions at 8",
+    )
     def test_mm_local_m_reduce_feed_main_specializes_group_across_functions(self):
         torch._dynamo.reset()
         m, n = 128, 64
@@ -5842,6 +6007,8 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
     @parametrize("axis", (0, 1))
     def test_mm_local_reduce_specializes_explicit_group_across_functions(self, axis):
+        if axis == 0 and SM120OrLater:
+            self.skipTest("SM120 caps grouped feed-main M reductions at 8")
         torch._dynamo.reset()
         m = n = 128
 
@@ -6245,7 +6412,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "SM120 caps grouped feed-main M reductions at 8",
+    )
     def test_mm_local_m_reduce_feed_main_supports_trailing_fp8_quant(self):
         m = 128
         n = 64
@@ -6286,7 +6456,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "SM120 caps grouped feed-main M reductions at 8",
+    )
     def test_mm_local_m_reduce_feed_main_supports_mx_scale(self):
         m, n, k, group = 128, 64, 64, 32
 
@@ -6416,7 +6589,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "SM120 caps grouped feed-main M reductions at 8",
+    )
     def test_mm_local_m_reduce_feed_main_trailing_quant_with_scale_store(self):
         m = 128
         n = 64
@@ -6552,7 +6728,10 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
 
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
-    @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @unittest.skipIf(
+        not SM100OrLater or SM120OrLater,
+        "SM120 caps grouped feed-main M reductions at 8",
+    )
     @parametrize(
         "case",
         (
@@ -8262,7 +8441,10 @@ instantiate_device_type_tests(TestFlexGemmScaledMmDevice, globals(), only_for="c
 
 
 @skipIfNoCuteDSL
-@unittest.skipIf(not SM100OrLater, "SM100+ required")
+@unittest.skipIf(
+    not SM100OrLater or SM120OrLater,
+    "needs SM100/SM110 group-128 local-M or 256x256 cluster-2x1 QuACK configs",
+)
 class TestFlexGemmTransposedOutputDevice(FlexGemmTestCase):
     def test_mm_tuple_aux_local_m_reduce_contiguous_transpose(self, device):
         m, n, k, group = 256, 192, 64, 128
@@ -8740,6 +8922,10 @@ class TestFlexGemmGroupedMmDevice(FlexGemmTestCase):
             actual[:valid], eager[:valid], expected, self.K
         )
 
+    @unittest.skipIf(
+        SM120OrLater,
+        "group-2 grouped main outputs require an SM100 or SM110 config",
+    )
     @parametrize(
         "case",
         (
@@ -9440,6 +9626,9 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         ):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
+    @unittest.skipIf(
+        SM120OrLater, "swapped local-N grouped reductions require an SM100 config"
+    )
     @parametrize("tuned", (False, True))
     def test_mm_swap_ab_supports_local_n_reduce(self, device, tuned):
         m = n = 128
@@ -9577,6 +9766,9 @@ class TestFlexGemmExplicitConfigDevice(FlexGemmTestCase):
         with self.assertRaisesRegex(InductorError, error):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b)
 
+    @unittest.skipIf(
+        SM120OrLater, "SM120 has no swapped 256x256, cluster-2x1 QuACK config"
+    )
     def test_mm_tuned_swap_candidate_captured_args_matches_reference(self, device):
         import torch._vendor.quack.gemm_runtime.autotune as epi_autotune
 
