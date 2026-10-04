@@ -2,11 +2,14 @@
 
 #include <ATen/ATen.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
+#include <c10/util/flat_hash_map.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
+#include <map>
 #include <shared_mutex>
+#include <vector>
 
 namespace c10d::symmetric_memory {
 
@@ -148,11 +151,46 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   std::string name() override;
 
  private:
+  // Handles this allocator has returned, by storage pointer and
+  // group, each recorded under the block it lies in so that the block's entries
+  // go with it. Ops rendezvous their inputs on every call, so a repeat is a
+  // pointer hash and a name comparison, with no string copied or hashed. Holds
+  // at most one entry per storage pointer and group. Not thread-safe: the
+  // allocator's mutex guards it.
+  class HandleCache {
+   public:
+    // The handle cached for (ptr, group), or null.
+    c10::intrusive_ptr<SymmetricMemory> find(
+        void* ptr,
+        const std::string& group) const;
+    // Caches `handle` for (ptr, group), which must not be cached yet; `block`
+    // is the block ptr lies in.
+    void insert(
+        const Block* block,
+        void* ptr,
+        std::string group,
+        c10::intrusive_ptr<SymmetricMemory> handle);
+    // Drops every entry recorded under `block`.
+    void erase_block(const Block* block);
+
+   private:
+    struct Entry {
+      std::string group;
+      c10::intrusive_ptr<SymmetricMemory> handle;
+    };
+    ska::flat_hash_map<void*, std::vector<Entry>> by_ptr_;
+    ska::flat_hash_map<const Block*, std::vector<void*>> ptrs_by_block_;
+  };
+
   c10::intrusive_ptr<Block> find_block(void* ptr);
   c10::intrusive_ptr<Block> find_block_covering(void* ptr, size_t& offset);
 
+  // Guards ptr_to_block_ and handles_.
   std::shared_mutex mutex_;
-  std::unordered_map<void*, c10::intrusive_ptr<Block>> ptr_to_block_;
+  // Keyed by the address alloc() returned. Ordered, so the block covering an
+  // interior pointer is found with upper_bound rather than a scan.
+  std::map<void*, c10::intrusive_ptr<Block>> ptr_to_block_;
+  HandleCache handles_;
   c10::cuda::CUDACachingAllocator::Expandable_Segments_Handle_Type
       handle_type_ = c10::cuda::CUDACachingAllocator::
           Expandable_Segments_Handle_Type::UNSPECIFIED;
