@@ -1,5 +1,8 @@
 # Owner(s): ["module: inductor"]
+from unittest.mock import patch
+
 import torch
+import torch._inductor.config as inductor_config
 from torch._inductor.heuristics.registry import (
     _TEMPLATE_HEURISTIC_REGISTRY,
     clear_registry,
@@ -10,6 +13,7 @@ from torch._inductor.heuristics.template.base import TemplateConfigHeuristics
 from torch._inductor.heuristics.template.triton import (
     BlackwellGPUGemmConfig,
     CUDAConfigHeuristic,
+    FlexBwDConfig,
     FlexConfig,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -236,6 +240,46 @@ class TestA100DefaultFlexConfig(TestCase):
         h = CUDAConfigHeuristic()
         self.assertEqual(h.a100_default_flex_config[(torch.bfloat16, 192)], expected)
         self.assertEqual(h.a100_default_flex_config[(torch.float16, 192)], expected)
+
+
+class TestSm12xDefaultFlexBwdConfig(TestCase):
+    @patch("torch.cuda.get_device_capability", return_value=(12, 1))
+    @inductor_config.patch(max_autotune=False)
+    def test_head_dim_above_128_entries(self, _mock_capability):
+        """Head dims above 128 need a smaller backward tile on sm_12x.
+
+        The kernel rounds both head dims up to a power of two, so 160, 192, 224
+        and 256 all stage what 256 does and all require the same 114688 bytes.
+        That exceeds the 99 KiB per-block shared-memory opt-in budget on sm_12x
+        boards and fails compilation with "No valid triton configs.
+        OutOfMemoryError: out of resource ... Required: 114688 Hardware
+        limit:101376". head_dim 128 rounds to 128, needs half as much, and is
+        left on the larger tile.
+
+        The pinned tile fits with margin and was the empirical fastest among
+        the fitting candidates on GB10 (sm_12.1) at head_dim 192 and 256; its
+        gradients match a float64 reference to 4.1e-3. Only GB10 was measured,
+        so if you retune, please re-validate on a real sm_12x board -- a
+        formula-based SMEM estimate alone is not a reliable proxy for what
+        triton actually allocates.
+        """
+        expected = FlexBwDConfig(32, 32, 32, 32, 2, 4)
+        h = CUDAConfigHeuristic()
+        for dtype in (torch.bfloat16, torch.float16):
+            for head_dim in (160, 192, 224, 256):
+                self.assertEqual(
+                    h.get_flex_attn_bwd_configs(head_dim, dtype)[0], expected
+                )
+
+            self.assertEqual(
+                h.get_flex_attn_bwd_configs(128, dtype)[0],
+                FlexBwDConfig(64, 64, 64, 64, 1, 4),
+            )
+
+        self.assertEqual(
+            h.get_flex_attn_bwd_configs(256, torch.float32)[0],
+            FlexBwDConfig(16, 16, 16, 16, 1, 4),
+        )
 
 
 if __name__ == "__main__":
