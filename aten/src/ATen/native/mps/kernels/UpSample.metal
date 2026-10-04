@@ -589,6 +589,137 @@ kernel void upsample_nearest2d(
   }
 }
 
+// Source position of an output index, its inverse, and the source interval
+// and weight the backward gather needs for an input index.
+struct LinearSource {
+  float scale;
+  bool align_corners;
+  float inv_scale = 1.0f / scale;
+  LinearSource(float scale_, bool align_corners_)
+      : scale(scale_), align_corners(align_corners_) {}
+  inline float operator()(int dst) const {
+    return area_pixel_compute_source_index(
+        scale, dst, align_corners, /*cubic=*/false);
+  }
+  inline float inverse(float src) const {
+    return align_corners ? src * inv_scale : (src + 0.5f) * inv_scale - 0.5f;
+  }
+  static inline float2 src_bounds(int input_idx) {
+    return float2(input_idx - 1, input_idx + 1);
+  }
+  // 1 - t on the lower tap, t on the upper tap, both on the last row.
+  inline float weight(int dst, int input_idx, int input_size) const {
+    const auto src = (*this)(dst);
+    const int lower = min(static_cast<int>(src), input_size - 1);
+    const float t = fract(src);
+    return lower != input_idx ? t : (lower + 1 == input_size ? 1.0f : 1.0f - t);
+  }
+};
+
+template <bool exact>
+struct NearestSource {
+  float scale;
+  float inv_scale = 1.0f / scale;
+  NearestSource(float scale_, bool) : scale(scale_) {}
+  inline float operator()(int dst) const {
+    return nearest_src_index<exact>(scale, dst);
+  }
+  inline float inverse(float src) const {
+    return src * inv_scale - (exact ? 0.5f : 0.0f);
+  }
+  static inline float2 src_bounds(int input_idx) {
+    return float2(input_idx, input_idx + 1);
+  }
+  static inline float weight(int, int, int) {
+    return 1.0f;
+  }
+};
+
+// Output run [lo, hi] whose source position falls in src_bounds: the estimate
+// inverts the source formula, the loops make it exact. A zero scale
+// (align_corners with a size-1 dim) maps every output to source 0.
+template <typename Source>
+inline int2 upsample_backward_range(
+    Source source,
+    float2 src_bounds,
+    int output_size) {
+  if (source.scale == 0.0f) {
+    const bool reads_src_zero = src_bounds.x <= 0.0f && 0.0f < src_bounds.y;
+    return reads_src_zero ? int2(0, output_size - 1) : int2(0, -1);
+  }
+  int lo = clamp(
+      static_cast<int>(ceil(source.inverse(src_bounds.x))), 0, output_size - 1);
+  int hi = clamp(
+      static_cast<int>(ceil(source.inverse(src_bounds.y))) - 1,
+      0,
+      output_size - 1);
+  while (lo > 0 && source(lo - 1) >= src_bounds.x) {
+    lo--;
+  }
+  while (lo < output_size && source(lo) < src_bounds.x) {
+    lo++;
+  }
+  while (hi < output_size - 1 && source(hi + 1) < src_bounds.y) {
+    hi++;
+  }
+  while (hi >= 0 && source(hi) >= src_bounds.y) {
+    hi--;
+  }
+  return int2(lo, hi);
+}
+
+// Gather backward: a thread owns one (y, x) of grad_input, strides over the
+// (n, c) planes left out of the grid and sums the grad_output run that read
+// each element in float. The last row also collects outputs whose source index
+// the forward clamped.
+template <typename T, typename Source>
+kernel void upsample_gather_backward(
+    device T* gradInputData [[buffer(0)]],
+    constant T* gradOutputData [[buffer(1)]],
+    constant UpsampleParams<4>& params [[buffer(2)]],
+    uint3 thread_index [[thread_position_in_grid]],
+    uint3 grid_size [[threads_per_grid]]) {
+  const auto input_strides = to_vec(params.input_strides);
+  const auto output_strides = to_vec(params.output_strides);
+  const auto input_sizes = to_vec(params.input_sizes);
+  const auto output_sizes = to_vec(params.output_sizes);
+  const int input_x = thread_index.x;
+  const int input_y = thread_index.y;
+  const auto channels = static_cast<uint>(input_sizes.y);
+  const auto planes = static_cast<uint>(input_sizes.x) * channels;
+  const Source source_x(params.scales[0], params.align_corners);
+  const Source source_y(params.scales[1], params.align_corners);
+  auto x_range = upsample_backward_range(
+      source_x, Source::src_bounds(input_x), output_sizes.w);
+  auto y_range = upsample_backward_range(
+      source_y, Source::src_bounds(input_y), output_sizes.z);
+  if (input_x == input_sizes.w - 1) {
+    x_range.y = output_sizes.w - 1;
+  }
+  if (input_y == input_sizes.z - 1) {
+    y_range.y = output_sizes.z - 1;
+  }
+  device auto* grad_input =
+      gradInputData + input_y * input_strides.z + input_x * input_strides.w;
+  for (auto plane = thread_index.z; plane < planes; plane += grid_size.z) {
+    const auto n = plane / channels;
+    const auto c = plane - n * channels;
+    constant auto* grad_output =
+        gradOutputData + n * output_strides.x + c * output_strides.y;
+    float res = 0;
+    for (auto y = y_range.x; y <= y_range.y; y++) {
+      const auto w_y = source_y.weight(y, input_y, input_sizes.z);
+      constant auto* row =
+          grad_output + y * output_strides.z + x_range.x * output_strides.w;
+      for (auto x = x_range.x; x <= x_range.y; x++, row += output_strides.w) {
+        res += w_y * source_x.weight(x, input_x, input_sizes.w) *
+            static_cast<float>(*row);
+      }
+    }
+    grad_input[n * input_strides.x + c * input_strides.y] = static_cast<T>(res);
+  }
+}
+
 struct BilinearFunctor {
   inline float operator()(float x) {
     x = abs(x);
@@ -867,6 +998,15 @@ kernel void upsample_bicubic2d_backward(
       constant UpsampleParams<4> & params [[buffer(2)]],                    \
       uint thread_index [[thread_position_in_grid]])
 
+#define INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(NAME, SOURCE, DTYPE)           \
+  template [[host_name("upsample_" #NAME "_backward_" #DTYPE)]] kernel void \
+  upsample_gather_backward<DTYPE, SOURCE>(                                  \
+      device DTYPE * gradInputData [[buffer(0)]],                           \
+      constant DTYPE * gradOutputData [[buffer(1)]],                        \
+      constant UpsampleParams<4> & params [[buffer(2)]],                    \
+      uint3 thread_index [[thread_position_in_grid]],                       \
+      uint3 grid_size [[threads_per_grid]])
+
 #define INSTANTIATE_UPSAMPLE_2D_BACKWARD(NAME, DTYPE)                       \
   template [[host_name("upsample_" #NAME "_backward_" #DTYPE)]] kernel void \
       upsample_##NAME##_backward<DTYPE>(                                    \
@@ -952,6 +1092,11 @@ kernel void upsample_bicubic2d_backward(
   INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(bicubic2d_aa, BicubicFunctor, DTYPE);   \
   INSTANTIATE_UPSAMPLE_2D_BACKWARD(bicubic2d, DTYPE);                         \
   INSTANTIATE_UPSAMPLE_2D(bilinear2d, DTYPE);                                 \
+  INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(bilinear2d, LinearSource, DTYPE);      \
+  INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(                                       \
+      nearest2d, NearestSource<false>, DTYPE);                                \
+  INSTANTIATE_UPSAMPLE_GATHER_BACKWARD(                                       \
+      nearest_exact2d, NearestSource<true>, DTYPE);                           \
   INSTANTIATE_UPSAMPLE_2D_AA(bilinear2d_aa, BilinearFunctor, DTYPE);          \
   INSTANTIATE_UPSAMPLE_2D_AA_BACKWARD(bilinear2d_aa, BilinearFunctor, DTYPE); \
   INSTANTIATE_UPSAMPLE_LINEAR(DTYPE);                                         \
