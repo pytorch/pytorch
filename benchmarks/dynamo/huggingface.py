@@ -7,7 +7,6 @@ import os
 import re
 import subprocess
 import sys
-import types
 import warnings
 
 
@@ -131,9 +130,17 @@ if not BATCH_SIZE_KNOWN_MODELS:
 
 
 try:
-    from .huggingface_llm_models import HF_LLM_MODELS
+    from .huggingface_llm_models import (
+        HF_LLM_MODELS,
+        PREFILL_MODELS,
+        TextGenerationPrefillModel,
+    )
 except ImportError:
-    from huggingface_llm_models import HF_LLM_MODELS
+    from huggingface_llm_models import (
+        HF_LLM_MODELS,
+        PREFILL_MODELS,
+        TextGenerationPrefillModel,
+    )
 
 
 def get_module_cls_by_model_name(model_cls_name):
@@ -339,6 +346,7 @@ class HuggingfaceRunner(BenchmarkRunner):
     def __init__(self):
         super().__init__()
         self.suite_name = "huggingface"
+        self.hf_llm = False
 
     @property
     def _config(self):
@@ -410,6 +418,86 @@ class HuggingfaceRunner(BenchmarkRunner):
             model = model_cls(config)
         return model
 
+    def validate_args(self, args):
+        if args.hf_inference_mode != "prefill":
+            if args.prompt_length is not None:
+                raise ValueError("--prompt-length requires --hf-inference-mode=prefill")
+            return
+        if args.prompt_length is not None and args.prompt_length <= 0:
+            raise ValueError(
+                f"--prompt-length must be positive, got {args.prompt_length}"
+            )
+        if args.batch_size is not None and args.batch_size <= 0:
+            raise ValueError(f"--batch-size must be positive, got {args.batch_size}")
+        if not args.inference:
+            raise ValueError("--hf-inference-mode=prefill requires --inference")
+        if args.only is not None and args.only not in PREFILL_MODELS:
+            raise ValueError(
+                f"--hf-inference-mode=prefill does not support {args.only}; "
+                f"supported models: {', '.join(sorted(PREFILL_MODELS))}"
+            )
+
+        unsupported = []
+        for flag in (
+            "amp",
+            "aot_precompile",
+            "batch_invariant",
+            "ddp",
+            "dynamic_shapes",
+            "enable_activation_checkpointing",
+            "export",
+            "export_aot_inductor",
+            "export_nativert",
+            "find_batch_sizes",
+            "fsdp",
+            "recompile_profiler",
+            "torchscript_jit_trace",
+            "tolerance",
+            "trace_on_xla",
+            "unbacked_batch_only",
+            "dynamic_batch_only",
+            "xla",
+        ):
+            if getattr(args, flag, False):
+                unsupported.append("--" + flag.replace("_", "-"))
+        if args.backend in ("optimus", "torchao"):
+            unsupported.append(f"--backend={args.backend}")
+        if unsupported:
+            raise ValueError(
+                "--hf-inference-mode=prefill does not support " + ", ".join(unsupported)
+            )
+        if args.iterations_per_run <= 0:
+            raise ValueError("--iterations-per-run must be positive for prefill")
+        if args.backend is None and not args.inductor:
+            raise ValueError(
+                "--hf-inference-mode=prefill requires --backend or --inductor"
+            )
+
+    def get_performance_workload(self):
+        if self.args.hf_inference_mode == "prefill":
+            return self.prefill_forward, self.setup_prefill
+        if self.hf_llm:
+            return self.generate, None
+        return super().get_performance_workload()
+
+    def use_model_forward_for_compilation(self):
+        return self.args.hf_inference_mode == "prefill"
+
+    def setup_prefill(self, model, example_inputs):
+        torch.compiler.cudagraph_mark_step_begin()
+        model.prepare_for_prefill(example_inputs["input_ids"])
+
+    def generate(self, model, example_inputs, collect_outputs=True):
+        return model.generate(**example_inputs)
+
+    def prefill(self, model, example_inputs, collect_outputs=True):
+        self.setup_prefill(model, example_inputs)
+        return self.prefill_forward(model, example_inputs, collect_outputs)
+
+    def prefill_forward(self, model, example_inputs, collect_outputs=True):
+        with torch.no_grad():
+            return model(**example_inputs)
+
     def load_model(
         self,
         device,
@@ -439,23 +527,31 @@ class HuggingfaceRunner(BenchmarkRunner):
                 log.info(
                     f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"  # noqa: G004
                 )
+        if self.args.hf_inference_mode == "prefill" and batch_size <= 0:
+            raise ValueError(f"--batch-size must be positive, got {batch_size}")
 
         # Get model and example inputs
         if model_name in HF_LLM_MODELS:
             benchmark_cls = HF_LLM_MODELS[model_name]
-            model, example_inputs = benchmark_cls.get_model_and_inputs(
-                model_name, device
+            if self.args.hf_inference_mode == "prefill":
+                prompt_length = self.args.prompt_length or benchmark_cls.INPUT_LENGTH
+                model, example_inputs = benchmark_cls.get_model_and_inputs(
+                    model_name,
+                    device,
+                    batch_size=batch_size,
+                    prompt_length=prompt_length,
+                    inference_mode="prefill",
+                )
+                self.model_iter_fn = self.prefill
+            else:
+                model, example_inputs = benchmark_cls.get_model_and_inputs(
+                    model_name, device
+                )
+            generation_model = (
+                model.model if isinstance(model, TextGenerationPrefillModel) else model
             )
-            model.generation_config.disable_compile = True
-
-            # Set this flag so that when we test for speedup, we use
-            # model.generate instead of using model.forward
+            generation_model.generation_config.disable_compile = True
             self.hf_llm = True
-
-            def generate(self, model, example_inputs, collect_outputs=True):
-                return model.generate(**example_inputs)
-
-            self.generate = types.MethodType(generate, self)
 
         else:
             self.hf_llm = False
@@ -499,6 +595,8 @@ class HuggingfaceRunner(BenchmarkRunner):
     def iter_model_names(self, args):
         model_names = list(BATCH_SIZE_KNOWN_MODELS.keys()) + list(EXTRA_MODELS.keys())
         model_names = set(model_names)
+        if args.hf_inference_mode == "prefill":
+            model_names &= PREFILL_MODELS
         model_names = sorted(model_names)
 
         start, end = self.get_benchmark_indices(len(model_names))
