@@ -5,6 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import torch
+import torch._dynamo
 import torch.utils.checkpoint
 from functorch.compile import aot_function, min_cut_rematerialization_partition, nop
 
@@ -17,9 +18,12 @@ from torch.testing._internal.common_utils import (
     HardwareClassification,
     IS_CI,
     IS_WINDOWS,
+    parametrize,
     run_tests,
+    subtest,
     TestCase,
 )
+from torch.testing._internal.inductor_utils import requires_triton
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write("torch.compile not supported on windows")
@@ -373,6 +377,109 @@ class TestFunctionalizationRngOps(TestCase):
         # check results match the non-checkpoint case
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
+
+    @dtypes(torch.float32)
+    @parametrize(
+        "backend", ["aot_eager", subtest("inductor", decorators=[requires_triton()])]
+    )
+    @parametrize("op", ["randperm", "multinomial"])
+    @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
+    def test_unfunctionalized_rng_op_matches_eager(self, dtype, device, op, backend):
+        # These ops have no philox decomposition and draw from the live generator,
+        # so the compiled calls must advance it exactly like eager.
+        fn = {
+            "randperm": lambda x: torch.randperm(x.numel(), device=x.device),
+            "multinomial": lambda x: torch.multinomial(x, x.numel()),
+        }[op]
+        x = torch.ones(64, device=device, dtype=dtype)
+
+        torch.cuda.manual_seed(123)
+        ref = [fn(x) for _ in range(4)]
+        ref_state = torch.cuda.get_rng_state()
+        self.assertNotEqual(ref[0], ref[1])
+
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend=backend)
+        for _ in range(2):
+            torch.cuda.manual_seed(123)
+            self.assertEqual(ref, [opt_fn(x) for _ in range(4)])
+            self.assertEqual(ref_state, torch.cuda.get_rng_state())
+
+    @dtypes(torch.float32)
+    @parametrize(
+        "backend", ["aot_eager", subtest("inductor", decorators=[requires_triton()])]
+    )
+    @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
+    def test_randn_reseed_reproduces_advancing_sequence(self, dtype, device, backend):
+        # Inductor draws the seeds for its randn kernel from the live generator.
+        def fn(x):
+            return torch.randn(x.shape, device=x.device, dtype=x.dtype)
+
+        x = torch.empty(16, device=device, dtype=dtype)
+        torch._dynamo.reset()
+        opt_fn = torch.compile(fn, backend=backend)
+        runs = []
+        for _ in range(2):
+            torch.cuda.manual_seed(0)
+            runs.append([opt_fn(x) for _ in range(3)])
+
+        self.assertEqual(runs[0], runs[1])
+        self.assertNotEqual(runs[0][0], runs[0][1])
+        self.assertNotEqual(runs[0][1], runs[0][2])
+
+    @dtypes(torch.float32)
+    @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
+    def test_mixed_functionalized_and_unfunctionalized_rng_ops(self, dtype, device):
+        def fn(x):
+            return torch.rand_like(x), torch.randperm(1024, device=x.device)
+
+        x = torch.rand(4, device=device, dtype=dtype)
+
+        torch.cuda.manual_seed(0)
+        ref = torch.rand_like(x)
+        rand_offset = torch.cuda._get_rng_state_offset()
+        torch.cuda.manual_seed(0)
+        torch.randperm(1024, device=device)
+        randperm_offset = torch.cuda._get_rng_state_offset()
+
+        aot_fn = aot_function(fn, functools.partial(count_philox_rand, freq=1))
+        torch.cuda.manual_seed(0)
+        res, _ = aot_fn(x)
+
+        self.assertEqual(ref, res)
+        # The next call must start past everything either op drew in this one.
+        self.assertGreaterEqual(
+            torch.cuda._get_rng_state_offset(), max(rand_offset, randperm_offset)
+        )
+
+    @dtypes(torch.float32)
+    @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
+    def test_unfunctionalized_rng_op_in_backward(self, dtype, device):
+        class Shuffle(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                # Reading grad_out keeps the op in the backward graph.
+                idx = torch.multinomial(grad_out.abs() + 1, grad_out.numel())
+                return grad_out[idx]
+
+        weight = torch.arange(64, device=device, dtype=dtype)
+
+        def grads(fn):
+            torch.cuda.manual_seed(0)
+            out = []
+            for _ in range(3):
+                x = torch.ones(64, device=device, dtype=dtype, requires_grad=True)
+                (fn(x) * weight).sum().backward()
+                out.append(x.grad)
+            return out
+
+        ref = grads(Shuffle.apply)
+        self.assertNotEqual(ref[0], ref[1])
+        self.assertEqual(ref, grads(aot_function(Shuffle.apply, nop)))
 
 
 instantiate_device_type_tests(TestFunctionalizationRngOps, globals(), only_for="cuda")
