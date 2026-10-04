@@ -527,6 +527,16 @@ class NNModuleVariable(VariableTracker):
                     args=[f"'{type(base).__name__}' object has no attribute '{name}'"],
                 )
 
+        if object_member and name not in base_dict:
+            # A registered entry is only visible while the instance dict lacks it.
+            install_guard(
+                self.source.make_guard(
+                    functools.partial(
+                        GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=name
+                    )
+                )
+            )
+
         if name == "forward":
             guard_to_detect_forward_monkeypatching(self.source, base)
 

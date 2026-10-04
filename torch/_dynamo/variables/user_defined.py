@@ -3834,6 +3834,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # Step 6: __getattr__ fallback.
         result = self.call_getattr_fallback(tx, name)
         if result is not None:
+            if (
+                self.source
+                and isinstance(self, variables.UnspecializedNNModuleVariable)
+                and hasattr(self.value, "__dict__")
+                and name not in self.value.__dict__
+            ):
+                # __getattr__ only runs after the normal lookup misses, so a later
+                # instance __dict__ write (e.g. object.__setattr__) would shadow
+                # the registered entry. A pending deletion in the traced code can
+                # reach here with the name still in the live dict; skip the guard
+                # then, as it would fail on the frame it was created.
+                install_guard(
+                    self.source.make_guard(
+                        functools.partial(
+                            GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr=name
+                        )
+                    )
+                )
             return result
 
         # Step 7: AttributeError.
