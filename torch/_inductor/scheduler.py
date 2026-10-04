@@ -12916,7 +12916,7 @@ class Scheduler:
                         and not isinstance(
                             buffer.layout, (NoneLayout, MultiOutputLayout)
                         )
-                        and buffer.get_size() == []
+                        and len(buffer.get_size()) == 0
                     ):
                         V.graph.zero_dim_cpu_tensor_list.add(read.name)
 
