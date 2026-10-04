@@ -19626,6 +19626,72 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled = torch.compile(fn, backend="inductor", dynamic=True)(a, b)
         self.assertEqual(eager, compiled)
 
+    @requires_gpu_and_triton
+    def test_cpu_scalar_squeezed_with_gpu_tensor(self):
+        # Regression test for #199676: Inductor passing CPU pointer to Triton kernel
+        def fn_expr_forward(x, lr):
+            return x * ((1.0 - lr.to(torch.float32).squeeze()) * 2.5)
+
+        def fn_expr_reverse(x, lr):
+            return ((1.0 - lr.to(torch.float32).squeeze()) * 2.5) * x
+
+        def fn_direct_forward(x, lr):
+            return x * lr.squeeze()
+
+        def fn_direct_reverse(x, lr):
+            return lr.squeeze() * x
+
+        def fn_multi_use(x, lr):
+            s = (1.0 - lr.to(torch.float32).squeeze()) * 2.5
+            return x * s + s
+
+        x = torch.randn(10, 10, device=GPU_TYPE)
+        lr = torch.tensor([0.005], dtype=torch.float64, device="cpu")
+
+        for fn in (
+            fn_expr_forward,
+            fn_expr_reverse,
+            fn_direct_forward,
+            fn_direct_reverse,
+            fn_multi_use,
+        ):
+            eager = fn(x, lr)
+            compiled = torch.compile(fn, backend="inductor")(x, lr)
+            self.assertEqual(eager, compiled)
+
+            compiled_dynamic = torch.compile(fn, backend="inductor", dynamic=True)(
+                x, lr
+            )
+            self.assertEqual(eager, compiled_dynamic)
+
+    @requires_gpu_and_triton
+    def test_cpu_scalar_custom_op_with_gpu_tensor(self):
+        with torch.library._scoped_library("test_cpu_scalar", "FRAGMENT"):
+
+            @torch.library.custom_op(
+                "test_cpu_scalar::opaque_cpu_1d", mutates_args=()
+            )
+            def opaque_cpu_1d(t: torch.Tensor) -> torch.Tensor:
+                return torch.tensor([0.005], dtype=torch.float32, device="cpu")
+
+            @opaque_cpu_1d.register_fake
+            def _(t: torch.Tensor) -> torch.Tensor:
+                return torch.empty([1], dtype=torch.float32, device="cpu")
+
+            def fn_forward(x):
+                scalar = torch.ops.test_cpu_scalar.opaque_cpu_1d(x).squeeze()
+                return x * scalar
+
+            def fn_reverse(x):
+                scalar = torch.ops.test_cpu_scalar.opaque_cpu_1d(x).squeeze()
+                return scalar * x
+
+            x = torch.randn(10, 10, device=GPU_TYPE)
+            for fn in (fn_forward, fn_reverse):
+                eager = fn(x)
+                compiled = torch.compile(fn, backend="inductor")(x)
+                self.assertEqual(eager, compiled)
+
     def test_cpu_scalar_with_cpu_tensor(self):
         def fn(a, b):
             return a + b[0]
