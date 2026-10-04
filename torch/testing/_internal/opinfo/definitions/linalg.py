@@ -764,16 +764,16 @@ def sample_inputs_linalg_lstsq(op_info, device, dtype, requires_grad=False, **kw
         )
         yield SampleInput(a, b, driver=driver)
 
-    # Empty systems have no singular values; the solution is zero. gels is left
-    # out because LAPACK zeroes B on quick return, so CPU residuals are wrong.
-    empty_shapes = ((0, 0), (0, 3), (3, 0)) if len(deltas) > 1 else ((0, 0),)
-    empty_drivers = [d for d in drivers if d != "gels"]
-    for batch, driver, (m, n) in product(((), (3,)), empty_drivers, empty_shapes):
+    # Empty systems, which have no singular values, and systems without right-hand sides
+    empty_shapes = ((0, 0, 2), (3, 3, 0))
+    if len(deltas) > 1:
+        empty_shapes += ((0, 3, 2), (3, 0, 2), (4, 3, 0), (3, 4, 0))
+    for batch, driver, (m, n, k) in product(((), (3,)), drivers, empty_shapes):
         a = make_tensor(
             batch + (m, n), dtype=dtype, device=device, requires_grad=requires_grad
         )
         b = make_tensor(
-            batch + (m, 2), dtype=dtype, device=device, requires_grad=requires_grad
+            batch + (m, k), dtype=dtype, device=device, requires_grad=requires_grad
         )
         yield SampleInput(a, b, driver=driver)
 
