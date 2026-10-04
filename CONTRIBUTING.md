@@ -199,7 +199,7 @@ This workflow is being rolled out. The following parts are still in progress:
 
 | In progress | Until it lands |
 |---|---|
-| The `no automated triage` and `no automated review` labels | The labels exist, but the bots do not act on them yet. |
+| The `no automated triage` label on issues | The label exists, but the issue triage bot does not act on it yet. |
 | Requesting re-evaluation of an issue by removing its label. This needs `@pytorchbot` to support removing labels: today `@pytorchbot label` can only add labels, for any label, and there is no command to remove one. | Comment on the issue with the new information and mention the maintainer who applied the label. |
 | PR triage: a bot assigns one reviewer per module and adds `triaged` | Reviewers are requested through [CODEOWNERS](CODEOWNERS) and manual reviewer assignment. |
 | Automated review | It runs on PRs labeled `in progress` and replaces that label with `ready for review` when it passes, but it does not post its findings on the PR yet. Run the [pr-review skill](.claude/skills/pr-review/SKILL.md) locally to see what it checks. A "Request changes" review does not move the PR back to `in progress` automatically yet. |
