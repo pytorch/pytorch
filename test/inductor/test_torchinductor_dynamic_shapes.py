@@ -1281,6 +1281,20 @@ class TestInductorDynamic(DynamicShapesTestCase):
         torch._dynamo.decorators.mark_unbacked(x, 0)
         f(x)
 
+    @torch.fx.experimental._config.patch(backed_size_oblivious=True)
+    def test_backed_size_oblivious_open_ended_slice_scatter(self, device):
+        def f(cu_seqlens):
+            out = torch.zeros_like(cu_seqlens)
+            out[1:] = torch.cumsum(cu_seqlens[1:] - cu_seqlens[:-1], dim=0)
+            return out
+
+        cnt = CompileCounterWithBackend("inductor")
+        opt_f = torch.compile(f, backend=cnt, dynamic=True)
+        for n in (1, 4, 64):
+            x = torch.arange(n + 1, device=device, dtype=torch.int32) * 3
+            self.assertEqual(opt_f(x), f(x))
+        self.assertEqual(cnt.frame_count, 1)
+
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
     def test_unspecialized_float_operations(self):
         operations = {
