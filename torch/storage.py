@@ -182,6 +182,9 @@ class _StorageBase:
     def resize_(self, size: _int):
         raise NotImplementedError
 
+    def _resize_with_addr_(self, size: _int, addr: _int):
+        raise NotImplementedError
+
     def _weak_ref(self, *args, **kwargs) -> _StorageBase | TypedStorage:
         raise NotImplementedError
 
