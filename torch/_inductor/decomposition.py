@@ -521,6 +521,10 @@ def addmm(
     beta: torch.types.Number = 1,
     alpha: torch.types.Number = 1,
 ) -> torch.Tensor:
+    # Zero-alpha NaN/Inf behavior depends on the native GEMM backend.
+    if statically_known_true(alpha == 0):
+        return NotImplemented
+
     def add_input(out: torch.Tensor) -> torch.Tensor:
         if alpha != 1:
             out = alpha * out

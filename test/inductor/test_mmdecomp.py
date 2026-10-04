@@ -483,6 +483,219 @@ class TestDecomp(NNTestCase):
                 self.assertTrue(r_expr_types[1] == og_t2_expr_types[1])
 
 
+class TestAddmmZeroAlpha(NNTestCase):
+    @parametrize("alpha", [0, 0.0, -0.0])
+    @parametrize("shape", [(1, 4, 1), (1, 4, 4), (4, 1, 4)])
+    def test_zero_alpha_decomposition(self, device, alpha, shape):
+        from torch._inductor.decomposition import addmm
+
+        m, k, n = shape
+        args = (
+            torch.ones(n, device=device),
+            torch.ones(m, k, device=device),
+            torch.ones(k, n, device=device),
+        )
+        self.assertIs(addmm(*args, alpha=alpha), NotImplemented)
+
+    @parametrize("dtype", [torch.float32, torch.float64, torch.float16, torch.bfloat16])
+    @parametrize("beta", [0, 1, -2])
+    @parametrize("autotune", [False, True])
+    @parametrize(
+        "shape,operand,value",
+        [
+            ((1, 4, 1), 1, float("nan")),
+            ((1, 4, 4), 2, float("inf")),
+            ((4, 1, 4), 1, -float("inf")),
+            ((8, 32, 8), 0, float("nan")),
+        ],
+    )
+    def test_zero_alpha_numerics(
+        self, device, dtype, beta, autotune, shape, operand, value
+    ):
+        from torch._inductor.utils import fresh_cache, run_and_get_code
+
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=0, beta=beta)
+
+        m, k, n = shape
+        args = (
+            torch.ones(n, device=device, dtype=dtype),
+            torch.ones(m, k, device=device, dtype=dtype),
+            torch.ones(k, n, device=device, dtype=dtype),
+        )
+        args[operand].fill_(value)
+        expected = fn(*args)
+
+        with (
+            config.patch(
+                max_autotune=autotune,
+                max_autotune_gemm=autotune,
+                cpp_wrapper=False,
+            ),
+            fresh_cache(),
+        ):
+            actual, code = run_and_get_code(torch.compile(fn, fullgraph=True), *args)
+
+        self.assertEqual(actual, expected, atol=0, rtol=0)
+        self.assertEqual(torch.isnan(actual), torch.isnan(expected))
+        self.assertEqual(torch.isfinite(actual), torch.isfinite(expected))
+        self.assertIn("torch.ops.aten.addmm.default", "\n".join(code))
+
+    @parametrize("bias_kind", ["scalar", "vector", "expanded", "transposed"])
+    @parametrize("k", [0, 3])
+    def test_zero_alpha_shapes(self, device, bias_kind, k):
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=0, beta=-2)
+
+        a = torch.ones(k, 2, device=device).t()
+        b = torch.ones(4, k, device=device).t()
+
+        if bias_kind == "scalar":
+            inp = torch.tensor(2.0, device=device)
+        elif bias_kind == "vector":
+            inp = torch.arange(8.0, device=device)[::2]
+        elif bias_kind == "expanded":
+            inp = torch.ones(1, 4, device=device).expand(2, 4)
+        else:
+            inp = torch.arange(8.0, device=device).view(4, 2).t()
+
+        expected = fn(inp, a, b)
+        actual = torch.compile(fn, fullgraph=True)(inp, a, b)
+        self.assertEqual(actual, expected, exact_stride=True)
+
+    def test_zero_alpha_dynamic_backward(self, device):
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=0, beta=-2).square().sum()
+
+        compiled = torch.compile(fn, fullgraph=True, dynamic=True)
+
+        for m, k, n in [(2, 3, 4), (5, 6, 7)]:
+            args = (
+                torch.randn(n, device=device, requires_grad=True),
+                torch.randn(m, k, device=device, requires_grad=True),
+                torch.randn(k, n, device=device, requires_grad=True),
+            )
+            expected = fn(*args)
+            expected_grad = torch.autograd.grad(expected, args)
+
+            actual = compiled(*args)
+            actual_grad = torch.autograd.grad(actual, args)
+
+            self.assertEqual(actual, expected)
+            self.assertEqual(actual_grad, expected_grad)
+
+    @parametrize("bad", ["matrices", "bias"])
+    def test_zero_alpha_invalid_shapes(self, device, bad):
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=0)
+
+        inp = torch.ones(5 if bad == "bias" else 4, device=device)
+        a = torch.ones(2, 3, device=device)
+        b = torch.ones(5 if bad == "matrices" else 3, 4, device=device)
+
+        with self.assertRaisesRegex(RuntimeError, "shape|size|dim|expand"):
+            fn(inp, a, b)
+        with self.assertRaisesRegex(RuntimeError, "shape|size|dim|expand"):
+            torch.compile(fn, fullgraph=True)(inp, a, b)
+
+    @parametrize("alpha", [0, 1])
+    def test_zero_alpha_unfuse_guard(self, device, alpha):
+        from types import SimpleNamespace
+
+        from torch._inductor.fx_passes.post_grad import should_prefer_unfused_addmm
+
+        graph = torch.fx.Graph()
+        inp, a, b = [graph.placeholder(name) for name in ("inp", "a", "b")]
+        out = graph.call_function(
+            torch.ops.aten.addmm.default,
+            (inp, a, b),
+            {"alpha": alpha, "beta": 1},
+        )
+        consumer = graph.call_function(torch.ops.aten.relu.default, (out,))
+        graph.output(consumer)
+
+        with FakeTensorMode():
+            inp.meta["val"] = torch.empty(4, device="cuda")
+            a.meta["val"] = torch.empty(2, 3, device="cuda")
+            b.meta["val"] = torch.empty(3, 4, device="cuda")
+            out.meta["val"] = torch.empty(2, 4, device="cuda")
+
+        match = SimpleNamespace(
+            args=(a, b),
+            kwargs={"inp": inp, "alpha": alpha, "beta": 1},
+            output_node=lambda: out,
+        )
+        self.assertEqual(should_prefer_unfused_addmm(match), alpha != 0)
+
+    @parametrize("alpha", [0, 1])
+    def test_zero_alpha_mem_bound_pass(self, device, alpha):
+        if device != "cpu":
+            self.skipTest("Uses the CPU decomposition threshold")
+
+        from torch._inductor.fx_passes import decompose_mem_bound_mm
+        from torch._inductor.fx_passes.split_cat import construct_pattern_matcher_pass
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def fn(inp, a, b):
+            return torch.addmm(inp, a, b, alpha=alpha)
+
+        args = (torch.ones(4), torch.ones(1, 4), torch.ones(4, 4))
+        gm = make_fx(fn, tracing_mode="fake")(*args)
+        expected = gm(*args)
+
+        with config.patch(post_grad_fusion_options={"decompose_mm_pass": {}}):
+            node = next(
+                n for n in gm.graph.nodes if n.target == torch.ops.aten.addmm.default
+            )
+            self.assertTrue(
+                decompose_mem_bound_mm.should_decompose_mm(node.args[1], node.args[2])
+            )
+            construct_pattern_matcher_pass("decompose_mm_pass").apply(gm)
+
+        gm.graph.lint()
+        gm.recompile()
+        addmms = [
+            node
+            for node in gm.graph.nodes
+            if node.target == torch.ops.aten.addmm.default
+        ]
+        self.assertEqual(len(addmms), 1 if alpha == 0 else 0)
+        self.assertEqual(gm(*args), expected)
+
+    @parametrize("alpha", [0, 1])
+    def test_zero_alpha_binary_folding(self, device, alpha):
+        from torch._inductor.fx_passes.binary_folding import binary_folding_init
+        from torch._inductor.fx_passes.freezing_patterns import binary_folding_pass
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+
+        bias = torch.ones(4, device=device)
+        weight = torch.ones(3, 4, device=device)
+        other = torch.ones(4, device=device)
+
+        def fn(a):
+            return torch.addmm(bias, a, weight, alpha=alpha) + other
+
+        a = torch.ones(2, 3, device=device)
+        gm = make_fx(fn)(a)
+        FakeTensorProp(gm, mode=FakeTensorMode(allow_non_fake_inputs=True)).propagate(a)
+        expected = gm(a)
+
+        binary_folding_init()
+        with config.patch(enable_linear_binary_folding=True):
+            matches = binary_folding_pass.apply(gm)
+
+        gm.graph.lint()
+        gm.recompile()
+        self.assertEqual(matches > 0, alpha != 0)
+        self.assertEqual(gm(a), expected)
+
+
+instantiate_device_type_tests(
+    TestAddmmZeroAlpha, globals(), only_for=("cpu", GPU_TYPE), allow_xpu=True
+)
+
+
 device_types = ("cpu", GPU_TYPE)
 instantiate_device_type_tests(
     TestDecomp, globals(), only_for=device_types, allow_xpu=True
