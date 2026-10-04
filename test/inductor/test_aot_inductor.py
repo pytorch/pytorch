@@ -785,6 +785,39 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    def test_constant_folding_lite_mode(self):
+        # Both the constant-folding graph and the main graph call ops through
+        # the proxy executor, which indexes into one serialized node list.
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.w_pre = torch.randn(4, 4, device=device)
+                self.b = torch.randn(4, device=device)
+
+            def forward(self, x):
+                w = torch.transpose(self.w_pre, 0, 1).relu() + self.b
+                return torch.matmul(x, w)
+
+        model = Model(self.device)
+        example_inputs = (torch.randn(4, 4, device=self.device),)
+        with config.patch(
+            {
+                **torch._inductor.lite_mode_options,
+                "aot_inductor.use_runtime_constant_folding": True,
+            }
+        ):
+            _, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.compile, model, example_inputs
+            )
+            self.check_model(model, example_inputs)
+        # Only ops without a C shim use the proxy executor, so check the const
+        # graph still makes a proxy call, and that the main graph's calls don't
+        # reuse its index.
+        call0 = "aoti_torch_proxy_executor_call_function(proxy_executor, 0,"
+        FileCheck().check("::_const_run_impl(").check(call0).check(
+            "::run_impl("
+        ).check_not(call0).run(code)
+
     def test_const_graph_no_autotune_at_compile_time(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -2459,6 +2492,28 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
+    @skipIfNoFBGEMM
+    def test_quanatized_int8_linear_lite_mode(self):
+        # Lite mode skips the decomposition of wrapped_quantized_linear, and
+        # only the ops it decomposes into have C shims.
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device=device)
+                self.bias = torch.randn(10, device=device)
+                self.scale = torch.tensor(0.1)
+                self.zero_point = torch.tensor(0)
+
+            def forward(self, x):
+                s, z = self.scale, self.zero_point
+                return torch.ops._quantized.wrapped_quantized_linear(
+                    x, s, z, self.weight, s, z, self.bias, s, z, 10
+                )
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch(torch._inductor.lite_mode_options):
+            self.check_model(Model(self.device), example_inputs)
+
     def test_zero_grid_with_unbacked_symbols(self):
         class Repro(torch.nn.Module):
             def __init__(self) -> None:
@@ -3055,6 +3110,20 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_cond_nested_lite_mode(self):
+        # With all ops falling back, the nested subgraphs keep tensor constants,
+        # which the model constructor looks up on the root graph.
+        inputs = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+        )
+        with config.patch(torch._inductor.lite_mode_options):
+            self.check_model_with_multiple_inputs(
+                CondModels.Nested(),
+                prepend_predicates(inputs, num_predicates=3),
+            )
+
     def test_cond_with_parameters(self):
         inputs = (torch.randn((10, 20), device=self.device),)
         dim0_abc = Dim("s0", min=2, max=1024)
@@ -3554,6 +3623,20 @@ class AOTInductorTestsTemplate:
             prepend_counters(inputs),
             dynamic_shapes=dynamic_shapes,
         )
+
+    def test_symint_in_tensor_arg_lite_mode(self):
+        # The int64 add has no C-shim-compatible scalar ABI, so the fallback goes
+        # through the proxy executor, which cannot take the SymInt as a tensor.
+        class Model(torch.nn.Module):
+            def forward(self, c, b):
+                return c + torch.nonzero(b).size(0)
+
+        inputs = (
+            torch.tensor(3, device=self.device),
+            torch.tensor([0, 1, 1, 0], device=self.device),
+        )
+        with config.patch(torch._inductor.lite_mode_options):
+            self.check_model(Model(), inputs)
 
     @common_utils.parametrize("dynamic", [False, True])
     def test_while_loop_with_conv(self, dynamic):
@@ -4267,6 +4350,24 @@ class AOTInductorTestsTemplate:
 
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
+
+    def test_return_view_constant_lite_mode(self):
+        # The transpose falls back to ATen, so the output aliases the constant
+        # through an ExternKernel rather than an IR view.
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.cst = torch.randn(5, 5, device=device)
+
+            def forward(self, x):
+                return (x, torch.transpose(self.cst, 0, 1))
+
+        x = torch.randn(5, device=self.device)
+        with config.patch(torch._inductor.lite_mode_options):
+            self.check_model(Model(self.device), (x,))
+            # check_model only notices a missing clone if the freed constant's
+            # memory gets overwritten.
+            self.code_check_count(Model(self.device), (x,), "aoti_torch_clone(", 1)
 
     def test_profile_benchmark_harness(self):
         batch_size = 32
@@ -8294,11 +8395,15 @@ class AOTInductorTestsTemplate:
         model = Model()
         example_inputs = (mask(1, 1, 0, 0), mask(1, 1, 1, 0))
         with config.patch(torch._inductor.lite_mode_options):
-            so_path = AOTIRunnerUtil.legacy_compile(model, example_inputs)
+            so_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check_regex(r"Expected u\d+ <= u\d+").run(code)
         compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
         self.assertEqual(compiled(*example_inputs), model(*example_inputs))
         # Same sizes as the example, so only the relational assert can catch it.
-        with self.assertRaisesRegex(RuntimeError, r"Expected u\d+ <= u\d+"):
+        # Don't match the message: the fbcode runner doesn't surface it.
+        with self.assertRaisesRegex(Exception, ""):
             compiled(mask(1, 1, 1, 0), mask(1, 0, 0, 0))
 
     def test_multi_input_nonzero_slice_shared_dim(self):
@@ -11302,6 +11407,7 @@ GPU_TEST_FAILURES = {
     # quantized unsupported for GPU
     "test_quantized_linear": fail_gpu(("cuda", "xpu")),
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
+    "test_quanatized_int8_linear_lite_mode": fail_gpu(("cuda", "xpu")),
     "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
     # This test forces lazy dual-wrapper mode; torch.cond support for that
     # mode is covered by AOTInductorTestDualWrapper skips below.
@@ -11751,10 +11857,12 @@ class TestCppWrapperFallbackProfiling(TestCase):
         """Test profiling for GPU non-Triton kernel call path (CUTLASS/ROCm templates).
 
         Non-Triton GPU kernels use kernels.{name}() direct calls. This path requires
-        max_autotune with CUTLASS backend availability (SM80+).
+        max_autotune with CUTLASS backend availability (SM90+).
         """
-        if not SM80OrLater:
-            raise unittest.SkipTest("CUTLASS requires SM80+")
+        # Dense mm only uses CUTLASS 3.x kernels, which need SM90+; on SM80 the
+        # CUTLASS backend has no choices and autotuning raises NoValidChoicesError.
+        if not SM90OrLater:
+            raise unittest.SkipTest("CUTLASS mm templates require SM90+")
         from torch._inductor.codegen.cutlass.utils import try_import_cutlass
 
         if not try_import_cutlass():

@@ -7886,6 +7886,42 @@ class CPUReproTests(TestCase):
         )
         self.assertTrue(cuda_storage.has_exceeded_max_reads())
 
+    def test_masked_bool_vec(self):
+        # Regression test for gh-198613
+        def fn_cmp_slice(a):
+            y = a > 0
+            y[1:] = y[:-1].clone()
+            return y
+
+        def fn_cmp_pad(a):
+            y = a > 0
+            return F.pad(y[:-1], (0, 0, 1, 0))
+
+        def fn_to_bool(a):
+            y = a.bool()
+            y[1:] = y[:-1].clone()
+            return y
+
+        def fn_bitwise_bool(a, b):
+            y = (a > 0) & (b > 0)
+            y[1:] = y[:-1].clone()
+            return y
+
+        for dtype in [torch.int64, torch.int32, torch.uint8, torch.float64]:
+            if dtype.is_floating_point:
+                a = torch.randn((4, 64), dtype=dtype)
+                b = torch.randn((4, 64), dtype=dtype)
+            elif dtype == torch.uint8:
+                a = torch.randint(0, 5, (4, 64), dtype=dtype)
+                b = torch.randint(0, 5, (4, 64), dtype=dtype)
+            else:
+                a = torch.randint(-5, 5, (4, 64), dtype=dtype)
+                b = torch.randint(-5, 5, (4, 64), dtype=dtype)
+
+            for fn in [fn_cmp_slice, fn_cmp_pad, fn_to_bool]:
+                self.common(fn, (a,))
+            self.common(fn_bitwise_bool, (a, b))
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

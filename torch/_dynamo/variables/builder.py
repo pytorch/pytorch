@@ -3764,7 +3764,9 @@ class VariableBuilder:
         if self.name in self.tx.output.unspec_variable_map:
             return self.tx.output.unspec_variable_map[self.name]
 
-        wrapped_value = torch.tensor(value)
+        # Match the runtime calling convention: codegen passes graph args with
+        # pass_arg_as_tensor=True through torch._as_tensor_fullprec.
+        wrapped_value = torch._as_tensor_fullprec(value)
         if not isinstance(self.get_source(), RandomValueSource):
             install_guard(self.get_source().make_guard(GuardBuilder.TYPE_MATCH))
 
@@ -5539,6 +5541,7 @@ class SourcelessBuilder:
                 torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode,
             ):
                 return StringFormatVariable.create(
+                    tx,
                     value.fmt_var.as_python_constant(),
                     [value.sym_node_var],
                     {},

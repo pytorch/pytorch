@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
+#include <torch/csrc/distributed/c10d/hooks/HealthCheckHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/NanCheckHook.hpp>
 #include <string_view>
 #include <utility>
@@ -655,7 +656,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                  bool skip_all_reduce_unused_params,
                  bool use_python_reducer,
                  std::vector<int64_t> bucket_bytes_cap_list,
-                 bool batched_grad_copy) {
+                 bool batched_grad_copy,
+                 bool lazy_bucket_allocation) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
                 py::gil_scoped_release nogil{};
@@ -673,7 +675,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                     skip_all_reduce_unused_params,
                     use_python_reducer,
                     std::move(bucket_bytes_cap_list),
-                    batched_grad_copy);
+                    batched_grad_copy,
+                    lazy_bucket_allocation);
               }),
           py::arg("params"),
           py::arg("bucket_indices"),
@@ -689,7 +692,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("skip_all_reduce_unused_params") = false,
           py::arg("use_python_reducer") = false,
           py::arg("bucket_bytes_cap_list") = std::vector<int64_t>(),
-          py::arg("batched_grad_copy") = false)
+          py::arg("batched_grad_copy") = false,
+          py::arg("lazy_bucket_allocation") = false)
       .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
@@ -5095,6 +5099,15 @@ a RuntimeError; on CUDA it triggers a device-side assert. The process group
 owns the hook, so the returned handle only has to be kept if the check should
 be removed again via remove().)")
       .def("remove", &::c10d::NanCheckHook::remove);
+
+  py::class_<::c10d::HealthCheckHook>(module, "HealthCheckHook")
+      .def_static(
+          "attach",
+          &::c10d::HealthCheckHook::attach,
+          py::arg("pg"),
+          R"(
+Attach health reporting to every backend in a process group that supports
+abort hooks. The backends own the registered hooks for their lifetimes.)");
 
   module.def(
       "_dump_fr_trace_json",

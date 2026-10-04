@@ -225,7 +225,7 @@ class FSDPParamGroup:
                 post_forward_mesh_info,
                 device,
                 shard_placement_fn,
-                mp_policy,
+                mp_policy._resolve_for_param(param),
                 offload_policy,
             )
             for param, module_info in zip(params, param_module_infos)
@@ -234,7 +234,6 @@ class FSDPParamGroup:
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
         self.device_handle = _get_device_handle(device.type)
-        self.mp_policy = mp_policy
         self.offload_policy = offload_policy
         self._training_state = TrainingState.IDLE
         # Group's sharded state always matches its parameters' sharded states
@@ -261,6 +260,7 @@ class FSDPParamGroup:
         self._all_gather_output_fn: Callable = _default_all_gather_output_fn
         self._prepare_reduce_scatter_inputs: Callable = _default_reduce_scatter_input_fn
         self._reduce_scatter_param_indices: list[int] = []
+        self._fsdp_params_with_wider_grad_dtype: list[FSDPParam] = []
         self._param_group_index: int = 0
         self._num_param_groups: int = 1
         # Group's indices in the shared post-forward order
@@ -329,7 +329,7 @@ class FSDPParamGroup:
     # Initialization #
     def _init_mp_dtypes(self) -> None:
         for fsdp_param in self.fsdp_params:
-            fsdp_param.init_dtype_attrs(self.mp_policy)
+            fsdp_param.init_dtype_attrs(fsdp_param.mp_policy)
         trainable_params: list[FSDPParam] = [
             p for p in self.fsdp_params if p.sharded_param.requires_grad
         ]
@@ -354,6 +354,19 @@ class FSDPParamGroup:
         self._reduce_dtype = (
             next(iter(reduce_dtypes)) if dtype_sets_are_uniform else None
         )
+        # A larger floating-point dtype holds a smaller one exactly (e.g. fp32
+        # and bf16). Compare sizes since torch.promote_types rejects float8.
+        # Gradients reduced outside DP keep autograd's upcast so that reduction
+        # runs in the wider dtype too.
+        self._fsdp_params_with_wider_grad_dtype = [
+            p
+            for p in self.fsdp_params
+            if (grad_dtype := p.unsharded_grad_dtype) is not None
+            and (compute_dtype := p.param_dtype or p.orig_dtype).is_floating_point
+            and grad_dtype.is_floating_point
+            and grad_dtype.itemsize > compute_dtype.itemsize
+            and not p.may_reduce_grad_outside_dp
+        ]
 
     def _init_reduce_scatter_param_order(self) -> None:
         # Cache the packing order after resolving dtypes, keeping all-gather's
@@ -609,6 +622,7 @@ class FSDPParamGroup:
             leaf = getattr(fsdp_param, "_unsharded_param", None)
             if leaf is not None:
                 leaf.grad = None
+        self._set_unsharded_grad_dtypes(defer_upcast=False)
         self._partial_reduce_output = None
         self._post_backward_pending = False
         self._partial_reduce_output_layout.clear()
@@ -669,6 +683,7 @@ class FSDPParamGroup:
             self._training_state = TrainingState.PRE_BACKWARD
             self.unshard(self.unshard_async_op)  # no-op if prefetched
             self.wait_for_unshard()
+            self._set_unsharded_grad_dtypes(defer_upcast=True)
             if default_prefetch:
                 self._backward_prefetch()
 
@@ -692,6 +707,7 @@ class FSDPParamGroup:
             with record_function(self._with_fqn("FSDP::post_backward_reshard")):
                 if not self.reduce_grads:
                     self._post_backward_pending = True
+                    self._set_unsharded_grad_dtypes(defer_upcast=False)
                     if self.reshard_after_backward:
                         self.reshard()
                     return
@@ -702,6 +718,7 @@ class FSDPParamGroup:
                 fsdp_params_with_grad, unsharded_grads = (
                     self._take_unsharded_grads_to_reduce()
                 )
+                self._set_unsharded_grad_dtypes(defer_upcast=False)
                 if self.reshard_after_backward:
                     self.reshard()
             # Recycle prior modules' reduce-scatter input buffers, keeping at most
@@ -754,18 +771,9 @@ class FSDPParamGroup:
                 else:
                     all_reduce_stream = self.comm_ctx.all_reduce_stream
 
-                reduce_dtype = self._reduce_dtype
-                if reduce_dtype is None:
-                    dtypes = {grad.dtype for grad in unsharded_grads}
-                    if self._partial_reduce_output is not None:
-                        # The pending partial has an earlier backward's reduce dtype,
-                        # and _prepare_partial_reduce_output casts it to this one's.
-                        # Only grad_dtype=None params can make the grads narrower:
-                        # their dtype follows the computation, e.g. fp32 in one
-                        # microbatch and bf16 in the next. Promoting over the grads
-                        # alone would then cast the fp32 partial down to bf16.
-                        dtypes.add(self._partial_reduce_output.dtype)
-                    reduce_dtype = functools.reduce(torch.promote_types, dtypes)
+                reduce_dtype = self._get_reduce_dtype(
+                    fsdp_params_with_grad, unsharded_grads
+                )
                 partial_sizes = (
                     [p.padded_sharded_param_size.numel() for p in fsdp_params_with_grad]
                     if isinstance(self.mesh_info, DDPMeshInfo)
@@ -918,6 +926,46 @@ class FSDPParamGroup:
                     f"build zero gradients of the same dtype: {fsdp_param._param_fqn}. "
                     "Set reduce_dtype to the dtype its gradients already have."
                 )
+
+    def _set_unsharded_grad_dtypes(self, defer_upcast: bool) -> None:
+        # Leave gradients in the dtype autograd produces, saving a cast per
+        # parameter: AccumulateGrad adds them in place to existing wider
+        # gradients, and the reduce-scatter copy-in upcasts the rest. Only a
+        # gradient that starts accumulating across backwards needs the cast.
+        for fsdp_param in self._fsdp_params_with_wider_grad_dtype:
+            param = getattr(fsdp_param, "_unsharded_param", None)
+            if param is None or not param.requires_grad:
+                continue
+            grad, dtype = param.grad, fsdp_param.unsharded_grad_dtype
+            if defer_upcast:
+                if grad is not None or self.reduce_grads:
+                    param.grad_dtype = None
+                continue
+            if grad is not None and grad.dtype != dtype:
+                # Created while deferred but not reduced
+                param.grad = grad.to(dtype)
+            param.grad_dtype = dtype
+
+    def _get_reduce_dtype(
+        self, fsdp_params: list[FSDPParam], grads: list[torch.Tensor]
+    ) -> torch.dtype:
+        if self._reduce_dtype is not None:
+            return self._reduce_dtype
+        # Promote over accumulation dtypes (grad_dtype, or the original dtype if
+        # unset) since they match across ranks. Gradient dtypes may not: a fresh
+        # gradient may not be upcast to its accumulation dtype yet, while an
+        # accumulated one is. grad_dtype=None has no accumulation dtype, so use
+        # its gradient's dtype.
+        dtypes = {p.unsharded_grad_dtype or g.dtype for p, g in zip(fsdp_params, grads)}
+        if self._partial_reduce_output is not None:
+            # The pending partial has an earlier backward's reduce dtype, and
+            # _prepare_partial_reduce_output casts it to this one's. Only
+            # grad_dtype=None params can make these dtypes narrower: their dtype
+            # follows the computation, e.g. fp32 in one microbatch and bf16 in
+            # the next. Promoting over these dtypes alone would then cast the
+            # fp32 partial down to bf16.
+            dtypes.add(self._partial_reduce_output.dtype)
+        return functools.reduce(torch.promote_types, dtypes)
 
     def _take_unsharded_grads_to_reduce(
         self,
