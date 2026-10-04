@@ -228,6 +228,17 @@ _MODULE_HEADER = """\
 """
 
 
+def _unwrap_dynamo_runtime_module_call(obj: object) -> object:
+    """Peel ModuleTracker wrappers without unwrapping user decorators."""
+    while True:
+        inner = getattr(obj, "_dynamo_runtime_module_call_inner", None)
+        # update_wrapper copies the wrapped function's __dict__. Requiring this
+        # function's own __wrapped__ link keeps the marker self-authenticating.
+        if inner is None or getattr(obj, "__wrapped__", None) is not inner:
+            return obj
+        obj = inner
+
+
 def _resolve_global(
     obj: object,
     helper_table: dict[int, tuple[str, str]],
@@ -241,6 +252,7 @@ def _resolve_global(
     ``obj``, recording any needed import. Raises NotImplementedError if ``obj`` is
     neither the inner call, a sibling wrapper, a known helper, nor source-
     reconstructible (see ``_emit_value``)."""
+    obj = _unwrap_dynamo_runtime_module_call(obj)
     if inner_call_id is not None and id(obj) == inner_call_id:
         return "_inner_call"
     # An OUTER wrapper (dedup / synthetic base) closes over the orchestration's outer
@@ -414,7 +426,7 @@ def _compose_standalone_module(
     def _inner_ref(g: GeneratedSource) -> Any:
         for nm in _INNER_NAMES:
             if nm in g.globals_dict:
-                return g.globals_dict[nm]
+                return _unwrap_dynamo_runtime_module_call(g.globals_dict[nm])
         return None
 
     # The inner Inductor call is AUTHORITATIVE: it is the placeholder object the capture
