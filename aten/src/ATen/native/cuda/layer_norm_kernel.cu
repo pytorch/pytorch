@@ -188,9 +188,10 @@ WelfordDataLN cuWelfordCombine(
 #else
       auto coef = fn_rcp(count); //NB we don't use --use_fast_math, but this is emulation, 1./count goes to intrinsic, `* coef` is multiplication, instead of slow fp division
 #endif
-      auto nA = dataA.count * coef;
       auto nB = dataB.count * coef;
-      mean = nA*dataA.mean + nB*dataB.mean;
+      // Welford increment, not a weighted average of the two means: the latter
+      // needs nA+nB to be exactly 1, which an approximate coef does not give.
+      mean = (dataA.count == U(0)) ? dataB.mean : dataA.mean + delta * nB;
       sigma2 = dataA.sigma2 + dataB.sigma2 + delta * delta * dataA.count * nB;
     } else {
       mean = U(0);
