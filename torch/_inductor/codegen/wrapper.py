@@ -3627,7 +3627,13 @@ class PythonWrapperCodegen(CodeGen):
     def finalize_prefix(self):
         pass
 
-    def codegen_cpp_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
+    def codegen_cpp_sizevar(
+        self,
+        x: Expr,
+        *,
+        simplify: bool = True,
+        unsigned_symbols: OrderedSet[sympy.Symbol] | None = None,
+    ) -> str:
         raise RuntimeError("codegen_cpp_sizevar is only implemented for cpp_wrapper!")
 
     def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:

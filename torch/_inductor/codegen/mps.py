@@ -18,6 +18,7 @@ from torch.utils._cpp_embed_headers import _embed_headers
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import Min
 from torch.utils._sympy.printers import CppPrinter, ExprPrinter as ExprPrinter_
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import ValueRanges
 
 from ..utils import ceildiv, get_bounds_index_expr, get_kernel_metadata
@@ -1111,8 +1112,15 @@ class MetalKernel(SIMDKernel):
                     else:
                         dtype_str = self.dtype_to_str(dtype)
                     code.writeline(f"constant {dtype_str}* {inner},")
-                for inner in self.args.sizevars.values():
-                    code.writeline(f"constant long& {inner},")
+                for outer, inner in self.args.sizevars.items():
+                    dtype_str = (
+                        "float"
+                        if isinstance(outer, sympy.Symbol)
+                        and symbol_is_type(outer, SymT.UNBACKED_FLOAT)
+                        and not V.graph.cpp_wrapper
+                        else "long"
+                    )
+                    code.writeline(f"constant {dtype_str}& {inner},")
 
                 # Write dynamic values as inputs
                 for idx_var in idx_vars:

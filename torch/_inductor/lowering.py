@@ -2918,6 +2918,33 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
     if node.target is aten.view_as_complex.default:
         return False
 
+    if (
+        node.target is aten.full.default
+        and config.cpp_wrapper
+        and isinstance(node.meta.get("val"), torch.Tensor)
+        and node.meta["val"].device.type == "cpu"
+        and node.meta["val"].dtype in (torch.complex64, torch.complex128)
+    ):
+        fill_value = node.args[1]
+        if (
+            isinstance(fill_value, torch.fx.Node)
+            and fill_value.target is aten._local_scalar_dense.default
+        ):
+            source_node = fill_value.args[0]
+            source = (
+                source_node.meta.get("val")
+                if isinstance(source_node, torch.fx.Node)
+                else None
+            )
+            if (
+                isinstance(source, torch.Tensor)
+                and source.device.type == "cpu"
+                and source.dtype == torch.uint64
+            ):
+                # The proxy fallback cannot carry a uint64 item above INT64_MAX.
+                # This full can instead load the scalar tensor in its C++ kernel.
+                return False
+
     if node.op == "placeholder":
         return False
 
@@ -4465,6 +4492,49 @@ def _full(fill_value, device, dtype, size):
     if not isinstance(fill_value, (int, float)) and hasattr(value, "value"):
         value = value.value
 
+    unsigned_half_singleton = False
+    if device.type == "cpu" and config.cpp_wrapper and isinstance(value, sympy.Symbol):
+        for buffer in V.graph.buffers:
+            if not isinstance(buffer, ir.DynamicScalar):
+                continue
+            source = buffer.inputs[0]
+            if (
+                isinstance(source, ir.IRNode)
+                and buffer.sym == value
+                and not buffer.keypath
+                and all(
+                    V.graph.sizevars.is_size_one_or_false(dim)
+                    for dim in source.get_size()
+                )
+                and source.get_dtype() == torch.uint64
+                and source.get_device() == device
+            ):
+                singleton = all(
+                    V.graph.sizevars.is_size_one_or_false(dim) for dim in size
+                )
+                if dtype == torch.float16 and not singleton:
+                    assert_op = ir.AssertScalar(
+                        value <= int(torch.finfo(dtype).max),
+                        f"value cannot be converted to type {dtype} without overflow",
+                    )
+                    V.graph.register_buffer(assert_op, set_name=True)
+                    V.graph.register_operation(assert_op)
+                elif dtype in (
+                    torch.bool,
+                    torch.uint64,
+                    torch.bfloat16,
+                    torch.float16,
+                    torch.float32,
+                    torch.float64,
+                    torch.complex64,
+                    torch.complex128,
+                ):
+                    # Load large uint64 values in the full kernel when the
+                    # destination can represent the eager result.
+                    value = ir.SqueezeView.create(source)
+                    unsigned_half_singleton = dtype == torch.float16
+                break
+
     if isinstance(value, (int, float)):
 
         def inner_fn(index):
@@ -4473,7 +4543,7 @@ def _full(fill_value, device, dtype, size):
     elif isinstance(value, sympy.Basic):
 
         def inner_fn(index):
-            return ops.index_expr(value, dtype)
+            return ops.value_expr(value, dtype)
 
     else:
         if len(value.get_size()) != 0:
@@ -4481,6 +4551,20 @@ def _full(fill_value, device, dtype, size):
         value_loader = value.make_loader()
 
         def inner_fn(index):
+            if unsigned_half_singleton:
+                # Eager scalar fills of a single Half element round 65505..65519
+                # to 65504 and larger uint64 values to infinity.  Bound the
+                # checked cast before selecting infinity for the latter case.
+                source = value_loader([])
+                finite = ops.to_dtype(
+                    ops.minimum(source, ops.constant(65504, torch.uint64)),
+                    torch.float16,
+                )
+                return ops.where(
+                    ops.gt(source, ops.constant(65519, torch.uint64)),
+                    ops.constant(float("inf"), torch.float16),
+                    finite,
+                )
             return value_loader([])
 
     return Pointwise.create(

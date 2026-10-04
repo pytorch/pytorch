@@ -9659,8 +9659,18 @@ class AssertScalar(ExternKernel):
             pass
         elif V.graph.cpp_wrapper:
             symbol_str = f"std::to_string({symbol})"
+            unsigned_symbols: OrderedSet[sympy.Symbol] = OrderedSet()
+            symbols = self.get_free_symbol_uses(unbacked_only=False)
+            for buffer in V.graph.buffers:
+                if not isinstance(buffer, DynamicScalar) or buffer.sym not in symbols:
+                    continue
+                source = buffer.inputs[0]
+                if isinstance(source, IRNode) and source.get_dtype() == torch.uint64:
+                    unsigned_symbols.add(buffer.sym)
             sizevar = V.graph.wrapper_code.codegen_cpp_sizevar(
-                self.scalar, simplify=False
+                self.scalar,
+                simplify=False,
+                unsigned_symbols=unsigned_symbols,
             )
             # TODO: when we start compiling in C++20, annotate with [[unlikely]].
             wrapper.writeline(
