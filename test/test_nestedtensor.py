@@ -7529,6 +7529,15 @@ torch.cuda.synchronize()
 
         torch.manual_seed(0)
 
+        # XPU has no fused SDPA kernel for nested inputs
+        if torch.device(device).type == "xpu":
+            sdp_backends = [torch.nn.attention.SDPBackend.MATH]
+        else:
+            sdp_backends = [
+                torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+                torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION,
+            ]
+
         class mha(torch.nn.Module):
             def __init__(self, use_legacy_api) -> None:
                 super().__init__()
@@ -7558,12 +7567,7 @@ torch.cuda.synchronize()
                 k = key.view(bs, -1, n_heads, d_head).transpose(1, 2)
                 v = value.view(bs, -1, n_heads, d_head).transpose(1, 2)
 
-                with torch.nn.attention.sdpa_kernel(
-                    [
-                        torch.nn.attention.SDPBackend.FLASH_ATTENTION,
-                        torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION,
-                    ]
-                ):
+                with torch.nn.attention.sdpa_kernel(sdp_backends):
                     attn_output = torch.nn.functional.scaled_dot_product_attention(
                         q,
                         k,
