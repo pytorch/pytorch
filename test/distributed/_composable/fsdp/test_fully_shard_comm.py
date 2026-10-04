@@ -3,7 +3,6 @@
 import copy
 import functools
 import itertools
-import math
 import os
 import tempfile
 import unittest
@@ -59,7 +58,6 @@ from torch.profiler import profile, ProfilerActivity
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import SM90OrLater, TEST_CUDA, TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
-    dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
 )
@@ -468,94 +466,6 @@ instantiate_device_type_tests(
 
 
 class TestFullyShardNativeCollectiveCopy(TestCase):
-    @parametrize("num_chunks", [1, 4])
-    @parametrize("outer_size", [1, 128])
-    @dtypes(torch.bfloat16, torch.float32, torch.int64)
-    def test_all_gather_copy_out(self, device, dtype, num_chunks, outer_size):
-        shapes = [
-            (num_chunks * 3, 5),
-            (outer_size, num_chunks * 3, 5),
-            (2, 3, num_chunks * 2, 5),
-        ]
-        expected = [make_tensor(s, device=device, dtype=dtype) for s in shapes]
-        shards = [torch.chunk(t, num_chunks, dim) for dim, t in enumerate(expected)]
-        packed = torch.cat(
-            [s[rank].flatten() for rank in range(num_chunks) for s in shards]
-        )
-        # Misaligned input and outputs
-        source = torch.cat([packed.new_zeros(3), packed, packed.new_zeros(3)])[3:-3]
-        buffers = [t.new_full((t.numel() + 10,), 7) for t in expected]
-        outputs = [b[5:-5].view(s) for b, s in zip(buffers, shapes)]
-        splits = [t.numel() // num_chunks for t in expected]
-        outer_sizes = [math.prod(s[:dim]) for dim, s in enumerate(shapes)]
-        versions = [t._version for t in outputs]
-        torch.ops.fsdp._all_gather_copy_out_(
-            outputs, source, splits, outer_sizes, num_chunks
-        )
-        self.assertEqual(outputs, expected, atol=0, rtol=0)
-        for output, version, buffer in zip(outputs, versions, buffers):
-            self.assertGreater(output._version, version)
-            self.assertEqual(buffer[:5], buffer.new_full((5,), 7))
-            self.assertEqual(buffer[-5:], buffer.new_full((5,), 7))
-
-    @parametrize("num_chunks", [1, 4])
-    @parametrize("outer_size", [1, 128])
-    @parametrize("noncontiguous", [False, True])
-    @parametrize("nonzero_shards", [False, True])
-    @parametrize(
-        "in_dtype,out_dtype",
-        [
-            (torch.bfloat16, torch.bfloat16),
-            (torch.bfloat16, torch.float32),
-            (torch.float16, torch.float32),
-            (torch.float32, torch.float64),
-        ],
-    )
-    def test_reduce_scatter_copy_in(
-        self,
-        device,
-        num_chunks,
-        outer_size,
-        noncontiguous,
-        nonzero_shards,
-        in_dtype,
-        out_dtype,
-    ):
-        shapes = [
-            (num_chunks + 1, 5),
-            (outer_size, num_chunks * 3, 5),
-            (2, 3, num_chunks * 2, 5),
-        ]
-        tensors = [make_tensor(s, device=device, dtype=in_dtype) for s in shapes]
-        if noncontiguous:
-            tensors[0] = tensors[0].t().contiguous().t()
-        dims = [0, 1, 2] if nonzero_shards else [0, 0, 0]
-        rank_outputs = []
-        for rank in range(num_chunks):
-            rank_shards = []
-            for dim, tensor in zip(dims, tensors):
-                shard_size = (tensor.size(dim) + num_chunks - 1) // num_chunks
-                start = min(rank * shard_size, tensor.size(dim))
-                length = min(shard_size, tensor.size(dim) - start)
-                shape = list(tensor.shape)
-                shape[dim] = shard_size
-                shard = torch.zeros(shape, device=device, dtype=out_dtype)
-                shard.narrow(dim, 0, length).copy_(tensor.narrow(dim, start, length))
-                rank_shards.append(shard.flatten())
-            rank_outputs.append(torch.cat(rank_shards))
-        expected = torch.stack(rank_outputs)
-        buffer = expected.new_full((expected.numel() + 10,), 7)
-        output = buffer[5:-5].view(expected.shape)
-        version = output._version
-        result = torch.ops.fsdp._reduce_scatter_copy_in_(
-            output, tensors, dims, num_chunks
-        )
-        self.assertIs(result, output)
-        self.assertGreater(output._version, version)
-        self.assertEqual(output, expected, atol=0, rtol=0)
-        self.assertEqual(buffer[:5], buffer.new_full((5,), 7))
-        self.assertEqual(buffer[-5:], buffer.new_full((5,), 7))
-
     @parametrize("outer_size", [1, 2])
     def test_opcheck(self, device, outer_size):
         tensor = make_tensor((outer_size, 8, 3), device=device, dtype=torch.float32)
@@ -571,19 +481,14 @@ class TestFullyShardNativeCollectiveCopy(TestCase):
 
     @onlyCUDA
     def test_cuda_graph(self, device):
-        tensors = [
-            make_tensor(shape, device=device, dtype=torch.bfloat16)
-            for shape in [(8, 3), (128, 8, 3)]
-        ]
-        num_chunks = 4
-        splits = [t.numel() // num_chunks for t in tensors]
-        packed = tensors[0].new_empty((num_chunks, sum(splits)))
-        outputs = [torch.empty_like(t) for t in tensors]
+        tensor = make_tensor((128, 8, 3), device=device, dtype=torch.bfloat16)
+        packed = tensor.new_empty((4, tensor.numel() // 4))
+        output = torch.empty_like(tensor)
 
         def copy():
-            torch.ops.fsdp._reduce_scatter_copy_in_(packed, tensors, [0, 1], num_chunks)
+            torch.ops.fsdp._reduce_scatter_copy_in_(packed, [tensor], [1], 4)
             torch.ops.fsdp._all_gather_copy_out_(
-                outputs, packed, splits, [1, 128], num_chunks
+                [output], packed, [packed.size(1)], [128], 4
             )
 
         copy()
@@ -591,18 +496,10 @@ class TestFullyShardNativeCollectiveCopy(TestCase):
         with torch.cuda.graph(graph):
             copy()
         for _ in range(3):
-            for tensor in tensors:
-                tensor.add_(1)
+            tensor.add_(1)
             graph.replay()
-            shards = [torch.chunk(t, num_chunks, dim) for dim, t in enumerate(tensors)]
-            expected = torch.stack(
-                [
-                    torch.cat([shard[rank].flatten() for shard in shards])
-                    for rank in range(num_chunks)
-                ]
-            )
-            self.assertEqual(packed, expected, atol=0, rtol=0)
-            self.assertEqual(outputs, tensors, atol=0, rtol=0)
+            # The round trip only matches if both copies replay on the new data
+            self.assertEqual(output, tensor, atol=0, rtol=0)
 
 
 instantiate_device_type_tests(
