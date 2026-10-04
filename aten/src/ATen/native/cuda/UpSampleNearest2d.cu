@@ -256,7 +256,7 @@ static void upsample_nearest2d_out_cuda_template(
 
   const auto memory_format = input_.suggest_memory_format();
 
-  if (input_.sizes() == output.sizes()) {
+  if (input_.sizes() == output.sizes() && (!scales_h.has_value() || scales_h.value() == 1.0) && (!scales_w.has_value() || scales_w.value() == 1.0)) {
     output.copy_(input_);
     return;
   }

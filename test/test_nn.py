@@ -5177,7 +5177,33 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                         libc.munmap(addr, total_size)
 
     @set_default_dtype(torch.double)
-    def test_interpolate(self):
+    
+    @set_default_dtype(torch.double)
+    def test_interpolate_identity_shortcut(self):
+        # Issue 199620: F.interpolate incorrectly took an identity shortcut
+        # when scale_factor != 1.0 but rounded to the same output size.
+        torch.manual_seed(0)
+        x = torch.randn(1, 1, 4, 4)
+        for mode in ['bicubic', 'bilinear', 'nearest']:
+            if mode == 'nearest':
+                kwargs = {}
+            else:
+                kwargs = {'align_corners': False}
+                
+            def f(x): 
+                return F.interpolate(x, scale_factor=(1.2,1.2), mode=mode, **kwargs)
+
+            ref = f(x.double())
+            
+            for device in ['cpu', 'cuda']:
+                if not torch.cuda.is_available() and device == 'cuda':
+                    continue
+                out = f(x.to(device)).cpu()
+                d = (out.double() - ref).abs()
+                max_diff = d.max().item()
+                self.assertTrue(max_diff < 1e-4, f'mode={mode} device={device} max_diff={max_diff}')
+
+def test_interpolate(self):
         def _test_interpolate_non_integer_size_warning(in_t, out_size, dim, **kwargs):
             test_sizes = [float(out_size),
                           torch.tensor(out_size, dtype=torch.float)]
