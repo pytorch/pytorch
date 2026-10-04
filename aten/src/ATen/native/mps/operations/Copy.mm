@@ -65,8 +65,7 @@ void copy_cast_kernel_mps(at::Tensor& dst, const at::Tensor& src) {
 }
 
 // Byte-erased compute copy, not a blit: faster at small sizes and avoids the encoder switch.
-// One dispatch per <=2GB chunk keeps chunk_bytes in uint. dst/src are raw MTLBuffers treated as
-// flat byte runs; the optional tensors only supply storage offsets and profiler info.
+// One dispatch per <=2GB chunk keeps chunk_bytes in uint.
 static void copy_bytes_kernel(void* dst,
                               const void* src,
                               size_t size,
