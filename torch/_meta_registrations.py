@@ -6025,7 +6025,18 @@ def grid_sampler_2d_backward_meta(
 ):
     input_requires_grad = output_mask[0]
     if input_requires_grad:
-        grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
+        # Match ROCm allocation independently of the selected kernel. device_hint
+        # preserves the logical device while FakeTensor runs this on Meta tensors.
+        if (
+            torch.version.hip is not None
+            and device_hint(input) == "cuda"
+            and input.is_contiguous(memory_format=torch.channels_last)
+        ):
+            # Explicit strides also preserve empty channels-last tensors whose
+            # strides can contain zeros.
+            grad_input = input.new_empty_strided(input.shape, input.stride())
+        else:
+            grad_input = torch.zeros_like(input, memory_format=torch.contiguous_format)
     else:
         grad_input = None
     grad_grid = torch.empty_like(grid, memory_format=torch.contiguous_format)

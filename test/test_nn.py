@@ -11542,6 +11542,208 @@ class TestNNDeviceType(NNTestCase):
                 self.assertTrue(bool(d_input.isfinite().all()))
                 self.assertEqual(d_input, reference[0])
 
+    @onlyCUDA
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific backward layout")
+    @parametrize_test("shape,layout,out_hw", [
+        ((1, 8, 8, 8), "channels_last", (1, 64)),
+        ((1, 2, 8, 8), "channels_last", (1, 64)),
+        ((1, 64, 8, 8), "contiguous", (1, 64)),
+        ((1, 1, 8, 8), "channels_last", (1, 4)),
+        ((1, 1, 8, 8), "contiguous", (1, 4)),
+        ((2, 8, 1, 8), "channels_last", (1, 4)),
+        ((2, 8, 8, 1), "channels_last", (1, 4)),
+        ((2, 8, 1, 1), "channels_last", (1, 4)),
+        ((0, 8, 8, 8), "channels_last", (1, 4)),
+        ((1, 0, 8, 8), "channels_last", (1, 4)),
+        ((1, 8, 8, 8), "channels_last", (0, 4)),
+        ((1, 8, 8, 8), "transposed", (1, 4)),
+        ((1, 8, 8, 16), "sliced", (1, 4)),
+    ])
+    @parametrize_test("grad_output_cl", [False, True])
+    @parametrize_test("input_requires_grad", [False, True])
+    def test_grid_sample_2d_backward_rocm_grad_input_memory_format(
+            self, device, shape, layout, out_hw, grad_output_cl, input_requires_grad):
+        # Eager and Fake strides depend only on input layout, including mixed
+        # layouts, generic fallbacks, singleton dimensions and empty tensors.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        fmt = torch.channels_last if layout == "channels_last" else torch.contiguous_format
+        inp = torch.empty(shape, device=device, memory_format=fmt).normal_()
+        if layout == "transposed":
+            inp = inp.transpose(2, 3)
+        elif layout == "sliced":
+            inp = inp[..., ::2]
+        out_fmt = torch.channels_last if grad_output_cl else torch.contiguous_format
+        grad_output = torch.empty(
+            (shape[0], shape[1], *out_hw), device=device, memory_format=out_fmt).normal_()
+        grid = torch.rand(shape[0], *out_hw, 2, device=device) * 2 - 1
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        args = (grad_output, inp, grid, 0, 0, False, [input_requires_grad, True])
+        eager = bw(*args)
+        with FakeTensorMode() as fake_mode:
+            fake_args = tuple(
+                fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t for t in args)
+            fake = bw(*fake_args)
+        if input_requires_grad:
+            grad_fmt = (torch.preserve_format if inp.is_contiguous(memory_format=torch.channels_last)
+                        else torch.contiguous_format)
+            expected = torch.empty_like(inp, memory_format=grad_fmt)
+            self.assertEqual(eager[0].stride(), expected.stride())
+        else:
+            self.assertIsNone(eager[0])
+            self.assertIsNone(fake[0])
+        for actual, traced in zip(eager, fake):
+            if actual is not None:
+                self.assertEqual(traced.stride(), actual.stride())
+                self.assertEqual(traced.shape, actual.shape)
+
+        # A ROCm build must still advertise contiguous gradients for CPU inputs.
+        cpu_args = tuple(t.cpu() if isinstance(t, torch.Tensor) else t for t in args)
+        with FakeTensorMode() as fake_mode:
+            fake_cpu_args = tuple(
+                fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t for t in cpu_args)
+            fake_cpu = bw(*fake_cpu_args)
+        if input_requires_grad:
+            expected_cpu = torch.empty_like(cpu_args[1], memory_format=torch.contiguous_format)
+            self.assertEqual(fake_cpu[0].stride(), expected_cpu.stride())
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific backward path")
+    @largeTensorTest("12GB", device="cuda")
+    def test_grid_sample_2d_backward_rocm_launch_fallback_memory_format(self, device):
+        # The channel-parallel kernel needs one block per output point, which HIP
+        # bounds by gridDim.x * blockDim.x <= UINT32_MAX. Past that bound the
+        # kernel is ineligible and dispatch falls back to the generic kernel.
+        # Output layout must still follow the input. Out-of-bounds nearest
+        # samples avoid atomic contention while exercising the large launch.
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        channels = 5                         # lanes rounds up to 8
+        w_out = (2**32 - 1) // 8 + 2         # just past the global work-size bound
+        inp = torch.randn(1, channels, 8, 8, device=device, dtype=torch.half
+                          ).contiguous(memory_format=torch.channels_last)
+        grad_output = torch.empty((1, channels, 1, w_out), device=device,
+                                  dtype=torch.half, memory_format=torch.channels_last).fill_(1)
+        grid = torch.full((1, 1, w_out, 2), 2, device=device, dtype=torch.half)
+        args = (grad_output, inp, grid, 1, 0, False, [True, True])
+        grad_input = bw(*args)[0]
+        self.assertEqual(grad_input.stride(), inp.stride())
+        self.assertEqual(grad_input, torch.zeros_like(inp))
+
+        # Meta has no launch-extent dependency.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        with FakeTensorMode() as fake_mode:
+            fake_args = tuple(
+                fake_mode.from_tensor(t) if isinstance(t, torch.Tensor) else t
+                for t in args)
+            fake_grad_input = bw(*fake_args)[0]
+        self.assertEqual(fake_grad_input.stride(), grad_input.stride(),
+                         msg="meta must preserve layout across launch fallback")
+
+    @onlyCUDA
+    @largeTensorTest("20GB", device="cuda")
+    @parametrize_test("mode", [0, 1, 2])
+    @parametrize_test("input_requires_grad", [False, True])
+    def test_grid_sample_2d_backward_large_spatial_offset(self, device, mode, input_requires_grad):
+        # C=1 forces generic dispatch. The last row of this channels-last input
+        # starts at 2**31 elements, exercising both bicubic reads and ROCm writes.
+        height, width = 32769, 65536
+        inp = torch.empty((1, 1, height, width), device=device, dtype=torch.float32,
+                          memory_format=torch.channels_last).zero_()
+        self.assertEqual((height - 1) * inp.stride(2), 2**31)
+        reference = torch.zeros(1, 1, 5, 5, dtype=torch.float32)
+        reference[0, :, 0, 0] = torch.tensor([1.])
+        reference[0, :, -1, 0] = torch.tensor([3.])
+        # Make the far-row bicubic grid gradient nonzero, so dropped or
+        # incorrectly addressed input reads cannot accidentally pass.
+        reference[0, :, -1, 1] = torch.tensor([5.])
+        inp[0, :, 0, 0] = reference[0, :, 0, 0].to(device)
+        inp[0, :, -1, 0] = reference[0, :, -1, 0].to(device)
+        inp[0, :, -1, 1] = reference[0, :, -1, 1].to(device)
+        grad_output = torch.tensor([[[[1., 2.]]]], dtype=torch.float32)
+        grid = torch.tensor([[[[-1., -1.], [-1., 1.]]]], dtype=torch.float32)
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        tail = (mode, 0, True, [input_requires_grad, True])
+        expected = bw(grad_output, reference, grid, *tail)
+        if mode == 2:
+            self.assertNotEqual(expected[1][0, 0, 1, 0].item(), 0)
+        actual = bw(grad_output.to(device), inp, grid.to(device), *tail)
+        if input_requires_grad:
+            self.assertEqual(actual[0][0, :, 0, 0].cpu(), expected[0][0, :, 0, 0])
+            self.assertEqual(actual[0][0, :, -1, 0].cpu(), expected[0][0, :, -1, 0])
+            self.assertEqual(actual[0].sum().cpu(), expected[0].sum())
+        else:
+            self.assertIsNone(actual[0])
+        expected[1][..., 0] *= (width - 1) / 4
+        expected[1][..., 1] *= (height - 1) / 4
+        self.assertEqual(actual[1].cpu(), expected[1])
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific backward path")
+    @dtypes(torch.float, torch.double)
+    def test_grid_sample_2d_backward_rocm_reference_values(self, device, dtype):
+        # No OpInfo sample reaches the ROCm channel-parallel kernel: the
+        # grid_sampler_2d samples use three contiguous channels, below the
+        # ordinary-layout C >= 32 threshold. Check
+        # both gradients against CPU on eligible shapes and generic fallbacks.
+        # Nearest mode is covered separately -- its coordinate rounding makes
+        # exact ties device-dependent, which is a property of the mode rather
+        # than of this kernel.
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        tol = ({"atol": 2e-4, "rtol": 2e-4} if dtype == torch.float
+               else {"atol": 1e-9, "rtol": 1e-7})
+
+        # Cover both thresholds, the one-channel fallback and mixed layouts.
+        for channels, channels_last, grad_output_cl in (
+                (8, True, True), (32, False, False), (1, True, True), (2, True, True),
+                (4, True, False), (8, True, False), (16, True, False)):
+            gen = torch.Generator().manual_seed(1234 + channels)
+            inp = torch.randn(2, channels, 7, 5, generator=gen).to(dtype)
+            grad_output = torch.randn(2, channels, 3, 4, generator=gen).to(dtype)
+            # Slightly outside [-1, 1] so every padding mode is exercised, and
+            # off the half-integer grid so no sample sits on a boundary tie.
+            grid = (torch.rand(2, 3, 4, 2, generator=gen) * 2.6 - 1.3).to(dtype)
+            if channels_last:
+                inp = inp.contiguous(memory_format=torch.channels_last)
+            if grad_output_cl:
+                grad_output = grad_output.contiguous(
+                    memory_format=torch.channels_last)
+            cpu_args = (grad_output, inp, grid)
+            dev_args = tuple(t.to(device) for t in cpu_args)
+
+            for mode in (0, 2):                    # bilinear, bicubic
+                for padding_mode in (0, 1, 2):     # zeros, border, reflection
+                    for align_corners in (False, True):
+                        for mask in ([True, True], [False, True]):
+                            tail = (mode, padding_mode, align_corners, mask)
+                            expected = bw(*cpu_args, *tail)
+                            actual = bw(*dev_args, *tail)
+                            msg = (f"C={channels} channels_last={channels_last} "
+                                   f"mode={mode} padding_mode={padding_mode} "
+                                   f"align_corners={align_corners} mask={mask}")
+                            if mask[0]:
+                                self.assertEqual(actual[0].cpu(), expected[0],
+                                                 msg=msg, **tol)
+                            self.assertEqual(actual[1].cpu(), expected[1],
+                                             msg=msg, **tol)
+
+    @onlyCUDA
+    @unittest.skipIf(not TEST_WITH_ROCM, "ROCm-specific backward path")
+    @dtypes(torch.half, torch.float)
+    def test_grid_sample_2d_backward_rocm_nearest_zero_grid_grad(self, device, dtype):
+        # Nearest mode has no grid gradient, so the backward must store an exact
+        # zero. Computing it as `coordinate_scale * 0` yields NaN whenever the
+        # scale overflows the dtype -- half with inp_W == 65536 makes it inf.
+        bw = torch.ops.aten.grid_sampler_2d_backward.default
+        for width in (4096, 65536):
+            inp = torch.randn(1, 4, 1, width, device=device, dtype=dtype
+                              ).contiguous(memory_format=torch.channels_last)
+            grad_output = torch.randn(1, 4, 1, 1, device=device, dtype=dtype
+                                      ).contiguous(memory_format=torch.channels_last)
+            grid = torch.zeros(1, 1, 1, 2, device=device, dtype=dtype)
+            grad_grid = bw(grad_output, inp, grid, 1, 0, False, [True, True])[1]
+            self.assertEqual(grad_grid, torch.zeros_like(grad_grid),
+                             msg=f"nearest grid gradient must be zero (W={width})")
+
     @onlyNativeDeviceTypes
     @dtypes(torch.float, torch.double)
     @dtypesIfMPS(torch.float, torch.half, torch.bfloat16)
