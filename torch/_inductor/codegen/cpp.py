@@ -4918,7 +4918,12 @@ class CppKernelProxy(CppKernel):
             DataTypePropagation.propagate_loopbody(body)
         self.codegen_functions(loop_bodies, var_sizes_list)
 
-    def codegen_nodes(self, nodes: list[SchedulerNode]):
+    def codegen_nodes(
+        self,
+        nodes: list[SchedulerNode],
+        *,
+        run_scheduler_bookkeeping: bool = True,
+    ):
         # Legalize BF16 node by adding to_dtype explicitly
         self.legalize_lowp_fp_dtype(nodes)
         self.data_type_propagation(nodes)
@@ -4926,8 +4931,9 @@ class CppKernelProxy(CppKernel):
             raise AssertionError("expected len(nodes) >= 1")
 
         def fn(node, *index_vars):
-            node.decide_inplace_update()
-            node.mark_run()
+            if run_scheduler_bookkeeping:
+                node.decide_inplace_update()
+                node.mark_run()
             if isinstance(V.kernel, NullKernelHandler):
                 return node._body(*index_vars)
             else:
@@ -5106,6 +5112,8 @@ class ReasonFusedNodes(Enum):
 
 
 class CppScheduling(BaseScheduling):
+    """Schedule and generate C++ kernels for CPU scheduler nodes."""
+
     # Subclass CppKernelProxy to customize codegen without copying codegen_node().
     # Use kernel_proxy_cls to inject custom proxies in CppScheduling subclasses.
     # Avoid duplicating codegen_node() just to swap in a custom kernel proxy class.
@@ -5483,7 +5491,9 @@ class CppScheduling(BaseScheduling):
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
         ) or self.can_fuse_vertical_outer_loop(node1, node2)
 
-    def try_loop_split(self, nodes: list[SchedulerNode]):
+    def try_loop_split(
+        self, nodes: list[SchedulerNode]
+    ) -> list[list[tuple[Any, ...]]] | None:
         """
         Apply loop split optimization.
         When one of the indexing_exprs contains a division, we eliminate the division by splitting the loop
@@ -5509,7 +5519,7 @@ class CppScheduling(BaseScheduling):
             )
             for node in nodes
         ):
-            return nodes
+            return None
 
         split_var = None
         split_number = None
@@ -5540,7 +5550,7 @@ class CppScheduling(BaseScheduling):
                         div_expr_ = div_expr
                         num_div += 1
                     if num_div > 1:
-                        return nodes
+                        return None
                     if (
                         isinstance(div_expr.args[1], sympy.core.numbers.Integer)
                         and div_expr.args[0] in original_body.iter_vars
@@ -5559,7 +5569,7 @@ class CppScheduling(BaseScheduling):
 
         # Only one node contains a division, and the split dimension is contiguous in all other indexing_exprs.
         if not match_div:
-            return nodes
+            return None
 
         # Check if all nodes have split_var in their iter_vars and have compatible sizes
         # (same number of index dimensions). If not, bail out to avoid incompatible
@@ -5571,9 +5581,27 @@ class CppScheduling(BaseScheduling):
 
         for node, ((index_size, _), original_body, _) in node_bodies:
             if split_var not in original_body.iter_vars:
-                return nodes
+                return None
             if len(index_size) != matched_num_dims:
-                return nodes
+                return None
+
+        if split_number is None:
+            raise AssertionError("expected split_number is not None")
+
+        if any(
+            V.graph.sizevars.statically_known_lt(
+                index_size[original_body.iter_vars.index(split_var)], split_number
+            )
+            for _, ((index_size, _), original_body, _) in node_bodies
+        ):
+            return None
+
+        needs_tail = not all(
+            V.graph.sizevars.statically_known_multiple_of(
+                index_size[original_body.iter_vars.index(split_var)], split_number
+            )
+            for _, ((index_size, _), original_body, _) in node_bodies
+        )
 
         def loop_split(sizes, body, vars):
             index_size, reduce_size = sizes
@@ -5597,6 +5625,28 @@ class CppScheduling(BaseScheduling):
                 (new_index_vars, reduce_vars),
             )
 
+        def tail_loop(sizes, body, vars):
+            index_size, reduce_size = sizes
+            index_vars, reduce_vars = vars
+            split_idx = index_vars.index(split_var)
+            tail_size = index_size[split_idx] % split_number
+            tail_start = index_size[split_idx] - tail_size
+            new_index_size = index_size.copy()
+            new_index_size[split_idx] = tail_size
+            (new_index_vars, _), var_ranges = dependencies.index_vars_no_squeeze(
+                new_index_size, reduce_size, prefix="y"
+            )
+            iter_vars = new_index_vars.copy()
+            iter_vars[split_idx] += tail_start
+            body = ir.LoopBody(
+                body, [iter_vars, reduce_vars], var_ranges, new_index_vars, reduce_vars
+            )
+            return (
+                (new_index_size, reduce_size),
+                body,
+                (new_index_vars, reduce_vars),
+            )
+
         extra_indexing_ranges = None
         extra_indexing_exprs = OrderedSet[Any]()
         for _, sizes_body in node_bodies:
@@ -5604,12 +5654,7 @@ class CppScheduling(BaseScheduling):
             if extra_indexing_ranges is None:
                 extra_indexing_ranges = split_body.var_ranges
             if extra_indexing_ranges != split_body.var_ranges:
-                raise AssertionError(
-                    (
-                        extra_indexing_ranges,
-                        split_body.var_ranges,
-                    )
-                )
+                return None
             extra_indexing_exprs.update(split_body.indexing_exprs.values())
 
         if extra_indexing_ranges is None:
@@ -5619,22 +5664,59 @@ class CppScheduling(BaseScheduling):
             list(extra_indexing_exprs),
         )
 
-        snapshots = [(node, node.snapshot_loop_state()) for node in nodes]
-        for node in nodes:
-            node.recompute_size_and_body(
-                extra_indexing_constraints=extra_indexing_constraints,
-                recompute_sizes_body_func=loop_split,
+        original_states = [node.snapshot_loop_state() for node in nodes]
+        tail_indexing_constraints = None
+        if needs_tail:
+            tail_indexing_ranges = None
+            tail_indexing_exprs = OrderedSet[Any]()
+            for _, sizes_body in node_bodies:
+                _, tail_body, _ = tail_loop(*sizes_body)
+                if tail_indexing_ranges is None:
+                    tail_indexing_ranges = tail_body.var_ranges
+                if tail_indexing_ranges != tail_body.var_ranges:
+                    return None
+                tail_indexing_exprs.update(tail_body.indexing_exprs.values())
+
+            if tail_indexing_ranges is None:
+                raise AssertionError("tail_indexing_ranges is None")
+            tail_indexing_constraints = ir.ExtraIndexingConstraints(
+                tail_indexing_ranges,
+                list(tail_indexing_exprs),
             )
 
-        # Keep the post-split leaves compatible with CppKernelProxy.codegen_functions.
-        # If simplification still picks different loop factorizations, skip this
-        # optional optimization and codegen the original fused pointwise group.
-        group = nodes[0].group[1]
-        if any(node.group[1] != group for node in nodes[1:]):
-            for node, state in reversed(snapshots):
+        def restore(states: list[tuple[Any, ...]]) -> None:
+            for node, state in zip(nodes, states, strict=True):
                 node.restore_loop_state(state)
 
-        return nodes
+        def prepare_region(
+            indexing_constraints: ir.ExtraIndexingConstraints,
+            transform: Callable[..., Any],
+        ) -> list[tuple[Any, ...]] | None:
+            for node in nodes:
+                node.recompute_size_and_body(
+                    extra_indexing_constraints=indexing_constraints,
+                    recompute_sizes_body_func=transform,
+                )
+            group = nodes[0].group[1]
+            if any(node.group[1] != group for node in nodes[1:]):
+                return None
+            return [node.snapshot_loop_state() for node in nodes]
+
+        try:
+            main_states = prepare_region(extra_indexing_constraints, loop_split)
+            if main_states is None:
+                return None
+
+            regions = [main_states]
+            if tail_indexing_constraints is not None:
+                restore(original_states)
+                tail_states = prepare_region(tail_indexing_constraints, tail_loop)
+                if tail_states is None:
+                    return None
+                regions.append(tail_states)
+            return regions
+        finally:
+            restore(original_states)
 
     def codegen_outer_loop_node(
         self,
@@ -5898,10 +5980,32 @@ class CppScheduling(BaseScheduling):
             self.codegen_outer_loop_node(node)
         else:
             nodes: list[SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
-            nodes = self.try_loop_split(nodes)
-            cpp_kernel_proxy = self.kernel_proxy_cls(kernel_group)
-            cpp_kernel_proxy.codegen_nodes(nodes)
-            kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
+            regions = self.try_loop_split(nodes)
+            if regions is None:
+                cpp_kernel_proxy = self.kernel_proxy_cls(kernel_group)
+                cpp_kernel_proxy.codegen_nodes(nodes)
+                kernel_group.finalize_kernel(cpp_kernel_proxy, nodes)
+            else:
+                original_states = [node.snapshot_loop_state() for node in nodes]
+                emitted = False
+                try:
+                    for index, states in enumerate(regions):
+                        for scheduler_node, state in zip(nodes, states, strict=True):
+                            scheduler_node.restore_loop_state(state)
+                        cpp_kernel_proxy = self.kernel_proxy_cls(kernel_group)
+                        cpp_kernel_proxy.codegen_nodes(
+                            nodes, run_scheduler_bookkeeping=index == 0
+                        )
+                        kernel_group.finalize_kernel(
+                            cpp_kernel_proxy, nodes if index == 0 else []
+                        )
+                    emitted = True
+                finally:
+                    if not emitted:
+                        for scheduler_node, state in zip(
+                            nodes, original_states, strict=True
+                        ):
+                            scheduler_node.restore_loop_state(state)
 
         args_num = self._get_scheduled_num_args()
         if args_num > CppScheduling.MAX_FUSED_KERNEL_ARGS_NUM:

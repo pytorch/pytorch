@@ -1288,6 +1288,69 @@ class CPUReproTests(TestCase):
                 (v,),
             )
 
+    @parametrize("target", (50, 45, 7))
+    def test_negative_pad_loop_split_tail(self, target):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 50, (2, 2))
+                self.bn = nn.BatchNorm2d(50)
+                self.fc = nn.Linear(target, 10)
+
+            def forward(self, x):
+                x = self.bn(self.conv(x))
+                x = x.view(x.shape[0], -1)
+                x = F.pad(x, (0, target - x.shape[-1]))
+                return self.fc(x), torch.sin(x)
+
+        torch.manual_seed(420)
+        model = M().eval()
+        x = torch.randn(3, 1, 4, 4)
+        with torch.no_grad():
+            actual, code = run_and_get_cpp_code(torch.compile(model), x)
+            self.assertEqual(actual, model(x))
+
+        if target == 50:
+            FileCheck().check("float* out_ptr1").check("9L*x1").check("45L + x1").run(
+                code
+            )
+        elif target == 45:
+            FileCheck().check("9L*x1").check_not("45L + x1").run(code)
+        else:
+            FileCheck().check("x1<static_cast<int64_t>(7L)").check_not("9L*x1").run(
+                code
+            )
+
+    def test_negative_pad_loop_split_dynamic_extent(self):
+        class M(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(1, 50, (2, 2))
+                self.bn = nn.BatchNorm2d(50)
+
+            def forward(self, x, target):
+                x = self.bn(self.conv(x))
+                x = x.view(x.shape[0], -1)
+                return F.pad(x, (0, target.shape[-1] - x.shape[-1]))
+
+        torch.manual_seed(420)
+        model = M().eval()
+        x = torch.randn(3, 1, 4, 4)
+        dynamic_target = torch.randn(3, 8)
+        torch._dynamo.mark_dynamic(dynamic_target, 1, min=2, max=100)
+        counter = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(model, backend=counter, fullgraph=True)
+
+        with torch.no_grad():
+            for target in (
+                dynamic_target,
+                torch.randn(3, 9),
+                torch.randn(3, 10),
+                torch.randn(3, 21),
+            ):
+                self.assertEqual(compiled(x, target), model(x, target))
+        self.assertEqual(counter.frame_count, 1)
+
     def test_masked_fill_with_inf_or_nan_value(self):
         def fn(value, mask):
             y1 = torch.masked_fill(value, mask, float("inf"))
