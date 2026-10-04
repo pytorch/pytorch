@@ -9,6 +9,7 @@ import unittest
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -41,6 +42,7 @@ from torch.distributed.fsdp._fully_shard._fsdp_common import (
     ShardPlacementResult,
     TrainingState,
 )
+from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
 from torch.distributed.tensor import DTensor, init_device_mesh, Shard
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import (
@@ -3515,7 +3517,7 @@ class TestFullyShardCudaGraph(FSDPTest):
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     @unittest.skipIf(device_type.type != "cuda", "CUDA graph test requires CUDA")
-    def test_gradient_accumulation_cudagraph_fake_pg(self):
+    def test_pending_backward_prefetch_cleanup_cudagraph(self):
         torch.cuda.set_device(self.rank)
         device = torch.device("cuda", self.rank)
         fake_pg = dist.new_group(backend="fake")
@@ -3544,9 +3546,21 @@ class TestFullyShardCudaGraph(FSDPTest):
             run_accumulation()
             model.zero_grad(set_to_none=True)
 
+        pending_all_gather_cleanups = 0
+        orig_finalize_backward = FSDPParamGroup.finalize_backward
+
+        def finalize_backward(param_group: FSDPParamGroup) -> None:
+            nonlocal pending_all_gather_cleanups
+            result = param_group._all_gather_result
+            if result is not None and result.all_gather_event is not None:
+                pending_all_gather_cleanups += 1
+            orig_finalize_backward(param_group)
+
         graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph, stream=stream):
-            run_accumulation()
+        with mock.patch.object(FSDPParamGroup, "finalize_backward", finalize_backward):
+            with torch.cuda.graph(graph, stream=stream):
+                run_accumulation()
+        self.assertGreater(pending_all_gather_cleanups, 0)
         graph.replay()
         torch.cuda.synchronize()
 
