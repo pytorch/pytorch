@@ -96,8 +96,7 @@ class Enumerator {
   using iterator_concept = std::input_iterator_tag;
   using iterator_category = std::input_iterator_tag;
   using value_type = Proxy;
-  using difference_type =
-      typename std::iterator_traits<Iterator>::difference_type;
+  using difference_type = std::ptrdiff_t;
 
   Enumerator() = default;
 
