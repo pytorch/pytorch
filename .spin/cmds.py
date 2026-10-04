@@ -224,6 +224,7 @@ SLOW_LINTERS = {
     "TEST_DEVICE_BIAS",
     "TEST_HAS_MAIN",
     "SCOPED_LIBRARY",
+    "TEST_LINTER",
 }
 
 
