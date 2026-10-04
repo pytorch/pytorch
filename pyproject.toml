@@ -137,7 +137,6 @@ include = [
 ]
 exclude = [
     "**/.github/**",
-    ".agents/**",
     ".ci/**",
     ".claude/**",
     ".spin/**",
