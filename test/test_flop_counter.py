@@ -22,6 +22,7 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     HardwareClassification,
+    instantiate_parametrized_tests,
     parametrize,
     run_tests,
     subtest,
@@ -359,6 +360,50 @@ class TestFlopCounter(TestCase):
             int(get_total_flops(mode)), expected_forward + expected_backward
         )
 
+    @parametrize(
+        "batch_size", [subtest(None, name="unbatched"), subtest(2, name="batched")]
+    )
+    def test_sdpa_overrideable_flops(self, batch_size):
+        """The overrideable fused attention op takes (H, S, D) or (B, H, S, D)."""
+        H_Q, H_KV, S, D = 32, 8, 128, 64
+        batch = () if batch_size is None else (batch_size,)
+        q = torch.randn(*batch, H_Q, S, D, device="meta", dtype=torch.float16)
+        k = torch.randn(*batch, H_KV, S, D, device="meta", dtype=torch.float16)
+        v = torch.randn(*batch, H_KV, S, D, device="meta", dtype=torch.float16)
+        b = 1 if batch_size is None else batch_size
+        q_shape, kv_shape = (b, H_Q, S, D), (b, H_KV, S, D)
+
+        with FlopCounterMode() as mode:
+            fwd = torch.ops.aten._scaled_dot_product_fused_attention_overrideable(
+                q, k, v, None, 0.0, True, False
+            )
+        out, lse, cu_q, cu_k, max_q, max_k, seed, offset, _ = fwd
+        expected = sdpa_flop_count(q_shape, kv_shape, kv_shape)
+        self.assertEqual(int(get_total_flops(mode)), expected)
+
+        bias = torch.empty(0, device="meta", dtype=torch.float16)
+        with FlopCounterMode() as mode:
+            torch.ops.aten._scaled_dot_product_fused_attention_overrideable_backward(
+                torch.empty_like(out),
+                q,
+                k,
+                v,
+                bias,
+                [True, True, True, False],
+                out,
+                lse,
+                cu_q,
+                cu_k,
+                max_q,
+                max_k,
+                0.0,
+                True,
+                seed,
+                offset,
+            )
+        expected = sdpa_backward_flop_count(q_shape, q_shape, kv_shape, kv_shape)
+        self.assertEqual(int(get_total_flops(mode)), expected)
+
     def test_flash_attention_forward_flop_layout(self):
         B, S, H, D = 2, 128, 8, 64
         q = torch.randn(B, S, H, D, device="meta", dtype=torch.float16)
@@ -563,6 +608,9 @@ class TestFlopCounter(TestCase):
             torch.ops.aten.convolution
         ]
         self.assertEqual(layer1_conv_flops_standard, layer1_conv_flops_inference)
+
+
+instantiate_parametrized_tests(TestFlopCounter)
 
 
 @unittest.skipIf(
