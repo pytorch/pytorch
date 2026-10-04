@@ -10,6 +10,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <torch/csrc/distributed/c10d/hooks/FlightRecorderHook.hpp>
+#include <torch/csrc/distributed/c10d/hooks/HealthCheckHook.hpp>
 #include <torch/csrc/distributed/c10d/hooks/NanCheckHook.hpp>
 #include <string_view>
 #include <utility>
@@ -655,7 +656,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                  bool skip_all_reduce_unused_params,
                  bool use_python_reducer,
                  std::vector<int64_t> bucket_bytes_cap_list,
-                 bool batched_grad_copy) {
+                 bool batched_grad_copy,
+                 bool lazy_bucket_allocation) {
                 // gil_scoped_release is not safe as a call_guard in init.
                 // https://github.com/pybind/pybind11/issues/5473
                 py::gil_scoped_release nogil{};
@@ -673,7 +675,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
                     skip_all_reduce_unused_params,
                     use_python_reducer,
                     std::move(bucket_bytes_cap_list),
-                    batched_grad_copy);
+                    batched_grad_copy,
+                    lazy_bucket_allocation);
               }),
           py::arg("params"),
           py::arg("bucket_indices"),
@@ -689,7 +692,8 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::arg("skip_all_reduce_unused_params") = false,
           py::arg("use_python_reducer") = false,
           py::arg("bucket_bytes_cap_list") = std::vector<int64_t>(),
-          py::arg("batched_grad_copy") = false)
+          py::arg("batched_grad_copy") = false,
+          py::arg("lazy_bucket_allocation") = false)
       .def(
           "prepare_for_forward",
           &::c10d::Reducer::prepare_for_forward,
@@ -820,6 +824,19 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
              c10::intrusive_ptr<::c10d::ProcessGroup> new_process_group) {
             return reducer.update_process_group(std::move(new_process_group));
           },
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_set_manual_finalization_required",
+          &::c10d::Reducer::set_manual_finalization_required,
+          py::arg("required"),
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_should_finalize_after_backward",
+          &::c10d::Reducer::should_finalize_after_backward,
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_finalize_backward_manual",
+          &::c10d::Reducer::finalize_backward_manual,
           py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::Logger>(module, "Logger")
@@ -3917,11 +3934,12 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::arg("size"),
               py::arg("timeout") = ::c10d::kProcessGroupNCCLDefaultTimeout,
               R"(Create a new ProcessGroupNCCL instance.)")
-          .def(
-              "_comm_ptr",
+          .def("_comm_ptr", &::c10d::ProcessGroupNCCL::getCommPtr)
+          .def_property_readonly(
+              "comm_ptr",
               &::c10d::ProcessGroupNCCL::getCommPtr,
               R"(
-            Get the communicator of the current device.
+            The communicator of the current device, as an opaque handle.
 
             .. warning ::
                 Unsafe to use. The collectives launched into the communicator
@@ -4334,6 +4352,22 @@ Returns:
           .def(
               "perform_nocolor_split",
               &::c10d::nccl2::ProcessGroupNCCL::performNocolorSplit)
+          .def("_comm_ptr", &::c10d::nccl2::ProcessGroupNCCL::getCommPtr)
+          .def_property_readonly(
+              "comm_ptr",
+              &::c10d::nccl2::ProcessGroupNCCL::getCommPtr,
+              R"(
+            This process group's ``ncclComm_t``, as an opaque handle.
+
+            The process group holds a single communicator, created in its
+            constructor, so the value does not depend on the current device.
+
+            .. warning ::
+                The communicator is owned by the process group. Do not modify
+                or free it. Collectives launched into it from outside the
+                process group are not monitored by the watchdog, so check the
+                communicator's readiness before launching any.
+            )")
           .def_property_readonly(
               "options",
               &::c10d::nccl2::ProcessGroupNCCL::getBackendOptions,
@@ -4392,6 +4426,17 @@ Returns:
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self, at::Device device) {
             self.getPrimary()->performNocolorSplit(device);
           })
+      .def(
+          "_comm_ptr",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
+            return self.getPrimary()->getCommPtr();
+          })
+      .def_property_readonly(
+          "comm_ptr",
+          [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
+            return self.getPrimary()->getCommPtr();
+          },
+          R"(The primary communicator's ``ncclComm_t``, as an opaque handle.)")
       .def_property_readonly(
           "options",
           [](::c10d::nccl2::ProcessGroupNCCLLazy& self) {
@@ -5054,6 +5099,15 @@ a RuntimeError; on CUDA it triggers a device-side assert. The process group
 owns the hook, so the returned handle only has to be kept if the check should
 be removed again via remove().)")
       .def("remove", &::c10d::NanCheckHook::remove);
+
+  py::class_<::c10d::HealthCheckHook>(module, "HealthCheckHook")
+      .def_static(
+          "attach",
+          &::c10d::HealthCheckHook::attach,
+          py::arg("pg"),
+          R"(
+Attach health reporting to every backend in a process group that supports
+abort hooks. The backends own the registered hooks for their lifetimes.)");
 
   module.def(
       "_dump_fr_trace_json",

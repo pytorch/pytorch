@@ -32,6 +32,7 @@ from ...ir import (
 )
 from ...kernel.gemm_epilogue import (
     GEMM_ACCUMULATOR_ARG_NAME,
+    GEMM_REDUCTION_FRAGMENT_WIDTH,
     GemmEpiloguePlan,
     GemmReductionGeometry,
 )
@@ -133,6 +134,16 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         )
 
     @staticmethod
+    def _has_output_scale(ir_node: Any) -> bool:
+        if isinstance(ir_node, NVUniversalGemmBuffer):
+            return ir_node.output_scale_node is not None
+        return isinstance(ir_node, MultiTemplateBuffer) and any(
+            isinstance(choice, NVUniversalGemmCaller)
+            and choice.output_scale_node is not None
+            for choice in ir_node._choices
+        )
+
+    @staticmethod
     def is_nv_universal_gemm_template(node: BaseSchedulerNode) -> bool:
         """Check if a node is an NVGEMM template SchedulerNode."""
         if not isinstance(node, SchedulerNode):
@@ -140,10 +151,75 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         return NVUniversalGemmScheduling._is_nvgemm_ir_buffer(node.node)
 
     @staticmethod
+    def _supports_reduction_layout(
+        choice: NVUniversalGemmCaller,
+        min_tile_shape: tuple[int, int],
+    ) -> bool:
+        required_tile = min_tile_shape[::-1] if choice.swap_ab else min_tile_shape
+        design = choice.kernel.metadata.design
+        if choice.variant not in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM):
+            return True
+        tile_m, tile_n = design.tile_shape[:2]
+        for tile, group in zip((tile_m, tile_n), required_tile):
+            if group and tile % group != 0:
+                log.debug(
+                    "Skipping %s: reduction group %s does not divide tile %s",
+                    choice.name,
+                    group,
+                    tile,
+                )
+                return False
+        if choice.variant == GemmVariant.GEMM:
+            use_2cta = design.use_2cta_mma
+        else:
+            use_2cta = design.tile_shape[0] == 256
+        if not use_2cta:
+            return True
+
+        cluster_m, cluster_n = design.cluster_shape[:2]
+        if required_tile[0] > tile_m // 2:
+            log.debug(
+                "Skipping %s: reduction group %s exceeds its per-CTA M tile %s",
+                choice.name,
+                required_tile[0],
+                tile_m // 2,
+            )
+            return False
+        n_group = required_tile[1]
+        if n_group == 0:
+            return True
+        if tile_m == 128 and n_group > GEMM_REDUCTION_FRAGMENT_WIDTH // 2:
+            log.debug(
+                "Skipping %s: reduction group %s crosses N-warp ownership",
+                choice.name,
+                n_group,
+            )
+            return False
+        if n_group <= GEMM_REDUCTION_FRAGMENT_WIDTH:
+            supported = n_group < tile_n
+            if not supported:
+                log.debug(
+                    "Skipping %s: reduction group %s does not fit one N-warp fragment",
+                    choice.name,
+                    n_group,
+                )
+            return supported
+
+        # The wide-M layout assigns each row's N tile to one warp partition.
+        supported = tile_m == 256 and (cluster_m, cluster_n) == (2, 1)
+        if not supported:
+            log.debug(
+                "Skipping %s: reduction group %s crosses N-warp ownership",
+                choice.name,
+                n_group,
+            )
+        return supported
+
+    @staticmethod
     def _best_nvgemm_choice(
         ir_node: MultiTemplateBuffer,
         require_epilogue_fusion: bool = False,
-        min_tile_n: int = 0,
+        min_tile_shape: tuple[int, int] = (0, 0),
     ) -> NVUniversalGemmCaller:
         """Find the best NVUniversalGemmCaller from an MTB's choice timings."""
         choice_timings = ir_node.choice_timings()
@@ -154,7 +230,13 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 continue
             if require_epilogue_fusion and not choice.supports_epilogue_fusion:
                 continue
-            if choice.kernel.metadata.design.tile_shape[1] < min_tile_n:
+            if not NVUniversalGemmScheduling._supports_reduction_layout(
+                choice, min_tile_shape
+            ):
+                continue
+            required_tile = min_tile_shape[::-1] if choice.swap_ab else min_tile_shape
+            tile_shape = choice.kernel.metadata.design.tile_shape
+            if any(tile_shape[axis] < required_tile[axis] for axis in (0, 1)):
                 continue
             timing = choice_timings.get(choice, float("inf"))
             if best is None or timing < best_time:
@@ -169,7 +251,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
     def get_nv_gemm_buffer_from_node(
         node: BaseSchedulerNode,
         require_epilogue_fusion: bool = False,
-        min_tile_n: int = 0,
+        min_tile_shape: tuple[int, int] = (0, 0),
     ) -> NVUniversalGemmBuffer:
         """Extract NVUniversalGemmBuffer from node (direct or via MultiTemplateBuffer)."""
         if not isinstance(node, SchedulerNode):
@@ -181,21 +263,30 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         elif isinstance(ir_node, MultiTemplateBuffer):
             # Honor an explicit swap/finalize -- the fusion benchmark loop swaps
             # in each EFC choice one at a time and must not re-select from timings.
+            selected = ir_node._render_caller
+            required_tile = (
+                min_tile_shape[::-1]
+                if isinstance(selected, NVUniversalGemmCaller) and selected.swap_ab
+                else min_tile_shape
+            )
             if (
-                isinstance(ir_node._render_caller, NVUniversalGemmCaller)
-                and (
-                    not require_epilogue_fusion
-                    or ir_node._render_caller.supports_epilogue_fusion
+                isinstance(selected, NVUniversalGemmCaller)
+                and (not require_epilogue_fusion or selected.supports_epilogue_fusion)
+                and NVUniversalGemmScheduling._supports_reduction_layout(
+                    selected, min_tile_shape
                 )
-                and ir_node._render_caller.kernel.metadata.design.tile_shape[1]
-                >= min_tile_n
+                and all(
+                    selected.kernel.metadata.design.tile_shape[axis]
+                    >= required_tile[axis]
+                    for axis in (0, 1)
+                )
             ):
-                selected_choice = ir_node._render_caller
+                selected_choice = selected
             elif require_epilogue_fusion:
                 selected_choice = NVUniversalGemmScheduling._best_nvgemm_choice(
                     ir_node,
                     require_epilogue_fusion=True,
-                    min_tile_n=min_tile_n,
+                    min_tile_shape=min_tile_shape,
                 )
             else:
                 min_choice, _ = ir_node.get_min_choice()
@@ -219,6 +310,38 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         if not isinstance(node, FusedSchedulerNode):
             return False
         return NVUniversalGemmScheduling._is_nvgemm_ir_buffer(node.get_template_node())
+
+    @staticmethod
+    def is_pdl_enabled_template(node: BaseSchedulerNode) -> bool:
+        """Return whether a scheduler node resolves to a PDL-enabled NVGEMM."""
+        if isinstance(node, SchedulerNode):
+            ir_node = node.node
+        elif isinstance(node, FusedSchedulerNode):
+            ir_node = node.get_template_node()
+        else:
+            return False
+
+        if isinstance(ir_node, NVUniversalGemmBuffer):
+            return bool(ir_node.kernel_metadata.get("use_pdl", False))
+        if not isinstance(ir_node, MultiTemplateBuffer):
+            return False
+
+        selected = ir_node._render_caller
+        if selected is None:
+            try:
+                selected, _ = ir_node.get_min_choice()
+            except (RuntimeError, ValueError):
+                return False
+        if not isinstance(selected, NVUniversalGemmCaller):
+            return False
+        kernel_impl = getattr(selected.kernel, "impl", None)
+        return bool(
+            getattr(
+                kernel_impl,
+                "use_pdl",
+                getattr(selected.kernel.metadata.design, "use_pdl", False),
+            )
+        )
 
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
@@ -297,6 +420,8 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         ir_node = gemm_template_node.node
         if not isinstance(ir_node, (NVUniversalGemmBuffer, MultiTemplateBuffer)):
             return NVGemmVerticalFusionDecision.DEFER
+        if self._has_output_scale(ir_node):
+            return NVGemmVerticalFusionDecision.DEFER
 
         if isinstance(ir_node, NVUniversalGemmBuffer):
             if ir_node.variant not in (GemmVariant.GEMM, GemmVariant.SCALED_GEMM):
@@ -355,13 +480,31 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         scaled_epilogue = all(
             variant == GemmVariant.SCALED_GEMM for variant in variants
         )
-        reduction_plan = epilogue_program.reduction_plan
-        if reduction_plan is not None and self._uses_swap_ab(ir_node):
-            log.debug("NVGEMM swap_ab does not support fused local reductions")
+        swap_ab = self._uses_swap_ab(ir_node)
+        try:
+            reduction_plan = epilogue_program.oriented_reduction_plan(swap_ab)
+            reduction_geometries = epilogue_program.oriented_reduction_geometries(
+                swap_ab
+            )
+        except NotImplementedError as exc:
+            log.debug("NVGEMM cannot orient fused reductions: %s", exc)
+            return NVGemmVerticalFusionDecision.DEFER
+        if epilogue_program.has_composite_generated_reduction_plan:
+            log.debug("NVGEMM direct EFC supports one generated reduction")
             return NVGemmVerticalFusionDecision.DEFER
         if reduction_plan is not None and not all(
             variant.supports_reduction(reduction_plan) for variant in variants
         ):
+            return NVGemmVerticalFusionDecision.DEFER
+        if isinstance(ir_node, MultiTemplateBuffer) and not any(
+            isinstance(choice, NVUniversalGemmCaller)
+            and choice.supports_epilogue_fusion
+            and self._supports_reduction_layout(choice, epilogue_program.min_tile_shape)
+            for choice in ir_node._choices
+        ):
+            log.debug(
+                "NVGEMM epilogue fusion: no EFC kernel supports the reduction layout"
+            )
             return NVGemmVerticalFusionDecision.DEFER
 
         for s_node in all_scheduler_nodes:
@@ -375,7 +518,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             for region in epilogue_program.generated_reduction_regions
             for node in region.nodes
         )
-        generated_reduction_outputs = epilogue_program.generated_reduction_geometries
+        generated_reduction_outputs = reduction_geometries
         if not feeds_main:
             for s_node in epilogue_program.pointwise_nodes:
                 node = cast(ComputedBuffer, s_node.node)
@@ -508,7 +651,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                     ir_node.get_name(),
                     codegen_nodes,
                     trial_removed_buffers,
-                    epilogue_program.generated_reduction_geometries,
+                    reduction_geometries,
                     suppressed_outputs,
                 )
                 trial_reads = lowered_epilogue.reads
@@ -696,10 +839,11 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
     @staticmethod
     def _schedule_reduction_plan(
         program: NVGemmEpilogueProgram,
+        swap_ab: bool = False,
     ) -> GemmReductionPlan | None:
         if not program.supported:
             return None
-        reduction_plan = program.reduction_plan
+        reduction_plan = program.oriented_reduction_plan(swap_ab)
         if (
             reduction_plan is None
             or not reduction_plan.feeds_main
@@ -828,8 +972,10 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         ctb: NVUniversalGemmBuffer = self.get_nv_gemm_buffer_from_node(
             template_node,
             require_epilogue_fusion=bool(epilogue_nodes),
-            min_tile_n=epilogue_program.min_tile_n,
+            min_tile_shape=epilogue_program.min_tile_shape,
         )
+        swap_ab = ctb.swap_ab
+        reduction_geometries = epilogue_program.oriented_reduction_geometries(swap_ab)
 
         lowered_epilogue = GemmEpiloguePlan()
         reduction_plan: GemmReductionPlan | None = None
@@ -837,7 +983,9 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         if epilogue_nodes:
             scheduler = V.graph.scheduler
             try:
-                reduction_plan = self._schedule_reduction_plan(epilogue_program)
+                reduction_plan = self._schedule_reduction_plan(
+                    epilogue_program, swap_ab
+                )
                 if feeds_main:
                     if reduction_plan is None:
                         raise AssertionError("expected feed-main reduction plan")
@@ -893,7 +1041,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                         original_buffer_name,
                         codegen_nodes,
                         removed_buffers_with_gemm,
-                        epilogue_program.generated_reduction_geometries,
+                        reduction_geometries,
                         suppressed_outputs,
                     )
                     if feeds_main and reduction_plan is not None:
@@ -953,7 +1101,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         if only_gen_src_code:
             return NVGemmGeneratedSource(
                 source=src_code,
-                epilogue_reads=lowered_epilogue.reads,
+                epilogue_reads=kernel.epilogue.reads,
                 output_buffers=tuple(kernel.ordered_output_buffers()),
             )
 
@@ -994,7 +1142,8 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
         precompile_dtypes = {}
 
         try:
-            for param_name, input_node in kernel._template_input_args:
+
+            def add_tensor_metadata(param_name, input_node):
                 size = input_node.get_size()
                 precompile_shapes[param_name] = [int(s) for s in size]
                 stride = input_node.get_stride()
@@ -1002,6 +1151,15 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
                 precompile_dtypes[param_name] = str(
                     input_node.get_dtype()
                 ).removeprefix("torch.")
+
+            for param_name, input_node in kernel._template_input_args:
+                add_tensor_metadata(param_name, input_node)
+
+            output_scale_name = kernel.epilogue.output_scale
+            if output_scale_name is not None:
+                add_tensor_metadata(
+                    output_scale_name, V.graph.get_buffer(output_scale_name)
+                )
 
             out_layout = cast(Layout, ctb.layout)
             precompile_shapes["output"] = [int(s) for s in out_layout.size]
@@ -1112,7 +1270,7 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
             template_node, require_epilogue_fusion=bool(epilogue_nodes)
         )
 
-        input_nodes = cast(list[Buffer], ctb.inputs)
+        input_nodes = cast(list[Buffer], ctb.gemm_inputs())
         # Output store layouts in out_ptr order. A multi-store epilogue has one
         # per graph output; otherwise a single output (the fused final node, or
         # the plain GEMM layout).
@@ -1157,6 +1315,10 @@ class NVUniversalGemmScheduling(NVGemmEpilogueLowering, BaseScheduling):
 
             for read_name in epilogue_reads:
                 buf = V.graph.get_buffer(read_name)
+                if buf is None:
+                    buf = V.graph.graph_inputs.get(read_name)
+                if buf is None:
+                    raise AssertionError(f"missing NVGEMM epilogue input {read_name}")
                 size = V.graph.sizevars.optimization_hints(buf.get_size())
                 stride = V.graph.sizevars.optimization_hints(buf.get_stride())
                 dtype = buf.get_dtype()

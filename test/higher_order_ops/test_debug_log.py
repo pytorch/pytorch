@@ -4,11 +4,17 @@
 import logging
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.utils.debug_log import debug_grad_log
 
 
 class TestDebugGradLog(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self._log_records: list[str] = []

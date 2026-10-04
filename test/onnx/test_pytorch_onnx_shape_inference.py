@@ -13,6 +13,7 @@ from torch.onnx import _constants, utils
 from torch.onnx._internal.torchscript_exporter import jit_utils
 from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_utils import HardwareClassification
 
 
 def expect_tensor(scalar_type, shape=None):
@@ -43,6 +44,8 @@ def g_op(graph: torch.Graph, op_name: str, *args, **kwargs):
 
 
 class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         self.opset_version = _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
         GLOBALS.export_onnx_opset_version = self.opset_version
@@ -375,6 +378,8 @@ class TestONNXShapeInference(pytorch_test_common.ExportTestCase):
 
 
 class TestONNXCustomOpShapeInference(pytorch_test_common.ExportTestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def setUp(self):
         super().setUp()
         self.opset_version = _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
