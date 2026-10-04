@@ -4,13 +4,10 @@
 #endif
 #include <structmember.h>
 
-#include <c10/core/CPUAllocator.h>
 #include <libshm.h>
 #include <torch/csrc/CudaIPCTypes.h>
-#include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/THP.h>
-#include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/copy_utils.h>
 
 #include <c10/util/intrusive_ptr.h>
@@ -29,10 +26,9 @@
 #include <ATen/MapAllocator.h>
 #include <ATen/StorageUtils.h>
 #include <torch/csrc/utils/python_numbers.h>
-#include <atomic>
 #include <string>
 
-static PyObject* THPStorage_sharedDecref(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_sharedDecref(PyObject* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
@@ -48,7 +44,7 @@ static PyObject* THPStorage_sharedDecref(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_sharedIncref(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_sharedIncref(PyObject* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
@@ -65,7 +61,7 @@ static PyObject* THPStorage_sharedIncref(PyObject* self, PyObject* noargs) {
 }
 
 static PyObject* THPStorage_pyNewFilenameStorage(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* args) {
   HANDLE_TH_ERRORS
   long long size = 0;
@@ -90,7 +86,9 @@ static PyObject* THPStorage_pyNewFilenameStorage(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_shareFilename(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_shareFilename(
+    PyObject* self,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
@@ -152,7 +150,7 @@ static PyObject* THPStorage_shareFilename(PyObject* self, PyObject* noargs) {
 }
 
 static PyObject* THPStorage_newSharedFilename(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* args) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(PyTuple_GET_SIZE(args) == 3, "tuple of 3 items expected");
@@ -185,7 +183,9 @@ static PyObject* THPStorage_newSharedFilename(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_pyNewFdStorage(PyObject* _unused, PyObject* args) {
+static PyObject* THPStorage_pyNewFdStorage(
+    PyObject* /*_unused*/,
+    PyObject* args) {
   HANDLE_TH_ERRORS
   long long size = 0;
   if (!PyArg_ParseTuple(args, "L", &size)) {
@@ -199,7 +199,7 @@ static PyObject* THPStorage_pyNewFdStorage(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_shareFd(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_shareFd(PyObject* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
@@ -242,7 +242,7 @@ static PyObject* THPStorage_shareFd(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_newSharedFd(PyObject* _unused, PyObject* args) {
+static PyObject* THPStorage_newSharedFd(PyObject* /*_unused*/, PyObject* args) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(PyTuple_GET_SIZE(args) == 2, "tuple of 2 items expected");
   PyObject* _tmp_fd = PyTuple_GET_ITEM(args, 0);
@@ -278,7 +278,7 @@ static PyObject* THPStorage_newSharedFd(PyObject* _unused, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
 #ifdef USE_CUDA
@@ -362,7 +362,7 @@ static PyObject* THPStorage_shareCuda(PyObject* self, PyObject* noargs) {
 }
 
 static PyObject* THPStorage_releaseIPCCounter(
-    PyObject* _unused,
+    PyObject* /*_unused*/,
     PyObject* args) {
   HANDLE_TH_ERRORS
 #ifdef USE_CUDA
@@ -416,7 +416,9 @@ static std::string THPStorage_bytesAsHandleString(PyObject* handle) {
 }
 #endif
 
-static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
+static PyObject* THPStorage_newSharedCuda(
+    PyObject* /*_unused*/,
+    PyObject* args) {
   HANDLE_TH_ERRORS
 #ifdef USE_CUDA
   TORCH_CHECK(PyTuple_GET_SIZE(args) == 8, "tuple of 8 items expected");
@@ -560,14 +562,16 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
 // pointer.
 //
 // NB: This does NOT preserve object identity when you call it multiple times
-static PyObject* THPStorage_weakRef(PyObject* self, PyObject* args) {
+static PyObject* THPStorage_weakRef(PyObject* self, PyObject* /*args*/) {
   HANDLE_TH_ERRORS
   c10::StorageImpl* storage = THPStorage_Unpack(self).unsafeGetStorageImpl();
   return PyLong_FromVoidPtr(c10::raw::intrusive_ptr::make_weak(storage));
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_newWithWeakPtr(PyObject* _unused, PyObject* arg) {
+static PyObject* THPStorage_newWithWeakPtr(
+    PyObject* /*_unused*/,
+    PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       THPUtils_checkLong(arg), "_new_with_weak_ptr(): arg must be an 'int'");
@@ -581,7 +585,7 @@ static PyObject* THPStorage_newWithWeakPtr(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_freeWeakRef(PyObject* _unused, PyObject* arg) {
+static PyObject* THPStorage_freeWeakRef(PyObject* /*_unused*/, PyObject* arg) {
   HANDLE_TH_ERRORS
   if (Py_IsNone(arg)) {
     Py_RETURN_NONE;
@@ -596,7 +600,7 @@ static PyObject* THPStorage_freeWeakRef(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_expired(PyObject* _unused, PyObject* arg) {
+static PyObject* THPStorage_expired(PyObject* /*_unused*/, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "_expired(): arg must be an 'int'");
   c10::StorageImpl* weak_storage =
@@ -606,7 +610,7 @@ static PyObject* THPStorage_expired(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_sharedFd(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_sharedFd(PyObject* self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   at::MapAllocator* ctx = nullptr;
@@ -620,7 +624,7 @@ static PyObject* THPStorage_sharedFd(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPStorage_isShared(PyObject* self, PyObject* noargs) {
+static PyObject* THPStorage_isShared(PyObject* self, PyObject* /*noargs*/) {
   const auto& storage = THPStorage_Unpack(self);
   if (storage.device_type() != at::kCPU && storage.device_type() != at::kMeta) {
     Py_RETURN_TRUE;

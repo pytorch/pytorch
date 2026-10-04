@@ -26,7 +26,7 @@ def unsafe_remove_auto_functionalized_pass(
     ep: ExportedProgram,
 ) -> ExportedProgram:
     """
-    This pass removes an instances of the higher order op 'auto_functionalized',
+    This pass removes all instances of the higher order op 'auto_functionalized',
     and modifies the calling EP inplace to have the original mutator op.
     This pass doesn't perform safety checks to make sure that this inplace mutation is safe.
     """

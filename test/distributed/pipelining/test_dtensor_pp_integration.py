@@ -146,6 +146,9 @@ def _requires_multi_gpu(func):
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
 
+    # Decorators above may rebind wrapper. Stamp the object pytest collects
+    # (item.obj), not the inner function. The skip condition is unchanged.
+    wrapper._min_gpus_required = 4
     return wrapper
 
 

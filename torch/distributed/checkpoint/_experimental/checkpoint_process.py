@@ -316,8 +316,10 @@ class CheckpointProcess:
         logger.debug(
             "Closing CheckpointProcess for rank %d", self._rank_info.global_rank
         )
-        self._executor.shutdown(wait=True, cancel_futures=True)
 
+        # Shut down the executor after the subprocess below: its worker thread
+        # is the PR_SET_PDEATHSIG "parent", so killing it first would send the
+        # child a spurious SIGINT before graceful termination.
         if self.process and self.process.processes[0].is_alive():
             subprocess_pid = self.process.processes[0].pid
             # send graceful termination to sub process
@@ -357,5 +359,7 @@ class CheckpointProcess:
             except ProcessExitedException:
                 logger.exception("ProcessExitedException during subprocess termination")
                 raise
+
+        self._executor.shutdown(wait=True, cancel_futures=True)
 
         logger.debug("CheckpointProcess closed successfully")

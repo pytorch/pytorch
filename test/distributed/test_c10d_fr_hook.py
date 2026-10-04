@@ -78,6 +78,7 @@ class AbstractFlightRecorderHookTest:
         return os.environ["TORCH_FR_DUMP_TEMP_FILE"] + str(self.rank)
 
     def _init_pg(self):
+        os.environ["LOCAL_RANK"] = str(self.rank)
         if self.device_type == "cuda":
             torch.cuda.set_device(self.rank)
         if self._communicates:
@@ -299,6 +300,7 @@ class AbstractFlightRecorderHookTest:
         dist.all_reduce(t)
         torch.cuda.synchronize()
         before = len(self._await_retired(1))
+        store = dist.distributed_c10d._get_default_store()
 
         if self.rank == 0:
             # Returns as soon as it is issued: a c10d wait() on CUDA only
@@ -315,8 +317,9 @@ class AbstractFlightRecorderHookTest:
             self.assertEqual(hung[0]["time_discovered_completed_ns"], 0)
             # ... and the healthy ones before it are unaffected.
             self.assertEqual(entries[before - 1]["state"], "completed")
+            store.set("hung_collective_checked", "1")
         else:
-            time.sleep(15)
+            store.wait(["hung_collective_checked"], timedelta(seconds=60))
             dist.all_reduce(t)
 
         torch.cuda.synchronize()
