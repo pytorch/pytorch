@@ -40,6 +40,7 @@ from torch.testing._internal.common_cuda import (
     SM100OrLater,
     SM120OrLater,
     TEST_CUDA,
+    xfailIfSM120OrLater,
 )
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_quantized import (
@@ -747,6 +748,22 @@ class TestFlexGemmRuntimeHelpers(TestCase):
         )
 
         self.assertEqual(LOCAL_REDUCE_FRAGMENT_WIDTH, GROUPED_FRAGMENT_WIDTH)
+
+    @unittest.skipUnless(importlib.util.find_spec("cutlass"), "requires CuTeDSL")
+    def test_grouped_n_reduce_rejects_sm120_config(self):
+        from torch._inductor.kernel.flex_gemm.quack_ops.grouped_reduce import (
+            grouped_reduce_supports_config,
+        )
+        from torch._vendor.quack.gemm_config import GemmConfig
+
+        sm100 = GemmConfig(
+            tile_m=128, tile_n=128, cluster_m=1, pingpong=False, device_capacity=10
+        )
+        sm120 = dataclasses.replace(sm100, pingpong=True, device_capacity=12)
+        self.assertTrue(grouped_reduce_supports_config(sm100, axis=1, group=32))
+        self.assertFalse(grouped_reduce_supports_config(sm120, axis=1, group=16))
+        self.assertFalse(grouped_reduce_supports_config(sm120, axis=1, group=32))
+        self.assertTrue(grouped_reduce_supports_config(sm120, axis=0, group=32))
 
     def test_post_grad_addmm_fusion_preserves_flex_gemm_body_mm(self):
         from torch._higher_order_ops.flex_gemm import mark_flex_gemm_body_gemm_node
@@ -6832,6 +6849,7 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
     @skipIfNoCuteDSL
     @unittest.skipIf(not TEST_CUDA, "CUDA required")
     @unittest.skipIf(not SM100OrLater, "SM100+ required")
+    @xfailIfSM120OrLater
     @parametrize(
         "case",
         (
@@ -6946,10 +6964,12 @@ class TestFlexGemmEpilogueHOP(FlexGemmTestCase):
         gamma = self.makeTensor(1, n)
         b2 = self.makeTensor(n, p)
 
-        with self.assertRaisesRegex(
-            Exception,
-            "requested group=1024, max supported group=512 for axis=1",
-        ):
+        error = (
+            "grouped N reduce is not supported on SM120"
+            if SM120OrLater
+            else "requested group=1024, max supported group=512 for axis=1"
+        )
+        with self.assertRaisesRegex(Exception, error):
             torch.compile(fn, backend="inductor", fullgraph=True)(a, b1, gamma, b2)
 
     @skipIfNoCuteDSL
