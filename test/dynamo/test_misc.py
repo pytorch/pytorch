@@ -6850,6 +6850,22 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         def fn(x):
             idx = torch.tensor(1)
             dim_size = x.shape[idx]
+            return x.reshape(2, dim_size, 4)
+
+        x = torch.randn(2, 3, 4)
+        ref = fn(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_torch_size_tensor_index_scalar_constant_guard_simplification(self):
+        def fn(x):
+            idx = torch.tensor(1)
+            dim_size = x.shape[idx]
             return x.reshape(-1, dim_size)
 
         x = torch.randn(2, 3, 4)
