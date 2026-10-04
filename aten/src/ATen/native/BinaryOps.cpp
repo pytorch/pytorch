@@ -9,6 +9,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorMeta.h>
+#include <ATen/native/Resize.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -1589,9 +1590,19 @@ Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
 
   if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
       isFloatingType(self.scalar_type()) &&
-      result.scalar_type() == self.scalar_type() &&
       ldexp_stub.is_device_supported(self.device().type())) {
-    return _ldexp_int_exponent(self, other, result);
+    if (result.scalar_type() == self.scalar_type()) {
+      return _ldexp_int_exponent(self, other, result);
+    }
+    // The kernel can't cast its output, so compute in self's dtype and copy.
+    // Falling back to mul(self, 2**other) would compute 2**other in self's dtype,
+    // which over/underflows even when the final result is representable.
+    TORCH_CHECK(result.device() == self.device(),
+                "Expected out tensor to have device ", self.device(), ", but got ", result.device(), " instead");
+    Tensor tmp = at::empty({0}, self.options());
+    _ldexp_int_exponent(self, other, tmp);
+    at::native::resize_output(result, tmp.sizes());
+    return result.copy_(tmp);
   }
 
   return at::mul_out(result, self, _pow2(self, other));
@@ -1601,7 +1612,9 @@ Tensor ldexp(const Tensor& self, const Tensor& other) {
   if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
       isFloatingType(self.scalar_type()) &&
       ldexp_stub.is_device_supported(self.device().type())) {
-    Tensor result = at::empty_like(self);
+    // An empty output lets TensorIterator size it to the broadcast shape; a
+    // self-shaped one would be resized with a warning when other is larger.
+    Tensor result = at::empty({0}, self.options());
     return _ldexp_int_exponent(self, other, result);
   }
 
