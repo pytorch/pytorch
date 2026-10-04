@@ -1,11 +1,14 @@
 #pragma once
 
+#if !defined(__METAL_VERSION__)
 #include <c10/core/Scalar.h>
+#endif
 
 namespace at::native {
 
 enum class ReductionType {MAX, MEAN, MIN, SUM, PROD};
 
+#if !defined(__METAL_VERSION__)
 inline ReductionType get_reduction_enum(const std::string_view& reduce) {
   if (reduce == "max" || reduce == "amax") {
     return ReductionType::MAX;
@@ -36,5 +39,6 @@ inline ReductionType get_operator_enum(const std::string_view reduce, bool use_n
     }
   }
 }
+#endif
 
 } // at::native
