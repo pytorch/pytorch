@@ -1286,43 +1286,52 @@ class TestTorchDeviceType(TestCase):
 
     # FIXME: update OpInfos to support "nondeterministic samples" and port these tests
     #   to that architecture
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    # Under torch.compile the backward of this op is compiled to a deterministic kernel, so
+    # the nondeterministic alert is correctly not raised.
+    @skipIfTorchInductor("the compiled backward is deterministic, so no alert is raised")
     def test_nondeterministic_alert_AvgPool3d(self, device):
         module = torch.nn.AvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
-        res = module(input)
-        grad = torch.ones_like(res)
+
+        def forward_backward():
+            res = module(input)
+            res.backward(torch.ones_like(res))
 
         self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
+            forward_backward,
             'avg_pool3d_backward_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_AdaptiveAvgPool2d(self, device):
         module = torch.nn.AdaptiveAvgPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
-        res = module(input)
-        grad = torch.ones_like(res)
+
+        def forward_backward():
+            res = module(input)
+            res.backward(torch.ones_like(res))
 
         self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
+            forward_backward,
             'adaptive_avg_pool2d_backward_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_AdaptiveAvgPool3d(self, device):
         module = torch.nn.AdaptiveAvgPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
-        res = module(input)
-        grad = torch.ones_like(res)
+
+        def forward_backward():
+            res = module(input)
+            res.backward(torch.ones_like(res))
 
         self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
+            forward_backward,
             'adaptive_avg_pool3d_backward_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    # This test switches deterministic mode on between the forward and the backward, which
+    # torch.compile rejects by design (#114780): in deterministic mode the forward picks a
+    # different implementation on CUDA, so the compiled backward would not match.
+    @skipIfTorchInductor("switches deterministic mode between forward and backward")
     def test_nondeterministic_alert_MaxPool3d(self, device):
         module = torch.nn.MaxPool3d(3)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
@@ -1334,39 +1343,42 @@ class TestTorchDeviceType(TestCase):
             'max_pool3d_with_indices_backward_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_AdaptiveMaxPool2d(self, device):
         module = torch.nn.AdaptiveMaxPool2d(3)
         input = torch.randn(2, 3, 3, requires_grad=True, device=device)
-        res = module(input)
-        grad = torch.ones_like(res)
+
+        def forward_backward():
+            res = module(input)
+            res.backward(torch.ones_like(res))
 
         self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
+            forward_backward,
             'adaptive_max_pool2d_backward_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_FractionalMaxPool2d(self, device):
         module = torch.nn.FractionalMaxPool2d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, requires_grad=True, device=device)
-        res = module(input)
-        grad = torch.ones_like(res)
+
+        def forward_backward():
+            res = module(input)
+            res.backward(torch.ones_like(res))
 
         self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
+            forward_backward,
             'fractional_max_pool2d_backward_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_FractionalMaxPool3d(self, device):
         module = torch.nn.FractionalMaxPool3d(2, output_ratio=0.5)
         input = torch.randn(2, 3, 3, 3, 3, requires_grad=True, device=device)
-        res = module(input)
-        grad = torch.ones_like(res)
+
+        def forward_backward():
+            res = module(input)
+            res.backward(torch.ones_like(res))
 
         self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
+            forward_backward,
             'fractional_max_pool3d_backward_cuda',
             torch.device(device).type == 'cuda')
 
@@ -1403,22 +1415,29 @@ class TestTorchDeviceType(TestCase):
             lambda: module(input, indices),
             'max_unpooling3d_forward_out')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    # Under torch.compile the backward of this op is compiled to a deterministic kernel, so
+    # the nondeterministic alert is correctly not raised.
+    @skipIfTorchInductor("the compiled backward is deterministic, so no alert is raised")
     def test_nondeterministic_alert_interpolate_linear(self, device):
         input = torch.randn(1, 2, 4, device=device, requires_grad=True)
-        res = torch.nn.functional.interpolate(
-            input,
-            size=12,
-            mode='linear',
-            align_corners=False)
-        grad = torch.ones_like(res)
+
+        def forward_backward():
+            res = torch.nn.functional.interpolate(
+                input,
+                size=12,
+                mode='linear',
+                align_corners=False)
+            res.backward(torch.ones_like(res))
 
         self.check_nondeterministic_alert(
-            lambda: res.backward(grad),
+            forward_backward,
             'upsample_linear1d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    # This test switches deterministic mode on between the forward and the backward, which
+    # torch.compile rejects by design (#114780): in deterministic mode the forward picks a
+    # different implementation on CUDA, so the compiled backward would not match.
+    @skipIfTorchInductor("switches deterministic mode between forward and backward")
     def test_nondeterministic_alert_interpolate_bilinear(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1541,7 +1560,10 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(grad, input.grad, atol=0, rtol=0)
                 input.grad = None
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    # This test switches deterministic mode on between the forward and the backward, which
+    # torch.compile rejects by design (#114780): in deterministic mode the forward picks a
+    # different implementation on CUDA, so the compiled backward would not match.
+    @skipIfTorchInductor("switches deterministic mode between forward and backward")
     def test_nondeterministic_alert_interpolate_bicubic(self, device):
         input = torch.randn(1, 2, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1575,7 +1597,10 @@ class TestTorchDeviceType(TestCase):
                     self.assertEqual(grad, input.grad, atol=0, rtol=0)
                 input.grad = None
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    # This test switches deterministic mode on between the forward and the backward, which
+    # torch.compile rejects by design (#114780): in deterministic mode the forward picks a
+    # different implementation on CUDA, so the compiled backward would not match.
+    @skipIfTorchInductor("switches deterministic mode between forward and backward")
     def test_nondeterministic_alert_interpolate_trilinear(self, device):
         input = torch.randn(1, 2, 4, 4, 4, device=device, requires_grad=True)
         res = torch.nn.functional.interpolate(
@@ -1590,31 +1615,42 @@ class TestTorchDeviceType(TestCase):
             'upsample_trilinear3d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    # Under torch.compile the backward of this op is compiled to a deterministic kernel, so
+    # the nondeterministic alert is correctly not raised.
+    @skipIfTorchInductor("the compiled backward is deterministic, so no alert is raised")
     def test_nondeterministic_alert_ReflectionPad1d(self, device):
         module = torch.nn.ReflectionPad1d((1, 2))
         input = torch.randn(2, 3, 8, device=device, requires_grad=True)
-        res = module(input)
-        grad = torch.ones_like(res)
+
+        def forward_backward():
+            res = module(input)
+            res.backward(torch.ones_like(res))
 
         self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
+            forward_backward,
             'reflection_pad1d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    # Under torch.compile the backward of this op is compiled to a deterministic kernel, so
+    # the nondeterministic alert is correctly not raised.
+    @skipIfTorchInductor("the compiled backward is deterministic, so no alert is raised")
     def test_nondeterministic_alert_ReflectionPad3d(self, device):
         module = torch.nn.ReflectionPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 8, 8, 8, device=device, requires_grad=True)
-        res = module(input)
-        grad = torch.ones_like(res)
+
+        def forward_backward():
+            res = module(input)
+            res.backward(torch.ones_like(res))
 
         self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
+            forward_backward,
             'reflection_pad3d_backward_out_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    # This test switches deterministic mode on between the forward and the backward, which
+    # torch.compile rejects by design (#114780): in deterministic mode the forward picks a
+    # different implementation on CUDA, so the compiled backward would not match.
+    @skipIfTorchInductor("switches deterministic mode between forward and backward")
     def test_nondeterministic_alert_ReplicationPad1d(self, device):
         module = torch.nn.ReplicationPad1d((1, 2))
         input = torch.randn(2, 3, 4, device=device, requires_grad=True)
@@ -1626,7 +1662,10 @@ class TestTorchDeviceType(TestCase):
             'replication_pad1d_backward_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    # This test switches deterministic mode on between the forward and the backward, which
+    # torch.compile rejects by design (#114780): in deterministic mode the forward picks a
+    # different implementation on CUDA, so the compiled backward would not match.
+    @skipIfTorchInductor("switches deterministic mode between forward and backward")
     def test_nondeterministic_alert_ReplicationPad2d(self, device):
         module = torch.nn.ReplicationPad2d((1, 2, 3, 4))
         input = torch.randn(2, 3, 4, 4, device=device, requires_grad=True)
@@ -1652,7 +1691,10 @@ class TestTorchDeviceType(TestCase):
             'replication_pad2d_backward_cuda',
             False)
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
+    # This test switches deterministic mode on between the forward and the backward, which
+    # torch.compile rejects by design (#114780): in deterministic mode the forward picks a
+    # different implementation on CUDA, so the compiled backward would not match.
+    @skipIfTorchInductor("switches deterministic mode between forward and backward")
     def test_nondeterministic_alert_ReplicationPad3d(self, device):
         module = torch.nn.ReplicationPad3d((1, 2, 3, 4, 5, 6))
         input = torch.randn(2, 3, 4, 4, 4, device=device, requires_grad=True)
@@ -1691,17 +1733,18 @@ class TestTorchDeviceType(TestCase):
             'ctc_loss_backward_gpu',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_EmbeddingBag_max(self, device):
         module = torch.nn.EmbeddingBag(
             4, 3, None, 2., False, 'max',
             _weight=torch.randn(4, 3, device=device, requires_grad=True))
         input = torch.randint(0, 3, (4, 3), device=device)
-        res = module(input)
-        grad = torch.ones_like(res)
+
+        def forward_backward():
+            res = module(input)
+            res.backward(torch.ones_like(res))
 
         self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
+            forward_backward,
             'embedding_bag_backward_cuda_max',
             torch.device(device).type == 'cuda')
 
@@ -1820,27 +1863,29 @@ class TestTorchDeviceType(TestCase):
                 '_bincount_cuda',
                 False)
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_grid_sample_2d(self, device):
         input = torch.empty(1, 1, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, device=device)
-        res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
-        grad = torch.ones_like(res)
+
+        def forward_backward():
+            res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
+            res.backward(torch.ones_like(res))
 
         self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
+            forward_backward,
             'grid_sampler_2d_backward_cuda',
             torch.device(device).type == 'cuda')
 
-    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     def test_nondeterministic_alert_grid_sample_3d(self, device):
         input = torch.empty(1, 1, 2, 2, 2, device=device, requires_grad=True)
         grid = torch.empty(1, 1, 1, 2, 3, device=device)
-        res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
-        grad = torch.ones_like(res)
+
+        def forward_backward():
+            res = torch.nn.functional.grid_sample(input, grid, align_corners=False)
+            res.backward(torch.ones_like(res))
 
         self.check_nondeterministic_alert(
-            lambda: res.backward(grad, retain_graph=True),
+            forward_backward,
             'grid_sampler_3d_backward_cuda',
             torch.device(device).type == 'cuda')
 
