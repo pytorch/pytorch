@@ -3203,9 +3203,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
-                source = self.source
+                source = self.source and AttrSource(self.source, name)
                 source_fn = None
-                if source:
+                if self.cls_source:
                     source_fn = self.get_source_by_walking_mro(tx, name)
                 # TODO(jansel): add a guard to check for monkey patching?
                 from ..mutation_guard import unpatched_nn_module_init
@@ -3892,7 +3892,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Source points to the descriptor in the class __dict__ via MRO
             # walk, not via AttrSource(cls, name) which would trigger the
             # descriptor protocol and skip past the property wrapper.
-            if self.source:
+            if self.cls_source is not None:
                 source = self.get_source_by_walking_mro(tx, name)
             prop_vt = variables.PropertyVariable(type_attr, source=source)
             return prop_vt.tp_descr_get_impl(
@@ -3978,7 +3978,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         ):
             type_attr = unpatched_nn_module_init
 
-        can_use_mro_source = self.cls_source is not None and self.source is not None
+        can_use_mro_source = self.cls_source is not None
 
         # LOAD_ATTR + CALL (3.11+) never hits call_method unless getattr
         # returns CallMethodVariable. object_generic_getattr already does this;
@@ -4086,8 +4086,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         # without __get__, etc.).
         if can_use_mro_source:
             source = self.get_source_by_walking_mro(tx, name)
-        elif not source and self.cls_source is not None:
-            source = AttrSource(self.cls_source, name)
         return VariableTracker.build(tx, type_attr, source)
 
     def invoke_descriptor_get(
