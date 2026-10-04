@@ -1,3 +1,4 @@
+#include <c10/util/error.h>
 #include <c10/util/thread_name.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/multiprocessing/init.h>
@@ -7,22 +8,19 @@
 #include <torch/csrc/utils/python_strings.h>
 
 #include <initializer_list>
-#include <stdexcept>
 
 #if defined(__linux__)
 #include <sys/prctl.h>
 #endif
 
-#define SYSASSERT(rv, ...)                                                 \
-  if ((rv) < 0) {                                                          \
-    throw std::system_error(errno, std::system_category(), ##__VA_ARGS__); \
-  }
+#define SYSASSERT(rv, ...) \
+  TORCH_CHECK((rv) >= 0, ##__VA_ARGS__, ": ", c10::utils::str_error(errno))
 
 namespace torch::multiprocessing {
 
 namespace {
 
-PyObject* multiprocessing_init(PyObject* _unused, PyObject* noargs) {
+PyObject* multiprocessing_init(PyObject* /*_unused*/, PyObject* /*noargs*/) {
   auto multiprocessing_module =
       THPObjectPtr(PyImport_ImportModule("torch.multiprocessing"));
   TORCH_CHECK_PYTHON(multiprocessing_module);
@@ -39,7 +37,7 @@ PyObject* multiprocessing_init(PyObject* _unused, PyObject* noargs) {
   Py_RETURN_TRUE;
 }
 
-PyObject* set_thread_name(PyObject* _unused, PyObject* arg) {
+PyObject* set_thread_name(PyObject* /*_unused*/, PyObject* arg) {
   TORCH_CHECK(THPUtils_checkString(arg), "invalid argument to setDevice");
 
   auto name = THPUtils_unpackString(arg);
@@ -48,7 +46,7 @@ PyObject* set_thread_name(PyObject* _unused, PyObject* arg) {
   Py_RETURN_TRUE;
 }
 
-PyObject* get_thread_name(PyObject* _unused, PyObject* noargs) {
+PyObject* get_thread_name(PyObject* /*_unused*/, PyObject* /*noargs*/) {
   return THPUtils_packString(c10::getThreadName());
 }
 

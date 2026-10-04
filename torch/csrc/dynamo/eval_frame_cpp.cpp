@@ -9,7 +9,6 @@
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 #include <torch/csrc/dynamo/stackref_bridge.h>
-#include <torch/csrc/utils/python_compat.h>
 
 #include <algorithm>
 #include <optional>
@@ -383,7 +382,7 @@ PyObject* dynamo__custom_eval_frame(
     // immediately skip the frame, and (2) even if it did, this would only
     // be profitable if there was tensor code in the unwinding code.  Seems
     // unlikely.
-    DEBUG_TRACE("throw %s", get_frame_name(frame)); // @allow-raw-throw
+    DEBUG_TRACE("throw %s", get_frame_name(frame));
     return dynamo_eval_frame_default(tstate, frame, throw_flag);
   }
 
@@ -430,15 +429,15 @@ PyObject* dynamo__custom_eval_frame(
   // original frame, we are responsible for clearing it - via
   // clear_old_frame_if_python_312_plus.
   auto eval_custom = [&]() {
-    if (fullgraph_compiled_frame_count >= 0) {
-      fullgraph_compiled_frame_count++;
+    if (get_fullgraph_compiled_frame_count() >= 0) {
+      bump_fullgraph_compiled_frame_count();
       // Under fullgraph, disable or error Dynamo for sub-frames of compiled
       // code. If fullgraph_error_on_nested_compile is set, wrap the callback
       // with get_fail_callback so compilation attempts error. Otherwise, set
       // callback to None to skip sub-frames entirely.
       if (!recursive_callback.is_none() &&
           !recursive_callback.is(py::bool_(false))) {
-        if (fullgraph_error_on_nested_compile) {
+        if (get_fullgraph_error_on_nested_compile()) {
           if (!convert_frame_get_fail_callback) {
             convert_frame_get_fail_callback =
                 py::module_::import("torch._dynamo.convert_frame")
@@ -507,9 +506,9 @@ PyObject* dynamo__custom_eval_frame(
 
   // Resolve strategy per isolate_recompiles scope. For non-isolated
   // frames (id < 0) this returns extra->strategy; for isolated regions
-  // it returns the region's own strategy if set, otherwise inherits
-  // global SKIP (deliberate "do not trace" marks must apply across
-  // regions) but not RUN_ONLY (recompile-limit hits are per-region).
+  // it returns the region's own strategy with global SKIP applied
+  // (deliberate "do not trace" marks must apply across regions), but
+  // does not inherit RUN_ONLY (recompile-limit hits are per-region).
   int64_t isolate_recompiles_id = get_current_isolate_recompiles_id();
   FrameExecStrategy strategy =
       extra_state_get_region_exec_strategy(extra, isolate_recompiles_id);
@@ -541,7 +540,7 @@ PyObject* dynamo__custom_eval_frame(
           isolate_recompiles_id,
           &maybe_cached_code,
           &trace_annotation,
-          is_skip_guard_eval_unsafe)) {
+          get_skip_guard_eval_unsafe())) {
     locals = std::make_unique<FrameLocalsMapping>(frame);
     _PytorchRecordFunctionState* rf =
         _pytorch_record_function_enter(cache_lookup_profiler_str);
@@ -552,7 +551,7 @@ PyObject* dynamo__custom_eval_frame(
         isolate_recompiles_id,
         &maybe_cached_code,
         &trace_annotation,
-        is_skip_guard_eval_unsafe);
+        get_skip_guard_eval_unsafe());
     _pytorch_record_function_exit(rf);
   }
 
@@ -596,7 +595,7 @@ PyObject* dynamo__custom_eval_frame(
 
   // cache miss
   DEBUG_TRACE("cache miss %s", get_frame_name(frame));
-  if (is_skip_guard_eval_unsafe) {
+  if (get_skip_guard_eval_unsafe()) {
     PyErr_SetString(
         PyExc_RuntimeError,
         "Recompilation triggered with skip_guard_eval_unsafe stance. "

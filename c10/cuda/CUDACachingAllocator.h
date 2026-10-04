@@ -598,6 +598,13 @@ C10_CUDA_API void setDefaultExpandableSegmentReserveFractionForClass(
     const std::string& reserve_class,
     double fraction);
 
+// Process-wide expandable-segment virtual-address gauges, for observability
+// (ODS) and out-of-VM diagnostics: total VA bytes reserved by all live
+// ExpandableSegments, and the number of live segments. Cheap relaxed-atomic
+// reads; safe to call at any time.
+C10_CUDA_API size_t getExpandableSegmentsReservedBytes();
+C10_CUDA_API size_t getExpandableSegmentsCount();
+
 } // namespace c10::cuda::CUDACachingAllocator
 
 namespace c10::cuda {
