@@ -3254,6 +3254,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             args: list[VariableTracker],
             kwargs: dict[str, VariableTracker],
             fn: Callable[[int], int | None],
+            device_type: str = "cuda",
         ) -> VariableTracker:
             if len(args) != 1 or kwargs:
                 raise_type_error(
@@ -3263,7 +3264,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             torch_source = ImportSource("torch")
             install_guard(torch_source.make_guard(GuardBuilder.ID_MATCH))
             current_device_source = CallFunctionNoArgsSource(
-                AttrSource(AttrSource(torch_source, "cuda"), "current_device")
+                AttrSource(AttrSource(torch_source, device_type), "current_device")
             )
             install_guard(current_device_source.make_guard(GuardBuilder.EQUALS_MATCH))
             arg = args[0].as_python_constant()
@@ -3274,7 +3275,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 (arg,),
                 {},
             )
-            tx.output.add_cleanup_hook(lambda: torch.cuda.set_device(prev))
+            device_module = torch.get_device_module(device_type)
+            tx.output.add_cleanup_hook(lambda: device_module.set_device(prev))
             return VariableTracker.build(tx, prev)
 
         @register(torch.cuda._exchange_device)
@@ -3297,6 +3299,28 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ) -> VariableTracker:
             return exchange_device_helper(
                 tx, list(args), kwargs, torch.cuda._maybe_exchange_device
+            )
+
+        @register(torch.xpu._exchange_device)
+        def handle_xpu_exchange_device(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            return exchange_device_helper(
+                tx, list(args), kwargs, torch.xpu._exchange_device, "xpu"
+            )
+
+        @register(torch.xpu._maybe_exchange_device)
+        def handle_xpu_maybe_exchange_device(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            return exchange_device_helper(
+                tx, list(args), kwargs, torch.xpu._maybe_exchange_device, "xpu"
             )
 
         @register(torch._dynamo.decorators.override_optimization_hint)
