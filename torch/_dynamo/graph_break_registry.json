@@ -6029,6 +6029,36 @@
       ]
     }
   ],
+  "GB6036": [
+    {
+      "Gb_type": "Unbound exception __str__/__repr__ on a different type",
+      "Context": "{fn.__name__}.{name}({args[0].python_type_name()})",
+      "Explanation": "Dynamo only supports {fn.__name__}.{name}(obj) when it resolves to the same method as type(obj).{name}.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB3741": [
+    {
+      "Gb_type": "Unsupported exception __str__",
+      "Context": "str() of {self.python_type_name()}",
+      "Explanation": "Dynamo does not model {self.python_type_name()}.__str__, which formats differently from BaseException.__str__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB9833": [
+    {
+      "Gb_type": "Unsupported exception __repr__",
+      "Context": "repr() of {self.python_type_name()}",
+      "Explanation": "Dynamo does not model {self.python_type_name()}.__repr__, which formats differently from BaseException.__repr__.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0341": [
     {
       "Gb_type": "torch.associative_scan: improper args",
