@@ -96,13 +96,18 @@ def rocm_rpaths(rocm_home: Path | None = None) -> str:
 
     ROCm packages are siblings of torch, so paths are ``$ORIGIN``-relative.
     Include flat and discovered per-target LLVM paths for ``libomp.so`` across
-    TheRock package layouts.
+    TheRock package layouts. ``host-math/lib`` holds ``librocm-openblas.so.0``
+    and ``rocm_sysdeps/lib`` holds ``librocm_sysdeps_numa.so.1``; devel images
+    can place those same sonames under ``_rocm_sdk_devel`` instead of core.
     """
     rpaths = [
         "$ORIGIN/../../_rocm_sdk_core/lib",
         "$ORIGIN/../../_rocm_sdk_core/lib/rocm_sysdeps/lib",
+        "$ORIGIN/../../_rocm_sdk_core/lib/host-math/lib",
         "$ORIGIN/../../_rocm_sdk_libraries/lib",
         "$ORIGIN/../../_rocm_sdk_core/lib/llvm/lib",
+        "$ORIGIN/../../_rocm_sdk_devel/lib/host-math/lib",
+        "$ORIGIN/../../_rocm_sdk_devel/lib/rocm_sysdeps/lib",
     ]
     if rocm_home is None:
         env_home = os.environ.get("ROCM_HOME")
