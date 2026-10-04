@@ -1228,4 +1228,13 @@ class Optimizer:
         if not param_set.isdisjoint(set(param_group["params"])):
             raise ValueError("some parameters appear in more than one parameter group")
 
+        # The group owns tensor hyperparameters. Schedulers update that storage
+        # in place, which is what a captured graph reads. The object the caller
+        # passed in is not that storage.
+        for key, value in list(param_group.items()):
+            if key in {"params", "param_names"}:
+                continue
+            if isinstance(value, torch.Tensor):
+                param_group[key] = value.clone()
+
         self.param_groups.append(param_group)
