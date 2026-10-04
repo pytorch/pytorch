@@ -2950,9 +2950,59 @@ class BuiltinVariable(BaseBuiltinVariable):
         return generic_issubclass(tx, left_ty, right_ty)
 
     def call_super(
-        self, tx: "InstructionTranslatorBase", a: VariableTracker, b: VariableTracker
-    ) -> VariableTracker:
-        return variables.SuperVariable(a, b)
+        self,
+        tx: "InstructionTranslatorBase",
+        *args: VariableTracker,
+        **kwargs: VariableTracker,
+    ) -> VariableTracker | None:
+        if not args and not kwargs:
+            code = tx.f_code
+            if code.co_argcount == 0:
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): no arguments"]
+                )
+
+            arg0_name = code.co_varnames[0]
+            arg0 = tx.symbolic_locals.get(arg0_name)
+            if arg0_name in tx.cellvars() and isinstance(arg0, CellVariable):
+                arg0 = tx.output.side_effects.load_cell(arg0)
+            if arg0 is None or isinstance(arg0, variables.DeletedVariable):
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): arg[0] deleted"]
+                )
+
+            if "__class__" not in tx.cell_and_freevars():
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): __class__ cell not found"]
+                )
+            if "__class__" in tx.symbolic_deleted_cells:
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): empty __class__ cell"]
+                )
+            class_cell = tx._cellvar("__class__")
+            class_var = tx.output.side_effects.load_cell(class_cell)
+            if isinstance(class_var, variables.DeletedVariable):
+                raise_observed_exception(
+                    RuntimeError, tx, args=["super(): empty __class__ cell"]
+                )
+            try:
+                type_obj = class_var.as_python_constant()
+                if isinstance(arg0, CellVariable):
+                    builtins.super(type_obj, types.CellType())
+                obj = arg0.as_python_constant()
+            except AsPythonConstantNotImplementedError:
+                pass
+            except TypeError as error:
+                raise_observed_exception(TypeError, tx, args=list(error.args))
+            else:
+                try:
+                    builtins.super(type_obj, obj)
+                except TypeError as error:
+                    raise_observed_exception(TypeError, tx, args=list(error.args))
+            return variables.SuperVariable(class_var, arg0)
+        if len(args) == 2 and not kwargs:
+            return variables.SuperVariable(args[0], args[1])
+        return None
 
     def call_classmethod(
         self, tx: "InstructionTranslatorBase", func: VariableTracker

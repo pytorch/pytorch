@@ -10476,6 +10476,115 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
                 m, (x,), dynamic_shapes={"x": {0: d1}}, strict=False
             )
 
+    @parametrize("inlined", (False, True))
+    @parametrize("captured", (False, True))
+    @parametrize("class_method", (False, True))
+    def test_super_implicit_receiver(self, inlined, captured, class_method):
+        class Receiver:
+            if captured:
+
+                def method(first, x):
+                    def capture():
+                        return first
+
+                    return x + 1, super().__class__
+
+            else:
+
+                def method(first, x):
+                    return x + 1, super().__class__
+
+            if class_method:
+                method = classmethod(method)
+
+        method = Receiver.method if class_method else Receiver().method
+
+        def wrapper(x):
+            return method(x)
+
+        fn = wrapper if inlined else method
+        x = torch.ones(1)
+        cnt = CompileCounter()
+        result = torch.compile(fn, backend=cnt, fullgraph=True)(x)
+        self.assertEqual(result, fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+
+    @parametrize("inlined", (False, True))
+    @parametrize("bound_method", (False, True))
+    @unittest.skipIf(sys.version_info < (3, 12), "Needs Python 3.12+")
+    def test_super_deleted_receiver(self, inlined, bound_method):
+        def function(first, x):
+            del first
+            try:
+                builtins.super()
+            except RuntimeError as error:
+                return x + 1, str(error)
+            return x + 1, "no error"
+
+        class Receiver:
+            def method(first, x):
+                del first
+                try:
+                    super()
+                except RuntimeError as error:
+                    return x + 1, str(error)
+                return x + 1, "no error"
+
+        fn = Receiver().method if bound_method else function
+        args = (torch.ones(1),) if bound_method else (None, torch.ones(1))
+
+        def wrapper(*args):
+            return fn(*args)
+
+        expected = fn(*args)
+        self.assertEqual(expected[1], "super(): arg[0] deleted")
+        cnt = CompileCounter()
+        opt_fn = torch.compile(wrapper if inlined else fn, backend=cnt, fullgraph=True)
+        self.assertEqual(opt_fn(*args), expected)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @parametrize("inlined", (False, True))
+    @parametrize("aliased", (False, True))
+    def test_super_missing_class_cell(self, inlined, aliased):
+        super_alias = super
+
+        def fn(first, x):
+            try:
+                if aliased:
+                    super_alias()
+                else:
+                    builtins.super()
+            except RuntimeError as error:
+                return x + 1, str(error)
+
+        def wrapper(x):
+            return fn(None, x)
+
+        args = (torch.ones(1),) if inlined else (None, torch.ones(1))
+        function = wrapper if inlined else fn
+        expected = function(*args)
+        self.assertEqual(expected[1], "super(): __class__ cell not found")
+        cnt = CompileCounter()
+        result = torch.compile(function, backend=cnt, fullgraph=True)(*args)
+        self.assertEqual(result, expected)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @parametrize("graph_break", (False, True))
+    def test_no_guard_for_unused_first_input(self, graph_break):
+        def fn(unused, x):
+            y = x + 1
+            if graph_break:
+                torch._dynamo.graph_break()
+            return y + 1
+
+        x = torch.ones(1)
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=not graph_break)
+        self.assertEqual(opt_fn(torch.ones(2), x), fn(None, x))
+        self.assertEqual(opt_fn(torch.ones(3), x), fn(None, x))
+        self.assertEqual(opt_fn(object(), x), fn(None, x))
+        self.assertEqual(cnt.frame_count, 2 if graph_break else 1)
+
     def test_call_parent_non_class_methods_from_child(self):
         class A:
             a = 4
