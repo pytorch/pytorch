@@ -1428,8 +1428,18 @@ class VariableBuilder:
             )
             # Preserve cache_hash for SAC context_fn caching
             original_cache_hash = getattr(value, "cache_hash", None)
+            # partial(value, ...) unwraps value only if its instance dict was
+            # never created. Reading value.__dict__ would create it, so check
+            # the state from __reduce__, whose dict slot is None in that case.
+            flattenable = (
+                type(value) is functools.partial and value.__reduce__()[2][3] is None
+            )
             return FunctoolsPartialVariable(
-                func_obj, args, keywords, original_cache_hash=original_cache_hash
+                func_obj,
+                args,
+                keywords,
+                original_cache_hash=original_cache_hash,
+                flattenable=flattenable,
             )
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.

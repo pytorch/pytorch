@@ -1510,6 +1510,28 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # The first arg, a callable (the ctor below will assert on types)
             fn = args[0]
             rest_args = args[1:]
+            if (
+                isinstance(fn, variables.functions.FunctoolsPartialVariable)
+                and fn.flattenable
+            ):
+                # Like CPython's partial_new, merge a nested partial into the
+                # new one instead of wrapping it.
+                if fn.source:
+                    # Guard that the instance dict is still unset, without
+                    # creating it by reading __dict__.
+                    dict_state_source = GetItemSource(
+                        GetItemSource(
+                            CallFunctionNoArgsSource(
+                                AttrSource(fn.source, "__reduce__")
+                            ),
+                            2,
+                        ),
+                        3,
+                    )
+                    install_guard(dict_state_source.make_guard(GuardBuilder.NONE_MATCH))
+                rest_args = fn.args + rest_args
+                kwargs = {**fn.keywords, **kwargs}
+                fn = fn.func
             # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
             # args and keywords
             return variables.functions.FunctoolsPartialVariable(

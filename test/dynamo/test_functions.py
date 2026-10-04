@@ -438,6 +438,51 @@ partial_fn = functools.partial(fn, scale=2)
         compiled_fn = torch.compile(module.partial_fn, backend="eager", fullgraph=True)
         self.assertEqual(compiled_fn(x), module.partial_fn(x))
 
+    def test_functools_partial_nested_flattened(self):
+        # functools.partial(partial(f, *a, **k), ...) is flattened into a
+        # single partial of f, as in CPython's partial_new.
+        def fn(x):
+            p = functools.partial(functools.partial(capture_args, "asdf"), bar=True)
+            return p.func is capture_args, p.args, p.keywords, p(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(1), fn(1))
+        self.assertEqual(
+            opt_fn(1),
+            (True, ("asdf",), {"bar": True}, (("asdf", 1), {"bar": True})),
+        )
+
+    def test_functools_partial_nested_global_flattened(self):
+        def fn(x):
+            p = functools.partial(global_partial_capture_args, bar=True)
+            return p.func is capture_args, p.args, p.keywords, p(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(1), fn(1))
+        self.assertTrue(opt_fn(1)[0])
+        # Guarding must not create the inner partial's __dict__, which would
+        # stop eager from flattening it.
+        self.assertIsNone(global_partial_capture_args.__reduce__()[2][3])
+
+    def test_functools_partial_nested_with_attribute_not_flattened(self):
+        # A partial with an instance __dict__ is wrapped, not flattened.
+        def fn(inner, x):
+            p = functools.partial(inner, bar=True)
+            return p.func is inner, p.args, p.keywords, p(x.sin())
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        x = torch.randn(3)
+        inner = functools.partial(capture_args, "asdf")
+        self.assertEqual(opt_fn(inner, x), fn(inner, x))
+        self.assertFalse(opt_fn(inner, x)[0])
+        self.assertEqual(cnt.frame_count, 1)
+
+        inner.attr = "spam"
+        self.assertEqual(opt_fn(inner, x), fn(inner, x))
+        self.assertTrue(opt_fn(inner, x)[0])
+        self.assertEqual(cnt.frame_count, 2)
+
     @make_test
     def test_itertools_product(a, b):
         v = a
@@ -6424,6 +6469,13 @@ def udf_mul2(x, y, z):
 
 def udf_add(x, y):
     return x + y
+
+
+def capture_args(*args, **kwargs):
+    return args, kwargs
+
+
+global_partial_capture_args = functools.partial(capture_args, "asdf")
 
 
 class SmallNN(torch.nn.Module):
