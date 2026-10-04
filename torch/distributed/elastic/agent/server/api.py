@@ -148,7 +148,6 @@ class Worker:
     agent it could be encoded as ``host:port (string)``.
 
     Args:
-        id (Any): uniquely identifies a worker (interpreted by the agent)
         local_rank (int): local rank of the worker
         global_rank (int): global rank of the worker
         role_rank (int): rank of the worker across all workers that have the same role

@@ -629,7 +629,13 @@ def skip_unless_torch_gpu(method: T) -> T:
     >>>   ...
     """
     # The builtin @skip_if_no_gpu relies on os.environ['WORLD_SIZE'] being set.
-    return cast(T, skip_if_lt_x_gpu(NUM_DEVICES)(method))
+    # Runtime skip stays skip_if_lt_x_gpu(NUM_DEVICES), which scales with the
+    # machine. Pytest collects the object this decorator returns, so stamp that
+    # object with 2. A capacity-scaled stamp would look like a 4-GPU requirement
+    # to --multigpu-min-gpus.
+    wrapped = skip_if_lt_x_gpu(NUM_DEVICES)(method)
+    wrapped._min_gpus_required = 2
+    return cast(T, wrapped)
 
 
 def _get_device_type(world_size: int) -> str:
