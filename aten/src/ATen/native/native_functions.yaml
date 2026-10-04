@@ -5787,6 +5787,27 @@
 
 - func: dstack.out(Tensor[] tensors, *, Tensor(a!) out) -> Tensor(a!)
 
+# The real-input core of stft: frames a (batch, signal) tensor, windows it and
+# transforms the frames. Exists as an op so backends can fuse the framing and the
+# window into the transform; the default implementation is the decomposition.
+# Not differentiable -- stft only routes here when no graph is being recorded.
+- func: _stft_r2c(Tensor self, int n_fft, int hop_length, int n_frames, Tensor? window, bool onesided, int normalization) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _stft_r2c
+    CUDA: _stft_r2c_cuda
+
+# The complex-input core of istft: transforms (channel, n_frames, n_fft / 2 + 1)
+# back to frames and applies the synthesis window. Exists as an op so backends
+# can fuse the window into the transform; the default implementation is the
+# decomposition. Not differentiable -- istft only routes here when no graph is
+# being recorded.
+- func: _istft_c2r(Tensor self, int n_fft, Tensor window, int normalization) -> Tensor
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: _istft_c2r
+    CUDA: _istft_c2r_cuda
+
 # Overload without center & pad mode, needed for forward-compatibility
 - func: stft(Tensor self, int n_fft, int? hop_length=None, int? win_length=None, Tensor? window=None, bool normalized=False, bool? onesided=None, bool? return_complex=None, bool? align_to_window=None) -> Tensor
   variants: function, method

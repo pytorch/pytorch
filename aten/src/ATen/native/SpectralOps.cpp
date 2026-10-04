@@ -6,6 +6,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorOperators.h>
 #include <ATen/WrapDimUtils.h>
+#include <c10/core/GradMode.h>
 #include <c10/util/irange.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -19,6 +20,10 @@
 #include <ATen/ops/_fft_c2c.h>
 #include <ATen/ops/_fft_c2r.h>
 #include <ATen/ops/_fft_r2c.h>
+#include <ATen/ops/_istft_c2r.h>
+#include <ATen/ops/_istft_c2r_native.h>
+#include <ATen/ops/_stft_r2c.h>
+#include <ATen/ops/_stft_r2c_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/arange_native.h>
 #include <ATen/ops/conj.h>
@@ -837,6 +842,31 @@ static Stream& write_opt(Stream& SS, const std::optional<T>& value) {
   return SS;
 }
 
+// The frames stft transforms: an overlapping (batch, n_frames, n_fft) view of
+// the signal, windowed. The view itself is free; the multiply is what
+// materializes it, and at typical hop lengths that is several times the size of
+// the signal.
+static Tensor stft_window_frames(const Tensor& input, int64_t n_fft, int64_t hop_length,
+                                 int64_t n_frames, const Tensor& window) {
+  auto frames = input.as_strided(
+      {input.size(0), n_frames, n_fft},
+      {input.stride(0), hop_length * input.stride(1), input.stride(1)});
+  return window.defined() ? frames.mul(window) : frames;
+}
+
+Tensor _stft_r2c(const Tensor& self, int64_t n_fft, int64_t hop_length, int64_t n_frames,
+                 const std::optional<Tensor>& window_opt, bool onesided, int64_t normalization) {
+  c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
+  auto frames = stft_window_frames(self, n_fft, hop_length, n_frames, *window_maybe_owned);
+  return at::_fft_r2c(frames, frames.dim() - 1, normalization, onesided);
+}
+
+Tensor _istft_c2r(const Tensor& self, int64_t n_fft, const Tensor& window,
+                  int64_t normalization) {
+  auto frames = at::_fft_c2r(self, self.dim() - 1, normalization, n_fft);
+  return frames.mul(window);
+}
+
 /* Short-time Fourier Transform, for signal analysis.
  *
  * This is modeled after librosa but with support for complex time-domain
@@ -926,7 +956,6 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
     input = input.view(IntArrayRef(input.sizes()).slice(extra_dims));
   }
 
-  int64_t batch = input.size(0);
   int64_t len = input.size(1);
   if (n_fft <= 0 || n_fft > len) {
     std::ostringstream ss;
@@ -975,26 +1004,29 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
   } else {
     n_frames = 1 + (len - n_fft) / hop_length;
   }
-  // time2col
-  input = input.as_strided(
-    {batch, n_frames, n_fft},
-    {input.stride(0), hop_length * input.stride(1), input.stride(1)}
-  );
-  if (window_.defined()) {
-    input = input.mul(window_);
-  }
-
   // FFT and transpose to get (batch x fft_size x num_frames)
-  const bool complex_fft = input.is_complex();
+  const bool complex_fft = input.is_complex() || (window_.defined() && window_.is_complex());
   const auto onesided = onesidedOpt.value_or(!complex_fft);
 
   const fft_norm_mode norm = normalized ? fft_norm_mode::by_root_n : fft_norm_mode::none;
+  // _stft_r2c lets a backend fuse the framing and the window into the transform,
+  // but it is not differentiable, so anything recording a graph has to take the
+  // decomposition instead.
+  const bool recording = at::GradMode::is_enabled() &&
+      (input.requires_grad() || (window_.defined() && window_.requires_grad()));
+  TORCH_CHECK(!complex_fft || !onesided,
+              "Cannot have onesided output if window or input is complex");
   Tensor out;
-  if (complex_fft) {
-    TORCH_CHECK(!onesided, "Cannot have onesided output if window or input is complex");
-    out = at::_fft_c2c(input, input.dim() - 1, static_cast<int64_t>(norm), /*forward=*/true);
+  if (!complex_fft && !recording) {
+    out = at::_stft_r2c(input, n_fft, hop_length, n_frames, window_, onesided,
+                        static_cast<int64_t>(norm));
   } else {
-    out = at::_fft_r2c(input, input.dim() - 1, static_cast<int64_t>(norm), onesided);
+    auto frames = stft_window_frames(input, n_fft, hop_length, n_frames, window_);
+    if (complex_fft) {
+      out = at::_fft_c2c(frames, frames.dim() - 1, static_cast<int64_t>(norm), /*forward=*/true);
+    } else {
+      out = at::_fft_r2c(frames, frames.dim() - 1, static_cast<int64_t>(norm), onesided);
+    }
   }
   out.transpose_(1, 2);
 
@@ -1157,20 +1189,30 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
   input = as_complex(input.transpose(1, 2));  // size: (channel, n_frames, fft_size)
 
   const fft_norm_mode norm = normalized ? fft_norm_mode::by_root_n : fft_norm_mode::by_n;
+  // _istft_c2r lets a backend apply the synthesis window inside the transform,
+  // but it is not differentiable, so anything recording a graph has to take the
+  // decomposition instead.
+  const bool recording = at::GradMode::is_enabled() &&
+      (input.requires_grad() || window_tmp.requires_grad());
+  Tensor y_tmp;  // size: (channel, n_frames, n_fft)
   if (return_complex) {
     TORCH_CHECK(!onesided, "Cannot have onesided output if window or input is complex");
-    input = at::_fft_c2c(input, input.dim() - 1, static_cast<int64_t>(norm), /*forward=*/false);  // size: (channel, n_frames, n_fft)
+    auto frames = at::_fft_c2c(input, input.dim() - 1, static_cast<int64_t>(norm), /*forward=*/false);
+    y_tmp = frames * window_tmp.view({1, 1, n_fft});
   } else {
     TORCH_CHECK(!window.defined() || !window.is_complex(),
                 "Complex windows are incompatible with return_complex=False");
     if (!onesided) {
       input = input.slice(-1, 0, n_fft / 2 + 1);
     }
-    input = at::_fft_c2r(input, input.dim() - 1, static_cast<int64_t>(norm), n_fft);  // size: (channel, n_frames, n_fft)
+    if (recording) {
+      auto frames = at::_fft_c2r(input, input.dim() - 1, static_cast<int64_t>(norm), n_fft);
+      y_tmp = frames * window_tmp.view({1, 1, n_fft});
+    } else {
+      y_tmp = at::_istft_c2r(input, n_fft, window_tmp, static_cast<int64_t>(norm));
+    }
   }
-  TORCH_INTERNAL_ASSERT(input.size(2) == n_fft);
-
-  Tensor y_tmp = input * window_tmp.view({1, 1, n_fft});  // size: (channel, n_frames, n_fft)
+  TORCH_INTERNAL_ASSERT(y_tmp.size(2) == n_fft);
 
   Tensor y = at::unfold_backward(
     y_tmp,
