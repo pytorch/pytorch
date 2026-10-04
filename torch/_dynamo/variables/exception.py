@@ -656,6 +656,10 @@ class SyntaxErrorVariable(ExceptionVariable):
         fmt = "{} (" + ", ".join(["{}"] * len(parts)) + ")"
         return variables.BuiltinVariable(str.format).call_function(
             tx,
-            [ConstantVariable.create(fmt), msg, *map(ConstantVariable.create, parts)],
+            [
+                ConstantVariable.create(fmt),
+                msg,
+                *[ConstantVariable.create(part) for part in parts],
+            ],
             {},
         )

@@ -20,6 +20,7 @@ or by creating appropriate graph nodes when needed.
 """
 
 import __future__
+
 import abc
 import ast
 import builtins
@@ -1627,7 +1628,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         tx: "InstructionTranslatorBase",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> types.CodeType | BaseException | None:
+    ) -> types.CodeType | Exception | None:
         # Compiling constant source is pure, so do it while tracing. Returns the
         # code object or the exception compile() raised, or None when the
         # arguments are not constants or compiling would emit a warning.
@@ -1668,7 +1669,7 @@ class BuiltinVariable(BaseBuiltinVariable):
         **kwargs: VariableTracker,
     ) -> VariableTracker | None:
         result = self._compile_constant_source(tx, args, kwargs)
-        if isinstance(result, BaseException):
+        if isinstance(result, Exception):
             raise_observed_exception(type(result), tx, args=list(result.args))
         if result is None:
             return None
@@ -1714,7 +1715,7 @@ class BuiltinVariable(BaseBuiltinVariable):
             ],
             {},
         )
-        if not isinstance(result, BaseException):
+        if not isinstance(result, Exception):
             return None
         # CPython adds __builtins__ to the globals dict before compiling.
         if globals_vt is not None:
