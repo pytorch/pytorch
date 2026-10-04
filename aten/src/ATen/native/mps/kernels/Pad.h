@@ -1,6 +1,16 @@
 #pragma once
 #include <c10/metal/common.h>
 
+template <typename idx_t = int64_t>
+struct PadParams {
+  ::c10::metal::array<idx_t, 3> input_sizes;
+  ::c10::metal::array<idx_t, 3> output_sizes;
+  ::c10::metal::array<idx_t, 3> left_pad;
+  ::c10::metal::array<idx_t, 5> input_strides;
+  ::c10::metal::array<idx_t, 5> output_strides;
+  idx_t channels;
+};
+
 struct ConstantPadDenseParams {
   ::c10::metal::array<uint32_t, 3> input_sizes;
   ::c10::metal::array<uint32_t, 3> output_sizes;

@@ -79,13 +79,15 @@ jobs:
       docker_image: "pytorch/manylinux2_28-builder:cpu"
 
   build-wheel-win:
+    # The selector also applies the [no-ci] gate to this fixed runner.
+    needs: select-runner
     if: github.repository_owner == 'pytorch'
     name: "Build Triton Windows Wheel"
     runs-on: "windows.4xlarge"
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.14", "3.14t", "3.15", "3.15t" ]
+        py_vers: [ "3.11", "3.12", "3.13", "3.14", "3.14t", "3.15", "3.15t" ]
         device: ["xpu"]
     timeout-minutes: 40
     env:

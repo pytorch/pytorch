@@ -39,6 +39,8 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
+    _restore_fp32_precision,
+    _snapshot_fp32_precision,
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_SANDCASTLE,
@@ -67,21 +69,21 @@ else:
     LOOPBACK = "lo"
 
 
-_PRIOR_FP32_PRECISION: str | None = None
+_PRIOR_FP32_PRECISION: tuple[str, ...] | None = None
 
 
 def setUpModule():
     global _PRIOR_FP32_PRECISION
-    # Snapshot fp32_precision (not allow_tf32) so tearDownModule restores the
-    # exact original; writing allow_tf32 back can't reproduce the "none" default.
-    _PRIOR_FP32_PRECISION = torch.backends.cuda.matmul.fp32_precision
+    # allow_tf32 writes both the legacy Float32MatmulPrecision enum and the
+    # backend-specific fp32_precision, so snapshot and restore all of it.
+    _PRIOR_FP32_PRECISION = _snapshot_fp32_precision()
     torch.backends.cuda.matmul.allow_tf32 = False
 
 
 def tearDownModule():
     global _PRIOR_FP32_PRECISION
     if _PRIOR_FP32_PRECISION is not None:
-        torch.backends.cuda.matmul.fp32_precision = _PRIOR_FP32_PRECISION
+        _restore_fp32_precision(_PRIOR_FP32_PRECISION)
         _PRIOR_FP32_PRECISION = None
 
 
@@ -127,6 +129,8 @@ def gpus_for_rank(world_size):
 
 class AbstractTimeoutTest:
     def _test_store_timeout(self, backend, init_method, c2p):
+        # The callers are decorated with retry_on_connect_failures, which re-runs
+        # them on a RuntimeError, so the group must not survive a failed attempt.
         try:
             dist.init_process_group(
                 backend=backend,
@@ -146,6 +150,9 @@ class AbstractTimeoutTest:
             # catch "Address already in use" error and report it to the main
             # thread
             c2p.append(e)
+        finally:
+            if dist.is_initialized():
+                dist.destroy_process_group()
 
     def _init_methods(self):
         with tempfile.NamedTemporaryFile(delete=False) as f:
@@ -214,9 +221,9 @@ class TimeoutTest(TestCase):
                 error_list.append(e)
 
         world_size = 4
-        error_list = []
+        errors_by_type = {name: [] for name in ("file", "tcp", "hash")}
         threads = []
-        for init_type in ["file", "tcp", "hash"]:
+        for init_type, error_list in errors_by_type.items():
             for rank in range(world_size):
                 t = threading.Thread(
                     target=thread_work,
@@ -231,18 +238,17 @@ class TimeoutTest(TestCase):
                 threads.append(t)
                 t.start()
 
-            for thread in threads:
-                thread.join()
+        for thread in threads:
+            thread.join()
 
+        for init_type, error_list in errors_by_type.items():
             # we expect the world_size-1 threads to have failed
-            self.assertEqual(len(error_list), world_size - 1)
+            self.assertEqual(len(error_list), world_size - 1, init_type)
             for error in error_list:
                 self.assertTrue(
                     "Timed out initializing process group in store based barrier"
                     in error.args[0]
                 )
-            error_list = []
-            threads = []
 
 
 class BackendEntryPointTest(TestCase):
@@ -1700,17 +1706,66 @@ class CommonDistributedDataParallelTest:
                     ddp_model.finalize_backward()
 
     @skip_if_lt_x_gpu(2)
-    def test_manual_backward_finalization_pickle_compatibility(self):
-        ddp_model = self._create_ddp_model()
+    def test_lazy_bucket_allocation_with_gradient_as_bucket_view(self):
+        process_group = self._get_process_group()
+
+        for set_to_none in (True, False):
+            with self.subTest(set_to_none=set_to_none):
+                model = Net()
+                eager_model = self._create_ddp_model(
+                    model=copy.deepcopy(model),
+                    process_group=process_group,
+                    gradient_as_bucket_view=True,
+                )
+                lazy_model = self._create_ddp_model(
+                    model=copy.deepcopy(model),
+                    process_group=process_group,
+                    gradient_as_bucket_view=True,
+                    lazy_bucket_allocation=True,
+                )
+                lazy_model.require_manual_backward_finalization = True
+                input = torch.full(
+                    (4, 2),
+                    self.rank + 1.0,
+                    device=self.rank,
+                )
+
+                for _ in range(2):
+                    eager_model.zero_grad(set_to_none=set_to_none)
+                    lazy_model.zero_grad(set_to_none=set_to_none)
+                    eager_model(input)[:, 0].sum().backward()
+                    lazy_model(input)[:, 0].sum().backward()
+                    lazy_model.finalize_backward()
+
+                    for eager_param, lazy_param in zip(
+                        eager_model.parameters(), lazy_model.parameters()
+                    ):
+                        self.assertIsNotNone(eager_param.grad)
+                        self.assertIsNotNone(lazy_param.grad)
+                        self.assertTrue(lazy_param.grad._is_view())
+                        self.assertEqual(eager_param.grad, lazy_param.grad)
+
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_pickle_compatibility(self):
+        ddp_model = self._create_ddp_model(
+            batched_grad_copy=True,
+            lazy_bucket_allocation=True,
+        )
         old_state = ddp_model.__getstate__()
         old_state.pop("_require_manual_backward_finalization")
+        old_state.pop("batched_grad_copy")
+        old_state.pop("lazy_bucket_allocation")
         restored_old = DistributedDataParallel.__new__(DistributedDataParallel)
         restored_old.__setstate__(old_state)
         self.assertFalse(restored_old.require_manual_backward_finalization)
+        self.assertFalse(restored_old.batched_grad_copy)
+        self.assertFalse(restored_old.lazy_bucket_allocation)
 
         ddp_model.require_manual_backward_finalization = True
         restored = pickle.loads(pickle.dumps(ddp_model))
         self.assertTrue(restored.require_manual_backward_finalization)
+        self.assertTrue(restored.batched_grad_copy)
+        self.assertTrue(restored.lazy_bucket_allocation)
 
         restored(torch.randn(4, 2, device=self.rank)).sum().backward()
         restored.finalize_backward()
@@ -1959,6 +2014,10 @@ class AbstractCommTest:
             dist.get_global_rank(DummyProcessGroup(self.rank, self.world_size), 0)
 
         self.assertEqual(dist.get_process_group_ranks(group), [1])
+
+        # init_process_group can return on one rank while its peer is still
+        # connecting; tearing down before the peer is done makes its init fail.
+        dist.barrier()
 
     def _test_tensor_dtype_mismatch(self, backend):
         store = dist.FileStore(self.file_name, self.world_size)
@@ -2919,6 +2978,22 @@ class PythonProcessGroupExtensionTest(MultiProcessTestCase):
 instantiate_parametrized_tests(CommonDistributedDataParallelTest)
 
 
+class _CloneTrackingStore(dist.Store):
+    def __init__(self):
+        super().__init__()
+        self._values = {}
+        self.clone_count = 0
+
+    def add(self, key, value):
+        result = int(self._values.get(key, b"0")) + value
+        self._values[key] = str(result).encode()
+        return result
+
+    def clone(self):
+        self.clone_count += 1
+        return self
+
+
 class SplitGroupOptionsTest(TestCase):
     class _SplittingBackend(C10DBackend):
         def __init__(self, rank, size, name):
@@ -2926,6 +3001,7 @@ class SplitGroupOptionsTest(TestCase):
             self._name = name
             self._options = C10DBackend.Options(name, timeout=timedelta(seconds=111))
             self.split_opts = None
+            self.split_store = None
 
         @property
         def supports_splitting(self):
@@ -2939,18 +3015,21 @@ class SplitGroupOptionsTest(TestCase):
             return self._name
 
         def split(self, store, ranks, opts):
+            self.split_store = store
             self.split_opts = opts
             return SplitGroupOptionsTest._SplittingBackend(
                 ranks.index(self.rank()), len(ranks), f"{self._name}-child"
             )
 
-    def _make_group(self):
+    def _make_group(self, store=None):
         # Shaped like a "cpu:gloo,cuda:nccl" group: two distinct backends, the
         # accelerator one being the group's default. The backend type tags are
         # just map keys here, the backends themselves are Python ones.
         cpu_backend = self._SplittingBackend(0, 1, "cpu-backend")
         default_backend = self._SplittingBackend(0, 1, "default-backend")
-        pg = dist.ProcessGroup(dist.HashStore(), 0, 1)
+        if store is None:
+            store = dist.HashStore()
+        pg = dist.ProcessGroup(store, 0, 1)
         pg._register_backend(
             torch.device("cpu"), dist.ProcessGroup.BackendType.GLOO, cpu_backend
         )
@@ -2960,6 +3039,18 @@ class SplitGroupOptionsTest(TestCase):
         pg._set_default_backend(dist.ProcessGroup.BackendType.NCCL)
         pg._set_group_name("split-options-test")
         return pg, cpu_backend, default_backend
+
+    def test_split_group_passes_prefixed_parent_store_to_backend(self):
+        store = _CloneTrackingStore()
+        pg, cpu_backend, default_backend = self._make_group(store)
+        child = pg.split_group([0], group_name="child")
+
+        self.assertEqual(store.clone_count, 0)
+        self.assertIs(cpu_backend.split_store, default_backend.split_store)
+        self.assertIs(cpu_backend.split_store.underlying_store, store)
+        self.assertIs(child.get_group_store(), cpu_backend.split_store)
+        child.get_group_store().add("probe", 1)
+        self.assertTrue(any(key.startswith("child/") for key in store._values))
 
     def test_split_group_clones_parent_options(self):
         # getBackendOptions() returns the backend's live options_, and split()

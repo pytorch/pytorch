@@ -34,6 +34,7 @@ if TYPE_CHECKING:
 
     from .codegen.simd import MemoryCoalescing
     from .codegen.wrapper import PythonWrapperCodegen
+    from .memory import FreeableInputBuffer
     from .tiling_utils import CoalesceVarAnalysis
 
 import sympy
@@ -82,6 +83,7 @@ from .utils import (
     cmp,
     decompose_index,
     device_need_guard,
+    fx_node_crosses_devices,
     get_current_backend,
     get_device_tflops,
     get_dtype_size,
@@ -158,6 +160,39 @@ class PendingFusion:
         return (self.node1, self.node2)
 
 
+@dataclasses.dataclass(eq=False, slots=True)
+class _FusionMemoryCandidate:
+    snodes: tuple[BaseSchedulerNode, ...]
+    outputs: tuple[SchedulerBuffer, ...]
+    unmet_dependencies: OrderedSet[Dep]
+    mpi_node: MemoryPlanningInfoForNode = dataclasses.field(
+        default_factory=MemoryPlanningInfoForNode
+    )
+
+    def get_nodes(self) -> tuple[BaseSchedulerNode, ...]:
+        return self.snodes
+
+    def get_outputs(self) -> tuple[SchedulerBuffer, ...]:
+        return self.outputs
+
+    def get_buffer_names(self) -> OrderedSet[str]:
+        return OrderedSet(buf.get_name() for buf in self.outputs)
+
+
+@dataclasses.dataclass(slots=True)
+class FusionMemoryUpdate:
+    node1: BaseSchedulerNode
+    node2: BaseSchedulerNode
+    candidate: _FusionMemoryCandidate
+    candidate_step: int
+    region_start: int
+    region_end: int
+    region_nodes: list[BaseSchedulerNode]
+    live_before: list[int]
+    live_after: list[int]
+    peak: int
+
+
 @dataclasses.dataclass(slots=True)
 class ComboKernelMemoryContext:
     """Shared state used by the memory-aware combo gate.
@@ -181,6 +216,52 @@ class ComboKernelMemoryContext:
     baseline_live_before: list[int] = dataclasses.field(default_factory=list)
 
 
+@dataclasses.dataclass(slots=True)
+class FusionMemoryState:
+    nodes: list[BaseSchedulerNode | None]
+    graph_outputs: OrderedSet[str]
+    node_to_idx: dict[BaseSchedulerNode, int]
+    baseline_peak: int
+    baseline_live_before: list[int]
+    baseline_live_after: list[int]
+    peak_limit: int
+    pending_update: FusionMemoryUpdate | None = None
+
+    def apply_accepted_fusion(
+        self, update: FusionMemoryUpdate, fused_node: BaseSchedulerNode
+    ) -> None:
+        start = update.region_start
+        end = update.region_end + 1
+        if len(update.live_after) != end - start:
+            raise AssertionError("unexpected live-after region length")
+        if len(update.live_before) != end - start + 1:
+            raise AssertionError("unexpected live-before region length")
+
+        region_nodes: list[BaseSchedulerNode | None] = [None] * (end - start)
+        for idx, node in enumerate(update.region_nodes):
+            if idx >= len(region_nodes):
+                raise AssertionError("too many nodes in fused memory region")
+            region_nodes[idx] = fused_node if node is update.candidate else node
+        self.nodes[start:end] = region_nodes
+
+        self.baseline_live_after[start:end] = update.live_after
+        self.baseline_live_before[start : end + 1] = update.live_before
+        self.baseline_peak = max(self.baseline_live_after)
+
+        for idx, node in enumerate(region_nodes, start):
+            if node is None:
+                continue
+            self.node_to_idx[node] = idx
+            for snode in node.get_nodes():
+                self.node_to_idx[snode] = idx
+
+        self.node_to_idx[fused_node] = update.candidate_step
+        for node in (update.node1, update.node2):
+            self.node_to_idx[node] = update.candidate_step
+            for snode in node.get_nodes():
+                self.node_to_idx[snode] = update.candidate_step
+
+
 def _is_gpu_triton_backend(
     node1: BaseSchedulerNode,
     node2: BaseSchedulerNode,
@@ -190,6 +271,25 @@ def _is_gpu_triton_backend(
     device_type = node1.get_device().type  # type: ignore[union-attr]
     return (
         device_type in ("cuda", "xpu") and get_current_backend(device_type) == "triton"
+    )
+
+
+def _is_loop_carried_compile_error(e: Exception) -> bool:
+    """Whether ``e`` is the Triton loop-carried-variable compile failure.
+
+    Benchmarking a fusion candidate that hits it tells us nothing, so callers allow
+    the fusion instead -- the workaround for
+    https://github.com/triton-lang/triton/issues/2151. A compile that ran in an
+    async-compile pool worker comes back wrapped in a SubprocException, so match on
+    both sides of that boundary or the workaround silently stops applying whenever
+    the pool is in use.
+    """
+    from triton.compiler.errors import CompilationError
+
+    from torch._inductor.compile_worker.subproc_pool import SubprocException
+
+    return isinstance(e, (CompilationError, SubprocException)) and (
+        "Loop-carried variable" in str(e)
     )
 
 
@@ -207,6 +307,16 @@ class MixOrderReduction:
             if isinstance(subnode, SchedulerNode)
             and subnode.is_reduction()
             and isinstance(subnode.node, ComputedBuffer)
+        )
+
+    @staticmethod
+    def supports_noncontiguous_reductions(node: BaseSchedulerNode) -> bool:
+        return all(
+            subnode.node.get_reduction_type() in {"sum", "prod"}  # type: ignore[union-attr]
+            and subnode.node.get_dtype()  # type: ignore[union-attr]
+            in {torch.float16, torch.bfloat16, torch.float32}
+            for subnode in node.get_nodes()
+            if subnode.is_reduction()
         )
 
     @classmethod
@@ -447,18 +557,7 @@ class MixOrderReduction:
         if MixOrderReduction.is_split_reduction(contiguous_node):
             return False
 
-        # Other reduction types like max/min is not supported yet.
-        # There are no real use case as well.
-        out = all(
-            subnode.node.get_reduction_type()  # type: ignore[union-attr]
-            in {
-                "sum",
-                "prod",
-            }
-            for subnode in other_node.get_nodes()
-            if subnode.is_reduction()
-        )
-        return out
+        return cls.supports_noncontiguous_reductions(other_node)
 
     @classmethod
     def are_mix_order_reductions(
@@ -3402,6 +3501,8 @@ class BaseSchedulerNode:
             return ret
 
         dtype = buf.node.maybe_get_dtype()
+        if dtype is None:
+            return 0
         try:
             gpu_memory_bandwidth = get_gpu_dram_gbps()
             gpu_flops = get_device_tflops(dtype) * 10**12
@@ -4448,9 +4549,10 @@ class FusedMixOrderReductions(FusedSchedulerNode):
 
         # Since node1 is from the current mix order reduction, if node1 is
         # contiguous, the fused node should also be contiguous.
-        if MixOrderReduction.is_contiguous_node(
-            node1
-        ) and not MixOrderReduction.is_contiguous_node(node2):
+        if MixOrderReduction.is_contiguous_node(node1):
+            if not MixOrderReduction.is_contiguous_node(node2):
+                return False
+        elif not MixOrderReduction.supports_noncontiguous_reductions(node2):
             return False
 
         def _get_ancestors(nodes: tuple[BaseSchedulerNode, ...]) -> OrderedSet[str]:
@@ -4753,7 +4855,19 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             foreach_match = len(producer.snodes) == len(consumer.snodes)
             if not foreach_match:
                 why("foreach do not have same length")
-            return foreach_match and all(
+                return False
+            # Each pair becomes one sub-kernel and the sub-kernels run in
+            # parallel, so a consumer may depend only on its own partner.
+            owner = {
+                name: i
+                for i, snode in enumerate(producer.snodes)
+                for name in snode.get_buffer_names()
+            }
+            for i, snode in enumerate(consumer.snodes):
+                if any(owner.get(dep.name, i) != i for dep in snode.unmet_dependencies):
+                    why("a consumer depends on another producer sub-node")
+                    return False
+            return all(
                 producer.scheduler.can_fuse(l, r)
                 for l, r in zip(producer.snodes, consumer.snodes)
             )
@@ -5528,7 +5642,31 @@ def get_scheduler_node_symbol_uses(
     free_symbol_uses.update(
         *(get_layout_symints(ir_node) for ir_node in node.node.get_outputs())
     )
-    return free_symbol_uses
+    expanded_symbol_uses = OrderedSet[sympy.Symbol]()
+    for symbol in free_symbol_uses:
+        expanded_symbol_uses.update(
+            V.graph.sizevars.remove_precomputed_replacements(symbol).free_symbols
+        )
+    return expanded_symbol_uses
+
+
+def filter_graph_level_symbols(
+    symbols: OrderedSet[sympy.Symbol],
+) -> OrderedSet[sympy.Symbol]:
+    """Remove symbols that are always internal to generated kernels."""
+    return OrderedSet(
+        s
+        for s in symbols
+        if symbol_is_type(
+            s,
+            (
+                SymT.SIZE,
+                SymT.FLOAT,
+                SymT.UNBACKED_INT,
+                SymT.UNBACKED_FLOAT,
+            ),
+        )
+    )
 
 
 def _is_epilogue_fusion_enabled(template_node: BaseSchedulerNode) -> bool:
@@ -5755,11 +5893,16 @@ class Scheduler:
         self._tiling_memory_cache: dict[tuple[Any, ...], Any] = {}
         # buffer name -> reuse key, see _single_user_read_reuse_keys
         self._fusion_reuse_keys: dict[str, Any] = {}
+        # Failed correctness check of memory timeline modeling disables fusion memory checks
+        # for later fusion rounds.
+        self._fusion_memory_guard_disabled = False
         super().__init__()
         V.graph.scheduler = self
         self.backends: dict[torch.device, BaseScheduling] = {}
         self.post_grad_graph_id = next(_post_grad_graph_counter)
         self._graph_partition_counter = itertools.count()
+        self._fusion_memory_state: FusionMemoryState | None = None
+
         self.completed_operations: OrderedSet[str] = OrderedSet()
         self.available_buffer_names = OrderedSet(
             [
@@ -6254,18 +6397,32 @@ class Scheduler:
             removed_node_names.update(names)
             snodes = [self.name_to_node[name] for name in names]
 
+            # The nodes of a foreach kernel run in parallel, so a node that
+            # depends on an earlier one of the list starts a new kernel: in
+            # _foreach_add_([a, b], [b, a]) the value for b reads a after the
+            # first element has written it.
+            groups: list[list[tuple[str, BaseSchedulerNode]]] = [[]]
+            written: OrderedSet[str] = OrderedSet()
+            for name, snode in zip(names, snodes):
+                if any(dep.name in written for dep in snode.unmet_dependencies):
+                    groups.append([])
+                    written = OrderedSet()
+                groups[-1].append((name, snode))
+                written.update(snode.get_buffer_names())
+
             enable_autotune = config.combo_kernels_autotune > 1
-            fe_node = ForeachKernelSchedulerNode(
-                self,
-                snodes,
-                use_custom_partition_algo=False,
-                enable_autotune=enable_autotune,
-            )
+            for group in groups:
+                fe_node = ForeachKernelSchedulerNode(
+                    self,
+                    [snode for _, snode in group],
+                    use_custom_partition_algo=False,
+                    enable_autotune=enable_autotune,
+                )
 
-            fe_nodes.append(fe_node)
+                fe_nodes.append(fe_node)
 
-            for name in names:
-                self.name_to_fused_node[name] = fe_node
+                for name, _ in group:
+                    self.name_to_fused_node[name] = fe_node
 
         self.nodes = [
             node for node in self.nodes if node.get_name() not in removed_node_names
@@ -6560,7 +6717,6 @@ class Scheduler:
         from .memory import (
             assign_memory_planning_info_for_scheduler_buffers,
             compute_memory_timeline,
-            FreeableInputBuffer,
             get_freeable_input_buf,
         )
 
@@ -6707,6 +6863,46 @@ class Scheduler:
                 name_to_node[name] = node
         for node in nodes:
             visit(node)
+        return result
+
+    @staticmethod
+    def _stable_topological_sort_schedule(
+        nodes: list[BaseSchedulerNode],
+    ) -> list[BaseSchedulerNode]:
+        """Topologically sort scheduler nodes while preserving their order."""
+        name_to_node = {
+            name: node for node in nodes for name in node.get_buffer_names()
+        }
+        pending = list(reversed(nodes))
+        ready: OrderedSet[BaseSchedulerNode] = OrderedSet()
+        waiting: dict[BaseSchedulerNode, list[BaseSchedulerNode]] = defaultdict(list)
+        dep_iters: dict[BaseSchedulerNode, Iterator[BaseSchedulerNode]] = {}
+        result: list[BaseSchedulerNode] = []
+
+        while pending:
+            node = pending.pop()
+            dep_iter = dep_iters.pop(node, None)
+            if dep_iter is None:
+                deps = OrderedSet(
+                    name_to_node[dep.name]
+                    for dep in node.unmet_dependencies
+                    if dep.name in name_to_node
+                )
+                deps.discard(node)
+                dep_iter = reversed(deps)
+
+            for dep in dep_iter:
+                if dep not in ready:
+                    dep_iters[node] = dep_iter
+                    waiting[dep].append(node)
+                    break
+            else:
+                ready.add(node)
+                result.append(node)
+                pending.extend(reversed(waiting.pop(node, ())))
+
+        if waiting or len(result) != len(nodes):
+            raise AssertionError("stable topological sort failed")
         return result
 
     def _enforce_switch_ordering(self) -> None:
@@ -6856,6 +7052,7 @@ class Scheduler:
         with dynamo_timed(
             "Scheduler.fused_nodes", log_pt2_compile_event=True, log_waitcounter=True
         ):
+            self._fusion_memory_state = None
             for i in range(10):
                 old_len = len(nodes)
                 fusion_log.debug(
@@ -6882,6 +7079,7 @@ class Scheduler:
                 or config.loop_index_inversion_in_fusion
             ):
                 nodes = self.fuse_nodes_once(nodes, is_reorder_round=True)
+            self._fusion_memory_state = None
             return nodes
 
     def process_grouped_nodes(self) -> None:
@@ -7131,7 +7329,10 @@ class Scheduler:
         )
 
     def compile_kernel(
-        self, nodes: Sequence[BaseSchedulerNode], hint_override: int | None = None
+        self,
+        nodes: Sequence[BaseSchedulerNode],
+        hint_override: int | None = None,
+        skip_if_perf_cached: bool = False,
     ) -> tuple[LambdaFuture | None, ModuleType]:
         src_code = self.generate_kernel_code_from_nodes(
             nodes, benchmark_kernel=True, hint_override=hint_override
@@ -7140,6 +7341,11 @@ class Scheduler:
 
         if not hasattr(mod, "triton_"):
             return (None, mod)
+
+        if skip_if_perf_cached and mod.__file__ is not None:
+            perf_path = os.path.splitext(mod.__file__)[0] + ".kernel_perf"
+            if os.path.exists(perf_path):
+                return (None, mod)
 
         async_compile = torch._inductor.async_compile.AsyncCompile()
         if not async_compile.use_process_pool():
@@ -7223,8 +7429,6 @@ class Scheduler:
         if has_atomic_add and not is_multi_template:
             return FusionResult.fuse(True)
 
-        from triton.compiler.errors import CompilationError
-
         why = WhyNoFuse(node1, node2)
 
         device = node_list_fused[0].get_device()
@@ -7271,6 +7475,8 @@ class Scheduler:
             if self._has_layout_conflict_for_template(multi_node):
                 return FusionResult.fuse(False)
 
+            from torch._inductor.codegen.simd import CantSplit
+
             hint_override_best_fusion_choice: dict[int | None, ir.ChoiceCaller] = {}
             if not has_atomic_add:
                 for hint_override in config.multi_kernel_hints:
@@ -7284,16 +7490,19 @@ class Scheduler:
                             torch._inductor.select_algorithm.TritonTemplateCaller,
                         ):
                             continue
-                        with multi_node.swap_as_triton_caller(choice):
-                            future_choices.append(
-                                (
-                                    choice,
-                                    *self.compile_kernel(
-                                        node_list_fused,
-                                        hint_override=choice.hint_override,
-                                    ),
+                        try:
+                            with multi_node.swap_as_triton_caller(choice):
+                                future_choices.append(
+                                    (
+                                        choice,
+                                        *self.compile_kernel(
+                                            node_list_fused,
+                                            hint_override=choice.hint_override,
+                                        ),
+                                    )
                                 )
-                            )
+                        except CantSplit:
+                            continue
 
                     min_ms_fused = float("inf")
                     ms_fused_choice: TritonTemplateCallerBase | None = None
@@ -7331,7 +7540,7 @@ class Scheduler:
 
             from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
 
-            bench_epilogue = config.benchmark_epilogue_fusion
+            benchmark_template_fusion = config.benchmark_template_fusion
             num_fusible_callers = sum(
                 isinstance(c, (TritonTemplateCallerBase, NVUniversalGemmCaller))
                 for c in multi_node.choices
@@ -7339,8 +7548,9 @@ class Scheduler:
             # Track if the choice timings can be retrieved async after compilation
             get_choice_timings_async = (
                 use_pipelined_autotuning()
-                and not bench_epilogue
-                and num_fusible_callers <= config.max_epilogue_benchmarked_choices
+                and not benchmark_template_fusion
+                and num_fusible_callers
+                <= config.max_template_fusion_benchmarked_choices
             )
 
             ms1, ms2 = float("inf"), float("inf")
@@ -7353,11 +7563,9 @@ class Scheduler:
                     choice_timings.items(), key=operator.itemgetter(1)
                 )
             else:
-                # Use 0 for unfused time, won't be used as bench_epilogue
+                # Use 0 for unfused time, won't be used as benchmark_template_fusion
                 # is guaranteed to be False here
                 choice_timings_iter = [(c, 0) for c in multi_node.choices]
-
-            from torch._inductor.codegen.simd import CantSplit
 
             def choice_supports_fusion(choice: ir.ChoiceCaller) -> bool:
                 if not isinstance(
@@ -7432,7 +7640,7 @@ class Scheduler:
                     multi_node.finalize_as_triton_caller(best)
                 return FusionResult.fuse(True)
 
-            if bench_epilogue:
+            if benchmark_template_fusion:
                 ms2, path2 = (
                     self.benchmark_fused_nodes(node_list_2)
                     if epilogue_fusion
@@ -7480,11 +7688,10 @@ class Scheduler:
                 ):
                     continue
 
-                if bench_epilogue and unfused_time >= ms1 + ms2:
+                if benchmark_template_fusion and unfused_time >= ms1 + ms2:
                     break
 
-                template_choices += 1
-                if template_choices > config.max_epilogue_benchmarked_choices:
+                if template_choices >= config.max_template_fusion_benchmarked_choices:
                     break
 
                 try:
@@ -7510,6 +7717,7 @@ class Scheduler:
                             )
                 except CantSplit:
                     continue
+                template_choices += 1
 
             if len(future_choices) == 0:
                 return FusionResult.fuse(False)
@@ -7546,7 +7754,7 @@ class Scheduler:
                     try:
                         if future is not None:
                             res = future.result()
-                        elif not bench_epilogue:
+                        elif not benchmark_template_fusion:
                             if hasattr(mod_fused, "triton_"):
                                 res = mod_fused.triton_
                                 res.precompile()
@@ -7566,7 +7774,7 @@ class Scheduler:
                             )
                         continue
 
-                    if bench_epilogue:
+                    if benchmark_template_fusion:
                         is_nvgemm_choice = isinstance(choice, NVUniversalGemmCaller)
                         swap_ctx = (
                             # pyrefly: ignore [missing-attribute]
@@ -7623,11 +7831,11 @@ class Scheduler:
                                 ms_fused_choice = choice
                                 break
 
-                if bench_epilogue:
+                if benchmark_template_fusion:
                     log_fusion(min_ms_fused, ms1, ms2)
 
                 if (
-                    not bench_epilogue or min_ms_fused < (ms1 + ms2)
+                    not benchmark_template_fusion or min_ms_fused < (ms1 + ms2)
                 ) and ms_fused_choice is not None:
                     is_nvgemm = isinstance(ms_fused_choice, NVUniversalGemmCaller)
                     if is_nvgemm:
@@ -7643,7 +7851,7 @@ class Scheduler:
                         # pyrefly: ignore [missing-attribute]
                         multi_node.finalize_as_triton_caller(ms_fused_choice)
 
-                    if bench_epilogue:
+                    if benchmark_template_fusion:
                         # pyrefly: ignore [missing-attribute]
                         multi_node._choice_timings[None] = new_timings
                     return True
@@ -7731,10 +7939,10 @@ class Scheduler:
                 except NoTritonConfigsError:
                     return False
 
-                except CompilationError as e:
-                    if "Loop-carried variable" in str(e):
-                        return True
-                    raise
+                except Exception as e:
+                    if not _is_loop_carried_compile_error(e):
+                        raise
+                    return True
 
             return FusionResult.from_callable(
                 callable_fn=benchmark_when_ready, future=future_and_mod_l1_fused[0]
@@ -7770,6 +7978,40 @@ class Scheduler:
 
         return node3
 
+    def _apply_fusion_memory_update(
+        self,
+        fused: BaseSchedulerNode,
+        memory_update: FusionMemoryUpdate | None,
+    ) -> None:
+        state = self._fusion_memory_state
+        if state is None:
+            return
+        if memory_update is None:
+            raise AssertionError("expected a fusion memory update")
+        state.apply_accepted_fusion(memory_update, fused)
+        fused.mpi_node = memory_update.candidate.mpi_node
+
+    def _can_fuse_peak_memory_check(
+        self,
+        state: FusionMemoryState,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> tuple[bool, FusionMemoryUpdate | None]:
+        update = self._fusion_memory_update(state, node1, node2)
+        if update is None:
+            self._fusion_memory_guard_disabled = True
+            self._fusion_memory_state = None
+            return True, None
+        if update.peak > state.peak_limit:
+            fusion_log.debug(
+                "memory-timeline fusion rejected %s with %s: estimated peak delta %d bytes",
+                node1.get_name(),
+                node2.get_name(),
+                update.peak - state.baseline_peak,
+            )
+            return False, None
+        return True, update
+
     def fuse_if_speedup(
         self,
         node1: BaseSchedulerNode,
@@ -7777,12 +8019,20 @@ class Scheduler:
         speedup_fn: Callable[[], bool],
         fused_nodes: OrderedSet[BaseSchedulerNode],
     ):
+        memory_state = self._fusion_memory_state
+        can_fuse = self.can_fuse(node1, node2)
+        state = self._fusion_memory_state
+        memory_update = state.pending_update if state is not None else None
         if (
-            self.can_fuse(node1, node2)
-            and not self.will_fusion_create_cycle(node1, node2)
+            can_fuse
+            and (
+                memory_state is not None
+                or not self.will_fusion_create_cycle(node1, node2)
+            )
             and speedup_fn()
         ):
-            self.fuse_two_nodes(node1, node2, fused_nodes)
+            fused = self.fuse_two_nodes(node1, node2, fused_nodes)
+            self._apply_fusion_memory_update(fused, memory_update)
             return True
 
         return False
@@ -7849,6 +8099,9 @@ class Scheduler:
                     future_to_pending_fusion[f] = (pending_fusion, candidate)
                 else:
                     # Non AsyncCompile path, perform fusion
+                    if self._fusion_memory_state is not None:
+                        node1 = self.get_fused_node(node1)
+                        node2 = self.get_fused_node(node2)
                     if self.fuse_if_speedup(
                         node1, node2, pending_fusion.callable_fn, fused_nodes
                     ):
@@ -7905,7 +8158,17 @@ class Scheduler:
                 if not is_speedup() or self.will_fusion_create_cycle(node1, node2):
                     continue
 
-                self.fuse_two_nodes(node_key1, node_key2, fused_nodes)
+                state = self._fusion_memory_state
+                memory_update = None
+                if state is not None:
+                    can_fuse, memory_update = self._can_fuse_peak_memory_check(
+                        state, node_key1, node_key2
+                    )
+                    if not can_fuse:
+                        continue
+
+                fused = self.fuse_two_nodes(node_key1, node_key2, fused_nodes)
+                self._apply_fusion_memory_update(fused, memory_update)
 
         for node1, node2 in possible_fusion_pairs:
             # if either node is in a pending fusion, resolve it.
@@ -7921,9 +8184,14 @@ class Scheduler:
             ):
                 continue
 
-            if self.can_fuse(
-                node1, node2, is_reorder_round
-            ) and not self.will_fusion_create_cycle(node1, node2):
+            memory_state = self._fusion_memory_state
+            can_fuse = self.can_fuse(node1, node2, can_reorder=is_reorder_round)
+            state = self._fusion_memory_state
+            memory_update = state.pending_update if state is not None else None
+            if can_fuse and (
+                memory_state is not None
+                or not self.will_fusion_create_cycle(node1, node2)
+            ):
                 fusion_res = self.speedup_by_fusion(node1, node2)
                 if fusion_res.callable_fn is not None:
                     pending_fusion = PendingFusion(
@@ -7953,7 +8221,8 @@ class Scheduler:
                 if not fusion_res.should_fuse:
                     continue
 
-                self.fuse_two_nodes(node1, node2, fused_nodes)
+                fused = self.fuse_two_nodes(node1, node2, fused_nodes)
+                self._apply_fusion_memory_update(fused, memory_update)
 
     def _finish_pending_fusions(
         self,
@@ -8034,6 +8303,8 @@ class Scheduler:
             tuple[BaseSchedulerNode, BaseSchedulerNode]
         ] = []
 
+        old_state = self._fusion_memory_state
+        self._fusion_memory_state = None
         possible_fusions = self.get_possible_fusions(
             nodes,
             is_reorder_round,
@@ -8043,6 +8314,22 @@ class Scheduler:
             possible_fusions = self._handle_template_overlap(
                 possible_fusions, deferred_prologue_fusions
             )
+
+        if (
+            not self._fusion_memory_guard_disabled
+            and nodes
+            and (
+                config.fusion_memory_timeline_peak_memory_increase_gb is not None
+                or config.fusion_memory_timeline_peak_memory_pct_threshold is not None
+            )
+        ):
+            peak_limit = old_state.peak_limit if old_state is not None else None
+            fusion_memory_state = self._init_fusion_memory_state(
+                nodes, peak_limit=peak_limit
+            )
+        else:
+            fusion_memory_state = None
+        self._fusion_memory_state = fusion_memory_state
 
         self._try_fusion_pairs(
             possible_fusions,
@@ -8066,8 +8353,29 @@ class Scheduler:
             )
             self._evaluate_pending_template_fusions(template_fusion_nodes, fused_nodes)
 
-        nodes = sorted(fused_nodes, key=lambda x: x.min_order)
-        nodes = self.topological_sort_schedule(nodes)
+        fusion_memory_state = self._fusion_memory_state
+        if fusion_memory_state is None:
+            nodes = sorted(fused_nodes, key=lambda x: x.min_order)
+            nodes = self.topological_sort_schedule(nodes)
+        else:
+            # During fusion memory modelling topologically sorted nodes were already constructed.
+            # Reusing this order without topological sort.
+            nodes = [node for node in fusion_memory_state.nodes if node is not None]
+            from .memory import (
+                assign_memory_planning_info_for_scheduler_buffers,
+                assign_memory_planning_info_for_scheduler_nodes,
+                get_freeable_input_buf,
+            )
+
+            graph_inputs = OrderedSet(V.graph.graph_inputs.keys())
+            name_to_freeable = get_freeable_input_buf(nodes, graph_inputs)
+            assign_memory_planning_info_for_scheduler_buffers(nodes, self.name_to_buf)
+            assign_memory_planning_info_for_scheduler_nodes(
+                nodes,
+                self.name_to_fused_node,
+                self.name_to_buf,
+                name_to_freeable,
+            )
         return nodes
 
     def _combo_kernel_context_key(
@@ -8625,13 +8933,17 @@ class Scheduler:
                         continue
                     seen.add(key)
 
-                    if self.can_fuse(node1, node2, is_reorder_round):
+                    # Skip cycle checks during candidates discovery,
+                    # cycles will be checked before final fusion application.
+                    if self.can_fuse(node1, node2, is_reorder_round, check_cycle=False):
                         possible_fusions.append(key)
                     elif (
                         node2.is_template()
                         or node2.is_foreach()
                         or isinstance(node2, FusedNestedReductions)
-                    ) and self.can_fuse(node2, node1, is_reorder_round):
+                    ) and self.can_fuse(
+                        node2, node1, is_reorder_round, check_cycle=False
+                    ):
                         # These fusions are order dependent. Fused nested reductions
                         # must remain the producer for scheduler bookkeeping.
                         possible_fusions.append((node2, node1))
@@ -8776,6 +9088,230 @@ class Scheduler:
         if V.graph.sizevars.statically_known_gt(memory_overhead, 32 * bw_saving):
             return True
         return False
+
+    def _init_fusion_memory_state(
+        self, nodes: list[BaseSchedulerNode], peak_limit: int | None = None
+    ) -> FusionMemoryState:
+        from .memory import (
+            assign_memory_planning_info_for_scheduler_buffers,
+            assign_memory_planning_info_for_scheduler_nodes,
+            compute_memory_timeline,
+            get_freeable_input_buf,
+            live_memory_before_steps_from_buf_info_list,
+            peak_memory_from_buf_info_list,
+        )
+
+        graph_inputs = OrderedSet(V.graph.graph_inputs.keys())
+        graph_outputs = OrderedSet(V.graph.get_output_names())
+        name_to_freeable = get_freeable_input_buf(nodes, graph_inputs)
+        assign_memory_planning_info_for_scheduler_buffers(nodes, self.name_to_buf)
+        assign_memory_planning_info_for_scheduler_nodes(
+            nodes, self.name_to_fused_node, self.name_to_buf, name_to_freeable
+        )
+        buffer_info, node_to_idx, _ = compute_memory_timeline(
+            nodes, name_to_freeable, graph_outputs
+        )
+        for node in nodes:
+            for snode in node.get_nodes():
+                node_to_idx[snode] = node_to_idx[node]
+
+        baseline_peak, memory_at_nodes = peak_memory_from_buf_info_list(
+            buffer_info, len(nodes)
+        )
+        baseline_live_before = live_memory_before_steps_from_buf_info_list(
+            buffer_info, len(nodes)
+        )
+
+        abs_thr_gb = config.fusion_memory_timeline_peak_memory_increase_gb
+        pct_thr = config.fusion_memory_timeline_peak_memory_pct_threshold
+        if abs_thr_gb is None and pct_thr is None:
+            raise AssertionError("expected fusion memory guard to be enabled")
+        if peak_limit is None:
+            limits = [float(abs_thr_gb) * (1024**3)] if abs_thr_gb is not None else []
+            if pct_thr is not None:
+                limits.append(pct_thr * baseline_peak)
+            peak_limit = baseline_peak + int(min(limits))
+
+        state = FusionMemoryState(
+            nodes=list(nodes),
+            graph_outputs=graph_outputs,
+            node_to_idx=node_to_idx,
+            baseline_peak=baseline_peak,
+            baseline_live_before=baseline_live_before,
+            baseline_live_after=memory_at_nodes[:-1],
+            peak_limit=peak_limit,
+        )
+        return state
+
+    def _fusion_node_step(
+        self, state: FusionMemoryState, node: BaseSchedulerNode | OutputNode
+    ) -> int | None:
+        r"""
+        Node's step in the fusion-memory timeline.
+
+        Args:
+            state (FusionMemoryState): timeline containing recorded node positions.
+            node (BaseSchedulerNode or OutputNode): node whose position is requested.
+
+        Returns:
+            int or None: Directly recorded step, or the earliest recorded step.
+              Output nodes and nodes without recorded constituents have no timeline step.
+        """
+        if isinstance(node, OutputNode):
+            return None
+        node = self.get_fused_node(node)
+        if node in state.node_to_idx:
+            return state.node_to_idx[node]
+        steps = [
+            state.node_to_idx[n] for n in node.get_nodes() if n in state.node_to_idx
+        ]
+        return min(steps) if steps else None
+
+    @staticmethod
+    def _make_fusion_memory_candidate(
+        node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> _FusionMemoryCandidate:
+        snodes = tuple(OrderedSet([*node1.get_nodes(), *node2.get_nodes()]))
+        buffer_names = node1.get_buffer_names() | node2.get_buffer_names()
+        outputs = tuple(
+            buffer for node in (node1, node2) for buffer in node.get_outputs()
+        )
+        unmet_dependencies = OrderedSet(
+            dep
+            for node in (node1, node2)
+            for dep in node.unmet_dependencies
+            if dep.name not in buffer_names
+        )
+        input_buffers = OrderedSet()
+        for node in (node1, node2):
+            input_buffers.update(node.mpi_node.pred_buffers)
+        return _FusionMemoryCandidate(
+            snodes=snodes,
+            outputs=outputs,
+            unmet_dependencies=unmet_dependencies,
+            mpi_node=MemoryPlanningInfoForNode(
+                pred_buffers=input_buffers,
+            ),
+        )
+
+    def _fusion_memory_update(
+        self,
+        state: FusionMemoryState,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+    ) -> FusionMemoryUpdate | None:
+        r"""_fusion_memory_update(state, node1, node2) -> FusionMemoryUpdate | None
+
+        Simulate how fusing two nodes changes their memory timeline region.
+
+        The affected region spans the original positions of ``node1`` and
+        ``node2``. Replace both with one synthetic candidate, topologically place
+        that candidate among the unaffected nodes, and assign the proposed
+        schedule steps. Recalculate allocation and freeing from the region's
+        original live-in value so the result can replace the same region after
+        fusion.
+
+        Args:
+            state (FusionMemoryState): current fusion-memory timeline.
+            node1 (BaseSchedulerNode): first node in the proposed fusion.
+            node2 (BaseSchedulerNode): second node in the proposed fusion.
+
+        Returns:
+            FusionMemoryUpdate: proposed schedule and memory values for the
+              affected timeline region, or None when its boundary cannot be
+              reconciled with the current timeline.
+        """
+        from .memory import estimate_region_memory
+
+        node1_step = self._fusion_node_step(state, node1)
+        node2_step = self._fusion_node_step(state, node2)
+        if node1_step is None or node2_step is None:
+            missing = node1 if node1_step is None else node2
+            raise AssertionError(
+                f"expected {missing.get_name()} in the fusion memory timeline"
+            )
+
+        region_start = min(node1_step, node2_step)
+        region_end = max(node1_step, node2_step)
+
+        candidate = self._make_fusion_memory_candidate(node1, node2)
+        candidate_node = typing.cast(BaseSchedulerNode, candidate)
+
+        region_nodes: list[BaseSchedulerNode] = [candidate_node]
+        for idx in range(region_start, region_end + 1):
+            node = state.nodes[idx]
+            if node is None or node is node1 or node is node2:
+                continue
+            region_nodes.append(node)
+
+        # Move the candidate behind any of its producers inside this region.
+        region_buffer_names = OrderedSet(
+            name for node in region_nodes[1:] for name in node.get_buffer_names()
+        )
+        has_in_region_predecessor = any(
+            dep.name in region_buffer_names for dep in candidate.unmet_dependencies
+        )
+        if has_in_region_predecessor:
+            region_nodes = self._stable_topological_sort_schedule(region_nodes)
+
+        # Record changed region positions in proposed_steps
+        # Unchanged nodes fallback to previous timeline.
+        proposed_steps = {
+            node: region_start + idx for idx, node in enumerate(region_nodes)
+        }
+        candidate_step = proposed_steps[candidate_node]
+        for node in region_nodes:
+            step = proposed_steps[node]
+            for snode in node.get_nodes():
+                proposed_steps[snode] = step
+        for node in (node1, node2):
+            proposed_steps[node] = candidate_step
+
+        def get_proposed_step(node: BaseSchedulerNode) -> int:
+            if node is not candidate_node:
+                node = self.get_fused_node(node)
+            if node in proposed_steps:
+                return proposed_steps[node]
+            if node in state.node_to_idx:
+                return state.node_to_idx[node]
+            raise AssertionError(
+                f"expected {node.get_name()} in the fusion memory timeline"
+            )
+
+        region_peak, live_before, live_after = estimate_region_memory(
+            region_nodes,
+            region_start=region_start,
+            region_end=region_end,
+            step_of=get_proposed_step,
+            graph_outputs=state.graph_outputs,
+            cur_memory=state.baseline_live_before[region_start],
+        )
+        expected_live_out = state.baseline_live_before[region_end + 1]
+        if live_before[-1] != expected_live_out:
+            fusion_log.debug(
+                "fusion memory simulation ended with %d live bytes; expected %d",
+                live_before[-1],
+                expected_live_out,
+            )
+            torch._logging.warning_once(
+                log,
+                "Fusion memory modeling produced an inconsistent live-memory "
+                "total after simulating a fusion; disabling the guard and "
+                "continuing with ordinary fusion.",
+            )
+            return None
+        return FusionMemoryUpdate(
+            node1=node1,
+            node2=node2,
+            candidate=candidate,
+            candidate_step=candidate_step,
+            region_start=region_start,
+            region_end=region_end,
+            region_nodes=region_nodes,
+            live_before=live_before,
+            live_after=live_after,
+            peak=region_peak,
+        )
 
     def fusion_prevent_too_many_reads_and_writes(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode, threshold: int
@@ -9840,12 +10376,23 @@ class Scheduler:
         node2: BaseSchedulerNode,
         can_reorder: bool = False,
         allow_mix_order_reduction: bool = True,
+        check_cycle: bool = True,
     ) -> bool:
         """Determine if node1 and node2 can be combined into a single fused node.
 
         Speculative loop mutations (reordering, reindexing) are automatically
         rolled back if the fusion decision ultimately fails.
         """
+        memory_state = self._fusion_memory_state
+        is_nested_fusion = False
+        if memory_state is not None:
+            # Foreach and FusedMixOrderReductions recursively check whether their
+            # constituent nodes can fuse.
+            # Graph-level checks only apply to outer fusions.
+            is_nested_fusion = (
+                self.get_fused_node(node1) is not node1
+                or self.get_fused_node(node2) is not node2
+            )
         tracker = _LoopMutationTracker.create((node1, node2))
         can_fuse = self._can_fuse_impl(
             node1,
@@ -9853,6 +10400,21 @@ class Scheduler:
             can_reorder=can_reorder,
             allow_mix_order_reduction=allow_mix_order_reduction,
         )
+        if (
+            can_fuse
+            and check_cycle
+            and memory_state is not None
+            and not is_nested_fusion
+            and self.will_fusion_create_cycle(node1, node2)
+        ):
+            can_fuse = False
+        memory_update = None
+        if can_fuse and memory_state is not None and not is_nested_fusion:
+            can_fuse, memory_update = self._can_fuse_peak_memory_check(
+                memory_state, node1, node2
+            )
+        if memory_state is not None and not is_nested_fusion:
+            memory_state.pending_update = memory_update
         tracker.finish(rollback=not can_fuse)
         return can_fuse
 
@@ -10428,10 +10990,12 @@ class Scheduler:
             relevant_reading_nodes = node1.snodes
         num_concurrent_reads = 0
         for reading_node in relevant_reading_nodes:
+            # A read of an earlier mutation of the same buffer (the output of an
+            # index_put_ into it, say) reads the same memory under another name.
             relevant_reads = [
                 read
                 for read in reading_node.read_writes.reads
-                if read.name == real_name
+                if self.mutation_real_name.get(read.name, read.name) == real_name
             ]
             if not relevant_reads:
                 continue
@@ -11206,8 +11770,14 @@ class Scheduler:
         if not node.is_gpu():
             return f"{node.get_device()} ops"
 
-        if isinstance(node.node, ir.DeviceCopy):
-            return "DeviceCopy ops"
+        # Decided on the FX node so that MultiOutput children, which share their
+        # parent's fx_node, are split together with it.
+        if isinstance(ir_node, ir.DeviceCopy) or (
+            isinstance(ir_node, ir.ExternKernel)
+            and (fx_node := getattr(ir_node, "fx_node", None)) is not None
+            and fx_node_crosses_devices(fx_node)
+        ):
+            return "cross-device ops"
 
         if isinstance(node.node, ir.Switch):
             return "Switch ops"
@@ -11223,7 +11793,7 @@ class Scheduler:
 
         # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
         if config.triton.cudagraph_skip_dynamic_graphs:
-            if get_scheduler_node_symbol_uses(node):
+            if filter_graph_level_symbols(get_scheduler_node_symbol_uses(node)):
                 return "dynamic shape ops"
 
         return None
@@ -11369,28 +11939,6 @@ class Scheduler:
                 # read_writes does not contain sympy.Expr
                 raise NotImplementedError(f"Unsupported input node type: {type(node)}")
 
-        def filter_symbols(
-            symbols: OrderedSet[sympy.Symbol],
-        ) -> OrderedSet[sympy.Symbol]:
-            """
-            Filters a set of symbols that are required for codegen. Skip symbols
-            that are always internal to kernels, such as SymT.TMP, SymT.INDEX,
-            and SymT.R0_INDEX.
-            """
-            return OrderedSet(
-                s
-                for s in symbols
-                if symbol_is_type(
-                    s,
-                    (
-                        SymT.SIZE,
-                        SymT.FLOAT,
-                        SymT.UNBACKED_INT,
-                        SymT.UNBACKED_FLOAT,
-                    ),
-                )
-            )
-
         candidate_symbols: OrderedSet[sympy.Symbol] = OrderedSet().union(
             *(get_scheduler_node_symbol_uses(node) for node in partition)
         )
@@ -11398,7 +11946,7 @@ class Scheduler:
             *(get_input_node_symbols(node) for node in input_nodes.values())
         )
 
-        candidate_symbols = filter_symbols(candidate_symbols)
+        candidate_symbols = filter_graph_level_symbols(candidate_symbols)
 
         res: OrderedSet[sympy.Symbol] = OrderedSet()
         for s in candidate_symbols:
@@ -11755,6 +12303,9 @@ class Scheduler:
         signatures = self.get_graph_partition_signature(
             partitions=partitions, skip_cudagraphs=skip_cudagraphs
         )
+        V.graph.has_uncaptured_partition = any(
+            signature.skip_cudagraph for signature in signatures
+        )
         self.compute_graph_partition_maps(signatures)
 
         self._log_graph_partitions(partitions, signatures)
@@ -12027,6 +12578,9 @@ class Scheduler:
         self.current_device = self.default_device_context
         if self.previous_node is not None:
             raise AssertionError("expected previous_node to be None")
+        previous_nodes_by_stream: dict[
+            tuple[torch.device | None, int], BaseSchedulerNode
+        ] = {}
 
         # pyrefly: ignore [unbound-name]
         if self.default_device_context and config.triton.autotune_at_compile_time:
@@ -12054,6 +12608,8 @@ class Scheduler:
                     V.graph.wrapper_code.mark_multistream_alignment(multi)
 
         for node in nodes:
+            stream_key = (node.get_device(), self.get_node_stream(node))
+            self.previous_node = previous_nodes_by_stream.get(stream_key)
             if log.isEnabledFor(logging.DEBUG):
                 try:
                     log.debug(
@@ -12142,7 +12698,7 @@ class Scheduler:
             # on multiple streams get one copy per stream.
             V.graph.wrapper_code.codegen_deferred_alignment_copies(
                 (dep.name for dep in node.read_writes.reads),
-                self.node_to_stream.get(node, 0),
+                stream_key[1],
             )
 
             self.current_node = node
@@ -12214,9 +12770,9 @@ class Scheduler:
                 V.graph.wrapper_code.codegen_cuda_mempool_exit()
 
             if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
-                self.previous_node = node
+                previous_nodes_by_stream[stream_key] = node
             else:
-                self.previous_node = None
+                previous_nodes_by_stream.pop(stream_key, None)
 
         if self.current_device != self.default_device_context:
             # when default_device_context is not None, we are codegen
@@ -12263,12 +12819,19 @@ class Scheduler:
 
         if not config.benchmark_combo_kernel:
             return True
-
-        from triton.compiler.errors import CompilationError
+        if device is None:
+            raise AssertionError("expected device to be set")
 
         ms1, path1_list = 0.0, []
         node_benchmark_results = {}
-        for i, snode in enumerate(subkernel_nodes):
+        # Submit cache misses to the compile pool before benchmarking any subkernel.
+        # Triton's frontend holds the GIL, so compiles only overlap across processes.
+        compiled = [
+            self.compile_kernel(snode.get_nodes(), skip_if_perf_cached=True)
+            for snode in subkernel_nodes
+        ]
+
+        for i, (snode, (future, mod)) in enumerate(zip(subkernel_nodes, compiled)):
             node_list = snode.get_nodes()
             # We can not accurately benchmark kernel using atomic_add
             # due to how we generate random integer inputs.
@@ -12277,8 +12840,20 @@ class Scheduler:
                     "ComboKernel: benchmarking may not accurate due to atomic_add"
                 )
 
+            if future is not None:
+                try:
+                    future.result()
+                except Exception:
+                    # The benchmark below recompiles in-process and scores a failure as
+                    # inf; deciding here would make the verdict depend on the pool.
+                    fusion_log.debug(
+                        "ComboKernel benchmark: %d-th subkernel failed in the pool",
+                        i,
+                        exc_info=True,
+                    )
+
             try:
-                ms, path = self.benchmark_fused_nodes(node_list)
+                ms, path = self.benchmark_codegened_module(mod, device)
                 node_benchmark_results[snode] = (ms, path)
                 if math.isinf(ms):
                     fusion_log.debug(
@@ -12286,15 +12861,13 @@ class Scheduler:
                         i,
                     )
                     return False
-            except CompilationError as e:
-                # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
-                if "Loop-carried variable" in str(e):
-                    fusion_log.debug(
-                        "ComboKernel benchmark: return True because of loop-carried variable"
-                    )
-                    return True  # allow fusion
-                else:
+            except Exception as e:
+                if not _is_loop_carried_compile_error(e):
                     raise
+                fusion_log.debug(
+                    "ComboKernel benchmark: return True because of loop-carried variable"
+                )
+                return True  # allow fusion
             ms1 += ms
             path1_list.append(path)
 
@@ -12302,15 +12875,13 @@ class Scheduler:
             ms2, ms2_clone, _path2_list = self.benchmark_combo_kernel(
                 subkernel_nodes, node_benchmark_results
             )
-        except CompilationError as e:
-            # workaround triton issue: https://github.com/triton-lang/triton/issues/2151
-            if "Loop-carried variable" in str(e):
-                fusion_log.debug(
-                    "ComboKernel benchmark: return True because of loop-carried variable"
-                )
-                return True  # allow fusion
-            else:
+        except Exception as e:
+            if not _is_loop_carried_compile_error(e):
                 raise
+            fusion_log.debug(
+                "ComboKernel benchmark: return True because of loop-carried variable"
+            )
+            return True  # allow fusion
 
         # small kernels are very likely to have speedup but hard to benchmark. So we skip benchmarking.
         small_kernel = ms2 - ms2_clone < 0.3 or ms1 < 0.3
@@ -12325,7 +12896,7 @@ class Scheduler:
                     "cannot fuse (benchmark): fusing causes %sx slowdown",
                     red_text(f"{ms1 / ms2:.3f}"),
                 )
-        # ms1 returned by benchmark_fused_nodes discounted clone time
+        # ms1 returned by benchmark_codegened_module discounted clone time
         return ms2 - ms2_clone < ms1 or small_kernel
 
     def get_buffer_layout(self, buf_name: str) -> ir.Layout:
