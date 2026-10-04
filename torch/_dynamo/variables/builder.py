@@ -2356,17 +2356,17 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, dict_keys):
             if all(ConstantVariable.is_literal(k) for k in value):
-                # Model the view over its owning dict, reached through the view's
-                # .mapping proxy, so mutations of the dict are visible through it.
-                mapping_vt = VariableBuilder(
-                    self.tx, AttrSource(self.source, "mapping")
-                )(value.mapping)
-                if not (
-                    isinstance(mapping_vt, MappingProxyVariable)
-                    and isinstance(mapping_vt.dv_dict, ConstDictVariable)
-                ):
-                    raise AssertionError(f"Expected a dict proxy, got {mapping_vt}")
-                return DictKeysVariable(mapping_vt.dv_dict, source=self.source)
+                # Model the view over its owning dict (the view's only gc
+                # referent) so mutations of the dict are visible through it.
+                dict_source = MappingProxyMappingSource(self.source)
+                owner = gc.get_referents(value)[0]
+                dict_vt = VariableBuilder(self.tx, dict_source)(owner)
+                if not isinstance(dict_vt, ConstDictVariable):
+                    raise AssertionError(f"Expected a dict, got {dict_vt}")
+                # Same key guards as ConstDictVariable.dict_keys installs.
+                install_guard(dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH))
+                self.tx.output.guard_on_key_order.add(dict_source)
+                return DictKeysVariable(dict_vt, source=self.source)
             else:
                 unimplemented(
                     gb_type="non-const keys in dict_keys",
