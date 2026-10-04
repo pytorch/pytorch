@@ -659,12 +659,10 @@ def _restore_expandable_segments(
     previous process, and map back the ranges they had mapped.
 
     ``segments`` are entries from :func:`memory_snapshot` taken in the earlier
-    process. Each is re-reserved at the address, size and segment size it had,
-    with handles shareable the way the originals were, whatever this process's
-    settings, which the driver honors because the
-    reservation is large (see Note [Expandable Segment
-    Reserved Address]); the address does not have to have been predictable when
-    it was recorded. The restored ranges become free blocks in ``mempool_id``, so
+    process, all on ``device``. Each is re-reserved at the address, size and
+    segment size it had, with handles shareable the way the originals were,
+    whatever this process's settings (see Note [Expandable Segment Reserved
+    Address]). The restored ranges become free blocks in ``mempool_id``, so
     ``UntypedStorage._resize_with_addr_`` can then place a tensor back at its
     original address.
 
@@ -685,6 +683,11 @@ def _restore_expandable_segments(
             raise ValueError(
                 f"segment at {seg['address']:#x} is not an expandable segment, so its "
                 "address cannot be reproduced; set expandable_segments:True when saving"
+            )
+        if seg.get("device", device_index) != device_index:
+            raise ValueError(
+                f"segment at {seg['address']:#x} is on device {seg['device']}, "
+                f"not device {device_index}"
             )
         key = (seg["segment_type"] == "small", seg["expandable_segment_base"])
         offset = seg["address"] - seg["expandable_segment_base"]
