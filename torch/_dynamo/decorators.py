@@ -87,6 +87,21 @@ def run(fn: Callable[_P, _R] | None = None) -> Any:
     return RunOnlyContext()
 
 
+def _disable_with_runtime_module_refs(
+    fn: Callable[_P, _R],
+    *,
+    reason: str,
+    runtime_module_refs: tuple[weakref.ReferenceType[torch.nn.Module], ...],
+) -> Callable[_P, _R]:
+    fn = innermost_fn(fn)
+    if not callable(fn):
+        raise AssertionError("fn must be callable")
+    return DisableContext(
+        msg=reason,
+        runtime_module_refs=runtime_module_refs,
+    )(fn)
+
+
 def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ignore[no-untyped-def]
     """
     Decorator to disable TorchDynamo

@@ -18,6 +18,7 @@ of compilation.
 
 import logging
 import traceback
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
@@ -27,7 +28,14 @@ import torch
 from torch import fx
 from torch._dynamo.backends.registry import CompiledFn, CompilerFn
 from torch._dynamo.output_graph import GraphCompileReason
-from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
+from torch._dynamo.utils import (
+    _DynamoRuntimeModule,
+    deepcopy_to_fake_tensor,
+    detect_fake_mode,
+    dynamo_runtime_modules,
+    DynamoRuntimeModuleRef,
+    get_dynamo_runtime_module_refs,
+)
 from torch._logging import trace_structured
 from torch.fx.node import Node
 
@@ -202,7 +210,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
 
     def compile_submod(
         self, input_mod: fx.GraphModule, args: list[torch.Tensor], kwargs: Any
-    ) -> Any:
+    ) -> tuple[torch.nn.Module, tuple[DynamoRuntimeModuleRef, ...]]:
         """
         Compile the submodule,
         using a wrapper to make sure its output is always a tuple,
@@ -211,12 +219,16 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
         if len(kwargs) != 0:
             raise AssertionError("We assume only args for these modules")
 
-        class WrapperModule(torch.nn.Module):
+        class WrapperModule(_DynamoRuntimeModule):
             def __init__(
-                self, submod: Callable[..., Any], unwrap_singleton_tuple: bool
+                self,
+                submod: Callable[..., Any],
+                input_mod: fx.GraphModule,
+                unwrap_singleton_tuple: bool,
             ) -> None:
                 super().__init__()
                 self.submod = submod
+                self.input_mod_ref = weakref.ref(input_mod)
                 self.unwrap_singleton_tuple = unwrap_singleton_tuple
 
             def forward(self, *args: Any) -> Any:
@@ -228,6 +240,9 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
                 if self.unwrap_singleton_tuple and isinstance(x, (tuple, list)):
                     return x[0]
                 return x
+
+            def _dynamo_runtime_module_values(self) -> tuple[Any, ...]:
+                return (self.submod, self.input_mod_ref())
 
         unwrap_singleton_tuple = False
         for sn in input_mod.graph.nodes:
@@ -246,11 +261,12 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             ],
         )
 
-        wrapper = WrapperModule(
-            self.compiler(input_mod, args, **self.compiler_configs),
-            unwrap_singleton_tuple,
-        )
-        return wrapper
+        input_mod_refs = get_dynamo_runtime_module_refs(input_mod)
+        with dynamo_runtime_modules(input_mod_refs):
+            compiled_submod = self.compiler(input_mod, args, **self.compiler_configs)
+        wrapper = WrapperModule(compiled_submod, input_mod, unwrap_singleton_tuple)
+        runtime_module_refs = get_dynamo_runtime_module_refs(wrapper)
+        return wrapper, runtime_module_refs
 
     # Note:
     #
@@ -336,7 +352,9 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             from torch._dynamo.utils import counters
 
             init = counters["aot_autograd"]["total"]
-            compiled_submod_real = self.compile_submod(real_mod, new_args, kwargs)
+            compiled_submod_real, runtime_module_refs = self.compile_submod(
+                real_mod, new_args, kwargs
+            )
 
             # TODO - better way of doing this?
             # Only aot autograd handles fakifying first call
@@ -354,6 +372,9 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
             with (
                 self.fake_mode,
                 mock.patch.object(self.fake_mode, "allow_non_fake_inputs", True),
+                dynamo_runtime_modules(
+                    runtime_module_refs + get_dynamo_runtime_module_refs(curr_submod)
+                ),
             ):
                 if has_tracing_context and invoked_aot_autograd:
                     tracing_ctx = torch._guards.TracingContext.try_get()
