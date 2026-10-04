@@ -1491,6 +1491,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             if (
                 isinstance(fn, variables.functions.FunctoolsPartialVariable)
                 and fn.flattenable
+                and not tx.output.side_effects.is_attribute_mutation(fn)
             ):
                 # Like CPython's partial_new, merge a nested partial into the
                 # new one instead of wrapping it.
@@ -1512,8 +1513,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 fn = fn.func
             # guards for the produced FunctoolsPartialVariable are installed in FunctoolsPartialVariable ctor from the
             # args and keywords
+            # A partial created while tracing never gets an instance dict:
+            # setattr on it graph breaks, as FunctoolsPartialVariable has no
+            # attribute-mutation support (the is_attribute_mutation check above
+            # keeps this correct if that is ever added).
             return variables.functions.FunctoolsPartialVariable(
-                fn, args=rest_args, keywords=kwargs
+                fn, args=rest_args, keywords=kwargs, flattenable=True
             )
         elif self.value is warnings.catch_warnings and not args:
             return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)

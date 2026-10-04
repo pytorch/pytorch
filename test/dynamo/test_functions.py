@@ -483,6 +483,47 @@ partial_fn = functools.partial(fn, scale=2)
         self.assertTrue(opt_fn(inner, x)[0])
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_functools_partial_nested_merge_order(self):
+        # Inner args come before outer args; outer keywords override inner ones.
+        def fn(x):
+            p = functools.partial(functools.partial(capture_args, "a"), "b")
+            q = functools.partial(functools.partial(capture_args, k=1), k=2)
+            return p.args, q.keywords, p(x), q(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(1), fn(1))
+        self.assertEqual(opt_fn(1)[:2], (("a", "b"), {"k": 2}))
+
+    def test_functools_partial_nested_flattened_returned(self):
+        # Reconstructing a flattened partial gives the same object shape as eager.
+        def fn(x):
+            return functools.partial(
+                functools.partial(capture_args, "a", k=1), "b", k=2
+            ), x.sin()
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(3)
+        ref, _ = fn(x)
+        res, _ = opt_fn(x)
+        self.assertIs(ref.func, capture_args)
+        self.assertIs(res.func, capture_args)
+        self.assertEqual(res.args, ref.args)
+        self.assertEqual(res.keywords, ref.keywords)
+        self.assertEqual(res(1), ref(1))
+
+    def test_functools_partial_traced_setattr_graph_breaks(self):
+        # Flattening partials created while tracing relies on setattr on them
+        # graph breaking, so their instance dict is never set.
+        def fn(x):
+            inner = functools.partial(capture_args, "a")
+            inner.attr = "spam"
+            p = functools.partial(inner, bar=True)
+            return p.func is inner, p(x.sin())
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaises(Unsupported):
+            opt_fn(torch.randn(3))
+
     @make_test
     def test_itertools_product(a, b):
         v = a
