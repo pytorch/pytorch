@@ -138,7 +138,7 @@ jobs:
   test-rocm:
     if: github.repository_owner == 'pytorch' && inputs.gpu == 'MI300X'
     name: test-rocm
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-no-dind.yml
     needs: build-rocm
     with:
       timeout-minutes: 120

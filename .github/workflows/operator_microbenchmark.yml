@@ -134,7 +134,7 @@ jobs:
 
   opmicrobenchmark-test-rocm:
     name: opmicrobenchmark-test-rocm
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-no-dind.yml
     needs: opmicrobenchmark-build-rocm
     with:
       # TODO (huydo): Need to implement sharding for ops micro benchmark

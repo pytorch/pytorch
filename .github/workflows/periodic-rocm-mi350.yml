@@ -43,7 +43,6 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: amd-dpx
 
   linux-noble-rocm-py3_11-build:
     name: linux-noble-rocm-py3.11-mi350
@@ -55,17 +54,17 @@ jobs:
       build-environment: linux-noble-rocm-py3.11-mi350
       docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
       # distributed_4gpu selects only the >2-GPU distributed tests, so it must
-      # run on the gfx950.4 (4-GPU) runner labels.
+      # run on the 4-GPU mi350.dpx runner labels.
       test-matrix: |
         { include: [
-          { config: "distributed_4gpu", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.4", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed_4gpu", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed_4gpu", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.mi350.dpx.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed_4gpu", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.mi350.dpx.4", owners: ["module:rocm", "oncall:distributed"] },
         ]}
     secrets: inherit
 
   linux-noble-rocm-py3_11-test:
     name: linux-noble-rocm-py3.11-mi350
-    uses: ./.github/workflows/_rocm-test.yml
+    uses: ./.github/workflows/_rocm-test-no-dind.yml
     needs:
       - linux-noble-rocm-py3_11-build
       - target-determination
