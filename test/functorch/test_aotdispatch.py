@@ -6222,7 +6222,6 @@ class <lambda>(torch.nn.Module):
         getitem_3: "f32[3]" = _native_batch_norm_legit_functional[3]
         getitem_4: "f32[3]" = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
         relu: "f32[1, 3, 3, 3]" = torch.ops.aten.relu.default(getitem);  getitem = None
-        alias: "f32[1, 3, 3, 3]" = torch.ops.aten.alias.default(relu);  alias = None
         alias_1: "f32[1, 3, 3, 3]" = torch.ops.aten.alias.default(relu)
         sum_1: "f32[]" = torch.ops.aten.sum.default(relu)
         alias_2: "f32[1, 3, 3, 3]" = torch.ops.aten.alias.default(relu);  relu = None
@@ -6432,14 +6431,15 @@ class <lambda>(torch.nn.Module):
         def f(x, y):
             return (torch.matmul(x, y),)
 
-        self.assertTrue(_is_op_registered_to_fake_rule(torch.ops.aten.item.default))
+        ops = [torch.ops.aten.item.default, torch.ops.aten.nonzero_numpy.default]
+        self.assertTrue(all(_is_op_registered_to_fake_rule(op) for op in ops))
         aot_export_joint_simple(
             f,
             [torch.randn(2, 3), torch.randn(3, 4)],
             trace_joint=False,
             decompositions={},
         )
-        self.assertTrue(_is_op_registered_to_fake_rule(torch.ops.aten.item.default))
+        self.assertTrue(all(_is_op_registered_to_fake_rule(op) for op in ops))
 
     def test_aot_export_module_keeps_raw_decomposition_semantics(self):
         class M(torch.nn.Module):

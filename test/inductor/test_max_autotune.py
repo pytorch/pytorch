@@ -941,6 +941,18 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
+    def test_addmm_0d_bias_max_autotune(self):
+        torch._dynamo.reset()
+        bias = torch.tensor(0.5)
+        x = torch.randn(2, 2)
+        y = torch.randn(2, 2)
+
+        eager_out = torch.addmm(bias, x, y)
+        with config.patch({"max_autotune": True, "max_autotune_gemm": True}):
+            compiled_out = torch.compile(torch.addmm)(bias, x, y)
+
+        self.assertEqual(compiled_out, eager_out)
+
     @fresh_cache()
     def test_addmm_1d_bias_no_reinterpret_tensor(self):
         """
@@ -2572,7 +2584,8 @@ class TestMaxAutotune(TestCase):
                         'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                         'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
                         'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},
-                        'hint_override':None,'triton_meta':None}"""
+                        'hint_override':None,'emulate_precision_casts':False,
+                        'triton_meta':None}"""
 
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
@@ -2614,7 +2627,9 @@ class TestMaxAutotune(TestCase):
                     'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
                     'tma_load_for_template_epilogue':False,'transpose_discontiguous_tensor_descriptors_override':None,
                     'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,
-                    'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},'hint_override':None,'triton_meta':None}"""
+                    'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':False},
+                    'hint_override':None,'emulate_precision_casts':False,
+                    'triton_meta':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
                     remove_white_space(cache_key),
