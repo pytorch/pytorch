@@ -1,7 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/function.h>
-#include <torch/csrc/autograd/input_metadata.h>
 #include <torch/csrc/autograd/variable.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -9,7 +7,6 @@
 #else
 #include <ATen/ops/_has_same_storage_numel.h>
 #include <ATen/ops/_new_zeros_with_same_feature_meta.h>
-#include <ATen/ops/zeros.h>
 #endif
 
 namespace torch::autograd {
@@ -237,8 +234,10 @@ void AutogradMeta::set_fw_grad(
             if (view_info.has_view_fn()) {
               new_fw_grad_value = view_info.view_fn()(new_base_fw_grad);
             } else {
-              new_fw_grad_value = new_base_fw_grad.as_strided(
-                  self.sizes(), self.strides(), self.storage_offset());
+              new_fw_grad_value = new_base_fw_grad.as_strided_symint(
+                  self.sym_sizes(),
+                  self.sym_strides(),
+                  self.sym_storage_offset());
             }
 
             new_fw_grad_value.copy_(new_grad);
@@ -304,8 +303,8 @@ const Variable& AutogradMeta::fw_grad(
         if (view_info.has_view_fn()) {
           new_val = view_info.view_fn()(base_val);
         } else {
-          new_val = base_val.as_strided(
-              self.sizes(), self.strides(), self.storage_offset());
+          new_val = base_val.as_strided_symint(
+              self.sym_sizes(), self.sym_strides(), self.sym_storage_offset());
         }
 
         const_view_meta->fw_grad_->set_value(std::move(new_val), level);

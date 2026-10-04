@@ -437,6 +437,7 @@ class TpHashTests(torch._dynamo.test_case.TestCase):
         torch._dynamo.reset()
 
         # After registration: no graph break
+        self.addCleanup(torch._dynamo.decorators._disallow_c_slot, sqlite3.Row)
         torch._dynamo.allow_c_slot(sqlite3.Row)
         self._assert_hash_equals(row)
 
