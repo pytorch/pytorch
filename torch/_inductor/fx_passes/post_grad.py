@@ -2940,6 +2940,10 @@ class ConstructorMoverPass:
                 equal_constructor_sets[obj] = set1
             return set1
 
+        # a moved cpu placeholder keeps its cpu tensor for the output use, but a
+        # moved constructor changes the device the caller sees
+        returned_constructors = OrderedSet[fx.Node]()
+
         queue: list[fx.Node] = list(constructors)
 
         for c in queue:
@@ -2953,6 +2957,11 @@ class ConstructorMoverPass:
                 if self.cannot_be_moved(user):
                     cannot_move_to_gpu.update(dependencies)
                     break
+
+                if user.target == "output":
+                    returned_constructors.update(
+                        c for c in dependencies if c.op != "placeholder"
+                    )
 
                 # this node was used on an op which takes in multiple devices and output a gpu
                 # tensor. we can convert its cpu input to gpu without making further changes
@@ -2982,6 +2991,8 @@ class ConstructorMoverPass:
         for node in cpu_indeg:
             if constructor_dependencies[node]:
                 cannot_move_to_gpu.update(constructor_dependencies[node])
+
+        cannot_move_to_gpu.update(returned_constructors)
 
         all_cannot_move_to_gpu = cannot_move_to_gpu.copy()
         for constructor in cannot_move_to_gpu:
