@@ -4058,14 +4058,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # the method's closure sourcelessly and SourcelessBuilder fails on
             # a captured tensor (test_modes.py,
             # test_nested_torch_function_mode).
-            fn_source = var_source or (
-                self.source and AttrSource(TypeSource(self.source), name)
-            )
-            return variables.UserMethodVariable(
-                variables.UserFunctionVariable(type_attr, source=fn_source),
-                self,
-                source=source,
-            )
+            # Guard __code__ only via the cls.__dict__ source; a GetAttr accessor
+            # off TypeSource is not tag-safe.
+            if var_source is not None:
+                im_func = variables.UserFunctionVariable.create_with_source(
+                    type_attr, var_source
+                )
+            else:
+                im_func = variables.UserFunctionVariable(
+                    type_attr,
+                    source=self.source and AttrSource(TypeSource(self.source), name),
+                )
+            return variables.UserMethodVariable(im_func, self, source=source)
         # Check for a Python-level __get__ (non-data descriptor with traceable __get__).
         get_fn = inspect.getattr_static(type(type_attr), "__get__", None)
         if isinstance(get_fn, types.FunctionType):
