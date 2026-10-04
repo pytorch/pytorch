@@ -4574,7 +4574,6 @@ class TestConvolutionNNCUDA(NNTestCase):
             else:
                 self.assertEqual(F.relu(conv2d_out + alpha * z), cudnn_out)
 
-    @skipCUDAIfRocm
     @largeTensorTest("48GB", "cuda")
     @serialTest()
     @dtypes(*(torch.half, torch.bfloat16))
