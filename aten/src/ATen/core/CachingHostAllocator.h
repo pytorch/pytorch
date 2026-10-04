@@ -8,11 +8,11 @@
 #include <c10/core/thread_pool.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/flat_hash_map.h>
-#include <c10/util/llvmMathExtras.h>
 #include <iostream>
 #include <optional>
 
 #include <atomic>
+#include <bit>
 #include <deque>
 #include <vector>
 #include <mutex>
@@ -344,7 +344,7 @@ struct CachingHostAllocatorImpl {
     const auto roundSize = [&]() -> size_t {
       if (size <= pinned_max_round_threshold() &&
           size <= pinned_max_cached_size()) {
-        return c10::llvm::PowerOf2Ceil(size);
+        return std::bit_ceil(size);
       } else {
         return size;
       }
