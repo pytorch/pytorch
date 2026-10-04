@@ -12023,6 +12023,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         x = torch.randn(1, 2048, dtype=torch.float32)
         self.common(fn, (x,))
 
+    @skip_if_halide
+    @skip_if_pallas
+    def test_index_put_duplicate_indices_from_arange_no_accumulate(self):
+        # https://github.com/pytorch/pytorch/issues/197582
+        def fn(x):
+            v = x.view(-1)
+            idx = torch.arange(v.numel(), device=x.device) % 2
+            v[idx] = v[idx] + 1.0
+            return x
+
+        x = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
+        self.common(fn, (x,))
+
     @skip_if_pallas
     def test_index_put_duplicate_indices_accumulate(self):
         # accumulate=True is well-defined with duplicate indices.
