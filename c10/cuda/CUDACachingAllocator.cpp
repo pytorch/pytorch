@@ -1625,6 +1625,13 @@ class DeviceCachingAllocator {
   // thread local compile context for each device
   static thread_local std::stack<std::string> compile_context;
 
+  // Memory trimming callback
+  cudaAsyncCallbackHandle_t notification_handle_;
+  static void trimCacheCallback(
+    cudaAsyncNotificationInfo_t* info,
+    void* userData,
+    cudaAsyncCallbackHandle_t handle);
+
   // Thread local user metadata recorded on memory history trace entries.
   // Note: being a static member, this is per-thread process-wide state, NOT
   // per-device state; setUserMetadata on any DeviceCachingAllocator instance
@@ -1648,6 +1655,19 @@ class DeviceCachingAllocator {
     stats.max_split_size =
         static_cast<int64_t>(AcceleratorAllocatorConfig::max_split_size());
     context_recorder_.store(nullptr);
+    cudaError_t err = cudaDeviceRegisterAsyncNotification(
+        id, trimCacheCallback, (void*)this, &notification_handle_);
+    if (err != cudaSuccess) {
+      TORCH_WARN(
+          "cudaDeviceRegisterAsyncNotification failed: ",
+          cudaGetErrorString(err));
+    }
+  }
+
+  ~DeviceCachingAllocator() {
+    if (notification_handle_ != nullptr) {
+      cudaDeviceUnregisterAsyncNotification(device_id, notification_handle_);
+    }
   }
 
   void recordHistory(
@@ -4630,6 +4650,20 @@ class DeviceCachingAllocator {
     }
   }
 };
+
+void CUDART_CB DeviceCachingAllocator::trimCacheCallback(
+  cudaAsyncNotificationInfo_t* notificationInfo,
+  void* userData,
+  cudaAsyncCallbackHandle_t handle) {
+  if (notificationInfo &&
+    notificationInfo->type == cudaAsyncNotificationTypeOverBudget) {
+    auto allocator = static_cast<DeviceCachingAllocator*>(userData);
+    if (allocator) {
+      // GPU memory budget has been exceeded, so free unneeded memory
+      allocator->emptyCache({0, 0});
+    }
+  }
+}
 
 // Returns whether to force all allocations to bypass the caching allocator and
 // go straight to cudaMalloc.  This setting is useful when debugging GPU memory
