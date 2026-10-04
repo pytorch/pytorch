@@ -20900,6 +20900,17 @@ if RUN_GPU or HAS_MPS:
                         bad_decomp_bias, bad_decomp_x, bad_decomp_weight
                     )
 
+            def baddbmm_beta_zero(bias, x, weight):
+                return torch.baddbmm(bias, x, weight, beta=0.0)
+
+            cpu_bias = torch.tensor(0.0)
+            with self.assertRaisesRegex(RuntimeError, "same device"):
+                baddbmm_beta_zero(cpu_bias, bad_x[None], bad_weight[None])
+            with self.assertRaisesRegex(Exception, "must be on the same device"):
+                torch.compile(baddbmm_beta_zero, fullgraph=True)(
+                    cpu_bias, bad_x[None], bad_weight[None]
+                )
+
             with config.patch({"shape_padding": False, "triton.native_matmul": True}):
                 with self.assertRaisesRegex(Exception, "input dtypes must be the same"):
                     torch.compile(addmm_dtype_mismatch, fullgraph=True)(
@@ -20929,6 +20940,12 @@ if RUN_GPU or HAS_MPS:
                         zero_x,
                         zero_weight,
                     ),
+                )
+                check(
+                    lambda bias, x, weight: torch.addmm(
+                        bias, x, weight.t(), beta=0.0, alpha=0.1
+                    ),
+                    (torch.full((8,), float("nan"), device=self.device), x, weight),
                 )
 
     copy_tests(CommonTemplate, GPUTests, GPU_TYPE)

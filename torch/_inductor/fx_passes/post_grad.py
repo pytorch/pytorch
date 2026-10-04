@@ -2086,11 +2086,9 @@ def should_prefer_unfused_addmm(match):
         return False
     if inp_val.device != mat1_val.device or inp_val.device != mat2_val.device:
         return False
-    beta = match.kwargs.get("beta", 1)
-    if inp_val.device.type != "cuda" and beta == 0:
-        mm_shape = mat1_val.shape[0], mat2_val.shape[1]
-        if not is_expandable_to(inp_val.shape, mm_shape):
-            return False
+    # tuned_addmm drops the ignored input when beta == 0.
+    if match.kwargs.get("beta", 1) == 0:
+        return False
 
     output = match.output_node()
     if not _is_bias_like_addmm_input(inp, output):
@@ -2103,6 +2101,9 @@ def should_prefer_unfused_baddbmm(match):
     if not is_gpu(inp.meta["val"].device.type):
         return False
     if match.output_node().meta.get(_PRESERVE_FLEX_GEMM_GEMM_OP):
+        return False
+    # tuned_baddbmm drops the ignored input when beta == 0.
+    if match.kwargs.get("beta", 1) == 0:
         return False
 
     output = match.output_node()
@@ -2143,16 +2144,10 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
         ):
             return
 
-    drop_input_for_beta_zero = inp.meta["val"].device.type == "cuda"
-
     def repl(inp, x1, x2, alpha, beta):
-        if alpha == 0 and beta == 0 and drop_input_for_beta_zero:
-            return x1.new_zeros((x1.shape[0], x2.shape[1]))
         mm_result = x1 @ x2
         if alpha != 1:
             mm_result = alpha * mm_result
-        if beta == 0 and drop_input_for_beta_zero:
-            return mm_result
         if beta != 1:
             inp = beta * inp
         return inp + mm_result

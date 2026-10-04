@@ -941,15 +941,16 @@ class TestMaxAutotune(TestCase):
         with config.patch({"max_autotune": True}):
             torch.compile(mm, dynamic=dynamic)(a, b)
 
-    def test_addmm_0d_bias_max_autotune(self):
+    @parametrize("beta", (0, 1))
+    def test_addmm_0d_bias_max_autotune(self, beta):
         torch._dynamo.reset()
         bias = torch.tensor(0.5)
         x = torch.randn(2, 2)
         y = torch.randn(2, 2)
 
-        eager_out = torch.addmm(bias, x, y)
+        eager_out = torch.addmm(bias, x, y, beta=beta)
         with config.patch({"max_autotune": True, "max_autotune_gemm": True}):
-            compiled_out = torch.compile(torch.addmm)(bias, x, y)
+            compiled_out = torch.compile(torch.addmm)(bias, x, y, beta=beta)
 
         self.assertEqual(compiled_out, eager_out)
 
@@ -1301,6 +1302,26 @@ class TestMaxAutotune(TestCase):
         b = torch.randn(16, 8).to(GPU_TYPE)
         with config.patch({"max_autotune": True}):
             torch.compile(fn, dynamic=dynamic)(x, a, b)
+
+    @parametrize("op", [torch.addmm, torch.baddbmm])
+    def test_max_autotune_zero_beta_drops_nan_bias(self, op):
+        def fn(x, a, b):
+            return op(x, a, b, beta=0, alpha=0.5)
+
+        shape = (64, 64) if op is torch.addmm else (2, 64, 64)
+        x = torch.full((64,), float("nan"), device=GPU_TYPE)
+        a = torch.randn(shape, device=GPU_TYPE)
+        b = torch.randn(shape, device=GPU_TYPE)
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "triton.native_matmul": False,
+            }
+        ):
+            out = torch.compile(fn)(x, a, b)
+        self.assertFalse(out.isnan().any())
+        self.assertEqual(out, fn(x, a, b), atol=1e-2, rtol=1e-2, equal_nan=False)
 
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_autotune_conv1x1(self, search_space):
@@ -2258,6 +2279,26 @@ class TestMaxAutotune(TestCase):
 
             # Check that contiguous transform was used
             FileCheck().check("contiguous_addmm").run(code[0])
+
+    @unittest.skipIf(not torch.version.hip, "ROCM only")
+    @parametrize("beta", (0.0, 0.5))
+    @config.patch(max_autotune=True)
+    def test_max_autotune_contiguous_transform_addmm_scalars(self, beta):
+        def addmm_transpose(inp, a, b):
+            return torch.addmm(inp, a, b.transpose(0, 1), beta=beta, alpha=2.0)
+
+        inp = torch.randn(64, 128, device=GPU_TYPE)
+        a = torch.randn(64, 256, device=GPU_TYPE)
+        b = torch.randn(128, 256, device=GPU_TYPE)
+        with mock.patch(
+            "torch._inductor.heuristics.template.contiguous_mm.use_contiguous",
+            return_value=True,
+        ):
+            out, code = run_and_get_code(torch.compile(addmm_transpose), inp, a, b)
+
+        # contiguous_addmm calls addmm without alpha and beta.
+        FileCheck().check_not("contiguous_addmm").run(code[0])
+        self.assertEqual(out, addmm_transpose(inp, a, b), atol=1e-2, rtol=1e-2)
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dynamic", (False, True))
