@@ -73,6 +73,7 @@ sycl::event convolution(
     const at::Tensor& src,
     const at::Tensor& weight,
     const at::Tensor& bia,
+    bool is_channels_last,
     IntArrayRef padding_front_top_left,
     IntArrayRef padding_back_bottom_right,
     IntArrayRef stride,
@@ -83,7 +84,7 @@ sycl::event convolution(
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
 
-  bool is_channels_last = use_channels_last_for_conv(src, weight);
+  check_conv_layout_agreement(is_channels_last, src, weight, dst);
 
   // create usr_md for tensors, and md for conv primitive
   auto [src_md, weight_md, dst_md] =
@@ -173,6 +174,7 @@ sycl::event convolution_backward_weights(
     at::Tensor& diff_bia,
     const at::Tensor& diff_dst,
     const at::Tensor& src,
+    bool is_channels_last,
     IntArrayRef diff_weight_aten_size,
     IntArrayRef padding_front_top_left,
     IntArrayRef padding_back_bottom_right,
@@ -183,7 +185,7 @@ sycl::event convolution_backward_weights(
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
 
-  bool is_channels_last = use_channels_last_for_conv(src, diff_dst);
+  check_conv_layout_agreement(is_channels_last, src, diff_weight, diff_dst);
 
   // create dnnl::memory desc
   auto [src_md, weight_md, dst_md] =
@@ -280,6 +282,7 @@ sycl::event convolution_backward_data(
     at::Tensor& diff_src,
     const at::Tensor& diff_dst,
     const at::Tensor& weight,
+    bool is_channels_last,
     IntArrayRef padding_front_top_left,
     IntArrayRef padding_back_bottom_right,
     IntArrayRef stride,
@@ -290,7 +293,7 @@ sycl::event convolution_backward_data(
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
 
-  bool is_channels_last = use_channels_last_for_conv(diff_dst, weight);
+  check_conv_layout_agreement(is_channels_last, diff_src, weight, diff_dst);
 
   // create memory desc
   auto [src_md, weight_md, dst_md] =
