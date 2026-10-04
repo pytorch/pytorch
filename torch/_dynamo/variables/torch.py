@@ -1337,6 +1337,35 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             return self.call_function(tx, [pynumber_index(tx, arg) for arg in args], {})
 
+        @register(math.prod)
+        def handle_prod(
+            self,
+            tx: "InstructionTranslatorBase",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker | None:
+            if len(args) != 1 or kwargs.keys() - {"start"}:
+                return None
+
+            iterable = args[0]
+            if not isinstance(iterable, (ListVariable, TupleVariable)):
+                return None
+
+            if not iterable.items:
+                return kwargs.get("start", ConstantVariable.create(1))
+
+            start = kwargs.get("start")
+            if (
+                iterable.is_proxy()
+                and (start is None or start.is_proxy())
+                and not check_unspec_or_constant_args(args, kwargs)
+            ):
+                return None
+
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.math_prod), list(args), kwargs
+            )
+
         @register(math.lcm)
         def handle_lcm(
             self,
@@ -3746,6 +3775,20 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         if self.torch_function_override_enabled(tx, args, kwargs):
             return dispatch_torch_function(tx, self, args, kwargs)
+
+        if (
+            self.value is math.prod
+            and len(args) == 1
+            and isinstance(args[0], (ListVariable, TupleVariable))
+        ):
+            # Preserve start and element aliases before constant folding.
+            inputs = [*args[0].items, *kwargs.values()]
+            if not args[0].items or not all(
+                isinstance(value, ConstantVariable) for value in inputs
+            ):
+                result = self._get_handlers()[math.prod](self, tx, *args, **kwargs)
+                if result is not None:
+                    return result
 
         if self.can_constant_fold_through():
             from .tensor import CurrentDeviceVariable
