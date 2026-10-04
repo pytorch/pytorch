@@ -2981,12 +2981,13 @@ class rocm:
     # If empty, the `native` arch is used
     arch: list[str] = []
 
-    # Enable the CK backend for CDNA2 and CDNA3 only (for now)
+    # Enable the CK backend for gfx90a/gfx942/gfx950 and gfx1250.
     # Processor name reference: https://llvm.org/docs/AMDGPUUsage.html#processors
-    ck_supported_arch: list[Literal["gfx90a", "gfx942", "gfx950"]] = [
+    ck_supported_arch: list[Literal["gfx90a", "gfx942", "gfx950", "gfx1250"]] = [
         "gfx90a",
         "gfx942",
         "gfx950",
+        "gfx1250",
     ]
 
     # Optimization level, use to balance compilation speed and runtime performance.
