@@ -1899,7 +1899,7 @@ def decompose_auto_functionalized(graph):
         raise AssertionError("auto_functionalized_v2 was not removed")
 
 
-# see cat_splitwithsizes above for why both arities are registered
+# see cat_splitwithsizes below for why both arities are registered
 for _cat_arity, _split_arity in itertools.product((1, 2), (2, 3)):
 
     @register_lowering_pattern(
@@ -1960,6 +1960,10 @@ def is_valid_cat_splitwithsizes(match):
         # each cat input tensor's size along dim
         # should match the corresponding split size
         if "val" not in cat_input.meta:
+            return False
+        if cat_input.meta["val"].ndim != rank:
+            # legacy 1D empties ride along in cat with a lower rank than the
+            # output; indexing them on the canonical dim would raise
             return False
         cat_input_size = cat_input.meta["val"].size(dim)
         if cat_input_size != split_size:
