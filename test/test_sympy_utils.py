@@ -14,6 +14,7 @@ import torch.fx as fx
 from sympy.core.relational import is_ge, is_gt, is_le, is_lt
 from torch.testing._internal.common_device_type import skipIf
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
@@ -163,6 +164,8 @@ def generate_range(vals):
 
 
 class TestNumbers(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_int_infinity(self):
         self.assertIsInstance(int_oo, IntInfinity)
         self.assertIsInstance(-int_oo, NegativeIntInfinity)
@@ -231,6 +234,8 @@ class TestNumbers(TestCase):
 
 
 class TestCppPrinter(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_min_max_preserve_float_expressions(self):
         s0 = sympy.Symbol("s0")
         expr = TorchSymMin(
@@ -263,6 +268,8 @@ class TestCppPrinter(TestCase):
 
 
 class TestValueRanges(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize("fn", UNARY_OPS)
     @parametrize("dtype", ("int", "float"))
     def test_unary_ref(self, fn, dtype):
@@ -620,6 +627,8 @@ class TestValueRanges(TestCase):
 
 
 class TestSympyInterp(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     @parametrize(
         "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
     )
@@ -841,6 +850,8 @@ def parametrize_relational_types(*types):
 
 
 class TestSympySolve(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def _create_integer_symbols(self) -> list[sympy.Symbol]:
         return sympy.symbols("a b c", integer=True)
 
@@ -1103,6 +1114,8 @@ class TestSympySolve(TestCase):
 
 
 class TestSympyFunctions(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_shift_edges(self):
         x = sympy.Symbol("x", integer=True)
         self.assertEqual(LShift(x, 0), x)
@@ -1150,6 +1163,8 @@ class TestSympyFunctions(TestCase):
 
 
 class TestSingletonInt(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_basic(self):
         j1 = SingletonInt(1, coeff=1)
         j1_copy = SingletonInt(1, coeff=1)
@@ -1233,6 +1248,8 @@ class TestSingletonInt(TestCase):
         self.assertEqual(j1.free_symbols, set())
 
 class TestIdentity(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_expand_identity(self):
         """
         Test removing an identity via expansion.
@@ -1265,6 +1282,8 @@ class TestIdentity(TestCase):
         self.assertRaises(TypeError, float, tup_I)
 
 class TestTypedExpr(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     def test_typed_expr(self):
         I = Identity(1)
         typed_I = TypedExpr(I, torch.int32)
@@ -1273,6 +1292,8 @@ class TestTypedExpr(TestCase):
 
 class TestCCodePrinting(TestCase):
     """Test _ccode methods on sympy function classes."""
+
+    hw_classification = HardwareClassification.GENERIC
 
     def test_floor_to_int_ccode(self):
         from torch.utils._sympy.functions import FloorToInt
