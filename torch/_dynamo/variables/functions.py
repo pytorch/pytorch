@@ -3718,6 +3718,32 @@ class PolyfilledFunctionVariable(VariableTracker):
         return {}
 
     @classmethod
+    def get_reimported_polyfill(cls, fn: object) -> types.FunctionType | None:
+        if type(fn) is not types.BuiltinFunctionType or fn.__module__ not in (
+            "_bisect",
+            "_heapq",
+        ):
+            return None
+        owner = fn.__self__
+        if not isinstance(owner, types.ModuleType) or owner.__name__ != fn.__module__:
+            return None
+        origin = getattr(getattr(owner, "__spec__", None), "origin", None)
+        if origin is None:
+            return None
+        for original, handler in cls._get_polyfill_handlers().items():
+            if (
+                type(original) is types.BuiltinFunctionType
+                and original.__module__ == fn.__module__
+                and original.__name__ == fn.__name__
+                and getattr(
+                    getattr(original.__self__, "__spec__", None), "origin", None
+                )
+                == origin
+            ):
+                return handler
+        return None
+
+    @classmethod
     def create_with_source(
         cls, value: Any, source: Source
     ) -> "PolyfilledFunctionVariable":
@@ -3733,7 +3759,11 @@ class PolyfilledFunctionVariable(VariableTracker):
         # pyrefly: ignore[invalid-type-var]
         self.fn: _F = fn
 
-        handler = self._get_polyfill_handlers().get(fn, fn)
+        handler = (
+            self._get_polyfill_handlers().get(fn)
+            or self.get_reimported_polyfill(fn)
+            or fn
+        )
         traceable_fn = None
         if not callable(handler):
             raise AssertionError(f"Polyfill handler {handler} is not callable for {fn}")
