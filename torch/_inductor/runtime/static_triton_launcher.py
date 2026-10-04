@@ -1,13 +1,41 @@
 import functools
 import inspect
 import os
+from collections.abc import Callable
 from functools import cached_property
 from typing import Any
 from typing_extensions import Unpack
 
+import torch
+from torch.cuda.graphs import register_graph_capture_end_hook
+
 from ..utils import is_rocm
 from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
 from .triton_helpers import get_constexprs
+
+
+# Modules closed while the current stream was capturing a CUDA graph. cuModuleUnload is
+# not permitted during capture and invalidates it, so they are unloaded once it ends.
+_pending_module_unloads: list[tuple[Callable[[int], None], int]] = []
+
+
+@functools.cache
+def _register_unload_after_capture_hook() -> None:
+    register_graph_capture_end_hook(lambda _graph: _unload_pending_modules())
+
+
+def _unload_pending_modules() -> None:
+    if not _pending_module_unloads:
+        return
+    if torch.cuda.is_current_stream_capturing():
+        _register_unload_after_capture_hook()
+        return
+    while _pending_module_unloads:
+        try:
+            unload, module = _pending_module_unloads.pop()
+        except IndexError:  # drained concurrently by another thread
+            return
+        unload(module)
 
 
 @functools.lru_cache(None)
@@ -275,8 +303,10 @@ class StaticallyLaunchedTritonKernel:
         self.function = None
         self.modules = {}
         self.functions = {}
-        for mod in modules:
-            self.C_impl._unload_kernel(mod)
+        _pending_module_unloads.extend(
+            (self.C_impl._unload_kernel, mod) for mod in modules
+        )
+        _unload_pending_modules()
 
     def __del__(self) -> None:
         try:
