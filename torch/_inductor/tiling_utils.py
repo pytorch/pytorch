@@ -2,7 +2,7 @@ import dataclasses
 import itertools
 from collections import Counter, defaultdict
 from collections.abc import Callable, Sequence
-from typing import Any, Literal, overload, TYPE_CHECKING, TypeVar, Union
+from typing import Any, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -268,29 +268,12 @@ class _FusedNodeView:
         return OrderedSet(node.get_name() for node in self.nodes)
 
 
-@overload
-def get_pw_red_splits(
-    n: "SchedulerNode",
-    pointwise_numel: sympy.Expr,
-    red_numel: sympy.Expr,
-    none_if_not_divisible: Literal[True],
-) -> tuple[VarsAndRanges, VarsAndRanges] | None: ...
-
-
-@overload
-def get_pw_red_splits(
-    n: "SchedulerNode",
-    pointwise_numel: sympy.Expr,
-    red_numel: sympy.Expr,
-    none_if_not_divisible: Literal[False] = False,
-) -> tuple[VarsAndRanges, VarsAndRanges]: ...
-
-
 def get_pw_red_splits(
     n: "SchedulerNode",
     pointwise_numel: sympy.Expr,
     red_numel: sympy.Expr,
     none_if_not_divisible: bool = False,
+    none_if_numel_mismatch: bool = False,
 ) -> tuple[VarsAndRanges, VarsAndRanges] | None:
     # nb: use statically_known_equals here to mimic scheduler.
     # TODO : store type of split/broadcast on fused node itself,
@@ -307,6 +290,13 @@ def get_pw_red_splits(
     if get_hint(sympy_product(n._body.sizes[0])) != get_hint(
         pointwise_numel * red_numel  # type: ignore[operator]
     ):
+        # A fused member whose pointwise iteration count is neither
+        # pointwise_numel nor pointwise_numel * red_numel (e.g. an epilogue
+        # broadcasting the per-row reduction over an extra axis, landing on
+        # red_numel) cannot split into the group's (pointwise, reduction)
+        # frame. Decline when the caller can fall back, instead of asserting.
+        if none_if_not_divisible or none_if_numel_mismatch:
+            return None
         raise AssertionError(
             "expected pointwise sizes to match pointwise_numel * red_numel"
         )
@@ -597,9 +587,20 @@ def extract_normalized_read_writes(
         if not n_reads and not n_writes:
             continue
 
-        (iter_vars, n_pw_splits), (red_vars, n_red_splits) = get_pw_red_splits(
-            n, pointwise_numel, red_numel
+        # Only the numel-mismatch case declines here. A member spanning
+        # pointwise_numel * red_numel whose dims don't suffix-split still
+        # uses the whole-frame fallback in get_pw_red_splits, keeping the
+        # coalescing analysis for fusions that worked before.
+        maybe_splits = get_pw_red_splits(
+            n, pointwise_numel, red_numel, none_if_numel_mismatch=True
         )
+        if maybe_splits is None:
+            # The member sits outside the group's (pointwise, reduction)
+            # frame, so there is no readable normalized shape for this
+            # fusion. Report the coalescing analysis as unknown; downstream
+            # treats unknown the same as any other unanalyzable kernel.
+            return None
+        (iter_vars, n_pw_splits), (red_vars, n_red_splits) = maybe_splits
 
         groups = pw_splits + red_splits
         lengths = (n_pw_splits, (n_red_splits))

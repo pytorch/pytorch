@@ -2,6 +2,7 @@
 
 import contextlib
 import os
+import types
 import unittest
 from unittest import mock, skipUnless
 
@@ -79,6 +80,178 @@ class MockSchedulerTest(TestCase):
     def tearDownClass(cls):
         super().tearDownClass()
         cls._exit_stack.close()
+
+
+class GetPwRedSplitsTest(MockSchedulerTest):
+    """Contract of get_pw_red_splits for members outside the group's frame."""
+
+    @staticmethod
+    def _fake_node(pw_sizes):
+        return types.SimpleNamespace(
+            _body=types.SimpleNamespace(
+                sizes=(pw_sizes, []),
+                iter_vars=[sympy.Symbol(f"p{i}") for i in range(len(pw_sizes))],
+                reduce_vars=[],
+            ),
+            is_reduction=lambda: False,
+        )
+
+    def test_unmatched_member_declines_instead_of_asserting(self):
+        # #197077: an RMSNorm-style epilogue can broadcast the per-row
+        # reduction over an extra axis, landing its pointwise product on
+        # red_numel instead of pointwise_numel or pointwise_numel * red_numel.
+        # Callers that can fall back get None; without a flag the assert
+        # still guards the frame contract.
+        from torch._inductor.tiling_utils import get_pw_red_splits
+
+        node = self._fake_node([sympy.Integer(4096), sympy.Integer(4)])
+
+        with self.assertRaises(AssertionError):
+            get_pw_red_splits(node, sympy.Integer(4096), sympy.Integer(16384))
+        for flag in ("none_if_not_divisible", "none_if_numel_mismatch"):
+            with self.subTest(flag=flag):
+                self.assertIsNone(
+                    get_pw_red_splits(
+                        node,
+                        sympy.Integer(4096),
+                        sympy.Integer(16384),
+                        **{flag: True},
+                    )
+                )
+
+    def test_member_spanning_the_full_frame_still_splits(self):
+        from torch._inductor.tiling_utils import get_pw_red_splits
+
+        node = self._fake_node([sympy.Integer(4096), sympy.Integer(16384)])
+
+        (_, pw_splits), (_, red_splits) = get_pw_red_splits(
+            node, sympy.Integer(4096), sympy.Integer(16384)
+        )
+        self.assertEqual(list(pw_splits), [sympy.Integer(4096)])
+        self.assertEqual(list(red_splits), [sympy.Integer(16384)])
+
+    def test_full_frame_merged_dim_keeps_whole_frame_fallback(self):
+        # A member spanning pointwise_numel * red_numel as one merged dim has
+        # no suffix splitting to red_numel. Only none_if_not_divisible declines
+        # it; none_if_numel_mismatch must not, so extract_normalized_read_writes
+        # keeps analyzing members it handled before #197078.
+        from torch._inductor.tiling_utils import get_pw_red_splits
+
+        node = self._fake_node([sympy.Integer(4096 * 16384)])
+
+        (_, pw_splits), (_, red_splits) = get_pw_red_splits(
+            node,
+            sympy.Integer(4096),
+            sympy.Integer(16384),
+            none_if_numel_mismatch=True,
+        )
+        self.assertEqual(list(pw_splits), [sympy.Integer(4096 * 16384)])
+        self.assertEqual(list(red_splits), [])
+        self.assertIsNone(
+            get_pw_red_splits(
+                node,
+                sympy.Integer(4096),
+                sympy.Integer(16384),
+                none_if_not_divisible=True,
+            )
+        )
+
+
+class OutOfFrameMemberAnalysisTest(MockSchedulerTest):
+    """extract_normalized_read_writes on real fused bodies built from IR."""
+
+    @staticmethod
+    def _pointwise_buffer(name, sizes):
+        strides = ir.FlexibleLayout.contiguous_strides(sizes)
+        box = ir.TensorBox.create(
+            ir.Buffer(
+                name=name,
+                layout=ir.FixedLayout(
+                    torch.device("cpu"),
+                    torch.float32,
+                    size=sizes,
+                    stride=strides,
+                ),
+            )
+        )
+        loader = box.make_loader()
+        buf = ir.Pointwise.create(
+            device=box.get_device(),
+            dtype=box.get_dtype(),
+            inner_fn=lambda index: loader(index) * 2,
+            ranges=box.get_size(),
+        )
+        buf.realize()
+        computed_buf = buf.data.data
+        computed_buf.decide_layout()
+        return computed_buf
+
+    @staticmethod
+    def _reduction_buffer(name, ranges, reduction_ranges):
+        sizes = [*ranges, *reduction_ranges]
+        strides = ir.FlexibleLayout.contiguous_strides(sizes)
+        box = ir.TensorBox.create(
+            ir.Buffer(
+                name=name,
+                layout=ir.FixedLayout(
+                    torch.device("cpu"),
+                    torch.float32,
+                    size=sizes,
+                    stride=strides,
+                ),
+            )
+        )
+        loader = box.make_loader()
+
+        def inner_fn(index, reduction_index):
+            return loader(index + reduction_index)
+
+        buf = ir.Reduction(
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+            inner_fn=inner_fn,
+            ranges=ranges,
+            reduction_ranges=reduction_ranges,
+            reduction_type="sum",
+            src_dtype=torch.float32,
+            reduction_hint=ir.ReductionHint.DEFAULT,
+        )
+        box = ir.TensorBox.create(buf)
+        box.realize()
+        return box.data.data
+
+    def _fused_with_pointwise_member(self, pw_sizes):
+        reduction = SchedulerNode(
+            V.graph.scheduler, self._reduction_buffer("red", [4096], [16384])
+        )
+        pointwise = SchedulerNode(
+            V.graph.scheduler, self._pointwise_buffer("pw", pw_sizes)
+        )
+        for node in (reduction, pointwise):
+            node.min_order = 0
+            node.max_order = 100
+        return FusedSchedulerNode.fuse(reduction, pointwise)
+
+    def test_member_landing_on_red_numel_reports_unknown_analysis(self):
+        # #197077: pre-fix this raised AssertionError out of NodeSplitGetter.
+        from torch._inductor import tiling_utils
+
+        fused = self._fused_with_pointwise_member((4096, 4))
+        self.assertIsNone(tiling_utils.extract_normalized_read_writes(fused))
+
+    def test_member_spanning_full_frame_still_analyzed(self):
+        # The merged-dim member covers pointwise_numel * red_numel; the
+        # analysis must keep accepting it via the whole-frame fallback.
+        from torch._inductor import tiling_utils
+
+        fused = self._fused_with_pointwise_member((4096 * 16384,))
+        self.assertIsNotNone(tiling_utils.extract_normalized_read_writes(fused))
+
+    def test_member_matching_pointwise_frame_still_analyzed(self):
+        from torch._inductor import tiling_utils
+
+        fused = self._fused_with_pointwise_member((4096,))
+        self.assertIsNotNone(tiling_utils.extract_normalized_read_writes(fused))
 
 
 @inductor_config.patch(loop_ordering_after_fusion=True)
