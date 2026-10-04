@@ -4646,6 +4646,74 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(10, 20, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_triton_kernel_oversized_shared_mem(self):
+        # Some devices (sm_107) allow more shared memory per block than the
+        # opt-in limit, only in the oversized shared memory mode. Triton compiles
+        # against the larger limit, so the generated loadKernel must enable that
+        # mode for such kernels.
+        if self.device != GPU_TYPE or GPU_TYPE != "cuda" or torch.version.hip:
+            raise unittest.SkipTest("requires a CUDA GPU")
+        device_index = torch.device(self.device).index or 0
+        opt_in = torch.cuda.get_device_properties(
+            device_index
+        ).shared_memory_per_block_optin
+        oversized = triton.runtime.driver.active.utils.get_device_properties(
+            device_index
+        )["max_shared_mem"]
+        if oversized <= opt_in:
+            raise unittest.SkipTest("No oversized shared memory on this device")
+
+        @triton.jit
+        def matmul_kernel(
+            a_ptr,
+            b_ptr,
+            c_ptr,
+            M,
+            N,
+            K,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+            BLOCK_K: tl.constexpr,
+        ):
+            offs_m = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
+            offs_n = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+            offs_k = tl.arange(0, BLOCK_K)
+            a_ptrs = a_ptr + offs_m[:, None] * K + offs_k[None, :]
+            b_ptrs = b_ptr + offs_k[:, None] * N + offs_n[None, :]
+            acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+            for _ in range(0, K, BLOCK_K):
+                acc += tl.dot(tl.load(a_ptrs), tl.load(b_ptrs))
+                a_ptrs += BLOCK_K
+                b_ptrs += BLOCK_K * N
+            c_ptrs = c_ptr + offs_m[:, None] * N + offs_n[None, :]
+            tl.store(c_ptrs, acc.to(tl.bfloat16))
+
+        # Four pipeline stages of 128x128 bf16 A and B tiles need about 256 KiB.
+        meta = {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 128}
+        launch = {"num_warps": 8, "num_stages": 4}
+        M = N = K = 512
+        grid = (M // 128, N // 128)
+        a = torch.randn(M, K, device=self.device, dtype=torch.bfloat16)
+        b = torch.randn(K, N, device=self.device, dtype=torch.bfloat16)
+        c = torch.empty(M, N, device=self.device, dtype=torch.bfloat16)
+        shared = matmul_kernel[grid](a, b, c, M, N, K, **meta, **launch).metadata.shared
+        if not opt_in < shared <= oversized:
+            raise unittest.SkipTest(
+                f"Kernel uses {shared} B of shared memory, not between the "
+                f"opt-in ({opt_in} B) and oversized ({oversized} B) limits"
+            )
+        matmul = triton.autotune(configs=[triton.Config(meta, **launch)], key=[])(
+            matmul_kernel
+        )
+
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                c = torch.empty(M, N, device=a.device, dtype=torch.bfloat16)
+                matmul[grid](a, b, c, M, N, K)
+                return c
+
+        self.check_model(Model(), (a, b))
+
     @requires_cuda_tma
     @common_utils.parametrize("dynamic", [False, True])
     @common_utils.parametrize("tma_version", ["new", "old"])
