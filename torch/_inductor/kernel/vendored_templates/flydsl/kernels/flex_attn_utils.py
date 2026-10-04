@@ -4,15 +4,6 @@ import flydsl.expr as fx
 from flydsl.expr import const_expr
 
 
-_CAUSAL_DOCUMENT_MASK_PROGRAM = (
-    ("const_bool", True),
-    ("ge", 2, 3),
-    ("and", 4, 5),
-    ("load_i32", 0, (2,)),
-    ("load_i32", 1, (7,)),
-    ("ge", 3, 8),
-    ("and", 6, 9),
-)
 # A sliding-window mask reaches the lowering in two shapes: and_masks() seeds a
 # const_bool True and folds each term into it, while a plain (q >= kv) & (q - kv < W)
 # lambda lowers without that prefix. Entries are (program, width_slot, output); the
@@ -76,23 +67,6 @@ def make_value_shared_layout(rows, columns):
     return fx.make_layout(
         ((8, rows // 8), (32, columns // 32)),
         ((32, 8 * columns), (1, 8 * 32)),
-    )
-
-
-def make_shared_view(pointer, shape, stride):
-    return fx.make_view(pointer, fx.make_layout(shape, stride))
-
-
-def is_causal_document_mask_program(
-    mask_program,
-    mask_program_output,
-    mask_buffer_strides,
-):
-    return (
-        tuple(mask_program) == _CAUSAL_DOCUMENT_MASK_PROGRAM
-        and int(mask_program_output) == 10
-        and len(mask_buffer_strides) == 2
-        and all(len(strides) == 1 for strides in mask_buffer_strides)
     )
 
 

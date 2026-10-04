@@ -223,7 +223,7 @@ def _get_flydsl_flex_attention_forward_config(
         if mask_program is None:
             return None, f"unsupported mask_mod: {mask_reason}"
 
-    decode = sq in (1, 4, 8)
+    decode = 0 < sq < 128
     common_reason = _check_flydsl_common_compatibility(
         query=query,
         key=key,
@@ -295,7 +295,7 @@ def _get_flydsl_flex_attention_forward_config(
         return (
             None,
             "requires prefill Sq divisible by 128 with matching BlockMask rows, "
-            "or decode Sq=1/4/8 with a shared/per-KV-head BlockMask and "
+            "or decode 0 < Sq < 128 with a shared/per-KV-head BlockMask and "
             "(Hq/Hkv)*Sq <= 256",
         )
 

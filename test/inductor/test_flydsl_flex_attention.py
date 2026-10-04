@@ -863,10 +863,12 @@ class TestFlyDSLFlexAttention(TestCase):
                 torch.isneginf(aux.max_scores[:, :, start : start + 128]).all()
             )
 
-    def test_gfx950_forward_unequal_packed_documents(self, device):
+    @parametrize("seq,document_starts", [(128, [0, 29, 83]), (8192, [0, 1701, 5387])])
+    def test_gfx950_forward_unequal_packed_documents(
+        self, device, seq, document_starts
+    ):
         self._require_runtime()
-        seq = 8192
-        starts = torch.tensor([0, 1701, 5387], device=device, dtype=torch.int32)
+        starts = torch.tensor(document_starts, device=device, dtype=torch.int32)
         document_ids = torch.bucketize(
             torch.arange(seq, device=device), starts[1:], right=True
         ).to(torch.int32)
@@ -885,7 +887,9 @@ class TestFlyDSLFlexAttention(TestCase):
             return_aux=True,
         )
 
-    def _check_gfx950_public_api_per_kv_head_decode(self, device, seq_q):
+    @parametrize("seq_q", [1, 3, 4, 8, 16])
+    def test_gfx950_public_api_per_kv_head_decode(self, device, seq_q):
+        self._require_runtime()
         batch, q_heads, kv_heads = 1, 64, 4
         seq_kv, head_dim = 8192, 128
         query, key, value = _make_qkv(
@@ -968,11 +972,6 @@ class TestFlyDSLFlexAttention(TestCase):
             enable_gqa=True,
             return_aux=True,
         )
-
-    @parametrize("seq_q", [1, 4, 8])
-    def test_gfx950_public_api_per_kv_head_decode(self, device, seq_q):
-        self._require_runtime()
-        self._check_gfx950_public_api_per_kv_head_decode(device, seq_q)
 
     def test_gfx950_public_api_transposed_document_qk192_v128(self, device):
         self._require_runtime()
@@ -1068,47 +1067,18 @@ class TestFlyDSLFlexAttention(TestCase):
         self._require_runtime()
         self._compare_created_mask(mask_mod, device=device, **kwargs)
 
-    def test_gfx950_public_api_document_mask_lowering(self, device):
+    @parametrize("seq", [128, 512])
+    def test_gfx950_public_api_composed_document_mask(self, device, seq):
         self._require_runtime()
-
-        from torch._inductor.kernel.vendored_templates.flydsl.kernels.flex_attn_utils import (
-            is_causal_document_mask_program,
-        )
-
-        seq = 512
-        document_ids = torch.arange(seq, device=device, dtype=torch.int32) // 256
-        document_starts = torch.tensor([0, 256], device=device, dtype=torch.int32)
+        document_ids = torch.arange(seq, device=device, dtype=torch.int32) // (seq // 2)
+        document_starts = torch.tensor([0, seq // 2], device=device, dtype=torch.int32)
         document_causal = and_masks(
             lambda b, h, q_idx, kv_idx: q_idx >= kv_idx,
             lambda b, h, q_idx, kv_idx: kv_idx >= document_starts[document_ids[q_idx]],
         )
-
-        def check_document_lowering(*args, **kwargs):
-            program, reason = lower_flydsl_mask_graph(*args, **kwargs)
-            self.assertIsNotNone(program, reason)
-            self.assertTrue(
-                is_causal_document_mask_program(
-                    program.instructions, program.output, program.buffer_strides
-                )
-            )
-            return program, reason
-
-        torch._dynamo.reset()
-        with (
-            torch._inductor.config.patch({"fx_graph_cache": False}),
-            mock.patch(
-                "torch._inductor.kernel.flex.flex_flydsl_attention.lower_flydsl_mask_graph",
-                side_effect=check_document_lowering,
-            ) as lower,
-        ):
-            self._compare_created_mask(
-                document_causal,
-                device=device,
-                seq=seq,
-                seed=4,
-                return_aux=True,
-            )
-            lower.assert_called_once()
+        self._compare_created_mask(
+            document_causal, device=device, seq=seq, seed=4, return_aux=True
+        )
 
     def test_gfx950_public_api_sliding_window_mask_lowering(self, device):
         self._require_runtime()
