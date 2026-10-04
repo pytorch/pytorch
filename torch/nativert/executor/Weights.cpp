@@ -1,5 +1,8 @@
 
 #include <c10/util/Logging.h>
+#include <algorithm>
+#include <cctype>
+#include <iterator>
 #include <utility>
 
 #include <torch/csrc/export/pt2_archive_constants.h>
@@ -19,6 +22,47 @@
 #include <caffe2/serialize/inline_container.h>
 
 namespace torch::nativert {
+
+namespace {
+
+bool isGeneratedLoweringWrapper(std::string_view component) {
+  constexpr std::string_view kPrefixes[] = {"_run_on_acc_", "_run_on_gpu_"};
+  for (const auto prefix : kPrefixes) {
+    if (component.starts_with(prefix) && component.size() > prefix.size()) {
+      return std::all_of(
+          component.begin() + prefix.size(),
+          component.end(),
+          [](unsigned char c) { return std::isdigit(c); });
+    }
+  }
+  return false;
+}
+
+std::string canonicalizeAotiOriginalFqn(std::string_view name) {
+  // For example, "merge._run_on_acc_0.layer.weight" becomes
+  // "merge.layer.weight".
+  std::string canonical;
+  size_t begin = 0;
+  while (begin <= name.size()) {
+    const size_t end = name.find('.', begin);
+    const auto component = name.substr(
+        begin,
+        end == std::string_view::npos ? name.size() - begin : end - begin);
+    if (!isGeneratedLoweringWrapper(component)) {
+      if (!canonical.empty()) {
+        canonical.push_back('.');
+      }
+      canonical.append(component);
+    }
+    if (end == std::string_view::npos) {
+      break;
+    }
+    begin = end + 1;
+  }
+  return canonical;
+}
+
+} // namespace
 
 WeightVersion Weights::globalVersion_ = 0;
 
@@ -45,6 +89,7 @@ Weights::Weights(
       }
     }
   }
+  rebuildCanonicalAotiOriginalFqns();
 }
 
 Weights::Weights(
@@ -104,8 +149,8 @@ Weights::Weights(
     // /extra/xl_weights/<model_name>_model_param_config.json
     // Currently, we only use the metadata from model definition.
     std::optional<TensorMeta> tensorMeta;
-    if (weightsMeta_.contains(tensorName)) {
-      tensorMeta = weightsMeta_.at(tensorName);
+    if (auto it = weightsMeta_.find(tensorName); it != weightsMeta_.end()) {
+      tensorMeta = it->second;
     } else {
       TORCH_CHECK(
           false,
@@ -115,13 +160,15 @@ Weights::Weights(
     }
     std::optional<TensorMeta> newTensorMeta;
     if (maybeNewWeightsMeta) {
-      if (!stateDictPaths.contains(tensorName)) {
+      auto it = stateDictPaths.find(tensorName);
+      if (it == stateDictPaths.end()) {
         TORCH_CHECK(false, "Tensor name not found in state dict paths");
       }
 
-      std::string paramName = stateDictPaths.at(tensorName);
-      if (maybeNewWeightsMeta->contains(paramName)) {
-        newTensorMeta = *maybeNewWeightsMeta->at(paramName);
+      std::string paramName = it->second;
+      if (auto metaIt = maybeNewWeightsMeta->find(paramName);
+          metaIt != maybeNewWeightsMeta->end()) {
+        newTensorMeta = *metaIt->second;
       } else {
         TORCH_CHECK(
             false,
@@ -248,6 +295,8 @@ Weights::Weights(
   loadConstants(graph->signature().nonPersistentBuffers());
   loadConstants(graph->signature().tensorConstants());
 
+  setWeightStorageKeys(stateDictPaths, constantPaths);
+
   // custom object constants
   for (const auto& customObjName : graph->signature().customObjs()) {
     auto pathIt = constantPaths.find(std::string(customObjName));
@@ -286,6 +335,7 @@ Weights::Weights(
     customObjs_[std::string(customObjName)] = std::move(customObj);
     customObjsPaths_[customObjPath] = std::string(customObjName);
   }
+  rebuildCanonicalAotiOriginalFqns();
 }
 
 std::unordered_map<std::string, at::Tensor> Weights::parameters() const {
@@ -328,6 +378,85 @@ at::Tensor& Weights::at(const std::string& name) {
 
 bool Weights::contains(const std::string& name) const {
   return allValues_.contains(name);
+}
+
+std::optional<std::string> Weights::resolveAotiOriginalFqn(
+    const std::string& name) const {
+  if (contains(name)) {
+    return name;
+  }
+
+  const auto it =
+      canonicalAotiOriginalFqns_.find(canonicalizeAotiOriginalFqn(name));
+  if (it == canonicalAotiOriginalFqns_.end()) {
+    return std::nullopt;
+  }
+  return it->second;
+}
+
+void Weights::rebuildCanonicalAotiOriginalFqns() {
+  canonicalAotiOriginalFqns_.clear();
+  canonicalAotiOriginalFqns_.reserve(allValues_.size());
+  for (const auto& [name, _] : allValues_) {
+    indexCanonicalAotiOriginalFqn(name);
+  }
+}
+
+void Weights::indexCanonicalAotiOriginalFqn(const std::string& name) {
+  const auto canonical = canonicalizeAotiOriginalFqn(name);
+  const auto [it, inserted] =
+      canonicalAotiOriginalFqns_.try_emplace(canonical, name);
+  if (!inserted && it->second && *it->second != name) {
+    it->second.reset();
+  }
+}
+
+std::optional<std::string> Weights::getWeightStorageKey(
+    const std::string& name) const {
+  if (const auto it = weightNameToStorageKey_.find(name);
+      it != weightNameToStorageKey_.end()) {
+    return it->second;
+  }
+  return std::nullopt;
+}
+
+std::optional<std::string> Weights::resolveWeightStorageKey(
+    const std::string& storageKey) const {
+  const auto [begin, end] = storageKeyToWeightNames_.equal_range(storageKey);
+  if (begin == end) {
+    return std::nullopt;
+  }
+  const auto match = begin->second;
+  if (std::next(begin) != end) {
+    return std::nullopt;
+  }
+  return match;
+}
+
+void Weights::setWeightStorageKeys(
+    const std::unordered_map<std::string, std::string>& stateDictPaths,
+    const std::unordered_map<std::string, std::string>& constantPaths) {
+  weightNameToStorageKey_.clear();
+  storageKeyToWeightNames_.clear();
+  for (const auto& [name, path] : stateDictPaths) {
+    indexWeightStorageKey(name, "state_dict:", path);
+  }
+  for (const auto& [name, path] : constantPaths) {
+    indexWeightStorageKey(name, "constant:", path);
+  }
+}
+
+void Weights::indexWeightStorageKey(
+    const std::string& name,
+    std::string_view storageNamespace,
+    const std::string& path) {
+  if (!contains(name)) {
+    return;
+  }
+  std::string storageKey{storageNamespace};
+  storageKey.append(path);
+  weightNameToStorageKey_[name] = storageKey;
+  storageKeyToWeightNames_.emplace(std::move(storageKey), name);
 }
 
 c10::IValue Weights::getCustomObj(const std::string& name) const {
@@ -381,6 +510,7 @@ void Weights::loadStateDict(
     validateAndInsert(std::string(name));
   }
   // TensorConstants_ not filled !!
+  rebuildCanonicalAotiOriginalFqns();
 }
 
 void Weights::validateValue(const std::string& name, const at::Tensor& newValue)
@@ -439,13 +569,15 @@ void Weights::setValue(
     const std::string& name,
     const at::Tensor& newValue,
     bool skipDeviceCheck) {
-  if (allValues_.contains(name)) {
+  auto it = allValues_.find(name);
+  if (it != allValues_.end()) {
     validateValue(name, newValue, skipDeviceCheck);
+    it->second = newValue;
   } else {
     LOG(WARNING) << name << " is not found in the registered weights";
+    allValues_.emplace(name, newValue);
+    indexCanonicalAotiOriginalFqn(name);
   }
-
-  allValues_[name] = newValue;
 }
 
 void Weights::updateValue(const std::string& name, const at::Tensor& newValue) {

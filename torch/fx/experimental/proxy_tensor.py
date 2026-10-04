@@ -10,6 +10,7 @@ import contextvars
 import functools
 import inspect
 import logging
+import math
 import operator
 import threading
 import typing
@@ -1217,6 +1218,26 @@ def _coor_current_device() -> torch.device:
     return cur
 
 
+def _coor_device_index_is_current(device: torch.device) -> bool:
+    """Whether ``device``'s index is just "the device this rank happens to be on".
+
+    True only under compile-on-one-rank, and only for the current accelerator. CooR
+    enforces a single-accelerator invariant while tracing -- one accelerator device,
+    though cpu tensors may coexist with it -- so for an accelerator device the index
+    is the compiling rank's and conveys nothing that is true of any other rank.
+    Callers use this to leave the index out of anything that has to be identical
+    across ranks (a guard, a cache key, a traced constant).
+
+    cpu is excluded: it is portable already and its index is not a rank identity.
+    Outside CooR several accelerator devices can legitimately be live at once, so
+    the index is real information and this returns False.
+    """
+    if not _coor_enabled() or device.index is None:
+        return False
+    cur = _coor_current_accelerator()
+    return cur is not None and device.type == cur.type and device.index == cur.index
+
+
 # Registered as an op (not a bare function) so it is a serializable call_function target
 # with a stable identity for precompile/export and for consumers to match. It reads only
 # torch.accelerator, so it lives in core fx with no torch.distributed coupling.
@@ -1235,6 +1256,34 @@ def _coor_current_device_impl() -> torch.device:
 @torch.library.register_fake("coor::current_device")
 def _coor_current_device_fake() -> torch.device:
     return _coor_current_device()
+
+
+# An int has no index-less form meaning "this rank's device", so device-index
+# observations stay unknown until the artifact runs. The fake implementation returns
+# an unbacked symbol rather than the compiling rank's index.
+torch.library.define(
+    "coor::current_device_index",
+    "() -> SymInt",
+    tags=torch.Tag.pt2_compliant_tag,
+)
+
+
+@torch.library.impl("coor::current_device_index", "CompositeExplicitAutograd")
+def _coor_current_device_index_impl() -> int:
+    return torch.accelerator.current_device_index()
+
+
+@torch.library.register_fake("coor::current_device_index")
+def _coor_current_device_index_fake() -> torch.SymInt:
+    from torch.fx.experimental.symbolic_shapes import constrain_range
+
+    # Unbacked, but not a size, so not ctx.new_dynamic_size(): that files the
+    # symbol under ShapeEnv.size_like, whose size-oblivious reasoning assumes a
+    # value is never 0 or 1 -- here, that this rank is never cuda:0 or cuda:1.
+    ctx = torch.library.get_ctx()
+    index = ctx._shape_env.create_unbacked_symint()
+    constrain_range(index, min=0)  # an accelerator index is non-negative
+    return index
 
 
 def _coor_check_current_accelerator(
@@ -1608,8 +1657,8 @@ class PythonKeyTracer(Tracer):
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
 
-    def __init__(self) -> None:
-        super().__init__(autowrap_modules=())  # type: ignore[arg-type]
+    def __init__(self, *, autowrap_modules: tuple[types.ModuleType, ...] = ()) -> None:
+        super().__init__(autowrap_modules=autowrap_modules)
         _init_proxy_trackers(self)
 
     # In general, we don't want to make modules leaves. In principle, users of
@@ -1881,6 +1930,15 @@ def dispatch_trace(
 
         # Accessors always OK to DCE
         if is_accessor_node(n):
+            return False
+
+        # Views only compute metadata, so they are OK to DCE unless they bind
+        # unbacked symbols
+        if (
+            isinstance(n.target, OpOverload)
+            and n.target.is_view
+            and "unbacked_bindings" not in n.meta
+        ):
             return False
 
         # If the operator in question takes SymInt args to SymInt output,
@@ -2469,11 +2527,18 @@ class _SelectiveDecomposeInterpreter(fx.Interpreter):
         )
 
     def run_node(self, n: fx.Node) -> Any:
+        from torch._guards import detect_fake_mode
+        from torch.fx.experimental.symbolic_shapes import rebind_unbacked
+
         if self.should_decompose(n):
             with decompose(self.decomposition_table):
                 result = super().run_node(n)
         else:
             result = super().run_node(n)
+        # Retracing allocates fresh unbacked symbols; tie them back to the
+        # originals, which deferred runtime asserts are keyed on.
+        if (fake_mode := detect_fake_mode()) is not None:
+            rebind_unbacked(fake_mode.shape_env, n, result)
         return result
 
 
@@ -2485,6 +2550,12 @@ def selective_decompose(
     trace_joint_graph: bool,
 ) -> fx.GraphModule:
     """Retrace a joint graph module and selectively apply decomposition."""
+    from torch._guards import detect_fake_mode
+
+    # rebind_unbacked (in _SelectiveDecomposeInterpreter.run_node) requires that
+    # the retrace not hit fake tensor memos from the original trace.
+    if (fake_mode := detect_fake_mode(args)) is not None:
+        fake_mode.epoch += 1
 
     if trace_joint_graph:
         # the arg name, primals and tangents, are important.
@@ -2557,8 +2628,17 @@ class _ModuleStackTracer(PythonKeyTracer):
     See Note [Preserving the nn module stack metadata during export non-strict mode]  # noqa: W605
     """
 
-    def __init__(self, scope_root: GraphModule) -> None:
-        super().__init__()
+    @classmethod
+    def _graph_module_deserialization_tracer(cls, root: Module) -> Tracer:
+        return _ModuleStackTracerForGraphModuleDeserialization(root)
+
+    def __init__(
+        self,
+        scope_root: Module,
+        *,
+        autowrap_modules: tuple[types.ModuleType, ...] = (),
+    ) -> None:
+        super().__init__(autowrap_modules=autowrap_modules)
         self.record_stack_traces = not fx.config.do_not_emit_stack_traces
         self._record_forward_stack_traces_only = True
         self.scope_root = scope_root
@@ -2719,8 +2799,20 @@ class _ModuleStackTracer(PythonKeyTracer):
         global _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT
         _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT.clear()
 
-        for key, val in self.tensor_tracker.items():
-            _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(key)] = val.proxy.node
+        # Only step (2) of the strategy above, and only the consumers gated on
+        # detect_non_strict_fake_tensor_leaks ever read this. Populating it
+        # regardless kept a node per traced tensor in a module-level dict, and
+        # through them the graph, its owning module, and every parameter -- for
+        # the life of the process, long after the trace returned.
+        # Imported here rather than at module level on purpose: importing
+        # torch._export.config runs torch/_export/__init__.py, which does
+        # `from torch.fx.experimental.proxy_tensor import make_fx` -- a cycle
+        # back into this module while it is still initialising.
+        import torch._export.config as _export_config
+
+        if _export_config.detect_non_strict_fake_tensor_leaks:
+            for key, val in self.tensor_tracker.items():
+                _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(key)] = val.proxy.node
 
         # Since we are making _AttrProxy mimic the original
         # submodule, when someone registers a module directly
@@ -2842,6 +2934,43 @@ class _ModuleStackTracer(PythonKeyTracer):
             )
 
         return node
+
+
+class _ModuleStackTracerForGraphModuleDeserialization(_ModuleStackTracer):
+    """Replay GraphModule code without running export-only tracer behavior."""
+
+    def __init__(self, scope_root: Module) -> None:
+        super().__init__(scope_root, autowrap_modules=(math,))
+        self.record_stack_traces = False
+
+    def trace(
+        self,
+        root: Module | Callable[..., Any],
+        concrete_args: dict[str, object] | None = None,
+    ) -> fx.Graph:
+        return Tracer.trace(self, root, concrete_args)
+
+    def call_module(
+        self,
+        m: Module,
+        forward: Callable[..., Any],
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+    ) -> Any:
+        return Tracer.call_module(self, m, forward, args, kwargs)
+
+    def getattr(
+        self, attr: str, attr_val: object, parameter_proxy_cache: dict[str, Proxy]
+    ) -> object:
+        if isinstance(attr_val, Module) and self.enable_attr_proxy:
+            return self.proxy_type(attr_val, attr)
+        return Tracer.getattr(self, attr, attr_val, parameter_proxy_cache)
+
+    def is_leaf_module(self, m: Module, module_qualified_name: str) -> bool:
+        return True
+
+    def create_node(self, *args: object, **kwargs: object) -> fx.node.Node:
+        return Tracer.create_node(self, *args, **kwargs)  # type: ignore[arg-type]
 
 
 class _MakefxTracer:

@@ -202,13 +202,15 @@ def quack_rmsnorm_bwd(
         dw_partial is not None,
         per_head=False,
     )
-    # compile order: (x, weight, dout, dres_out, rstd, dx, dw_partial, dres, db_partial, sm_count)
+    # compile order: (x, weight, dout, dres_out, rstd, mean, dx, dw_partial, dres,
+    # db_partial, sm_count); mean is LayerNorm-only.
     kernel(
         _read_only(x),
         _read_only(weight),
         _read_only(dout),
         None,
         _read_only(rstd_flat),
+        None,
         dx,
         dw_partial,
         None,

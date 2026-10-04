@@ -163,8 +163,8 @@ void RNNImplBase<Derived>::reset() {
   flat_weights_ = {};
   for (const auto& wn : flat_weights_names_) {
     auto named_parameters = this->named_parameters(/*recurse=*/false);
-    if (named_parameters.contains(wn)) {
-      flat_weights_.emplace_back(named_parameters[wn]);
+    if (auto* parameter = named_parameters.find(wn)) {
+      flat_weights_.emplace_back(*parameter);
     } else {
       flat_weights_.emplace_back();
     }
@@ -242,8 +242,8 @@ void RNNImplBase<Derived>::reset_flat_weights() {
   flat_weights_ = {};
   for (const auto& wn : flat_weights_names_) {
     auto named_parameters = this->named_parameters(/*recurse=*/false);
-    if (named_parameters.contains(wn)) {
-      flat_weights_.emplace_back(named_parameters[wn]);
+    if (auto* parameter = named_parameters.find(wn)) {
+      flat_weights_.emplace_back(*parameter);
     } else {
       flat_weights_.emplace_back();
     }

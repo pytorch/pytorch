@@ -29,7 +29,6 @@ from torch.testing._internal.common_utils import (
     MI200_ARCH,
     NAVI_ARCH,
     parametrize,
-    skipIfRocm,
     skipIfRocmArch,
     subtest,
 )
@@ -129,7 +128,7 @@ class BlockDescriptorTestBase(InductorTestCase):
         return self._assert_tiling_ndims(code, pointwise_blocks, num_dims)
 
     def _assert_reduction_ndims(self, code, num_dims: int) -> None:
-        reduction_blocks = ["R0_BLOCK", "R1_BLOCK"]
+        reduction_blocks = ["R0_BLOCK", "R1_BLOCK", "R2_BLOCK"]
         return self._assert_tiling_ndims(code, reduction_blocks, num_dims)
 
     def _assert_tiling_ndims(self, code, blocks: list[str], num_dims: int) -> None:
@@ -1050,7 +1049,6 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2)
 
-    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/158328")
     @parametrize("reduction_op", [torch.sum, torch.argmax])
     def test_2d_reductions_mixed_indexing(
         self,
@@ -1078,6 +1076,25 @@ class CommonTemplate:
 
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2)
+
+    def test_3d_reduction_with_pointwise_output(self):
+        view = self._discontiguous_tensor((5, 7, 3, 5), self.device)
+
+        _result, (code,) = self._run_and_compare(
+            functools.partial(torch.sum, dim=(1, 2, 3)),
+            view,
+            expected_num_block_pointers=2,
+            expected_num_triton_kernels=1,
+            config_patches={
+                **tiled_reduction_config,
+                "triton.max_tiles": 3,
+            },
+            rtol=1e-4,
+            atol=1e-4,
+        )
+
+        self._assert_pointwise_ndims(code, 1)
+        self._assert_reduction_ndims(code, 3)
 
     @parametrize(
         "tile_reductions",
@@ -1207,6 +1224,53 @@ class CommonTemplate:
 
         # Verify 2D reduction is used (R0_BLOCK and R1_BLOCK present)
         self._assert_reduction_ndims(code, 2)
+
+    def test_3d_reduction_with_broadcast(self):
+        def fn(x, y):
+            return (x * y[:, :, None]).sum()
+
+        x = torch.empty_strided((5, 7, 9), (256, 16, 1), device=self.device).normal_()
+        y = torch.empty_strided((5, 7), (16, 1), device=self.device).normal_()
+
+        class FixedReductionBlockSizeChoices(InductorChoices):
+            def triton_kernel_kwargs(self, kernel_cls, features, groups, kernel_kwargs):
+                kernel_kwargs["fixed_config"] = FixedTritonConfig(
+                    {
+                        "XBLOCK": 1,
+                        "R0_BLOCK": 2,
+                        "R1_BLOCK": 4,
+                        "R2_BLOCK": 4,
+                    }
+                )
+                return kernel_kwargs
+
+        expected_num_block_pointers = (
+            2 if self.block_descriptor_constructor_str == "tl.make_block_ptr" else None
+        )
+        with V.set_choices_handler(FixedReductionBlockSizeChoices()):
+            _result, (code,) = self._run_and_compare(
+                fn,
+                x,
+                y,
+                expected_num_block_pointers=expected_num_block_pointers,
+                config_patches={
+                    **tiled_reduction_config,
+                    "split_reductions": False,
+                    "triton.cooperative_reductions": False,
+                    "triton.force_cooperative_reductions": False,
+                    "triton.max_tiles": 3,
+                    "triton.persistent_reductions": False,
+                },
+            )
+
+        self._assert_reduction_ndims(code, 3)
+        for reduction_dim in range(3):
+            self.assertIn(
+                f"for r{reduction_dim}_offset in tl.range(0, r{reduction_dim}_numel",
+                code,
+            )
+        if self.block_descriptor_constructor_str == "tl.make_block_ptr":
+            self.assertIn("tl.advance(", code)
 
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
@@ -1609,7 +1673,22 @@ class TritonBlockPointerTestGPU(BlockDescriptorTestBase):
 test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYPE)
 
 
-@unittest.skipIf(not TRITON_HAS_CPU, "requires triton CPU backend")
+def _triton_cpu_supports_tensor_descriptor() -> bool:
+    # A CPU backend existing does not imply tensor descriptor support; older
+    # builds register the backend without the driver API.
+    # Internal-only: stable is an old (3.5-era) frontend with a retrofitted
+    # 3.8-based CPU backend; drop this once stable is upgraded to 3.8.
+    try:
+        from triton.backends.cpu.driver import CPUDriver
+    except ImportError:
+        return False
+    return hasattr(CPUDriver, "tensor_descriptor")
+
+
+@unittest.skipIf(
+    not TRITON_HAS_CPU or not _triton_cpu_supports_tensor_descriptor(),
+    "requires triton CPU backend with tensor descriptor support",
+)
 @config.patch({"triton.use_tensor_descriptor": True, "cpu_backend": "triton"})
 @instantiate_parametrized_tests
 class TritonTensorDescriptorTestCPU(BlockDescriptorTestBase):
@@ -1628,6 +1707,27 @@ class TritonTensorDescriptorTestCPU(BlockDescriptorTestBase):
 class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
     block_descriptor_constructor_str = "tl.make_tensor_descriptor"
     device = GPU_TYPE
+
+    def test_3d_reduction_descriptor_respects_tensor_rank_limit(self):
+        def reduce_3d(x):
+            return torch.sum(x, dim=(3, 4, 5))
+
+        inp = torch.empty_strided(
+            (12, 3, 4, 4, 4, 4),
+            (1536, 128, 4, 384, 32, 1),
+            device=self.device,
+        ).normal_()
+
+        _result, (code,) = self._run_and_compare(
+            reduce_3d,
+            inp,
+            config_patches={
+                **tiled_reduction_config,
+                "triton.max_tiles": 3,
+            },
+        )
+
+        self.assertIn("tl.load(in_ptr0 +", code)
 
     @config.patch({"triton.transpose_discontiguous_tensor_descriptor": True})
     @parametrize(
@@ -2401,6 +2501,85 @@ class TritonHostSideTMATestCUDA(BlockDescriptorTestBase):
             "static Triton launcher path was not taken for host-side TMA kernel",
         )
         self.assertTrue(torch.allclose(compiled_out, eager_out))
+
+    def _host_tma_launcher_lines(self, fn, *args):
+        from torch._inductor.runtime import triton_heuristics
+
+        captured = []
+        orig = triton_heuristics.CompileResult._gen_launcher_code
+
+        def capture(result_self, scope, def_args, runner_args, pre_runner_lines=None):
+            if pre_runner_lines:
+                names = getattr(result_self.kernel, "tensordesc_arg_names", [])
+                captured.append((pre_runner_lines, names))
+            return orig(
+                result_self,
+                scope,
+                def_args,
+                runner_args,
+                pre_runner_lines=pre_runner_lines,
+            )
+
+        with mock.patch.object(
+            triton_heuristics.CompileResult, "_gen_launcher_code", capture
+        ):
+            result, _ = run_and_get_code(torch.compile(fn), *args)
+        self.assertTrue(captured, "no host-side TMA descriptors were emitted")
+        return captured, result
+
+    @config.patch("use_static_triton_launcher", True)
+    def test_host_tma_launcher_keeps_aligned_tensor_alive(self):
+        # The CUtensorMap stores only a device address, so the aligned (possibly
+        # cloned) tensor must be a launcher local that outlives the launch.
+        def fn(a, b):
+            return (a + b) * 2
+
+        a = torch.randn(1024, 1024, device=self.device, dtype=torch.bfloat16)
+        b = torch.randn(1024, 1024, device=self.device, dtype=torch.bfloat16)
+        captured, result = self._host_tma_launcher_lines(fn, a, b)
+        self.assertTrue(torch.allclose(result, fn(a, b)))
+        for lines, _ in captured:
+            expands = [ln for ln in lines if "expand_host_tma_descriptor(" in ln]
+            self.assertTrue(expands)
+            for line in expands:
+                name = line.split("_host_tma_desc")[0].strip()
+                self.assertIn(
+                    f'{name}_aligned = _host_tma_aligned({name}, "{name}")', lines
+                )
+                self.assertIn(f"{name}_aligned,", line)
+
+    def test_host_tma_meta_index_follows_signature_order(self):
+        # triton keys tensordesc_meta by signature position. Real kernels happen
+        # to encounter descriptors in signature order, so drive the mapping
+        # directly with the two orders disagreeing.
+        from types import SimpleNamespace
+
+        from torch._inductor.runtime.triton_heuristics import CompileResult
+
+        desc = {"block_shape": [128], "shape": [1024], "strides": [1]}
+        stub = SimpleNamespace(
+            inductor_meta={
+                "host_tma_descriptor_args": {"out_ptr0": desc, "in_ptr0": desc}
+            },
+            config=SimpleNamespace(kwargs={}),
+            compile_meta={"constants": {}},
+            kernel=SimpleNamespace(
+                tensordesc_meta=[{"elem_size": 2}, {"elem_size": 4}],
+                tensordesc_arg_names=["in_ptr0", "out_ptr0"],
+            ),
+        )
+        call_args = ["in_ptr0", "out_ptr0"]
+        lines, _, _ = CompileResult._host_tma_static_pre_runner_lines(
+            stub, list(call_args), call_args
+        )
+        meta_idx = {
+            ln.split("_host_tma_desc")[0].strip(): int(
+                ln.split("_tma_meta[")[1].split("]")[0]
+            )
+            for ln in lines
+            if "expand_host_tma_descriptor(" in ln
+        }
+        self.assertEqual(meta_idx, {"in_ptr0": 0, "out_ptr0": 1})
 
 
 test_torchinductor.copy_tests(CommonTemplate, TritonHostSideTMATestCUDA, GPU_TYPE)

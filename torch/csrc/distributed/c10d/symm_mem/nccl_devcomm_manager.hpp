@@ -34,22 +34,13 @@ class TORCH_API NCCLDevCommManager {
   // @param device The CUDA device this manager is associated with
   explicit NCCLDevCommManager(const c10::Device device) : device_(device) {}
 
-  // Per-device singleton: lazily creates one manager per CUDA device so
-  // callers on different devices don't share state.
-  static NCCLDevCommManager& get(const c10::Device device) {
-    static std::mutex mu;
-    static std::
-        unordered_map<c10::DeviceIndex, std::unique_ptr<NCCLDevCommManager>>
-            managers;
-    std::lock_guard<std::mutex> lock(mu);
-    auto& slot = managers[device.index()];
-    if (!slot) {
-      slot =
-          std::unique_ptr<NCCLDevCommManager>(new NCCLDevCommManager(device));
-      LOG(INFO) << "[NCCLDevCommManager] created manager for device=" << device;
-    }
-    return *slot;
-  }
+  // Per-device singleton: Defined out-of-line in nccl_devcomm_manager.cpp
+  // (libtorch_cuda) so the function-local registry is process-wide. An inline
+  // definition is hidden by
+  // `-fvisibility-inlines-hidden`, so a separately linked DSO (e.g.
+  // torch._nccl_ep) gets its own empty map and cannot see ProcessGroup / hook
+  // registration.
+  static NCCLDevCommManager& get(const c10::Device device);
 
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
   // Get an NCCL device communicator for a group, for the caller function.  By

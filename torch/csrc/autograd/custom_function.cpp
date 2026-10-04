@@ -1,7 +1,6 @@
 #include <c10/core/AutogradState.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/VariableTypeUtils.h>
-#include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/forward_grad.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
