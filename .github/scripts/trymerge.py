@@ -57,6 +57,7 @@ from label_utils import (
 )
 from native_stack import (
     build_native_stack_commits,
+    find_stack_dependents,
     get_native_stack,
     get_native_stack_landing_prs,
     landed_since,
@@ -2993,17 +2994,15 @@ def get_ghstack_dependent_prs(
     return rc
 
 
-def do_revert_prs(
+def commit_reverts(
     repo: GitRepo,
-    original_pr: GitHubPR,
     shas_and_prs: list[tuple[str, GitHubPR]],
     *,
     author_login: str,
-    extra_msg: str = "",
-    skip_internal_checks: bool = False,
-    dry_run: bool = False,
-) -> None:
-    # Prepare and push revert commits
+    extra_msg: str,
+) -> str:
+    """Commit a revert of each commit of `shas_and_prs`, in order, on the default
+    branch, and return the line that ends the message of the last one."""
     for commit_sha, pr in shas_and_prs:
         revert_msg = f"\nReverted {pr.get_pr_url()} on behalf of {prefix_with_github_url(author_login)}"
         revert_msg += extra_msg
@@ -3013,9 +3012,19 @@ def do_revert_prs(
         msg = re.sub(RE_PULL_REQUEST_RESOLVED, "", msg)
         msg += revert_msg
         repo.amend_commit_message(msg)
-    repo.push(shas_and_prs[0][1].default_branch(), dry_run)
+    return revert_msg
 
-    # Comment/reopen PRs
+
+def reopen_reverted_prs(
+    original_pr: GitHubPR,
+    shas_and_prs: list[tuple[str, GitHubPR]],
+    revert_msg: str,
+    *,
+    skip_internal_checks: bool,
+    dry_run: bool,
+) -> None:
+    """Comment on, label and reopen the PRs of `shas_and_prs`, in order, once the
+    reverts of their commits landed, and comment `revert_msg` on those commits."""
     for commit_sha, pr in shas_and_prs:
         revert_message = ""
         if pr.pr_num == original_pr.pr_num:
@@ -3045,6 +3054,80 @@ def do_revert_prs(
             gh_update_pr_state(pr.org, pr.project, pr.pr_num)
 
 
+def do_revert_prs(
+    repo: GitRepo,
+    original_pr: GitHubPR,
+    shas_and_prs: list[tuple[str, GitHubPR]],
+    *,
+    author_login: str,
+    extra_msg: str = "",
+    skip_internal_checks: bool = False,
+    dry_run: bool = False,
+) -> None:
+    revert_msg = commit_reverts(
+        repo, shas_and_prs, author_login=author_login, extra_msg=extra_msg
+    )
+    repo.push(shas_and_prs[0][1].default_branch(), dry_run)
+    reopen_reverted_prs(
+        original_pr,
+        shas_and_prs,
+        revert_msg,
+        skip_internal_checks=skip_internal_checks,
+        dry_run=dry_run,
+    )
+
+
+def revert_with_dependents(
+    repo: GitRepo,
+    pr: GitHubPR,
+    commit_sha: str,
+    *,
+    author_login: str,
+    extra_msg: str,
+    skip_internal_checks: bool,
+    dry_run: bool,
+) -> None:
+    """Revert `commit_sha`, which lands `pr`, or, if PRs stacked on `pr` landed on
+    top of it (see find_stack_dependents), revert them and `pr`'s landing, top of the
+    stack first, and reopen them bottom-up. Each attempt starts from the remote's
+    default branch, as other jobs may land PRs on top of `pr` after this job's
+    checkout or before its push."""
+    default_branch = pr.default_branch()
+    trunk = f"refs/remotes/{repo.remote}/{default_branch}"
+    for attempt in range(1, NATIVE_STACK_PUSH_ATTEMPTS + 1):
+        repo._run_git("fetch", repo.remote, f"+refs/heads/{default_branch}:{trunk}")
+        repo._run_git("checkout", "-B", default_branch, trunk)
+        landing, dependents = find_stack_dependents(
+            repo, pr.org, pr.project, pr.pr_num, trunk
+        )
+        shas_and_prs = [(commit_sha, pr)]
+        if landing is not None and dependents:
+            # validate_revert's lookup is a substring search, which also matches
+            # quotes and longer PR numbers; revert the landing the dependents need
+            shas_and_prs = [
+                (sha, GitHubPR(pr.org, pr.project, num)) for sha, num in dependents
+            ] + [(landing, pr)]
+            prs_to_revert = " ".join(p.get_pr_url() for _, p in shas_and_prs)
+            print(f"About to revert native stack of PRs: {prs_to_revert}")
+        revert_msg = commit_reverts(
+            repo, shas_and_prs, author_login=author_login, extra_msg=extra_msg
+        )
+        try:
+            repo.push(default_branch, dry_run, retry=1)
+            break
+        except RuntimeError as e:
+            if attempt == NATIVE_STACK_PUSH_ATTEMPTS:
+                raise
+            print(f"Push attempt {attempt} failed, reverting again: {e}")
+    reopen_reverted_prs(
+        pr,
+        shas_and_prs[::-1],
+        revert_msg,
+        skip_internal_checks=skip_internal_checks,
+        dry_run=dry_run,
+    )
+
+
 def try_revert(
     repo: GitRepo,
     pr: GitHubPR,
@@ -3065,16 +3148,24 @@ def try_revert(
         if comment_id is not None
         else "\n"
     )
+    if not pr.is_ghstack_pr():
+        revert_with_dependents(
+            repo,
+            pr,
+            commit_sha,
+            author_login=author_login,
+            extra_msg=extra_msg,
+            skip_internal_checks=can_skip_internal_checks(pr, comment_id),
+            dry_run=dry_run,
+        )
+        return
     shas_and_prs = [(commit_sha, pr)]
-    if pr.is_ghstack_pr():
-        try:
-            shas_and_prs = get_ghstack_dependent_prs(repo, pr)
-            prs_to_revert = " ".join([t[1].get_pr_url() for t in shas_and_prs])
-            print(f"About to stack of PRs: {prs_to_revert}")
-        except Exception as e:
-            print(
-                f"Failed to fetch dependent PRs: {str(e)}, fall over to single revert"
-            )
+    try:
+        shas_and_prs = get_ghstack_dependent_prs(repo, pr)
+        prs_to_revert = " ".join([t[1].get_pr_url() for t in shas_and_prs])
+        print(f"About to stack of PRs: {prs_to_revert}")
+    except Exception as e:
+        print(f"Failed to fetch dependent PRs: {str(e)}, fall over to single revert")
 
     if not shas_and_prs:
         raise RuntimeError(

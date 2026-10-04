@@ -21,7 +21,7 @@ from typing import Any, TYPE_CHECKING
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
-from github_utils import gh_graphql, GHGraphQLError
+from github_utils import gh_graphql, GHGraphQLError, GitHubComment
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 from greenlight_guard import (
     GREENLIGHT_LOGIN,
@@ -32,6 +32,8 @@ from greenlight_guard import (
 from greenlight_identity import normalize_login
 from native_stack import (
     build_native_stack_commits,
+    find_landed_commit,
+    find_stack_dependents,
     NativeStack,
     NativeStackError,
     PULL_REQUEST_RESOLVED,
@@ -86,6 +88,7 @@ from trymerge import (
     REVIEWS_PER_PAGE,
     sha_from_committed_event,
     sha_from_force_push_after,
+    try_revert,
     validate_revert,
 )
 
@@ -3578,8 +3581,219 @@ class TestNativeStackMain(NoNetworkTestCase):
         self.merge.assert_not_called()
 
 
+def reverted_pr(number: int) -> Any:
+    pr = stacked_pr(number)
+    pr.is_closed.return_value = True
+    pr.get_pr_url.return_value = pr_url(number)
+    pr.get_pr_creator_login.return_value = f"author{number}"
+    pr.has_internal_changes.return_value = False
+    return pr
+
+
+class TestNativeStackRevert(NoNetworkTestCase):
+    """try_revert of PR #1000, which PRs #1001 and #1002 landed on top of, with git
+    and GitHub mocked"""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.repo = mock.MagicMock(spec=GitRepo)
+        self.repo.remote = "origin"
+        self.repo.commit_message.return_value = 'Revert "Change"\n'
+        self.prs = {num: reverted_pr(num) for num in (1000, 1001, 1002)}
+        self.bottom = self.prs[1000]
+        self.pr_cls = self.patch(
+            "trymerge.GitHubPR", side_effect=lambda _, __, num: self.prs[num]
+        )
+        self.validate = self.patch(
+            "trymerge.validate_revert", return_value=("reverter", "sha-1000")
+        )
+        self.patch("trymerge.can_skip_internal_checks", return_value=False)
+        self.dependents = self.patch(
+            "trymerge.find_stack_dependents",
+            return_value=("sha-1000", [("sha-1002", 1002), ("sha-1001", 1001)]),
+        )
+        self.ghstack = self.patch("trymerge.get_ghstack_dependent_prs")
+        self.calls = mock.Mock()
+        self.calls.attach_mock(self.repo, "repo")
+        for name in ("gh_post_pr_comment", "gh_post_commit_comment"):
+            self.calls.attach_mock(self.patch(f"trymerge.{name}"), name)
+        self.calls.attach_mock(self.patch("trymerge.gh_update_pr_state"), "reopen")
+
+    def revert(self, dry_run: bool = False) -> None:
+        try_revert(self.repo, self.bottom, dry_run=dry_run, reason="broken trunk")
+
+    def calls_to(self, *names: str) -> list[Any]:
+        return [call for call in self.calls.mock_calls if call[0] in names]
+
+    def git_calls(self) -> list[Any]:
+        return self.calls_to("repo._run_git", "repo.revert", "repo.push")
+
+    def attempt(self, *shas: str, dry_run: bool = False) -> list[Any]:
+        """The git calls of an attempt that reverts commits `shas`, in order"""
+        trunk = "refs/remotes/origin/main"
+        return [
+            mock.call.repo._run_git("fetch", "origin", f"+refs/heads/main:{trunk}"),
+            mock.call.repo._run_git("checkout", "-B", "main", trunk),
+            *(mock.call.repo.revert(sha) for sha in shas),
+            mock.call.repo.push("main", dry_run, retry=1),
+        ]
+
+    def reopened(self, *numbers: int) -> list[Any]:
+        return [mock.call.reopen("pytorch", "pytorch", num) for num in numbers]
+
+    def assertNothingReverted(self) -> None:
+        self.assertEqual(self.calls_to("repo.revert", "repo.push"), [])
+        github = ("gh_post_pr_comment", "gh_post_commit_comment", "reopen")
+        self.assertEqual(self.calls_to(*github), [])
+
+    def test_reverts_the_prs_above_first(self) -> None:
+        self.revert()
+        self.dependents.assert_called_once_with(
+            self.repo, "pytorch", "pytorch", 1000, "refs/remotes/origin/main"
+        )
+        self.assertEqual(
+            self.git_calls(), self.attempt("sha-1002", "sha-1001", "sha-1000")
+        )
+        self.ghstack.assert_not_called()
+
+    def test_reverts_the_landed_commit_of_the_pr_not_the_one_validated(self) -> None:
+        self.validate.return_value = ("reverter", "sha-quoting-1000")
+        self.revert()
+        self.assertEqual(
+            self.git_calls(), self.attempt("sha-1002", "sha-1001", "sha-1000")
+        )
+
+    def test_reopens_the_reverted_prs_bottom_up_after_the_push(self) -> None:
+        self.revert()
+        self.assertEqual(
+            self.calls_to("repo.push", "reopen"),
+            [
+                mock.call.repo.push("main", False, retry=1),
+                *self.reopened(1000, 1001, 1002),
+            ],
+        )
+        stacked = "your PR has been reverted as part of the stack under #1000.\n"
+        comments = self.calls_to("gh_post_pr_comment")
+        self.assertEqual(
+            [(call.args[2], call.args[3]) for call in comments],
+            [
+                (1000, "@author1000 your PR has been successfully reverted."),
+                (1001, f"@author1001 {stacked}"),
+                (1002, f"@author1002 {stacked}"),
+            ],
+        )
+        # Every reverted commit gets the revert line of the PR reverted last
+        line = (
+            "\nReverted https://github.com/pytorch/pytorch/pull/1000 on behalf of "
+            "https://github.com/reverter due to broken trunk\n"
+        )
+        self.assertEqual(
+            self.calls_to("gh_post_commit_comment"),
+            [
+                mock.call.gh_post_commit_comment("pytorch", "pytorch", sha, line)
+                for sha in ("sha-1000", "sha-1001", "sha-1002")
+            ],
+        )
+        for pr in self.prs.values():
+            pr.add_numbered_label.assert_called_once_with("reverted", False)
+            pr.add_label.assert_called_once_with("ci-no-td", False)
+
+    def test_pr_without_dependents_is_reverted_alone(self) -> None:
+        self.validate.return_value = ("reverter", "sha-validated")
+        self.dependents.return_value = ("sha-1000", [])
+        self.revert()
+        self.pr_cls.assert_not_called()
+        self.assertEqual(self.git_calls(), self.attempt("sha-validated"))
+        self.assertEqual(self.calls_to("reopen"), self.reopened(1000))
+
+    def test_dry_run_reverts_without_pushing_or_reopening(self) -> None:
+        self.revert(dry_run=True)
+        self.assertEqual(
+            self.git_calls(),
+            self.attempt("sha-1002", "sha-1001", "sha-1000", dry_run=True),
+        )
+        comments = self.calls_to("gh_post_pr_comment")
+        self.assertEqual(
+            [(call.args[2], call.kwargs) for call in comments],
+            [(num, {"dry_run": True}) for num in (1000, 1001, 1002)],
+        )
+        self.assertEqual(self.calls_to("gh_post_commit_comment", "reopen"), [])
+        for pr in self.prs.values():
+            pr.add_numbered_label.assert_called_once_with("reverted", True)
+
+    def test_rejected_push_is_reverted_again_on_the_new_trunk(self) -> None:
+        self.repo.push.side_effect = [RuntimeError("rejected"), None]
+        self.dependents.side_effect = [
+            ("sha-1000", [("sha-1001", 1001)]),
+            ("sha-1000", [("sha-1002", 1002), ("sha-1001", 1001)]),
+        ]
+        self.revert()
+        self.assertEqual(
+            self.git_calls(),
+            self.attempt("sha-1001", "sha-1000")
+            + self.attempt("sha-1002", "sha-1001", "sha-1000"),
+        )
+        self.assertEqual(self.calls_to("reopen"), self.reopened(1000, 1001, 1002))
+
+    def test_only_rejected_pushes_are_retried_and_only_so_often(self) -> None:
+        self.repo.revert.side_effect = RuntimeError("conflict")
+        with self.assertRaisesRegex(RuntimeError, "conflict"):
+            self.revert()
+        self.repo.push.assert_not_called()
+        self.repo.revert.side_effect = None
+        self.repo.push.side_effect = RuntimeError("rejected")
+        with self.assertRaisesRegex(RuntimeError, "rejected"):
+            self.revert()
+        self.assertEqual(self.repo.push.call_count, NATIVE_STACK_PUSH_ATTEMPTS)
+        github = ("gh_post_pr_comment", "gh_post_commit_comment", "reopen")
+        self.assertEqual(self.calls_to(*github), [])
+        for pr in self.prs.values():
+            pr.add_numbered_label.assert_not_called()
+
+    def test_ghstack_pr_keeps_its_ghstack_revert(self) -> None:
+        self.bottom.is_ghstack_pr.return_value = True
+        self.ghstack.return_value = [
+            ("sha-1002", self.prs[1002]),
+            ("sha-1000", self.prs[1000]),
+        ]
+        self.revert()
+        self.ghstack.assert_called_once_with(self.repo, self.bottom)
+        self.dependents.assert_not_called()
+        self.assertEqual(
+            self.git_calls(),
+            [
+                mock.call.repo.revert("sha-1002"),
+                mock.call.repo.revert("sha-1000"),
+                mock.call.repo.push("main", False),
+            ],
+        )
+        self.assertEqual(self.calls_to("reopen"), self.reopened(1002, 1000))
+
+    def test_ghstack_pr_falls_back_to_a_single_revert(self) -> None:
+        self.bottom.is_ghstack_pr.return_value = True
+        self.ghstack.side_effect = RuntimeError("orig branch is gone")
+        self.revert()
+        self.dependents.assert_not_called()
+        self.assertEqual(
+            self.git_calls(),
+            [mock.call.repo.revert("sha-1000"), mock.call.repo.push("main", False)],
+        )
+
+    def test_discovery_errors_propagate(self) -> None:
+        self.dependents.side_effect = RuntimeError("git log failed")
+        with self.assertRaisesRegex(RuntimeError, "git log failed"):
+            self.revert()
+        self.assertNothingReverted()
+
+    def test_errors_reading_a_dependent_pr_propagate(self) -> None:
+        self.pr_cls.side_effect = RuntimeError("Could not fetch PR #1002")
+        with self.assertRaisesRegex(RuntimeError, "Could not fetch PR #1002"):
+            self.revert()
+        self.assertNothingReverted()
+
+
 def native_stack_pr(entry: StackEntry) -> Any:
-    """A PR of a stack pushed by GitTestCase, as merge_into reads it"""
+    """A PR of a stack pushed by GitTestCase, as merge_into and try_revert read it"""
     pr = stacked_pr(entry.number)
     pr.last_commit_sha.return_value = entry.head_oid
     pr.base_ref.return_value = entry.base_ref
@@ -3591,14 +3805,31 @@ def native_stack_pr(entry: StackEntry) -> Any:
     pr.get_pr_creator_login.return_value = "author"
     pr.get_authors.return_value = {"author": author(entry.number)}
     pr.get_author.return_value = author(entry.number)
+    pr.get_merge_commit.return_value = None
     pr.gen_commit_message = MethodType(GitHubPR.gen_commit_message, pr)
     pr.merge_native_stack_into = MethodType(GitHubPR.merge_native_stack_into, pr)
     return pr
 
 
+def revert_native_pr(repo: GitRepo, pr: Any) -> None:
+    """try_revert of `pr` for a maintainer's revert comment"""
+    pr.get_comment_by_id.return_value = GitHubComment(
+        body_text="@pytorchbot revert -m 'broken trunk' -c nosignal",
+        created_at="",
+        author_login="reverter",
+        author_url=None,
+        author_association="MEMBER",
+        editor_login=None,
+        database_id=1,
+        url=f"{pr_url(pr.pr_num)}#issuecomment-1",
+    )
+    try_revert(repo, pr, dry_run=False, comment_id=1, reason="broken trunk")
+
+
 class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
-    """GitHubPR.merge_into lands a real stack: the bot clone builds the commits and
-    pushes them to a local bare origin. Only GitHub is patched."""
+    """GitHubPR.merge_into lands a real stack and try_revert reverts it: the bot clone
+    builds the commits and pushes them to a local bare origin. Only GitHub is
+    patched."""
 
     def setUp(self) -> None:
         GitTestCase.setUp(self)
@@ -3712,6 +3943,124 @@ class TestNativeStackMergeEndToEnd(NoNetworkTestCase, GitTestCase):
         self.merge_stack(start=reverted)
         subjects = [f"Change {n} (#{n})" for n in (101, 102, 103)]
         self.assertEqual(self.origin_log(reverted, "%s"), subjects)
+
+    def merge_then_patch_revert(self) -> tuple[list[str], Any]:
+        """Lands the stack, then patches what try_revert writes to GitHub. Returns
+        the landed commits, oldest first, and the mock that reopens PRs."""
+        self.merge_stack()
+        self.patch("trymerge.gh_post_pr_comment")
+        self.patch("trymerge.gh_post_commit_comment")
+        return self.origin_log(self.root), self.patch("trymerge.gh_update_pr_state")
+
+    def pull_trunk(self) -> None:
+        """Brings the developer clone's trunk up to date with the bot's pushes"""
+        self.git("checkout", "-q", TRUNK)
+        self.git("pull", "-q", "--ff-only", "origin", TRUNK)
+
+    def revert_pr(self, number: int) -> None:
+        self.git("pull", "-q", "--ff-only", cwd=self.repo.repo_dir)
+        revert_native_pr(self.repo, self.prs[number])
+
+    def assertReverts(self, since: str, target: int, landed: dict[int, str]) -> None:
+        """The origin's commits after `since` revert the landed commits of `landed`
+        in its order, each naming its PR and the revert comment on PR `target`."""
+        origin = GitRepo(self.origin)
+        comment = f"([comment]({pr_url(target)}#issuecomment-1))"
+        reverts = [origin.commit_message(sha) for sha in self.origin_log(since)]
+        self.assertEqual(
+            [message.splitlines()[:5] for message in reverts],
+            [
+                [
+                    f'Revert "Change {num} (#{num})"',
+                    "",
+                    f"This reverts commit {sha}.",
+                    "",
+                    f"Reverted {pr_url(num)} on behalf of https://github.com/reverter "
+                    f"due to broken trunk {comment}",
+                ]
+                for num, sha in landed.items()
+            ],
+        )
+
+    def test_revert_sees_prs_that_landed_after_its_checkout(self) -> None:
+        landed, reopen = self.merge_then_patch_revert()
+        # actions/checkout pins both refs to the commit that triggered the job
+        for ref in (f"refs/heads/{TRUNK}", f"refs/remotes/origin/{TRUNK}"):
+            self.git("update-ref", ref, landed[0], cwd=self.repo.repo_dir)
+        self.git("checkout", "-q", "-f", TRUNK, cwd=self.repo.repo_dir)
+        revert_native_pr(self.repo, self.prs[101])
+        reverted = {103: landed[2], 102: landed[1], 101: landed[0]}
+        self.assertReverts(landed[-1], 101, reverted)
+        reopened = [mock.call("pytorch", "pytorch", num) for num in (101, 102, 103)]
+        self.assertEqual(reopen.call_args_list, reopened)
+
+    def test_revert_is_redone_when_a_pr_lands_on_top_before_its_push(self) -> None:
+        a, b, c = self.stack.entries
+        self.patch("trymerge.gh_post_pr_comment")
+        self.patch("trymerge.gh_post_commit_comment")
+        reopen = self.patch("trymerge.gh_update_pr_state")
+        landed = {101: self.land_by_hand(a), 102: self.land_by_hand(b, 101)}
+
+        def lookup_then_land_c(*args: Any) -> Any:
+            found = find_stack_dependents(*args)
+            if 103 not in landed:
+                landed[103] = self.land_by_hand(c, 101, 102)
+            return found
+
+        self.patch("trymerge.find_stack_dependents", side_effect=lookup_then_land_c)
+        self.git("pull", "-q", "--ff-only", cwd=self.repo.repo_dir)
+        revert_native_pr(self.repo, self.prs[101])
+        reverted = {num: landed[num] for num in (103, 102, 101)}
+        self.assertReverts(landed[103], 101, reverted)
+        self.assertEqual(self.git("diff", self.root, TRUNK, cwd=self.origin), "")
+        reopened = [mock.call("pytorch", "pytorch", num) for num in (101, 102, 103)]
+        self.assertEqual(reopen.call_args_list, reopened)
+
+    def land_by_hand(self, entry: StackEntry, *deps: int) -> str:
+        """Lands `entry` from the developer clone as a native merge would"""
+        self.pull_trunk()
+        self.git("merge", "-q", "--squash", entry.head_ref)
+        message = self.prs[entry.number].gen_commit_message(stack_deps=list(deps))
+        self.git("commit", "-q", "-m", message)
+        self.git("push", "-q", "origin", TRUNK)
+        return self.git("rev-parse", "HEAD")
+
+    def test_revert_of_the_bottom_pr_reverts_the_prs_above_it_first(self) -> None:
+        landed, reopen = self.merge_then_patch_revert()
+        self.revert_pr(101)
+        reverted = {103: landed[2], 102: landed[1], 101: landed[0]}
+        self.assertReverts(landed[-1], 101, reverted)
+        self.assertEqual(self.git("diff", self.root, TRUNK, cwd=self.origin), "")
+        origin = GitRepo(self.origin)
+        for num in reverted:
+            self.assertIsNone(find_landed_commit(origin, pr_url(num), TRUNK))
+        reopened = [mock.call("pytorch", "pytorch", num) for num in (101, 102, 103)]
+        self.assertEqual(reopen.call_args_list, reopened)
+
+    def test_revert_of_a_middle_pr_keeps_the_prs_below_it(self) -> None:
+        landed, reopen = self.merge_then_patch_revert()
+        self.revert_pr(102)
+        self.assertReverts(landed[-1], 102, {103: landed[2], 102: landed[1]})
+        origin = GitRepo(self.origin)
+        self.assertEqual(find_landed_commit(origin, pr_url(101), TRUNK), landed[0])
+        reopened = [mock.call("pytorch", "pytorch", num) for num in (102, 103)]
+        self.assertEqual(reopen.call_args_list, reopened)
+
+    def test_revert_of_a_relanded_pr_reverts_the_prs_that_stayed_landed(self) -> None:
+        landed, reopen = self.merge_then_patch_revert()
+        a = self.stack.entries[0]
+        self.pull_trunk()
+        self.revert(a, landed[0])
+        self.git("merge", "-q", "--squash", a.head_ref)
+        self.git("commit", "-q", "-m", self.prs[101].gen_commit_message())
+        self.git("push", "-q", "origin", TRUNK)
+        relanded = self.git("rev-parse", "HEAD")
+        self.revert_pr(101)
+        reverted = {103: landed[2], 102: landed[1], 101: relanded}
+        self.assertReverts(relanded, 101, reverted)
+        self.assertEqual(self.git("diff", self.root, TRUNK, cwd=self.origin), "")
+        reopened = [mock.call("pytorch", "pytorch", num) for num in (101, 102, 103)]
+        self.assertEqual(reopen.call_args_list, reopened)
 
 
 if __name__ == "__main__":

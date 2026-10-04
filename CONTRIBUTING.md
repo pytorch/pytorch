@@ -655,7 +655,7 @@ Occasionally, things might fall through the cracks (sorry!). In case your PR is 
 
 Once your PR is approved and CI is green, you can merge it in by entering a comment `@pytorchbot merge` ([what's this bot?](https://github.com/pytorch/pytorch/wiki/Bot-commands))
 
-The bot also handles GitHub-native stacks of PRs based on `main`. `@pytorchbot merge` on a PR of such a stack lands it and every open PR below it, one commit per PR, and closes them; the stack itself is kept. Stacks that mix ghstack PRs with other PRs are refused.
+The bot also handles GitHub-native stacks of PRs based on `main`. `@pytorchbot merge` on a PR of such a stack lands it and every open PR below it, one commit per PR, and closes them; the stack itself is kept. `@pytorchbot revert` on a landed PR also reverts the PRs of its stack that landed above it. Stacks that mix ghstack PRs with other PRs are refused.
 
 ## GreenLight
 
