@@ -2547,6 +2547,34 @@ class TestTorchDeviceType(TestCase):
 
         _test_euclidean_large_cdist((2000, 5))
 
+    def _euclidean_dist_reference(self, x1, x2):
+        x1_norm = x1.pow(2).sum(-1, keepdim=True)
+        x1_pad = torch.ones_like(x1_norm)
+        x2_norm = x2.pow(2).sum(-1, keepdim=True)
+        x2_pad = torch.ones_like(x2_norm)
+        x1_ = torch.cat((x1.mul(-2), x1_norm, x1_pad), -1)
+        x2_ = torch.cat((x2, x2_pad, x2_norm), -1)
+        return x1_.matmul(x2_.mT).clamp_min(0).sqrt()
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_cdist_reduced_mm_uses_float_product(self, device, dtype):
+        # The matrix-multiplication path is the one half/bfloat16 can run.
+        # The pairwise kernel still rejects those dtypes.
+        torch.manual_seed(0)
+        x = torch.randn(4, 64, device=device, dtype=dtype)
+        y = torch.randn(30, 64, device=device, dtype=dtype)
+        got = torch.cdist(x, y, compute_mode="use_mm_for_euclid_dist")
+        expected = self._euclidean_dist_reference(x.float(), y.float()).to(dtype)
+        self.assertEqual(got, expected, atol=0, rtol=0)
+
+        z = torch.randn(3, 64, device=device, dtype=dtype)
+        diag = torch.cdist(z, z, compute_mode="use_mm_for_euclid_dist").diagonal(dim1=-2, dim2=-1)
+        expected_diag = self._euclidean_dist_reference(z.float(), z.float()).to(dtype).diagonal(dim1=-2, dim2=-1)
+        self.assertEqual(diag, expected_diag, atol=0, rtol=0)
+
+        wide = torch.cdist(x.float(), y.float(), compute_mode="use_mm_for_euclid_dist")
+        self.assertEqual(wide, self._euclidean_dist_reference(x.float(), y.float()), atol=0, rtol=0)
+
     # Ensure that cdist backward with p<1 does not produce NaNs
     def test_cdist_grad_p_lt_1_no_nan(self, device):
         for p in [0.99, 0.7, 0.5, 0.1, 0.01]:
