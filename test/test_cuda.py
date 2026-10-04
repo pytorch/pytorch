@@ -6436,18 +6436,21 @@ class TestExpandableSegmentRestore(TestCase):
     back in a fresh process. See Note [Expandable Segment Reserved Address].
     """
 
+    # Freeing the middle of three whole 20 MiB granules unmaps it, so the large
+    # segment comes back as two runs around a hole. The default pool is used
+    # because empty_cache does not release blocks of a live MemPool.
     _SAVE = """
 import json, torch
-pool = torch.cuda.MemPool()
-with torch.cuda.use_mem_pool(pool):
-    a = torch.arange(1 << 20, dtype=torch.float32, device="cuda")
-    b = torch.full((1 << 18,), 7.5, device="cuda")
+a, hole, c = (torch.empty(5 << 20, dtype=torch.float32, device="cuda") for _ in range(3))
+b = torch.empty(1 << 18, dtype=torch.float32, device="cuda")
+del hole
+torch.cuda.empty_cache()
 torch.cuda.synchronize()
 print(json.dumps({
-    "segments": torch.cuda.memory_snapshot(mempool_id=pool.id, include_traces=False),
+    "segments": torch.cuda.memory_snapshot(include_traces=False),
     "tensors": [
         {"addr": t.data_ptr(), "nbytes": t.numel() * t.element_size(), "numel": t.numel()}
-        for t in (a, b)
+        for t in (a, c, b)
     ],
 }))
 """
@@ -6482,7 +6485,9 @@ print(json.dumps({
 
     def test_tensors_come_back_at_their_original_addresses(self):
         saved = self._run(self._SAVE)
-        self.assertGreater(len(saved["segments"]), 0)
+        large = [s for s in saved["segments"] if s["segment_type"] == "large"]
+        self.assertEqual(len(large), 2)
+        self.assertEqual(len({s["expandable_segment_base"] for s in large}), 1)
         with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
             json.dump(saved, f)
             f.flush()
