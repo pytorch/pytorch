@@ -298,6 +298,11 @@ def install_config_module(module: ModuleType) -> None:
         module.__class__ = ImplicationConfigModuleInstance
     else:
         module.__class__ = ConfigModuleInstance
+    # Config values are not in the module __dict__, so every read misses.
+    # On a miss, ModuleType.__getattribute__ calls a PEP 562 module-level
+    # __getattr__ directly; without one it builds and raises an AttributeError
+    # before Python falls back to the class __getattr__, which is ~2x slower.
+    module.__dict__["__getattr__"] = module.__getattr__
     module._hash_dirty_var = ContextVar(f"{module.__name__}._hash_dirty", default=True)  # type: ignore[attr-defined]  # pyrefly: ignore[missing-attribute]
     module._hash_cache_var = ContextVar(  # pyrefly: ignore[missing-attribute]
         f"{module.__name__}._hash_cache", default=None
@@ -578,9 +583,8 @@ class ConfigModule(ModuleType):
             # Issue deprecation warning on read (once per config)
             self._warn_if_deprecated(name, config)
 
-            alias_val = self._get_alias_val(config)
-            if alias_val is not _UNSET_SENTINEL:
-                return alias_val
+            if config.alias is not None:
+                return self._get_alias_val(config)
 
             if config.env_value_force is not _UNSET_SENTINEL:
                 return config.env_value_force
