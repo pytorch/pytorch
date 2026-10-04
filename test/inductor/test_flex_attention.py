@@ -2791,14 +2791,17 @@ class TestFlexAttention(InductorTestCase):
         [
             ((1,), (0,), "aot_eager"),
             ((4,), (2,), "aot_eager"),
-            ((2, 3), (1, 2), "inductor"),
+            # Inductor's MPS backward lowering raises NotImplementedError.
+            common_utils.subtest(
+                ((2, 3), (1, 2), "inductor"),
+                decorators=[expected_not_implemented_on_mps],
+            ),
         ],
         name_fn=lambda trailing_shape, trailing_indices, backend: (
             f"shape_{'x'.join(map(str, trailing_shape))}_"
             f"index_{'x'.join(map(str, trailing_indices))}_{backend}"
         ),
     )
-    @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
     def test_captured_score_mod_nested_index_backward(
         self, device, trailing_shape, trailing_indices, backend
     ):
@@ -2839,7 +2842,6 @@ class TestFlexAttention(InductorTestCase):
         self.assertEqual(embedding_table.grad, embedding_table_ref.grad)
 
     @supported_platform
-    @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
     def test_captured_score_mod_nested_index_backward_dynamic(self, device):
         embedding_table = nn.Parameter(
             torch.randn(5, 4, device=device, dtype=torch.float32)
@@ -2877,7 +2879,6 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
-    @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
     def test_captured_score_mod_nonterminal_index_backward_error(self, device):
         max_len = 4
         embedding_table = nn.Parameter(
