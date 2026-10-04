@@ -168,6 +168,16 @@
       ]
     }
   ],
+  "GB3885": [
+    {
+      "Gb_type": "OrderedDict subclass fromkeys with metaclass __call__",
+      "Context": "self.value.__name__",
+      "Explanation": "Cannot trace fromkeys through a metaclass __call__",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0010": [
     {
       "Gb_type": "Attempted to read a deleted variable",
@@ -420,16 +430,6 @@
       "Explanation": "Except expects to receive an object of Exception type but received {exc_instance}.",
       "Hints": [
         "Your code may result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled. You can do this by removing the `torch.compile` call, or by using `torch.compiler.set_stance(\"force_eager\")`. "
-      ]
-    }
-  ],
-  "GB2050": [
-    {
-      "Gb_type": "OrderedDict subclass fromkeys override",
-      "Context": "user_cls.__name__",
-      "Explanation": "Cannot trace fromkeys with overridden construction or insertion",
-      "Hints": [
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],

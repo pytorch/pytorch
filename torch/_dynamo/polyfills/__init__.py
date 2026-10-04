@@ -528,6 +528,16 @@ def construct_dict(
     return self
 
 
+def odict_fromkeys(cls: type[T], iterable: Iterable[object], value: object = None) -> T:
+    # Same steps as _PyDict_FromKeys for a non-exact dict: build the result with
+    # cls() and fill it with __setitem__, so subclass overrides of either run.
+    # ref: _PyDict_FromKeys in https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c
+    self = cls()
+    for key in iterable:
+        self[key] = value  # type: ignore[index]
+    return self
+
+
 def foreach_map_fn(*args: Any) -> Any:
     op = args[0]
     new_args: list[Any] = []

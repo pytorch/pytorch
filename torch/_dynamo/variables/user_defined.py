@@ -1151,12 +1151,32 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 source = AttrSource(self.source, "__subclasses__")
                 source = CallFunctionNoArgsSource(source)
             return VariableTracker.build(tx, self.value.__subclasses__(), source)
-        elif name == "fromkeys" and (
-            self.value is collections.defaultdict
-            or issubclass(self.value, collections.OrderedDict)
+        elif (
+            self.value in {collections.OrderedDict, collections.defaultdict}
+            and name == "fromkeys"
         ):
             return variables.DictBuiltinVariable.call_custom_dict_fromkeys(
-                tx, self.value, self, *args, **kwargs
+                tx, self.value, *args, **kwargs
+            )
+        elif (
+            name == "fromkeys"
+            and issubclass(self.value, collections.OrderedDict)
+            and inspect.getattr_static(self.value, "fromkeys")
+            is collections.OrderedDict.__dict__["fromkeys"]
+        ):
+            # The polyfill builds the result with cls(); a metaclass __call__
+            # would not run there, so the result would silently miss its effects.
+            if type(self.value).__call__ is not type.__call__:
+                unimplemented(
+                    gb_type="OrderedDict subclass fromkeys with metaclass __call__",
+                    context=self.value.__name__,
+                    explanation="Cannot trace fromkeys through a metaclass __call__",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, polyfills.odict_fromkeys),
+                [self, *args],
+                kwargs,
             )
         elif self.value is collections.OrderedDict and name == "move_to_end":
             return args[0].call_method(tx, name, [*args[1:]], kwargs)
@@ -1218,9 +1238,14 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             self.value.__new__
         ):
-            if self.value is collections.OrderedDict:
+            if (
+                self.value is collections.OrderedDict
+                and isinstance(args[0], UserDefinedClassVariable)
+                and args[0].value is collections.OrderedDict
+            ):
                 # Exact OrderedDict: represent as a bare OrderedDictVariable,
                 # mirroring dict.__new__(dict) -> ConstDictVariable.
+                # OrderedDict.__new__(Sub) must still build a Sub instance.
                 return OrderedDictVariable({}, mutation_type=ValueMutationNew())
             # Some C-level tp_new functions (dict.__new__, set.__new__) ignore
             # extra args — only the type arg matters.  Pass init_args=[] for

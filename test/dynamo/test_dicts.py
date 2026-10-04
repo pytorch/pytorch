@@ -1385,55 +1385,92 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
     def test_ordered_dict_subclass_fromkeys_graph_break(self):
         def fn(x):
-            d = _OrderedDictSubclass.fromkeys("abc")
+            d = _OrderedDictSubclass.fromkeys("abc", 0)
             x = x + 1
             torch._dynamo.graph_break()
-            d.move_to_end("a")
+            d["d"] = 1
             return d, x + 1
 
         cnt = torch._dynamo.testing.CompileCounter()
         res, _ = torch.compile(fn, backend=cnt)(torch.ones(1))
         self.assertEqual(cnt.frame_count, 2)
         self.assertIs(type(res), _OrderedDictSubclass)
-        self.assertEqual(list(res), ["b", "c", "a"])
+        self.assertEqual(list(res.items()), [("a", 0), ("b", 0), ("c", 0), ("d", 1)])
 
     @parametrize("override", ["__new__", "__init__", "__setitem__", "metaclass"])
     def test_ordered_dict_subclass_fromkeys_override(self, override):
-        calls = []
-
+        # Each override leaves a mark on the result, so the compiled result
+        # only matches eager if fromkeys ran the override.
         class Meta(type):
             def __call__(cls, *args, **kwargs):
-                calls.append("metaclass")
-                return super().__call__(*args, **kwargs)
+                obj = super().__call__(*args, **kwargs)
+                obj.tag = "metaclass"
+                return obj
 
         class OD(OrderedDict, metaclass=Meta if override == "metaclass" else type):
             if override == "__new__":
 
                 def __new__(cls, *args, **kwargs):
-                    calls.append("__new__")
-                    return OrderedDict.__new__(cls)
+                    obj = OrderedDict.__new__(cls)
+                    obj.tag = "__new__"
+                    return obj
 
             elif override == "__init__":
 
                 def __init__(self, *args, **kwargs):
-                    calls.append("__init__")
                     super().__init__(*args, **kwargs)
+                    self.tag = "__init__"
 
             elif override == "__setitem__":
 
                 def __setitem__(self, key, value):
-                    calls.append("__setitem__")
-                    super().__setitem__(key, value)
+                    super().__setitem__(key, "__setitem__")
 
         def fn():
             d = OD.fromkeys("ab")
-            return type(d).__name__, list(d)
+            return type(d).__name__, list(d.items()), getattr(d, "tag", None)
 
-        self.assertEqual(fn(), ("OD", ["a", "b"]))
-        self.assertIn(override, calls)
-        # fromkeys would skip the user override, so it must graph break.
-        with self.assertRaisesRegex(Unsupported, "fromkeys override"):
-            torch.compile(fn, backend="eager", fullgraph=True)()
+        expected = fn()
+        self.assertEqual(expected[0], "OD")
+        self.assertIn(override, (expected[2], expected[1][0][1]))
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        if override == "metaclass":
+            # cls() in the polyfill would skip the metaclass __call__.
+            with self.assertRaisesRegex(Unsupported, "metaclass __call__"):
+                compiled()
+        else:
+            self.assertEqual(compiled(), expected)
+
+    def test_ordered_dict_new_subclass(self):
+        class OD(OrderedDict):
+            def __new__(cls, *args, **kwargs):
+                return OrderedDict.__new__(cls)
+
+        def fn():
+            d = OD()
+            d["a"] = 1
+            return type(d), list(d.items())
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
+
+    def test_ordered_dict_subclass_fromkeys_keywords(self):
+        def fn(x):
+            d = _OrderedDictSubclass.fromkeys(iterable="ab", value=x)
+            return type(d), list(d.items())
+
+        x = torch.ones(1)
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(x), fn(x))
+
+    def test_ordered_dict_subclass_fromkeys_classmethod_override(self):
+        class OD(OrderedDict):
+            @classmethod
+            def fromkeys(cls, iterable, value=None):
+                return cls((k, value * 2) for k in iterable)
+
+        def fn():
+            return list(OD.fromkeys("ab", 1).items())
+
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(), fn())
 
     def test_mapping_proxy_ban_muation_on_dict_realization(self):
         def fn(x):
