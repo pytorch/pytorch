@@ -131,7 +131,7 @@ static_assert(
     }                                                                   \
   }
 
-#ifdef AT_VEC_CUSTOM_MATH
+#if 1
 
 #define IMPLEMENT_VML_MKL(op, mklop)          \
   IMPLEMENT_VML_MKL_STUB(op, mklop, double, d)
