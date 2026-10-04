@@ -497,6 +497,39 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             ),
         )
 
+    def test_find(self):
+        b = self.type2test(b"mississippi")
+        self.assertEqual(b.find(b"i"), 1)
+        self.assertEqual(b.find(b"i", 5), 7)
+        self.assertEqual(b.find(b"i", 5, 8), 7)
+        self.assertEqual(b.find(b"is"), 1)
+        self.assertEqual(b.find(b"pi"), 9)
+        self.assertEqual(b.find(b"z"), -1)
+        self.assertEqual(b.find(self.type2test(b"ss")), 2)
+        self.assertEqual(b.find(b"i", -3), 10)
+        with self.assertRaises(TypeError):
+            b.find("i")
+        with self.assertRaises(TypeError):
+            b.find(b"i", "1")
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.find(-1)
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.find(256)
+
+    def test_rfind(self):
+        b = self.type2test(b"mississippi")
+        self.assertEqual(b.rfind(b"i"), 10)
+        self.assertEqual(b.rfind(b"i", 0, 6), 4)
+        self.assertEqual(b.rfind(b"i", 0, 4), 1)
+        self.assertEqual(b.rfind(b"is"), 4)
+        self.assertEqual(b.rfind(b"z"), -1)
+        self.assertEqual(b.rfind(b"i", 0, 9), 7)
+        with self.assertRaises(TypeError):
+            b.rfind("i")
+        with self.assertRaisesRegex(ValueError, "byte must be in range"):
+            b.rfind(256)
+
+
     def test_input_bytearray_hex_decode(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(ba):
@@ -510,6 +543,14 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
             fn(bytearray(b"\xff\x00")),
             ("ff00", "\xff\x00"),
         )
+
+    def test_input_bytearray_find_rfind(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(ba):
+            return ba.find(b"b"), ba.find(b"z"), ba.rfind(b"b")
+
+        self.assertEqual(fn(bytearray(b"abcabc")), (1, -1, 4))
+        self.assertEqual(fn(bytearray(b"xyz")), (-1, 2, -1))
 
     def test_inplace_concat_arg_mutation(self):
         # Regression: missing sq_inplace_concat fell back to constant-folding

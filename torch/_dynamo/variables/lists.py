@@ -2433,6 +2433,50 @@ class ByteArrayVariable(VariableTracker):
     ) -> VariableTracker | None:
         return self._bytearray_split(tx, args, kwargs, "rsplit")
 
+    def bytearray_find(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        check_positional(tx, "find", len(args), 1, 3)
+        no_keywords(tx, "find", kwargs)
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+        except AsPythonConstantNotImplementedError:
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, bytearray.find),
+                [self] + list(args),
+                kwargs,
+            )
+        try:
+            result = self.data.find(*const_args)
+        except (TypeError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return VariableTracker.build(tx, result)
+
+    def bytearray_rfind(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        check_positional(tx, "rfind", len(args), 1, 3)
+        no_keywords(tx, "rfind", kwargs)
+        try:
+            const_args = [arg.as_python_constant() for arg in args]
+        except AsPythonConstantNotImplementedError:
+            return tx.inline_user_function_return(
+                VariableTracker.build(tx, bytearray.rfind),
+                [self] + list(args),
+                kwargs,
+            )
+        try:
+            result = self.data.rfind(*const_args)
+        except (TypeError, ValueError) as e:
+            raise_observed_exception(type(e), tx, args=list(e.args))
+        return VariableTracker.build(tx, result)
+
     def bytearray_hex(
         self,
         tx: "InstructionTranslatorBase",
@@ -2642,6 +2686,8 @@ class ByteArrayVariable(VariableTracker):
         "count": Method(bytearray_count),
         "split": Method(bytearray_split),
         "rsplit": Method(bytearray_rsplit),
+        "find": Method(bytearray_find),
+        "rfind": Method(bytearray_rfind),
         "hex": Method(bytearray_hex),
         "decode": Method(bytearray_decode),
         "append": Method(bytearray_append),
