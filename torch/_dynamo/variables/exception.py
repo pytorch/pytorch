@@ -11,6 +11,7 @@ Key classes include:
 
 import traceback
 import types
+import weakref
 from typing import Any, TYPE_CHECKING, Union
 
 from torch._dynamo.variables.base import MutationType
@@ -61,11 +62,80 @@ class FrameSummaryVariable(VariableTracker):
     }
 
 
+class FrameVariable(VariableTracker):
+    """A frame object of a frame traced by `tx`, as reached via `tb_frame`."""
+
+    _nonvar_fields = {
+        "tx_ref",
+        "f_code",
+        "is_frozen",
+        "frozen_positions",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(self, tx: "InstructionTranslatorBase", **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        # Weak: tx caches this VT, and a strong ref would keep every traced
+        # value of the frame alive until the next gc cycle.
+        self.tx_ref = weakref.ref(tx)
+        self.f_code = tx.f_code
+        self.is_frozen = False
+        self.frozen_positions: Any = None
+
+    def freeze(self, tx: "InstructionTranslatorBase") -> None:
+        # A finished frame's lasti no longer changes (CPython keeps it too), so
+        # keep its positions and stop depending on tx staying alive.
+        self.frozen_positions = tx.lasti_instruction().positions
+        self.is_frozen = True
+
+    def python_type(self) -> type[types.FrameType]:
+        return types.FrameType
+
+    def _get_f_lineno(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+        # tx is the frame doing the read; the traced frame may be a finished
+        # callee further down the traceback.
+        if self.is_frozen:
+            positions = self.frozen_positions
+        else:
+            frame_tx = self.tx_ref()
+            inst = frame_tx.lasti_instruction() if frame_tx is not None else None
+            positions = inst.positions if inst is not None else None
+        if positions is None:
+            unimplemented(
+                gb_type="frame.f_lineno not supported",
+                context=f"{self} accessing 'f_lineno'",
+                explanation="Dynamo cannot recover the line number of this frame.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return ConstantVariable.create(positions.lineno)
+
+    def tp_getattro_impl(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
+        # Without this, an unmodeled attribute such as f_trace becomes a
+        # GetAttrVariable that silently compares unequal to its eager value.
+        if self.lookup_tp_getset_member(name) is None:
+            unimplemented(
+                gb_type="Unsupported frame attribute",
+                context=f"{self} accessing '{name}'",
+                explanation="Dynamo only models f_lineno and f_code of frame objects.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return super().tp_getattro_impl(tx, name)
+
+    # ref: CPython Objects/frameobject.c frame_getsetlist
+    tp_getset = {
+        "f_lineno": GetSet(_get_f_lineno, unmodeled_setter),
+        "f_code": GetSet(getset_build(lambda s: s.f_code), readonly_setter),
+    }
+
+
 class TracebackVariable(VariableTracker):
     def __init__(
         self,
         frame_summary: FrameSummaryVariable,
         tb_next: Union["TracebackVariable", ConstantVariable],
+        frame: FrameVariable,
         **kwargs: Any,
     ) -> None:
         # The traceback holds four attributes:
@@ -80,14 +150,16 @@ class TracebackVariable(VariableTracker):
         if tb_next is None:
             raise AssertionError("tb_next must not be None")
         self.tb_next = tb_next
+        self.frame = frame
 
     @classmethod
     def from_frame_summary(
         cls,
         frame_summary: traceback.FrameSummary,
         tb_next: Union["TracebackVariable", ConstantVariable],
+        frame: FrameVariable,
     ) -> "TracebackVariable":
-        return cls(FrameSummaryVariable(frame_summary), tb_next=tb_next)
+        return cls(FrameSummaryVariable(frame_summary), tb_next=tb_next, frame=frame)
 
     @staticmethod
     def is_valid_traceback(obj: VariableTracker) -> bool:
@@ -164,9 +236,11 @@ class TracebackVariable(VariableTracker):
         "frame_summary": GetSet(lambda s, _: s.frame_summary, readonly_setter),
     }
 
-    # ref: CPython Objects/traceback.c tb_memberlist, where tb_lasti is
-    # READONLY. Dynamo graph breaks on read rather than modelling the value.
+    # ref: CPython Objects/traceback.c tb_memberlist, where tb_frame and
+    # tb_lasti are READONLY. Dynamo graph breaks on a tb_lasti read rather than
+    # modelling the value.
     tp_members = {
+        "tb_frame": Member(lambda s, _: s.frame, readonly_setter),
         "tb_lasti": Member(_get_tb_lasti, readonly_setter),
     }
 

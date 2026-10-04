@@ -175,7 +175,7 @@ from .variables.ctx_manager import (
     WithExitFunctionVariable,
 )
 from .variables.dicts import ConstDictVariable
-from .variables.exception import TracebackVariable
+from .variables.exception import FrameVariable, TracebackVariable
 from .variables.functions import (
     BaseUserFunctionVariable,
     CO_VARARGS,
@@ -2861,7 +2861,9 @@ class InstructionTranslatorBase(
             raise AssertionError(
                 "expected isinstance( tb, (ConstantVariable, TracebackVariable) ) to be true"
             )  # make pyrefly happy
-        new_tb = TracebackVariable.from_frame_summary(frame_summary, tb)
+        new_tb = TracebackVariable.from_frame_summary(
+            frame_summary, tb, self.frame_variable
+        )
         exc.call_method(
             self,  # type: ignore[bad-argument-type]
             "__setattr__",
@@ -2984,6 +2986,9 @@ class InstructionTranslatorBase(
                 )
             if inst.argval:
                 # RERAISE 1
+                lasti = self.stack[-inst.argval].as_python_constant()
+                lasti_inst = next(i for i in self.instructions if i.offset == lasti)
+                self.reraise_lasti = (inst, lasti_inst)
                 _ = self.pop()
                 self.exn_vt_stack.set_raised_exception(val)
             else:
@@ -3119,7 +3124,7 @@ class InstructionTranslatorBase(
                     # 2) if 'lasti' is true, then push the offset that the exception was raised at
                     if exn_tab_entry.lasti:
                         self.push(
-                            VariableTracker.build(self, self.current_instruction.offset)
+                            VariableTracker.build(self, self.lasti_instruction().offset)
                         )
 
                     # 3) push the exception to the stack
@@ -5372,6 +5377,17 @@ class InstructionTranslatorBase(
             [self.frame_summary()] + list(reversed(additional_stack_frames))
         )
 
+    @functools.cached_property
+    def frame_variable(self) -> FrameVariable:
+        return FrameVariable(self)
+
+    def lasti_instruction(self) -> Instruction:
+        # Mirrors CPython's _PyInterpreterFrame_LASTI: the current instruction,
+        # unless `RERAISE oparg` just reset it to the lasti popped off the stack.
+        if self.reraise_lasti and self.reraise_lasti[0] is self.current_instruction:
+            return self.reraise_lasti[1]
+        return self.current_instruction
+
     def frame_summary(self) -> traceback.FrameSummary:
         positions = self.current_instruction.positions
         # colno/end_colno kwargs were added to FrameSummary in 3.11
@@ -5382,7 +5398,7 @@ class InstructionTranslatorBase(
             kwargs["end_colno"] = positions.end_col_offset
         return traceback.FrameSummary(
             getattr(self.f_code, "co_filename", "<unknown>"),
-            self.lineno,
+            self.lineno if self.lineno >= 0 else None,
             getattr(self.f_code, "co_name", "<unknown>"),
             lookup_line=False,
             **kwargs,
@@ -5652,6 +5668,8 @@ class InstructionTranslatorBase(
         self.active_generic_context_managers: list[GenericContextWrappingVariable] = []
         self.skip_one_hop_torch_function_depth: int = 0
         self.lineno = -1
+        # (RERAISE inst, instruction its oparg restored the frame's lasti to)
+        self.reraise_lasti: tuple[Instruction, Instruction] | None = None
         self.kw_names = None
         self.accept_prefix_inst = True
         self.prefix_insts = []
@@ -6204,7 +6222,15 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 kwargs,
                 allow_nested_graph_breaks=allow_nested_graph_breaks,
             )
-            return tracer.inline_call_()
+            try:
+                return tracer.inline_call_()
+            except exc.ObservedException:
+                # As in CPython's PyTraceBack_Here, the frame the exception
+                # surfaces in adds its own entry, here at the call site.
+                parent._attach_traceback_to_exception(
+                    parent.exn_vt_stack.get_raised_exception()
+                )
+                raise
 
     @staticmethod
     def check_inlineable(
@@ -6430,6 +6456,14 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
         return tracer
 
+    def freeze_frame_variable(self) -> None:
+        frame_variable = self.__dict__.get("frame_variable")
+        if frame_variable is not None:
+            frame_variable.freeze(self)
+
+    def finish_frame(self) -> None:
+        self.freeze_frame_variable()
+
     def inline_call_(self) -> VariableTracker:
         parent = self.parent
         parent.has_no_inlined_calls = False
@@ -6464,6 +6498,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # while the inlined tx's error_on_graph_break was set to False.
             parent.error_on_graph_break = self.error_on_graph_break
             parent.is_child_tracer_active = False
+            self.finish_frame()
 
         if self.output.should_exit:
             # graph break
@@ -6729,6 +6764,11 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     def inline_call_(self) -> VariableTracker:
         with profile_inline_call(self.output, self.f_code, lambda: self.inline_depth):
             return super().inline_call_()
+
+    def finish_frame(self) -> None:
+        # inline_call_ re-enters on every send; the frame only finishes when
+        # the generator completes (see GeneratorVariable.gen_send_ex2).
+        pass
 
     def should_compile_partial_graph(self) -> bool:
         # resuming on graph break on inlined generator not supported

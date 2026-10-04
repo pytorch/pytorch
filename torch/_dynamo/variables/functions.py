@@ -1457,6 +1457,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # StopIteration, so only convert when the body was still executing.
             was_executing = tracer.frame_state == FrameState.FRAME_EXECUTING
             tracer.frame_state = FrameState.FRAME_COMPLETED
+            tracer.freeze_frame_variable()
             if sys.version_info < (3, 12) and was_executing:
                 # Match CPython's _PyErr_FormatFromCause: set __context__ and
                 # __cause__ directly rather than pushing onto the exception
@@ -1483,6 +1484,12 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # An exception propagating out of the generator frame finishes it,
             # mirroring CPython setting gi_frame_state = FRAME_CLEARED.
             tracer.frame_state = FrameState.FRAME_CLEARED
+            tracer.freeze_frame_variable()
+            # The frame that resumed the generator receives the exception, so
+            # it (not the generator's creator) adds the traceback entry.
+            tx._attach_traceback_to_exception(
+                tracer.exn_vt_stack.get_raised_exception()
+            )
             raise
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit

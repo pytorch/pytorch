@@ -6,6 +6,8 @@ import gc
 import operator
 import sys
 import unittest
+import weakref
+from unittest import mock
 
 import torch
 import torch._dynamo.config
@@ -15,7 +17,11 @@ import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
 from torch._dynamo.exc import get_dynamo_observed_exception, Unsupported
-from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
+from torch._dynamo.symbolic_convert import (
+    InstructionTranslatorBase,
+    SpeculationLog,
+    SpeculationLogDivergence,
+)
 from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import (
     disable_gc,
@@ -1702,6 +1708,239 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    @unittest.skipIf(sys.version_info < (3, 11), "requires co_linetable")
+    def test_exception_traceback_missing_line_table(self):
+        def inner():
+            raise ValueError("oops")
+
+        inner.__code__ = inner.__code__.replace(co_linetable=b"")
+
+        def fn(x):
+            try:
+                inner()
+            except ValueError as e:
+                tb = e.__traceback__
+                while tb.tb_next:
+                    tb = tb.tb_next
+                return x + 1, tb.tb_frame.f_lineno, tb.tb_lineno
+
+        self.assertEqual(fn(1), (2, None, None))
+        self.assertEqual(torch.compile(fn, backend="eager", fullgraph=True)(1), fn(1))
+
+    @unittest.skipIf(
+        sys.version_info < (3, 11), "frame.f_lineno needs instruction positions"
+    )
+    def test_exception_traceback_frame_lineno(self):
+        class ExitFails:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                raise ValueError
+
+        class Noop:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+        def simple():
+            1 / 0
+
+        def in_finally():
+            try:
+                1 / 0
+            finally:
+                pass
+
+        def other_except():
+            try:
+                1 / 0
+            except TypeError:
+                pass
+
+        def reraise_named():
+            try:
+                1 / 0
+            except ZeroDivisionError as e:
+                raise ValueError from e
+
+        def with_noop():
+            with Noop():
+                1 / 0
+
+        def with_exit_fails():
+            with ExitFails():
+                1 / 0
+
+        def fn(x, f):
+            try:
+                f()
+            except Exception as ex:
+                t = ex.__traceback__
+            lines = []
+            while t:
+                frame = t.tb_frame
+                first = frame.f_code.co_firstlineno
+                lines.append((t.tb_lineno - first, frame.f_lineno - first))
+                t = t.tb_next
+            return x + 1, lines
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for f in (
+            simple,
+            in_finally,
+            other_except,
+            reraise_named,
+            with_noop,
+            with_exit_fails,
+        ):
+            self.assertEqual(fn(x, f), opt_fn(x, f))
+
+    def test_exception_traceback_frame_unsupported_attr(self):
+        def fn(x):
+            try:
+                raise ValueError("oops")
+            except ValueError as e:
+                if e.__traceback__.tb_frame.f_trace is None:
+                    x = x + 1
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(Unsupported, "Unsupported frame attribute"):
+            opt_fn(torch.randn(4))
+
+    @torch._dynamo.config.patch(run_gc_after_compile=False)
+    def test_exception_traceback_frame_no_tx_cycle(self):
+        # The tb_frame VT must not keep its translator alive; otherwise every
+        # traced value (here the optimizer state) waits for a full gc cycle.
+        # run_gc_after_compile would hide a young cycle, so it is disabled.
+        txs = []
+        orig_init = InstructionTranslatorBase.__init__
+
+        def init(tx, *args, **kwargs):
+            txs.append(weakref.ref(tx))
+            orig_init(tx, *args, **kwargs)
+
+        model = torch.nn.Linear(8, 8, bias=False)
+        optimizer = torch.optim.Adadelta(model.parameters(), lr=0.01)
+        model(torch.ones(8)).sum().backward()
+        gc.collect()
+        gc.disable()
+        try:
+            with mock.patch.object(InstructionTranslatorBase, "__init__", init):
+                torch.compile(optimizer.step, backend="eager")()
+            alive = sum(ref() is not None for ref in txs)
+        finally:
+            gc.enable()
+        self.assertGreater(len(txs), 0)
+        self.assertEqual(alive, 0)
+
+    def test_exception_traceback_finished_frame_lineno(self):
+        # A finished frame keeps its lasti, so f_lineno must not depend on
+        # when the garbage collector frees its translator.
+        def inner():
+            raise ValueError("boom")
+
+        def raised_then_more_work(x):
+            try:
+                inner()
+            except ValueError as e:
+                tb = e.__traceback__
+            for i in range(20):
+                x = x + i
+            return x, tb.tb_next.tb_frame.f_lineno
+
+        def helper():
+            try:
+                1 / 0
+            except ZeroDivisionError as e:
+                return e
+
+        def returned_exception(x):
+            e = helper()
+            return x + 1, e.__traceback__.tb_frame.f_lineno
+
+        for fn in (raised_then_more_work, returned_exception):
+            with self.subTest(fn=fn.__name__):
+                torch._dynamo.reset()
+                x = torch.ones(2)
+                opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+                self.assertEqual(fn(x), opt_fn(x))
+
+    def test_exception_traceback_generator_consumed_by_caller(self):
+        # The frame that resumes a generator receives its exception, not the
+        # frame that created it.
+        def gen():
+            yield 1
+            raise ValueError
+
+        def make_gen():
+            return gen()
+
+        def names(tb):
+            out = []
+            while tb:
+                out.append(tb.tb_frame.f_code.co_name)
+                tb = tb.tb_next
+            return out
+
+        def fn(x):
+            g = make_gen()
+            next(g)
+            try:
+                next(g)
+            except ValueError as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        @contextlib.contextmanager
+        def cm():
+            try:
+                yield
+            except KeyError:
+                raise ValueError from None
+
+        def fn_cm(x):
+            try:
+                with cm():
+                    raise KeyError
+            except ValueError as e:
+                tb = e.__traceback__
+            return x + 1, names(tb)
+
+        for f in (fn, fn_cm):
+            with self.subTest(fn=f.__name__):
+                torch._dynamo.reset()
+                x = torch.ones(2)
+                opt_f = torch.compile(f, backend="eager", fullgraph=True)
+                self.assertEqual(f(x), opt_f(x))
+
+    def test_exception_traceback_chain_lineno(self):
+        # Each entry is the line where its frame called the next one.
+        def inner():
+            raise ValueError
+
+        def outer():
+            inner()
+
+        def fn(x):
+            try:
+                outer()
+            except ValueError as e:
+                t = e.__traceback__
+            lines = []
+            while t:
+                lines.append(t.tb_lineno - fn.__code__.co_firstlineno)
+                t = t.tb_next
+            return x + 1, lines
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        x = torch.randn(4)
+        self.assertEqual(opt_fn(x), fn(x))
 
     def test_exception_with_traceback_method(self):
         # Test the with_traceback() method
