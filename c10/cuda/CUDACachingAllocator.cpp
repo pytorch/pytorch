@@ -1957,8 +1957,7 @@ class DeviceCachingAllocator {
 
         // Free enough available cached blocks to satisfy alloc and retry.
         if (!block_found &&
-            release_available_cached_blocks(
-                params, context, deferred_frees)) {
+            release_available_cached_blocks(params, context, deferred_frees)) {
           // The reclamation loop has finished, so it is safe to unlock while
           // invoking custom frees. Drain before retrying so the external
           // allocator can reuse the returned memory.
