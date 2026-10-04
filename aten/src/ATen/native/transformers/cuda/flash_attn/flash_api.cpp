@@ -766,7 +766,7 @@ mha_varlen_fwd(const at::Tensor &q,  // total_q x num_heads x head_size, total_q
                      /*unpadded_lse*/true);
     params.total_q = total_q;
     if (paged_KV) {
-        params.block_table = block_table.data_ptr<int>();
+        params.block_table = block_table.mutable_data_ptr<int>();
         params.block_table_batch_stride = block_table.stride(0);
         params.k_batch_stride = k_padded.stride(0);
         params.v_batch_stride = v_padded.stride(0);
@@ -1037,7 +1037,7 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
     at::PhiloxCudaState philox_args;
 
     if (is_dropout) {
-        params.rng_state = philox_seed.data_ptr<uint64_t>();
+        params.rng_state = philox_seed.mutable_data_ptr<uint64_t>();
     }
     new (params.philox_args) at::PhiloxCudaState(philox_args);
 
@@ -1265,7 +1265,7 @@ mha_varlen_bwd(const at::Tensor &dout,  // total_q x num_heads, x head_size
 
     at::PhiloxCudaState philox_args;
     if (is_dropout) {
-        params.rng_state = philox_seed.data_ptr<uint64_t>();
+        params.rng_state = philox_seed.mutable_data_ptr<uint64_t>();
     }
     new (params.philox_args) at::PhiloxCudaState(philox_args);
 
@@ -1531,7 +1531,7 @@ mha_fwd_kvcache(at::Tensor &q,                 // batch_size x seqlen_q x num_he
                        head_size_rounded, /*dropout*/0.f, num_splits, dprops, opts);
 
     if (paged_KV) {
-        params.block_table = block_table.data_ptr<int>();
+        params.block_table = block_table.mutable_data_ptr<int>();
         params.block_table_batch_stride = block_table.stride(0);
     }
     params.page_block_size = page_block_size;
