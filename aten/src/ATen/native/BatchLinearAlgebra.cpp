@@ -3418,6 +3418,8 @@ static void linalg_lstsq_out_info(
   if (driver != "gels") {
     TORCH_INTERNAL_ASSERT(rank.sizes().equals(input_batch_shape));
     TORCH_INTERNAL_ASSERT(rank.is_contiguous());
+  } else {
+    at::native::resize_output(rank, {0});
   }
 
   // if 'singular_values' is empty we might resize it
@@ -3431,18 +3433,37 @@ static void linalg_lstsq_out_info(
   if (driver == "gelsd" || driver == "gelss") {
     TORCH_INTERNAL_ASSERT(singular_values.sizes().equals(singular_values_shape));
     TORCH_INTERNAL_ASSERT(singular_values.is_contiguous());
+  } else {
+    at::native::resize_output(singular_values, {0});
   }
 
   // 'input' is modified in-place so we need a column-major copy
   auto input_working_copy = copyBatchedColumnMajor(input);
 
-  // now the actual call that computes the result in-place (apply_lstsq)
-  lstsq_stub(input.device().type(), input_working_copy, solution, rank, singular_values, infos, rcond, driver);
+  // Degenerate shapes are handled here rather than by the backends, whose LAPACK quick returns
+  // disagree: gels zeroes B (so the residuals read as zero), gelsy reports rank 0 when there are
+  // no right-hand sides, and gelsd/gelss access B even then.
+  if (std::min(m, n) == 0) {
+    // No singular values: the solution is zero, and B is left in place as the residual.
+    if (driver != "gels") {
+      rank.zero_();
+    }
+    infos.zero_();
+  } else if (solution.size(-1) == 0) {
+    // rank and singular values depend only on A, so solve against a single zero column.
+    auto rhs_shape = solution.sizes().vec();
+    rhs_shape.back() = 1;
+    auto rhs = at::zeros(rhs_shape, solution.options());
+    lstsq_stub(input.device().type(), input_working_copy, rhs, rank, singular_values, infos, rcond, driver);
+  } else {
+    // now the actual call that computes the result in-place (apply_lstsq)
+    lstsq_stub(input.device().type(), input_working_copy, solution, rank, singular_values, infos, rcond, driver);
+  }
 
   // residuals are available only if m > n and drivers other than gelsy used
-  if (m > n && driver != "gelsy") {
+  bool compute_residuals = m > n && driver != "gelsy";
+  if (compute_residuals) {
     // if the driver is gelss or gelsd then the residuals are available only if rank == n
-    bool compute_residuals = true;
     if (driver == "gelss" || driver == "gelsd") {
       if (input.dim() == 2) {
         compute_residuals = (rank.item().toInt() == n);
@@ -3465,6 +3486,10 @@ static void linalg_lstsq_out_info(
       }
       at::sum_out(residuals, raw_residuals, /*dim=*/-2, /*keepdim=*/false, /*dtype*/real_dtype);
     }
+  }
+  if (!compute_residuals) {
+    // an out= residuals tensor must come back empty, as it does from the functional variant
+    at::native::resize_output(residuals, {0});
   }
   auto solution_view = solution.narrow(/*dim=*/-2, /*start=*/0, /*length*/n);
   // manually restride original
