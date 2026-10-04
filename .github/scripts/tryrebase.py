@@ -8,11 +8,23 @@ import sys
 from collections.abc import Generator
 from typing import Any
 
-from github_utils import gh_post_pr_comment as gh_post_comment
+from github_utils import (
+    gh_fetch_json_list,
+    gh_post_pr_comment as gh_post_comment,
+    GITHUB_API_URL,
+)
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
+from native_stack import (
+    build_native_stack_rebase,
+    get_native_stack,
+    NativeStack,
+    NativeStackError,
+    push_branches,
+)
 from trymerge import GitHubPR
 
 
+VIABLE_STRICT_BRANCH = "viable/strict"
 SAME_SHA_ERROR = (
     "\n```\nAborting rebase because rebasing the branch resulted in the same sha as the target branch.\n"
     + "This usually happens because the PR has already been merged.  Please rebase locally and push.\n```"
@@ -96,6 +108,45 @@ def rebase_onto(
             dry_run=dry_run,
         )
         return True
+
+
+def rebase_native_stack_onto(
+    pr: GitHubPR,
+    repo: GitRepo,
+    stack: NativeStack,
+    onto_branch: str,
+    dry_run: bool = False,
+) -> bool:
+    """Merge `onto_branch` into the branches of `pr`'s GitHub-native stack up to `pr`
+    (see build_native_stack_rebase) and fast-forward them. A stacked PR's branch is
+    never force-pushed, as the PR above it is based on its commits."""
+    default_branch = pr.default_branch()
+    onto = onto_branch.removeprefix(f"refs/remotes/{repo.remote}/")
+    if onto not in (default_branch, VIABLE_STRICT_BRANCH):
+        raise NativeStackError(
+            f"PR #{pr.pr_num} is in a stack, so it can only be rebased onto "
+            f"{default_branch} or {VIABLE_STRICT_BRANCH}, not {onto}"
+        )
+    updates = build_native_stack_rebase(
+        repo, pr.org, pr.project, stack, pr.pr_num, default_branch, onto
+    )
+    if not updates:
+        post_already_uptodate(pr, repo, onto_branch, dry_run)
+        return False
+    push_branches(repo, updates, dry_run)
+    closed = {entry.number for entry in stack.entries if entry.closed}
+    for number, branch, _, _ in updates:
+        if number in closed:
+            continue
+        msg = f"Merged `{onto_branch}` into `{branch}`"
+        if number != pr.pr_num:
+            msg += f" because #{pr.pr_num} was rebased"
+        msg += (
+            ", please pull locally before adding more changes (for example, via "
+            f"`git checkout {branch} && git pull --rebase`)"
+        )
+        gh_post_comment(pr.org, pr.project, number, msg, dry_run=dry_run)
+    return True
 
 
 def rebase_ghstack_onto(
@@ -247,7 +298,31 @@ def main() -> None:
             with git_config_guard(repo):
                 rc = rebase_ghstack_onto(pr, repo, onto_branch, dry_run=args.dry_run)
         else:
-            rc = rebase_onto(pr, repo, onto_branch, dry_run=args.dry_run)
+            stack = None
+            # Forks are never stacked, and neither is a PR on the default branch
+            # that no PR is based on. Only the other PRs read the stack, a preview
+            # API whose failure refuses the rebase: force-pushing a stack's bottom
+            # PR would break the PRs above it.
+            if not pr.is_cross_repo() and (
+                pr.base_ref() != pr.default_branch()
+                or gh_fetch_json_list(
+                    f"{GITHUB_API_URL}/repos/{org}/{project}/pulls",
+                    {"base": pr.head_ref(), "state": "all", "per_page": 1},
+                )
+            ):
+                try:
+                    stack = get_native_stack(org, project, pr.pr_num)
+                except Exception as e:
+                    raise NativeStackError(
+                        f"Could not read the stack of PR #{pr.pr_num}, so it was not "
+                        f"rebased: {e}"
+                    ) from e
+            if stack is None:
+                rc = rebase_onto(pr, repo, onto_branch, dry_run=args.dry_run)
+            else:
+                rc = rebase_native_stack_onto(
+                    pr, repo, stack, onto_branch, dry_run=args.dry_run
+                )
         sys.exit(0 if rc else 1)
 
     except Exception as e:
