@@ -7363,6 +7363,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     triton_reduction_function = get_triton_reduction_function(
                         partial_accum.reduction_type,
                     )
+                    if not self._has_constant_xmask():
+                        # tail iteration of the split loop may read rows >= xnumel
+                        mask_default = self._map_tuple_or_scalar(
+                            constant_repr,
+                            ir.Reduction.default_value(
+                                partial_accum.reduction_type, torch.float
+                            ),
+                        )
+                        var = self.cse.generate(
+                            self.body,
+                            f"tl.where(xmask, {var}, {mask_default})",
+                            dtype=var.dtype,
+                            shape=var.shape,
+                        )
                     newval = self.cse.generate(
                         self.body,
                         f"{triton_reduction_function}({var}, 0)",
