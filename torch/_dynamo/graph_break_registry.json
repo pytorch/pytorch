@@ -2333,6 +2333,17 @@
       ]
     }
   ],
+  "GB4405": [
+    {
+      "Gb_type": "tl.constexpr-wrapped user-defined type",
+      "Context": "call to a user-defined type wrapped in tl.constexpr",
+      "Explanation": "Dynamo does not yet support preserving the tl.constexpr wrapper when constructing an instance of a wrapped user-defined type.",
+      "Hints": [
+        "Annotate the Triton kernel parameter with tl.constexpr rather ",
+        "than annotating the user-defined class."
+      ]
+    }
+  ],
   "GB0146": [
     {
       "Gb_type": "Unsupported event method",

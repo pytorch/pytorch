@@ -9080,6 +9080,7 @@ class UserDefinedTritonKernel(ExternKernel):
             kernel,
             {**kernel_args, **autotuned_kwargs},
             tma_descriptor_metadata,
+            aggregate_type_metadata={},
         )
 
         # Filter to only tensor args: with Triton 3.7+, ordered_arg_names
