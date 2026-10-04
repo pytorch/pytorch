@@ -3584,3 +3584,13 @@ _logging._init_logs()
 
 # Register all registered custom / override ops in torch/_native
 import torch._native
+
+# TORCH_CUDNN_SDPA_USE_PYTHON: must be the last thing `import torch` does.
+# Enabling imports the cuDNN frontend provider, which pulls in torch.fx and
+# torch.jit; torch.nn.attention is imported only partway through this file, so a
+# hook there sees a partially initialised `torch` and fails. Like
+# _import_device_backends() above, it needs torch fully up.
+from torch.nn.attention import _cudnn as _cudnn_sdpa
+
+_cudnn_sdpa._enable_from_env()
+del _cudnn_sdpa
