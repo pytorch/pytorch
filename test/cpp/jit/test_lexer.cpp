@@ -4,6 +4,31 @@
 
 namespace torch::jit {
 
+namespace {
+
+std::shared_ptr<Source> makeSplitSource(const std::string& text, size_t split) {
+  auto first = std::make_shared<std::string>(text.substr(0, split));
+  auto second = std::make_shared<std::string>(text.substr(split));
+  std::vector<std::string_view> pieces{*first, *second};
+  std::vector<std::shared_ptr<std::string>> ownerships{
+      std::move(first), std::move(second)};
+  return std::make_shared<Source>(
+      StringCordView(std::move(pieces), std::move(ownerships)));
+}
+
+void expectToken(
+    const std::shared_ptr<Source>& source,
+    int kind,
+    const std::string& text) {
+  Lexer lexer(source);
+  const Token token = lexer.next();
+  EXPECT_EQ(kind, token.kind);
+  EXPECT_EQ(text, token.range.text().str());
+  EXPECT_EQ(TK_EOF, lexer.cur().kind);
+}
+
+} // namespace
+
 TEST(LexerTest, AllTokens) {
   std::vector<std::pair<int /* TokenKind */, std::string>> tokens;
   for (const char* ch = valid_single_char_tokens; *ch; ch++) {
@@ -17,13 +42,48 @@ TEST(LexerTest, AllTokens) {
 #undef ADD_TOKEN
 
   for (const auto& [kind, token] : tokens) {
-    Lexer l(std::make_shared<Source>(token));
-    const auto& tok = l.cur();
-    EXPECT_EQ(kind, tok.kind) << tok.range.text().str();
-    EXPECT_EQ(token, tok.range.text().str()) << tok.range.text().str();
-    l.next();
-    EXPECT_EQ(l.cur().kind, TK_EOF);
+    expectToken(std::make_shared<Source>(token), kind, token);
+    if (kind != TK_TYPE_COMMENT) {
+      for (size_t split = 1; split < token.size(); ++split) {
+        expectToken(makeSplitSource(token, split), kind, token);
+      }
+    }
   }
+}
+
+TEST(LexerTest, TokenizeNumbersAndStrings) {
+  const std::vector<std::pair<int, std::string>> expected = {
+      {TK_NUMBER, "0"},
+      {TK_NUMBER, ".5"},
+      {'.', "."},
+      {TK_DOTS, "..."},
+      {TK_NUMBER, "1e-5"},
+      {TK_NUMBER, "0x1p2"},
+      {TK_NUMBER, "3j"},
+      {TK_STRINGLITERAL, "'single'"},
+      {TK_STRINGLITERAL, "\"double\""},
+  };
+  Lexer lexer(
+      std::make_shared<Source>("0 .5 . ... 1e-5 0x1p2 3j 'single' \"double\""));
+  std::vector<std::pair<int, std::string>> actual;
+  while (lexer.cur().kind != TK_EOF) {
+    const Token token = lexer.next();
+    actual.emplace_back(token.kind, token.range.text().str());
+  }
+  EXPECT_EQ(expected, actual);
+}
+
+TEST(LexerTest, RejectsNonAsciiIdentifierBytes) {
+  const std::string input{"\xC3\xA9"};
+  EXPECT_THROW(Lexer(std::make_shared<Source>(input)), std::runtime_error);
+  EXPECT_THROW(Lexer(makeSplitSource(input, 1)), std::runtime_error);
+}
+
+TEST(LexerTest, SkipsAsciiWhitespace) {
+  Lexer lexer(std::make_shared<Source>("a \t\r\f\vb"));
+  EXPECT_EQ("a", lexer.next().range.text().str());
+  EXPECT_EQ("b", lexer.next().range.text().str());
+  EXPECT_EQ(TK_EOF, lexer.cur().kind);
 }
 
 TEST(LexerTest, SlightlyOffIsNot) {
