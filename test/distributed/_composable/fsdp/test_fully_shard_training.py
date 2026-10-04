@@ -3509,6 +3509,47 @@ class TestFullyShardCudaGraph(FSDPTest):
             self._test_manual_backward_finalization_cudagraph,
         )
 
+    @skipIfRocm(msg="https://github.com/pytorch/pytorch/issues/173761")
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    @unittest.skipIf(device_type.type != "cuda", "CUDA graph test requires CUDA")
+    def test_gradient_accumulation_cudagraph_fake_pg(self):
+        torch.cuda.set_device(self.rank)
+        device = torch.device("cuda", self.rank)
+        fake_pg = dist.new_group(backend="fake")
+        mesh = DeviceMesh.from_group(fake_pg, "cuda")
+        model = nn.Sequential(
+            nn.Linear(8, 8, bias=False),
+            nn.Linear(8, 8, bias=False),
+        ).to(device)
+        fully_shard(model[0], mesh=mesh)
+        fully_shard(model[1], mesh=mesh)
+        fully_shard(model, mesh=mesh)
+        static_inputs = [torch.randn(4, 8, device=device) for _ in range(2)]
+
+        def run_accumulation() -> None:
+            model.set_is_last_backward(False)
+            model.set_reshard_after_backward(False)
+            model.set_requires_gradient_sync(False)
+            model(static_inputs[0]).sum().backward()
+            model.set_is_last_backward(True)
+            model.set_reshard_after_backward(True)
+            model.set_requires_gradient_sync(True)
+            model(static_inputs[1]).sum().backward()
+
+        stream = torch.cuda.Stream()
+        with torch.cuda.stream(stream):
+            run_accumulation()
+            model.zero_grad(set_to_none=True)
+
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=stream):
+            run_accumulation()
+        graph.replay()
+        torch.cuda.synchronize()
+
     def _test_manual_backward_finalization_cudagraph(self, async_op: bool) -> None:
         torch.cuda.set_device(self.rank)
         device = torch.device("cuda", self.rank)
