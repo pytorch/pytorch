@@ -1,16 +1,25 @@
 # Owner(s): ["module: inductor"]
 import logging
+import math
 import os
 import unittest
 from collections.abc import Callable
+from types import SimpleNamespace
 from unittest import mock
+
+import sympy
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config
+from torch._inductor.heuristics.template import triton as triton_heuristics
 from torch._inductor.heuristics.template.triton import (
     _rocm_version as _th_rocm_version,
+    FlexAttentionConfigContext,
+    FlexConfig,
     ORIGAMI_UNSUPPORTED_ROCM_VERSION,
+    ROCmConfigHeuristic,
+    ROCmFlexConfig,
 )
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.test_case import run_tests, TestCase
@@ -49,6 +58,287 @@ except ImportError:
 
 
 _PRIOR_FP32_MATMUL_PRECISION: str | None = None
+
+
+class TestOrigamiFlexAttentionConfigSelection(TestCase):
+    """CPU-only coverage for the gating and projected gfx950 candidate pool."""
+
+    def setUp(self):
+        super().setUp()
+        self.heuristic = object.__new__(ROCmConfigHeuristic)
+        self.heuristic.exhaustive_flex_attn_fwd_configs = [
+            ROCmFlexConfig(
+                block_m,
+                block_n,
+                num_stages,
+                num_warps,
+                mfma,
+                waves_per_eu,
+                kpack,
+            )
+            for block_m in (16, 32, 64, 128)
+            for block_n in (32, 64, 128)
+            for num_stages in (1, 2)
+            for num_warps in (2, 4, 8)
+            for mfma in (0, 16)
+            for waves_per_eu in (0, 8 // num_warps)
+            for kpack in (1, 2)
+        ]
+        self.heuristic.flex_attn_fwd_autotune_configs = [
+            ROCmFlexConfig(128, 64, 1, 4, kpack=2)
+        ]
+        self.stock: list[FlexConfig] = [ROCmFlexConfig(128, 64, 2, 4, kpack=2)]
+        self.heuristic.gfx950_default_flex_config = {
+            (torch.float16, 64): self.stock[0],
+            (torch.float16, 128): self.stock[0],
+            (torch.float16, 256): ROCmFlexConfig(32, 64, 2, 4, kpack=2),
+        }
+
+    @staticmethod
+    def _context(**overrides):
+        values = {
+            "batch_size": 1,
+            "kv_batch_size": 1,
+            "num_heads": 16,
+            "num_kv_heads": 16,
+            "seq_len_q": 4096,
+            "seq_len_kv": 4096,
+            "qk_head_dim": 64,
+            "v_head_dim": 64,
+            "qk_head_dim_rounded": 64,
+            "v_head_dim_rounded": 64,
+            "dtype": torch.float16,
+            "device": torch.device("cuda", 0),
+            "inputs_contiguous": True,
+            "is_noop_block_mask": True,
+            "kernel_options": {},
+        }
+        values.update(overrides)
+        return FlexAttentionConfigContext(**values)
+
+    def _select(
+        self,
+        context,
+        *,
+        arch="gfx950",
+        configs: list[FlexConfig] | None = None,
+        search_space="DEFAULT",
+        origami_module=object(),
+        selected_tiles=((128, 128), (64, 128)),
+    ):
+        configs = self.stock if configs is None else configs
+        get_device_properties = mock.Mock(return_value=mock.Mock(gcnArchName=arch))
+        self.last_get_device_properties = get_device_properties
+        with (
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_flex_search_space": search_space,
+                }
+            ),
+            mock.patch.object(triton_heuristics, "origami", origami_module),
+            mock.patch.object(
+                triton_heuristics,
+                "_origami_flex_attention_tiles",
+                return_value=selected_tiles,
+            ),
+            mock.patch.object(
+                torch.cuda,
+                "get_device_properties",
+                get_device_properties,
+            ),
+            mock.patch.object(
+                self.heuristic,
+                "get_flex_attn_fwd_configs",
+                return_value=self.stock,
+            ),
+        ):
+            return self.heuristic.filter_flex_attn_fwd_configs(configs, context)
+
+    def test_selects_subgemm_tiles_and_keeps_unmodeled_backend_axes(self):
+        selected = self._select(self._context())
+        self.assertEqual(len(selected), 9)
+        self.assertEqual(
+            {(config.block_m, config.block_n) for config in selected},
+            {(128, 128), (64, 128), (128, 64)},
+        )
+        self.assertEqual({config.num_stages for config in selected}, {2})
+        self.assertEqual({config.num_warps for config in selected}, {4})
+        self.assertEqual(
+            [
+                config
+                for config in selected
+                if (config.block_m, config.block_n) == (128, 64)
+            ],
+            self.stock,
+        )
+        self.assertEqual(
+            {
+                (
+                    config.matrix_instr_nonkdim,
+                    config.waves_per_eu,
+                    config.kpack,
+                )
+                for config in selected
+            },
+            {
+                (mfma, waves_per_eu, kpack)
+                for mfma in (0, 16)
+                for waves_per_eu in (0,)
+                for kpack in (1, 2)
+            },
+        )
+
+    def test_preserves_generic_d32_default(self):
+        selected = self._select(
+            self._context(
+                qk_head_dim=32,
+                v_head_dim=32,
+                qk_head_dim_rounded=32,
+                v_head_dim_rounded=32,
+            )
+        )
+        self.assertIn(ROCmFlexConfig(128, 64, 1, 4, kpack=2), selected)
+
+    def test_gqa_keeps_two_and_four_warp_variants(self):
+        selected = self._select(self._context(num_kv_heads=4))
+        self.assertEqual(len(selected), 17)
+        self.assertEqual({config.num_warps for config in selected}, {2, 4})
+
+    def test_queries_the_compiling_device(self):
+        self._select(self._context(device=torch.device("cuda", 3)))
+        self.last_get_device_properties.assert_called_once_with(3)
+
+    def test_falls_back_outside_measured_domain(self):
+        cases = {
+            "block_mask": self._context(is_noop_block_mask=False),
+            "short_sequence": self._context(seq_len_q=512),
+            "d128_transition": self._context(
+                seq_len_q=1024,
+                seq_len_kv=1024,
+                qk_head_dim=128,
+                v_head_dim=128,
+                qk_head_dim_rounded=128,
+                v_head_dim_rounded=128,
+            ),
+            "d256_transition": self._context(
+                seq_len_q=1024,
+                seq_len_kv=1024,
+                qk_head_dim=256,
+                v_head_dim=256,
+                qk_head_dim_rounded=256,
+                v_head_dim_rounded=256,
+            ),
+            "low_parallelism": self._context(num_heads=8),
+            "batch_broadcast": self._context(batch_size=2, kv_batch_size=1),
+            "mixed_head_dims": self._context(v_head_dim=128, v_head_dim_rounded=128),
+            "unmeasured_head_dim": self._context(
+                qk_head_dim=100,
+                v_head_dim=100,
+                qk_head_dim_rounded=128,
+                v_head_dim_rounded=128,
+            ),
+            "unsupported_dtype": self._context(dtype=torch.float32),
+            "dynamic_sequence": self._context(seq_len_q=sympy.Symbol("s")),
+            "noncontiguous_inputs": self._context(inputs_contiguous=False),
+            "user_tile": self._context(kernel_options={"BLOCK_M": 64}),
+            "user_rocm_option": self._context(kernel_options={"kpack": 1}),
+            "prefixed_rocm_option": self._context(
+                kernel_options={"fwd_waves_per_eu": 2}
+            ),
+        }
+        for name, context in cases.items():
+            with self.subTest(name=name):
+                self.assertIs(self._select(context), self.stock)
+        self.assertIs(self._select(self._context(), arch="gfx942"), self.stock)
+        custom: list[FlexConfig] = [ROCmFlexConfig(64, 64, 1, 4)]
+        self.assertIs(self._select(self._context(), configs=custom), custom)
+        self.assertIs(
+            self._select(self._context(), search_space="EXHAUSTIVE"), self.stock
+        )
+        self.assertIs(self._select(self._context(), origami_module=None), self.stock)
+        self.assertIs(self._select(self._context(), selected_tiles=()), self.stock)
+
+    def test_d128_and_d256_positive_boundaries(self):
+        for head_dim in (128, 256):
+            with self.subTest(head_dim=head_dim):
+                selected = self._select(
+                    self._context(
+                        seq_len_q=2048,
+                        seq_len_kv=2048,
+                        qk_head_dim=head_dim,
+                        v_head_dim=head_dim,
+                        qk_head_dim_rounded=head_dim,
+                        v_head_dim_rounded=head_dim,
+                    )
+                )
+                self.assertGreater(len(selected), 1)
+
+    @staticmethod
+    def _fake_origami(latencies):
+        fake_origami = mock.Mock()
+        fake_origami.transpose_t = SimpleNamespace(N="N", T="T")
+        fake_origami.problem_t.side_effect = SimpleNamespace
+        fake_origami.config_t.side_effect = SimpleNamespace
+
+        def dim3(m, n, k):
+            return (m, n, k)
+
+        fake_origami.dim3_t.side_effect = dim3
+        fake_origami.string_to_datatype.return_value = "f16"
+        hardware = mock.Mock(N_CU=256)
+        hardware.get_recommended_matrix_instruction.return_value = (16, 16, 32)
+        fake_origami.get_hardware_for_device.return_value = hardware
+        fake_origami.compute_total_latency.side_effect = latencies
+        return fake_origami
+
+    def _run_model(self, latencies, candidate_tiles):
+        fake_origami = self._fake_origami(latencies)
+        triton_heuristics._origami_flex_attention_tiles.cache_clear()
+        with mock.patch.object(triton_heuristics, "origami", fake_origami):
+            selected = triton_heuristics._origami_flex_attention_tiles(
+                16,
+                2048,
+                4096,
+                100,
+                80,
+                128,
+                128,
+                torch.float16,
+                0,
+                candidate_tiles,
+            )
+        return selected, fake_origami
+
+    def test_models_qk_and_pv_tile_geometry(self):
+        selected, fake_origami = self._run_model((10.0, 20.0), ((64, 128),))
+
+        self.assertEqual(selected, ((64, 128),))
+        qk_call, pv_call = fake_origami.compute_total_latency.call_args_list
+        qk_problem, _, qk_config, _ = qk_call.args
+        pv_problem, _, pv_config, _ = pv_call.args
+        self.assertEqual(qk_problem.size, (2048, 4096, 100))
+        self.assertEqual(qk_problem.batch, 16)
+        self.assertEqual(qk_problem.a_transpose, "N")
+        self.assertEqual(qk_problem.b_transpose, "T")
+        self.assertEqual(qk_config.mt, (64, 128, 128))
+        self.assertEqual(pv_problem.size, (2048, 80, 4096))
+        self.assertEqual(pv_problem.batch, 16)
+        self.assertEqual(pv_problem.a_transpose, "N")
+        self.assertEqual(pv_problem.b_transpose, "N")
+        self.assertEqual(pv_config.mt, (64, 128, 128))
+
+    def test_unions_qk_top1_and_pv_top2_without_duplicates(self):
+        tiles = ((16, 32), (32, 64), (64, 128))
+        # Calls alternate QK/PV. QK ranks A,B,C; PV ranks A,C,B, so A is
+        # deduplicated and the production union is A,C.
+        selected, _ = self._run_model((1.0, 1.0, 2.0, 3.0, 3.0, 2.0), tiles)
+        self.assertEqual(selected, (tiles[0], tiles[2]))
+
+    def test_requires_finite_results_from_both_subgemms(self):
+        tiles = ((64, 64), (128, 128))
+        selected, _ = self._run_model((math.inf, 1.0, math.inf, 2.0), tiles)
+        self.assertEqual(selected, ())
 
 
 def setUpModule():
@@ -186,6 +476,123 @@ class TestOrigami(TestCase):
             "test_configs.autotune_choice_name_regex": r"^triton_(b)?mm_",
             "triton.native_matmul": False,
         }
+
+    def test_origami_filters_dense_flex_attention_configs(self):
+        arch = torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
+        if arch != "gfx950":
+            self.skipTest("the measured FlexAttention config projection is gfx950-only")
+
+        from torch.nn.attention.flex_attention import AuxRequest, flex_attention
+        from torch._inductor.choices import InductorChoices
+
+        torch.manual_seed(0)
+        q_ref, k_ref, v_ref = (
+            torch.randn(
+                1,
+                16,
+                1024,
+                64,
+                device=GPU_TYPE,
+                dtype=torch.float16,
+                requires_grad=True,
+            )
+            for _ in range(3)
+        )
+        q, k, v = (
+            tensor.detach().clone().requires_grad_() for tensor in (q_ref, k_ref, v_ref)
+        )
+
+        def fn(q, k, v):
+            return flex_attention(q, k, v, return_aux=AuxRequest(lse=True))
+
+        expected_out, expected_aux = fn(q_ref, k_ref, v_ref)
+        expected_out.sum().backward()
+        triton_heuristics._origami_flex_attention_tiles.cache_clear()
+        filtered_sizes = []
+        appended_config_sizes = []
+        filter_configs = ROCmConfigHeuristic.filter_flex_attn_fwd_configs
+
+        def record_filter(heuristic, configs, context):
+            filtered = filter_configs(heuristic, configs, context)
+            filtered_sizes.append(len(filtered))
+            return filtered
+
+        def record_append(handler, choices, configs, *args, **kwargs):
+            appended_config_sizes.append(len(configs))
+            return choices
+
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_flex_search_space": "DEFAULT",
+                    "autotune_num_choices_displayed": 0,
+                    "rocm.origami": True,
+                }
+            ),
+            mock.patch.object(
+                triton_heuristics,
+                "_origami_flex_attention_tiles",
+                wraps=triton_heuristics._origami_flex_attention_tiles,
+            ) as select_tiles,
+            mock.patch.object(
+                ROCmConfigHeuristic,
+                "filter_flex_attn_fwd_configs",
+                record_filter,
+            ),
+            mock.patch.object(
+                InductorChoices,
+                "append_flex_attention_choices",
+                record_append,
+            ),
+        ):
+            actual_out, actual_aux = torch.compile(fn, fullgraph=True)(q, k, v)
+            actual_out.sum().backward()
+
+        self.assertGreater(select_tiles.call_count, 0)
+        self.assertEqual(filtered_sizes, [9])
+        self.assertEqual(appended_config_sizes, [25])
+        torch.testing.assert_close(actual_out, expected_out, atol=2e-2, rtol=2e-2)
+        torch.testing.assert_close(
+            actual_aux.lse, expected_aux.lse, atol=2e-2, rtol=2e-2
+        )
+        for actual_grad, expected_grad in zip(
+            (q.grad, k.grad, v.grad), (q_ref.grad, k_ref.grad, v_ref.grad)
+        ):
+            torch.testing.assert_close(actual_grad, expected_grad, atol=3e-2, rtol=3e-2)
+
+    def test_origami_leaves_flex_decoding_unchanged(self):
+        from torch.nn.attention.flex_attention import flex_attention
+
+        torch.manual_seed(0)
+        q = torch.randn(1, 16, 1, 64, device=GPU_TYPE, dtype=torch.float16)
+        k, v = (
+            torch.randn(1, 16, 1024, 64, device=GPU_TYPE, dtype=torch.float16)
+            for _ in range(2)
+        )
+        expected = flex_attention(q, k, v)
+        triton_heuristics._origami_flex_attention_tiles.cache_clear()
+        with (
+            fresh_cache(),
+            config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_flex_search_space": "DEFAULT",
+                    "autotune_num_choices_displayed": 0,
+                    "rocm.origami": True,
+                }
+            ),
+            mock.patch.object(
+                triton_heuristics,
+                "_origami_flex_attention_tiles",
+                wraps=triton_heuristics._origami_flex_attention_tiles,
+            ) as select_tiles,
+        ):
+            actual = torch.compile(flex_attention, fullgraph=True)(q, k, v)
+
+        self.assertEqual(select_tiles.call_count, 0)
+        torch.testing.assert_close(actual, expected, atol=2e-2, rtol=2e-2)
 
     def test_origami_respects_gemm_search_space(self):
         for op_name in ("mm", "addmm", "bmm"):
