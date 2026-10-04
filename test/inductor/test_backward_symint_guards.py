@@ -108,5 +108,43 @@ class TestBackwardSymIntGuardBinding(TestCase):
             self.assertEqual(run(compiled, 5), run(model, 5))
 
 
+class TestPositionalGuardExpressionIsEvaluable(TestCase):
+    def test_symbol_without_placeholder_is_specialized_not_sourced(self):
+        # produce_guards_expression names its args t0..tN and evaluate_guards_expression
+        # binds only those, so everything the former emits must be resolvable against
+        # them. get_pruned_guards keeps a guard whose UNSIMPLIFIED symbols are all
+        # placeholders, but rendering applies ShapeEnv replacements and can surface a
+        # symbol that has no placeholder; emitting that symbol's original Dynamo source
+        # produced an expression no later lookup could evaluate. Here `extra` stands in
+        # for such a symbol -- in production it was a KJT's _offset_per_key[1].
+        from torch._dynamo.source import LocalSource
+        from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
+
+        env = ShapeEnv()
+
+        def backed(val, name):
+            return env.create_symintnode(
+                env.create_symbol(val, LocalSource(name), DimDynamic.DYNAMIC),
+                hint=val,
+            )
+
+        bound = backed(7, "bound")
+        extra = backed(11, "extra")
+        total = backed(11 + 5 * 7, "total")
+
+        # Record a guard that ties a placeholder to an expression over `extra`.
+        self.assertTrue(bool(total == extra + 5 * bound))
+
+        # `extra` is deliberately NOT a placeholder.
+        expr = env.produce_guards_expression([total, bound], guards=env.guards)
+        self.assertIsNotNone(expr)
+        self.assertNotIn("extra", expr)
+
+        # The whole point: the emitted expression must be evaluable.
+        self.assertTrue(env.evaluate_guards_expression(expr, [11 + 5 * 7, 7]))
+        # And it must still reject values that violate the recorded relation.
+        self.assertFalse(env.evaluate_guards_expression(expr, [11 + 5 * 7 + 1, 7]))
+
+
 if __name__ == "__main__":
     run_tests()
