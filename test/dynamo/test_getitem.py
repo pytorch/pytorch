@@ -840,19 +840,115 @@ class GetItemTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(4)
         self.assertEqual(fn(x), self._compile(fn, x))
 
+    def test_str_bytes_subscript_index_object(self):
+        class Index:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                return self.value
+
+        def fn():
+            return "abcd"[Index(1)], b"abcd"[Index(-1)]
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_str_bytes_subscript_index_object_errors(self):
+        class Index:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                return self.value
+
+        def fn():
+            result = []
+            for value in ("bad", 100):
+                try:
+                    "abcd"[Index(value)]
+                except (TypeError, IndexError) as e:
+                    result.append(type(e).__name__)
+            return result
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_str_bytes_subscript_invalid_object(self):
+        def fn():
+            errors = []
+            for value in ("abc", b"abc"):
+                try:
+                    value[object()]
+                except TypeError as e:
+                    errors.append(str(e))
+            return errors
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_str_bytes_subscript_slice_index_object(self):
+        class Index:
+            def __init__(self, value):
+                self.value = value
+
+            def __index__(self):
+                return self.value
+
+        def fn():
+            return "abcde"[Index(1) : Index(5) : Index(2)], b"abcde"[
+                Index(-4) : Index(-1)
+            ]
+
+        self.assertEqual(fn(), self._compile(fn))
+
+    def test_slice_index_object_side_effect_order(self):
+        class Index:
+            def __init__(self):
+                self.calls = 0
+
+            def __index__(self):
+                self.calls += 1
+                return (1, 4, 2)[self.calls - 1]
+
+        def fn(value, index):
+            return value[index:index:index], index.calls
+
+        for value in ("abcdef", b"abcdef", list(range(6)), range(6)):
+            self.assertEqual(fn(value, Index()), self._compile(fn, value, Index()))
+
+    def test_slice_index_object_zero_step_effects(self):
+        class Index:
+            def __init__(self, value):
+                self.value = value
+                self.calls = 0
+
+            def __index__(self):
+                self.calls += 1
+                return self.value
+
+        def fn():
+            results = []
+            for value in ("abcdef", b"abcdef", list(range(6)), range(6)):
+                start, stop, step = Index(1), Index(4), Index(0)
+                try:
+                    value[start:stop:step]
+                except ValueError as exc:
+                    results.append((str(exc), start.calls, stop.calls, step.calls))
+            return results
+
+        self.assertEqual(fn(), self._compile(fn))
+
     def test_str_subscript_symbolic_index(self):
-        # A non-constant key must fall through to the generic "unsupported
-        # subscript" graph break, not leak AsPythonConstantNotImplementedError.
+        # A non-constant int key goes through nb_index (PyNumber_Index) and
+        # indexes the constant string, instead of leaking
+        # AsPythonConstantNotImplementedError.
         def fn(t):
             i = t.item()
             torch._check(i >= 0)
             torch._check(i < 3)
             return "abc"[i]
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "does not yet support subscripting 'str'"
-        ):
-            self._compile(fn, torch.tensor(1))
+        for v in range(3):
+            t = torch.tensor(v)
+            self.assertEqual(self._compile(fn, t), fn(t))
 
     # ===================================================================
     # Explicit __getitem__ dunder call path tests

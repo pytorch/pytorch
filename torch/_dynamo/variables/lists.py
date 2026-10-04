@@ -2735,17 +2735,22 @@ class SliceVariable(VariableTracker):
         # coerced through __index__ (nb_index), so user objects with an
         # __index__ method are valid slice bounds.
         # https://github.com/python/cpython/blob/62a6e898e01/Objects/sliceobject.c#L196-L242
-        members = []
-        for member in self.items:
+        # PySlice_Unpack evaluates step before start and stop.
+        members = [None, None, None]
+        for index in (2, 0, 1):
+            member = self.items[index]
             if isinstance(member, ConstantVariable) and member.value is None:
-                members.append(None)
                 continue
             if not pyindex_check(maybe_get_python_type(member)):
                 raise_type_error(
                     tx,
                     "slice indices must be integers or None or have an __index__ method",
                 )
-            members.append(pynumber_index(tx, member).as_python_constant())
+            members[index] = pynumber_index(tx, member).as_python_constant()
+            if index == 2 and members[index] == 0:
+                raise_observed_exception(
+                    ValueError, tx, args=["slice step cannot be zero"]
+                )
         return slice(*members)
 
     def is_hashable(self) -> bool:
