@@ -1849,6 +1849,15 @@ class AOTDedupeWrapper(CompilerWrapper):
         return debugged_compiled_fn
 
 
+def _view_base_sharing_storage(arg: torch.Tensor) -> torch.Tensor | None:
+    # set_() can rebind a tensor's storage without clearing the stale _base
+    # link, so only trust _base when it still shares storage with the tensor.
+    base = arg._base
+    if base is not None and base.untyped_storage()._cdata == arg.untyped_storage()._cdata:
+        return base
+    return None
+
+
 # This layer handles the situation where you have two inputs that alias each other,
 # and one of the inputs is mutated.
 # We need to take special care to ensure that the mutation is applied to the other aliases in the graph.
@@ -2058,32 +2067,32 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             args="args",
             artifact_name="synthetic_base_wrapper",
         )
-        buf.bind(torch=torch, _compiled_fn_=compiled_fn)
+        buf.bind(
+            torch=torch,
+            _compiled_fn_=compiled_fn,
+            _view_base_sharing_storage=_view_base_sharing_storage,
+        )
 
         with buf.indent():
             buf.writeline(f"_bases = [None] * {num_bases}")
             for base_idx in sorted(base_groups):
                 group = base_groups[base_idx]
                 first_orig = group[0]
-                if len(group) == 1:
-                    indices_check = f"args[{first_orig}]._base is not None"
-                    base_expr = f"args[{first_orig}]._base"
-                else:
-                    indices_str = ", ".join(str(i) for i in group)
-                    indices_check = (
-                        f"any(args[_i]._base is not None for _i in [{indices_str}])"
-                    )
-                    base_expr = f"next(args[_i]._base for _i in [{indices_str}] if args[_i]._base is not None)"
-                buf.writeline(f"if {indices_check}:")
+                indices_str = ", ".join(str(i) for i in group)
+                buf.writeline("_b = None")
+                buf.writeline(f"for _i in [{indices_str}]:")
                 with buf.indent():
-                    buf.writeline(f"_bases[{base_idx}] = {base_expr}")
-                buf.writeline("else:")
+                    buf.writeline("_b = _view_base_sharing_storage(args[_i])")
+                    buf.writeline("if _b is not None:")
+                    with buf.indent():
+                        buf.writeline("break")
+                buf.writeline("if _b is None:")
                 with buf.indent():
                     buf.writeline(
                         f"_b = torch.empty((0,), dtype=args[{first_orig}].dtype, device=args[{first_orig}].device)"
                     )
                     buf.writeline(f"_b.set_(args[{first_orig}].untyped_storage())")
-                    buf.writeline(f"_bases[{base_idx}] = _b")
+                buf.writeline(f"_bases[{base_idx}] = _b")
 
             other_items = ", ".join(f"args[{orig}]" for orig in other_indices)
             buf.writeline(f"_new_args = _bases + [{other_items}]")
