@@ -1,5 +1,5 @@
 """GitHub-native PR stacks for the merge bot: reading and validating them, finding
-what landed, and building the commits that merge or rebase them."""
+what landed, and building the commits that merge, revert or rebase them."""
 
 from __future__ import annotations
 
