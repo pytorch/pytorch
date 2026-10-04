@@ -45,6 +45,58 @@ def _maximum(lhs, rhs):
     return lhs.maximumf(rhs)
 
 
+def _store_output_fragments(
+    final_output,
+    inverse_vec,
+    output_row,
+    lane_half,
+    output_copy,
+    output_chunks,
+    mfma_tile_size,
+):
+    for d_chunk in fx.range_constexpr(output_chunks):
+        normalized = Vec(final_output[d_chunk]) * inverse_vec
+        for column_group in fx.range_constexpr(2):
+            packed = (
+                Vec.from_elements(
+                    [normalized[column_group * 8 + i] for i in fx.range_constexpr(8)],
+                    fx.Float32,
+                )
+                .to(fx.BFloat16)
+                .bitcast(fx.Int32)
+            )
+            lower = []
+            upper = []
+            for i in fx.range_constexpr(2):
+                lhs = fx.Int32(packed[i]).ir_value()
+                rhs = fx.Int32(packed[i + 2]).ir_value()
+                swapped = fx.rocdl.permlane32_swap(
+                    ir.Type.parse("!llvm.struct<(i32, i32)>"),
+                    lhs,
+                    rhs,
+                    False,
+                    True,
+                )
+                lower.append(
+                    fx.Int32(llvm.extractvalue(fx.Int32.ir_type, swapped, [0]))
+                )
+                upper.append(
+                    fx.Int32(llvm.extractvalue(fx.Int32.ir_type, swapped, [1]))
+                )
+            values = Vec.from_elements([*lower, *upper], fx.Int32).bitcast(fx.BFloat16)
+            column = fx.Int32(
+                d_chunk * mfma_tile_size + column_group * 16
+            ) + lane_half * fx.Int32(8)
+            fragment = fx.make_rmem_tensor(8, fx.BFloat16)
+            fragment.store(values)
+            fx.copy(
+                output_copy,
+                fragment,
+                fx.slice(output_row, (None, column // fx.Int32(8))),
+            )
+            fx.rocdl.sched_barrier(0)
+
+
 def _select_owner_waves(
     *,
     batch_size: int,
@@ -117,14 +169,15 @@ def build_flex_attn_fwd_module(
 ):
     builder = _build_native_forward
     paired_ctas = batch_size * num_q_heads * (seq_q // 256)
+    # Buffered partial tiles also pay for captured loads and owner membership.
+    min_kv_blocks = 64 if mask_buffer_shapes else 16
     # Pairing needs enough CTAs and KV work to amortize merging sparse rows.
     if (
-        not mask_buffer_shapes
-        and seq_q % 256 == 0
+        seq_q % 256 == 0
         and sparse_q_block_size == 128
         and sparse_kv_block_size == 128
         and paired_ctas >= _FOUR_WAVE_PREFILL_MIN_CTAS
-        and seq_kv // sparse_kv_block_size >= 16
+        and seq_kv // sparse_kv_block_size >= min_kv_blocks
     ):
         builder = _build_paired_prefill
     return builder(
@@ -154,6 +207,231 @@ def build_flex_attn_fwd_module(
         output_stats_in_log2=output_stats_in_log2,
         write_max_scores=write_max_scores,
     )
+
+
+def _make_forward_launch(kernel, *, grid, num_threads, mask_buffer_count, waves_per_eu):
+    def launch_kernel(
+        query,
+        key,
+        value,
+        logsumexp,
+        max_scores,
+        kv_num_blocks,
+        kv_indices,
+        full_kv_num_blocks,
+        full_kv_indices,
+        mask_buffer_0,
+        mask_buffer_1,
+        mask_buffer_2,
+        mask_buffer_3,
+        output,
+        stream,
+    ):
+        kernel(
+            query,
+            key,
+            value,
+            logsumexp,
+            max_scores,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+            mask_buffer_0,
+            mask_buffer_1,
+            mask_buffer_2,
+            mask_buffer_3,
+            output,
+        ).launch(
+            grid=grid,
+            block=(num_threads, 1, 1),
+            stream=stream,
+        )
+
+    # Each JIT entry point exposes only its live mask buffers. The internal
+    # placeholder slots alias kv_num_blocks and must remain unused above count.
+    if mask_buffer_count == 0:
+
+        @flyc.jit
+        def launch(
+            query: fx.Tensor,
+            key: fx.Tensor,
+            value: fx.Tensor,
+            logsumexp: fx.Tensor,
+            max_scores: fx.Tensor,
+            kv_num_blocks: fx.Tensor,
+            kv_indices: fx.Tensor,
+            full_kv_num_blocks: fx.Tensor,
+            full_kv_indices: fx.Tensor,
+            output: fx.Tensor,
+            stream: fx.Stream = fx.Stream(None),
+        ):
+            launch_kernel(
+                query,
+                key,
+                value,
+                logsumexp,
+                max_scores,
+                kv_num_blocks,
+                kv_indices,
+                full_kv_num_blocks,
+                full_kv_indices,
+                kv_num_blocks,
+                kv_num_blocks,
+                kv_num_blocks,
+                kv_num_blocks,
+                output,
+                stream,
+            )
+
+    elif mask_buffer_count == 1:
+
+        @flyc.jit
+        def launch(
+            query: fx.Tensor,
+            key: fx.Tensor,
+            value: fx.Tensor,
+            logsumexp: fx.Tensor,
+            max_scores: fx.Tensor,
+            kv_num_blocks: fx.Tensor,
+            kv_indices: fx.Tensor,
+            full_kv_num_blocks: fx.Tensor,
+            full_kv_indices: fx.Tensor,
+            mask_buffer_0: fx.Tensor,
+            output: fx.Tensor,
+            stream: fx.Stream = fx.Stream(None),
+        ):
+            launch_kernel(
+                query,
+                key,
+                value,
+                logsumexp,
+                max_scores,
+                kv_num_blocks,
+                kv_indices,
+                full_kv_num_blocks,
+                full_kv_indices,
+                mask_buffer_0,
+                kv_num_blocks,
+                kv_num_blocks,
+                kv_num_blocks,
+                output,
+                stream,
+            )
+
+    elif mask_buffer_count == 2:
+
+        @flyc.jit
+        def launch(
+            query: fx.Tensor,
+            key: fx.Tensor,
+            value: fx.Tensor,
+            logsumexp: fx.Tensor,
+            max_scores: fx.Tensor,
+            kv_num_blocks: fx.Tensor,
+            kv_indices: fx.Tensor,
+            full_kv_num_blocks: fx.Tensor,
+            full_kv_indices: fx.Tensor,
+            mask_buffer_0: fx.Tensor,
+            mask_buffer_1: fx.Tensor,
+            output: fx.Tensor,
+            stream: fx.Stream = fx.Stream(None),
+        ):
+            launch_kernel(
+                query,
+                key,
+                value,
+                logsumexp,
+                max_scores,
+                kv_num_blocks,
+                kv_indices,
+                full_kv_num_blocks,
+                full_kv_indices,
+                mask_buffer_0,
+                mask_buffer_1,
+                kv_num_blocks,
+                kv_num_blocks,
+                output,
+                stream,
+            )
+
+    elif mask_buffer_count == 3:
+
+        @flyc.jit
+        def launch(
+            query: fx.Tensor,
+            key: fx.Tensor,
+            value: fx.Tensor,
+            logsumexp: fx.Tensor,
+            max_scores: fx.Tensor,
+            kv_num_blocks: fx.Tensor,
+            kv_indices: fx.Tensor,
+            full_kv_num_blocks: fx.Tensor,
+            full_kv_indices: fx.Tensor,
+            mask_buffer_0: fx.Tensor,
+            mask_buffer_1: fx.Tensor,
+            mask_buffer_2: fx.Tensor,
+            output: fx.Tensor,
+            stream: fx.Stream = fx.Stream(None),
+        ):
+            launch_kernel(
+                query,
+                key,
+                value,
+                logsumexp,
+                max_scores,
+                kv_num_blocks,
+                kv_indices,
+                full_kv_num_blocks,
+                full_kv_indices,
+                mask_buffer_0,
+                mask_buffer_1,
+                mask_buffer_2,
+                kv_num_blocks,
+                output,
+                stream,
+            )
+
+    else:
+
+        @flyc.jit
+        def launch(
+            query: fx.Tensor,
+            key: fx.Tensor,
+            value: fx.Tensor,
+            logsumexp: fx.Tensor,
+            max_scores: fx.Tensor,
+            kv_num_blocks: fx.Tensor,
+            kv_indices: fx.Tensor,
+            full_kv_num_blocks: fx.Tensor,
+            full_kv_indices: fx.Tensor,
+            mask_buffer_0: fx.Tensor,
+            mask_buffer_1: fx.Tensor,
+            mask_buffer_2: fx.Tensor,
+            mask_buffer_3: fx.Tensor,
+            output: fx.Tensor,
+            stream: fx.Stream = fx.Stream(None),
+        ):
+            launch_kernel(
+                query,
+                key,
+                value,
+                logsumexp,
+                max_scores,
+                kv_num_blocks,
+                kv_indices,
+                full_kv_num_blocks,
+                full_kv_indices,
+                mask_buffer_0,
+                mask_buffer_1,
+                mask_buffer_2,
+                mask_buffer_3,
+                output,
+                stream,
+            )
+
+    launch.compile_hints = {"waves_per_eu": waves_per_eu}
+    return launch
 
 
 def _build_native_forward(
@@ -273,6 +551,13 @@ def _build_native_forward(
         if decode
         else seq_q // query_tile_rows
     )
+
+    launch_heads = num_kv_heads if decode else num_q_heads
+    total_heads = batch_size * launch_heads
+    # Limit the heads interleaved across query blocks to preserve K/V reuse.
+    heads_per_group = max(1, min(total_heads, 64))
+    while total_heads % heads_per_group:
+        heads_per_group -= 1
 
     if decode:
         if block_mask_heads not in (1, num_kv_heads):
@@ -443,7 +728,12 @@ def _build_native_forward(
                 fx.make_layout((mfma_tile_size, qk_head_dim), (0, 1)),
             )
         )
-        batch = fx.block_idx.z
+        grouped_head = fx.block_idx.z * fx.Int32(heads_per_group) + fx.block_idx.x
+        batch = (
+            fx.Int32(0)
+            if const_expr(batch_size == 1)
+            else grouped_head // fx.Int32(launch_heads)
+        )
         if const_expr(decode or flat_work_mask):
             q_chunk = fx.block_idx.y
         else:
@@ -452,10 +742,10 @@ def _build_native_forward(
             q_chunk = fx.Int32(num_query_chunks - 1) - fx.block_idx.y
         q_base = q_chunk * fx.Int32(query_tile_rows)
         if const_expr(decode):
-            kv_head = fx.block_idx.x
+            kv_head = grouped_head % fx.Int32(num_kv_heads)
             head = kv_head * fx.Int32(query_heads_per_kv_head)
         else:
-            head = fx.block_idx.x
+            head = grouped_head % fx.Int32(num_q_heads)
             kv_head = head // fx.Int32(query_heads_per_kv_head)
 
         def row_coordinates(local_row):
@@ -483,6 +773,8 @@ def _build_native_forward(
 
         lds = fx.SharedAllocator().allocate(ForwardSharedMemory).peek()
         if const_expr(pipelined_kv):
+            # Q aliases K0/K1 until every wave has cached its fragments.
+            shared_query_pointer = lds.k0.ptr
             shared_key_stages = [lds.k0.ptr, lds.k1.ptr]
             shared_value_stages = [lds.v0.ptr, lds.v1.ptr]
         else:
@@ -617,7 +909,7 @@ def _build_native_forward(
             mask_buffer_3,
         )
 
-        output_copy = fx.make_copy_atom(fx.rocdl.BufferCopy64b(), fx.BFloat16)
+        output_copy = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.BFloat16)
 
         def load_i32(view, index):
             return fx.Int32(view[index])
@@ -697,12 +989,12 @@ def _build_native_forward(
             )
             for pointer in shared_value_stages
         ]
-        if const_expr(not pipelined_kv):
+        if const_expr(not pipelined_kv or not decode):
             shared_query = fx.make_view(
                 shared_query_pointer,
                 make_qk_shared_layout(query_tile_rows, qk_head_dim),
             )
-        elif const_expr(decode):
+        else:
             # Decode inputs are contiguous; pack the group's query rows.
             shared_query = fx.make_view(
                 fx.get_iter(query_view),
@@ -711,8 +1003,6 @@ def _build_native_forward(
                     (qk_head_dim, 1),
                 ),
             )
-        else:
-            shared_query = query_view
         q_wave = fx.Int32(0) if const_expr(split_kv) else wave
         query_tiles = fx.flat_divide(shared_query, (mfma_tile_size, 16))
         key_tiles = [
@@ -767,12 +1057,57 @@ def _build_native_forward(
             fx.Float32,
         ).broadcast_to(values_per_thread)
         query_register_packs = []
-        if const_expr(pipelined_kv):
-            if const_expr(decode):
-                local_head = query_head - kv_head * fx.Int32(query_heads_per_kv_head)
-                query_source = fx.slice(query_view, (local_head, query_pos, None))
-            else:
-                query_source = fx.slice(query_view, (query_pos, None))
+        if const_expr(pipelined_kv and not decode):
+            query_shared_layout = make_qk_shared_layout(query_tile_rows, qk_head_dim)
+            query_copy_coordinates = fx.make_composed_layout(
+                fx.right_inverse(query_shared_layout.outer),
+                fx.make_composed_layout(
+                    query_shared_layout.inner,
+                    fx.make_layout(query_tile_rows * qk_head_dim, 1),
+                ),
+            )
+            query_destinations = fx.logical_divide(
+                fx.make_view(
+                    shared_query_pointer,
+                    fx.make_layout(query_tile_rows * qk_head_dim, 1),
+                ),
+                fx.make_layout(values_per_thread, 1),
+            )
+            for load_step in fx.range_constexpr(query_load_iterations):
+                linear = fx.Int32(load_step * num_threads) + tid
+                logical = fx.Int32(
+                    fx.get_scalar(
+                        fx.crd2idx(
+                            linear * fx.Int32(values_per_thread),
+                            query_copy_coordinates,
+                        )
+                    )
+                )
+                row = logical % fx.Int32(query_tile_rows)
+                chunk = logical // fx.Int32(query_tile_rows * values_per_thread)
+                source = fx.logical_divide(
+                    fx.slice(query_view, (q_base + row, None)),
+                    fx.make_layout(values_per_thread, 1),
+                )
+                fx.copy(
+                    lds_copy,
+                    fx.slice(source, (None, chunk)),
+                    fx.slice(query_destinations, (None, linear)),
+                )
+            fx.rocdl.s_waitcnt(vmcnt=0, lgkmcnt=0, expcnt=0)
+            fx.rocdl.s_barrier()
+            for k_step in fx.range_constexpr(qk_reduction_steps):
+                tile = fx.slice(query_tiles, (None, None, q_wave, k_step))
+                fragment = thr_mma.make_fragment_B(tile)
+                fx.copy(shared_copy, copy_q.partition_S(tile), copy_q.retile(fragment))
+                query_register_packs.append(
+                    (Vec(fragment.load()).to(fx.Float32) * query_scale).to(fx.BFloat16)
+                )
+            fx.rocdl.s_waitcnt(vmcnt=0, lgkmcnt=0, expcnt=0)
+            fx.rocdl.s_barrier()
+        elif const_expr(pipelined_kv):
+            local_head = query_head - kv_head * fx.Int32(query_heads_per_kv_head)
+            query_source = fx.slice(query_view, (local_head, query_pos, None))
             query_row_packs = fx.logical_divide(
                 query_source,
                 fx.make_layout(values_per_thread, 1),
@@ -1106,7 +1441,7 @@ def _build_native_forward(
                     for pair in fx.range_constexpr(32 >> (level + 1))
                 ]
             local_max = max_levels[0]
-            if const_expr(pipelined_kv and isinstance(masked, bool) and not masked):
+            if const_expr(pipelined_kv and isinstance(masked, bool)):
                 tile_max = reduce_lane_pair(local_max, True)
             else:
                 peer_max = _f32(
@@ -1212,7 +1547,7 @@ def _build_native_forward(
             local_sum = sum_levels[0]
             if const_expr(not stream_probabilities):
                 schedule_fwd_softmax_pipeline(vmem_count=value_load_iterations)
-            if const_expr(pipelined_kv and isinstance(masked, bool) and not masked):
+            if const_expr(pipelined_kv and isinstance(masked, bool)):
                 tile_sum = reduce_lane_pair(local_sum, False)
             else:
                 peer_sum = _f32(
@@ -1525,35 +1860,21 @@ def _build_native_forward(
                 output_source = fx.slice(output_view, (query_pos, None))
             output_row = fx.logical_divide(
                 output_source,
-                fx.make_layout(4, 1),
+                fx.make_layout(8, 1),
             )
             store_valid = query_valid
             if const_expr(split_kv):
                 store_valid = store_valid & (wave == fx.Int32(0))
             if store_valid:
-                for d_chunk in fx.range_constexpr(output_chunks):
-                    normalized = Vec(final_output[d_chunk]) * inverse_vec
-                    for column_group in fx.range_constexpr(4):
-                        values = Vec.from_elements(
-                            [
-                                normalized[column_group * 4 + element]
-                                for element in fx.range_constexpr(4)
-                            ],
-                            fx.Float32,
-                        ).to(fx.BFloat16)
-                        column = fx.Int32(d_chunk * mfma_tile_size) + fx.Int32(
-                            fx.get_scalar(accumulator_coordinates[column_group * 4])
-                        )
-                        fragment = fx.make_rmem_tensor(4, fx.BFloat16)
-                        fragment.store(values)
-                        fx.copy(
-                            output_copy,
-                            fragment,
-                            fx.slice(
-                                output_row,
-                                (None, column // fx.Int32(4)),
-                            ),
-                        )
+                _store_output_fragments(
+                    final_output,
+                    inverse_vec,
+                    output_row,
+                    lane_half,
+                    output_copy,
+                    output_chunks,
+                    mfma_tile_size,
+                )
 
             if store_valid & (lane_half == fx.Int32(0)):
                 has_values = final_sum > _f32(0.0)
@@ -1721,232 +2042,13 @@ def _build_native_forward(
                 final_results = yield [iter_max, iter_sum] + iter_output
         store_results(final_results, logsumexp_view, max_scores_view)
 
-    def launch_kernel(
-        query,
-        key,
-        value,
-        logsumexp,
-        max_scores,
-        kv_num_blocks,
-        kv_indices,
-        full_kv_num_blocks,
-        full_kv_indices,
-        mask_buffer_0,
-        mask_buffer_1,
-        mask_buffer_2,
-        mask_buffer_3,
-        output,
-        stream,
-    ):
-        kernel(
-            query,
-            key,
-            value,
-            logsumexp,
-            max_scores,
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-            mask_buffer_0,
-            mask_buffer_1,
-            mask_buffer_2,
-            mask_buffer_3,
-            output,
-        ).launch(
-            grid=(
-                num_kv_heads if decode else num_q_heads,
-                num_query_chunks,
-                batch_size,
-            ),
-            block=(num_threads, 1, 1),
-            stream=stream,
-        )
-
-    # Each JIT entry point exposes only its live mask buffers. The internal
-    # placeholder slots alias kv_num_blocks and must remain unused above count.
-    if mask_buffer_count == 0:
-
-        @flyc.jit
-        def launch(
-            query: fx.Tensor,
-            key: fx.Tensor,
-            value: fx.Tensor,
-            logsumexp: fx.Tensor,
-            max_scores: fx.Tensor,
-            kv_num_blocks: fx.Tensor,
-            kv_indices: fx.Tensor,
-            full_kv_num_blocks: fx.Tensor,
-            full_kv_indices: fx.Tensor,
-            output: fx.Tensor,
-            stream: fx.Stream = fx.Stream(None),
-        ):
-            launch_kernel(
-                query,
-                key,
-                value,
-                logsumexp,
-                max_scores,
-                kv_num_blocks,
-                kv_indices,
-                full_kv_num_blocks,
-                full_kv_indices,
-                kv_num_blocks,
-                kv_num_blocks,
-                kv_num_blocks,
-                kv_num_blocks,
-                output,
-                stream,
-            )
-
-    elif mask_buffer_count == 1:
-
-        @flyc.jit
-        def launch(
-            query: fx.Tensor,
-            key: fx.Tensor,
-            value: fx.Tensor,
-            logsumexp: fx.Tensor,
-            max_scores: fx.Tensor,
-            kv_num_blocks: fx.Tensor,
-            kv_indices: fx.Tensor,
-            full_kv_num_blocks: fx.Tensor,
-            full_kv_indices: fx.Tensor,
-            mask_buffer_0: fx.Tensor,
-            output: fx.Tensor,
-            stream: fx.Stream = fx.Stream(None),
-        ):
-            launch_kernel(
-                query,
-                key,
-                value,
-                logsumexp,
-                max_scores,
-                kv_num_blocks,
-                kv_indices,
-                full_kv_num_blocks,
-                full_kv_indices,
-                mask_buffer_0,
-                kv_num_blocks,
-                kv_num_blocks,
-                kv_num_blocks,
-                output,
-                stream,
-            )
-
-    elif mask_buffer_count == 2:
-
-        @flyc.jit
-        def launch(
-            query: fx.Tensor,
-            key: fx.Tensor,
-            value: fx.Tensor,
-            logsumexp: fx.Tensor,
-            max_scores: fx.Tensor,
-            kv_num_blocks: fx.Tensor,
-            kv_indices: fx.Tensor,
-            full_kv_num_blocks: fx.Tensor,
-            full_kv_indices: fx.Tensor,
-            mask_buffer_0: fx.Tensor,
-            mask_buffer_1: fx.Tensor,
-            output: fx.Tensor,
-            stream: fx.Stream = fx.Stream(None),
-        ):
-            launch_kernel(
-                query,
-                key,
-                value,
-                logsumexp,
-                max_scores,
-                kv_num_blocks,
-                kv_indices,
-                full_kv_num_blocks,
-                full_kv_indices,
-                mask_buffer_0,
-                mask_buffer_1,
-                kv_num_blocks,
-                kv_num_blocks,
-                output,
-                stream,
-            )
-
-    elif mask_buffer_count == 3:
-
-        @flyc.jit
-        def launch(
-            query: fx.Tensor,
-            key: fx.Tensor,
-            value: fx.Tensor,
-            logsumexp: fx.Tensor,
-            max_scores: fx.Tensor,
-            kv_num_blocks: fx.Tensor,
-            kv_indices: fx.Tensor,
-            full_kv_num_blocks: fx.Tensor,
-            full_kv_indices: fx.Tensor,
-            mask_buffer_0: fx.Tensor,
-            mask_buffer_1: fx.Tensor,
-            mask_buffer_2: fx.Tensor,
-            output: fx.Tensor,
-            stream: fx.Stream = fx.Stream(None),
-        ):
-            launch_kernel(
-                query,
-                key,
-                value,
-                logsumexp,
-                max_scores,
-                kv_num_blocks,
-                kv_indices,
-                full_kv_num_blocks,
-                full_kv_indices,
-                mask_buffer_0,
-                mask_buffer_1,
-                mask_buffer_2,
-                kv_num_blocks,
-                output,
-                stream,
-            )
-
-    else:
-
-        @flyc.jit
-        def launch(
-            query: fx.Tensor,
-            key: fx.Tensor,
-            value: fx.Tensor,
-            logsumexp: fx.Tensor,
-            max_scores: fx.Tensor,
-            kv_num_blocks: fx.Tensor,
-            kv_indices: fx.Tensor,
-            full_kv_num_blocks: fx.Tensor,
-            full_kv_indices: fx.Tensor,
-            mask_buffer_0: fx.Tensor,
-            mask_buffer_1: fx.Tensor,
-            mask_buffer_2: fx.Tensor,
-            mask_buffer_3: fx.Tensor,
-            output: fx.Tensor,
-            stream: fx.Stream = fx.Stream(None),
-        ):
-            launch_kernel(
-                query,
-                key,
-                value,
-                logsumexp,
-                max_scores,
-                kv_num_blocks,
-                kv_indices,
-                full_kv_num_blocks,
-                full_kv_indices,
-                mask_buffer_0,
-                mask_buffer_1,
-                mask_buffer_2,
-                mask_buffer_3,
-                output,
-                stream,
-            )
-
-    launch.compile_hints = {"waves_per_eu": waves_per_eu}
-    return launch
+    return _make_forward_launch(
+        kernel,
+        grid=(heads_per_group, num_query_chunks, total_heads // heads_per_group),
+        num_threads=num_threads,
+        mask_buffer_count=mask_buffer_count,
+        waves_per_eu=waves_per_eu,
+    )
 
 
 def _build_paired_prefill(
@@ -2068,21 +2170,38 @@ def _build_paired_prefill(
     mask_program_output = int(mask_program_output)
     mask_buffer_shapes = tuple(tuple(shape) for shape in mask_buffer_shapes)
     mask_buffer_strides = tuple(tuple(stride) for stride in mask_buffer_strides)
+    mask_buffer_count = len(mask_buffer_shapes)
+    mask_buffer_sizes = tuple(
+        1 + sum((size - 1) * stride for size, stride in zip(shape, strides))
+        for shape, strides in zip(mask_buffer_shapes, mask_buffer_strides)
+    )
     mask_interval_types = ["int"] * 4
+    mask_key_dependent = [False, False, False, True]
     for instruction in mask_program:
         op = instruction[0]
         value_type = None
-        if op == "const_i32":
-            value_type = "int"
-        elif op == "const_bool":
-            value_type = "bool"
-        elif op in ("ge", "gt", "le", "lt", "eq", "ne"):
-            if all(mask_interval_types[index] == "int" for index in instruction[1:]):
-                value_type = "bool"
-        elif op in ("and", "or", "not"):
-            if all(mask_interval_types[index] == "bool" for index in instruction[1:]):
-                value_type = "bool"
+        if op in ("const_i32", "const_bool"):
+            dependencies = ()
+            value_type = "int" if op == "const_i32" else "bool"
+        elif op == "load_i32":
+            dependencies = instruction[2]
+            if all(
+                mask_interval_types[index] == "int" and not mask_key_dependent[index]
+                for index in dependencies
+            ):
+                value_type = "int"
+        else:
+            dependencies = instruction[1:]
+            if op in ("ge", "gt", "le", "lt", "eq", "ne"):
+                if all(mask_interval_types[index] == "int" for index in dependencies):
+                    value_type = "bool"
+            elif op in ("and", "or", "not"):
+                if all(mask_interval_types[index] == "bool" for index in dependencies):
+                    value_type = "bool"
         mask_interval_types.append(value_type)
+        mask_key_dependent.append(
+            any(mask_key_dependent[index] for index in dependencies)
+        )
     mask_interval_supported = (
         bool(mask_program)
         and None not in mask_interval_types
@@ -2114,6 +2233,10 @@ def _build_paired_prefill(
         kv_indices: fx.Tensor,
         full_kv_num_blocks: fx.Tensor,
         full_kv_indices: fx.Tensor,
+        mask_buffer_0: fx.Tensor,
+        mask_buffer_1: fx.Tensor,
+        mask_buffer_2: fx.Tensor,
+        mask_buffer_3: fx.Tensor,
         output: fx.Tensor,
     ):
         tid = fx.thread_idx.x
@@ -2267,7 +2390,15 @@ def _build_paired_prefill(
                 batch_size * num_q_heads * seq_q,
                 1,
             )
-            mask_buffers = []
+            mask_buffers = make_mask_buffers(
+                make_global_view,
+                mask_buffer_count,
+                mask_buffer_sizes,
+                mask_buffer_0,
+                mask_buffer_1,
+                mask_buffer_2,
+                mask_buffer_3,
+            )
 
             output_copy = fx.make_copy_atom(fx.rocdl.BufferCopy128b(), fx.BFloat16)
 
@@ -2882,8 +3013,12 @@ def _build_paired_prefill(
                 return tile_output, tile_running_max, tile_running_sum, tile_exact_max
 
             def wave_mask_bounds(kv_chunk):
-                query_lo = q_base + wave * fx.Int32(mfma_tile_size)
-                query_hi = query_lo + fx.Int32(mfma_tile_size - 1)
+                if const_expr(mask_buffer_count):
+                    query_lo = query_pos
+                    query_hi = query_pos
+                else:
+                    query_lo = q_base + wave * fx.Int32(mfma_tile_size)
+                    query_hi = query_lo + fx.Int32(mfma_tile_size - 1)
                 key_lo = kv_chunk * fx.Int32(kv_tile_rows)
                 key_hi = key_lo + fx.Int32(kv_tile_rows - 1)
                 intervals = [
@@ -2902,6 +3037,15 @@ def _build_paired_prefill(
                             1
                         )
                         intervals.append((bound_value, bound_value))
+                    elif op == "load_i32":
+                        buffer_index, index_ids = instruction[1:]
+                        offset = fx.Int32(0)
+                        for dimension, index in enumerate(index_ids):
+                            offset = offset + intervals[index][0] * fx.Int32(
+                                mask_buffer_strides[buffer_index][dimension]
+                            )
+                        loaded_bound = load_i32(mask_buffers[buffer_index], offset)
+                        intervals.append((loaded_bound, loaded_bound))
                     else:
                         lhs_lo, lhs_hi = intervals[instruction[1]]
                         if op == "not":
@@ -2959,6 +3103,10 @@ def _build_paired_prefill(
                         possible = possible | tile_full
                     if tile_active is not None:
                         possible = possible & tile_active
+                    if const_expr(mask_buffer_count):
+                        possible = fx.Uint64(
+                            fx.rocdl.ballot(fx.Uint64.ir_type, possible.ir_value())
+                        ) != fx.Uint64(0)
                     if possible:
                         (
                             tile_output,
@@ -3715,60 +3863,15 @@ def _build_paired_prefill(
                 )
                 store_valid = query_valid
                 if store_valid:
-                    for d_chunk in fx.range_constexpr(output_chunks):
-                        normalized = Vec(final_output[d_chunk]) * inverse_vec
-                        for column_group in fx.range_constexpr(2):
-                            packed = (
-                                Vec.from_elements(
-                                    [
-                                        normalized[column_group * 8 + i]
-                                        for i in fx.range_constexpr(8)
-                                    ],
-                                    fx.Float32,
-                                )
-                                .to(fx.BFloat16)
-                                .bitcast(fx.Int32)
-                            )
-                            lower = []
-                            upper = []
-                            for i in fx.range_constexpr(2):
-                                lhs = fx.Int32(packed[i]).ir_value()
-                                rhs = fx.Int32(packed[i + 2]).ir_value()
-                                swapped = fx.rocdl.permlane32_swap(
-                                    ir.Type.parse("!llvm.struct<(i32, i32)>"),
-                                    lhs,
-                                    rhs,
-                                    False,
-                                    True,
-                                )
-                                lower.append(
-                                    fx.Int32(
-                                        llvm.extractvalue(
-                                            fx.Int32.ir_type, swapped, [0]
-                                        )
-                                    )
-                                )
-                                upper.append(
-                                    fx.Int32(
-                                        llvm.extractvalue(
-                                            fx.Int32.ir_type, swapped, [1]
-                                        )
-                                    )
-                                )
-                            values = Vec.from_elements(
-                                [*lower, *upper], fx.Int32
-                            ).bitcast(fx.BFloat16)
-                            column = fx.Int32(
-                                d_chunk * mfma_tile_size + column_group * 16
-                            ) + lane_half * fx.Int32(8)
-                            fragment = fx.make_rmem_tensor(8, fx.BFloat16)
-                            fragment.store(values)
-                            fx.copy(
-                                output_copy,
-                                fragment,
-                                fx.slice(output_row, (None, column // fx.Int32(8))),
-                            )
-                            fx.rocdl.sched_barrier(0)
+                    _store_output_fragments(
+                        final_output,
+                        inverse_vec,
+                        output_row,
+                        lane_half,
+                        output_copy,
+                        output_chunks,
+                        mfma_tile_size,
+                    )
 
                 if store_valid & (lane_half == fx.Int32(0)):
                     has_values = final_sum > _f32(0.0)
@@ -3840,40 +3943,10 @@ def _build_paired_prefill(
         if wave < fx.Int32(owner_waves // 2):
             run_body(False)
 
-    @flyc.jit
-    def launch(
-        query: fx.Tensor,
-        key: fx.Tensor,
-        value: fx.Tensor,
-        logsumexp: fx.Tensor,
-        max_scores: fx.Tensor,
-        kv_num_blocks: fx.Tensor,
-        kv_indices: fx.Tensor,
-        full_kv_num_blocks: fx.Tensor,
-        full_kv_indices: fx.Tensor,
-        output: fx.Tensor,
-        stream: fx.Stream = fx.Stream(None),
-    ):
-        kernel(
-            query,
-            key,
-            value,
-            logsumexp,
-            max_scores,
-            kv_num_blocks,
-            kv_indices,
-            full_kv_num_blocks,
-            full_kv_indices,
-            output,
-        ).launch(
-            grid=(
-                num_q_heads,
-                num_query_chunks,
-                batch_size,
-            ),
-            block=(num_threads, 1, 1),
-            stream=stream,
-        )
-
-    launch.compile_hints = {"waves_per_eu": waves_per_eu}
-    return launch
+    return _make_forward_launch(
+        kernel,
+        grid=(num_q_heads, num_query_chunks, batch_size),
+        num_threads=num_threads,
+        mask_buffer_count=mask_buffer_count,
+        waves_per_eu=waves_per_eu,
+    )
