@@ -3244,10 +3244,19 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             init: VariableTracker,
             xs: VariableTracker,
             additional_inputs: VariableTracker,
-        ) -> tuple[VariableTracker, VariableTracker, VariableTracker, VariableTracker]:
-            return combine_fn, init, xs, additional_inputs
+            parallel_backward: VariableTracker | None = None,
+        ) -> tuple[
+            VariableTracker, VariableTracker, VariableTracker, VariableTracker, bool
+        ]:
+            # scan() has already checked that parallel_backward is a bool.
+            pb = (
+                parallel_backward is not None and parallel_backward.as_python_constant()
+            )
+            return combine_fn, init, xs, additional_inputs, pb
 
-        combine_fn, init, xs, additional_inputs = arg_extractor(*args, **kwargs)
+        combine_fn, init, xs, additional_inputs, parallel_backward = arg_extractor(
+            *args, **kwargs
+        )
         init_vars = unpack_iterable(tx, init)
         xs_vars = unpack_iterable(tx, xs)
         additional_inputs_vars = unpack_iterable(tx, additional_inputs)
@@ -3475,9 +3484,11 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             xs_proxy,
             additional_inputs_proxy,
         )
-        hop_kwargs = (
+        hop_kwargs: dict[str, Any] = (
             {"mutated_arg_indices": mutated_arg_indices} if mutated_arg_indices else {}
         )
+        if parallel_backward:
+            hop_kwargs["parallel_backward"] = True
 
         return _call_function_and_unflatten_output(
             tx,
