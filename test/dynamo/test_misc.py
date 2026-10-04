@@ -2986,6 +2986,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(res, ref_res)
         self.assertEqual(new.cell_contents, ref_new.cell_contents)
 
+    @unittest.skipIf(sys.version_info < (3, 12), "__type_params__ is new in 3.12")
+    def test_pending_attr_not_shadowed_by_tp_getset(self):
+        # A tp_getset getter that does not read pending mutations (here the
+        # function's __type_params__) must not hide an attribute written
+        # earlier in the same graph.
+        T = typing.TypeVar("T")
+
+        def fn(x):
+            def f():
+                pass
+
+            f.__type_params__ = (T,)
+            return x + 1, f.__type_params__
+
+        x = torch.ones(2)
+        res = torch.compile(fn, backend="eager", fullgraph=True)(x)
+        self.assertEqual(res[1], (T,))
+        self.assertEqual(res, fn(x))
+
     def test_cell_delete_contents_empty_at_exit(self):
         # fn's own free variable cell: an existing, sourced CellVariable that
         # is still empty when the graph exits.
