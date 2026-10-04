@@ -459,7 +459,7 @@ option(USE_VULKAN_RELAXED_PRECISION
        "Vulkan - Use relaxed precision math in the kernels (mediump)" OFF)
 # option USE_XNNPACK: try to enable xnnpack by default.
 option(USE_XNNPACK "Use XNNPACK" OFF)
-option(USE_ROCM_KERNEL_ASSERT "Use Kernel Assert for ROCm" OFF)
+option(USE_ROCM_KERNEL_ASSERT "Use Kernel Assert for ROCm" ON)
 # Ensure that an ITT build is the default for x86 CPUs
 cmake_dependent_option(USE_ITT "Use Intel(R) VTune Profiler ITT functionality"
                        ON "CPU_INTEL" OFF)
