@@ -519,7 +519,6 @@ cmake_dependent_option(
   BUILD_LAZY_TS_BACKEND
   "Build the lazy Torchscript backend, not compatible with mobile builds" ON
   "NOT INTERN_BUILD_MOBILE" OFF)
-cmake_dependent_option(BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
 cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin folder"
                        OFF "USE_CUDA" OFF)
 cmake_dependent_option(
@@ -568,12 +567,15 @@ endif()
 cmake_dependent_option(USE_LLVM_BOLT "Optimize libraries with LLVM BOLT."
   "${USE_LLVM_BOLT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
 
-option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
 # on Windows and AArch64.
-option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
+set(USE_MIMALLOC_DEFAULT OFF)
 if(WIN32 OR (CPU_AARCH64 AND NOT APPLE))
-  set(USE_MIMALLOC ON)
+  set(USE_MIMALLOC_DEFAULT ON)
+endif()
+option(USE_MIMALLOC "Use mimalloc" "${USE_MIMALLOC_DEFAULT}")
+option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
+if(USE_MIMALLOC_DEFAULT)
   # Disable OPT flags for mimalloc on aarch64 as it breaks ARMv8.0
   # See https://github.com/pytorch/pytorch/issues/174344
   if(CPU_AARCH64)
@@ -590,14 +592,16 @@ endif()
 if(USE_CCACHE)
   find_program(CCACHE_PROGRAM ccache)
   find_program(SCCACHE_EXECUTABLE sccache)
+  # torch-xpu-ops consumes CMAKE_SYCL_COMPILER_LAUNCHER directly; this does not
+  # require CMake to provide native SYCL language support.
   if(CCACHE_PROGRAM)
-    foreach(LANG CXX C CUDA)
+    foreach(LANG CXX C CUDA SYCL)
       set(CMAKE_${LANG}_COMPILER_LAUNCHER
           "${CCACHE_PROGRAM}"
           CACHE STRING "${LANG} compiler launcher")
     endforeach()
   elseif(SCCACHE_EXECUTABLE)
-    foreach(LANG CXX C CUDA)
+    foreach(LANG CXX C CUDA SYCL)
       set(CMAKE_${LANG}_COMPILER_LAUNCHER
           "${SCCACHE_EXECUTABLE}"
           CACHE STRING "${LANG} compiler launcher")
@@ -760,6 +764,18 @@ if(MSVC)
   # * https://en.cppreference.com/w/cpp/preprocessor/replace#Predefined_macros
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zc:__cplusplus")
   set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler /Zc:__cplusplus -Xcompiler /Zc:preprocessor")
+
+  # Since VS 2022 17.10 (MSVC 14.40) std::mutex has a constexpr constructor
+  # that zero-initializes the mutex and relies on msvcp140.dll >= 14.40 to
+  # cope with that layout. If an older msvcp140.dll is already loaded in the
+  # process (stale VC redist, or a copy bundled by another package such as
+  # PyQt), the first lock during c10.dll static init faults inside DllMain and
+  # `import torch` fails with WinError 1114. Opt back into the classic
+  # constructor so the wheels work with any 14.x runtime.
+  # See https://github.com/pytorch/pytorch/issues/169429 and
+  # https://github.com/microsoft/STL/issues/4730
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR")
+  set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -D_DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR")
 
   set(CMAKE_NINJA_CMCLDEPS_RC OFF)
   if(MSVC_Z7_OVERRIDE)
@@ -958,8 +974,17 @@ if(USE_LLVM_BOLT)
   # step (torch_optimize_layout_if_enabled in cmake/public/utils.cmake).
   set(LLVM_BOLT_PROFILES_DIR "${CMAKE_BINARY_DIR}/bolt_profiles")
   file(REMOVE_RECURSE "${LLVM_BOLT_PROFILES_DIR}")
-  file(ARCHIVE_EXTRACT INPUT "${CMAKE_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
+  file(ARCHIVE_EXTRACT INPUT "${PROJECT_SOURCE_DIR}/cmake/bolt_profiles/torch.tar.zst"
        DESTINATION "${LLVM_BOLT_PROFILES_DIR}")
+
+  add_custom_target(bolt_profile_quality_summary ALL
+    COMMAND "${Python_EXECUTABLE}"
+      "${PROJECT_SOURCE_DIR}/tools/bolt_profile_quality.py"
+      "${CMAKE_BINARY_DIR}/logs"
+    COMMENT "Summarizing BOLT profile quality"
+    VERBATIM
+    USES_TERMINAL
+  )
 endif()
 
 # Build libtorch mobile library, which contains ATen/TH ops and native support
@@ -974,7 +999,6 @@ if(INTERN_BUILD_MOBILE)
     set(INTERN_DISABLE_AUTOGRAD ON)
   endif()
   set(BUILD_PYTHON OFF)
-  set(BUILD_FUNCTORCH OFF)
   set(USE_DISTRIBUTED OFF)
   set(NO_API ON)
   set(USE_FBGEMM OFF)
@@ -1116,7 +1140,7 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform"
   ON
-  "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
+  "USE_CUDA OR USE_ROCM"
   OFF)
 
 # Flash Attention needs sm80+; disable it if no resolved arch reaches that.
@@ -1194,14 +1218,14 @@ endif()
 if((${CMAKE_SYSTEM_NAME} STREQUAL "Darwin") AND ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "arm64"))
   message(STATUS "Running on macOS with Apple silicon")
   string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
-  add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
+  add_compile_definitions(AT_BUILD_ARM_VEC256_WITH_SLEEF)
 endif()
 
 # Enable sleef on Arm(R) architecture by default (except Android)
 if((NOT ${CMAKE_SYSTEM_NAME} STREQUAL "Android")
   AND("${CMAKE_SYSTEM_PROCESSOR}" MATCHES "aarch64"))
   string(APPEND CMAKE_CXX_FLAGS " -DAT_BUILD_ARM_VEC256_WITH_SLEEF")
-  add_definitions(-DAT_BUILD_ARM_VEC256_WITH_SLEEF)
+  add_compile_definitions(AT_BUILD_ARM_VEC256_WITH_SLEEF)
 endif()
 
 
@@ -1477,13 +1501,13 @@ if(USE_MIMALLOC)
   set(MI_BUILD_SHARED OFF)
   set(MI_BUILD_OBJECT OFF)
   set(MI_BUILD_TESTS OFF)
-  add_definitions(-DUSE_MIMALLOC)
+  add_compile_definitions(USE_MIMALLOC)
   add_subdirectory(third_party/mimalloc)
   include_directories(third_party/mimalloc/include)
 endif()
 
 if(USE_MIMALLOC AND USE_MIMALLOC_ON_MKL)
-  add_definitions(-DUSE_MIMALLOC_ON_MKL)
+  add_compile_definitions(USE_MIMALLOC_ON_MKL)
 endif()
 
 # ---[ Main build
@@ -1596,7 +1620,7 @@ if(DEFINED USE_CUSTOM_DEBINFO)
 
   string(REGEX REPLACE " +" ";" SOURCE_FILES_LIST "${SOURCE_FILES}")
 
-  # Set the COMPILE_FLAGS property for each source file
+  # Add debug info for each source file
   foreach(SOURCE_FILE ${SOURCE_FILES_LIST})
     # We have to specify the scope here. We do this by specifying the targets we
     # care about and caffe2/ for all test targets defined there
@@ -1607,9 +1631,9 @@ if(DEFINED USE_CUSTOM_DEBINFO)
       # @todo test if we can remove this
       set(ALL_PT_TARGETS "torch_python;c10;torch_cpu;torch")
     endif()
-    set_source_files_properties(
-      ${SOURCE_FILE} DIRECTORY "caffe2/" TARGET_DIRECTORY ${ALL_PT_TARGETS}
-      PROPERTIES COMPILE_FLAGS "-g")
+    set_property(SOURCE ${SOURCE_FILE}
+      DIRECTORY "caffe2/" TARGET_DIRECTORY ${ALL_PT_TARGETS}
+      APPEND PROPERTY COMPILE_OPTIONS "-g")
   endforeach()
 
   # Link everything with debug info when any file is in debug mode
