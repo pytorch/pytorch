@@ -1251,11 +1251,14 @@ class SideEffects:
                     explanation="We cannot reconstruct a torch.autograd.Function's context object.",
                     hints=[],
                 )
-            elif isinstance(var, variables.ExceptionVariable):
+            elif isinstance(
+                var, (variables.ExceptionVariable, variables.StringIOVariable)
+            ):
                 # Exceptions cannot be built via object.__new__ (CPython rejects
-                # it), so reconstruct() constructs by calling the type. Cache
-                # the result so later references load the single instance; any
-                # __dict__ attributes replay in codegen_update_mutated.
+                # it) and a StringIO needs its buffer state, so reconstruct()
+                # builds these itself. Cache the result so later references
+                # load the single instance; any __dict__ attributes replay in
+                # codegen_update_mutated.
                 var.reconstruct(cg)
                 cg.add_cache(var)
                 var.source = TempLocalSource(cg.tempvars[var])

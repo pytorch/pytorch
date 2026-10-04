@@ -29,6 +29,7 @@ import dataclasses
 import enum
 import functools
 import inspect
+import io
 import random
 import sys
 import threading
@@ -108,6 +109,7 @@ from ..utils import (
 from .base import (
     AsPythonConstantNotImplementedError,
     AttrMutationKind,
+    AttributeMutationNew,
     GetSet,
     Member,
     Method,
@@ -1589,8 +1591,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             # that Dynamo doesn't play well with today (i.e. contextlib.suppress)
             if self.value in (
                 contextlib._AsyncGeneratorContextManager,
-                contextlib.redirect_stdout,
-                contextlib.redirect_stderr,
                 contextlib.AsyncExitStack,
             ):
                 # We are not changing the behavior of Dynamo as these function were
@@ -1890,6 +1890,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 seed = None
             random_object = random.Random(seed)
             return RandomVariable(random_object)
+        elif self.value is io.StringIO:
+            return StringIOVariable.create(tx, args, kwargs)
         elif self.value is types.MappingProxyType and len(args) == 1:
             # types.MappingProxyType is a read-only proxy of the dict. If the
             # original dict changes, the changes are reflected in proxy as well.
@@ -5956,6 +5958,82 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         if self._maybe_get_baseclass_method("__len__") in dict_methods:
             return VariableTracker.build(tx, len(self.value))  # type: ignore[bad-argument-type]
         return super().mp_length_impl(tx)
+
+
+def _call_with_constant_args(
+    tx: "InstructionTranslatorBase",
+    fn: Callable[..., Any],
+    args: list[VariableTracker],
+    kwargs: dict[str, VariableTracker],
+) -> Any:
+    if not check_constant_args(args, kwargs):
+        unimplemented(
+            gb_type="io.StringIO call with non-constant arguments",
+            context=f"{fn}(*{args}, **{kwargs})",
+            explanation="Dynamo only supports io.StringIO construction and methods with constant arguments.",
+            hints=[*graph_break_hints.SUPPORTABLE],
+        )
+    try:
+        return fn(
+            *[x.as_python_constant() for x in args],
+            **{k: v.as_python_constant() for k, v in kwargs.items()},
+        )
+    except Exception as e:
+        raise_observed_exception(type(e), tx, args=[str(e)])
+
+
+def _stringio_method(name: str, mutates: bool) -> Method:
+    def handler(
+        self: "StringIOVariable",
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if mutates:
+            tx.output.side_effects.mutation(self)
+        fn = getattr(self.value, name)
+        return VariableTracker.build(tx, _call_with_constant_args(tx, fn, args, kwargs))
+
+    return Method(handler)
+
+
+class StringIOVariable(UserDefinedObjectVariable):
+    """io.StringIO constructed during tracing.
+
+    The supported methods run on the backing StringIO, so it always holds the
+    traced state. Reconstruction restores that state with __setstate__, which
+    sets the buffer without newline translation, the newline mode and position.
+    """
+
+    @staticmethod
+    def create(
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> "StringIOVariable":
+        value = _call_with_constant_args(tx, io.StringIO, args, kwargs)
+        return tx.output.side_effects.track_mutable(
+            value, StringIOVariable(value), mutation_type_cls=AttributeMutationNew
+        )
+
+    tp_methods = {
+        "getvalue": _stringio_method("getvalue", mutates=False),
+        "tell": _stringio_method("tell", mutates=False),
+        "read": _stringio_method("read", mutates=True),
+        "readline": _stringio_method("readline", mutates=True),
+        "seek": _stringio_method("seek", mutates=True),
+        "write": _stringio_method("write", mutates=True),
+    }
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        value, newline, pos, _ = self.value.__getstate__()
+        codegen.add_push_null(lambda: codegen.load_import_from("io", "StringIO"))
+        codegen.call_function(0, False)
+        codegen.dup_top()
+        codegen.load_attr("__setstate__")
+        codegen.extend_output([codegen.create_load_const((value, newline, pos, None))])
+        codegen.call_function(1, True)
+        codegen.pop_top()
 
 
 class RandomVariable(UserDefinedObjectVariable):

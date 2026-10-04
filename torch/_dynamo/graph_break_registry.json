@@ -1478,6 +1478,16 @@
       ]
     }
   ],
+  "GB0757": [
+    {
+      "Gb_type": "io.StringIO call with non-constant arguments",
+      "Context": "{fn}(*{args}, **{kwargs})",
+      "Explanation": "Dynamo only supports io.StringIO construction and methods with constant arguments.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0096": [
     {
       "Gb_type": "Should not compile partial graph (STORE_ATTR)",
