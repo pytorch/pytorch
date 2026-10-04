@@ -789,13 +789,21 @@ class TestFlyDSLFlexAttention(TestCase):
         kwargs, reason = _fake_choice_result(inputs)
         self.assertIsNotNone(kwargs, reason)
 
-    @parametrize("q_heads,kv_heads,seq", [(4, 2, 512), (64, 8, 2048)])
+    @parametrize(
+        "q_heads,kv_heads,seq,captured",
+        [
+            (4, 2, 512, False),
+            (64, 8, 2048, False),
+            (8, 2, 4096, True),
+            (16, 4, 8192, True),
+        ],
+    )
     def test_gfx950_forward_full_partial_gqa_and_empty_q_block(
-        self, device, q_heads, kv_heads, seq
+        self, device, q_heads, kv_heads, seq, captured
     ):
         self._require_runtime()
 
-        head_dim = 128
+        head_dim = 192 if captured else 128
         query, key, value = _make_qkv(
             device=device,
             q_heads=q_heads,
@@ -816,9 +824,18 @@ class TestFlyDSLFlexAttention(TestCase):
             [[[[0]] * (seq // 128)]], device=device, dtype=torch.int32
         )
 
-        def causal(b, h, q_idx, kv_idx):
-            del b, h
-            return q_idx >= kv_idx
+        if captured:
+            offsets = torch.zeros(seq, device=device, dtype=torch.int32)
+
+            def causal(b, h, q_idx, kv_idx):
+                del b, h
+                return q_idx >= kv_idx + offsets[q_idx]
+
+        else:
+
+            def causal(b, h, q_idx, kv_idx):
+                del b, h
+                return q_idx >= kv_idx
 
         block_mask = BlockMask.from_kv_blocks(
             kv_num_blocks,
@@ -845,6 +862,28 @@ class TestFlyDSLFlexAttention(TestCase):
             self.assertTrue(
                 torch.isneginf(aux.max_scores[:, :, start : start + 128]).all()
             )
+
+    def test_gfx950_forward_unequal_packed_documents(self, device):
+        self._require_runtime()
+        seq = 8192
+        starts = torch.tensor([0, 1701, 5387], device=device, dtype=torch.int32)
+        document_ids = torch.bucketize(
+            torch.arange(seq, device=device), starts[1:], right=True
+        ).to(torch.int32)
+
+        def mask_mod(b, h, q_idx, kv_idx):
+            return (q_idx >= kv_idx) & (kv_idx >= starts[document_ids[q_idx]])
+
+        self._compare_created_mask(
+            mask_mod,
+            device=device,
+            q_heads=16,
+            kv_heads=4,
+            seq=seq,
+            qk_dim=192,
+            transposed=True,
+            return_aux=True,
+        )
 
     def _check_gfx950_public_api_per_kv_head_decode(self, device, seq_q):
         batch, q_heads, kv_heads = 1, 64, 4
