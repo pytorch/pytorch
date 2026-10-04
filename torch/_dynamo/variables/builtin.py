@@ -196,7 +196,9 @@ IN_PLACE_DESUGARING_MAP = {
 _BUILTIN_CONSTANT_FOLDABLE_METHODS: dict[type, frozenset[str]] = {
     int: frozenset({"__new__", "from_bytes"}),
     bool: frozenset({"__new__", "from_bytes"}),
+    bytes: frozenset({"maketrans"}),
     float: frozenset({"fromhex", "hex"}),
+    str: frozenset({"maketrans"}),
 }
 if sys.version_info >= (3, 14):
     _BUILTIN_CONSTANT_FOLDABLE_METHODS[float] |= frozenset({"from_number"})
@@ -1962,6 +1964,16 @@ class BuiltinVariable(BaseBuiltinVariable):
             if all(a.is_python_constant() for a in args) and all(
                 v.is_python_constant() for v in kwargs.values()
             ):
+                if self.fn is str and name == "maketrans" and len(args) == 1:
+                    if isinstance(args[0], variables.ConstDictVariable):
+                        if not all(
+                            variables.ConstantVariable.is_base_literal(
+                                k.vt.as_python_constant()
+                            )
+                            for k in args[0].items
+                        ):
+                            return super().call_method(tx, name, args, kwargs)
+                        args[0].install_dict_keys_match_guard()
                 try:
                     fn = getattr(self.fn, name)
                     res = fn(
