@@ -1,5 +1,6 @@
 import logging
 import os
+import pickle
 import warnings
 import zipfile
 from collections.abc import Callable, Mapping
@@ -340,6 +341,7 @@ def load(
     *,
     extra_files: dict[str, Any] | None = None,
     expected_opset_version: dict[str, int] | None = None,
+    weights_only: bool | None = None,
 ) -> ExportedProgram:
     """
 
@@ -363,6 +365,16 @@ def load(
 
         expected_opset_version (Optional[Dict[str, int]]): A map of opset names
          to expected opset versions
+
+        weights_only (Optional[bool]): If ``True``, payloads that require
+         pickling (e.g. tensor subclass weights) are loaded with
+         ``torch.load(weights_only=True)`` and fail on non-allowlisted
+         objects. If ``False``, arbitrary pickle-based loading is allowed;
+         only use with files from trusted sources. If ``None`` (default),
+         preserves the current behavior, which falls back to
+         ``weights_only=False`` when loading custom objects. Note that
+         TorchScript custom objects and opaque objects are always loaded via
+         pickle regardless of this flag.
 
     Returns:
         An :class:`ExportedProgram` object
@@ -398,10 +410,20 @@ def load(
         pt2_contents = load_pt2(
             f,
             expected_opset_version=expected_opset_version,
+            weights_only=weights_only,
         )
     except RuntimeError:
         log.warning("Ran into the following error when deserializing", exc_info=True)
         pt2_contents = PT2ArchiveContents({}, {}, {})
+    except pickle.UnpicklingError as e:
+        if weights_only:
+            raise pickle.UnpicklingError(
+                f"Failed to deserialize with weights_only=True: {e}. If you "
+                "trust the source of this file, load with weights_only=False, "
+                "or register the required classes via "
+                "torch.serialization.add_safe_globals."
+            ) from e
+        raise
 
     if len(pt2_contents.exported_programs) > 0 or len(pt2_contents.extra_files) > 0:
         for k, v in pt2_contents.extra_files.items():
@@ -484,7 +506,7 @@ def load(
         )
 
         # Deserialize ExportedProgram
-        ep = deserialize(artifact, expected_opset_version)
+        ep = deserialize(artifact, expected_opset_version, weights_only=weights_only)
 
         return ep
 
