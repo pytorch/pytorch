@@ -9932,6 +9932,17 @@ class TestNNDeviceType(NNTestCase):
                 gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
                 gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
+                if deterministic and not TEST_WITH_ROCM:
+                    input_cuda = torch.randn(
+                        1, 2, 4, 4, 4, device=device, dtype=torch.double
+                    ).contiguous(memory_format=memory_format).requires_grad_()
+                    self.assertTrue(gradcheck(
+                        lambda x: F.interpolate(x, scale_factor=scale_factor, **kwargs),
+                        (input_cuda,)))
+                    self.assertTrue(gradgradcheck(
+                        lambda x: F.interpolate(x, scale_factor=scale_factor, **kwargs),
+                        (input_cuda,)))
+
     @skipMPS
     @onlyAccelerator
     @dtypes(torch.half, torch.bfloat16)
