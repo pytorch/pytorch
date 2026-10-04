@@ -1,9 +1,11 @@
-"""GitHub-native PR stacks for the merge bot: reading and validating them, and
-finding what landed."""
+"""GitHub-native PR stacks for the merge bot: reading and validating them, finding
+what landed, and building the commits that merge them."""
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from weakref import WeakKeyDictionary
@@ -47,6 +49,7 @@ query ($owner: String!, $name: String!, $number: Int!) {
 
 RE_GHSTACK_HEAD_REF = re.compile(r"^gh/[^/]+/[0-9]+/head$")
 PULL_REQUEST_RESOLVED = "Pull Request resolved: "
+STACK_DEPENDENCIES = "Stack dependencies: "
 PR_UPDATED_ERROR = "PR #{} was updated while preparing the merge, please try again"
 REBASE_HINT = "Rebase the stack onto main and try again."
 
@@ -107,6 +110,12 @@ def get_native_stack(org: str, project: str, pr_num: int) -> NativeStack | None:
     ]
     entries.sort(key=lambda entry: entry.position)
     return NativeStack(stack["number"], stack["baseRefName"], tuple(entries))
+
+
+def stack_dependencies_line(numbers: list[int]) -> str:
+    """The line that the merge bot adds to the landed commit of a stacked PR to name
+    the PRs below it, bottom first."""
+    return STACK_DEPENDENCIES + ", ".join(f"#{num}" for num in numbers)
 
 
 def _pr_url(org: str, project: str, number: int) -> str:
@@ -175,6 +184,11 @@ def find_landed_commit(repo: GitRepo, pr_url: str, ref: str) -> str | None:
     if landing is None or _revert_of(repo, landing, f"{landing}..{ref}") is not None:
         return None
     return landing
+
+
+def landed_since(repo: GitRepo, pr_url: str, start: str, ref: str) -> bool:
+    """Whether a commit in `start..ref` lands `pr_url`, reverted since or not."""
+    return _newest_landing(repo, pr_url, f"{start}..{ref}") is not None
 
 
 def _is_ancestor(repo: GitRepo, ancestor: str, descendant: str) -> bool:
@@ -394,3 +408,76 @@ def get_native_stack_landing_prs(
         )
         rc.append((entry, lower))
     return rc
+
+
+def _git(
+    repo: GitRepo,
+    *args: str,
+    stdin: str = "",
+    env: dict[str, str] | None = None,
+    ok_codes: tuple[int, ...] = (0,),
+) -> subprocess.CompletedProcess[str]:
+    """GitRepo._run_git with stdin, extra environment and accepted exit codes. It
+    runs in bytes mode, as text mode would turn each carriage return of the output
+    into a newline."""
+    cmd = ["git", "-C", repo.repo_dir, *args]
+    if repo.debug:
+        print(f"+ {' '.join(cmd)}")
+    run = subprocess.run(
+        cmd,
+        input=stdin.encode(),
+        capture_output=True,
+        env=None if env is None else {**os.environ, **env},
+    )
+    stdout, stderr = run.stdout.decode(), run.stderr.decode()
+    proc = subprocess.CompletedProcess(cmd, run.returncode, stdout, stderr)
+    if proc.returncode not in ok_codes:
+        print(f"stdout: \n{proc.stdout}")
+        print(f"stderr: \n{proc.stderr}")
+        raise RuntimeError(
+            f"Command `{' '.join(cmd)}` returned non-zero exit code "
+            f"{proc.returncode}\n```\n{proc.stdout}{proc.stderr}```"
+        )
+    return proc
+
+
+def _merge_tree(
+    repo: GitRepo, ours: str, theirs: str, conflict: str, merge_base: str
+) -> str:
+    """The tree of merging `theirs` into `ours`, or NativeStackError(`conflict`)."""
+    args = ("merge-tree", "--write-tree", f"--merge-base={merge_base}", ours, theirs)
+    merge = _git(repo, *args, ok_codes=(0, 1))
+    if merge.returncode == 1:
+        raise NativeStackError(conflict)
+    return merge.stdout.split("\n", 1)[0]
+
+
+def build_native_stack_commits(
+    repo: GitRepo,
+    base_sha: str,
+    landing: list[tuple[StackEntry, str]],
+    commits: list[tuple[str, str]],
+) -> str:
+    """Commit the changes of each PR in `landing`, as returned by
+    get_native_stack_landing_prs, on top of `base_sha`, without touching the
+    worktree or the index, and return the last commit. `commits` holds the author
+    (`Name <email>`) and the message of each PR's commit; the message is cleaned up
+    like `git commit -m` does."""
+    current = base_sha
+    for (entry, lower), (author, message) in zip(landing, commits, strict=True):
+        conflict = f"PR #{entry.number} has conflicts with the commits below it. "
+        tree = _merge_tree(repo, current, entry.head_oid, conflict + REBASE_HINT, lower)
+        if tree == repo.rev_parse(f"{current}^{{tree}}"):
+            raise NativeStackError(
+                f"PR #{entry.number} has no changes to land: it is empty, or its "
+                "changes already landed"
+            )
+        name, _, email = author.rpartition("<")
+        env = {
+            "GIT_AUTHOR_NAME": name.strip(),
+            "GIT_AUTHOR_EMAIL": email.removesuffix(">"),
+        }
+        message = _git(repo, "stripspace", stdin=message).stdout
+        commit = _git(repo, "commit-tree", tree, "-p", current, stdin=message, env=env)
+        current = commit.stdout.strip()
+    return current
