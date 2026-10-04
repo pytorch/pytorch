@@ -2297,6 +2297,59 @@ def is_nvshmem_available() -> bool:
     return _is_nvshmem_available()
 
 
+def initialize_nvshmem(device: _device | None = None) -> None:
+    r"""
+    Initialize the NVSHMEM runtime used by symmetric memory.
+
+    This is a collective operation over the default process group. It is
+    optional: symmetric-memory allocation initializes NVSHMEM lazily when this
+    function has not been called. Calling this function again for the same
+    device is a no-op.
+
+    Args:
+        device (`torch.device` or str, optional): CUDA device assigned to this
+            process. If omitted, uses the current CUDA device.
+    """
+    if device is None:
+        device_idx = torch.cuda.current_device()
+    else:
+        device = torch.device(device)
+        if device.type != "cuda":
+            raise ValueError(f"NVSHMEM requires a CUDA device, got {device}")
+        device_idx = (
+            torch.cuda.current_device() if device.index is None else device.index
+        )
+
+    try:
+        from torch._C._distributed_c10d import _initialize_nvshmem
+    except ImportError as exc:
+        raise RuntimeError("NVSHMEM is not available in this PyTorch build") from exc
+
+    _initialize_nvshmem(device_idx)
+
+
+def finalize_nvshmem() -> None:
+    r"""
+    Finalize the NVSHMEM runtime used by symmetric memory.
+
+    This is a collective operation over the default process group. Before every
+    rank calls it, release all symmetric-memory tensors, handles, CUDA graphs,
+    and memory pools in the same order. PyTorch's implicit symmetric-memory
+    pools are process-lifetime caches, so this is currently intended for
+    programs that use NVSHMEM without symmetric-memory allocations, such as
+    device-side barriers. Call it before destroying the default process group,
+    from the thread that initialized NVSHMEM. NVSHMEM cannot be initialized
+    again in the same process after finalization. All ranks must quiesce
+    NVSHMEM work before finalization; concurrent work is unsupported.
+    """
+    try:
+        from torch._C._distributed_c10d import _finalize_nvshmem
+    except ImportError as exc:
+        raise RuntimeError("NVSHMEM is not available in this PyTorch build") from exc
+
+    _finalize_nvshmem()
+
+
 def set_backend(name: Literal["NVSHMEM", "CUDA", "NCCL"]) -> None:
     r"""
     Set the backend for symmetric memory allocation. This is a global setting
@@ -2690,6 +2743,8 @@ __all__ = [
     "is_symm_mem_tensor",
     "rendezvous",
     "is_nvshmem_available",
+    "initialize_nvshmem",
+    "finalize_nvshmem",
     "set_backend",
     "get_backend",
     "get",

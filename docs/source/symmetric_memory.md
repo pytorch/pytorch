@@ -250,6 +250,33 @@ kernel, the decorator will search your system paths for the NVSHMEM device
 library. If it is available, Triton will include the necessary device assembly
 to use the NVSHMEM functions.
 
+## NVSHMEM Lifecycle
+
+NVSHMEM initialization normally happens lazily on the first symmetric-memory
+allocation. Applications that need NVSHMEM device operations without an
+allocation, such as a device-side barrier, can initialize it explicitly after
+the default process group and CUDA device are ready:
+
+```python
+import torch.distributed._symmetric_memory as symm_mem
+
+symm_mem.initialize_nvshmem(device)
+# Launch NVSHMEM device operations.
+symm_mem.finalize_nvshmem()
+```
+
+Both calls are collective over the default process group. Explicit
+initialization is optional and is a no-op when NVSHMEM is already initialized
+on the same device. Before finalizing, every rank must release symmetric-memory
+tensors, handles, CUDA graphs, and memory pools in the same order. Explicit
+finalization is currently intended for programs that use NVSHMEM without
+symmetric-memory allocations, including allocation-free device-side barriers:
+PyTorch's implicit symmetric-memory pools are process-lifetime caches.
+NVSHMEM cannot be initialized again in the same process afterward. Call
+finalization before destroying the default process group, from the thread that
+initialized NVSHMEM. All ranks must quiesce NVSHMEM work before finalization;
+concurrent work is unsupported.
+
 ## Using Memory Pool
 
 Memory pool allows PyTorch SymmMem to cache memory allocations that have been
@@ -629,6 +656,14 @@ communicator for the process group if it doesn't already exist.
 
 ```{eval-rst}
 .. autofunction:: is_nvshmem_available
+```
+
+```{eval-rst}
+.. autofunction:: initialize_nvshmem
+```
+
+```{eval-rst}
+.. autofunction:: finalize_nvshmem
 ```
 
 ```{eval-rst}

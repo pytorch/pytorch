@@ -223,6 +223,12 @@ TORCH_API void set_backend(const std::string& name);
 
 TORCH_API std::optional<std::string> get_backend(c10::Device device);
 
+#ifdef USE_NVSHMEM
+TORCH_API void initialize_nvshmem(int device_idx);
+
+TORCH_API void finalize_nvshmem();
+#endif
+
 // Get the current signal pad size for symmetric memory allocations.
 // Returns the user-configured size if set, otherwise returns the default size.
 TORCH_API size_t get_signal_pad_size();
