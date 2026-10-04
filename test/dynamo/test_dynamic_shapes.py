@@ -1,10 +1,11 @@
 # Owner(s): ["module: dynamo"]
+import unittest
 import warnings
 
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch.fx.experimental import _config as fx_config
-from torch.testing._internal.common_utils import periodic, slowTest, TEST_Z3
+from torch.testing._internal.common_utils import IS_S390X, periodic, slowTest, TEST_Z3
 
 
 try:
@@ -99,6 +100,12 @@ DynamicShapesExportTests.test_retracibility_nested_list_out_dynamic_shapes = slo
 DynamicShapesMiscTests.test_torch_size_tensor_index_scalar_constant_dynamic_shapes = periodic(  # noqa: F821
     DynamicShapesMiscTests.test_torch_size_tensor_index_scalar_constant_dynamic_shapes  # noqa: F821
 )
+
+# Skip test_recursion_depth_guards on s390x due to recursion depth issues
+DynamicShapesMiscTests.test_recursion_depth_guards_dynamic_shapes = unittest.skipIf(  # noqa: F821
+    IS_S390X,
+    "test_recursion_depth_guards_nested_graph_breaks fails on s390x and python 3.12",
+)(DynamicShapesMiscTests.test_recursion_depth_guards_dynamic_shapes)  # noqa: F821
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

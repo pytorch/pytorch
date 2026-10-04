@@ -13280,7 +13280,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
     @unittest.skipIf(
         IS_S390X,
-        "test_recursion_depth_guards_nested_graph_breaks fails on s390x and needs investigation",
+        "test_recursion_depth_guards_nested_graph_breaks fails on s390x and python 3.12",
     )
     def test_recursion_depth_guards(self):
         @torch.compile(dynamic=True, backend="eager")

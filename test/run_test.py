@@ -227,16 +227,10 @@ if TEST_WITH_ROCM and isRocmArchAnyOf(("gfx1100",)):
 
 S390X_BLOCKLIST = [
     # these tests fail due to various reasons
-    "dynamo/test_misc",
     "inductor/test_cpu_repro",
-    "inductor/test_cpu_select_algorithm",
-    "inductor/test_torchinductor_codegen_dynamic_shapes",
     "lazy/test_meta_kernel",
-    "onnx/test_utility_funs",
     "profiler/test_profiler",
     "test_jit",
-    "dynamo/test_utils",
-    "test_nn",
     # these tests run long and fail in addition to that
     "dynamo/test_dynamic_shapes",
     "test_quantization",
@@ -276,8 +270,6 @@ S390X_BLOCKLIST = [
     "test_fx",
     # some false errors
     "doctests",
-    # new failures to investigate and fix
-    "test_tensorboard",
     # onnx + protobuf failure, see
     # https://github.com/protocolbuffers/protobuf/issues/22104
     "dynamo/test_backends",
@@ -288,6 +280,13 @@ S390X_BLOCKLIST = [
     # depend on z3-solver
     "fx/test_z3_gradual_types",
     "test_proxy_tensor",
+    # depends on torchvision
+    "onnx/test_utility_funs",
+    # crash on s390x that needs investigation
+    "test_schema_check",
+    "test_meta",
+    # needs fixes in s390x vectorization code
+    "inductor/test_compile_subprocess",
 ]
 
 XPU_BLOCKLIST = [

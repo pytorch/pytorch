@@ -32,7 +32,6 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_LINUX,
     IS_MACOS,
-    IS_S390X,
     IS_SANDCASTLE,
     IS_WINDOWS,
     load_tests,
@@ -1427,7 +1426,6 @@ except RuntimeError as e:
             self.assertTrue(target.is_pinned())
 
     @skipIfXpu
-    @unittest.skipIf(IS_S390X, "Unexpectedly succeeds on s390x")
     # Test that DataLoader properly handles worker segfaults
     # Note: This test has inconsistent behavior across Linux distributions:
     # - Passes on RHEL 9.6 (segfault triggers correctly)
