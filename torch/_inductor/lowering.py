@@ -3503,6 +3503,16 @@ def require_contiguous(_, *args, **kwargs):
     return args, kwargs
 
 
+def require_contiguous_adaptive_max_pool3d_indices(_, *args, **kwargs):
+    # Native adaptive max-pool 3D backward reads indices as packed memory.
+    args = list(args)
+    if len(args) >= 3:
+        args[2] = ir.ExternKernel.require_contiguous(args[2])
+    else:
+        kwargs["indices"] = ir.ExternKernel.require_contiguous(kwargs["indices"])
+    return args, kwargs
+
+
 def require_contiguous_strides(_, *args, **kwargs):
     # TODO: combine this with require_contiguous after
     # https://github.com/pytorch/pytorch/pull/148235 lands.
@@ -3837,7 +3847,10 @@ make_fallback(aten.max_pool3d_with_indices_backward)
 make_fallback(aten._adaptive_avg_pool2d_backward, require_dense)
 make_fallback(aten._adaptive_avg_pool3d_backward)
 make_fallback(aten.adaptive_max_pool2d_backward)
-make_fallback(aten.adaptive_max_pool3d_backward)
+make_fallback(
+    aten.adaptive_max_pool3d_backward,
+    require_contiguous_adaptive_max_pool3d_indices,
+)
 make_fallback(aten.fractional_max_pool2d_backward)
 make_fallback(aten.fractional_max_pool3d_backward)
 make_fallback(aten.replication_pad1d_backward)
@@ -5842,8 +5855,10 @@ def max_pool_checks(
 def _pool_argmax_inner_fn(x, kernel_size, inner_fn):
     # Loop reordering runs after lowering and may permute the reduction ranges, so
     # the offset is returned as an explicit row-major index into the window.
-    supports_logical_index_argreduce = is_triton(x) or (
-        ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+    supports_logical_index_argreduce = (
+        is_triton(x)
+        or ir.get_device_type(x) == "mps"
+        or (ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp")
     )
     if len(kernel_size) == 1 or not supports_logical_index_argreduce:
         return inner_fn
@@ -7344,8 +7359,10 @@ def _make_reduction_inner(
 
     # Loop reordering happens after lowering, so the input IR cannot reliably predict
     # when the physical reduction order will differ from the logical order.
-    supports_logical_index_argreduce = is_triton(x) or (
-        ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp"
+    supports_logical_index_argreduce = (
+        is_triton(x)
+        or ir.get_device_type(x) == "mps"
+        or (ir.get_device_type(x) == "cpu" and config.cpu_backend == "cpp")
     )
     should_compute_logical_index = (
         reduction_type

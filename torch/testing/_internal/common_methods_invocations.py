@@ -33,7 +33,6 @@ from torch.testing._internal.common_device_type import (
     onlyCPU, onlyCUDA, onlyNativeDeviceTypes, onlyOn, disablecuDNN,
     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
     skipCPUIfNoMklSparse, toleranceOverride, tol, skipXPU, e4m3_type, e5m2_type, E4M3_MAX_POS, E5M2_MAX_POS,
-    skipCUDAIfNoMagmaAndNoLinalgsolver,
 )
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_FP8,
@@ -12308,8 +12307,8 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
 
                # vmap: calling random operator not supported
-               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfoDevice", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfoDevice", "test_op_has_batch_rule"),
 
                DecorateInfo(unittest.skip("make_traced() doesn't set seed properly!"), 'TestCommon', 'test_python_ref_executor'),
 
@@ -12340,8 +12339,8 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
 
                # vmap: calling random operator not supported
-               DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-               DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfoDevice", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.expectedFailure, "TestVmapOperatorsOpInfoDevice", "test_op_has_batch_rule"),
 
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
@@ -12371,8 +12370,8 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
 
                # vmap: calling random operator not supported
-               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfoDevice", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfoDevice", "test_op_has_batch_rule"),
 
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
            )),
@@ -12400,8 +12399,8 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
 
                # vmap: calling random operator not supported
-               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfoDevice", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfoDevice", "test_op_has_batch_rule"),
                DecorateInfo(unittest.expectedFailure, 'TestDecomp', 'test_quick'),
            )),
     OpInfo('normal',
@@ -12432,8 +12431,8 @@ op_db: list[OpInfo] = [
                # FX failed to normalize op - add the op to the op_skip list.
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # vmap: calling random operator not supported
-               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfoDevice", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfoDevice", "test_op_has_batch_rule"),
            )),
     OpInfo('uniform',
            op=lambda inp, *args, **kwargs: wrapper_set_seed(torch.Tensor.uniform_, inp, *args, **kwargs),
@@ -13203,7 +13202,6 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_linalg_cholesky_inverse,
            gradcheck_wrapper=gradcheck_wrapper_triangular_input_real_positive_diagonal,
            decorators=[
-               skipCUDAIfNoMagmaAndNoLinalgsolver,
                skipCPUIfNoLapack,
                DecorateInfo(
                    toleranceOverride({
@@ -13246,7 +13244,7 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
-           decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
+           decorators=[skipCPUIfNoLapack],
            skips=(
                # https://github.com/pytorch/pytorch/issues/165294
                DecorateInfo(skipIfRocm, "TestCommon", "test_noncontiguous_samples", dtypes=(torch.complex64,)),
@@ -14248,7 +14246,7 @@ op_db: list[OpInfo] = [
     OpInfo('geqrf',
            dtypes=floating_and_complex_types(),
            sample_inputs_func=sample_inputs_linalg_qr_geqrf,
-           decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
+           decorators=[skipCPUIfNoLapack],
            supports_autograd=False,
            skips=(
                # FIXME: geqrf can't forward with complex inputs that require grad
@@ -14606,7 +14604,7 @@ op_db: list[OpInfo] = [
            # https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            sample_inputs_func=sample_inputs_lu,
-           decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
+           decorators=[skipCPUIfNoLapack],
            skips=(
                # we skip jit tests because `lu` is a torch function
                # RuntimeError:
@@ -14638,7 +14636,7 @@ op_db: list[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Tests different backward paths"),
                             "TestCommon", "test_floating_inputs_are_differentiable"),),
-           decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoLinalgsolver]),
+           decorators=[skipCPUIfNoLapack]),
     OpInfo('masked_fill',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int8, torch.bool, torch.int32),
@@ -14775,7 +14773,6 @@ op_db: list[OpInfo] = [
     OpInfo('median',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int32),
-           dtypesIfMPS=all_types_and(torch.bfloat16, torch.float16),
            # TODO: some signatures of median do support out
            supports_out=False,
            supports_forward_ad=True,
@@ -14784,7 +14781,6 @@ op_db: list[OpInfo] = [
            sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('nanmedian',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
-           dtypesIfMPS=all_types_and(torch.bfloat16, torch.float16),
            # TODO: some signatures of nanmedian do support out
            supports_out=False,
            supports_forward_ad=True,
@@ -15266,9 +15262,15 @@ op_db: list[OpInfo] = [
                 "test_comprehensive",
             ),
             DecorateInfo(
-                toleranceOverride({torch.bfloat16: tol(atol=4e-3, rtol=2e-2)}),
+                toleranceOverride({torch.float16: tol(atol=1e-3, rtol=2e-3), torch.bfloat16: tol(atol=4e-3, rtol=2e-2)}),
                 "TestConsistency",
                 "test_output_match",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=2e-3, rtol=1e-2)}),
+                "TestConsistency",
+                "test_output_grad_match",
                 device_type="mps",
             ),
             DecorateInfo(
@@ -15307,20 +15309,6 @@ op_db: list[OpInfo] = [
                 unittest.skip("internal assert failure"),
                 'TestJit', 'test_variant_consistency_jit',
                 dtypes=(torch.float32,)),
-            # MPS fp16/bf16: 1/8 mismatched, max abs 4.6e-4 (atol 1e-5),
-            # max rel 0.89 (rtol 1e-3).
-            DecorateInfo(
-                unittest.skip("Inconsistent accuracy"),
-                'TestConsistency', 'test_output_match',
-                dtypes=(torch.float16, torch.bfloat16),
-                device_type="mps",),
-            # MPS scalar mismatch: -152.75 vs -157.25 (abs 4.5 vs atol 1e-3,
-            # rel 0.029 vs rtol 1e-2).
-            DecorateInfo(
-                unittest.skip("Inconsistent accuracy"),
-                "TestConsistency", "test_output_grad_match",
-                dtypes=(torch.float16, torch.bfloat16, torch.float32),
-                device_type="mps",),
             # torch.allclose(arg, arg_copy, rtol=0, atol=0, equal_nan=True),
             # -> torch.AcceleratorError: HIP error: unspecified launch failure
             #
@@ -15371,14 +15359,15 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.skip("nll_loss2d_forward decomposition mismatch on total_weight"),
                 "TestDecomp", "test_comprehensive", device_type="cuda"),
-            # MPS fp16/bf16 accuracy mismatch (same as unchunked variant).
-            DecorateInfo(unittest.skip("Inconsistent accuracy"),
+            # acc_policy="auto" accumulates fp16/bf16 in fp32 on CPU only, so the
+            # CPU reference is more precise than MPS by design.
+            DecorateInfo(unittest.skip("CPU uses fp32 accumulation"),
                          "TestConsistency", "test_output_match",
                          dtypes=(torch.float16, torch.bfloat16),
                          device_type="mps"),
-            DecorateInfo(unittest.skip("Inconsistent accuracy"),
+            DecorateInfo(unittest.skip("CPU uses fp32 accumulation"),
                          "TestConsistency", "test_output_grad_match",
-                         dtypes=(torch.float16, torch.bfloat16, torch.float32),
+                         dtypes=(torch.float16, torch.bfloat16),
                          device_type="mps"),
             # Only on this variant: the scalar backward supports neither jvp
             # nor the normalize pass, while its no_reduction sibling and the
@@ -16566,7 +16555,7 @@ op_db: list[OpInfo] = [
                # RuntimeError: aten::_upsample_nearest_exact*d hit the vmap fallback which is currently disabled
                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapjvpall_has_batch_rule'),
                DecorateInfo(unittest.expectedFailure, 'TestOperators', 'test_vmapvjp_has_batch_rule'),
-               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule'),
+               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfoDevice', 'test_op_has_batch_rule'),
            ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
@@ -17341,8 +17330,8 @@ op_db: list[OpInfo] = [
             # https://github.com/pytorch/pytorch/issues/107256
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness'),
             # aten::_scaled_mm hit the vmap fallback which is currently disabled
-            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
-            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfoDevice", "test_op_has_batch_rule"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfoDevice", "test_vmap_exhaustive"),
             DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
                          dtypes=(torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_compare_cpu'),
@@ -17371,8 +17360,8 @@ op_db: list[OpInfo] = [
             # https://github.com/pytorch/pytorch/issues/107256
             DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness'),
             # aten::_scaled_mm hit the vmap fallback which is currently disabled
-            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
-            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfoDevice", "test_op_has_batch_rule"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfoDevice", "test_vmap_exhaustive"),
             DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
                          dtypes=(torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_compare_cpu'),
@@ -18552,7 +18541,6 @@ op_db: list[OpInfo] = [
     UnaryUfuncInfo('sgn',
                    ref=reference_sgn,
                    dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf),
-                   dtypesIfMPS=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half, torch.chalf, torch.complex32),
                    backward_dtypes=floating_and_complex_types_and(torch.bfloat16, torch.half),
                    backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.half, torch.chalf),
                    backward_dtypesIfMPS=floating_and_complex_types_and(torch.bfloat16, torch.half, torch.complex32),
@@ -18975,7 +18963,6 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            gradcheck_wrapper=lambda *args, **kwargs: gradcheck_wrapper_triangular_input(*args, idx=1, **kwargs),
            decorators=[
-               skipCUDAIfNoMagmaAndNoLinalgsolver,
                skipCPUIfNoLapack,
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=3e-5, rtol=3e-6)}),
@@ -19269,7 +19256,7 @@ op_db: list[OpInfo] = [
            # We're using at::allclose, which does not have a batching rule
            check_batched_grad=False,
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack, with_tf32_off],
+           decorators=[skipCPUIfNoLapack, with_tf32_off],
            skips=(
                # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
                DecorateInfo(
@@ -19578,7 +19565,7 @@ op_db: list[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_out=False,
            sample_inputs_func=sample_inputs_linalg_invertible,
-           decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
+           decorators=[skipCPUIfNoLapack],
            skips=(
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager',
                             device_type='mps', dtypes=[torch.float32]),
@@ -20043,8 +20030,8 @@ op_db: list[OpInfo] = [
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestCommon", "test_noncontiguous_samples"),
-               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfoDevice", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfoDevice", "test_op_has_batch_rule"),
                # CPU randn generates different values based on the strides of out tensor
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
                # randn fails to warn when resizing its out tensor
@@ -20106,8 +20093,8 @@ op_db: list[OpInfo] = [
            skips=(
                # Tests that assume input is a tensor or sequence of tensors
                DecorateInfo(unittest.skip("Test expects tensor input"), "TestCommon", "test_noncontiguous_samples"),
-               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
-               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfoDevice", "test_vmap_exhaustive"),
+               DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfoDevice", "test_op_has_batch_rule"),
                # CPU randint generates different values based on the strides of out tensor
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # randint fails to warn when resizing its out tensor
@@ -21471,7 +21458,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
-        decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack]),
+        decorators=[skipCPUIfNoLapack]),
     # `log_softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
     OpInfo(
@@ -21559,7 +21546,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
-               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfo', 'test_op_has_batch_rule'),
+               DecorateInfo(unittest.expectedFailure, 'TestVmapOperatorsOpInfoDevice', 'test_op_has_batch_rule'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
            )),
@@ -21750,7 +21737,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
     OpInfo('norm',
            variant_test_name='nuc',
            sample_inputs_func=sample_inputs_norm_nuc,
-           decorators=[skipCUDAIfNoMagmaAndNoLinalgsolver, skipCPUIfNoLapack],
+           decorators=[skipCPUIfNoLapack],
            check_batched_gradgrad=False,
            # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
            # got: Could not allocate memory to change Tensor SizesAndStrides!
@@ -21847,7 +21834,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout, input, *args, **kwargs),
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.complex64),
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             # Probably because we have used lambda for the op here
@@ -21872,11 +21858,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         aten_name="native_dropout_backward",
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-        # The MPS kernel handles complex64 (matching the forward dropout op),
-        # but autograd does not support complex backward of
-        # native_dropout_backward, so OpInfo tests cannot exercise it through
-        # the standard requires_grad path.
-        dtypesIfMPS=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         supports_out=False,
         sample_inputs_func=sample_inputs_dropout_backward,
         skips=(
@@ -21898,7 +21879,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout2d, input, *args, **kwargs),
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.complex64),
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -21917,7 +21897,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.dropout3d, input, *args, **kwargs),
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.complex64),
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -21936,7 +21915,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.alpha_dropout, input, *args, **kwargs),
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.complex64),
         gradcheck_wrapper=wrapper_set_seed,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -21960,7 +21938,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             wrapper_set_seed(torch.nn.functional.feature_alpha_dropout, input, *args, **kwargs),
         variant_test_name="with_train",
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16, torch.complex64),
         skips=(
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
@@ -22137,6 +22114,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sample,
         reference_inputs_func=reference_inputs_grid_sample,
+        supports_forward_ad=True,
         supports_gradgrad=True,
         gradcheck_nondet_tol=1e-15,
         skips=(
@@ -22178,6 +22156,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sampler_2d,
+        supports_forward_ad=True,
         supports_gradgrad=True,
         gradcheck_nondet_tol=1e-15,
         skips=(
@@ -22198,6 +22177,7 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sampler_3d,
+        supports_forward_ad=True,
         supports_gradgrad=True,
         gradcheck_nondet_tol=1e-15,
         skips=(
@@ -22671,8 +22651,8 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
             # aten::hash_tensor hit the vmap fallback which is currently disabled
-            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
-            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfoDevice", "test_op_has_batch_rule"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfoDevice", "test_vmap_exhaustive"),
             # NYI
             DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
             # Sharding strategy NYI
@@ -22722,9 +22702,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
     OpInfo(
         "nn.functional.nll_loss",
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=floating_types_and(
-            torch.float16, torch.bfloat16, torch.int16, torch.int32, torch.int64, torch.uint8, torch.bool, torch.int8
-        ),
         supports_out=False,
         sample_inputs_func=sample_inputs_nll_loss,
         supports_forward_ad=True,
@@ -22992,8 +22969,6 @@ DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick'),
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-        # MPS: reject bool to match CPU (which raises NotImplementedError for bool mean).
-        dtypesIfMPS=all_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_scatter_reduce,
@@ -25111,21 +25086,6 @@ python_ref_db = [
             # RuntimeError: It appears that you're trying to get value out of a tracing tensor - erroring out!
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor', device_type="cuda"
-            ),
-            # The following dtypes did not work in forward but are listed by the OpInfo: {torch.bool}.
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-            # AssertionError: Scalars are not equal!
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
-                device_type='mps', dtypes=(torch.uint8, torch.bool,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
-                device_type='mps', dtypes=(torch.bool,),
-            ),
-            DecorateInfo(
-                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
-                device_type='mps', dtypes=(torch.uint8, torch.bool,),
             ),
         ),
     ),
