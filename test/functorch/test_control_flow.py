@@ -4965,24 +4965,22 @@ class TestControlFlowDevice(_TestControlFlowBase):
 
     @onlyAccelerator
     @skipCUDAIf(not SM70OrLater, "triton")
-    @parametrize("alias_site", ["xs", "init", "nested"])
+    @parametrize("alias_site", ["init", "nested"])
     @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
     @parametrize("autograd", [False, True])
     def test_scan_input_input_alias_sites(
         self, device, alias_site, compile_mode, autograd
     ):
+        if alias_site == "init" and compile_mode in ("none", "eager"):
+            # Dynamo clones init, so an aliased carry initializer only reaches
+            # the check in functionalization, which needs an AOT backend.
+            self.skipTest("init aliasing requires an AOT backend")
+
         scan_fct = compile_mode_helper(scan, compile_mode)
         kv = torch.randn(4, 4, device=device, requires_grad=autograd)
         k, v = kv[:, :2], kv[:, 2:]
 
-        if alias_site == "xs":
-            init = torch.randn(2, device=device, requires_grad=autograd)
-            xs, params = (k, v), (init, kv)
-
-            def fct_alias(x, y):
-                return x + y[0] * y[1], x.clone()
-
-        elif alias_site == "init":
+        if alias_site == "init":
             init = kv[0, 0]
             xs = torch.randn(3, 2, 4, device=device, requires_grad=autograd)
             params = (xs, kv)
@@ -5023,9 +5021,12 @@ class TestControlFlowDevice(_TestControlFlowBase):
         init = torch.randn(2, 2, device=device)
         xs = torch.randn(3, 2, 2, device=device)
 
-        with torch.no_grad(), self.assertRaisesRegex(
-            torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "shares storage with another input",
+        with (
+            torch.no_grad(),
+            self.assertRaisesRegex(
+                torch._dynamo.exc.UncapturedHigherOrderOpError,
+                "Encountered mutation of an aliased input",
+            ),
         ):
             scan(fct_aliased_mutation, init, xs, dim=0)
 

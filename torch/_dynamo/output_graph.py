@@ -4835,12 +4835,35 @@ class SubgraphTracer(fx.Tracer):
 
         return MutationInfo(False, "", ())
 
+    def has_aliased_input_mutation(self) -> MutationInfo:
+        from torch._dynamo.variables.higher_order_ops import get_tensor_storages
+        from torch._higher_order_ops.utils import _collect_fake_inputs
+
+        # Functionalization treats each subgraph input as an independent tensor,
+        # so aliased inputs are only safe if none of them is written.
+        placeholders = self.graph.find_nodes(op="placeholder")
+        storages: dict[int, set[StorageWeakRef]] = {}
+        for idx, node in enumerate(placeholders):
+            example_value = _collect_fake_inputs([node])[0]
+            if isinstance(example_value, torch.Tensor):
+                storages[idx] = get_tensor_storages(example_value)
+
+        mutated_indices = tuple(
+            i
+            for i in self.has_input_mutation().mutated_input_indices
+            if any(storages[i] & s for j, s in storages.items() if j != i)
+        )
+        if mutated_indices:
+            mutated_nodes = [placeholders[i] for i in mutated_indices]
+            msg = f"Mutation of aliased input detected at {mutated_nodes}"
+            return MutationInfo(True, msg, mutated_indices)
+        return MutationInfo(False, "", ())
+
     def has_aliasing(self, *, allow_input_input_aliasing: bool = False) -> AliasingInfo:
         from torch._dynamo.variables.higher_order_ops import get_tensor_storages
         from torch._higher_order_ops.utils import _collect_fake_inputs
 
         input_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
-        aliased_input_storages: set[StorageWeakRef] = set()
 
         for node in self.graph.nodes:
             if node.op == "placeholder":
@@ -4852,22 +4875,10 @@ class SubgraphTracer(fx.Tracer):
                             if not allow_input_input_aliasing:
                                 msg = f"Input-to-input aliasing detected at nodes {input_storages[storage]} and {node}"
                                 return AliasingInfo(True, msg)
-                            aliased_input_storages.add(storage)
                         else:
                             input_storages[storage] = node
             else:
                 break
-
-        # Functionalization treats each subgraph input as an independent tensor,
-        # so aliased inputs are only safe if none of them is written.
-        if aliased_input_storages:
-            placeholders = self.graph.find_nodes(op="placeholder")
-            for idx in self.has_input_mutation().mutated_input_indices:
-                node = placeholders[idx]
-                example_value = _collect_fake_inputs([node])[0]
-                if get_tensor_storages(example_value) & aliased_input_storages:
-                    msg = f"Input mutation detected at node {node}, which shares storage with another input"
-                    return AliasingInfo(True, msg)
 
         output_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
         out_nodes = self.graph.find_nodes(op="output")[0]

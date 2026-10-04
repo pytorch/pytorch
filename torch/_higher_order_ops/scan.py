@@ -1106,6 +1106,8 @@ def scan_functionalize(
             additional_inputs,
             mutated_arg_indices=mutated_arg_indices,
         )
+        # mutated_arg_indices is only set by Dynamo, which rejects mutating an
+        # input that aliases another input, so auto_functionalize never sees one.
         if can_auto_functionalize(hop_instance):
             return do_auto_functionalize_v2(
                 ctx.mode,

@@ -1487,6 +1487,21 @@ def check_aliasing_and_input_mutation(
                 ],
             )
 
+    if supports_input_input_aliasing:
+        aliased_mutation_info = subtracer.has_aliased_input_mutation()
+        if aliased_mutation_info.has_mutation:
+            context = f"{aliased_mutation_info.msg} in\n {graph}"
+            unimplemented(
+                gb_type="Encountered mutation of an aliased input during higher order op tracing",
+                context=context,
+                explanation=f"Higher order ops do not support mutating an input that shares "
+                f"storage with another input. Found in {name}",
+                hints=[
+                    "Clone one of the aliased inputs before the call, or stop mutating it.",
+                    "Please open an issue.",
+                ],
+            )
+
     if not supports_aliasing:
         aliasing_info = subtracer.has_aliasing(
             allow_input_input_aliasing=supports_input_input_aliasing
