@@ -30,6 +30,8 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfRocm,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
@@ -3439,6 +3441,7 @@ class TestPreBucketingFsdpCollectives(InductorTestCase):
         super().tearDownClass()
         dist.destroy_process_group()
 
+    @skipIfRocm(msg="ROCm has no interconnect profile")
     def test_saturation_model(self, device):
         """IB floor activates for small groups; NVLink uses formula; monotonic."""
         from torch._inductor.comm_analysis import (
@@ -3466,6 +3469,19 @@ class TestPreBucketingFsdpCollectives(InductorTestCase):
         sat_nv = sat(8, NCCL_COLL.ALL_GATHER)
         self.assertGreater(sat_nv, 50 * _MB)
         self.assertLess(sat_nv, 200 * _MB)
+
+    @unittest.skipUnless(TEST_WITH_ROCM, "ROCm-specific saturation behavior")
+    def test_saturation_model_rocm(self, device):
+        """ROCm has no interconnect profile, so no saturation size is modeled."""
+        from torch._inductor.comm_analysis import (
+            compute_min_saturation_bytes,
+            NCCL_COLL,
+        )
+
+        for group_size in (8, 16):
+            self.assertEqual(
+                compute_min_saturation_bytes(group_size, NCCL_COLL.ALL_GATHER), 0
+            )
 
     def test_pre_bucketing_only_merges_fsdp_collectives(self, device):
         """Pre-bucketing merges FSDP all-gathers but leaves TP all-gathers alone."""

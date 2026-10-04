@@ -3,6 +3,7 @@
 import sys
 import unittest
 import warnings
+from unittest import mock
 
 import torch
 import torch.distributed as dist
@@ -38,6 +39,50 @@ def _get_all_gather_node(group_size, group_name):
         if n.op == "call_function" and "all_gather_into_tensor" in str(n.target):
             return n
     raise RuntimeError("No all_gather_into_tensor node found in traced graph")
+
+
+class TestRocmCommAnalysis(TestCase):
+    def setUp(self):
+        super().setUp()
+        from torch._inductor.comm_analysis import get_gpu_type
+
+        get_gpu_type.cache_clear()
+        self.addCleanup(get_gpu_type.cache_clear)
+        patcher = mock.patch.object(torch.version, "hip", "7.0")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_rocm_does_not_use_nvidia_model(self):
+        from torch._inductor.comm_analysis import (
+            detect_interconnect,
+            get_gpu_type,
+            get_intra_node_bw,
+            InterconnectType,
+        )
+
+        self.assertEqual(
+            (get_gpu_type(), detect_interconnect(2), get_intra_node_bw()),
+            (None, InterconnectType.UNKNOWN, 0.0),
+        )
+
+    def test_rocm_uses_configured_bandwidth(self):
+        from torch._inductor.comm_analysis import (
+            estimate_nccl_collective_runtime_impl,
+            NCCL_COLL,
+        )
+
+        def estimate():
+            return estimate_nccl_collective_runtime_impl(
+                64 * 1024 * 1024, 2, NCCL_COLL.ALL_GATHER
+            )
+
+        self.assertEqual(estimate(), 0)
+        with torch._inductor.config.patch(intra_node_bw=50):
+            slow = estimate()
+        with torch._inductor.config.patch(intra_node_bw=100):
+            fast = estimate()
+        self.assertGreater(slow, fast)
+        self.assertGreater(fast, 0)
 
 
 class TestNcclEstimateDeviceResolution(TestCase):
@@ -83,7 +128,10 @@ class TestNcclEstimateDeviceResolution(TestCase):
             est_ms = estimate_nccl_collective_runtime_from_fx_node(
                 node, use_nccl_estimator=True
             )
-            self.assertGreater(est_ms, 0)
+            if torch.version.hip is not None:
+                self.assertEqual(est_ms, 0)
+            else:
+                self.assertGreater(est_ms, 0)
 
             est_ms_analytical = estimate_nccl_collective_runtime_from_fx_node(
                 node, use_nccl_estimator=False

@@ -525,10 +525,13 @@ runtime_estimations_mms_benchmark: bool = False
 
 # unit: GB/s, uni-directional P2P bandwidth per card (NVLink).
 # None = auto-detect from GPU generation; set to override.
+# ROCm has no auto-detection, so the analytical collective estimate is only
+# available there when this is set.
 intra_node_bw: int | None = None
 
 # unit: GB/s, uni-directional P2P bandwidth per node (IB/RoCE).
 # None = auto-detect from GPU generation; set to override.
+# ROCm has no auto-detection, so multi-node estimates require this setting.
 inter_node_bw: int | None = None
 
 # unit: GB/s, uni-directional CPU<>GPU bandwidth
