@@ -200,18 +200,13 @@ case "$tag" in
     ANACONDA_PYTHON_VERSION=3.14
     CLANG_VERSION=21
     ;;
-  pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3.11)
-    if [[ $tag =~ "jammy" ]]; then
-      ANACONDA_PYTHON_VERSION=3.10
-    else
-      ANACONDA_PYTHON_VERSION=3.11
-    fi
+  pytorch-linux-noble-rocm-n-py3.11 | pytorch-linux-noble-rocm-n-py3.11-benchmarks)
+    ANACONDA_PYTHON_VERSION=3.11
     GCC_VERSION=13
     ROCM_VERSION=10.0
     THEROCK_INDEX_URL="https://stable.repo.amd.com/rocm/whl-next/"
     TRITON=yes
     KATEX=yes
-    PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100"
     if [[ $tag =~ "benchmarks" ]]; then
       INDUCTOR_BENCHMARKS=yes
     fi
@@ -224,7 +219,6 @@ case "$tag" in
     USE_MSLK=1
     TRITON=yes
     KATEX=yes
-    PYTORCH_ROCM_ARCH="gfx950"
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
@@ -443,7 +437,6 @@ build_image() {
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
        --build-arg "THEROCK_INDEX_URL=${THEROCK_INDEX_URL:-}" \
        --build-arg "USE_MSLK=${USE_MSLK:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "TRITON=${TRITON}" \
        --build-arg "TRITON_CPU=${TRITON_CPU}" \
