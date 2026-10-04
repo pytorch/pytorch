@@ -4274,8 +4274,9 @@ class ReinterpretView(BaseView):
         def loader(index: Sequence[Expr]) -> OpsValue:
             indexer = self.layout.make_indexer()
             name = self.get_name()
-            if name in V.graph.constants:
-                name = V.graph.constant_name(name, ConstantBuffer.override_device)
+            device = ConstantBuffer.override_device
+            if device is not None and name in V.graph.constants:
+                name = V.graph.constant_name(name, device)
             tmp_loader = ops.load(name, indexer(index))
             if self.layout.dtype != self.data.dtype:
                 return ops.to_dtype_bitcast(tmp_loader, self.dtype, self.data.dtype)
@@ -6806,6 +6807,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         supports_epilogue_fusion: bool = False,
         swap_ab: bool = False,
         bias_node: Buffer | None = None,
+        output_scale_node: Buffer | None = None,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -6823,10 +6825,27 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         # When set, the last entry of `inputs` is an addmm bias consumed as a
         # fixed bias-add epilogue; the GEMM operands are the remaining inputs.
         self.bias_node = bias_node
+        # Native scaled-GEMM alpha is kept as a TemplateBuffer input so the
+        # scheduler tracks the dependency, then separated from GEMM operands
+        # when rendering the runtime call.
+        self.output_scale_node = output_scale_node
         # Store kernel metadata for code generation since kernels aren't serializeable yet
+        kernel_impl = getattr(kernel, "impl", None)
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.operator_name,
             "min_cc": kernel.designed_for_min_cc,
+            "supports_output_scale": getattr(kernel, "supports_output_scale", False),
+            "use_prefetch": getattr(
+                kernel_impl,
+                "use_prefetch",
+                getattr(kernel.metadata.design, "use_prefetch", False),
+            ),
+            "use_pdl": getattr(
+                kernel_impl,
+                "use_pdl",
+                getattr(kernel.metadata.design, "use_pdl", False),
+            ),
+            "output_dtype": layout.dtype,
         }
         # Override the instance attribute set by parent with our method
         # This is necessary because TemplateBuffer stores make_kernel_render as instance attr
@@ -6866,6 +6885,11 @@ class NVUniversalGemmBuffer(TemplateBuffer):
                 inp = inp.data
             input_nodes.append(inp)
 
+        output_scale_node = None
+        if self.output_scale_node is not None:
+            output_scale_node = input_nodes[-1]
+            input_nodes = input_nodes[:-1]
+
         # For a baked addmm bias, the bias is the last input and is consumed by
         # the epilogue, not as a GEMM operand.
         bias_node = None
@@ -6891,12 +6915,22 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             local_reduce=local_reduce,
             swap_ab=self.swap_ab,
             bias_node=bias_node,
+            output_scale_node=output_scale_node,
         )
 
         def render():
             return render_kernel.render()
 
         return render_kernel, render
+
+    def gemm_inputs(self) -> Sequence[IRNode]:
+        inputs = cast(Sequence[IRNode], self.inputs)
+        num_auxiliary_inputs = int(self.bias_node is not None) + int(
+            self.output_scale_node is not None
+        )
+        if num_auxiliary_inputs:
+            return inputs[:-num_auxiliary_inputs]
+        return inputs
 
 
 def is_node_sequence(
@@ -10373,13 +10407,23 @@ class FallbackKernel(ExternKernelAlloc):
 
         def maybe_wrap(value: Any, arg_info: torch._C.Argument) -> Any:
             # bool is a subclass of int; SymInt/SymFloat/SymBool are not int/float/complex.
-            if not isinstance(value, (int, float, complex)):
+            if not isinstance(value, (int, float, complex, sympy.Expr)):
                 return value
             if not is_tensor_slot(arg_info):
                 return value
             alias = arg_info.alias_info
             if alias is not None and alias.is_write:
                 return value
+            if isinstance(value, sympy.Expr):
+                # A symbolic scalar is only known at runtime, so build the 0-d tensor
+                # at runtime; the proxy executor passes a SymInt in a Scalar slot.
+                dtype = scalar_dtype(0 if value.is_integer else 0.0)
+                return pytree.tree_map(
+                    lambda x: x.wrap_for_lowering() if isinstance(x, IRNode) else x,
+                    cls.create(
+                        aten.scalar_tensor.default, value, dtype=dtype, device=device
+                    ),
+                )
             with torch.utils._python_dispatch._disable_current_modes():
                 const = torch.tensor(value, dtype=scalar_dtype(value), device=device)
             materialized.append(True)

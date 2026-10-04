@@ -1932,6 +1932,15 @@ def dispatch_trace(
         if is_accessor_node(n):
             return False
 
+        # Views only compute metadata, so they are OK to DCE unless they bind
+        # unbacked symbols
+        if (
+            isinstance(n.target, OpOverload)
+            and n.target.is_view
+            and "unbacked_bindings" not in n.meta
+        ):
+            return False
+
         # If the operator in question takes SymInt args to SymInt output,
         # we assume it's pure and OK to DCE
         if (
@@ -2518,11 +2527,18 @@ class _SelectiveDecomposeInterpreter(fx.Interpreter):
         )
 
     def run_node(self, n: fx.Node) -> Any:
+        from torch._guards import detect_fake_mode
+        from torch.fx.experimental.symbolic_shapes import rebind_unbacked
+
         if self.should_decompose(n):
             with decompose(self.decomposition_table):
                 result = super().run_node(n)
         else:
             result = super().run_node(n)
+        # Retracing allocates fresh unbacked symbols; tie them back to the
+        # originals, which deferred runtime asserts are keyed on.
+        if (fake_mode := detect_fake_mode()) is not None:
+            rebind_unbacked(fake_mode.shape_env, n, result)
         return result
 
 
@@ -2534,6 +2550,12 @@ def selective_decompose(
     trace_joint_graph: bool,
 ) -> fx.GraphModule:
     """Retrace a joint graph module and selectively apply decomposition."""
+    from torch._guards import detect_fake_mode
+
+    # rebind_unbacked (in _SelectiveDecomposeInterpreter.run_node) requires that
+    # the retrace not hit fake tensor memos from the original trace.
+    if (fake_mode := detect_fake_mode(args)) is not None:
+        fake_mode.epoch += 1
 
     if trace_joint_graph:
         # the arg name, primals and tangents, are important.
