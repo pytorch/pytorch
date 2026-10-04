@@ -1622,10 +1622,7 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def atanh(x):
-        # For real x, atanh(x) = 1/2 * log((1+x)/(1-x))
-        vec_one = f"decltype({x})(1)"
-        vec_one_half = f"decltype({x})(0.5)"
-        return f"{vec_one_half} * (({vec_one} + {x})/({vec_one} - {x})).log()"
+        return f"{x}.atanh()"
 
     @staticmethod
     def asinh(x):

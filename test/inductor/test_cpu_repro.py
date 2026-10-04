@@ -7214,6 +7214,18 @@ class CPUReproTests(TestCase):
             ).run(code)
 
     @requires_vectorization
+    def test_atanh_small_values(self):
+        def fn(x):
+            return torch.atanh(x)
+
+        values = [1e-4, 1e-6, 1e-8, 1e-10, -1e-4, -1e-6, -1e-8, -1e-10]
+        for dtype in (torch.float32, torch.float64):
+            x = torch.tensor(values * 3, dtype=dtype)
+            expected = fn(x)
+            actual = torch.compile(fn, fullgraph=True)(x)
+            self.assertEqual(actual, expected, rtol=2e-6, atol=0)
+
+    @requires_vectorization
     def test_bool_reduction_vec(self):
         for op in (
             torch.any,
