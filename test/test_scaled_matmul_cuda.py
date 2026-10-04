@@ -910,6 +910,58 @@ class TestFP8Matmul(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
+    @skipIfRocm
+    @skipIfTorchDynamo("error message checks rely on eager exception types")
+    def test_mxfp8_tn_only_on_sm120(self, device) -> None:
+        # cuBLAS only has non-TN block-scaled kernels for compute capability 12.x
+        # from 13.6.0 on, the cuBLAS that ships with CUDA 13.3 Update 1. Below
+        # that, _scaled_mm rejects the other layouts itself rather than letting
+        # them fail as a bare CUBLAS_STATUS_NOT_SUPPORTED out of the cuBLASLt
+        # heuristic.
+        major, _ = torch.cuda.get_device_capability(0)
+        if major != 12:
+            raise unittest.SkipTest("restriction only applies to compute capability 12.x")
+        cuda_version = _get_torch_cuda_version()
+        if cuda_version == (13, 3):
+            # CUDA 13.3.0 ships cuBLAS 13.5.1.27 and 13.3 Update 1 ships 13.6.0.2,
+            # and _get_torch_cuda_version() cannot tell the two apart.
+            raise unittest.SkipTest("support depends on the CUDA 13.3 update level")
+        tn_only = cuda_version < (13, 3)
+
+        M, K, N = 128, 128, 128
+        x = torch.randn(M, K, device=device).to(e4m3_type)
+        y = torch.randn(N, K, device=device).to(e4m3_type)
+        # Unit scales keep the reference exact: the only quantization is the fp8 cast.
+        num_scales = 128 * ceil_div(ceil_div(K, 32), 4) * 4
+        x_scale = torch.ones(num_scales, device=device, dtype=torch.float8_e8m0fnu)
+        y_scale = torch.ones(num_scales, device=device, dtype=torch.float8_e8m0fnu)
+
+        def mm(b):
+            return scaled_mm_wrap(
+                x,
+                b,
+                scale_a=x_scale,
+                scale_b=y_scale,
+                scale_recipe_a=ScalingType.BlockWise1x32,
+                scale_recipe_b=ScalingType.BlockWise1x32,
+                swizzle_a=SwizzleType.SWIZZLE_32_4_4,
+                swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+                out_dtype=torch.bfloat16,
+            )
+
+        out_ref = (x.float() @ y.t().float()).to(torch.bfloat16)
+        # TN -- row-major mat_a, column-major mat_b -- works on every cuBLAS version.
+        self.assertEqual(mm(y.t()), out_ref, atol=1e-2, rtol=1e-2)
+
+        # Same operands, but mat_b row-major.
+        if tn_only:
+            with self.assertRaisesRegex(RuntimeError, "row-major mat_a and a column-major mat_b"):
+                mm(y.t().contiguous())
+        else:
+            self.assertEqual(mm(y.t().contiguous()), out_ref, atol=1e-2, rtol=1e-2)
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_float8_basics_invalid_out_dtype(self, device) -> None:
         with self.assertRaises(
