@@ -4840,6 +4840,7 @@ class SubgraphTracer(fx.Tracer):
         from torch._higher_order_ops.utils import _collect_fake_inputs
 
         input_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
+        aliased_input_storages: set[StorageWeakRef] = set()
 
         for node in self.graph.nodes:
             if node.op == "placeholder":
@@ -4851,10 +4852,22 @@ class SubgraphTracer(fx.Tracer):
                             if not allow_input_input_aliasing:
                                 msg = f"Input-to-input aliasing detected at nodes {input_storages[storage]} and {node}"
                                 return AliasingInfo(True, msg)
+                            aliased_input_storages.add(storage)
                         else:
                             input_storages[storage] = node
             else:
                 break
+
+        # Functionalization treats each subgraph input as an independent tensor,
+        # so aliased inputs are only safe if none of them is written.
+        if aliased_input_storages:
+            placeholders = self.graph.find_nodes(op="placeholder")
+            for idx in self.has_input_mutation().mutated_input_indices:
+                node = placeholders[idx]
+                example_value = _collect_fake_inputs([node])[0]
+                if get_tensor_storages(example_value) & aliased_input_storages:
+                    msg = f"Input mutation detected at node {node}, which shares storage with another input"
+                    return AliasingInfo(True, msg)
 
         output_storages: dict[StorageWeakRef, torch.fx.Node] = dict()
         out_nodes = self.graph.find_nodes(op="output")[0]

@@ -4939,6 +4939,121 @@ class TestControlFlowDevice(_TestControlFlowBase):
         ):
             scan(fct_carry_output_alias, init, inp, dim=0)
 
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("alias_kind", ["disjoint", "overlap", "same_view"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("autograd", [False, True])
+    def test_scan_input_input_alias(self, device, alias_kind, compile_mode, autograd):
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        kv = torch.randn(2, 4, device=device, requires_grad=autograd)
+        start = {"disjoint": 2, "overlap": 1, "same_view": 0}[alias_kind]
+        k, v = kv[:, :2], kv[:, start : start + 2]
+
+        def fct_alias(x, y):
+            return x + y @ k.T, y @ v.T + 1
+
+        init = torch.randn(2, 2, device=device, requires_grad=autograd)
+        xs = torch.randn(3, 2, 2, device=device, requires_grad=autograd)
+
+        result = scan_fct(fct_alias, init, xs, dim=0)
+        result_exp = _fake_scan(fct_alias, init, xs, dim=0)
+        self.assertEqual(result, result_exp)
+
+        if autograd:
+            self.check_autograd(result, result_exp, (init, xs, kv))
+
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("alias_site", ["xs", "init", "nested"])
+    @parametrize("compile_mode", ["none", "eager", "compile", "compile_dynamic_shape"])
+    @parametrize("autograd", [False, True])
+    def test_scan_input_input_alias_sites(
+        self, device, alias_site, compile_mode, autograd
+    ):
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        kv = torch.randn(4, 4, device=device, requires_grad=autograd)
+        k, v = kv[:, :2], kv[:, 2:]
+
+        if alias_site == "xs":
+            init = torch.randn(2, device=device, requires_grad=autograd)
+            xs, params = (k, v), (init, kv)
+
+            def fct_alias(x, y):
+                return x + y[0] * y[1], x.clone()
+
+        elif alias_site == "init":
+            init = kv[0, 0]
+            xs = torch.randn(3, 2, 4, device=device, requires_grad=autograd)
+            params = (xs, kv)
+
+            def fct_alias(x, y):
+                return x + (y @ k).sum(), y.sum(-1)
+
+        else:
+            init = torch.randn(2, device=device, requires_grad=autograd)
+            xs = torch.randn(3, 2, device=device, requires_grad=autograd)
+            params = (init, xs, kv)
+
+            def inner_fct(x, y):
+                return x + y[0] * y[1], x + y[0]
+
+            def fct_alias(x, y):
+                carry, _ = scan(inner_fct, y, (k, v), dim=0)
+                return x + carry, carry
+
+        result = scan_fct(fct_alias, init, xs, dim=0)
+        result_exp = _fake_scan(fct_alias, init, xs, dim=0)
+        self.assertEqual(result, result_exp)
+
+        if autograd:
+            self.check_autograd(result, result_exp, params)
+
+    @onlyAccelerator
+    @parametrize("alias_kind", ["disjoint", "overlap"])
+    def test_scan_aliased_additional_input_mutation(self, device, alias_kind):
+        kv = torch.randn(2, 4, device=device)
+        k = kv[:, :2]
+        v = kv[:, 2:4] if alias_kind == "disjoint" else kv[:, 1:3]
+
+        def fct_aliased_mutation(x, y):
+            k.add_(1)
+            return x + y @ v.T, y @ v.T + 1
+
+        init = torch.randn(2, 2, device=device)
+        xs = torch.randn(3, 2, 2, device=device)
+
+        with torch.no_grad(), self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "shares storage with another input",
+        ):
+            scan(fct_aliased_mutation, init, xs, dim=0)
+
+    @onlyAccelerator
+    @skipCUDAIf(not SM70OrLater, "triton")
+    @parametrize("compile_mode", ["none", "eager", "compile"])
+    def test_scan_unaliased_additional_input_mutation(self, device, compile_mode):
+        scan_fct = compile_mode_helper(scan, compile_mode)
+        kv = torch.randn(2, 4, device=device)
+        k, v = kv[:, :2], kv[:, 2:]
+
+        def make_fct(buf):
+            def fct_unaliased_mutation(x, y):
+                buf.add_(1)
+                return x + y @ k.T, y @ v.T + 1
+
+            return fct_unaliased_mutation
+
+        init = torch.randn(2, 2, device=device)
+        xs = torch.randn(3, 2, 2, device=device)
+        buf, buf_exp = (torch.zeros(2, 2, device=device) for _ in range(2))
+
+        with torch.no_grad():
+            result = scan_fct(make_fct(buf), init, xs, dim=0)
+            result_exp = _fake_scan(make_fct(buf_exp), init, xs, dim=0)
+        self.assertEqual(result, result_exp)
+        self.assertEqual(buf, torch.full_like(buf, xs.size(0)))
+
 
 class AssociativeScanModels:
     @staticmethod

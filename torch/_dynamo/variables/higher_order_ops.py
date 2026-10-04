@@ -3342,6 +3342,7 @@ class ScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             set_subgraph_inputs="flatten_manual",
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
+            supports_input_input_aliasing=True,
         )
 
         combine_mutated_inputs = set(
