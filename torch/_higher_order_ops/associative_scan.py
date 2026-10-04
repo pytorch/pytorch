@@ -554,23 +554,39 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         g_ys3 = gl_ys3 + gl_ys4 * bw(ys4, ys3)
         g_ys4 = gl_ys4
 
-        Notice that the above can be re-written as a right-to-left associative_scan with flat operator
+        Notice that the above can be re-written as a right-to-left associative_scan over
+        affine maps. With a single xs leaf, an element is the pair (bw, gl) standing for
+        the map v -> bw * v + gl, and composition is
 
         def g_ys_combine_fn_flat(bw, gl, bw_next, gl_next):
             return bw * bw_next, torch.addcmul(gl_next, tensor1=bw_next, tensor2=gl) # gl_next + bw_next * gl
 
-        The recurrence g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst) means step t consumes
-        bwys shifted one step forward: bwys_aligned = [bwys21, bwys32, bwys43, 1], where
-        bwys21 abbreviates bw(ys2, ys1) and so on. The final step (g_ys4) has no successor,
-        so bwys_aligned is padded with a single 1. gl_ys is used as-is (no padding):
+        With N xs leaves the structure stays the same and only the types grow. One
+        forward step maps the N-tuple (ys{t-1}, xst) to the N-tuple yst, so
+        bw(ys{t+1}, yst) is an N x N Jacobian over the leaf index instead of a single
+        number: bw is a matrix, gl a vector, `bw * bw_next` a matrix product and
+        `bw_next * gl` a matrix-vector product. Each individual product is still
+        elementwise in the tensor entries. Every output leaf i contributes to the
+        gradient of every leaf j, so
 
-        bwys_aligned = [bwys21, bwys32, bwys43, 1]
+        g_yst^i = gl_yst^i + sum_j bw(ys{t+1}, yst)[j][i] * g_ys{t+1}^j
+        g_xst^j = sum_i bw(yst, xst)[i][j] * g_yst^i
+
+        For N = 1 these collapse to the formulas above.
+
+        The recurrence g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst) means step t consumes
+        bwys shifted one step forward: bwys_aligned = [bwys21, bwys32, bwys43, pad], where
+        bwys21 abbreviates bw(ys2, ys1) and so on. The final step (g_ys4) has no successor,
+        so bwys_aligned gets a pad slice, whose value does not matter (see 5.1 below).
+        gl_ys is used as-is (no padding):
+
+        bwys_aligned = [bwys21, bwys32, bwys43, pad]
         gl_ys        = [gl_ys1, gl_ys2, gl_ys3, gl_ys4]
 
         g_ys is recovered by flipping, scanning left-to-right, and flipping back:
-            leaves_rev = [bwys_aligned.flip([0]), gl_ys.flip([0])]
+            leaves_rev = [*bwys_aligned.flip([0]), *gl_ys.flip([0])]
             result_rev = associative_scan_op(g_ys_combine_fn_flat, leaves_rev, ())
-            g_ys = result_rev[1].flip([0])
+            g_ys = result_rev[N * N:].flip([0])
 
         References: https://justintchiu.com/blog/pscan_diff/
 
@@ -594,12 +610,14 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             cannot trace through the joint backward function dynamically.
 
         4.) Compute the single step bw (instantaneous gradients) at every step t
-            bwys{t-1}, bwxst = combine_fn_bw(ys{t-1}, xst, 1.)
-            Here we pass 1 as the upstream gradient to obtain the local partial derivatives.
+            The per-step Jacobian is read off one row at a time: seeding the joint with
+            row i of the identity in leaf space, i.e. ones on output leaf i and zeros on
+            the others, returns row i of it:
+            bwys[i]{t-1}, bwxs[i]t = combine_fn_bw(ys{t-1}, xst, identity_row(i))
 
-            This gives:
-                bwys = [bw(ys1, ys0), bw(ys2, ys1), ..., bw(ysT, ys{T-1})]
-                bwxs = [bw(ys1, xs0), bw(ys2, xs1), ..., bw(ys{T-1}, xsT)]
+            This gives, for every pair of leaves (i, j):
+                bwys[i][j] = [bw(ys1^i, ys0^j), bw(ys2^i, ys1^j), ..., bw(ysT^i, ys{T-1}^j)]
+                bwxs[i][j] = [bw(ys1^i, xs0^j), bw(ys2^i, xs1^j), ..., bw(ysT^i, xsT^j)]
 
         5.) Compute the gradients using a right-to-left associative scan
 
@@ -607,7 +625,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
             According to the chain rule, each such path contributes a product of local gradients g_ysk.
 
             For example:
-                g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst)
+                g_yst^i = gl_yst^i + sum_j bwys[j][i]{t+1} * g_ys{t+1}^j
 
             This motivates a right-to-left associative scan over bwys and gl_ys.
             We call the raw associative_scan_op HOP with the flat operator
@@ -616,21 +634,20 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
 
             5.1) Align bwys to the recurrence
 
-                bwys_aligned = torch.cat([bwys[1:], torch.ones_like(bwys[0:1])], 0)
-
-                Step t consumes bwys[t+1] (the local ys-gradient of the next step), so bwys
-                is shifted one step forward. The final step has no successor, so a single 1
-                is appended as padding; it does not affect the final g_ys. gl_ys is used
-                unchanged.
+                Step t consumes bwys[t+1] (the local ys-Jacobian of the next step), so
+                bwys is shifted one step forward and a pad slice is appended for the
+                final step, which has no successor. The pad only ever reaches the
+                composed matrix, never the affine constant that carries g_ys, hence its
+                value does not affect g_ys. gl_ys is used unchanged.
 
             5.2) Flip, scan left-to-right, and flip back
 
-                leaves_rev = [bwys_aligned.flip([0]), gl_ys.flip([0])]
+                leaves_rev = [*bwys_aligned.flip([0]), *gl_ys.flip([0])]
                 result_rev = associative_scan_op(g_ys_combine_fn_flat, leaves_rev, ())
-                g_ys = result_rev[1].flip([0])
+                g_ys = result_rev[N * N:].flip([0])
 
-        6.) Scale with the instantaneous input gradients bwxs
-            g_xs = g_ys * bwxs
+        6.) Contract with the instantaneous input gradients bwxs
+            g_xst^j = sum_i bwxs[i][j] * g_yst^i
 
             This gives the final input gradients:
                 g_xs = [∂L/∂xs0, ∂L/∂xs1, ..., ∂L/∂xsT]
@@ -750,64 +767,111 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         mapped_combine_fn_bw_gm = torch.vmap(combine_fn_bw_gm_xs, in_dims, 0)
 
         # 4.) Compute the single step bw (instantaneous gradients) at every step ``t``
-        # Use a ones_like tensor in order not to scale the bwyst and bwxst,
-        # with the upstream gradients yet.
-        # Note: All bwyst and bwxst are computed in parallel, thus the tensors bwys and bwxs are the result.
-        dummy_upstream_grad = (torch.ones_like(x) for x in gl_ys)
-        grads = mapped_combine_fn_bw_gm(
-            *(o.roll(1, dim) for o in outs), *fw_operands, *dummy_upstream_grad
-        )
-        bwys, bwxs = split_into_chunks(grads, [num_xs, num_xs])
+        # The per-step map (ys{t-1}, xst) -> yst consumes all leaves, so its local
+        # derivative is a full num_xs x num_xs Jacobian in the leaf index. Seeding the
+        # joint with row ``i`` of the identity in leaf space returns row ``i`` of it:
+        #   bwys[i][j] = d yst^i / d ys{t-1}^j and bwxs[i][j] = d yst^i / d xst^j
+        # The leaves may differ in shape and dtype, so the identity is a list of rows
+        # rather than a single tensor; the same ones and zeros are reused across rows.
+        # Note: for a fixed ``i`` all steps ``t`` are still computed in parallel by vmap.
+        ones = [torch.ones_like(g) for g in gl_ys]
+        zeros = [torch.zeros_like(g) for g in gl_ys]
+        rolled_outs = [o.roll(1, dim) for o in outs]
+        bwys: list[list[torch.Tensor]] = []
+        bwxs: list[list[torch.Tensor]] = []
+        for i in range(num_xs):
+            identity_row = [ones[j] if i == j else zeros[j] for j in range(num_xs)]
+            row = mapped_combine_fn_bw_gm(*rolled_outs, *fw_operands, *identity_row)
+            row_ys, row_xs = split_into_chunks(row, [num_xs, num_xs])
+            bwys.append(row_ys)
+            bwxs.append(row_xs)
 
-        def compute_gys_associative_scan(
-            gl_ys: torch.Tensor, bwys: torch.Tensor
-        ) -> torch.Tensor:
+        num_mat = num_xs * num_xs
+
+        def g_ys_combine_fn_flat(*args):
+            """Right-to-left affine composition, see 5.) above.
+
+            An element encodes the affine map v -> M @ v + g as the ``num_xs**2``
+            entries of M in row-major order followed by the ``num_xs`` entries of g.
+            The matrix product is over the leaf index; each entry is a full
+            per-timestep tensor and all its products are elementwise.
             """
-            Computes the gradient g_ys via a right-to-left associative scan:
-            I.e., the gradients are computed from the last time step to the first, following this equation
-                g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst)
-            """
-
-            # 5.1) Align bwys to the recurrence g_yst = gl_yst + g_ys{t+1} * bw(ys{t+1}, yst):
-            # step t consumes bwys[t+1], and the last step (t = T-1) has no successor, so
-            # pad with ones.
-            bwys_aligned = torch.cat([bwys[1:], torch.ones_like(bwys[0:1])], 0)
-
-            def g_ys_combine_fn_flat(bw, gl, bw_next, gl_next):
-                return bw * bw_next, torch.addcmul(gl_next, tensor1=bw_next, tensor2=gl)
-
-            # 5.2) Flip, scan left-to-right, and flip back to get g_ys. We call the raw
-            # associative_scan_op HOP (not generic_associative_scan) so this scan is
-            # Triton-lowerable under compiled autograd.
-            result_rev = associative_scan_op(
-                g_ys_combine_fn_flat,
-                [bwys_aligned.flip([0]), gl_ys.flip([0])],
-                (),
+            mat, vec, mat_next, vec_next = split_into_chunks(
+                args, [num_mat, num_xs, num_mat, num_xs]
             )
-            g_ys = result_rev[1].flip([0])
 
-            return g_ys
+            def entry(m, i, j):
+                return m[i * num_xs + j]
 
-        def compute_grad(
-            bwxs: torch.Tensor, bwys: torch.Tensor, gl_ys: torch.Tensor
-        ) -> torch.Tensor:
-            # The first output ys0 equals xs0, so its instantaneous input gradient is 1.
-            # Build a fresh tensor rather than mutating bwxs in place: for an additive
-            # combine_fn the joint graph can return the same tensor object for both the
-            # ys and xs grads, so bwxs may alias bwys and an in-place fill_ would clobber it.
-            bwxs = torch.cat([torch.ones_like(bwxs[0:1]), bwxs[1:]], 0)
+            def contract(row_of, col_of, base=None):
+                # Accumulate sum_k row_of(k) * col_of(k), onto ``base`` when given.
+                # addcmul keeps each multiply-accumulate in a single kernel, so for
+                # num_xs == 1 this emits the plain scalar affine recurrence.
+                acc = base
+                for k in range(num_xs):
+                    row, col = row_of(k), col_of(k)
+                    acc = (
+                        row * col
+                        if acc is None
+                        else torch.addcmul(acc, tensor1=row, tensor2=col)
+                    )
+                return acc
 
-            # 5.) Compute the gradients via an associative_scan
-            g_ys = compute_gys_associative_scan(gl_ys, bwys)
+            new_mat = [
+                contract(
+                    lambda k, i=i: entry(mat_next, i, k),
+                    lambda k, j=j: entry(mat, k, j),
+                )
+                for i in range(num_xs)
+                for j in range(num_xs)
+            ]
+            new_vec = [
+                contract(
+                    lambda k, i=i: entry(mat_next, i, k),
+                    lambda k: vec[k],
+                    vec_next[i],
+                )
+                for i in range(num_xs)
+            ]
+            return (*new_mat, *new_vec)
 
-            # 6.) Scale with the instantaneous input gradients bwxs
-            g_xs = g_ys * bwxs
+        # 5.1) Align to the recurrence g_yst = gl_yst + bwys{t+1}^T @ g_ys{t+1}: step t
+        # consumes the transposed ys-Jacobian of step t+1, hence the shift by one. The
+        # last step has no successor, so a pad slice is appended. It only ever reaches
+        # the composed matrix, never the affine constant term that carries g_ys, so its
+        # value is irrelevant; zeros keep the discarded products from overflowing.
+        mat_aligned = [
+            torch.cat([bwys[j][i][1:], torch.zeros_like(bwys[j][i][0:1])], 0).flip([0])
+            for i in range(num_xs)
+            for j in range(num_xs)
+        ]
 
-            return g_xs
+        # 5.2) Flip, scan left-to-right, and flip back to get g_ys. We call the raw
+        # associative_scan_op HOP (not generic_associative_scan) so this scan is
+        # Triton-lowerable under compiled autograd.
+        result_rev = associative_scan_op(
+            g_ys_combine_fn_flat,
+            [*mat_aligned, *[g.flip([0]) for g in gl_ys]],
+            (),
+        )
+        g_ys = [r.flip([0]) for r in result_rev[num_mat:]]
 
-        # Compute the gradients of all leaves sequentially
-        # TODO: Use torch.vmap here for parallelization, requires vmap of associative_scan
-        g_xs = [compute_grad(bwxs[ind], bwys[ind], gl_ys[ind]) for ind in range(num_xs)]
+        # 6.) Scale with the instantaneous input gradients bwxs:
+        #     g_xst^j = sum_i bwxs[i][j] * g_yst^i
+        g_xs = []
+        for j in range(num_xs):
+            terms = []
+            for i in range(num_xs):
+                bwxs_ij = bwxs[i][j]
+                # The first output ys0 equals xs0, so the xs-Jacobian of the first step
+                # is the identity. Splice it in with a fresh tensor: for an additive
+                # combine_fn the joint graph can hand back the same tensor object as
+                # both the ys and the xs grad, so bwxs may alias bwys and writing into
+                # it in place would clobber that.
+                like = torch.ones_like if i == j else torch.zeros_like
+                first = like(bwxs_ij[0:1])
+                terms.append(g_ys[i] * torch.cat([first, bwxs_ij[1:]], 0))
+            g_xs.append(terms[0] if num_xs == 1 else sum(terms[1:], terms[0]))
 
         # TODO: Currently the gradients for the additional_inputs are not computed properly
         return *[None] * 3, *g_xs, *[None] * num_additional_inputs
