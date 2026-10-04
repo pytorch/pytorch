@@ -48,6 +48,8 @@ from torch.testing._internal.common_utils import (
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests  # noqa: PLW0127
 
+requires_symmetric_memory_device_API = requires_nccl_version((2, 28), "NCCL Symmetric Memory support device API from nccl 2.28")
+
 nGPUs = torch.cuda.device_count()
 if not TEST_CUDA:
     print("CUDA not available, skipping tests", file=sys.stderr)
@@ -277,7 +279,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         cls.pg = c10d.distributed_c10d._get_default_group()
 
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version((2, 27), "NCCL Symmetric Memory support from nccl 2.27")
+    @requires_symmetric_memory_device_API
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_alloc(self):
         symm_mem.set_backend("NCCL")
@@ -302,7 +304,9 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version((2, 27), "NCCL Symmetric Memory support from nccl 2.27")
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+    )
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_rendezvous_many_allocations(self):
         symm_mem.set_backend("NCCL")
@@ -333,6 +337,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_symmetric_memory_device_API
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_rendezvous_world(self):
         symm_mem.set_backend("NCCL")
@@ -377,9 +382,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version(
-        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
-    )
+    @requires_symmetric_memory_device_API
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_barrier_channel_out_of_bounds(self):
         symm_mem.set_backend("NCCL")
@@ -420,6 +423,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_symmetric_memory_device_API
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_rendezvous_subgroup(self):
         symm_mem.set_backend("NCCL")
@@ -441,9 +445,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version(
-        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
-    )
+    @requires_symmetric_memory_device_API
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_collective(self):
         symm_mem.set_backend("NCCL")
@@ -472,9 +474,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version(
-        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
-    )
+    @requires_symmetric_memory_device_API
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_collective_cuda_graph(self):
         symm_mem.set_backend("NCCL")
@@ -521,9 +521,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version(
-        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
-    )
+    @requires_symmetric_memory_device_API
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_tensor_creation_and_collective_cuda_graph(self):
         symm_mem.set_backend("NCCL")
@@ -584,9 +582,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version(
-        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
-    )
+    @requires_symmetric_memory_device_API
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_put(self):
         symm_mem.set_backend("NCCL")
@@ -668,6 +664,9 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
     @skip_if_lt_x_gpu(2)
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory multicast support from nccl 2.28"
+    )
     def test_nccl_symmem_get(self):
         symm_mem.set_backend("NCCL")
         torch.cuda.set_device(self.rank)
@@ -1057,6 +1056,9 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+    )
     @skip_if_lt_x_gpu(2)
     def test_mempool_tensor_factory(self):
         symm_mem.set_backend("NCCL")
@@ -1085,6 +1087,9 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+    )
     @skip_if_lt_x_gpu(2)
     def test_mempool_compute_ops(self):
         symm_mem.set_backend("NCCL")
