@@ -355,15 +355,40 @@ def geomspace(
 ) -> torch.Tensor:
     if axis != 0 or not endpoint:
         raise NotImplementedError
-    base = torch.pow(stop / start, 1.0 / (num - 1))
-    logbase = torch.log(base)
-    # torch.logspace accepts tensor start/end/base at runtime.
-    return torch.logspace(  # pyrefly: ignore[no-matching-overload]
-        torch.log(start) / logbase,
-        torch.log(stop) / logbase,
+    if not isinstance(start, torch.Tensor):
+        start = torch.as_tensor(start)
+    if not isinstance(stop, torch.Tensor):
+        stop = torch.as_tensor(stop)
+    if bool(torch.any(start == 0)) or bool(torch.any(stop == 0)):
+        raise ValueError("Geometric sequence cannot include zero")
+    if dtype is None:
+        if start.is_complex() or stop.is_complex():
+            dtype = _dtypes_impl.default_dtypes().complex_dtype
+        else:
+            dtype = _dtypes_impl.default_dtypes().float_dtype
+    elif not isinstance(dtype, torch.dtype):
+        from . import _dtypes
+
+        dtype = _dtypes.dtype(dtype).torch_dtype
+    out_sign = torch.sgn(start)
+    start = start / out_sign
+    stop = stop / out_sign
+    log_start = torch.log10(start)
+    log_stop = torch.log10(stop)
+    # torch.logspace accepts tensor start/end at runtime.
+    res = torch.logspace(  # pyrefly: ignore[no-matching-overload]
+        log_start,
+        log_stop,
         num,
-        base=base,
+        base=10.0,
+        dtype=dtype,
     )
+    res = (res * out_sign).to(dtype)
+    if num > 0:
+        res[0] = start * out_sign
+        if num > 1:
+            res[-1] = stop * out_sign
+    return res
 
 
 def logspace(
