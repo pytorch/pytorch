@@ -3001,8 +3001,15 @@ class rocm:
     # Flag to keep intermediate files (assembly listings, preprocessed sources, etc.)
     save_temps = False
 
-    # Flag to add `-ffast-math`` to compile flags
-    use_fast_math = True
+    # Flag to add `-ffast-math` to compile flags.
+    #
+    # Off by default. These flags are applied to generated Composable Kernel
+    # sources, and CK does not build or validate itself with value-changing
+    # float options anywhere in its own CMake or CI. Enabling them has been
+    # observed to produce silently wrong results: a bf16 GEMM with a bias
+    # epilogue drops the bias term at scattered output elements on gfx950,
+    # with no error, no NaN and no warning.
+    use_fast_math = False
 
     # Flag to add `-fgpu-flush-denormals-to-zero` to compile flags
     flush_denormals = True
