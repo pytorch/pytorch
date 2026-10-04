@@ -17,6 +17,7 @@
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/NonEmptyUtils.h>
 #include <ATen/native/Pool.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorAdvancedIndexing.h>
@@ -552,12 +553,17 @@ static void flip_kernel_mps(TensorIterator& iter, const bool quantized) {
 static void encodeIndexBoundsCheck(id<MTLComputeCommandEncoder> encoder,
                                    at::mps::MPSStream* stream,
                                    const Tensor& index,
-                                   int64_t dim_size) {
+                                   int64_t dim_size,
+                                   bool allow_negative = false) {
   using namespace mps;
   auto pso = lib.getPipelineStateForFunc(fmt::format("index_check_bounds_{}", scalarToMetalTypeString(index)));
   [encoder setComputePipelineState:pso];
   mtl_setArgs(encoder, index);
-  mtl_setArgs<1>(encoder, static_cast<uint32_t>(index.stride(0)), dim_size, stream->getErrorBuffer());
+  mtl_setArgs<1>(encoder,
+                 static_cast<uint32_t>(index.stride(0)),
+                 dim_size,
+                 stream->getErrorBuffer(),
+                 static_cast<uint32_t>(allow_negative));
   mtl_dispatch1DJob(encoder, pso, index.numel());
 }
 
@@ -904,6 +910,9 @@ TORCH_IMPL_FUNC(index_reduce_mps_out)
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
+      // A 0-dim self accepts index 0, so treat it as size 1 rather than
+      // asking for size(0) of a tensor that has no dimensions.
+      encodeIndexBoundsCheck(compute_encoder, stream, index, ensure_nonempty_size(result, dim));
       auto pipeline_state = mps::lib.getPipelineStateForFunc(fmt::format(
           "index_reduce_{}_{}_{}", reduce, mps::scalarToMetalTypeString(result), mps::scalarToMetalTypeString(index)));
       getMPSProfiler().beginProfileKernel(pipeline_state, "index_reduce", {result, index, source}, stream);
@@ -1133,6 +1142,8 @@ static void index_fill_mps_kernel(TensorIterator& iter,
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
         auto computeEncoder = stream->commandEncoder();
+        // index_fill wraps valid negative indices, so allow [-dim_size, dim_size).
+        encodeIndexBoundsCheck(computeEncoder, stream, index, dim_size, /*allow_negative=*/true);
         auto mpsScalar = getMPSScalar(source, self.scalar_type());
         long indices_stride = index.stride(0);
 
@@ -1199,6 +1210,8 @@ static void index_fill_mps_kernel(TensorIterator& iter,
     dispatch_sync_with_rethrow(stream->queue(), ^() {
       @autoreleasepool {
         auto computeEncoder = stream->commandEncoder();
+        // index_fill wraps valid negative indices, so allow [-dim_size, dim_size).
+        encodeIndexBoundsCheck(computeEncoder, stream, index, dim_size, /*allow_negative=*/true);
         auto mpsScalar = getMPSScalar(source, self.scalar_type());
         [computeEncoder setComputePipelineState:indexFillPSO];
         mtl_setArgs(computeEncoder, self, index);
