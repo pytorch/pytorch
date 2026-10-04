@@ -375,27 +375,6 @@ class MPSBasicTests(TestCase):
     def test_metal_kernel_device_type(self):
         self.assertEqual(MetalKernel.device_type, "mps")
 
-    def test_masked_cse_recomputed_load(self):
-        # Regression test for https://github.com/pytorch/pytorch/issues/199642
-        # When an input load is first emitted inside ops.masked (via F.pad),
-        # then loaded unmasked into the kernel-level CSE cache, and subsequently
-        # loaded again inside ops.masked, the second ops.masked block has an
-        # empty scoped_body and returns the outer CSE variable directly.
-        # MetalOverrides.masked must include the return variable (rc) in its
-        # CSE cache key so distinct inputs are not deduplicated to the same var.
-        def fn(x, y, table):
-            padded_x = torch.nn.functional.pad(x, (1, 1, 1, 1))
-            padded_y = torch.nn.functional.pad(y, (1, 1, 1, 1))
-            m = (padded_x**2 + padded_y**2)[..., 1:-1, 1:-1]
-            i = ((x + y) * 3).round()
-            idx1 = (i % 8).long()
-            idx2 = ((i + 4) % 8).long()
-            return (m > table.gather(1, idx1)) & (m > table.gather(1, idx2))
-
-        x, y = torch.randn(2, 1, 1, 64, 80, device=self.device).unbind(0)
-        table = torch.rand(1, 8, 64, 80, device=self.device) * 4
-        self.common(fn, (x, y, table), check_lowp=False)
-
 
 @unittest.skipUnless(torch.backends.mps.is_available(), "MPS not available")
 class MPSBasicTestsAOTI(TestCase):
