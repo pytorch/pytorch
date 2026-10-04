@@ -108,6 +108,24 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                 if blocks_name in weight_map:
                     self._weight_scale_mapping[blocks_name] = tensor_name
 
+    def _get_checkpoint_file_path(self, file_name: str) -> Path:
+        """
+        Return the path of a file referenced by the index's weight_map.
+
+        weight_map entries must be relative paths inside the checkpoint
+        directory. Absolute paths and paths with ``..`` components are
+        rejected so that the index cannot point outside the checkpoint.
+        Symlinks are not resolved, since Hugging Face cache snapshots store
+        their files as symlinks into a sibling ``blobs`` directory.
+        """
+        relative_path = Path(file_name)
+        if relative_path.anchor or ".." in relative_path.parts:
+            raise ValueError(
+                f"weight_map entry {file_name!r} must be a relative path "
+                f"inside the checkpoint directory {str(self.path)!r}"
+            )
+        return Path(self.path) / relative_path
+
     def _process_read_request(
         self, f: Any, req: ReadItem, planner: LoadPlanner
     ) -> None:
@@ -466,7 +484,7 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                 # Scale tensor is in a different file, need to open it
                 from safetensors import safe_open  # type: ignore[import]
 
-                scale_file_path = Path(self.path) / scale_file_name
+                scale_file_path = self._get_checkpoint_file_path(scale_file_name)
                 with safe_open(
                     scale_file_path, framework="pt", device="cpu"
                 ) as scale_file:
