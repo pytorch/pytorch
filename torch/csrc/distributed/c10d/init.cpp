@@ -539,7 +539,7 @@ PyTypeObject* GetReduceOpMetaclass() {
   return metaclass;
 }
 
-PyObject* c10d_init(PyObject* _unused, PyObject* noargs) {
+PyObject* c10d_init(PyObject* /*_unused*/, PyObject* /*noargs*/) {
   C10_LOG_API_USAGE_ONCE("c10d.python.import");
 
   auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed"));
@@ -645,7 +645,7 @@ An enum-like class for built-in communication hooks: ``ALLREDUCE`` and ``FP16_CO
           py::init(
               [](std::vector<at::Tensor> params,
                  std::vector<std::vector<size_t>> bucket_indices,
-                 const std::vector<size_t>& per_bucket_size_limits,
+                 const std::vector<size_t>& /*per_bucket_size_limits*/,
                  c10::intrusive_ptr<::c10d::ProcessGroup> process_group,
                  std::vector<bool> expect_sparse_gradients,
                  int64_t bucket_bytes_cap,
@@ -967,7 +967,7 @@ This class does not support ``__members__`` property.)");
           // other types.
           "__eq__",
           // NOLINTNEXTLINE(performance-unnecessary-value-param)
-          [](const ::c10d::ReduceOp& self, py::object) { return false; })
+          [](const ::c10d::ReduceOp& /*self*/, py::object) { return false; })
       .def(
           "__hash__",
           [](const ::c10d::ReduceOp& self) {
@@ -978,7 +978,7 @@ This class does not support ``__members__`` property.)");
           [](const ::c10d::ReduceOp& self) { return ::c10d::ReduceOp(self); })
       .def(
           "__deepcopy__",
-          [](const ::c10d::ReduceOp& self, const py::dict& memo) {
+          [](const ::c10d::ReduceOp& self, const py::dict& /*memo*/) {
             return ::c10d::ReduceOp(self);
           })
       .def(py::pickle(
@@ -4098,7 +4098,7 @@ for details.
           [](const ncclConfig_t& self) { return ncclConfig_t(self); })
       .def(
           "__deepcopy__",
-          [](const ncclConfig_t& self, const py::dict& memo) {
+          [](const ncclConfig_t& self, const py::dict& /*memo*/) {
             return ncclConfig_t(self);
           },
           py::arg("memo"));
@@ -4156,7 +4156,7 @@ Example::
       .def(
           "__deepcopy__",
           [](const ::c10d::ProcessGroupNCCL::Options& self,
-             const py::dict& memo) {
+             const py::dict& /*memo*/) {
             return ::c10d::ProcessGroupNCCL::Options(self);
           },
           py::arg("memo"));
