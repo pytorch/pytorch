@@ -9412,6 +9412,51 @@ for args in ((a, b), (a, b, False)):
         )
         return allocator, dummy_allocator
 
+    def get_throwing_free_allocator(self):
+        source = r"""
+        #include <torch/extension.h>
+        #include <cuda_runtime_api.h>
+        #include <stdexcept>
+
+        void check_cuda(cudaError_t error) {
+          if (error != cudaSuccess) {
+            throw std::runtime_error(cudaGetErrorString(error));
+          }
+        }
+
+        extern "C" {
+          C10_EXPORT void* throwing_free_alloc(
+              size_t size, int device, void* stream) {
+            void* ptr;
+            check_cuda(cudaMalloc(&ptr, size));
+            return ptr;
+          }
+
+          C10_EXPORT void throwing_free(
+              void* ptr, size_t size, int device, void* stream) {
+            check_cuda(cudaFree(ptr));
+            throw std::runtime_error("custom free sentinel");
+          }
+        }
+        """
+
+        from torch.utils.cpp_extension import load_inline
+
+        allocator_library = load_inline(
+            name="throwing_free_allocator",
+            cpp_sources=source,
+            is_python_module=False,
+            keep_intermediates=False,
+            verbose=True,
+            with_cuda=True,
+        )
+        allocator = torch.cuda.memory.CUDAPluggableAllocator(
+            allocator_library,
+            "throwing_free_alloc",
+            "throwing_free",
+        )
+        return allocator
+
     def test_mempool_empty_cache(self):
         torch.cuda.empty_cache()
         pool = torch.cuda.MemPool()
@@ -9577,6 +9622,278 @@ for args in ((a, b), (a, b, False)):
                 self.assertIn("Check preceding allocator warnings or logs", message)
         finally:
             torch.cuda.set_per_process_memory_fraction(initial_fraction, device)
+
+    @unittest.skipIf(TEST_WITH_ROCM, "requires CUDA runtime bindings")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    @requires_cuda_python_bindings
+    @serialTest()
+    def test_custom_mempool_frees_are_drained_before_oom_retry(self):
+        from cuda.bindings import runtime
+
+        mb = 1024 * 1024
+        active_ptr = None
+        alloc_calls = 0
+        free_calls = 0
+        callback_errors = []
+
+        @ctypes.CFUNCTYPE(
+            ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+        )
+        def alloc(size, device, stream):
+            nonlocal active_ptr, alloc_calls
+            alloc_calls += 1
+            if active_ptr is not None:
+                return 0
+            err, ptr = runtime.cudaMalloc(size)
+            if err != runtime.cudaError_t.cudaSuccess:
+                callback_errors.append(err)
+                return 0
+            active_ptr = int(ptr)
+            return active_ptr
+
+        @ctypes.CFUNCTYPE(
+            None, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+        )
+        def free(ptr, size, device, stream):
+            nonlocal active_ptr, free_calls
+            free_calls += 1
+            (err,) = runtime.cudaFree(ptr)
+            if err != runtime.cudaError_t.cudaSuccess:
+                callback_errors.append(err)
+            active_ptr = None
+
+        allocator = torch._C._cuda_customAllocator(
+            ctypes.cast(alloc, ctypes.c_void_p).value,
+            ctypes.cast(free, ctypes.c_void_p).value,
+        )
+        pool = torch.cuda.MemPool(allocator)
+
+        try:
+            # Make the first segment eligible for the allocator's
+            # release_available_cached_blocks OOM path.
+            torch.cuda.memory._set_allocator_settings("max_split_size_mb:20")
+            with torch.cuda.use_mem_pool(pool):
+                first = torch.empty(21 * mb, dtype=torch.uint8, device="cuda")
+                del first
+
+                second = torch.empty(30 * mb, dtype=torch.uint8, device="cuda")
+
+                # The first attempt failed while the original segment was
+                # live. Reclamation then ran raw_delete without the allocator
+                # mutex, and the retry reused the returned capacity.
+                self.assertGreaterEqual(alloc_calls, 3)
+                self.assertEqual(free_calls, 1)
+                self.assertIsNotNone(active_ptr)
+                del second
+        finally:
+            torch.cuda.memory._set_allocator_settings("")
+            del pool
+            torch.cuda.empty_cache()
+
+        self.assertEqual(callback_errors, [])
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    @serialTest()
+    def test_custom_mempool_free_exception_does_not_fail_malloc(self):
+        allocator = self.get_throwing_free_allocator()
+        mb = 1024 * 1024
+        baseline_allocated = torch.cuda.memory_allocated()
+
+        self._setup_mempool_limited_memory_test(40)
+        try:
+
+            def allocate_from_temporary_pool():
+                pool = torch.cuda.MemPool(allocator.allocator())
+                with torch.cuda.use_mem_pool(pool):
+                    return torch.empty(40 * mb, dtype=torch.uint8, device="cuda")
+
+            custom = allocate_from_temporary_pool()
+            del custom
+
+            # The first default-pool allocation attempt hits the configured
+            # limit. Reclaiming the dead custom pool throws after freeing its
+            # segment, but malloc must log that unrelated free failure, retry,
+            # and return the successful allocation to its caller.
+            result = torch.empty(40 * mb, dtype=torch.uint8, device="cuda")
+            self.assertEqual(
+                torch.cuda.memory_allocated(), baseline_allocated + 40 * mb
+            )
+            del result
+        finally:
+            self._teardown_mempool_limited_memory_test()
+
+        self.assertEqual(torch.cuda.memory_allocated(), baseline_allocated)
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    @serialTest()
+    def test_custom_mempool_free_exception_propagates_from_empty_cache(self):
+        allocator = self.get_throwing_free_allocator()
+
+        def allocate_from_temporary_pool():
+            pool = torch.cuda.MemPool(allocator.allocator())
+            with torch.cuda.use_mem_pool(pool):
+                return torch.empty(1, dtype=torch.uint8, device="cuda")
+
+        custom = allocate_from_temporary_pool()
+        del custom
+
+        with self.assertRaisesRegex(RuntimeError, "custom free sentinel"):
+            torch.cuda.empty_cache()
+
+    @unittest.skipIf(TEST_WITH_ROCM, "requires CUDA runtime bindings")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    @requires_cuda_python_bindings
+    @serialTest()
+    def test_custom_mempool_alloc_callback_does_not_hold_allocator_lock(self):
+        from cuda.bindings import runtime
+
+        torch.cuda.empty_cache()
+        callback_entered = threading.Event()
+        peer_allocation_done = threading.Event()
+        peer_completed_while_callback_waited = []
+        callback_errors = []
+        worker_errors = []
+
+        @ctypes.CFUNCTYPE(
+            ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+        )
+        def alloc(size, device, stream):
+            if not callback_entered.is_set():
+                callback_entered.set()
+                peer_completed_while_callback_waited.append(
+                    peer_allocation_done.wait(timeout=10)
+                )
+            err, ptr = runtime.cudaMalloc(size)
+            if err != runtime.cudaError_t.cudaSuccess:
+                callback_errors.append(err)
+                return 0
+            return int(ptr)
+
+        @ctypes.CFUNCTYPE(
+            None, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+        )
+        def free(ptr, size, device, stream):
+            (err,) = runtime.cudaFree(ptr)
+            if err != runtime.cudaError_t.cudaSuccess:
+                callback_errors.append(err)
+
+        allocator = torch._C._cuda_customAllocator(
+            ctypes.cast(alloc, ctypes.c_void_p).value,
+            ctypes.cast(free, ctypes.c_void_p).value,
+        )
+        pool = torch.cuda.MemPool(allocator)
+
+        def allocate_from_custom_pool(custom_pool):
+            try:
+                with torch.cuda.use_mem_pool(custom_pool):
+                    torch.empty(1, dtype=torch.uint8, device="cuda")
+            except Exception as e:
+                worker_errors.append(e)
+
+        worker = threading.Thread(target=allocate_from_custom_pool, args=(pool,))
+        worker.start()
+        peer = None
+        try:
+            self.assertTrue(
+                callback_entered.wait(timeout=10),
+                "custom allocation callback was not entered",
+            )
+            # The callback is waiting with the GIL released. This allocation
+            # still needs DeviceCachingAllocator::mutex, so it can complete only
+            # if the custom callback was invoked without that mutex held.
+            peer = torch.empty(1, dtype=torch.uint8, device="cuda")
+        finally:
+            peer_allocation_done.set()
+            worker.join(timeout=10)
+
+        self.assertFalse(worker.is_alive(), "custom allocation worker hung")
+        self.assertEqual(worker_errors, [])
+        self.assertEqual(callback_errors, [])
+        self.assertEqual(peer_completed_while_callback_waited, [True])
+
+        del peer, pool
+        torch.cuda.empty_cache()
+
+    @unittest.skipIf(TEST_WITH_ROCM, "requires CUDA runtime bindings")
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "requires the native caching allocator")
+    @requires_cuda_python_bindings
+    @serialTest()
+    def test_custom_mempool_free_callback_does_not_hold_allocator_lock(self):
+        from cuda.bindings import runtime
+
+        torch.cuda.empty_cache()
+        callback_entered = threading.Event()
+        peer_allocation_done = threading.Event()
+        peer_completed_while_callback_waited = []
+        callback_errors = []
+        worker_errors = []
+
+        @ctypes.CFUNCTYPE(
+            ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+        )
+        def alloc(size, device, stream):
+            err, ptr = runtime.cudaMalloc(size)
+            if err != runtime.cudaError_t.cudaSuccess:
+                callback_errors.append(err)
+                return 0
+            return int(ptr)
+
+        @ctypes.CFUNCTYPE(
+            None, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
+        )
+        def free(ptr, size, device, stream):
+            if not callback_entered.is_set():
+                callback_entered.set()
+                peer_completed_while_callback_waited.append(
+                    peer_allocation_done.wait(timeout=10)
+                )
+            (err,) = runtime.cudaFree(ptr)
+            if err != runtime.cudaError_t.cudaSuccess:
+                callback_errors.append(err)
+
+        allocator = torch._C._cuda_customAllocator(
+            ctypes.cast(alloc, ctypes.c_void_p).value,
+            ctypes.cast(free, ctypes.c_void_p).value,
+        )
+        pool = torch.cuda.MemPool(allocator)
+        with torch.cuda.use_mem_pool(pool):
+            custom_tensor = torch.empty(1, dtype=torch.uint8, device="cuda")
+        del custom_tensor
+
+        # Transfer the final Python reference to a worker so MemPool::~MemPool
+        # and its emptyCache call run there.
+        pool_holder = [pool]
+        del pool
+
+        def destroy_custom_pool():
+            try:
+                pool_holder.clear()
+            except Exception as e:
+                worker_errors.append(e)
+
+        worker = threading.Thread(target=destroy_custom_pool)
+        worker.start()
+        peer = None
+        try:
+            self.assertTrue(
+                callback_entered.wait(timeout=10),
+                "custom free callback was not entered",
+            )
+            # The callback waits with the GIL released. A default-pool allocation
+            # can complete concurrently only if raw_delete runs after the outer
+            # caching-allocator lock has been released.
+            peer = torch.empty(1, dtype=torch.uint8, device="cuda")
+        finally:
+            peer_allocation_done.set()
+            worker.join(timeout=10)
+
+        self.assertFalse(worker.is_alive(), "custom free worker hung")
+        self.assertEqual(worker_errors, [])
+        self.assertEqual(callback_errors, [])
+        self.assertEqual(peer_completed_while_callback_waited, [True])
+
+        del peer
+        torch.cuda.empty_cache()
 
     @serialTest()
     def test_tensor_delete_after_allocator_delete(self):
