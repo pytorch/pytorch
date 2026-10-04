@@ -14,6 +14,14 @@ from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import make_dynamo_test, run_tests
 
 
+class Indexable:
+    def __init__(self, value=0):
+        self.value = value
+
+    def __index__(self):
+        return self.value
+
+
 class ByteArrayTest(torch._dynamo.test_case.TestCase):
     """bytearray-specific tests, ported from CPython ByteArrayTest."""
 
@@ -368,6 +376,61 @@ class ByteArrayTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(b, self.type2test(b"abab"))
         b *= 0
         self.assertEqual(b, self.type2test())
+
+    @make_dynamo_test
+    def test_append(self):
+        b = self.type2test(b"hell")
+        b.append(ord("o"))
+        self.assertEqual(b, b"hello")
+        self.assertEqual(b.append(100), None)
+        b.append(Indexable(ord("A")))
+        self.assertEqual(b, b"hellodA")
+        self.assertRaises(TypeError, lambda: b.append(b"o"))
+        self.assertRaises(ValueError, lambda: b.append(256))
+        self.assertRaises(ValueError, lambda: b.append(-1))
+        self.assertEqual(b, b"hellodA")
+
+    @make_dynamo_test
+    def test_extend(self):
+        a = self.type2test(b"hello")
+        a.extend(a)
+        self.assertEqual(a, b"hellohello")
+        a = self.type2test()
+        a.extend(map(int, b"ab"))
+        a.extend(int(x) for x in b"cd")
+        a.extend([101, Indexable(102)])
+        self.assertEqual(a, b"abcdef")
+        self.assertRaises(ValueError, a.extend, [0, 1, 2, 256])
+        self.assertRaises(ValueError, a.extend, map(int, "X"))
+        self.assertEqual(a, b"abcdef")
+        self.assertRaises(TypeError, a.extend, "def")
+        with self.assertRaisesRegex(TypeError, "can't extend bytearray with float"):
+            a.extend(1.0)
+
+    def test_append_extend_arg_mutation(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(ba, x):
+            ba.append(ord("c"))
+            ba.extend(b"de")
+            return len(ba), x + 1
+
+        b = bytearray(b"ab")
+        out_len, out_y = f(b, torch.ones(1))
+        self.assertEqual(out_len, 5)
+        self.assertEqual(b, bytearray(b"abcde"))
+        self.assertEqual(out_y, torch.ones(1) + 1)
+
+    def test_append_graph_break(self):
+        @torch.compile(backend="eager")
+        def f(ba):
+            ba.append(1)
+            torch._dynamo.graph_break()
+            ba.extend(ba)
+            return ba
+
+        b = bytearray(b"a")
+        self.assertIs(f(b), b)
+        self.assertEqual(b, bytearray(b"a\x01a\x01"))
 
     def test_repr(self):
         @torch.compile(backend="eager")
