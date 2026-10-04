@@ -1297,7 +1297,7 @@ torch.{device_type}.synchronize()
     @expectedFailureMPS  # TODO: fixme
     @gcIfJetson
     @dtypes(torch.float, torch.double)
-    @dtypesIfCUDA(torch.half, torch.float, torch.double)
+    @dtypesIfCUDA(torch.half, torch.bfloat16, torch.float, torch.double)
     @dtypesIfXPU(torch.half, torch.float, torch.double)
     def test_avg_pool2d_nhwc(self, device, dtype):
         def helper(
