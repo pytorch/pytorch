@@ -61,6 +61,10 @@ struct TORCH_API AnomalyMetadata {
   virtual ~AnomalyMetadata();
   virtual void store_stack();
   virtual void print_stack(const std::string& current_node_name);
+  // Format the stored forward traceback for `current_node_name` (and parents).
+  // Used to attach the trace to the backward exception rather than emit a
+  // UserWarning (see issue #101069).
+  virtual std::string format_stack(const std::string& current_node_name);
   virtual void assign_parent(const c10::intrusive_ptr<Node>& parent_node);
 
  private:

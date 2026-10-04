@@ -12682,12 +12682,14 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         with (
             warnings.catch_warnings(record=True) as w,
-            self.assertRaises(torch._dynamo.exc.BackendCompilerFailed),
+            self.assertRaises(torch._dynamo.exc.BackendCompilerFailed) as cm,
         ):
             f(torch.randn(2, 2, requires_grad=True))
 
-        # Suppress unrelated pkg_resources warnings
-        self.assertIn("forward call that caused the error", str(w[-1].message))
+        # AOT tracing keeps the traceback as a warning so sentinel exception
+        # messages stay intact. Eager detect_anomaly attaches it to the exception.
+        combined = str(cm.exception) + "".join(str(x.message) for x in w)
+        self.assertIn("forward call that caused the error", combined)
 
     def test_py_guards_mark_dynamic(self):
         def my_dyn_fn(a):

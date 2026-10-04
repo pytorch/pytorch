@@ -6,7 +6,6 @@ import contextlib
 import contextvars
 import functools
 import gc
-import io
 import math
 import operator
 import os
@@ -6276,22 +6275,20 @@ Done""",
         with self.assertRaisesRegex(
             RuntimeError,
             "Function 'MyFuncBackward' returned nan values in its 0th output.",
-        ):
-            with warnings.catch_warnings(record=True) as w:
-                with detect_anomaly():
-                    out.backward()
-            self.assertIn("No forward pass information", str(w[0].message))
+        ) as cm:
+            with detect_anomaly():
+                out.backward()
+        self.assertIn("No forward pass information", str(cm.exception))
 
         inp = torch.rand(size, requires_grad=True)
         with self.assertRaisesRegex(
             RuntimeError,
             "Function 'MyFuncBackward' returned nan values in its 1th output.",
-        ):
-            with warnings.catch_warnings(record=True) as w:
-                with detect_anomaly():
-                    out = MyFunc.apply(inp, inp, False)
-                    out.backward()
-            self.assertIn("MyFunc.apply", str(w[0].message))
+        ) as cm:
+            with detect_anomaly():
+                out = MyFunc.apply(inp, inp, False)
+                out.backward()
+        self.assertIn("MyFunc.apply", str(cm.exception))
 
     def test_calculate_shape_util(self):
         out = torch.randn(10, 5, requires_grad=True)
@@ -6371,50 +6368,36 @@ Done""",
         out = MyFunc.apply(inp, True)
         (ginp,) = torch.autograd.grad(out, (inp,), create_graph=True)
         gsum = ginp.sum()
-        with warnings.catch_warnings(record=True) as w:
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Function 'MyFunc2Backward' returned nan values in its 0th output.",
-            ):
-                with detect_anomaly():
-                    gsum.backward()
-        self.assertIn("No forward pass information", str(w[1].message))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Function 'MyFunc2Backward' returned nan values in its 0th output.",
+        ) as cm:
+            with detect_anomaly():
+                gsum.backward()
+        self.assertIn("No forward pass information", str(cm.exception))
 
         inp = torch.rand(size, requires_grad=True)
-        with warnings.catch_warnings(record=True) as w:
-            with self.assertRaisesRegex(
-                RuntimeError,
-                "Function 'MyFunc2Backward' returned nan values in its 1th output.",
-            ):
-                with detect_anomaly():
-                    out = MyFunc.apply(inp, False)
-                    (ginp,) = torch.autograd.grad(out, (inp,), create_graph=True)
-                    gsum = ginp.sum()
-                    gsum.backward()
-        self.assertIn("MyFunc2.apply", str(w[1].message))
-        self.assertIn("MyFunc.apply", str(w[2].message))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Function 'MyFunc2Backward' returned nan values in its 1th output.",
+        ) as cm:
+            with detect_anomaly():
+                out = MyFunc.apply(inp, False)
+                (ginp,) = torch.autograd.grad(out, (inp,), create_graph=True)
+                gsum = ginp.sum()
+                gsum.backward()
+        self.assertIn("MyFunc2.apply", str(cm.exception))
+        self.assertIn("MyFunc.apply", str(cm.exception))
 
     def test_anomaly_grad_warnings(self):
-        # PyTorch won't throw warnings if there is an error
-        # but we'd want to at least see them in stderr
-
-        class StdErrDiverter:
-            def __enter__(self):
-                self.stderr_orig = sys.stderr
-                self.stderr_new = io.StringIO()
-                sys.stderr = self.stderr_new
-                return self
-
-            def __exit__(self, *args):
-                self.captured = self.stderr_new.getvalue()
-                sys.stderr = self.stderr_orig
-
-        # if the warnings don't throw, they will be handled as regular warnings
+        # Forward-trace context is attached to the exception (issue #101069)
+        # so error-reporting frameworks see it. Enabling detect_anomaly still
+        # emits a UserWarning about the debug-mode slowdown.
         with self.assertRaisesRegex(
             RuntimeError,
             "one of the variables needed for gradient computation has been "
             "modified by an inplace operation",
-        ):
+        ) as cm:
             with warnings.catch_warnings(record=True) as w:
                 with detect_anomaly():
                     a = torch.randn(5, requires_grad=True)
@@ -6423,29 +6406,39 @@ Done""",
                     d1 += 1
                     torch.autograd.grad(d2.sum(), a)
 
-        self.assertEqual(len(w), 2)
-        self.assertIn("Anomaly Detection has been enabled", str(w[0].message))
-        self.assertIn("Error detected in PowBackward0", str(w[1].message))
-
-        # if the warning throws, it will be printed to sys.stderr
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "one of the variables needed for gradient computation has been "
-            "modified by an inplace operation",
-        ):
-            with warnings.catch_warnings(record=True) as w:
-                with detect_anomaly():
-                    warnings.simplefilter("error")
-                    with StdErrDiverter() as s:
-                        a = torch.randn(5, requires_grad=True)
-                        d1 = a + 1
-                        d2 = d1**2
-                        d1 += 1
-                        torch.autograd.grad(d2.sum(), a)
-
         self.assertEqual(len(w), 1)
         self.assertIn("Anomaly Detection has been enabled", str(w[0].message))
-        self.assertIn("Error detected in PowBackward0", s.captured)
+        self.assertIn("Error detected in PowBackward0", str(cm.exception))
+        self.assertIn("Traceback of forward", str(cm.exception))
+
+    def test_anomaly_preserves_fake_tensor_exception_type(self):
+        # AOT joint tracing enables detect_anomaly and matches FakeTensor
+        # exception types. Wrapping would turn DataDependentOutputException
+        # into a generic RuntimeError and break tracing.
+        from torch._subclasses.fake_tensor import (
+            DataDependentOutputException,
+            FakeTensorMode,
+        )
+
+        unique = torch.ops.aten._unique.default
+
+        def fail(_g):
+            raise DataDependentOutputException(unique)
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", "Anomaly Detection has been enabled."
+            )
+            with FakeTensorMode(), detect_anomaly(check_nan=False):
+                a = torch.randn(2, 2, requires_grad=True)
+                b = a * 2
+                b.register_hook(fail)
+                with self.assertRaises(DataDependentOutputException) as cm:
+                    b.sum().backward()
+        self.assertNotIn(
+            "Traceback of forward call that caused the error",
+            str(cm.exception),
+        )
 
     def test_anomaly_assign_parent_cleanup(self):
         # Test that python objects created are properly cleaned up when assign_parent is called
