@@ -2187,6 +2187,16 @@ def _cuda_cudaCachingAllocator_raw_delete(ptr: _int) -> None: ...
 def _cuda_cudaCachingAllocator_enable(val: _bool) -> None: ...
 def _cuda_cudaCachingAllocator_is_enabled() -> _bool: ...
 def _cuda_beginAllocateToPool(device: _int, mempool_id: tuple[_int, _int]) -> None: ...
+def _cuda_restoreExpandableSegment(
+    device: _int,
+    mempool_id: tuple[_int, _int],
+    is_small: _bool,
+    address: _int,
+    reserve_size: _int,
+    segment_size: _int,
+    handle_type: _int,
+    mapped_ranges: list[tuple[_int, _int]],
+) -> None: ...
 def _cuda_beginAllocateCurrentThreadToPool(
     device: _int,
     mempool_id: tuple[_int, _int],

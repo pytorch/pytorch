@@ -305,6 +305,23 @@ class CUDAAllocator : public DeviceAllocator {
   virtual CheckpointDelta setCheckpointPoolState(
       c10::DeviceIndex device,
       std::shared_ptr<AllocatorState> pps) = 0;
+  // See DeviceCachingAllocator::restore_expandable_segment.
+  virtual void restoreExpandableSegment(
+      c10::DeviceIndex device,
+      cudaStream_t stream,
+      MempoolId_t mempool_id,
+      bool is_small,
+      size_t address,
+      size_t reserve_size,
+      size_t segment_size,
+      Expandable_Segments_Handle_Type handle_type,
+      const std::vector<std::pair<size_t, size_t>>& mapped_ranges) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not support restoreExpandableSegment. "
+        "If you need it, please file an issue describing your use case.");
+  }
   virtual DataPtr allocateWithAddress(size_t size, void* addr) {
     TORCH_CHECK(
         false,
@@ -420,6 +437,28 @@ inline CheckpointDelta setCheckpointPoolState(
 
 inline DataPtr allocateWithAddress(size_t size, void* addr) {
   return get()->allocateWithAddress(size, addr);
+}
+
+inline void restoreExpandableSegment(
+    c10::DeviceIndex device,
+    cudaStream_t stream,
+    MempoolId_t mempool_id,
+    bool is_small,
+    size_t address,
+    size_t reserve_size,
+    size_t segment_size,
+    Expandable_Segments_Handle_Type handle_type,
+    const std::vector<std::pair<size_t, size_t>>& mapped_ranges) {
+  get()->restoreExpandableSegment(
+      device,
+      stream,
+      mempool_id,
+      is_small,
+      address,
+      reserve_size,
+      segment_size,
+      handle_type,
+      mapped_ranges);
 }
 
 // CUDAGraph interactions
