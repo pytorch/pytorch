@@ -87,6 +87,7 @@ def is_available() -> bool:
 
     Example::
 
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> assert torch.accelerator.is_available(), "No available accelerators detected."
     """
     # Why not just check "device_count() > 0" like other is_available call?
