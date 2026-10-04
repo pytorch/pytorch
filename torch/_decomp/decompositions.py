@@ -6032,12 +6032,27 @@ def isin(elements, test_elements, *, assume_unique=False, invert=False):
         )
 
 
+def _check_bernoulli_p(p: TensorLike | float) -> None:
+    # Mirrors the eager check; _assert_async is side-effectful and won't be DCE'd.
+    if isinstance(p, TensorLike):
+        aten._assert_async.msg(
+            torch.all((p >= 0) & (p <= 1)),
+            "bernoulli expects all elements of p to be in [0, 1]",
+        )
+    else:
+        torch._check(
+            0 <= p <= 1,
+            lambda: f"bernoulli_ expects p to be in [0, 1], but got p={p}",
+        )
+
+
 @register_decomposition(aten.bernoulli.default)
 def bernoulli(
     self: torch.Tensor,
     *,
     generator: torch.Generator | None = None,
 ) -> torch.Tensor:
+    _check_bernoulli_p(self)
     if generator is None:
         raw_p = torch.rand(self.size(), dtype=torch.float32, device=self.device)
     else:

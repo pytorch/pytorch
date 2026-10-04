@@ -12159,6 +12159,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             rtol=0.06,
         )
 
+    @parametrize("p", (-0.5, 1.5, float("nan")))
+    def test_bernoulli_invalid_p_raises(self, p):
+        if self.device != "cpu":
+            raise unittest.SkipTest("device-side assert would poison the context")
+
+        def fn(a):
+            return aten.bernoulli(a)
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        with self.assertRaisesRegex(RuntimeError, r"to be in \[0, 1\]"):
+            opt_fn(torch.full((4,), p, device=self.device))
+        self.assertTrue((opt_fn(torch.full((4,), 0.3, device=self.device)) <= 1).all())
+
     def test_narrow(self):
         def fn(x):
             return (
