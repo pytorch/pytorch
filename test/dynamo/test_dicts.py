@@ -48,6 +48,11 @@ class _BadCmp:
         return 1
 
 
+class _TupleEqualList(list):
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, tuple)
+
+
 class SimpleDict(dict):
     pass
 
@@ -1638,6 +1643,29 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
+
+    def test_dict_items_isdisjoint(self):
+        def f():
+            items = {"a": [1], "b": [2]}.items()
+            return (
+                items.isdisjoint([("x", [1])]),
+                items.isdisjoint([("a", [1])]),
+                items.isdisjoint([("a", [3])]),
+                items.isdisjoint(["a", []]),
+                items.isdisjoint(iter([("a", [1]), ([], 1)])),
+                items.isdisjoint([_TupleEqualList()]),
+            )
+
+        expected = (True, False, True, True, False, True)
+        self.assertEqual(f(), expected)
+        self.assertEqual(torch.compile(f, backend="eager", fullgraph=True)(), expected)
+
+    def test_dict_items_isdisjoint_tensor_value(self):
+        def f(t):
+            return {"a": t}.items().isdisjoint([("a", t + 0)])
+
+        t = torch.ones(1)
+        self.assertEqual(torch.compile(f, backend="eager")(t), f(t))
 
     @parametrize("op", ["ior", "iand", "ixor", "isub"])
     def test_dict_items_inplace_binop(self, op):

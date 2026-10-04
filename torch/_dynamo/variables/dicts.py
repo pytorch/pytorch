@@ -51,6 +51,7 @@ from ..utils import (
     dict_keys,
     dict_values,
     istype,
+    lazily_unpack,
     tracked_repr,
     unpack_iterable,
 )
@@ -1461,6 +1462,28 @@ class DictItemsVariable(DictViewVariable):
 
     kv = "items"
 
+    def dict_items_isdisjoint(
+        self,
+        tx: "InstructionTranslatorBase",
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        for item in lazily_unpack(tx, args[0]):
+            found = self.sq_contains_impl(tx, item)
+            if not found.is_python_constant():
+                unimplemented(
+                    gb_type="dict_items.isdisjoint with a data-dependent comparison",
+                    context=f"isdisjoint {self} {item} -> {found}",
+                    explanation="isdisjoint stops at the first matching item, but "
+                    "comparing this item with a stored value does not give a constant result.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            if found.as_python_constant():
+                return ConstantVariable.create(False)
+        return ConstantVariable.create(True)
+
+    tp_methods = {"isdisjoint": Method(dict_items_isdisjoint)}
+
     @property
     def set_items(self) -> set["HashableTracker"]:
         return {
@@ -1491,23 +1514,21 @@ class DictItemsVariable(DictViewVariable):
         self, tx: "InstructionTranslatorBase", item: VariableTracker
     ) -> VariableTracker:
         # ref: https://github.com/python/cpython/blob/v3.13.0/Objects/dictobject.c#L6433-L6451
-        from ..utils import iter_contains
+        if not isinstance(
+            item, (variables.TupleVariable, variables.UserDefinedTupleVariable)
+        ):
+            return ConstantVariable.create(False)
+        if len(item.items) != 2:
+            return ConstantVariable.create(False)
 
-        if not is_hashable(item):
-            raise_type_error(tx, f"unhashable type: '{item.python_type_name()}'")
-
-        # Fast path: if item is a known (key, value) pair, use O(1) dict lookup.
-        if isinstance(item, variables.TupleVariable) and len(item.items) == 2:
-            key, val = item.items
-            key_ht = HashableTracker(key)
-            if key_ht not in self.dv_dict.items:
-                return VariableTracker.build(tx, False)
-            stored = self.dv_dict.items[key_ht]
-            # dictitems_contains: PyObject_RichCompareBool(found, value, Py_EQ)
-            # on the stored value, so a value whose __eq__ raises propagates.
-            return generic_richcompare_bool(tx, stored, val, "__eq__")
-
-        return iter_contains(self.view_items_vt, item, tx)
+        key, val = item.items
+        key_ht = HashableTracker(key)
+        if key_ht not in self.dv_dict.items:
+            return VariableTracker.build(tx, False)
+        stored = self.dv_dict.items[key_ht]
+        # dictitems_contains: PyObject_RichCompareBool(found, value, Py_EQ)
+        # on the stored value, so a value whose __eq__ raises propagates.
+        return generic_richcompare_bool(tx, stored, val, "__eq__")
 
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: VariableTracker, op: str
