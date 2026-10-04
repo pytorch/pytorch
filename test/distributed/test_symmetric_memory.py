@@ -18,9 +18,12 @@ import torch.distributed._symmetric_memory as symm_mem
 from torch._C import FileCheck
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
+from torch._inductor.compile_fx import compile_fx_inner
+from torch._inductor.decomposition import select_decomp_table
 from torch._inductor.utils import (
     fresh_cache,
     fresh_inductor_cache,
+    run_and_get_code,
     run_and_get_triton_code,
 )
 from torch._prims_common import make_contiguous_strides_for
@@ -38,6 +41,7 @@ from torch.distributed._symmetric_memory._nccl import (
     register_external_nccl_comm,
 )
 from torch.distributed.distributed_c10d import _TORCHCOMM_AVAILABLE
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_cuda import SM100OrLater, SM89OrLater, SM90OrLater
 from torch.testing._internal.common_device_type import (
     e4m3_type,
@@ -2620,6 +2624,29 @@ class LoweringTest(MultiProcContinuousTest):
         eager_result_3 = func_3(arg.clone())
         compiled_result_3 = compiled_3(arg.clone())
         torch.testing.assert_close(eager_result_3, compiled_result_3)
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_cache()
+    def test_lowering_one_shot_all_reduce_live_alias(self):
+        self._init_process()
+        arg = torch.rand(4, 4, device=self.device)
+
+        # make_fx keeps all_reduce_ on a view whose base and sibling alias are
+        # read afterwards; torch.compile's functionalization never emits this.
+        def func(x):
+            base = x + 1
+            reduced = torch.ops._c10d_functional.all_reduce_(base.view(-1), "sum", "0")
+            torch.ops._c10d_functional.wait_tensor(reduced)
+            return base, base.t()
+
+        gm = make_fx(func, decomposition_table=select_decomp_table())(arg.clone())
+        compiled_result, (code,) = run_and_get_code(
+            lambda: compile_fx_inner(gm, [arg.clone()])([arg.clone()])
+        )
+
+        torch.testing.assert_close(compiled_result, func(arg.clone()))
+        FileCheck().check("one_shot_all_reduce").run(code)
 
     @skip_if_rocm_multiprocess  # requires registered-buffer support
     @skip_if_lt_x_gpu(2)
