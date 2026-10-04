@@ -18102,6 +18102,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         test_elements = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
         self.common(torch.isin, (elements, test_elements), {"assume_unique": True})
 
+    def test_isin_nan_inf(self):
+        # https://github.com/pytorch/pytorch/issues/198484
+        # sort places nan after inf and nan compares false against everything, so
+        # searchsorted could step past it and miss a present inf in isin_sorting.
+        inf, nan = float("inf"), float("nan")
+        test_elements = torch.tensor(
+            [0.0, 1.0, -1.0, inf, -inf, nan, 1e-38, 3.4e38, 0.5, -0.5, 0.0, 1.0],
+            device=self.device,
+        )
+        for invert in [True, False]:
+            torch._dynamo.reset()
+            elements = torch.tensor([inf], device=self.device)
+            self.common(torch.isin, (elements, test_elements), {"invert": invert})
+
+        # a nan in test_elements must not match an inf element
+        torch._dynamo.reset()
+        elements = torch.tensor([inf, nan, -inf, 1.0], device=self.device)
+        test_elements = torch.tensor([0.0, 1.0, nan, nan] * 5, device=self.device)
+        self.common(torch.isin, (elements, test_elements))
+
     def test_mul_index_expr(self):
         # Minified repro from https://github.com/pytorch/pytorch/issues/111884
         def forward():
