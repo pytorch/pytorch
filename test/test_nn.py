@@ -56,7 +56,7 @@ from torch.testing._internal.common_modules import module_inputs_torch_nn_Linear
 from hypothesis import given
 import torch.testing._internal.hypothesis_utils as hu
 from torch.testing._internal.common_utils import _assertGradAndGradgradChecks, gradcheck, gradgradcheck, \
-    GRADCHECK_NONDET_TOL
+    GRADCHECK_NONDET_TOL, DeterministicGuard
 from torch.testing._internal.common_utils import dtype2prec_DONTUSE
 from torch.testing._internal.common_cuda import tf32_on_and_off, tf32_off, tf32_on
 from torch.types import _TensorOrTensors
@@ -9581,11 +9581,20 @@ class TestNNDeviceType(NNTestCase):
     @parametrize_test("align_corners", [True, False])
     @parametrize_test("mode", ["bilinear", "bicubic", "lanczos"])
     @parametrize_test("memory_format", [torch.contiguous_format, torch.channels_last])
+    @parametrize_test("deterministic", [False, True])
     @expectedFailureMPS  # double device type
     @onlyNativeDeviceTypes
-    def test_upsamplingBiMode2d(self, device, antialias, align_corners, mode, memory_format):
+    def test_upsamplingBiMode2d(
+        self, device, antialias, align_corners, mode, memory_format, deterministic
+    ):
         # Forward AD does not support XLA because XLA tensors don't have storage
         check_forward_ad = torch.device(device).type != 'xla'
+
+        if deterministic:
+            if torch.device(device).type != "cuda":
+                raise unittest.SkipTest("deterministic bilinear coverage runs on CUDA only")
+            if mode != "bilinear" or antialias:
+                raise unittest.SkipTest("deterministic coverage only applies to bilinear")
 
         if mode == "lanczos":
             if torch.device(device).type != "cpu":
@@ -9596,64 +9605,77 @@ class TestNNDeviceType(NNTestCase):
                 raise SkipTest("Lanczos mode does not support align_corners=True")
 
         kwargs = dict(mode=mode, align_corners=align_corners, antialias=antialias)
-        # test float scale factor up & downsampling
-        for scale_factor in [0.5, 1.5, 2]:
-            in_t = torch.ones(
-                2, 3, 8, 8, device=device,
-                dtype=torch.double).contiguous(memory_format=memory_format).requires_grad_()
-            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-            with warnings.catch_warnings(record=True) as w:
-                out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-            expected_out = torch.ones(2, 3, out_size, out_size, device=device, dtype=torch.double)
-            self.assertEqual(expected_out, out_t)
-            # Assert that memory format is carried through to the output
-            self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
-            out_t.backward(torch.randn_like(out_t))
-            self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
+        with DeterministicGuard(deterministic):
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                in_t = torch.ones(
+                    2, 3, 8, 8, device=device,
+                    dtype=torch.double).contiguous(memory_format=memory_format).requires_grad_()
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                with warnings.catch_warnings(record=True) as w:
+                    out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
+                expected_out = torch.ones(2, 3, out_size, out_size, device=device, dtype=torch.double)
+                self.assertEqual(expected_out, out_t)
+                # Assert that memory format is carried through to the output
+                self.assertTrue(out_t.is_contiguous(memory_format=memory_format))
+                grad_out = torch.randn_like(out_t).contiguous(memory_format=memory_format)
+                out_t.backward(grad_out)
+                self.assertTrue(in_t.grad.is_contiguous(memory_format=memory_format))
 
-            if torch.device(device).type == 'cuda':
-                # Bilinear backward is nondeterministic because of atomicAdd usage
-                nondet_tol = 1e-5
-            else:
-                nondet_tol = 0.0
+                if deterministic:
+                    input_ref = in_t.detach().cpu().requires_grad_()
+                    output_ref = F.interpolate(input_ref, scale_factor=scale_factor, **kwargs)
+                    output_ref.backward(grad_out.cpu())
+                    self.assertEqual(in_t.grad.cpu(), input_ref.grad, atol=1e-10, rtol=1e-10)
 
-            input = torch.randn(
-                2, 3, 8, 8, device=device,
-                dtype=torch.double).contiguous(memory_format=memory_format).requires_grad_()
-            gradcheck(
-                lambda x: F.interpolate(x, out_size, **kwargs),
-                [input],
-                check_forward_ad=check_forward_ad, nondet_tol=nondet_tol
-            )
-            gradgradcheck(
-                lambda x: F.interpolate(x, out_size, **kwargs),
-                [input],
-                check_fwd_over_rev=check_forward_ad, nondet_tol=nondet_tol
-            )
+                # Allow atomic accumulation noise only for the nondeterministic path.
+                if deterministic:
+                    nondet_tol = 0.0
+                elif torch.device(device).type == 'cuda':
+                    nondet_tol = 1e-5
+                else:
+                    nondet_tol = 0.0
 
-            # Assert that cpu and cuda give same results
-            if torch.device(device).type == 'cuda':
-                for shapes in [
-                    (2, 2, 3, 4), (2, 3, 4, 5), (3, 1, 2, 2), (1, 5, 3, 2)
-                ]:
-                    a_cuda = torch.randn(
-                        *shapes, device=device, dtype=torch.double
-                    ).contiguous(memory_format=memory_format).requires_grad_()
-                    a_cpu = a_cuda.detach().cpu().requires_grad_()
+                input = torch.randn(
+                    2, 3, 8, 8, device=device,
+                    dtype=torch.double).contiguous(memory_format=memory_format).requires_grad_()
+                gradcheck(
+                    lambda x: F.interpolate(x, out_size, **kwargs),
+                    [input],
+                    check_forward_ad=check_forward_ad, nondet_tol=nondet_tol
+                )
+                gradgradcheck(
+                    lambda x: F.interpolate(x, out_size, **kwargs),
+                    [input],
+                    check_fwd_over_rev=check_forward_ad, nondet_tol=nondet_tol
+                )
 
-                    with warnings.catch_warnings(record=True):
-                        out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, **kwargs)
-                        out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, **kwargs)
+                # Assert that cpu and cuda give same results
+                if torch.device(device).type == 'cuda':
+                    for shapes in [
+                        (2, 2, 3, 4), (2, 3, 4, 5), (3, 1, 2, 2), (1, 5, 3, 2)
+                    ]:
+                        a_cuda = torch.randn(
+                            *shapes, device=device, dtype=torch.double
+                        ).contiguous(memory_format=memory_format).requires_grad_()
+                        a_cpu = a_cuda.detach().cpu().requires_grad_()
 
-                    self.assertEqual(out_cpu, out_cuda.cpu())
+                        with warnings.catch_warnings(record=True):
+                            out_cuda = F.interpolate(a_cuda, scale_factor=scale_factor, **kwargs)
+                            out_cpu = F.interpolate(a_cpu, scale_factor=scale_factor, **kwargs)
 
-                    g_cuda = torch.randn_like(out_cuda)
-                    g_cpu = g_cuda.cpu()
+                        self.assertEqual(out_cpu, out_cuda.cpu())
 
-                    out_cuda.backward(g_cuda)
-                    out_cpu.backward(g_cpu)
+                        g_cuda = torch.randn_like(out_cuda)
+                        g_cpu = g_cuda.cpu()
 
-                    self.assertEqual(a_cuda.grad, a_cpu.grad)
+                        out_cuda.backward(g_cuda)
+                        out_cpu.backward(g_cpu)
+
+                        if deterministic:
+                            self.assertEqual(a_cuda.grad, a_cpu.grad, atol=1e-10, rtol=1e-10)
+                        else:
+                            self.assertEqual(a_cuda.grad, a_cpu.grad)
 
     @parametrize_test("antialias", [True, False])
     @parametrize_test("num_channels", [3, 5])
