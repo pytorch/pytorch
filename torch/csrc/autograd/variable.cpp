@@ -249,7 +249,9 @@ c10::intrusive_ptr<Node> rebase_history(
   return fn;
 }
 
-void create_cpp_hook(const at::TensorBase& self, bool is_retains_grad_hook) {
+void create_cpp_hook(
+    const at::TensorBase& self,
+    bool /*is_retains_grad_hook*/) {
   const auto& fn = self.grad_fn();
   std::shared_ptr<hooks_list>& list =
       materialize_autograd_meta(self)->cpp_hooks_list_;
