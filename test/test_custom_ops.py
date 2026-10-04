@@ -6544,11 +6544,12 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             (torch.randn(3),),
             (torch.randn(3, requires_grad=True),),
         ]
-        if torch.cuda.is_available():
+        if TEST_CUDA or TEST_XPU:
+            gpu = "cuda" if TEST_CUDA else "xpu"
             sample_inputs.extend(
                 [
-                    (torch.randn(3, device="cuda"),),
-                    (torch.randn(3, device="cuda", requires_grad=True),),
+                    (torch.randn(3, device=gpu),),
+                    (torch.randn(3, device=gpu, requires_grad=True),),
                 ]
             )
         for args in sample_inputs:
