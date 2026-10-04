@@ -131,6 +131,21 @@ class CudaReproTests(TestCase):
         self.assertEqual(result.dtype, expected.dtype)
         self.assertEqual(result, expected)
 
+    @parametrize("op", ["mm", "bmm"])
+    def test_outer_product_out_dtype_compile(self, op: str) -> None:
+        batch = (2,) if op == "bmm" else ()
+        a = torch.randn(*batch, 4, 1, device=device_type, dtype=torch.float16)
+        b = torch.randn(*batch, 1, 3, device=device_type, dtype=torch.float16)
+
+        def fn(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            return getattr(torch, op)(x, y, out_dtype=torch.float32)
+
+        compiled = torch.compile(fn, backend="inductor", fullgraph=True)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result.dtype, expected.dtype)
+        self.assertEqual(result, expected)
+
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_frexp_non_finite(self):
         def fn(x):
