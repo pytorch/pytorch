@@ -2222,6 +2222,39 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
 
     return decorator
 
+def skipIfTorchDynamoOnDevices(msg="test doesn't currently work with dynamo on this device", device_types=None):
+    """
+    Skip test in Dynamo mode only on specific device types.
+    
+    Usage:
+    @skipIfTorchDynamoOnDevices("shape mismatch", device_types=['cpu', 'xpu'])
+    def test_blah(self, device, dtype):
+        ...
+    
+    Args:
+        msg: Skip message
+        device_types: List of device type strings (e.g., ['cpu', 'xpu']) to skip on.
+                      If None or empty, skips on all devices in Dynamo mode.
+    """
+    if not isinstance(msg, str):
+        raise AssertionError("Are you using skipIfTorchDynamoOnDevices correctly?")
+    
+    if device_types is None:
+        device_types = []
+    elif isinstance(device_types, str):
+        device_types = [device_types]
+    
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(self, *args, **kwargs):
+            # Check if we're in Dynamo mode AND on one of the target devices
+            if TEST_WITH_TORCHDYNAMO and hasattr(self, 'device_type'):
+                if not device_types or self.device_type in device_types:
+                    raise unittest.SkipTest(msg)
+            return fn(self, *args, **kwargs)
+        return wrapper
+    return decorator
+
 def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
                         condition=TEST_WITH_TORCHINDUCTOR):
     def decorator(fn):

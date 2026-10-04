@@ -23,7 +23,8 @@ from torch.testing._internal.common_utils import (
     parametrize, serialTest, subtest,
     gradcheck, gradgradcheck,
     skipIfMPS,
-    skipIfTorchDynamo,
+    skipIfXpu,
+    skipIfTorchDynamo, skipIfTorchDynamoOnDevices, HardwareClassification,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, onlyCPU, onlyCUDA, onlyNativeDeviceTypes, expectedFailureMeta, expectedFailureXPU, instantiate_device_type_tests, dtypes, dtypesIfCUDA,
@@ -100,7 +101,8 @@ def _reduced_shape(shape, empty_dim_as_none=False, dim=None, keepdim=False):
 
     return result
 
-class TestReductions(TestCase):
+class TestReductionsDevice(TestCase):
+    hw_classification = HardwareClassification.ACCELERATOR
     ###########################################################################
     # ReductionOpInfo unit tests
     ###########################################################################
@@ -1858,6 +1860,7 @@ class TestReductions(TestCase):
 
     @dtypes(torch.int32, torch.int64)
     @skipIfMPS
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/5092")
     def test_nansum_int_out_dtype_matches_inductor(self, device, dtype):
         # Eager/inductor parity for #183318.
         out_dtype = dtype
@@ -1875,8 +1878,6 @@ class TestReductions(TestCase):
         self.assertEqual(eager, compiled)
 
     @dtypes(*all_types_and(torch.half))
-    @dtypesIfXPU(torch.half, torch.int8, torch.uint8, torch.float32)
-    # Acc issue for other types on xpu, see https://github.com/intel/torch-xpu-ops/issues/2295
     @skipIfMPS
     def test_argminmax_multiple(self, device, dtype):
         # Case: All Ones
@@ -2527,7 +2528,6 @@ class TestReductions(TestCase):
 
     @onlyAccelerator
     @skipIfMPS
-    # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
     @dtypes(torch.half, torch.float, torch.double, torch.bfloat16)
     def test_reduction_vectorize_along_output(self, device, dtype):
         def run_test(input_):
@@ -3073,8 +3073,7 @@ class TestReductions(TestCase):
         self.assertEqual(torch_result, numpy_result, exact_dtype=exact_dtype)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
+    @skipIfTorchDynamoOnDevices("https://github.com/intel/torch-xpu-ops/issues/5123", device_types=['cpu', 'xpu'])
     @skipIfMPS
     def test_var_vs_numpy(self, device, dtype):
         _size = (20, 20)
@@ -3087,8 +3086,7 @@ class TestReductions(TestCase):
             self._compare_std_var_with_numpy('var', device, dtype, *test_case)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
+    @skipIfTorchDynamoOnDevices("https://github.com/intel/torch-xpu-ops/issues/5123", device_types=['cpu', 'xpu'])
     @skipIfMPS
     def test_std_vs_numpy(self, device, dtype):
         _size = (20, 20)
@@ -3101,8 +3099,6 @@ class TestReductions(TestCase):
             self._compare_std_var_with_numpy('std', device, dtype, *test_case)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
     @skipIfMPS
     def test_var_correction_vs_numpy(self, device, dtype):
         _size = (20, 20)
@@ -3138,8 +3134,6 @@ class TestReductions(TestCase):
             self.assertEqual(torch_res, numpy_res)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    # Driver issue for float64 on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-    @dtypesIfXPU(torch.float, torch.cfloat, torch.cdouble)
     @skipIfMPS
     def test_std_correction_vs_numpy(self, device, dtype):
         _size = (20, 20)
@@ -3175,8 +3169,6 @@ class TestReductions(TestCase):
             self.assertEqual(torch_res, numpy_res)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    # Driver issue on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-    @dtypesIfXPU(torch.float, torch.cfloat)
     @skipIfMPS
     def test_std_mean_correction(self, device, dtype):
         _size = (20, 20)
@@ -3209,8 +3201,6 @@ class TestReductions(TestCase):
             self.assertEqual(mean1, mean2)
 
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
-    # Driver issue on XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
-    @dtypesIfXPU(torch.float, torch.cfloat)
     @skipIfMPS
     def test_var_mean_correction(self, device, dtype):
         _size = (20, 20)
@@ -3472,6 +3462,7 @@ class TestReductions(TestCase):
     # Tests to ensure that reduction functions employing comparison operators are usable when there
     # exists a zero dimension (i.e. when the tensors are empty) in the tensor. These tests specifically
     # cater to functions where specifying the `dim` parameter is necessary.
+    @skipIfTorchDynamoOnDevices("https://github.com/intel/torch-xpu-ops/issues/5126", device_types=['cpu', 'xpu'])
     def test_tensor_compare_ops_empty(self, device):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
@@ -3769,7 +3760,9 @@ class TestReductions(TestCase):
         self.assertEqual(result_eager.shape, result_compiled.shape)
         self.assertEqual(result_eager.shape, torch.Size([2, 2]))
 
-class TestReductionsOnCPU(TestCase):
+class TestReductions(TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # TODO: kill map2_ (and similar) uses and update to compare with NumPy
     # only works on CPU since this uses map2_, which is only supported on CPU
     def _testCSelection(self, torchfn, mathfn):
@@ -4213,7 +4206,7 @@ as the input tensor excluding its innermost dimension'):
             values = torch.tensor([float("nan")], device="cpu", dtype=torch.float32)
             torch.histogram(values, 2)
 
-instantiate_device_type_tests(TestReductions, globals(), allow_xpu=True, allow_mps=True)
+instantiate_device_type_tests(TestReductionsDevice, globals(), allow_xpu=True, allow_mps=True)
 
 if __name__ == '__main__':
     run_tests()
