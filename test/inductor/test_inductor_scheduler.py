@@ -125,6 +125,209 @@ def _test_cases(device, dtype):
 
 
 class TestScheduler(TestCase):
+    @parametrize(
+        "offset, consumer_size",
+        ((64, (4, 129)), (256, (4, 128)), (-1, (4, 128))),
+    )
+    def test_translation_proof_reject_bounds(self, offset, consumer_size):
+        row, feature = sympy.symbols("row feature", integer=True, nonnegative=True)
+        variables = (row, feature)
+        index = 192 * row + feature
+        producer = MemoryDep("normed", index, variables, (4, 192))
+        consumer = MemoryDep("normed", index + offset, variables, consumer_size)
+        self.assertIsNone(
+            SubParentAccessRelation.prove_translation(
+                (producer,), consumer, sizevars=SizeVarAllocator()
+            )
+        )
+
+    @parametrize(
+        "row_stride, feature_stride, offset",
+        ((192, 2, 64), (192, -1, 127), (193, 1, 64)),
+    )
+    def test_translation_proof_reject_transform(
+        self, row_stride, feature_stride, offset
+    ):
+        row, feature = sympy.symbols("row feature", integer=True, nonnegative=True)
+        variables = (row, feature)
+        producer = MemoryDep("normed", 192 * row + feature, variables, (4, 192))
+        index = row_stride * row + feature_stride * feature + offset
+        consumer = MemoryDep("normed", index, variables, (4, 128))
+        self.assertIsNone(
+            SubParentAccessRelation.prove_translation(
+                (producer,), consumer, sizevars=SizeVarAllocator()
+            )
+        )
+
+    @parametrize("mismatch", ("name", "rank", "indirect"))
+    def test_translation_proof_reject_dependency(self, mismatch):
+        row, feature = sympy.symbols("row feature", integer=True, nonnegative=True)
+        variables = (row, feature)
+        index = 192 * row + feature
+        producer = MemoryDep("normed", index, variables, (4, 192))
+        if mismatch == "name":
+            consumer = MemoryDep("other", index + 64, variables, (4, 128))
+        elif mismatch == "rank":
+            variables = (*variables, sympy.Symbol("extra", integer=True))
+            consumer = MemoryDep("normed", index + 64, variables, (4, 128, 1))
+        else:
+            index = sympy.Symbol("indirect_index", integer=True) + feature
+            consumer = MemoryDep("normed", index, variables, (4, 128))
+        self.assertIsNone(
+            SubParentAccessRelation.prove_translation(
+                (producer,), consumer, sizevars=SizeVarAllocator()
+            )
+        )
+
+    def test_translation_proof_reject_conflicting_sources(self):
+        row, feature = sympy.symbols("row feature", integer=True, nonnegative=True)
+        variables = (row, feature)
+        index = 192 * row + feature
+        producer = MemoryDep("normed", index, variables, (4, 192))
+        conflicting_source = MemoryDep("normed", index + 1, variables, (4, 192))
+        consumer = MemoryDep("normed", index + 64, variables, (4, 128))
+        self.assertIsNone(
+            SubParentAccessRelation.prove_translation(
+                (producer, conflicting_source), consumer, sizevars=SizeVarAllocator()
+            )
+        )
+
+    @parametrize(
+        "minimum_width, row_shift, feature_shift, expected_translation",
+        (
+            (128, 0, 64, (0, 64)),
+            (32, 0, 64, None),
+            (128, 1, 0, (1, 0)),
+            (128, 2, 0, (2, 0)),
+            (128, 1, 64, (1, 64)),
+        ),
+    )
+    def test_translation_proof_symbolic_width(
+        self, minimum_width, row_shift, feature_shift, expected_translation
+    ):
+        row, feature = sympy.symbols("row feature", integer=True, nonnegative=True)
+        width = sympy.Symbol("proof_width", integer=True, positive=True)
+        variables = (row, feature)
+        index = width * row + feature
+        producer = MemoryDep("normed", index, variables, (4, width))
+        consumer_index = index + row_shift * width + feature_shift
+        consumer_size = (4 - row_shift, width - feature_shift)
+        consumer = MemoryDep("normed", consumer_index, variables, consumer_size)
+        sizevars = SizeVarAllocator()
+        sizevars.shape_env.var_to_range[width] = ValueRanges(minimum_width, 1024)
+        proof = SubParentAccessRelation.prove_translation(
+            (producer,), consumer, sizevars=sizevars
+        )
+        if expected_translation is None:
+            self.assertIsNone(proof)
+        else:
+            self.assertIsNotNone(proof)
+            self.assertEqual(proof.translation, expected_translation)
+
+    @parametrize(
+        "producer_size, consumer_size, translation",
+        (
+            ((4, 192), (4, 64), (0, 0)),
+            ((4, 192), (4, 128), (0, 64)),
+            ((4, 192), (3, 128), (1, 64)),
+            ((4, 3, 192), (3, 2, 128), (1, 1, 64)),
+        ),
+    )
+    @parametrize("multiple_sources", (False, True))
+    def test_translation_proof(
+        self, producer_size, consumer_size, translation, multiple_sources
+    ):
+        variables = sympy.symbols(
+            f"i:{len(producer_size)}", integer=True, nonnegative=True
+        )
+        strides = tuple(
+            sympy.prod(producer_size[axis + 1 :]) for axis in range(len(producer_size))
+        )
+        producer_index = sum(stride * var for stride, var in zip(strides, variables))
+        offset = sum(stride * shift for stride, shift in zip(strides, translation))
+        consumer = MemoryDep(
+            "normed", producer_index + offset, variables, consumer_size
+        )
+        if multiple_sources:
+            flat, group, lane = sympy.symbols(
+                "flat group lane", integer=True, nonnegative=True
+            )
+            grouped_index = producer_index.subs({variables[-1]: 64 * group + lane})
+            grouped_vars = (*variables[:-1], group, lane)
+            grouped_size = (*producer_size[:-1], 3, 64)
+            sources = (
+                MemoryDep("normed", flat, (flat,), (sympy.prod(producer_size),)),
+                MemoryDep("normed", grouped_index, grouped_vars, grouped_size),
+            )
+        else:
+            source = MemoryDep("normed", producer_index, variables, producer_size)
+            sources = (source,)
+        sizevars = SizeVarAllocator()
+        with V.set_graph_handler(Mock(sizevars=sizevars)):
+            source_frames = tuple(
+                source.normalize_with_ranges(variables, producer_size)
+                for source in sources
+            )
+        for source in source_frames:
+            self.assertIsNotNone(source)
+            self.assertEqual(source.index, producer_index)
+        proof = SubParentAccessRelation.prove_translation(
+            source_frames, consumer, sizevars=sizevars
+        )
+        self.assertIsNotNone(proof)
+        self.assertEqual(proof.translation, translation)
+        extents = tuple(zip(producer_size, consumer_size))
+        self.assertEqual(proof.compatible_extents, extents)
+        self.assertEqual(
+            proof.matched_dependencies,
+            tuple(MemoryDepMatch(source, consumer) for source in source_frames),
+        )
+
+    @parametrize(
+        "producer_size, consumer_size, translation",
+        (
+            ((1, 192), (1, 128), (0, 64)),
+            ((4, 1), (3, 1), (1, 0)),
+            ((4, 192), (1, 128), (2, 64)),
+            ((4, 192), (4, 1), (0, 64)),
+            ((1, 1), (1, 1), (0, 0)),
+        ),
+    )
+    @parametrize("omit_producer_terms", (False, True))
+    @parametrize("omit_consumer_terms", (False, True))
+    def test_translation_proof_singleton_axes(
+        self,
+        producer_size,
+        consumer_size,
+        translation,
+        omit_producer_terms,
+        omit_consumer_terms,
+    ):
+        row, feature = sympy.symbols("row feature", integer=True, nonnegative=True)
+        variables = (row, feature)
+        producer_index = producer_size[1] * row + feature
+        offset = producer_size[1] * translation[0] + translation[1]
+        consumer_index = producer_index + offset
+        if omit_producer_terms:
+            producer_index = producer_index.subs(
+                {var: 0 for var, size in zip(variables, producer_size) if size == 1}
+            )
+        if omit_consumer_terms:
+            consumer_index = consumer_index.subs(
+                {var: 0 for var, size in zip(variables, consumer_size) if size == 1}
+            )
+        producer = MemoryDep("buf", producer_index, variables, producer_size)
+        consumer = MemoryDep("buf", consumer_index, variables, consumer_size)
+        proof = SubParentAccessRelation.prove_translation(
+            (producer,), consumer, sizevars=SizeVarAllocator()
+        )
+        self.assertIsNotNone(proof)
+        self.assertEqual(proof.translation, translation)
+        extents = tuple(zip(producer_size, consumer_size))
+        self.assertEqual(proof.compatible_extents, extents)
+        match = MemoryDepMatch(producer, consumer)
+        self.assertEqual(proof.matched_dependencies, (match,))
+
     def _mock_base_snode(self, name, device=None):
         node = Mock()
         node.get_name.return_value = name
