@@ -20544,6 +20544,107 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(y, ey)
         self.assertEqual(base, ebase)
 
+    def test_woq_fusion_device_registry(self):
+        """Third-party backends can opt into the WOQ int8 fusions by device type."""
+        from torch._inductor.fx_passes.quantization import (
+            _concat_linear_int8_woq_devices,
+            _woq_int8pack_fusion_devices,
+            register_concat_linear_int8_woq_device,
+            register_woq_int8pack_fusion_device,
+        )
+
+        device_type = "privateuseone"
+        self.addCleanup(_concat_linear_int8_woq_devices.discard, device_type)
+        self.addCleanup(_woq_int8pack_fusion_devices.discard, device_type)
+
+        # The registries start as the previously hardcoded whitelists:
+        # cpu/cuda for both, plus xpu for the int8pack-mm fusion only.
+        for default_device in ("cpu", "cuda"):
+            self.assertIn(default_device, _concat_linear_int8_woq_devices)
+            self.assertIn(default_device, _woq_int8pack_fusion_devices)
+        self.assertIn("xpu", _woq_int8pack_fusion_devices)
+        self.assertNotIn("xpu", _concat_linear_int8_woq_devices)
+
+        register_concat_linear_int8_woq_device(device_type)
+        register_woq_int8pack_fusion_device(device_type)
+        # Registering an already-registered device type is a no-op.
+        register_concat_linear_int8_woq_device(device_type)
+        self.assertIn(device_type, _concat_linear_int8_woq_devices)
+        self.assertIn(device_type, _woq_int8pack_fusion_devices)
+
+    def test_concat_linear_int8_woq_registration_bypasses_config_gate(self):
+        """Registering a device type fully opts in to the concat-linear fusion.
+
+        config.cpp.enable_concat_linear stays the profitability gate for the
+        default cpu/cuda device types, but a registered device type does not
+        need it, so an out-of-tree backend does not have to flip a
+        CPU-oriented global config option.
+        """
+        from types import SimpleNamespace
+
+        from torch._inductor import config
+        from torch._inductor.fx_passes.quantization import (
+            _concat_linear_int8_woq_devices,
+            _concat_linear_int8_woq_optins,
+            _is_valid_concat_linear_int8_woq_optimization_pattern,
+            register_concat_linear_int8_woq_device,
+        )
+
+        class FakeDevice:
+            def __init__(self, device_type: str) -> None:
+                self.type = device_type
+
+            def __eq__(self, other: object) -> bool:
+                return isinstance(other, FakeDevice) and other.type == self.type
+
+        class FakeVal:
+            def __init__(
+                self, dtype: torch.dtype, device_type: str, size: tuple[int, ...]
+            ) -> None:
+                self.dtype = dtype
+                self.device = FakeDevice(device_type)
+                self._size = size
+
+            def size(self) -> tuple[int, ...]:
+                return self._size
+
+            def numel(self) -> int:
+                n = 1
+                for s in self._size:
+                    n *= s
+                return n
+
+        def make_match(device_type: str) -> SimpleNamespace:
+            # Duck-typed match for the concat-linear int8 WOQ extra check:
+            # x is (2, 8) bf16, w1/w2/w3 are (4, 8) int8, 12 bf16 scales.
+            def node(dtype: torch.dtype, size: tuple[int, ...]) -> SimpleNamespace:
+                return SimpleNamespace(meta={"val": FakeVal(dtype, device_type, size)})
+
+            return SimpleNamespace(
+                kwargs={
+                    "x": node(torch.bfloat16, (2, 8)),
+                    "w1": node(torch.int8, (4, 8)),
+                    "w2": node(torch.int8, (4, 8)),
+                    "w3": node(torch.int8, (4, 8)),
+                    "scales": node(torch.bfloat16, (12,)),
+                }
+            )
+
+        fn = _is_valid_concat_linear_int8_woq_optimization_pattern()
+        with config.patch({"cpp.enable_concat_linear": False}):
+            # The default cpu/cuda device types need the config flag.
+            self.assertFalse(fn(make_match("cpu")))
+            # Unregistered third-party device types are rejected outright.
+            self.assertFalse(fn(make_match("privateuseone")))
+        with config.patch({"cpp.enable_concat_linear": True}):
+            self.assertTrue(fn(make_match("cpu")))
+        with config.patch({"cpp.enable_concat_linear": False}):
+            # A registered device type opts in without the config flag.
+            self.addCleanup(_concat_linear_int8_woq_devices.discard, "privateuseone")
+            self.addCleanup(_concat_linear_int8_woq_optins.discard, "privateuseone")
+            register_concat_linear_int8_woq_device("privateuseone")
+            self.assertTrue(fn(make_match("privateuseone")))
+
     # end of class CommonTemplate - add new tests here
 
 
