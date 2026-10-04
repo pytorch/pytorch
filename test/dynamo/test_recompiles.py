@@ -990,6 +990,24 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
             torch._dynamo.reset()
             self.assertEqual(count_recompiles(out_fn), 2)
 
+    def test_container_truthiness_guards_only_emptiness(self):
+        def fn(c, x):
+            if c:
+                return x + 1
+            return x - 1
+
+        x = torch.zeros(2)
+        for make in (list, tuple, lambda vals: dict(zip("ab", vals))):
+            torch._dynamo.reset()
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt = torch.compile(fn, backend=cnt, fullgraph=True)
+            self.assertEqual(opt(make([]), x), x - 1)
+            self.assertEqual(opt(make([1, 2]), x), x + 1)
+            self.assertEqual(cnt.frame_count, 2)
+            # Only the length is guarded, not the element values.
+            self.assertEqual(opt(make([3, 4]), x), x + 1)
+            self.assertEqual(cnt.frame_count, 2)
+
 
 class FloatGuardBitwiseTests(torch._dynamo.test_case.TestCase):
     # Float constant guards must be value-identity (bitwise), not IEEE eq:

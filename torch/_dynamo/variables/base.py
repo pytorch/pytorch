@@ -21,7 +21,7 @@ import functools
 import inspect
 import logging
 import textwrap
-from collections.abc import Callable, ItemsView, KeysView, ValuesView
+from collections.abc import Callable, ItemsView, Iterable, KeysView, ValuesView
 from contextvars import ContextVar
 from enum import Enum, IntFlag
 from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING, TypeAlias
@@ -2868,6 +2868,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Mirrors what a tp_repr writes after Py_ReprEnter reports a cycle.
         """
         return "..."
+
+    def repr_parts(self) -> Iterable[str | VariableTracker] | None:
+        """The repr of this object as literal text and elements to repr, in order.
+
+        Types whose tp_repr_impl is repr_from_parts override this so that
+        deeply nested containers are repr'd without recursing per level. None
+        means tp_repr_impl builds the repr some other way.
+        """
+        return None
 
     def tp_str_impl(
         self,

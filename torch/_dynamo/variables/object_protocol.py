@@ -59,6 +59,8 @@ from .constant import ConstantVariable
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from ..symbolic_convert import InstructionTranslatorBase
 
 
@@ -453,7 +455,33 @@ def generic_is_true(
     return ConstantVariable.create(True)
 
 
+# Ids of the objects whose repr is in progress. Every in-progress repr adds its
+# object once, so the size of this set is also the repr nesting depth.
 _repr_running: set[int] = set()
+
+
+def _c_recursion_limit() -> int | None:
+    """How deeply CPython lets repr() calls nest before raising RecursionError."""
+    if sys.version_info < (3, 12):
+        # Py_EnterRecursiveCall shares the Python recursion limit.
+        return sys.getrecursionlimit()
+    if sys.version_info < (3, 14):
+        # C_RECURSION_LIMIT (3.12) / Py_C_RECURSION_LIMIT (3.13) in
+        # Include/cpython/pystate.h, a compile-time constant that CPython does
+        # not expose at runtime. Debug builds (with gettotalrefcount) use 500.
+        if hasattr(sys, "gettotalrefcount"):
+            return 500
+        return 3000 if sys.platform == "win32" else 10000
+    # 3.14 bounds C recursion by the remaining stack size, not by a count.
+    return None
+
+
+def _repr_enter_recursive_call(tx: "InstructionTranslatorBase") -> None:
+    """Mirrors the Py_EnterRecursiveCall that PyObject_Repr makes before tp_repr."""
+    limit = _c_recursion_limit()
+    if limit is not None and len(_repr_running) >= limit:
+        msg = "maximum recursion depth exceeded while getting the repr of an object"
+        raise_observed_exception(RecursionError, tx, args=[msg])
 
 
 def generic_repr(
@@ -469,6 +497,7 @@ def generic_repr(
 
     tp_repr = obj.tp_repr
     if tp_repr is not None:
+        _repr_enter_recursive_call(tx)
         obj_id = id(obj)
         if obj_id in _repr_running:
             sentinel = {list: "[...]", dict: "{...}", collections.deque: "[...]"}
@@ -495,6 +524,53 @@ def generic_repr(
         return result
 
     raise_type_error(tx, f"object of type '{obj.python_type_name()}' has no repr")
+
+
+def repr_from_parts(
+    tx: "InstructionTranslatorBase", obj: VariableTracker
+) -> VariableTracker:
+    """tp_repr_impl for types whose repr is built from obj.repr_parts().
+
+    CPython nests one C-level PyObject_Repr per container level, bounded only by
+    Py_EnterRecursiveCall. Recursing through generic_repr costs several Python
+    frames per level instead, which overflows Dynamo's own stack long before
+    CPython's limit. So nested containers that also build their repr from parts
+    are walked with an explicit stack, doing generic_repr's bookkeeping for
+    each; any other element goes through generic_repr.
+    """
+    obj_parts = obj.repr_parts()
+    if obj_parts is None:
+        raise AssertionError(f"{type(obj).__name__} has no repr parts")
+    # (object, its remaining parts, the repr text so far) per nesting level.
+    # The outermost object was entered by our caller.
+    stack: list[tuple[VariableTracker, Iterator[str | VariableTracker], list[str]]] = [
+        (obj, iter(obj_parts), [])
+    ]
+    try:
+        while True:
+            _, parts, pieces = stack[-1]
+            for part in parts:
+                if isinstance(part, str):
+                    pieces.append(part)
+                    continue
+                part_parts = part.repr_parts()
+                if part_parts is None or id(part) in _repr_running:
+                    pieces.append(generic_repr(tx, part).as_python_constant())
+                    continue
+                _repr_enter_recursive_call(tx)
+                _repr_running.add(id(part))
+                stack.append((part, iter(part_parts), []))
+                break
+            else:
+                text = "".join(pieces)
+                if len(stack) == 1:
+                    return ConstantVariable.create(text)
+                done, _, _ = stack.pop()
+                _repr_running.discard(id(done))
+                stack[-1][2].append(text)
+    finally:
+        for entered, _, _ in stack[1:]:
+            _repr_running.discard(id(entered))
 
 
 def generic_str(

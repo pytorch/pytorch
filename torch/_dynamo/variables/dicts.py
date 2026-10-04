@@ -72,6 +72,7 @@ from .object_protocol import (
     generic_getitem,
     generic_richcompare_bool,
     mro_lookup,
+    repr_from_parts,
 )
 
 
@@ -201,12 +202,18 @@ class ConstDictVariable(VariableTracker):
             for k, v in self.items.items()
         }
 
+    def repr_parts(self) -> Iterator[str | VariableTracker]:
+        yield "{"
+        for i, (key, value) in enumerate(self.items.items()):
+            if i:
+                yield ", "
+            yield key.vt
+            yield ": "
+            yield value
+        yield "}"
+
     def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
-        items = [
-            f"{tracked_repr(tx, key.vt)}: {tracked_repr(tx, value)}"
-            for key, value in self.items.items()
-        ]
-        return VariableTracker.build(tx, "{" + ", ".join(items) + "}")
+        return repr_from_parts(tx, self)
 
     def keys_as_python_constant(self) -> dict[Any, VariableTracker]:
         self.install_dict_keys_match_guard()
@@ -962,14 +969,25 @@ class OrderedDictVariable(ConstDictVariable):
         items = [(k.vt.debug_repr(), v.debug_repr()) for k, v in self.items.items()]
         return self._ordered_dict_repr(items)
 
-    def tp_repr_impl(self, tx: "InstructionTranslatorBase") -> VariableTracker:
+    def repr_parts(self) -> Iterator[str | VariableTracker]:
+        if not self.items:
+            yield "OrderedDict()"
+            return
         # Python < 3.12 uses the historical list-of-pairs form, while 3.12+
         # uses dict-style formatting.
-        items = [
-            (tracked_repr(tx, key.vt), tracked_repr(tx, value))
-            for key, value in self.items.items()
-        ]
-        return VariableTracker.build(tx, self._ordered_dict_repr(items))
+        pairs = sys.version_info < (3, 12)
+        yield "OrderedDict([" if pairs else "OrderedDict({"
+        for i, (key, value) in enumerate(self.items.items()):
+            if i:
+                yield ", "
+            if pairs:
+                yield "("
+            yield key.vt
+            yield ", " if pairs else ": "
+            yield value
+            if pairs:
+                yield ")"
+        yield "])" if pairs else "})"
 
     def nb_or_impl(
         self,
