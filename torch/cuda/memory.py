@@ -7,7 +7,6 @@ import ctypes
 import json
 import pickle
 import sys
-import threading
 import warnings
 from collections.abc import Callable
 from inspect import signature
@@ -1531,22 +1530,8 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
         _cuda_releasePool(device_index, pool.id)
 
 
-# Process-lifetime singleton: the UVM pluggable allocator + the ctypes closures
-# behind it, lazily built (lock-guarded) by _make_uvm_allocator and reused.
-_UVM_ALLOCATOR = None
-_UVM_ALLOCATOR_LOCK = threading.Lock()
-
-
-def _make_uvm_allocator():
-    r"""Build the UVM ``CUDAPluggableAllocator`` and the ctypes closures behind it.
-
-    Returns ``(c_alloc, c_free, allocator)``. UVM alloc/free are stateless (device
-    is passed per call), so one allocator serves all calls and devices. Raises
-    ``ImportError`` if ``cuda-python`` is unavailable.
-    """
-    import logging
-    import traceback
-
+def _make_uvm_pool():
+    r"""Build a Python-callback MemPool backed by CUDA managed memory."""
     try:
         from cuda.bindings import runtime as _rt  # pyrefly: ignore[missing-import]
     except ImportError:
@@ -1555,15 +1540,6 @@ def _make_uvm_allocator():
             "(cuda.bindings.runtime) for cudaMallocManaged, cudaMemAdvise, "
             "and cudaFree."
         ) from None
-
-    log = logging.getLogger(__name__)
-
-    _ALLOC_FN = ctypes.CFUNCTYPE(
-        ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
-    )
-    _FREE_FN = ctypes.CFUNCTYPE(
-        None, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p
-    )
 
     def _check(result, msg: str = ""):
         err = result if not isinstance(result, tuple) else result[0]
@@ -1612,64 +1588,35 @@ def _make_uvm_allocator():
         return supported
 
     def _uvm_alloc(size, device, stream, _runtime=_rt):
-        try:
-            err, ptr = _runtime.cudaMallocManaged(size, _runtime.cudaMemAttachGlobal)
-            _check(err, f"cudaMallocManaged({size})")
-            ptr = int(ptr)
-            if device >= 0 and _device_supports_uvm_advise(device, _runtime):
-                _check(
-                    _mem_advise(
-                        ptr,
-                        size,
-                        _runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
-                        device,
-                    ),
-                    "cudaMemAdvise(SetPreferredLocation)",
-                )
-                _check(
-                    _mem_advise(
-                        ptr,
-                        size,
-                        _runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
-                        device,
-                    ),
-                    "cudaMemAdvise(SetAccessedBy)",
-                )
-            return ptr
-        except Exception:
-            log.error(
-                "[_use_uvm] FAILED to allocate %d bytes (%.2f GiB) via UVM."
-                " CUDACachingAllocator will raise an OOM error as a result."
-                " You can ignore free-memory numbers reported by PyTorch"
-                " as they are irrelevant for UVM.\nException:\n%s",
-                size,
-                size / (1024**3),
-                traceback.format_exc(),
+        err, ptr = _runtime.cudaMallocManaged(size, _runtime.cudaMemAttachGlobal)
+        _check(err, f"cudaMallocManaged({size})")
+        ptr = int(ptr)
+        if device >= 0 and _device_supports_uvm_advise(device, _runtime):
+            _check(
+                _mem_advise(
+                    ptr,
+                    size,
+                    _runtime.cudaMemoryAdvise.cudaMemAdviseSetPreferredLocation,
+                    device,
+                ),
+                "cudaMemAdvise(SetPreferredLocation)",
             )
-            return 0
+            _check(
+                _mem_advise(
+                    ptr,
+                    size,
+                    _runtime.cudaMemoryAdvise.cudaMemAdviseSetAccessedBy,
+                    device,
+                ),
+                "cudaMemAdvise(SetAccessedBy)",
+            )
+        return ptr
 
     def _uvm_free(ptr, size, device, stream, _runtime=_rt):
-        """Best-effort free; guards against interpreter shutdown."""
-        try:
-            if ptr:
-                _check(_runtime.cudaFree(ptr))
-        except Exception:
-            if log is not None and traceback is not None:
-                try:
-                    log.error(
-                        "[_use_uvm] exception in free:\n%s",
-                        traceback.format_exc(),
-                    )
-                except Exception:
-                    pass
+        if ptr:
+            _check(_runtime.cudaFree(ptr))
 
-    c_alloc = _ALLOC_FN(_uvm_alloc)
-    c_free = _FREE_FN(_uvm_free)
-    alloc_ptr = ctypes.cast(c_alloc, ctypes.c_void_p).value
-    free_ptr = ctypes.cast(c_free, ctypes.c_void_p).value
-    # pyrefly: ignore[bad-argument-type]
-    allocator = torch._C._cuda_customAllocator(alloc_ptr, free_ptr)
-    return c_alloc, c_free, allocator
+    return MemPool.from_callbacks(_uvm_alloc, _uvm_free)
 
 
 @contextlib.contextmanager
@@ -1703,16 +1650,6 @@ def _use_uvm(device: "Device" = None):
     .. note::
         Requires the ``cuda-python`` package (``cuda.bindings``).
     """
-    # A tensor's block can stay cached in the PrivatePool after _use_uvm() returns
-    # and be freed later by a global empty_cache(); per-call ctypes closures would
-    # be GC'd by then, dangling the free callback. Build once and reuse instead.
-    global _UVM_ALLOCATOR
-    if _UVM_ALLOCATOR is None:
-        with _UVM_ALLOCATOR_LOCK:
-            if _UVM_ALLOCATOR is None:
-                _UVM_ALLOCATOR = _make_uvm_allocator()
-    allocator = _UVM_ALLOCATOR[2]
-
-    pool = MemPool(allocator=allocator)
+    pool = _make_uvm_pool()
     with use_mem_pool(pool, device=device):
         yield pool
