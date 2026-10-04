@@ -819,14 +819,18 @@ void MetalShaderLibrary::exec_binary_kernel_with_params(TensorIteratorBase& iter
   const auto cast_needed = input.scalar_type() != other.scalar_type();
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
   // TODO: Implicitly pass both input and output types to non-cast kernels
-  const auto kernel_name = cast_needed
-      ? fmt::format("{}_{}_cast_{}_{}", name, suffix, scalarToMetalTypeString(out), params_type_name)
-      : fmt::format("{}_{}_{}_{}_{}",
-                    name,
-                    suffix,
-                    scalarToMetalTypeString(out),
-                    scalarToMetalTypeString(input),
-                    params_type_name);
+  const auto kernel_name = cast_needed ? fmt::format("{}_{}_cast_{}_{}_{}",
+                                                     name,
+                                                     suffix,
+                                                     scalarToMetalTypeString(out),
+                                                     scalarToMetalTypeString(iter.common_dtype()),
+                                                     params_type_name)
+                                       : fmt::format("{}_{}_{}_{}_{}",
+                                                     name,
+                                                     suffix,
+                                                     scalarToMetalTypeString(out),
+                                                     scalarToMetalTypeString(input),
+                                                     params_type_name);
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       auto computeEncoder = mpsStream->commandEncoder();

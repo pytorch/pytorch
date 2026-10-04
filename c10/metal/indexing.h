@@ -636,11 +636,11 @@ kernel void binary_strided(
       static_cast<res_t>(f(om_t(a), om_t(b)));
 }
 
-template <typename T, typename T2, typename F>
+template <typename T, typename T2, typename F, typename P = constant void*>
 kernel void binary_alpha_strided(
     device void* output [[buffer(0)]],
-    constant void* input [[buffer(1)]],
-    constant void* other [[buffer(2)]],
+    P input [[buffer(1)]],
+    P other [[buffer(2)]],
     constant T2& alpha [[buffer(3)]],
     constant long* sizes [[buffer(4)]],
     constant long* output_strides [[buffer(5)]],
@@ -717,11 +717,11 @@ kernel void binary_strided_castout(
       output, output_offs, static_cast<ScalarType>(ndim_types.w), result);
 }
 
-template <typename T, typename T2, typename F>
+template <typename T, typename T2, typename F, typename P = constant void*>
 kernel void binary_alpha_strided_cast(
     device void* output [[buffer(0)]],
-    constant void* input [[buffer(1)]],
-    constant void* other [[buffer(2)]],
+    P input [[buffer(1)]],
+    P other [[buffer(2)]],
     constant T2& alpha [[buffer(3)]],
     constant long* sizes [[buffer(4)]],
     constant long* output_strides [[buffer(5)]],
@@ -857,11 +857,11 @@ kernel void binary_inner_contiguous(
   }
 }
 
-template <typename T, typename T2, typename F>
+template <typename T, typename T2, typename F, typename P = constant T*>
 kernel void binary_alpha_dense(
     device result_of<F, T, T, T2>* out [[buffer(0)]],
-    constant T* input [[buffer(1)]],
-    constant T* other [[buffer(2)]],
+    P input [[buffer(1)]],
+    P other [[buffer(2)]],
     constant T2& alpha [[buffer(3)]],
     uint tid [[thread_position_in_grid]]) {
   F f;
@@ -884,11 +884,11 @@ kernel void binary_dense_cast(
   out[tid] = static_cast<res_t>(f(a, b));
 }
 
-template <typename T, typename T2, typename F>
+template <typename T, typename T2, typename F, typename P = constant void*>
 kernel void binary_alpha_dense_cast(
     device result_of<F, T, T, T2>* out [[buffer(0)]],
-    constant void* input [[buffer(1)]],
-    constant void* other [[buffer(2)]],
+    P input [[buffer(1)]],
+    P other [[buffer(2)]],
     constant T2& alpha [[buffer(3)]],
     constant uint4& sizes_types [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
@@ -1297,7 +1297,8 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant uint4& ndim_types,                                   \
           uint tid)
 
-#define REGISTER_BINARY_ALPHA_OP(NAME, DTYPEI, DTYPEA, DTYPEO)                \
+#define REGISTER_BINARY_ALPHA_OP_WITH_INPUT_PTRS(                             \
+    NAME, DTYPEI, DTYPEA, DTYPEO, PTR, TYPED_PTR)                             \
   static_assert(                                                              \
       ::metal::is_same_v<                                                     \
           DTYPEO,                                                             \
@@ -1305,10 +1306,10 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
       "Output dtype mismatch for binary op " #NAME " and input " #DTYPEI);    \
   template [[host_name(#NAME "_strided_" #DTYPEO "_" #DTYPEI                  \
                              "_" #DTYPEA)]] kernel void ::c10::metal::        \
-      binary_alpha_strided<DTYPEI, DTYPEA, NAME##_functor>(                   \
+      binary_alpha_strided<DTYPEI, DTYPEA, NAME##_functor, PTR>(              \
           device void* out,                                                   \
-          constant void* input,                                               \
-          constant void* other,                                               \
+          PTR input,                                                          \
+          PTR other,                                                          \
           constant DTYPEA& alpha,                                             \
           constant long* sizes,                                               \
           constant long* output_strides,                                      \
@@ -1318,10 +1319,10 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           uint tid);                                                          \
   template [[host_name(#NAME "_strided_cast_" #DTYPEO "_" #DTYPEI             \
                              "_" #DTYPEA)]] kernel void ::c10::metal::        \
-      binary_alpha_strided_cast<DTYPEI, DTYPEA, NAME##_functor>(              \
+      binary_alpha_strided_cast<DTYPEI, DTYPEA, NAME##_functor, PTR>(         \
           device void* out,                                                   \
-          constant void* input,                                               \
-          constant void* other,                                               \
+          PTR input,                                                          \
+          PTR other,                                                          \
           constant DTYPEA& alpha,                                             \
           constant long* sizes,                                               \
           constant long* output_strides,                                      \
@@ -1331,24 +1332,24 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           uint tid);                                                          \
   template [[host_name(#NAME "_dense_" #DTYPEO "_" #DTYPEI                    \
                              "_" #DTYPEA)]] kernel void ::c10::metal::        \
-      binary_alpha_dense<DTYPEI, DTYPEA, NAME##_functor>(                     \
+      binary_alpha_dense<DTYPEI, DTYPEA, NAME##_functor, TYPED_PTR>(          \
           device ::c10::metal::                                               \
                   result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
               out_,                                                           \
-          constant DTYPEI * input_,                                           \
-          constant DTYPEI * other_,                                           \
+          TYPED_PTR input_,                                                   \
+          TYPED_PTR other_,                                                   \
           constant DTYPEA & alpha,                                            \
           uint tid);                                                          \
   template [[host_name(#NAME "_dense_cast_" #DTYPEO "_" #DTYPEI               \
                              "_" #DTYPEA)]] kernel void ::c10::metal::        \
-      binary_alpha_dense_cast<DTYPEI, DTYPEA, NAME##_functor>(                \
+      binary_alpha_dense_cast<DTYPEI, DTYPEA, NAME##_functor, PTR>(           \
           device ::c10::metal::                                               \
                   result_of<NAME##_functor, DTYPEI, DTYPEI, DTYPEA> *         \
               out_,                                                           \
-          constant void* input,                                               \
-          constant void* other,                                               \
-          constant DTYPEA& alpha,                                             \
-          constant uint4& sizes_types,                                        \
+          PTR input,                                                          \
+          PTR other,                                                          \
+          constant DTYPEA & alpha,                                            \
+          constant uint4 & sizes_types,                                       \
           uint tid);                                                          \
   template [[host_name(#NAME "_dense_broadcast_" #DTYPEO "_" #DTYPEI          \
                              "_" #DTYPEA)]] kernel void ::c10::metal::        \
@@ -1438,6 +1439,10 @@ kernel void binary_alpha_dense_scalar_lhs_cast(
           constant DTYPEA& alpha,                                             \
           constant uint4& sizes_types,                                        \
           uint tid)
+
+#define REGISTER_BINARY_ALPHA_OP(NAME, DTYPEI, DTYPEA, DTYPEO) \
+  REGISTER_BINARY_ALPHA_OP_WITH_INPUT_PTRS(                    \
+      NAME, DTYPEI, DTYPEA, DTYPEO, constant void*, constant DTYPEI*)
 
 // Decodes the dispatch coordinates and accumulates all four operand offsets in
 // one pass. The obvious alternative -- materialize `pos[max_ndim]`, then call
