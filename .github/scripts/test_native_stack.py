@@ -4,12 +4,13 @@ from __future__ import annotations
 import io
 import os
 import re
+import shutil
 import tempfile
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from dataclasses import replace
 from itertools import pairwise
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 from unittest import main, mock, TestCase
 
 from github_utils import GHGraphQLError
@@ -17,6 +18,7 @@ from gitutils import _check_output, GitRepo
 from native_stack import (
     _trunk_landings,
     build_native_stack_commits,
+    build_native_stack_rebase,
     find_landed_commit,
     find_stack_dependents,
     get_native_stack,
@@ -25,9 +27,14 @@ from native_stack import (
     NativeStack,
     NativeStackError,
     PULL_REQUEST_RESOLVED,
+    push_branches,
     stack_dependencies_line,
     StackEntry,
 )
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 
 ORG = "pytorch"
@@ -504,7 +511,9 @@ class TestTrunkLandings(GitTestCase):
 
 
 NOT_LANDED = r"PR #101 is closed but not landed on main, or it was reverted"
-REBASE = re.escape("Rebase the stack onto main and try again.")
+REBASE = re.escape(
+    "Rebase the stack onto main with `@pytorchbot rebase -b main` and try again."
+)
 
 
 class TestGetNativeStackLandingPrs(GitTestCase):
@@ -1112,7 +1121,7 @@ class TestFindStackDependents(GitTestCase):
         self.assertEqual(self.found(101), (None, []))
         reapplied = revert(reverted)
         self.assertEqual(self.found(101), (a, [(c, 103), (b, 102)]))
-        # Merges still read a reverted revert as a revert
+        # Merges and rebases still read a reverted revert as a revert
         self.assertIsNone(find_landed_commit(GitRepo(self.dev), pr_url(101), TRUNK))
         revert(reapplied)
         self.assertEqual(self.found(101), (None, []))
@@ -1284,6 +1293,532 @@ class TestFindStackDependents(GitTestCase):
         for number in (101, 102, 103):
             self.land_pr(number)
         self.assertEqual(self.dependents(101), [])
+
+
+VIABLE_STRICT = "viable/strict"
+# Branch, line of f.txt and label of each PR of a line stack
+LINE_STACK = (("user/a", 2, "A"), ("user/b", 6, "B"), ("user/c", 9, "C"))
+# Branch updates as build_native_stack_rebase returns them
+Updates = list[tuple[int, str, str, str]]
+
+
+def lines(edits: dict[int, str]) -> str:
+    """f.txt, with each line in `edits` followed by its label"""
+    return "".join(
+        f"line {n} {edits[n]}\n" if n in edits else f"line {n}\n" for n in range(1, 11)
+    )
+
+
+def identity(person: str) -> dict[str, str]:
+    """The environment that makes git author and commit as `person`"""
+    name, _, email = person.rpartition(" <")
+    email = email.removesuffix(">")
+    return {
+        "GIT_AUTHOR_NAME": name,
+        "GIT_AUTHOR_EMAIL": email,
+        "GIT_COMMITTER_NAME": name,
+        "GIT_COMMITTER_EMAIL": email,
+    }
+
+
+@contextmanager
+def without_identity_variables() -> Iterator[None]:
+    """trymerge.yml and tryrebase.yml only set user.name and user.email; these
+    variables would override them and any identity the code under test sets
+    through git config"""
+    with mock.patch.dict(os.environ):
+        for var in GIT_ENV:
+            if var.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_")):
+                del os.environ[var]
+        yield
+
+
+class LineStackTestCase(GitTestCase):
+    """A stack whose PRs each change their own line of f.txt and add their own file,
+    in commits by the PR's author, on an origin that refuses non-fast-forward pushes,
+    even forced ones"""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.origin = self.git("remote", "get-url", "origin")
+        self.origin_git("config", "receive.denyNonFastForwards", "true")
+        for key, value in (("user.name", BOT_NAME), ("user.email", BOT_EMAIL)):
+            self.git("config", key, value, cwd=self.repo.repo_dir)
+        self.add_commits(TRUNK, files={"f.txt": lines({})})
+        self.landings: dict[int, str] = {}
+
+    def origin_git(self, *args: str) -> str:
+        return self.git(*args, cwd=self.origin)
+
+    def push_line_stack(self) -> NativeStack:
+        entries: list[StackEntry] = []
+        edits: dict[int, str] = {}
+        base = TRUNK
+        for position, (branch, line, label) in enumerate(LINE_STACK, start=1):
+            edits[line] = label
+            files = {"f.txt": lines(edits), f"{label}.txt": f"{label}\n"}
+            with mock.patch.dict(os.environ, identity(author(100 + position))):
+                head = self.push_branch(branch, base, files=files)
+            entries.append(make_entry(position, 100 + position, branch, head, base))
+            base = branch
+        return NativeStack(number=100, base_ref=TRUNK, entries=tuple(entries))
+
+    def heads(self, stack: NativeStack) -> dict[str, str]:
+        """The tip of each PR's branch on the origin, bottom first"""
+        refs = [f"refs/heads/{entry.head_ref}" for entry in stack.entries]
+        fmt = "--format=%(refname:lstrip=2) %(objectname)"
+        listed = self.origin_git("for-each-ref", fmt, *refs)
+        tips = dict(line.split() for line in listed.splitlines())
+        return {entry.head_ref: tips[entry.head_ref] for entry in stack.entries}
+
+    def current(self, stack: NativeStack) -> NativeStack:
+        """`stack` as GitHub reports it now: open PRs at the tips of their branches,
+        closed ones at the head they were closed with"""
+        heads = self.heads(stack)
+        entries = [
+            entry if entry.closed else replace(entry, head_oid=heads[entry.head_ref])
+            for entry in stack.entries
+        ]
+        return replace(stack, entries=tuple(entries))
+
+    def changes(self, base: str, head: str, cwd: str | None = None) -> list[str]:
+        """The changes GitHub shows for a PR of `head` into `base`: the diff of
+        `base...head`, without line numbers and blob ids"""
+        diff = self.git("diff", "-U0", f"{base}...{head}", cwd=cwd or self.origin)
+        return [x for x in diff.splitlines() if not x.startswith(("index ", "@@"))]
+
+    def pr_changes(self, stack: NativeStack) -> dict[int, list[str]]:
+        return {e.number: self.changes(e.base_ref, e.head_ref) for e in stack.entries}
+
+    def move_trunk(self, files: FileChanges | None = None) -> str:
+        self.git("checkout", "-q", TRUNK)
+        self.git("pull", "-q", "--ff-only", "origin", TRUNK)
+        return self.add_commits(TRUNK, files=files)
+
+    def land_pr(self, stack: NativeStack, index: int) -> NativeStack:
+        """Squashes the PR at `index` onto trunk with the message of a native merge,
+        and closes it"""
+        entry = stack.entries[index]
+        message = landing_message(pr_url(entry.number))
+        if index:
+            deps = [below.number for below in stack.entries[:index]]
+            message += f"{stack_dependencies_line(deps)}\n"
+        self.git("fetch", "-q", "origin")
+        self.git("checkout", "-q", TRUNK)
+        self.git("merge", "-q", "--ff-only", f"origin/{TRUNK}")
+        self.git("merge", "-q", "--squash", f"origin/{entry.head_ref}")
+        self.git("commit", "-q", "-m", message)
+        self.git("push", "-q", "origin", TRUNK)
+        self.landings[entry.number] = self.git("rev-parse", "HEAD")
+        return with_entry(self.current(stack), index, closed=True)
+
+    def revert_pr(self, number: int) -> str:
+        """Reverts the landed commit of PR `number` on trunk like do_revert_prs"""
+        self.git("checkout", "-q", TRUNK)
+        self.git("pull", "-q", "--ff-only", "origin", TRUNK)
+        self.git("revert", "--no-edit", self.landings[number])
+        message = self.git("log", "-1", "--format=%B")
+        reverter = "https://github.com/reverter"
+        message += f"\n\nReverted {pr_url(number)} on behalf of {reverter}\n"
+        self.git("commit", "-q", "--amend", "-m", message)
+        self.git("push", "-q", "origin", TRUNK)
+        return self.git("rev-parse", "HEAD")
+
+    def landed_stack(self, landed: int = 1) -> tuple[NativeStack, dict[int, list[str]]]:
+        """A line stack whose `landed` lowest PRs landed on a trunk that moved before
+        and after, with the changes each PR showed before it landed"""
+        stack = self.push_line_stack()
+        own = self.pr_changes(stack)
+        self.move_trunk()
+        for index in range(landed):
+            stack = self.land_pr(stack, index)
+        self.move_trunk()
+        return stack, own
+
+    def reject_pushes_to(self, branch: str) -> None:
+        """Makes the origin refuse updates of `branch`; the other branches of a push
+        are still updated unless it is atomic"""
+        hook = Path(self.origin, "hooks", "update")
+        hook.write_text(f'#!/bin/sh\ntest "$1" != refs/heads/{branch}\n')
+        hook.chmod(0o755)
+
+    def rebase_stack(
+        self, stack: NativeStack, target: int, onto: str = TRUNK
+    ) -> Updates:
+        """Rebases `stack` from PR `target` onto `onto` like tryrebase.py does"""
+        with without_identity_variables():
+            updates = build_native_stack_rebase(
+                self.repo, ORG, PROJECT, self.current(stack), target, TRUNK, onto
+            )
+            if updates:
+                push_branches(self.repo, updates)
+        return updates
+
+    def assertFastForwarded(
+        self, before: dict[str, str], after: dict[str, str], *pushed: str
+    ) -> None:
+        """The branches `pushed`, bottom first, moved forward from `before` to
+        `after`, and no other branch moved"""
+        moved = [branch for branch in before if before[branch] != after[branch]]
+        self.assertEqual(moved, list(pushed))
+        for branch in pushed:
+            old, new = before[branch], after[branch]
+            self.assertEqual(self.origin_git("merge-base", old, new), old, branch)
+
+    def assertNoBranchHasTheHeadsAboveIt(
+        self, stack: NativeStack, *heads: dict[str, str]
+    ) -> None:
+        refs = [f"refs/heads/{entry.head_ref}" for entry in stack.entries]
+        for index, entry in enumerate(stack.entries[1:], start=1):
+            for head in {h[entry.head_ref] for h in heads}:
+                args = ("--contains", head, "--format=%(refname)", *refs[:index])
+                having = self.origin_git("for-each-ref", *args)
+                self.assertEqual(having, "", f"{entry.head_ref} at {head}")
+
+    def assertNewCommitsBy(
+        self, stack: NativeStack, before: dict[str, str], after: dict[str, str]
+    ) -> None:
+        """The commits each PR's branch got, other than those of the branches below
+        it and of the trunks, are authored by the PR's author and committed by the
+        bot"""
+        trunks = [f"refs/heads/{TRUNK}", f"refs/heads/{VIABLE_STRICT}"]
+        trunks = self.origin_git("for-each-ref", "--format=^%(refname)", *trunks)
+        for index, entry in enumerate(stack.entries):
+            lower = stack.entries[:index]
+            below = [h[e.head_ref] for e in lower for h in (before, after)]
+            revs = [after[entry.head_ref], f"^{before[entry.head_ref]}"]
+            revs += [*trunks.split(), *(f"^{head}" for head in below)]
+            people = self.origin_git("log", "--format=%an <%ae>|%cn <%ce>", *revs, "--")
+            expected = f"{author(entry.number)}|{BOT_NAME} <{BOT_EMAIL}>"
+            for line in people.splitlines():
+                self.assertEqual(line, expected, entry.head_ref)
+
+    def assertUpdated(
+        self,
+        stack: NativeStack,
+        before: dict[str, str],
+        own: dict[int, list[str]],
+        *pushed: str,
+    ) -> None:
+        """Only the branches `pushed` were fast-forwarded, with commits of their PR's
+        author, and every open PR of `stack` still shows only its own changes"""
+        after = self.heads(stack)
+        self.assertFastForwarded(before, after, *pushed)
+        self.assertNoBranchHasTheHeadsAboveIt(stack, before, after)
+        self.assertNewCommitsBy(stack, before, after)
+        changes = self.pr_changes(stack)
+        opened = [entry.number for entry in stack.entries if not entry.closed]
+        self.assertEqual({n: changes[n] for n in opened}, {n: own[n] for n in opened})
+
+    def assertMergesCleanly(
+        self, stack: NativeStack, target: int, own: dict[int, list[str]]
+    ) -> None:
+        """The native merge of PR `target` accepts the stack and lands exactly the
+        changes of each PR"""
+        landing = self.landing_prs(self.current(stack), target)
+        base = self.repo.rev_parse(TRUNK_REF)
+        commits = [
+            (author(entry.number), landing_message(pr_url(entry.number)))
+            for entry, _ in landing
+        ]
+        top = build_native_stack_commits(self.repo, base, landing, commits)
+        built = [base, *reversed(self.repo.revlist(f"{base}..{top}"))]
+        bot = self.repo.repo_dir
+        landed = [self.changes(old, new, bot) for old, new in pairwise(built)]
+        self.assertEqual(landed, [own[entry.number] for entry, _ in landing])
+
+
+class TestBuildNativeStackRebase(LineStackTestCase):
+    def tree(self, ref: str) -> str:
+        return self.origin_git("rev-parse", f"{ref}^{{tree}}")
+
+    def show(self, ref: str, path: str) -> str:
+        return self.origin_git("show", f"{ref}:{path}") + "\n"
+
+    def test_merges_target_into_landed_branch_and_the_prs_above_it(self) -> None:
+        stack, own = self.landed_stack()
+        before = self.heads(stack)
+        updates = self.rebase_stack(stack, 103)
+        after = self.heads(stack)
+        refs = [entry.head_ref for entry in stack.entries]
+        expected = [
+            (number, ref, before[ref], after[ref])
+            for number, ref in enumerate(refs, start=101)
+        ]
+        self.assertEqual(updates, expected)
+        self.assertUpdated(stack, before, own, *refs)
+        # The trunk has the landed PR, so its branch takes the trunk's tree
+        self.assertEqual(self.tree("user/a"), self.tree(TRUNK))
+        self.assertMergesCleanly(stack, 103, own)
+        self.assertEqual(self.rebase_stack(stack, 103), [])
+        self.assertEqual(self.heads(stack), after)
+
+    def test_landed_pr_with_several_commits_on_the_same_line(self) -> None:
+        with mock.patch.dict(os.environ, identity(author(101))):
+            files = {"f.txt": lines({2: "A1"}), "A.txt": "1\n"}
+            self.push_branch("user/a", TRUNK, files=files)
+            files = {"f.txt": lines({2: "A2", 3: "A2"}), "A.txt": "2\n"}
+            a_head = self.add_commits("user/a", files=files)
+        with mock.patch.dict(os.environ, identity(author(102))):
+            files = {"f.txt": lines({2: "A2", 3: "A2", 6: "B"}), "B.txt": "B\n"}
+            b_head = self.push_branch("user/b", "user/a", files=files)
+        a = make_entry(1, 101, "user/a", a_head, TRUNK)
+        b = make_entry(2, 102, "user/b", b_head, "user/a")
+        stack = NativeStack(100, TRUNK, (a, b))
+        own = self.pr_changes(stack)
+        self.move_trunk()
+        stack = self.land_pr(stack, 0)
+        self.move_trunk()
+        before = self.heads(stack)
+        self.rebase_stack(stack, 102)
+        self.assertUpdated(stack, before, own, "user/a", "user/b")
+        self.assertMergesCleanly(stack, 102, own)
+
+    def test_trunk_changing_the_lines_of_the_landed_pr_does_not_conflict(self) -> None:
+        stack, own = self.landed_stack()
+        self.move_trunk({"f.txt": lines({2: "trunk"})})
+        before = self.heads(stack)
+        self.rebase_stack(stack, 103)
+        self.assertUpdated(stack, before, own, "user/a", "user/b", "user/c")
+        expected = lines({2: "trunk", 6: "B", 9: "C"})
+        self.assertEqual(self.show("user/c", "f.txt"), expected)
+        self.assertMergesCleanly(stack, 103, own)
+
+    def test_target_without_the_landed_pr_keeps_its_changes(self) -> None:
+        stack = self.push_line_stack()
+        own = self.pr_changes(stack)
+        self.move_trunk()
+        self.git("push", "-q", "origin", f"{TRUNK}:refs/heads/{VIABLE_STRICT}")
+        stack = self.land_pr(stack, 0)
+        self.move_trunk()
+        before = self.heads(stack)
+        self.rebase_stack(stack, 103, onto=VIABLE_STRICT)
+        self.assertUpdated(stack, before, own, "user/a", "user/b", "user/c")
+        for ref, edits in (("user/a", {2: "A"}), ("user/b", {2: "A", 6: "B"})):
+            self.assertEqual(self.show(ref, "f.txt"), lines(edits))
+            self.assertEqual(self.show(ref, "A.txt"), "A\n")
+        self.assertMergesCleanly(stack, 103, own)
+        # Once the target has the landed PR, the landed branch takes the target's tree
+        self.git("push", "-q", "origin", f"{TRUNK}:refs/heads/{VIABLE_STRICT}")
+        before = self.heads(stack)
+        self.rebase_stack(stack, 103, onto=VIABLE_STRICT)
+        self.assertUpdated(stack, before, own, "user/a", "user/b", "user/c")
+        self.assertEqual(self.tree("user/a"), self.tree(VIABLE_STRICT))
+
+    def test_bottom_pr_merges_the_target(self) -> None:
+        stack = self.push_line_stack()
+        own = self.pr_changes(stack)
+        self.move_trunk()
+        before = self.heads(stack)
+        self.rebase_stack(stack, 103)
+        self.assertUpdated(stack, before, own, "user/a", "user/b", "user/c")
+        self.assertMergesCleanly(stack, 103, own)
+
+    def test_prs_above_the_target_are_untouched(self) -> None:
+        stack = self.push_line_stack()
+        own = self.pr_changes(stack)
+        self.move_trunk()
+        before = self.heads(stack)
+        self.rebase_stack(stack, 101)
+        self.assertUpdated(stack, before, own, "user/a")
+        stack = self.land_pr(stack, 0)
+        self.move_trunk()
+        before = self.heads(stack)
+        self.rebase_stack(stack, 102)
+        self.assertUpdated(stack, before, own, "user/a", "user/b")
+        self.assertMergesCleanly(stack, 102, own)
+        before = self.heads(stack)
+        self.rebase_stack(stack, 103)
+        self.assertUpdated(stack, before, own, "user/c")
+        self.assertMergesCleanly(stack, 103, own)
+
+    def test_only_the_branch_below_the_lowest_open_pr_merges_the_target(self) -> None:
+        stack, own = self.landed_stack(landed=2)
+        before = self.heads(stack)
+        self.rebase_stack(stack, 103)
+        self.assertUpdated(stack, before, own, "user/b", "user/c")
+        self.assertMergesCleanly(stack, 103, own)
+
+    def test_reapplies_reverted_pr_whose_branch_has_its_landed_commit(self) -> None:
+        stack, own = self.landed_stack()
+        self.rebase_stack(stack, 103)
+        self.revert_pr(101)
+        stack = with_entry(stack, 0, closed=False)
+        self.assertEqual(self.pr_changes(stack)[101], [])
+        before = self.heads(stack)
+        self.rebase_stack(stack, 103)
+        self.assertUpdated(stack, before, own, "user/a", "user/b", "user/c")
+
+    def test_reapplies_pr_reverted_by_a_revert_pr_opened_by_hand(self) -> None:
+        stack, own = self.landed_stack()
+        other = self.move_trunk({"other.txt": "other\n"})
+        self.rebase_stack(stack, 103)
+        # The revert PR also reverts another commit, which stays reverted
+        landed = self.landings[101]
+        self.git("revert", "--no-commit", landed, other)
+        body = f"This reverts commit {landed}.\nThis reverts commit {other}."
+        self.git("commit", "-q", "-m", landing_message(pr_url(700), body))
+        self.git("push", "-q", "origin", TRUNK)
+        stack = with_entry(stack, 0, closed=False)
+        self.assertEqual(self.pr_changes(stack)[101], [])
+        before = self.heads(stack)
+        self.rebase_stack(stack, 103)
+        self.assertUpdated(stack, before, own, "user/a", "user/b", "user/c")
+
+    def test_conflict_names_the_pr_and_nothing_is_pushed(self) -> None:
+        stack, _ = self.landed_stack()
+        self.move_trunk({"f.txt": lines({2: "A", 6: "trunk"})})
+        before = self.heads(stack)
+        message = r"^Merging user/a into user/b \(PR #102\) has conflicts"
+        with self.assertRaisesRegex(NativeStackError, message):
+            self.rebase_stack(stack, 103)
+        self.assertEqual(self.heads(stack), before)
+
+    def test_refuses_stack_based_on_another_branch(self) -> None:
+        stack = replace(self.push_line_stack(), base_ref=VIABLE_STRICT)
+        message = (
+            r"^PR #103 is in a stack based on viable/strict, but only stacks based on "
+            r"main can be rebased$"
+        )
+        with self.assertRaisesRegex(NativeStackError, message):
+            self.rebase_stack(stack, 103)
+
+    def test_refuses_closed_pr_below_that_did_not_land(self) -> None:
+        stack = with_entry(self.push_line_stack(), 0, closed=True)
+        before = self.heads(stack)
+        with self.assertRaisesRegex(NativeStackError, NOT_LANDED):
+            self.rebase_stack(stack, 103)
+        self.assertEqual(self.heads(stack), before)
+
+    def test_refuses_landed_pr_below_that_was_reverted(self) -> None:
+        stack, _ = self.landed_stack()
+        self.revert_pr(101)
+        before = self.heads(stack)
+        with self.assertRaisesRegex(NativeStackError, NOT_LANDED):
+            self.rebase_stack(stack, 103)
+        self.assertEqual(self.heads(stack), before)
+
+    def test_refuses_landed_branch_with_commits_that_never_landed(self) -> None:
+        stack, _ = self.landed_stack()
+        extra = self.add_commits("user/a")
+        message = (
+            "PR #101 is closed, but its branch has commits that never landed on "
+            f"main: {extra}"
+        )
+        with self.assertRaisesRegex(NativeStackError, message):
+            self.rebase_stack(stack, 103)
+
+    def test_refuses_target_behind_main_for_a_pr_it_rebases(self) -> None:
+        stack, _ = self.landed_stack()
+        first = self.landings[101]
+        self.git("push", "-q", "origin", f"{TRUNK}:refs/heads/{VIABLE_STRICT}")
+        self.revert_pr(101)
+        reopened = with_entry(stack, 0, closed=False)
+        before = self.heads(stack)
+        message = (
+            rf"^viable/strict is behind main for PR #101: it still has the PR's "
+            rf"landing {first}, which main reverted or replaced since\. {REBASE}$"
+        )
+        with self.assertRaisesRegex(NativeStackError, message):
+            self.rebase_stack(reopened, 103, onto=VIABLE_STRICT)
+        relanded = self.land_pr(reopened, 0)
+        with self.assertRaisesRegex(NativeStackError, message):
+            self.rebase_stack(relanded, 103, onto=VIABLE_STRICT)
+        self.assertEqual(self.heads(stack), before)
+
+    def test_refuses_target_that_has_an_open_pr(self) -> None:
+        stack = self.push_line_stack()
+        self.git("checkout", "-q", TRUNK)
+        self.git("merge", "-q", "--ff-only", "user/a")
+        self.git("push", "-q", "origin", TRUNK)
+        message = (
+            r"^The head of PR #101 is already in main, so it has nothing to rebase; "
+            r"close the PR if it landed$"
+        )
+        with self.assertRaisesRegex(NativeStackError, message):
+            self.rebase_stack(stack, 103)
+
+    def test_refuses_pr_opened_from_the_target(self) -> None:
+        head = self.push_branch(VIABLE_STRICT, TRUNK)
+        entry = make_entry(1, 101, VIABLE_STRICT, head, TRUNK)
+        stack = NativeStack(100, TRUNK, (entry,))
+        message = (
+            r"^PR #101 is opened from viable/strict, so rebasing it would push to "
+            r"viable/strict$"
+        )
+        with self.assertRaisesRegex(NativeStackError, message):
+            self.rebase_stack(stack, 101, onto=VIABLE_STRICT)
+
+
+class TestPushBranches(LineStackTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.stack, _ = self.landed_stack()
+        with without_identity_variables():
+            self.updates = build_native_stack_rebase(
+                self.repo, ORG, PROJECT, self.stack, 103, TRUNK, TRUNK
+            )
+        self.before = self.heads(self.stack)
+
+    def test_fast_forwards_every_branch_in_one_atomic_push(self) -> None:
+        log = Path(self.repo.repo_dir).parent / "git.log"
+        wrapper = log.parent / "bin" / "git"
+        wrapper.parent.mkdir()
+        git = shutil.which("git")
+        wrapper.write_text(f'#!/bin/sh\necho "$*" >> {log}\nexec {git} "$@"\n')
+        wrapper.chmod(0o755)
+        path = f"{wrapper.parent}{os.pathsep}{os.environ['PATH']}"
+        with mock.patch.dict(os.environ, {"PATH": path}):
+            push_branches(self.repo, self.updates)
+        after = {branch: new for _, branch, _, new in self.updates}
+        self.assertEqual(self.heads(self.stack), after)
+        commands = [line.split() for line in log.read_text().splitlines()]
+        pushes = [args[args.index("push") + 1 :] for args in commands if "push" in args]
+        self.assertEqual(len(pushes), 1, pushes)
+        self.assertIn("--atomic", pushes[0])
+        forced = [arg for arg in pushes[0] if arg.startswith(("-f", "--force", "+"))]
+        leases = [
+            f"--force-with-lease=refs/heads/{branch}:{old}"
+            for _, branch, old, _ in self.updates
+        ]
+        self.assertEqual(forced, leases)
+
+    def test_pushes_nothing_if_one_branch_is_refused(self) -> None:
+        self.reject_pushes_to("user/c")
+        with self.assertRaisesRegex(RuntimeError, "user/c"):
+            push_branches(self.repo, self.updates)
+        self.assertEqual(self.heads(self.stack), self.before)
+
+    def test_dry_run_pushes_nothing(self) -> None:
+        push_branches(self.repo, self.updates, dry_run=True)
+        self.assertEqual(self.heads(self.stack), self.before)
+
+    def test_runs_no_git_command_without_updates(self) -> None:
+        with mock.patch.object(self.repo, "_run_git") as run:
+            push_branches(self.repo, [])
+        run.assert_not_called()
+
+    def test_refuses_branch_reset_since_it_was_read(self) -> None:
+        dropped = self.before["user/b"]
+        self.origin_git("update-ref", "refs/heads/user/b", f"{dropped}^")
+        reset = self.heads(self.stack)
+        with self.assertRaisesRegex(RuntimeError, r"-> user/b \(stale info\)"):
+            push_branches(self.repo, self.updates)
+        self.assertEqual(self.heads(self.stack), reset)
+
+    def test_refuses_update_that_is_not_a_fast_forward(self) -> None:
+        # The lease matches and the origin takes forced updates, so only the check
+        # that the new commit has the old tip stops this push
+        self.origin_git("config", "receive.denyNonFastForwards", "false")
+        number, branch, old, _ = self.updates[-1]
+        updates = [*self.updates[:-1], (number, branch, old, self.root)]
+        message = (
+            rf"^The update of {branch} from {old} to {self.root} is not a "
+            "fast-forward$"
+        )
+        with self.assertRaisesRegex(NativeStackError, message):
+            push_branches(self.repo, updates)
+        self.assertEqual(self.heads(self.stack), self.before)
 
 
 if __name__ == "__main__":

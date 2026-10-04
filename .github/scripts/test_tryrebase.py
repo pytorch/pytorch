@@ -1,10 +1,19 @@
+import os
+from argparse import Namespace
 from typing import Any
 from unittest import main, mock, TestCase
 
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
-from test_trymerge import mocked_gh_graphql
+from native_stack import NativeStackError
+from test_native_stack import LineStackTestCase, without_identity_variables
+from test_trymerge import mocked_gh_graphql, NATIVE_STACK, NoNetworkTestCase, stacked_pr
 from trymerge import GitHubPR
-from tryrebase import additional_rebase_failure_info, rebase_ghstack_onto, rebase_onto
+from tryrebase import (
+    additional_rebase_failure_info,
+    main as tryrebase_main,
+    rebase_ghstack_onto,
+    rebase_onto,
+)
 
 
 def mocked_rev_parse(branch: str) -> str:
@@ -227,6 +236,245 @@ class TestRebase(TestCase):
                 )
             ],
         )
+
+
+def merged(branch: str, onto: str = MAIN_BRANCH, rebased: int | None = None) -> str:
+    """The comment on the PR of `branch` once `onto` was merged into it because PR
+    `rebased`, if given, was rebased"""
+    because = "" if rebased is None else f" because #{rebased} was rebased"
+    return (
+        f"Merged `{onto}` into `{branch}`{because}, please pull locally before adding "
+        f"more changes (for example, via `git checkout {branch} && git pull --rebase`)"
+    )
+
+
+class TryRebaseMainTestCase(NoNetworkTestCase):
+    """tryrebase.main() on PR #1002 of NATIVE_STACK, with GitHub patched"""
+
+    def setUp(self) -> None:
+        super().setUp()
+        env = mock.patch.dict(os.environ)
+        env.start()
+        self.addCleanup(env.stop)
+        os.environ.pop("GH_RUN_URL", None)
+        self.args = Namespace(pr_num=1002, branch=None, dry_run=False)
+        self.patch("tryrebase.parse_args", return_value=self.args)
+        self.pr = stacked_pr(1002)
+        self.pr.is_cross_repo.return_value = False
+        self.pr.head_ref.return_value = "user/1002"
+        self.patch("tryrebase.GitHubPR", return_value=self.pr)
+        self.post = self.patch("tryrebase.gh_post_comment")
+        # The PRs based on PR #1002's branch
+        self.pulls = self.patch("tryrebase.gh_fetch_json_list", return_value=[])
+        self.get_stack = self.patch(
+            "tryrebase.get_native_stack", return_value=NATIVE_STACK
+        )
+
+    def run_main(self) -> object:
+        """Runs tryrebase.main() and returns the exit code of the process"""
+        try:
+            tryrebase_main()
+        except SystemExit as e:
+            return e.code
+        return 0
+
+    def comments(self, dry_run: bool = False) -> list[Any]:
+        """The comments after the one that starts the job"""
+        started = self.post.call_args_list[0]
+        self.assertEqual(started.args[2], self.args.pr_num)
+        self.assertRegex(started.args[3], "^@pytorchbot started a rebase job onto")
+        self.assertEqual(started.kwargs, {"dry_run": dry_run})
+        return self.post.call_args_list[1:]
+
+    def comment(self, number: int, message: str, dry_run: bool = False) -> Any:
+        return mock.call("pytorch", "pytorch", number, message, dry_run=dry_run)
+
+
+class TestNativeStackRebaseMain(TryRebaseMainTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.repo = mock.MagicMock(spec=GitRepo)
+        self.repo.remote = "origin"
+        self.repo.gh_owner_and_name.return_value = ("pytorch", "pytorch")
+        self.repo.rev_parse.return_value = "onto-sha"
+        self.patch("tryrebase.GitRepo", return_value=self.repo)
+        self.updates = [
+            (n, f"user/{n}", f"old-{n}", f"new-{n}") for n in (1000, 1001, 1002)
+        ]
+        self.build = self.patch(
+            "tryrebase.build_native_stack_rebase", return_value=self.updates
+        )
+        self.push = self.patch("tryrebase.push_branches")
+        self.rebase_onto = self.patch("tryrebase.rebase_onto", return_value=True)
+        self.rebase_ghstack_onto = self.patch(
+            "tryrebase.rebase_ghstack_onto", return_value=True
+        )
+
+    def assertNotRebased(self) -> None:
+        self.build.assert_not_called()
+        self.push.assert_not_called()
+        self.rebase_onto.assert_not_called()
+        self.rebase_ghstack_onto.assert_not_called()
+
+    def test_merges_the_target_into_the_stack_and_fast_forwards_it(self) -> None:
+        self.assertEqual(self.run_main(), 0)
+        self.get_stack.assert_called_once_with("pytorch", "pytorch", 1002)
+        self.build.assert_called_once_with(
+            self.repo, "pytorch", "pytorch", NATIVE_STACK, 1002, "main", "main"
+        )
+        self.push.assert_called_once_with(self.repo, self.updates, False)
+        self.rebase_onto.assert_not_called()
+        # The landed PR whose branch got the target is not told about it
+        self.assertEqual(
+            self.comments(),
+            [
+                self.comment(1001, merged("user/1001", rebased=1002)),
+                self.comment(1002, merged("user/1002")),
+            ],
+        )
+
+    def test_rebases_onto_viable_strict(self) -> None:
+        self.args.branch = "viable/strict"
+        self.assertEqual(self.run_main(), 0)
+        self.build.assert_called_once_with(
+            self.repo, "pytorch", "pytorch", NATIVE_STACK, 1002, "main", "viable/strict"
+        )
+        self.assertEqual(
+            self.comments()[-1],
+            self.comment(1002, merged("user/1002", VIABLE_STRICT_BRANCH)),
+        )
+
+    def test_refuses_other_targets(self) -> None:
+        self.args.branch = "release/2.9"
+        self.assertEqual(self.run_main(), 0)
+        self.assertNotRebased()
+        message = (
+            "Rebase failed due to PR #1002 is in a stack, so it can only be rebased "
+            "onto main or viable/strict, not release/2.9"
+        )
+        self.assertEqual(self.comments(), [self.comment(1002, message)])
+
+    def test_up_to_date_stack_exits_with_failure(self) -> None:
+        self.build.return_value = []
+        self.assertEqual(self.run_main(), 1)
+        self.push.assert_not_called()
+        message = "Tried to rebase and push PR #1002, but it was already up to date."
+        self.assertEqual(self.comments(), [self.comment(1002, message)])
+
+    def test_stack_errors_are_commented(self) -> None:
+        error = "PR #1000 is closed but not landed on main, or it was reverted"
+        self.build.side_effect = NativeStackError(error)
+        self.assertEqual(self.run_main(), 0)
+        self.push.assert_not_called()
+        message = f"Rebase failed due to {error}"
+        self.assertEqual(self.comments(), [self.comment(1002, message)])
+
+    def test_dry_run(self) -> None:
+        self.args.dry_run = True
+        self.assertEqual(self.run_main(), 0)
+        self.push.assert_called_once_with(self.repo, self.updates, True)
+        comments = self.comments(dry_run=True)
+        self.assertEqual([call.kwargs for call in comments], [{"dry_run": True}] * 2)
+
+    def test_reads_the_stack_only_of_prs_that_may_be_stacked(self) -> None:
+        for cross_repo, base, upper, read in (
+            (True, "user/1001", [], False),
+            (False, "main", [], False),
+            (False, "main", [{"number": 1003}], True),
+            (False, "user/1001", [], True),
+        ):
+            with self.subTest(cross_repo=cross_repo, base=base, upper=upper):
+                self.pr.is_cross_repo.return_value = cross_repo
+                self.pr.base_ref.return_value = base
+                self.pulls.return_value = upper
+                for patched in (self.pulls, self.get_stack, self.build):
+                    patched.reset_mock()
+                self.rebase_onto.reset_mock()
+                self.assertEqual(self.run_main(), 0)
+                self.assertEqual(self.get_stack.called, read)
+                self.assertEqual(self.build.called, read)
+                self.assertEqual(self.rebase_onto.called, not read)
+                if not cross_repo and base == "main":
+                    self.pulls.assert_called_once_with(
+                        "https://api.github.com/repos/pytorch/pytorch/pulls",
+                        {"base": "user/1002", "state": "all", "per_page": 1},
+                    )
+                else:
+                    self.pulls.assert_not_called()
+
+    def test_pr_without_a_stack_keeps_its_rebase(self) -> None:
+        self.get_stack.return_value = None
+        self.assertEqual(self.run_main(), 0)
+        self.rebase_onto.assert_called_once_with(
+            self.pr, self.repo, MAIN_BRANCH, dry_run=False
+        )
+        self.build.assert_not_called()
+
+    def test_pr_whose_stack_cannot_be_read_is_not_rebased(self) -> None:
+        self.get_stack.side_effect = NativeStackError("GraphQL errors: Timeout")
+        self.pulls.return_value = [{"number": 1003}]
+        message = (
+            "Rebase failed due to Could not read the stack of PR #1002, so it was "
+            "not rebased: GraphQL errors: Timeout"
+        )
+        for base in ("main", "user/1001"):
+            with self.subTest(base=base):
+                self.pr.base_ref.return_value = base
+                self.post.reset_mock()
+                self.assertEqual(self.run_main(), 0)
+                self.assertNotRebased()
+                self.assertEqual(self.comments(), [self.comment(1002, message)])
+
+    def test_ghstack_pr_keeps_its_rebase(self) -> None:
+        self.pr.is_ghstack_pr.return_value = True
+        self.assertEqual(self.run_main(), 0)
+        self.rebase_ghstack_onto.assert_called_once_with(
+            self.pr, self.repo, MAIN_BRANCH, dry_run=False
+        )
+        self.get_stack.assert_not_called()
+        self.build.assert_not_called()
+
+    def test_closed_pr_is_not_rebased(self) -> None:
+        self.pr.is_closed.return_value = True
+        self.assertEqual(self.run_main(), 0)
+        self.get_stack.assert_not_called()
+        self.assertNotRebased()
+        message = "PR #1002 is closed, won't rebase"
+        self.assertEqual(self.comments(), [self.comment(1002, message)])
+
+
+class TestNativeStackRebaseEndToEnd(TryRebaseMainTestCase, LineStackTestCase):
+    """tryrebase.main() rebases a real stack, from PR #103, in the bot clone and pushes
+    it to a local origin; only GitHub is patched"""
+
+    def setUp(self) -> None:
+        LineStackTestCase.setUp(self)
+        TryRebaseMainTestCase.setUp(self)
+        self.stack, self.own = self.landed_stack()
+        os.environ.update(GIT_REPO_DIR=self.repo.repo_dir, GIT_REMOTE_NAME="origin")
+        self.args.pr_num = 103
+        self.pr.pr_num = 103
+        self.pr.base_ref.return_value = "user/b"
+        self.get_stack.side_effect = lambda *_: self.current(self.stack)
+
+    def test_rebases_the_stack_with_fast_forwards(self) -> None:
+        before = self.heads(self.stack)
+        with without_identity_variables():
+            self.assertEqual(self.run_main(), 0)
+        self.assertUpdated(self.stack, before, self.own, "user/a", "user/b", "user/c")
+        self.assertMergesCleanly(self.stack, 103, self.own)
+        self.assertEqual(
+            self.comments(),
+            [
+                self.comment(102, merged("user/b", rebased=103)),
+                self.comment(103, merged("user/c")),
+            ],
+        )
+        self.post.reset_mock()
+        with without_identity_variables():
+            self.assertEqual(self.run_main(), 1)
+        message = "Tried to rebase and push PR #103, but it was already up to date."
+        self.assertEqual(self.comments(), [self.comment(103, message)])
 
 
 if __name__ == "__main__":
