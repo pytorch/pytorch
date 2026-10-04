@@ -811,6 +811,53 @@ def _is_dim_dynamic_from_source_dynamism(
     return dim_dynamism is not None and dim < len(dim_dynamism) and dim_dynamism[dim]
 
 
+class _TritonWrapTargets(NamedTuple):
+    kernel_types: tuple[type, ...]
+    create_1d_tma_descriptor: object
+    create_2d_tma_descriptor: object
+    tensor_descriptor_from_tensor: object
+    set_allocator: object
+
+
+@functools.cache
+def _triton_wrap_targets() -> _TritonWrapTargets:
+    from torch.utils._triton import (
+        has_triton,
+        has_triton_experimental_host_tma,
+        has_triton_tensor_descriptor_host_tma,
+    )
+
+    # Fresh sentinels never match a user value when triton (or a given
+    # triton feature) is unavailable.
+    targets = _TritonWrapTargets((), object(), object(), object(), object())
+    # Triton runtime types are shared across backends, including CPU.
+    if has_triton(include_cpu=True):
+        import triton
+        from triton.runtime.autotuner import Autotuner
+        from triton.runtime.jit import JITFunction
+
+        targets = targets._replace(kernel_types=(JITFunction, Autotuner))
+        if hasattr(triton, "set_allocator"):
+            targets = targets._replace(set_allocator=triton.set_allocator)
+    if has_triton_experimental_host_tma():
+        from triton.tools.experimental_descriptor import (
+            create_1d_tma_descriptor,
+            create_2d_tma_descriptor,
+        )
+
+        targets = targets._replace(
+            create_1d_tma_descriptor=create_1d_tma_descriptor,
+            create_2d_tma_descriptor=create_2d_tma_descriptor,
+        )
+    if has_triton_tensor_descriptor_host_tma():
+        from triton.tools.tensor_descriptor import TensorDescriptor
+
+        targets = targets._replace(
+            tensor_descriptor_from_tensor=TensorDescriptor.from_tensor
+        )
+    return targets
+
+
 class VariableBuilder:
     """Wrap a python value in a VariableTracker() instance"""
 
@@ -1115,58 +1162,13 @@ class VariableBuilder:
 
     def _wrap(self, value: object) -> VariableTracker:
         # import here to avoid circular dependencies
-        from torch.utils._triton import (
-            has_triton,
-            has_triton_experimental_host_tma,
-            has_triton_tensor_descriptor_host_tma,
-        )
-
         from ..decorators import (
             CudagraphOverrideContextManager,
             DynamoConfigPatchProxy,
             ErrorOnGraphBreakDecoratorContextManager,
         )
 
-        # Triton runtime types are shared across backends, including CPU.
-        if has_triton(include_cpu=True):
-            from triton.runtime.autotuner import Autotuner
-            from triton.runtime.jit import JITFunction
-        else:
-
-            class JITFunction:
-                pass
-
-            class Autotuner:
-                pass
-
-        # default implementations, in case we don't have triton (or the wrong triton version)
-        def create_1d_tma_descriptor() -> None:
-            pass
-
-        def create_2d_tma_descriptor() -> None:
-            pass
-
-        class TensorDescriptor:
-            @staticmethod
-            def from_tensor() -> None:
-                pass
-
-        def set_allocator() -> None:
-            pass
-
-        if has_triton_experimental_host_tma():
-            from triton.tools.experimental_descriptor import (
-                create_1d_tma_descriptor,
-                create_2d_tma_descriptor,
-            )
-        if has_triton_tensor_descriptor_host_tma():
-            from triton.tools.tensor_descriptor import TensorDescriptor
-        # The allocator hook is shared across Triton backends, including CPU.
-        if has_triton(include_cpu=True):
-            import triton as triton_mod
-
-            if hasattr(triton_mod, "set_allocator"):
-                set_allocator = triton_mod.set_allocator
+        triton_targets = _triton_wrap_targets()
 
         # Handle exact type() match
         type_dispatch = self._type_dispatch().get(type(value))
@@ -1819,7 +1821,7 @@ class VariableBuilder:
             )  # cast it back to symbool for tracing
             return SymNodeVariable(sym_node_proxy, tracing_symint)
 
-        elif isinstance(value, (JITFunction, Autotuner)):
+        elif isinstance(value, triton_targets.kernel_types):
             self.install_guards(GuardBuilder.ID_MATCH)
             return TritonKernelVariable(
                 value,
@@ -1827,13 +1829,13 @@ class VariableBuilder:
                 None,  # No grid provided
                 source=self.source,
             )
-        elif value is create_1d_tma_descriptor:
+        elif value is triton_targets.create_1d_tma_descriptor:
             return CreateTMADescriptorExperimentalVariable(rank=1)
-        elif value is create_2d_tma_descriptor:
+        elif value is triton_targets.create_2d_tma_descriptor:
             return CreateTMADescriptorExperimentalVariable(rank=2)
-        elif value is TensorDescriptor.from_tensor:
+        elif value is triton_targets.tensor_descriptor_from_tensor:
             return CreateTMADescriptorStableVariable()
-        elif value is set_allocator:
+        elif value is triton_targets.set_allocator:
             return TritonSetAllocatorVariable(value)
         elif isinstance(value, torch.amp.autocast_mode.autocast):
             if isinstance(value, torch.amp.autocast_mode._UnmanagedAutocast):
