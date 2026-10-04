@@ -63,6 +63,31 @@ static void hardswish_backward_kernel(at::TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "hardswish_backward");
 }
 
+static void threshold_kernel(TensorIteratorBase& iter, const Scalar& threshold, const Scalar& value) {
+  if (iter.output().scalar_type() != iter.common_dtype()) {
+    auto result = at::empty(iter.output().sizes(), iter.output().options().dtype(iter.common_dtype()));
+    auto compute_iter = TensorIterator::binary_op(result, iter.input(0), iter.input(1));
+    threshold_kernel(compute_iter, threshold, value);
+    iter.output().copy_(result);
+    return;
+  }
+  if (c10::isFloatingType(iter.common_dtype())) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(c10::kHalf, c10::kBFloat16, iter.common_dtype(), "threshold_mps", [&]() {
+      ThresholdParams<float> params{threshold.to<float>(), static_cast<float>(value.to<scalar_t>())};
+      lib.exec_binary_kernel_with_params(iter, "threshold", params, "ThresholdParams_float");
+    });
+    return;
+  }
+  AT_DISPATCH_INTEGRAL_TYPES_AND(c10::kBool, iter.common_dtype(), "threshold_mps", [&]() {
+    ThresholdParams<scalar_t> params{threshold.to<scalar_t>(), value.to<scalar_t>()};
+    lib.exec_binary_kernel_with_params(
+        iter,
+        "threshold",
+        params,
+        fmt::format("ThresholdParams_{}", mps::scalarToMetalTypeString(iter.common_dtype())));
+  });
+}
+
 static void elu_kernel(TensorIteratorBase& iter, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
   AT_DISPATCH_FLOATING_TYPES_AND2(c10::kHalf, c10::kBFloat16, iter.common_dtype(), "elu_mps", [&]() {
     ELUParams<scalar_t> params{alpha.to<scalar_t>(), scale.to<scalar_t>(), input_scale.to<scalar_t>()};
@@ -362,6 +387,7 @@ REGISTER_DISPATCH(GeluKernel, gelu_kernel);
 REGISTER_DISPATCH(GeluBackwardKernel, gelu_backward_kernel);
 REGISTER_DISPATCH(sigmoid_backward_stub, sigmoid_backward_kernel);
 REGISTER_DISPATCH(tanh_backward_stub, tanh_backward_kernel);
+REGISTER_DISPATCH(threshold_stub, threshold_kernel);
 REGISTER_DISPATCH(logit_backward_stub, logit_backward_kernel);
 
 } // namespace at::native
