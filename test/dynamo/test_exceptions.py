@@ -75,6 +75,16 @@ def comparable(value):
     return value
 
 
+class _ExplicitInitExc(BaseException):
+    def __init__(self, value):
+        BaseException.__init__(self, value)
+
+
+class _SuperInitExc(BaseException):
+    def __init__(self, value):
+        super().__init__(value)
+
+
 class ExceptionTests(torch._dynamo.test_case.TestCase):
     def test_exception(self):
         def fn(x):
@@ -1485,6 +1495,65 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
             raise AttributeError(name="a")
 
         self.assertRaises(Unsupported, fn)
+
+    @parametrize(
+        "exc_type",
+        [BaseException, ValueError, OSError, StopIteration],
+        name_fn=lambda x: x.__name__,
+    )
+    def test_builtin_exception_rejects_kwargs(self, exc_type):
+        def fn(x):
+            try:
+                exc_type(a=1)
+            except TypeError as e:
+                return x + 1, e.args
+            return x - 1, ()
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_user_exception_init_kwargs(self):
+        class Explicit(BaseException):
+            def __init__(self, fancy_arg):
+                BaseException.__init__(self, fancy_arg, 2)
+                self.fancy_arg = fancy_arg
+
+        class ViaSuper(BaseException):
+            def __init__(self, fancy_arg):
+                super().__init__(fancy_arg)
+                self.fancy_arg = fancy_arg
+
+        class ForwardsKwargs(BaseException):
+            def __init__(self, fancy_arg):
+                BaseException.__init__(self, fancy_arg=fancy_arg)
+
+        def fn(x):
+            e1 = Explicit(fancy_arg=3)
+            e2 = ViaSuper(fancy_arg=4)
+            try:
+                ForwardsKwargs(fancy_arg=5)
+            except TypeError as e:
+                msg = e.args
+            return x + e1.fancy_arg + e2.fancy_arg, e1.args, e2.args, msg
+
+        x = torch.ones(2)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_user_exception_base_init_returned_object(self):
+        # Module-level classes: the returned objects are reconstructed by
+        # importing their class from its defining module.
+        def fn(x):
+            return x + 1, _ExplicitInitExc(value=x), _SuperInitExc(value=x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        for x in (torch.ones(2), torch.ones(3) + 1):
+            actual, *actual_exc = opt_fn(x)
+            expected, *expected_exc = fn(x)
+            self.assertEqual(actual, expected)
+            for actual_e, expected_e in zip(actual_exc, expected_exc):
+                self.assertEqual(actual_e.args, expected_e.args)
 
     def test_stack_trace_from_observed_exception(self):
         class Model(torch.nn.Module):
