@@ -207,7 +207,9 @@ class CPUReproTests(TestCase):
         expected = run(fn)
         with functorch_config.patch(activation_memory_budget=activation_memory_budget):
             actual = run(torch.compile(fn, backend="inductor", fullgraph=True))
-        self.assertEqual(actual, expected)
+        # mean/std grads are 256-term float32 sums; without vectorization
+        # (ATEN_CPU_CAPABILITY=default) inductor sums them sequentially.
+        self.assertEqual(actual, expected, atol=1e-4, rtol=1e-4)
 
     @parametrize("activation_memory_budget", (0, 1))
     def test_interpolate_mutated_input_backward(self, activation_memory_budget):
