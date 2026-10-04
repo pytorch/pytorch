@@ -154,6 +154,9 @@ auto tensor = torch::stable::empty(
 ```{doxygenfunction} torch::stable::sum_out
 ```
 
+```{doxygenfunction} torch::stable::add
+```
+
 ```{doxygenfunction} torch::stable::subtract
 ```
 
