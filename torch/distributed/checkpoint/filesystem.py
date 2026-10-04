@@ -73,7 +73,7 @@ CURRENT_DCP_VERSION: Final[str] = "1.0.0"
 
 @dataclass
 class _StorageInfo:
-    """This is the per entry storage info."""
+    """This is the per-entry storage info."""
 
     relative_path: str
     offset: int
@@ -131,7 +131,7 @@ class _SerialCpuLoader(_TensorLoader):
             tensor = self.resolve_fun(obj).detach()
             tensor = tensor.cpu()
             if tensor.untyped_storage().size() != tensor.nbytes:
-                # creates a new tensor with minimal storage while preserving memory format.
+                # Creates a new tensor with minimal storage while preserving memory format.
                 tensor = tensor.clone()
             yield (
                 tensor,
@@ -144,11 +144,11 @@ class _OverlappingCpuLoader(_TensorLoader):
         self,
         resolve_fun: Callable,
         stream: torch.Stream | None = None,
-        inflight_threshhold: int = 1_000_000,
+        inflight_threshold: int = 1_000_000,
     ) -> None:
         self.resolve_fun = resolve_fun
         self.items: list[tuple[int, object]] = []
-        self.inflight_threshhold = inflight_threshhold
+        self.inflight_threshold = inflight_threshold
         self.in_flight_data = 0
         self.current_items: collections.deque = collections.deque()
         self.idx = 0
@@ -169,9 +169,9 @@ class _OverlappingCpuLoader(_TensorLoader):
 
     def _drain(self) -> list[tuple[torch.Tensor, object]]:
         drained = []
-        if self.in_flight_data >= self.inflight_threshhold:
+        if self.in_flight_data >= self.inflight_threshold:
             self.stream.synchronize()
-        while self.in_flight_data >= self.inflight_threshhold:
+        while self.in_flight_data >= self.inflight_threshold:
             val = self.current_items.popleft()
             self.in_flight_data -= val[0].numel() * val[0].element_size()
             drained.append(val)
@@ -179,7 +179,7 @@ class _OverlappingCpuLoader(_TensorLoader):
 
     def _refill(self) -> None:
         with self.device_module.stream(self.stream):
-            while not self._done and self.in_flight_data < self.inflight_threshhold:
+            while not self._done and self.in_flight_data < self.inflight_threshold:
                 _, obj = self.items[self.idx]
                 self.idx += 1
                 tensor = self.resolve_fun(obj).detach()
@@ -190,7 +190,7 @@ class _OverlappingCpuLoader(_TensorLoader):
                         tensor.untyped_storage().size()
                         != tensor.numel() * tensor.itemsize
                     ):
-                        # creates a new tensor with minimal storage while preserving memory format.
+                        # Creates a new tensor with minimal storage while preserving memory format.
                         tensor = tensor.clone()
 
                 self.current_items.append(
@@ -232,8 +232,8 @@ class _OverlappingCpuLoader(_TensorLoader):
 
 class _StorageWriterTransforms:
     """
-    This is experimental, and will likely move elsewhere in the
-    future.  It lives here to minimize changes while we are still
+    This is experimental and will likely move elsewhere in the
+    future. It lives here to minimize changes while we are still
     learning and gathering feedback.
     """
 
@@ -244,7 +244,7 @@ class _StorageWriterTransforms:
         If the extensions arg is None, this means the implementation
         should provide whatever defaults it chooses.  An empty
         sequence indicates no extensions should be used.  At this
-        time, the default extensions sequence is empty.
+        time, the default extension sequence is empty.
         """
         self.extensions = () if extensions is None else extensions
 
@@ -254,9 +254,8 @@ class _StorageWriterTransforms:
         # In order to avoid leaking fds, transformers' close must
         # cascade to wrapped streams, but since this function can
         # append to the raw stream, we can't close the actual stream.
-        # So, we use this to put a wrapper around the raw stream's
-        # close() to make it a noop, and it gets closed once all files
-        # are appended.
+        # Therefore, we wrap the raw stream's close() method with a no-op;
+        # the raw stream is closed once all files have been appended.
 
         class NoCloseWriter(io.IOBase):
             def __init__(self, raw: io.IOBase):
@@ -271,7 +270,7 @@ class _StorageWriterTransforms:
             def close(self):
                 self.flush()
                 self.raw.flush()
-                # but not close.
+                # Do not close the raw stream.
 
         transform_to = cast(IO[bytes], NoCloseWriter(raw_stream))
 
@@ -285,7 +284,7 @@ def _item_size(item: WriteItem) -> int:
     size = 1
     if item.tensor_data is None:
         raise AssertionError("WriteItem tensor_data must not be None")
-    # can't use math.prod as PT needs to support older python
+    # Can't use math.prod because PT needs to support older Python versions.
     for s in item.tensor_data.size:
         size *= s
 
@@ -378,7 +377,7 @@ def _write_files_from_queue(
     result_queue: queue.Queue,
     planner: SavePlanner,
     transforms: _StorageWriterTransforms,
-    inflight_threshhold: int,
+    inflight_threshold: int,
     use_fsync: bool,
     thread_count: int,
     serialization_format: SerializationFormat,
@@ -400,11 +399,11 @@ def _write_files_from_queue(
                     torch.cuda.is_available()
                     or (custom_device_mod and custom_device_mod.is_available())
                 )
-                and inflight_threshhold > 0
+                and inflight_threshold > 0
             ):
                 loader = _OverlappingCpuLoader(
                     planner.resolve_data,
-                    inflight_threshhold=inflight_threshhold,
+                    inflight_threshold=inflight_threshold,
                 )
             else:
                 loader = _SerialCpuLoader(
@@ -474,7 +473,7 @@ def _write_files_from_queue(
                         os.fsync(stream.fileno())
                     except (AttributeError, UnsupportedOperation) as e:
                         warnings.warn(
-                            f"fsync not supported for this stream, relying on flush(): {e}"
+                            f"fsync is not supported for this stream; relying on flush(): {e}"
                         )
                 stream.close()
             result_queue.put(write_results)
@@ -582,9 +581,9 @@ class _FileSystemWriter(StorageWriter):
     This implementation makes the following assumptions and simplifications:
 
     * The checkpoint path is an empty or non-existing directory.
-    * File creation is atomic
+    * File creation is atomic.
 
-    The checkpoint consist of one file per write request plus
+    The checkpoint consists of one file per write request plus
     a `.metadata` file with the serialized metadata.
 
     """
@@ -607,12 +606,12 @@ class _FileSystemWriter(StorageWriter):
 
         Args:
             path: directory where the checkpoint will be written to.
-            single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
-            sync_files : force files to be synced to permanent storage. Default to True.
-            thread_count: Number of IO threads to use to write. Default to 1.
-            per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving them. Default 10Mb.
+            single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Defaults to True.
+            sync_files: Force files to be synced to permanent storage. Defaults to True.
+            thread_count: Number of IO threads to use to write. Defaults to 1.
+            per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving them. The default is 10 MB.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
-            _extensions: Extensions to apply to output streams (EXPERIMENTAL)
+            _extensions: Extensions to apply to output streams (EXPERIMENTAL).
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
@@ -741,7 +740,7 @@ class _FileSystemWriter(StorageWriter):
             result_queue=result_queue,
             planner=planner,
             transforms=self.transforms,
-            inflight_threshhold=self.per_thread_copy_ahead,
+            inflight_threshold=self.per_thread_copy_ahead,
             use_fsync=self.sync_files,
             thread_count=self.thread_count,
             serialization_format=self.serialization_format,
@@ -783,10 +782,10 @@ class _FileSystemWriter(StorageWriter):
                     os.fsync(metadata_file.fileno())
                 except (AttributeError, UnsupportedOperation) as e:
                     warnings.warn(
-                        f"fsync not supported for this stream, relying on flush(): {e}"
+                        f"fsync is not supported for this stream; relying on flush(): {e}"
                     )
 
-        # delete in-case other checkpoints were present.
+        # Delete in case other checkpoints were present.
         if not self.use_collectives and self.rank is not None:
             metadata_path = self._get_metadata_path(self.rank)
         else:
@@ -807,7 +806,7 @@ class _FileSystemWriter(StorageWriter):
     @property
     def checkpoint_id(self) -> str | os.PathLike:
         """
-        return the checkpoint_id that will be used to save the checkpoint.
+        Return the checkpoint ID that will be used to save the checkpoint.
         """
         return self.path
 
@@ -818,8 +817,8 @@ class _FileSystemWriter(StorageWriter):
 
 class _StorageReaderTransforms:
     """
-    This is experimental, and will likely move elsewhere in the
-    future.  It lives here to minimize changes while we are still
+    This is experimental and will likely move elsewhere in the
+    future. It lives here to minimize changes while we are still
     learning and gathering feedback.
     """
 
@@ -961,7 +960,7 @@ class FileSystemReader(StorageReader):
     @property
     def checkpoint_id(self) -> str | os.PathLike:
         """
-        return the checkpoint_id that will be used to load the checkpoint.
+        Return the checkpoint ID that will be used to load the checkpoint.
         """
         return self.path
 
@@ -977,11 +976,11 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
     This implementation makes the following assumptions and simplifications:
 
     * The checkpoint path is an empty or non-existing directory.
-    * File creation is atomic
+    * File creation is atomic.
 
-    The checkpoint consist of one file per write request plus
-    a global `.metadata` file with the serialized metadata if rank coordination is enabled.
-    a rank local `__{rank}.metadata` file with the serialized metadata if rank coordination is NOT enabled.
+    The checkpoint consists of one file per write request plus either
+    a global `.metadata` file with the serialized metadata if rank coordination is enabled
+    or a rank-local `__{rank}.metadata` file if rank coordination is not enabled.
 
     """
 
@@ -1002,15 +1001,15 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
 
         Args:
             path: directory where the checkpoint will be written to.
-            single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Default to True.
-            sync_files : force files to be synced to permanent storage. Default to True.
-            thread_count: Number of IO threads to use to write. Default to 1.
-            per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving them. Default 10Mb.
+            single_file_per_rank: Produce one file per rank instead of one file per tensor/blob. Defaults to True.
+            sync_files: Force files to be synced to permanent storage. Defaults to True.
+            thread_count: Number of IO threads to use to write. Defaults to 1.
+            per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving them. The default is 10 MB.
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
-                at the cost of increased memory usage. Additionally, if this parameter is set to True, it's the expectation
-                that the stager is maintained and reused for multiple dcp.async_save calls. Default to False.
+                at the cost of increased memory usage. Additionally, if this parameter is set to True, the stager is
+                expected to be maintained and reused for multiple dcp.async_save calls. Defaults to False.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
-            _extensions: Extensions to apply to output streams (EXPERIMENTAL)
+            _extensions: Extensions to apply to output streams (EXPERIMENTAL).
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
@@ -1032,7 +1031,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
 
     def stage(self, state_dict: STATE_DICT_TYPE) -> STATE_DICT_TYPE:
         """Override of AsyncStager.stage"""
-        # in the async case, the state dict is already on CPU, so maintaining this
+        # In the async case, the state dict is already on CPU, so maintaining this
         # buffer makes no sense
         self.per_thread_copy_ahead = 0
         return super().stage(state_dict)
