@@ -7851,6 +7851,34 @@ for dtype in (torch.int32, torch.int64):
         compiled_out = compiled(mean, std)
         self.assertNotEqual(eager_out, compiled_out)
 
+    @parametrize("std_dtype", (torch.complex64, torch.complex128))
+    @parametrize("mean_kind", ("scalar", "real", "complex"))
+    def test_normal_complex_std(self, std_dtype, mean_kind):
+        def fn(mean, std):
+            return torch.normal(mean, std)
+
+        std = torch.ones(3, device=self.device, dtype=std_dtype)
+        mean = 0.0
+        if mean_kind != "scalar":
+            mean = torch.zeros(
+                3,
+                device=self.device,
+                dtype=std_dtype if mean_kind == "complex" else torch.float32,
+            )
+        with self.assertRaisesRegex(
+            RuntimeError, "normal expects standard deviation to be non-complex"
+        ):
+            torch.compile(fn, fullgraph=True)(mean, std)
+
+    @parametrize("dtype", (torch.complex64, torch.complex128))
+    def test_normal_complex_mean_real_std(self, dtype):
+        def fn(mean, std):
+            return torch.normal(mean, std)
+
+        mean = torch.full((3,), 1 + 2j, device=self.device, dtype=dtype)
+        std = torch.zeros_like(mean.real)
+        self.assertEqual(torch.compile(fn, fullgraph=True)(mean, std), mean)
+
     def test_embedding(self):
         m = torch.nn.Sequential(
             torch.nn.Embedding(10, 4, padding_idx=0),

@@ -6730,9 +6730,25 @@ def log_normal(self, mean=1, std=2, generator=None):
     return torch.exp(std * torch.randn_like(self) + mean)
 
 
+def _check_normal_std(fn):
+    @wraps(fn)
+    def _fn(*args, **kwargs):
+        # Promotion can make a valid real std complex when mean is complex.
+        std = args[1] if len(args) > 1 else kwargs.get("std", 1)
+        if isinstance(std, TensorLike):
+            torch._check(
+                not utils.is_complex_dtype(std.dtype),
+                lambda: "normal expects standard deviation to be non-complex",
+            )
+        return fn(*args, **kwargs)
+
+    return _fn
+
+
 # NOTE: the device and dtype will be ignored when shape is None
 @register_decomposition(aten.normal)
 @out_wrapper()
+@_check_normal_std
 @elementwise_type_promotion_wrapper(
     type_promoting_args=(
         "mean",
