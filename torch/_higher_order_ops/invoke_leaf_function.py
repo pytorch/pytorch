@@ -8,7 +8,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet
 from torch._custom_class_base import CustomClassBase
-from torch._higher_order_ops.utils import register_fake
+from torch._higher_order_ops.utils import parse_comma_separated_indices, register_fake
 from torch._library.opaque_object import register_custom_class
 from torch._ops import HigherOrderOperator
 from torch.autograd.graph import get_gradient_edge
@@ -556,7 +556,7 @@ class InvokeLeafFunction(HigherOrderOperator):
         from torch._higher_order_ops.utils import _maybe_fake_prop_ignore_unbacked
         from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
-        mutated_set = _parse_mutated_arg_indices(mutated_arg_indices)
+        mutated_set = parse_comma_separated_indices(mutated_arg_indices)
 
         with disable_proxy_modes_tracing():
             if mutated_set:
@@ -866,16 +866,12 @@ def _validate_outputs_match(
                 )
 
 
-def _parse_mutated_arg_indices(s: str) -> set[int]:
-    return {int(x) for x in s.split(",") if x}
-
-
 def _check_no_input_mutation(
     flat_args: tuple[Any, ...],
     version_before: list[int],
     mutated_arg_indices: str = "",
 ) -> None:
-    mutated_set = _parse_mutated_arg_indices(mutated_arg_indices)
+    mutated_set = parse_comma_separated_indices(mutated_arg_indices)
     for i, arg in enumerate(flat_args):
         if isinstance(arg, torch.Tensor) and arg._version != version_before[i]:
             if i not in mutated_set:
@@ -928,7 +924,7 @@ def invoke_leaf_function_dense(
     ]
 
     flat_args = tuple(_detach_with_grad_dtype(arg) for arg in flat_args)
-    requires_grad_indices_set = _parse_mutated_arg_indices(requires_grad_indices)
+    requires_grad_indices_set = parse_comma_separated_indices(requires_grad_indices)
     flat_args = tuple(
         arg.requires_grad_(True) if idx in requires_grad_indices_set else arg
         for idx, arg in enumerate(flat_args)

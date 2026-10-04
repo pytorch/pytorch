@@ -8,6 +8,7 @@ import sys
 import torch
 import torch._dynamo.test_case
 from torch.testing._internal.common_utils import (
+    HardwareClassification,
     instantiate_parametrized_tests,
     make_dynamo_test,
 )
@@ -100,6 +101,8 @@ class _InheritedSub(_BaseWithMul):
 
 @torch._dynamo.config.patch(enable_trace_unittest=True)
 class TestNbMultiply(torch._dynamo.test_case.TestCase):
+    hw_classification = HardwareClassification.GENERIC
+
     # --- Integer multiply ---
 
     @make_dynamo_test

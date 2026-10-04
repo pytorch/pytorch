@@ -20,6 +20,7 @@ from torch._higher_order_ops.utils import (
     get_graph_output_example_values,
     HopInstance,
     materialize_as_graph,
+    parse_comma_separated_indices,
     reenter_make_fx,
     validate_subgraph_args_types,
 )
@@ -30,6 +31,67 @@ from torch.fx.experimental.proxy_tensor import (
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
+
+
+def validate_while_loop_mutated_arg_indices(
+    mutated_arg_indices: str,
+    carried_inputs,
+    additional_inputs,
+) -> set[int]:
+    """Validate indices into flattened carried_inputs + additional_inputs."""
+    if not isinstance(mutated_arg_indices, str):
+        raise RuntimeError(
+            "torch.while_loop mutated_arg_indices must be a comma-separated "
+            "list of indices"
+        )
+
+    try:
+        mutated_inputs = parse_comma_separated_indices(mutated_arg_indices)
+    except ValueError as error:
+        raise RuntimeError(
+            "torch.while_loop mutated_arg_indices must be a comma-separated "
+            "list of indices"
+        ) from error
+
+    flat_carried_inputs = pytree.tree_leaves(carried_inputs)
+    flat_additional_inputs = pytree.tree_leaves(additional_inputs)
+    flat_inputs = flat_carried_inputs + flat_additional_inputs
+
+    out_of_range_indices = sorted(
+        index for index in mutated_inputs if index < 0 or index >= len(flat_inputs)
+    )
+    if out_of_range_indices:
+        raise RuntimeError(
+            "torch.while_loop mutated_arg_indices contains out-of-range indices: "
+            f"{', '.join(str(index) for index in out_of_range_indices)}"
+        )
+
+    mutated_carried_inputs = sorted(
+        index for index in mutated_inputs if index < len(flat_carried_inputs)
+    )
+    if mutated_carried_inputs:
+        raise RuntimeError(
+            "torch.while_loop's cond_fn and body_fn must not mutate "
+            "carried_inputs in-place; got flattened carried input indices: "
+            f"{', '.join(str(index) for index in mutated_carried_inputs)}"
+        )
+
+    non_tensor_indices = sorted(
+        index
+        for index in mutated_inputs
+        if not isinstance(flat_inputs[index], torch.Tensor)
+    )
+    if non_tensor_indices:
+        descriptions = ", ".join(
+            f"index {index} refers to {type(flat_inputs[index]).__name__}"
+            for index in non_tensor_indices
+        )
+        raise RuntimeError(
+            "torch.while_loop mutated_arg_indices must refer to Tensor inputs; "
+            f"{descriptions}"
+        )
+
+    return mutated_inputs
 
 
 class WhileLoopOp(HigherOrderOperator):
@@ -57,6 +119,9 @@ class WhileLoopOp(HigherOrderOperator):
 
         validate_subgraph_args_types(carried_inputs)
         validate_subgraph_args_types(additional_inputs)
+        validate_while_loop_mutated_arg_indices(
+            mutated_arg_indices, carried_inputs, additional_inputs
+        )
         kwargs = {}
         if mutated_arg_indices:
             kwargs["mutated_arg_indices"] = mutated_arg_indices
@@ -81,6 +146,9 @@ class WhileLoopOp(HigherOrderOperator):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
 
+        mutated_inputs = validate_while_loop_mutated_arg_indices(
+            mutated_arg_indices, carried_inputs, additional_inputs
+        )
         all_inputs = carried_inputs + additional_inputs
 
         cond_gm: torch.fx.GraphModule = (
@@ -95,11 +163,6 @@ class WhileLoopOp(HigherOrderOperator):
         )
 
         body_outputs = get_graph_output_example_values(body_gm)
-        mutated_inputs = (
-            {int(i) for i in mutated_arg_indices.split(",") if i}
-            if mutated_arg_indices
-            else set()
-        )
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("cond_fn", cond_gm)

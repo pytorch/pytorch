@@ -5,6 +5,7 @@ import os.path as _osp
 import weakref
 
 import torch
+from torch._utils_internal import get_file_path as _get_file_path
 from torch.utils import (
     backcompat as backcompat,
     collect_env as collect_env,
@@ -13,11 +14,11 @@ from torch.utils import (
     hooks as hooks,
 )
 from torch.utils.backend_registration import (
-    generate_methods_for_privateuse1_backend,
-    rename_privateuse1_backend,
+    generate_methods_for_privateuse1_backend as generate_methods_for_privateuse1_backend,
+    rename_privateuse1_backend as rename_privateuse1_backend,
 )
-from torch.utils.cpp_backtrace import get_cpp_backtrace
-from torch.utils.throughput_benchmark import ThroughputBenchmark
+from torch.utils.cpp_backtrace import get_cpp_backtrace as get_cpp_backtrace
+from torch.utils.throughput_benchmark import ThroughputBenchmark as ThroughputBenchmark
 
 
 def set_module(obj, mod):
@@ -29,7 +30,17 @@ def set_module(obj, mod):
     obj.__module__ = mod
 
 
-cmake_prefix_path = _osp.join(_osp.dirname(_osp.dirname(__file__)), "share", "cmake")
+def _resolve_cmake_prefix_path() -> str:
+    try:
+        return _get_file_path("torch", "share", "cmake")
+    except OSError:
+        # Some build systems ship torch without the CMake package files, and
+        # their get_file_path raises for a resource that is not there. Keep the
+        # historical __file__-derived path so importing torch.utils still works.
+        return _osp.join(_osp.dirname(_osp.dirname(__file__)), "share", "cmake")
+
+
+cmake_prefix_path = _resolve_cmake_prefix_path()
 
 
 def swap_tensors(t1, t2):

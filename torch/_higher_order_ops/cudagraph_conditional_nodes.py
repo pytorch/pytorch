@@ -5,6 +5,7 @@ from contextlib import contextmanager
 import torch
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.auto_functionalize import auto_functionalized_v2_dense
+from torch._higher_order_ops.while_loop import validate_while_loop_mutated_arg_indices
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -102,7 +103,7 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
                     if_else_node(*args)
 
                 return func(*args, **kwargs)
-        elif func is torch.ops.higher_order.while_loop:
+        if func is torch.ops.higher_order.while_loop:
             _check_while_loop_kwargs(kwargs)
             if torch.cuda.is_current_stream_capturing():
                 # This is a call to torch.while_loop() nested within another
@@ -122,17 +123,17 @@ class ControlFlowOpWarmupDispatchMode(TorchDispatchMode):
                     while_loop_node(*args, **kwargs)
 
                 return func(*args, **kwargs)
-        elif func is torch.ops.higher_order.auto_functionalized_v2:
+        if func is torch.ops.higher_order.auto_functionalized_v2:
             mutable_op = _get_auto_functionalized_v2_op(args)
             if _is_control_flow_op(mutable_op):
                 with self:
                     return auto_functionalized_v2_dense(*args, **kwargs)
-            return func(*args, **kwargs)
-        else:
-            return func(*args, **kwargs)
+        return func(*args, **kwargs)
 
 
 def _get_auto_functionalized_v2_op(args):
+    # AutoFunctionalizedV2.__call__ has one positional-only operator argument.
+    # Assert the invariant here instead of silently dispatching a malformed call.
     if len(args) != 1:
         raise AssertionError(
             "auto_functionalized_v2 must receive exactly one positional operator "
@@ -148,6 +149,7 @@ def _is_control_flow_op(func: object) -> bool:
 
 
 def _check_no_cond_kwargs(kwargs) -> None:
+    # cond records mutation in its generated schema and needs no kwarg side channel.
     if kwargs:
         raise RuntimeError("CUDA graph conditional torch.cond does not support kwargs")
 
@@ -169,10 +171,6 @@ def _is_boolean_scalar_cuda_tensor(pred: object) -> bool:
         and pred.dtype == torch.bool
         and pred.is_cuda
     )
-
-
-def _parse_mutated_arg_indices(mutated_arg_indices: str) -> set[int]:
-    return {int(i) for i in mutated_arg_indices.split(",") if i}
 
 
 @contextmanager
@@ -232,12 +230,24 @@ def while_loop_node(
     *,
     mutated_arg_indices: str = "",
 ):
+    """Capture a CUDA graph WHILE node.
+
+    ``mutated_arg_indices`` is a comma-separated list of indices into
+    ``tree_leaves(carried_inputs) + tree_leaves(additional_inputs)``. Mutation
+    of carried inputs is disallowed by ``torch.while_loop``; only indices in
+    the flattened additional inputs are supported.
+    """
     flat_carried_inputs, carried_spec = pytree.tree_flatten(carried_inputs)
     if not all(isinstance(inp, torch.Tensor) for inp in flat_carried_inputs):
         raise RuntimeError(
             "CUDA graph while_loop conditional nodes only support tensor carried_inputs"
         )
-    mutated_input_indices = _parse_mutated_arg_indices(mutated_arg_indices)
+    flat_additional_inputs = pytree.tree_leaves(additional_inputs)
+    validate_while_loop_mutated_arg_indices(
+        mutated_arg_indices,
+        flat_carried_inputs,
+        flat_additional_inputs,
+    )
 
     loop_carried = pytree.tree_map_only(
         torch.Tensor, lambda inp: inp.clone(), carried_inputs
@@ -273,13 +283,5 @@ def while_loop_node(
                 f"cond_fn must return a boolean scalar CUDA tensor but got {pred}"
             )
         current_cuda_graph.set_conditional_handle_for_current_node(pred)
-
-    # Additional inputs are passed by reference and mutated in place; only the
-    # cloned carried inputs need their final values copied back.
-    for idx, (input_arg, carried) in enumerate(
-        zip(flat_carried_inputs, flat_loop_carried)
-    ):
-        if idx in mutated_input_indices:
-            input_arg.copy_(carried)
 
     return loop_carried
