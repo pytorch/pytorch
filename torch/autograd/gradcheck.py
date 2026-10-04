@@ -2184,10 +2184,22 @@ def _gradgradcheck_fwd_over_fwd(
 ):
     _check_inputs(inputs)
     input_indices, primals = _get_inp_tensors(inputs)
-    tangents = tuple(torch.randn_like(x) for x in primals)
+    g_cpu = torch.Generator(device="cpu")
+    tangents = tuple(
+        torch.empty_like(x, device="cpu").normal_(generator=g_cpu).to(x.device)
+        for x in primals
+    )
+    tangents = tuple(
+        tangent.conj() if primal.is_conj() else tangent
+        for tangent, primal in zip(tangents, primals)
+    )
     # Real coordinates also cover non-holomorphic functions of complex inputs.
     real_inputs = tuple(
-        (torch.view_as_real(x.resolve_conj()) if x.is_complex() else x)
+        (
+            torch.view_as_real(x.conj().clone() if x.is_conj() else x)
+            if x.is_complex()
+            else x
+        )
         .detach()
         .requires_grad_()
         for x in primals
@@ -2202,6 +2214,10 @@ def _gradgradcheck_fwd_over_fwd(
     def first_jvp(*args):
         args = tuple(
             torch.view_as_complex(arg) if primal.is_complex() else arg
+            for arg, primal in zip(args, primals)
+        )
+        args = tuple(
+            arg.conj() if primal.is_conj() else arg
             for arg, primal in zip(args, primals)
         )
         return torch.func.jvp(fn, args, tangents)[1]

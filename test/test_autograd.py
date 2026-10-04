@@ -13371,6 +13371,67 @@ class TestAutogradForwardMode(TestCase):
 class TestAutogradDeviceType(TestCase):
     hw_classification = HardwareClassification.ACCELERATOR
 
+    @dtypes(torch.cdouble)
+    @parametrize("fast_mode", (False, True))
+    @parametrize("shape", ((), (0,), (2, 3)))
+    @parametrize("noncontiguous", (False, True))
+    def test_gradgradcheck_forward_over_forward_conjugate_input(
+        self, device, dtype, fast_mode, shape, noncontiguous
+    ):
+        x = make_tensor(
+            shape,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+            noncontiguous=noncontiguous,
+        ).conj()
+        if x.ndim == 2:
+            x = x.T
+
+        def fn(arg):
+            self.assertTrue(arg.is_conj())
+            self.assertEqual(arg, x, atol=1e-5, rtol=0)
+            return arg**3, (arg * arg.conj()).real, arg.imag
+
+        self.assertTrue(
+            gradgradcheck(
+                fn,
+                x,
+                check_fwd_over_fwd=True,
+                check_rev_over_rev=False,
+                check_undefined_grad=False,
+                check_batched_grad=False,
+                fast_mode=fast_mode,
+            )
+        )
+
+    @dtypes(torch.double, torch.cdouble)
+    @parametrize("fast_mode", (False, True))
+    def test_gradgradcheck_forward_over_forward_preserves_rng_state(
+        self, device, dtype, fast_mode
+    ):
+        x = make_tensor((2,), dtype=dtype, device=device, requires_grad=True)
+        cpu_state = torch.get_rng_state()
+        device_module = torch.get_device_module(device)
+        device_state = None
+        if torch.device(device).type != "cpu":
+            device_state = device_module.get_rng_state(device)
+
+        self.assertTrue(
+            gradgradcheck(
+                lambda x: x**3,
+                x,
+                check_fwd_over_fwd=True,
+                check_rev_over_rev=False,
+                check_undefined_grad=False,
+                check_batched_grad=False,
+                fast_mode=fast_mode,
+            )
+        )
+        self.assertEqual(torch.get_rng_state(), cpu_state)
+        if device_state is not None:
+            self.assertEqual(device_module.get_rng_state(device), device_state)
+
     @dtypes(torch.double, torch.cdouble)
     @parametrize("fast_mode", (False, True))
     def test_gradgradcheck_forward_over_forward_empty_input(
