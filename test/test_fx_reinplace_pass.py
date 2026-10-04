@@ -1,6 +1,10 @@
 # Owner(s): ["module: functionalization"]
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import (
+    HardwareClassification,
+    run_tests,
+    TestCase,
+)
 from torch.fx.passes.reinplace import reinplace
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -14,6 +18,7 @@ except Exception:
     HAS_FUNCTIONALIZATION = False
 
 class TestReinplacePass(TestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_reinplace_basic(self):
         # Basic test: the out-of-place add() call should be converted
@@ -148,18 +153,13 @@ def forward(self, a__1):
 
 def forward(self, a__1):
     clone = torch.ops.aten.clone.default(a__1);  a__1 = None
-    view = torch.ops.aten.view.default(clone, [-1]);  view = None
     view_1 = torch.ops.aten.view.default(clone, [-1])
     select = torch.ops.aten.select.int(view_1, 0, 0);  view_1 = None
     view_2 = torch.ops.aten.view.default(select, [-1]);  select = None
     add = torch.ops.aten.add_.Tensor(view_2, 1);  add = None
     view_3 = torch.ops.aten.view.default(clone, [-1]);  clone = None
-    select_1 = torch.ops.aten.select.int(view_3, 0, 0);  select_1 = None
     view_4 = torch.ops.aten.view.default(view_2, []);  view_2 = view_4 = None
     view_5 = torch.ops.aten.view.default(view_3, [4]);  view_3 = None
-    view_6 = torch.ops.aten.view.default(view_5, [-1])
-    select_2 = torch.ops.aten.select.int(view_6, 0, 0);  view_6 = None
-    view_7 = torch.ops.aten.view.default(select_2, [-1]);  select_2 = view_7 = None
     view_8 = torch.ops.aten.view.default(view_5, [-1])
     add_1 = torch.ops.aten.add_.Tensor(view_5, view_8);  view_8 = add_1 = None
     return view_5
@@ -192,8 +192,6 @@ def forward(self, a__1):
     select_1 = torch.ops.aten.select.int(select, 0, 1);  select = None
     add = torch.ops.aten.add_.Tensor(select_1, 1);  select_1 = add = None
     select_2 = torch.ops.aten.select.int(clone, 1, 1);  select_2 = None
-    select_3 = torch.ops.aten.select.int(clone, 1, 1)
-    select_4 = torch.ops.aten.select.int(select_3, 0, 1);  select_3 = select_4 = None
     return clone
     """)
 
@@ -349,7 +347,6 @@ def forward(self):
     ones = torch.ops.aten.ones.default([4, 2, 4], device = device(type='cpu'), pin_memory = False)
     slice_1 = torch.ops.aten.slice.Tensor(zeros, 1, 2, 9223372036854775807)
     copy = torch.ops.aten.copy_.default(slice_1, ones);  slice_1 = ones = copy = None
-    slice_2 = torch.ops.aten.slice.Tensor(zeros, 1, 2, 9223372036854775807);  slice_2 = None
     return zeros
     """)
 

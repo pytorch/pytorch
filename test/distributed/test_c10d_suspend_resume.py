@@ -73,6 +73,7 @@ class AbstractSuspendResumeTest:
         self.assertEqual(recv_tensor, torch.full_like(recv_tensor, float(peer)))
 
     def _init_pg(self):
+        os.environ["LOCAL_RANK"] = str(self.rank)
         if self.device_type == "cuda":
             torch.cuda.set_device(self.rank)
         store = dist.FileStore(self.file_name, self.world_size)

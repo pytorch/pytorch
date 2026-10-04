@@ -1,18 +1,17 @@
 # Owner(s): ["module: rocm"]
-# Unneeded for CI: trunk.yml covers the same ROCm testing.
-# Kept in-repo for metrics; auto-triggers below are commented out.
-# workflow_dispatch remains for manual runs.
+# The distributed_4gpu config only runs distributed tests needing more than
+# 2 GPUs, so trunk.yml does not cover it and this workflow runs on a schedule.
 name: periodic-rocm-mi350
 
 on:
-  #schedule:
-  #  - cron: 0 0,3,6,9,12,15,18,21 * * *
-  #  - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
-  #push:
-  #  tags:
-  #    - ciflow/periodic-rocm-mi350/*
-  #  branches:
-  #    - release/*
+  schedule:
+    - cron: 0 0,3,6,9,12,15,18,21 * * *
+    - cron: 29 8 * * *  # about 1:29am PDT, for mem leak check and rerun disabled tests
+  push:
+    tags:
+      - ciflow/periodic-rocm-mi350/*
+    #branches:
+    #  - release/*
   workflow_dispatch:
 
 concurrency:
@@ -44,33 +43,34 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      check_experiments: amd-do
+      check_experiments: amd-dpx
 
-  linux-noble-rocm-py3_12-build:
-    name: linux-noble-rocm-py3.12-mi350
+  linux-noble-rocm-py3_11-build:
+    name: linux-noble-rocm-py3.11-mi350
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "mt-"
       ci-docker-hash: ${{ needs.get-label-type.outputs.ci-docker-hash }}
-      build-environment: linux-noble-rocm-py3.12-mi350
-      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3
+      build-environment: linux-noble-rocm-py3.11-mi350
+      docker-image-name: ci-image:pytorch-linux-noble-rocm-n-py3.11
+      # distributed_4gpu selects only the >2-GPU distributed tests, so it must
+      # run on the gfx950.4 (4-GPU) runner labels.
       test-matrix: |
         { include: [
-          { config: "distributed", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.2", owners: ["module:rocm", "oncall:distributed"] },
-          { config: "distributed", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.amd-do-label-type }}linux.rocm.gpu.gfx950.2", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed_4gpu", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.4", owners: ["module:rocm", "oncall:distributed"] },
+          { config: "distributed_4gpu", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.amd-dpx-label-type }}linux.rocm.gpu.gfx950.4", owners: ["module:rocm", "oncall:distributed"] },
         ]}
     secrets: inherit
 
-  linux-noble-rocm-py3_12-test:
-    name: linux-noble-rocm-py3.12-mi350
+  linux-noble-rocm-py3_11-test:
+    name: linux-noble-rocm-py3.11-mi350
     uses: ./.github/workflows/_rocm-test.yml
     needs:
-      - linux-noble-rocm-py3_12-build
+      - linux-noble-rocm-py3_11-build
       - target-determination
     with:
-      build-environment: ${{ needs.linux-noble-rocm-py3_12-build.outputs.build-environment }}
-      docker-image: ${{ needs.linux-noble-rocm-py3_12-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-noble-rocm-py3_12-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-noble-rocm-py3_11-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-noble-rocm-py3_11-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-noble-rocm-py3_11-build.outputs.test-matrix }}
     secrets: inherit

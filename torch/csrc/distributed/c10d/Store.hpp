@@ -97,7 +97,7 @@ class TORCH_API Store : public torch::CustomClassHolder {
       const std::vector<std::string>& keys,
       const std::vector<std::vector<uint8_t>>& values);
 
-  // Returns true if this store support append, multiGet and multiSet
+  // Returns true if this store supports append, multiGet and multiSet
   virtual bool hasExtendedApi() const;
 
   virtual void queuePush(

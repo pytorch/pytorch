@@ -24,6 +24,7 @@ from torch._higher_order_ops.utils import (
     get_graph_output_example_values,
     HopInstance,
     materialize_as_graph,
+    parse_comma_separated_indices,
     reenter_make_fx,
     register_fake,
     save_values_for_backward,
@@ -87,7 +88,7 @@ class MapImpl(HigherOrderOperator):
         #   shared mutable buffer should use scan / while_loop, where
         #   sequential iteration is part of the contract.
         outputs = get_graph_output_example_values(body_gm)
-        mutated_set = {int(i) for i in mutated_arg_indices.split(",") if i}
+        mutated_set = parse_comma_separated_indices(mutated_arg_indices)
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("f", body_gm)
