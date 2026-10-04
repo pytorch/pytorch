@@ -11,6 +11,7 @@ import math
 import operator
 import os
 import re
+import subprocess
 import sys
 import traceback
 import unittest
@@ -74,6 +75,7 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    TEST_CUDA,
     xfailIfDistributedNotSupported,
 )
 from torch.testing._internal.common_utils import (
@@ -1330,9 +1332,7 @@ def forward(self, x):
     _vmap_decrement_nesting = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting = None
     _remove_batch_dim_1 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim, 3, 128, 0);  _remove_batch_dim = None
     _vmap_decrement_nesting_1 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_1 = None
-    _remove_batch_dim_2 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_1, 2, 1, 0)
-    unsqueeze_default = torch.ops.aten.unsqueeze.default(_remove_batch_dim_1, 0);  _remove_batch_dim_1 = None
-    expand_default = torch.ops.aten.expand.default(unsqueeze_default, [1, 128, 128]);  unsqueeze_default = expand_default = None
+    _remove_batch_dim_2 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_1, 2, 1, 0);  _remove_batch_dim_1 = None
     _vmap_decrement_nesting_2 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_2 = None
     _remove_batch_dim_3 = torch._functorch.predispatch._remove_batch_dim(_remove_batch_dim_2, 1, 2, 0);  _remove_batch_dim_2 = None
     _vmap_decrement_nesting_3 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_3 = None
@@ -1376,11 +1376,11 @@ def forward(self, x):
     arange_default_1 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
     new_zeros_default = torch.ops.aten.new_zeros.default(_add_batch_dim_7, [1, 2], dtype = torch.int32, pin_memory = False)
     new_ones_default = torch.ops.aten.new_ones.default(new_zeros_default, [], pin_memory = False)
-    unsqueeze_default_1 = torch.ops.aten.unsqueeze.default(_add_batch_dim_6, -1);  _add_batch_dim_6 = None
-    lt_tensor = torch.ops.aten.lt.Tensor(arange_default_1, unsqueeze_default_1);  arange_default_1 = unsqueeze_default_1 = None
-    unsqueeze_default_2 = torch.ops.aten.unsqueeze.default(arange_default, -1);  arange_default = None
+    unsqueeze_default = torch.ops.aten.unsqueeze.default(_add_batch_dim_6, -1);  _add_batch_dim_6 = None
+    lt_tensor = torch.ops.aten.lt.Tensor(arange_default_1, unsqueeze_default);  arange_default_1 = unsqueeze_default = None
+    unsqueeze_default_1 = torch.ops.aten.unsqueeze.default(arange_default, -1);  arange_default = None
     where_scalar_other = torch.ops.aten.where.ScalarOther(lt_tensor, _add_batch_dim_7, 1);  lt_tensor = _add_batch_dim_7 = None
-    index_put__default = torch.ops.aten.index_put_.default(new_zeros_default, [unsqueeze_default_2, where_scalar_other], new_ones_default);  new_zeros_default = unsqueeze_default_2 = where_scalar_other = new_ones_default = None
+    index_put__default = torch.ops.aten.index_put_.default(new_zeros_default, [unsqueeze_default_1, where_scalar_other], new_ones_default);  new_zeros_default = unsqueeze_default_1 = where_scalar_other = new_ones_default = None
     slice_tensor = torch.ops.aten.slice.Tensor(index_put__default, 1, 0, 1);  index_put__default = None
     _remove_batch_dim_4 = torch._functorch.predispatch._remove_batch_dim(slice_tensor, 2, 1, 0);  slice_tensor = None
     _vmap_decrement_nesting_4 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_4 = None
@@ -1407,11 +1407,11 @@ def forward(self, x):
     arange_default_3 = torch.ops.aten.arange.default(1, dtype = torch.int32, device = device(type='cpu'), pin_memory = False)
     new_zeros_default_1 = torch.ops.aten.new_zeros.default(_add_batch_dim_11, [1, 2], dtype = torch.int32, pin_memory = False)
     new_ones_default_1 = torch.ops.aten.new_ones.default(new_zeros_default_1, [], pin_memory = False)
-    unsqueeze_default_3 = torch.ops.aten.unsqueeze.default(_add_batch_dim_10, -1);  _add_batch_dim_10 = None
-    lt_tensor_1 = torch.ops.aten.lt.Tensor(arange_default_3, unsqueeze_default_3);  arange_default_3 = unsqueeze_default_3 = None
-    unsqueeze_default_4 = torch.ops.aten.unsqueeze.default(arange_default_2, -1);  arange_default_2 = None
+    unsqueeze_default_2 = torch.ops.aten.unsqueeze.default(_add_batch_dim_10, -1);  _add_batch_dim_10 = None
+    lt_tensor_1 = torch.ops.aten.lt.Tensor(arange_default_3, unsqueeze_default_2);  arange_default_3 = unsqueeze_default_2 = None
+    unsqueeze_default_3 = torch.ops.aten.unsqueeze.default(arange_default_2, -1);  arange_default_2 = None
     where_scalar_other_1 = torch.ops.aten.where.ScalarOther(lt_tensor_1, _add_batch_dim_11, 1);  lt_tensor_1 = _add_batch_dim_11 = None
-    index_put__default_1 = torch.ops.aten.index_put_.default(new_zeros_default_1, [unsqueeze_default_4, where_scalar_other_1], new_ones_default_1);  new_zeros_default_1 = unsqueeze_default_4 = where_scalar_other_1 = new_ones_default_1 = None
+    index_put__default_1 = torch.ops.aten.index_put_.default(new_zeros_default_1, [unsqueeze_default_3, where_scalar_other_1], new_ones_default_1);  new_zeros_default_1 = unsqueeze_default_3 = where_scalar_other_1 = new_ones_default_1 = None
     slice_tensor_1 = torch.ops.aten.slice.Tensor(index_put__default_1, 1, 0, 1);  index_put__default_1 = None
     _remove_batch_dim_6 = torch._functorch.predispatch._remove_batch_dim(slice_tensor_1, 2, 1, 0);  slice_tensor_1 = None
     _vmap_decrement_nesting_6 = torch._functorch.predispatch._vmap_decrement_nesting();  _vmap_decrement_nesting_6 = None
@@ -3094,6 +3094,27 @@ graph():
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
+    def test_torch_assert_tensor_condition(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                torch._assert(x.min() >= 0, "x must be positive")
+                return x
+
+        for strict in (False, True):
+            with self.subTest(strict=strict):
+                inp = torch.ones(1, 32, 64)
+                ep = export(Foo(), (inp,), strict=strict)
+                self.assertTrue(
+                    any(
+                        node.target == torch.ops.aten._assert_async.msg
+                        for node in ep.graph.nodes
+                    )
+                )
+                self.assertEqual(ep.module()(inp), inp)
+
+                with self.assertRaisesRegex(RuntimeError, "x must be positive"):
+                    ep.module()(-inp)
+
     def test_symint_item(self):
         class M(torch.nn.Module):
             def forward(self, tensor):
@@ -3866,6 +3887,117 @@ def forward(self, add_tensor):
         # assertion.
         self.assertEqual(ep.module()(x, x), model(x, x))
         self.assertEqual(ep.module()(x, y), model(x, y))
+
+    def test_non_strict_export_distribution_validation(self):
+        class SquashedNormal(torch.distributions.TransformedDistribution):
+            def __init__(self, loc, scale, tanh_transform_clamp=(-0.99, 0.99)):
+                self.loc = loc
+                self.scale = scale
+                self.tanh_transform_clamp = tanh_transform_clamp
+                self.base_dist = torch.distributions.Normal(loc, scale)
+                super().__init__(self.base_dist, [])
+
+            @property
+            def mean(self):
+                mu = self.loc
+                for tr in self.transforms:
+                    mu = tr(mu)
+                return mu
+
+        def squashed_normal_flatten(t):
+            return [t.loc, t.scale], t.tanh_transform_clamp
+
+        def squashed_normal_unflatten(values, context):
+            return SquashedNormal(*values, context)
+
+        pytree.register_pytree_node(
+            SquashedNormal,
+            squashed_normal_flatten,
+            squashed_normal_unflatten,
+            serialized_type_name="test_export.SquashedNormalIssue135061",
+        )
+
+        class StochasticActor(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(4, 2)
+
+            def forward(self, state):
+                out = F.relu(self.fc(state))
+                mu, log_std = out.chunk(2, dim=1)
+                log_std = torch.tanh(log_std)
+                std = (-10 + 6 * (log_std + 1)).exp()
+                return SquashedNormal(mu, std)
+
+        model = StochasticActor()
+        inputs = (torch.randn(1, 4),)
+        ep = export(model, inputs, strict=False)
+
+        FileCheck().check("torch.ops.aten._assert_async.msg").run(ep.graph_module.code)
+        eager_dist = model(*inputs)
+        exported_dist = ep.module()(*inputs)
+        self.assertEqual(exported_dist.mean, eager_dist.mean)
+
+        class NormalMean(torch.nn.Module):
+            def forward(self, scale):
+                return torch.distributions.Normal(torch.zeros_like(scale), scale).mean
+
+        normal_inputs = (torch.ones(2, 3),)
+        normal_ep = export(NormalMean(), normal_inputs, strict=False)
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected parameter to satisfy its distribution constraint"
+        ):
+            normal_ep.module()(-normal_inputs[0])
+
+        class LogProb(torch.nn.Module):
+            def forward(self, value):
+                dist = torch.distributions.Normal(
+                    torch.zeros_like(value), torch.ones_like(value)
+                )
+                return dist.log_prob(value)
+
+        log_prob_inputs = (torch.randn(2, 3),)
+        log_prob_ep = export(LogProb(), log_prob_inputs, strict=False)
+        FileCheck().check("Expected value argument to be within the support").run(
+            log_prob_ep.graph_module.code
+        )
+        self.assertEqual(
+            log_prob_ep.module()(*log_prob_inputs), LogProb()(*log_prob_inputs)
+        )
+        invalid_log_prob_input = log_prob_inputs[0].clone()
+        invalid_log_prob_input[0, 0] = torch.nan
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected value argument to be within the support"
+        ):
+            log_prob_ep.module()(invalid_log_prob_input)
+
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_non_strict_export_distribution_validation_cuda(self):
+        script = """\
+import torch
+
+
+class NormalMean(torch.nn.Module):
+    def forward(self, scale):
+        return torch.distributions.Normal(torch.zeros_like(scale), scale).mean
+
+
+scale = torch.ones(2, 3, device="cuda")
+ep = torch.export.export(NormalMean(), (scale,), strict=False)
+try:
+    ep.module()(-scale)
+except RuntimeError as exc:
+    if "Expected parameter to satisfy its distribution constraint" not in str(exc):
+        raise
+else:
+    raise AssertionError("invalid scale did not raise")
+torch.ones(1, device="cuda")
+torch.cuda.synchronize()
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script], capture_output=True, text=True, timeout=60
+        )
+        self.assertEqual(result.returncode, 0, msg=result.stdout + result.stderr)
 
     def test_draft_export_checks_mutation_with_nan(self):
         @torch.library.custom_op("export::foo", mutates_args={})
@@ -19513,13 +19645,9 @@ def forward(self, x, mask):
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
     le = sym_size_int_1 <= 1188864
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression u0 <= 1188864 on node 'le'");  le = _assert_scalar_default_1 = None
-    mod = sym_size_int_1 % 1548
+    mod = sym_size_int_1 % 1548;  sym_size_int_1 = None
     eq_2 = mod == 0;  mod = None
     _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(Mod(u0, 1548), 0) on node 'eq_2'");  eq_2 = _assert_scalar_default_2 = None
-    floordiv = sym_size_int_1 // 1548
-    mul_2 = 1548 * floordiv;  floordiv = None
-    eq_3 = sym_size_int_1 == mul_2;  sym_size_int_1 = mul_2 = None
-    _assert_scalar_default_3 = torch.ops.aten._assert_scalar.default(eq_3, "Runtime assertion failed for expression Eq(u0, 1548*((u0//1548))) on node 'eq_3'");  eq_3 = _assert_scalar_default_3 = None
     view = torch.ops.aten.view.default(masked_select, [-1, 1548]);  masked_select = None
     add = torch.ops.aten.add.Tensor(view, 1);  view = None
     return (add,)""",

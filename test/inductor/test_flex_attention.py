@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 
+import contextlib
 import functools
 import gc
 import json
@@ -19,6 +20,8 @@ from itertools import product
 from typing import TypeVar
 from unittest import expectedFailure, mock, skip, skipUnless
 from unittest.mock import patch
+
+import sympy
 
 import torch
 import torch.nn as nn
@@ -73,7 +76,7 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_quantized import _snr
-from torch.testing._internal.common_utils import (  # noqa: F401
+from torch.testing._internal.common_utils import (
     IS_LINUX,
     isRocmArchAnyOf,
     MI200_ARCH,
@@ -84,7 +87,11 @@ from torch.testing._internal.common_utils import (  # noqa: F401
     TEST_WITH_ROCM,
     TEST_WITH_SLOW,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU, HAS_MPS
+from torch.testing._internal.inductor_utils import (
+    HAS_GPU,
+    HAS_MPS,
+    running_on_tdm_device,
+)
 from torch.utils._triton import has_triton, has_triton_tma_device
 
 
@@ -588,6 +595,715 @@ def batch_reserve(paged_attention: PagedAttention, target_seq_len: Tensor):
             torch.tensor(b),
             target_seq_len[b],
         )
+
+
+def _tdm_graph():
+    """A real GraphLowering, so the gate runs against real sizevars."""
+    from torch._inductor.graph import GraphLowering
+    from torch.fx.experimental.proxy_tensor import make_fx
+
+    return GraphLowering(make_fx(lambda: torch.zeros(2, 3))())
+
+
+def _tdm_operand(name, stride, size=(2, 4, 128, 64), offset=0, dtype=torch.float16):
+    """A real flex operand for the descriptor gate.
+
+    Real IR rather than a Mock: a mock can satisfy a gate for the wrong reason
+    and make an assertion pass vacuously.
+    """
+    from torch._inductor.ir import Buffer, FixedLayout
+
+    return Buffer(
+        name=name,
+        layout=FixedLayout(
+            torch.device("cuda"), dtype, size=size, stride=stride, offset=offset
+        ),
+    )
+
+
+# Host-side gate logic. Device capability is mocked, so these are not ROCm-only:
+# running them on CUDA and XPU builds is what keeps the gate honest there too.
+class TestFlexAttentionTDMOptions(InductorTestCase):
+    _PREREQS = "torch._inductor.utils._gfx1250_device_prereqs"
+
+    def test_flex_tdm_gate_checks_layout_and_offset(self):
+        from torch._inductor.utils import use_flex_tdm_descriptor
+        from torch._inductor.virtualized import V
+
+        good = _tdm_operand("good", [32768, 8192, 64, 1])
+        blocks = [(128, 64)] * 3
+        cases = {
+            "good": (good, blocks, False),
+            # Innermost stride must be one.
+            "bad_head": (_tdm_operand("bad_head", [32768, 8192, 128, 2]), blocks, True),
+            # 65 * 2 bytes is not 16-byte aligned.
+            "bad_outer": (
+                _tdm_operand("bad_outer", [32768, 8192, 65, 1]),
+                blocks,
+                True,
+            ),
+            "bad_offset": (
+                _tdm_operand("bad_offset", [32768, 8192, 64, 1], offset=1),
+                blocks,
+                True,
+            ),
+            # 8 elements is a 16-byte offset, so this one is admissible.
+            "semantic_offset": (
+                _tdm_operand("semantic_offset", [32768, 8192, 64, 1], offset=8),
+                blocks,
+                False,
+            ),
+            # 96 * 2 bytes is not 128-byte aligned.
+            "bad_block": (good, [(128, 64), (128, 64), (128, 96)], True),
+            # head_dim 65 under a 128-wide block: the descriptor bounds-checks
+            # and zero-fills the overhang, so a non-16-byte-multiple logical
+            # extent is admissible on TDM even though can_use_tma refuses it.
+            "padded_tail": (
+                _tdm_operand(
+                    "padded_tail", [65536, 16384, 128, 1], size=(2, 4, 128, 65)
+                ),
+                [(128, 128)] * 3,
+                False,
+            ),
+        }
+
+        graph = _tdm_graph()
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(self._PREREQS, return_value=True) as device_prereqs,
+        ):
+            for name, (operand, block_shapes, rejected) in cases.items():
+                with self.subTest(case=name):
+                    admitted = use_flex_tdm_descriptor(
+                        good, good, operand, block_shapes=block_shapes
+                    )
+                    self.assertEqual(admitted, not rejected)
+
+            # Capability is a hard boundary regardless of layout.
+            device_prereqs.return_value = False
+            self.assertFalse(
+                use_flex_tdm_descriptor(good, good, good, block_shapes=blocks)
+            )
+
+    def test_flex_tdm_gate_honours_config_flag(self):
+        """`enable_flex_tdm` must disable selection for operands that pass."""
+        from torch._inductor import config
+        from torch._inductor.utils import use_flex_tdm_descriptor
+        from torch._inductor.virtualized import V
+
+        good = _tdm_operand("good", [32768, 8192, 64, 1])
+        blocks = [(128, 64)] * 3
+        graph = _tdm_graph()
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(self._PREREQS, return_value=True),
+        ):
+            self.assertTrue(
+                use_flex_tdm_descriptor(good, good, good, block_shapes=blocks)
+            )
+            with config.patch({"triton.enable_flex_tdm": False}):
+                self.assertFalse(
+                    use_flex_tdm_descriptor(good, good, good, block_shapes=blocks)
+                )
+
+    def test_flex_tdm_gate_requires_one_block_shape_per_operand(self):
+        """A short list must raise, not silently leave operands unchecked.
+
+        `zip` truncates, so a missing entry would skip an operand's rules.
+        """
+        from torch._inductor.utils import use_flex_tdm_descriptor
+        from torch._inductor.virtualized import V
+
+        good = _tdm_operand("good", [32768, 8192, 64, 1])
+        bad = _tdm_operand("bad", [32768, 8192, 65, 1])
+        graph = _tdm_graph()
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(self._PREREQS, return_value=True),
+        ):
+            with self.assertRaises(AssertionError):
+                use_flex_tdm_descriptor(good, good, bad, block_shapes=[(128, 64)] * 2)
+
+    def test_flex_tdm_gate_preserves_dynamic_sequence_lengths(self):
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.utils import use_flex_tdm_descriptor
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        def make_qkv(name, seq_len):
+            return _tdm_operand(
+                name,
+                stride=(256 * seq_len, 64 * seq_len, 64, 1),
+                size=(2, 4, seq_len, 64),
+            )
+
+        graph = _tdm_graph()
+        q_len = graph.sizevars.shape_env.create_symbol(
+            128,
+            source=ConstantSource("q_len"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+        )
+        kv_len = graph.sizevars.shape_env.create_symbol(
+            256,
+            source=ConstantSource("kv_len"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+        )
+        v_len = graph.sizevars.shape_env.create_symbol(
+            384,
+            source=ConstantSource("v_len"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+        )
+        query = make_qkv("query", q_len)
+        key = make_qkv("key", kv_len)
+        value = make_qkv("value", v_len)
+
+        graph.unaligned_buffers.add("value")
+        guards_before = len(graph.sizevars.shape_env.guards)
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(self._PREREQS, return_value=True),
+        ):
+            # Admission is list-wide, as it is for the MM templates: `value` is
+            # rejected, so the earlier-checked `query` and `key` must not be
+            # left carrying range guards for a descriptor that is never built.
+            blocks = [(128, 64)] * 3
+            self.assertFalse(
+                use_flex_tdm_descriptor(query, key, value, block_shapes=blocks)
+            )
+            self.assertEqual(len(graph.sizevars.shape_env.guards), guards_before)
+            graph.unaligned_buffers.remove("value")
+            self.assertTrue(
+                use_flex_tdm_descriptor(query, key, value, block_shapes=blocks)
+            )
+
+        # Only an admitted operand list installs bounds, and it installs exactly
+        # one combined guard covering every operand -- that is what makes the
+        # rejection above leave nothing behind.
+        new_guards = graph.sizevars.shape_env.guards[guards_before:]
+        int32_max = torch.iinfo(torch.int32).max
+        self.assertEqual(len(new_guards), 1)
+        self.assertEqual(
+            set(new_guards[0][0].atoms(sympy.Le)),
+            {
+                sympy.Le(q_len, int32_max),
+                sympy.Le(kv_len, int32_max),
+                sympy.Le(v_len, int32_max),
+            },
+        )
+
+    def test_flex_tdm_gate_rejects_unprovable_alignment_with_aligned_hint(self):
+        """An aligned hint is not a proof, and must not be treated as one.
+
+        The gate is guard-free by construction, so a dynamic stride whose hint
+        happens to satisfy every alignment rule still has to be rejected rather
+        than silently specialized on that hint.
+        """
+        from torch._dynamo.source import ConstantSource
+        from torch._inductor.utils import use_flex_tdm_descriptor
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+        graph = _tdm_graph()
+        # Hint 64 elements == 128 bytes, so the hint clears both the 16-byte and
+        # the 128-byte rule while the symbol proves neither.
+        row = graph.sizevars.shape_env.create_symbol(
+            64,
+            source=ConstantSource("row"),
+            dynamic_dim=DimDynamic.DYNAMIC,
+        )
+        # The batch and head strides carry provable factors; only the row stride
+        # is left unprovable, which is the realistic shape.
+        mat = _tdm_operand("dynamic_row", stride=(512 * row, 128 * row, row, 1))
+
+        guards_before = len(graph.sizevars.shape_env.guards)
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(self._PREREQS, return_value=True),
+        ):
+            self.assertFalse(
+                use_flex_tdm_descriptor(mat, mat, mat, block_shapes=[(128, 64)] * 3)
+            )
+        self.assertEqual(len(graph.sizevars.shape_env.guards), guards_before)
+
+    def test_flex_head_dim_32_is_legal_but_rejected_by_policy(self):
+        """FP16 head_dim=32 is a 64-byte request: legal, and rejected anyway.
+
+        The rejection reason is asserted, not just the boolean, so the 128-byte
+        performance policy cannot be quietly restated as a legality rule.
+        """
+        from torch._inductor.utils import (
+            _TDM_MIN_INNERMOST_REQUEST_BYTES,
+            use_flex_tdm_descriptor,
+        )
+        from torch._inductor.virtualized import V
+
+        # Row stride padded to 64 elements (128 bytes) so every outer stride
+        # satisfies policy and the block width is the only thing left to fail.
+        qkv = [
+            _tdm_operand(n, [32768, 8192, 64, 1], size=(2, 4, 128, 32))
+            for n in ("q", "k", "v")
+        ]
+        head_dim_bytes = 32 * torch.float16.itemsize
+        self.assertEqual(head_dim_bytes, 64)
+        # Legal: it clears the one alignment-shaped rule Triton enforces.
+        self.assertGreaterEqual(head_dim_bytes, _TDM_MIN_INNERMOST_REQUEST_BYTES)
+
+        graph = _tdm_graph()
+        with (
+            V.set_graph_handler(graph),
+            mock.patch(self._PREREQS, return_value=True),
+            self.assertLogs("torch._inductor.utils", level="DEBUG") as logs,
+        ):
+            self.assertFalse(
+                use_flex_tdm_descriptor(*qkv, block_shapes=[(128, 32)] * 3)
+            )
+
+        reasons = "\n".join(logs.output)
+        self.assertIn("block width is not 128-byte aligned", reasons)
+        self.assertNotIn("innermost request extent", reasons)
+
+
+# Forward builds descriptors for all three operands; decode builds them for K/V
+# only, because its reshaped query uses ordinary tl.load.
+_TDM_FORWARD_OPERANDS = ("q", "k", "v")
+_TDM_DECODE_OPERANDS = ("k", "v")
+_TDM_TOLERANCES = {
+    torch.float16: Tolerances(atol=2e-2, rtol=2e-2),
+    torch.bfloat16: Tolerances(atol=5e-2, rtol=5e-2),
+    torch.float32: Tolerances(atol=2e-3, rtol=2e-3),
+}
+
+
+def _descriptor_load_pattern(operand):
+    return rf"tl\.load_tensor_descriptor\(\s*desc_{operand}\s*,"
+
+
+def _pointer_load_pattern(operand):
+    # load_checked_2d is defined unconditionally in every generated kernel, so
+    # only an operand-qualified call establishes the fallback.
+    return rf"\bload_checked_2d\(\s*{operand.upper()}\s*,"
+
+
+def _check_int64_decode_narrows_coordinates(
+    test_case, query, key, value, *, kernel_options, tolerances
+):
+    """Assert decode keeps descriptor coordinates int32 under int64 indexing.
+
+    Decode derives the K/V row offset from a program id cast to INDEX_DTYPE,
+    and Triton rejects a 64-bit descriptor coordinate. The operands that would
+    force INDEX_DTYPE=tl.int64 naturally are multi-gigabyte, so 32-bit indexing
+    is denied directly instead; that reaches the same codegen on small inputs.
+
+    Shared because the narrowing lives in common.py.jinja, which every
+    descriptor backend renders: the gfx1250 caller reaches it by capability and
+    the CUDA/XPU caller by an explicit USE_TMA request, but the generated
+    coordinate expression is the same one.
+    """
+    from torch._inductor.codegen.triton import TritonScheduling
+
+    def fn(q, k, v):
+        return flex_attention(q, k, v, kernel_options=kernel_options)
+
+    with mock.patch.object(
+        TritonScheduling, "can_use_32bit_indexing", return_value=False
+    ):
+        result, code = run_and_get_code(torch.compile(fn), query, key, value)
+
+    joined = "\n".join(code)
+    test_case.assertIn("INDEX_DTYPE : tl.constexpr = tl.int64", joined)
+    for name in _TDM_DECODE_OPERANDS:
+        test_case.assertRegex(joined, _descriptor_load_pattern(name))
+        # Per operand: one shared substring would accept a half-applied fix,
+        # since K and V render the same expression.
+        test_case.assertRegex(
+            joined,
+            _descriptor_load_pattern(name) + r"\s*\[\s*kv_base_offset\.to\(tl\.int32\)",
+        )
+    # Reference without kernel_options: the request selects an implementation,
+    # it does not define the expected numbers.
+    torch.testing.assert_close(
+        result,
+        flex_attention(query, key, value),
+        atol=tolerances.atol,
+        rtol=tolerances.rtol,
+    )
+
+
+@unittest.skipUnless(
+    running_on_tdm_device(),
+    "requires gfx1250 with ROCm 7.14+ and TDM-capable Triton",
+)
+class TestFlexAttentionTDMEndToEnd(InductorTestCase):
+    # Neither length divides any default tile, so every descriptor block has a
+    # masked tail and the bounds handling is always exercised.
+    Q_LEN = 509
+    KV_LEN = 513
+
+    def _compile_and_get_code(self, fn, *args):
+        # Flex TDM selection is capability- and layout-driven; no config opt-in.
+        return run_and_get_code(torch.compile(fn), *args)
+
+    def _assert_descriptor_path(self, code, operands):
+        joined = "\n".join(code)
+        for name in operands:
+            self.assertRegex(joined, _descriptor_load_pattern(name))
+
+    def _assert_pointer_path(self, code, operands):
+        joined = "\n".join(code)
+        for name in operands:
+            self.assertRegex(joined, _pointer_load_pattern(name))
+            self.assertNotRegex(joined, _descriptor_load_pattern(name))
+
+    def _qkv(self, device, dtype, q_len=None, kv_len=None, head_dim=64, offset=0):
+        # A nonzero offset is taken by slicing the sequence dim, which keeps the
+        # strides and shifts the storage offset by offset * head_dim elements.
+        def alloc(seq_len):
+            base = torch.randn(
+                2, 4, seq_len + offset, head_dim, device=device, dtype=dtype
+            )
+            return base[:, :, offset:, :] if offset else base
+
+        q = alloc(self.Q_LEN if q_len is None else q_len)
+        kv_len = self.KV_LEN if kv_len is None else kv_len
+        return q, alloc(kv_len), alloc(kv_len)
+
+    def _head_dim_tail(self, device, seq_len):
+        # Slice a 128-wide buffer rather than allocating head_dim 65
+        # contiguously: a contiguous tensor would have a 130-byte row stride,
+        # which the descriptor gate rejects outright, so TDM would never be
+        # selected and the test would pass without exercising the overhang.
+        padded = torch.randn(2, 4, seq_len, 128, device=device, dtype=torch.float16)
+        tail = padded[..., :65]
+        self.assertEqual(tail.stride()[-2], 128)
+        return tail
+
+    @dtypes(*_TDM_TOLERANCES)
+    def test_tdm_flex_forward_correctness_and_selection(self, device, dtype):
+        def fn(q, k, v):
+            return flex_attention(q, k, v)
+
+        q, k, v = self._qkv(device, dtype)
+        result, code = self._compile_and_get_code(fn, q, k, v)
+        self._assert_descriptor_path(code, _TDM_FORWARD_OPERANDS)
+        torch.testing.assert_close(
+            result,
+            fn(q, k, v),
+            atol=_TDM_TOLERANCES[dtype].atol,
+            rtol=_TDM_TOLERANCES[dtype].rtol,
+        )
+
+    @dtypes(*_TDM_TOLERANCES)
+    def test_tdm_flex_decode_correctness_and_selection(self, device, dtype):
+        def fn(q, k, v):
+            return flex_attention(q, k, v)
+
+        q, k, v = self._qkv(device, dtype, q_len=1)
+        result, code = self._compile_and_get_code(fn, q, k, v)
+        self._assert_descriptor_path(code, _TDM_DECODE_OPERANDS)
+        torch.testing.assert_close(
+            result,
+            fn(q, k, v),
+            atol=_TDM_TOLERANCES[dtype].atol,
+            rtol=_TDM_TOLERANCES[dtype].rtol,
+        )
+
+    def test_tdm_flex_decode_narrows_descriptor_coordinates(self, device):
+        """Descriptor coordinates stay int32 when indexing is int64.
+
+        Selection is capability-driven here, so the request stays implicit; the
+        empty option dict is what flex_attention() already builds when the
+        argument is omitted. test_tma_with_customer_kernel_options_int64_decode
+        runs the same checks on CUDA and XPU, where it must be explicit.
+        """
+        q, k, v = self._qkv(device, torch.float16, q_len=1)
+        _check_int64_decode_narrows_coordinates(
+            self,
+            q,
+            k,
+            v,
+            kernel_options={},
+            tolerances=_TDM_TOLERANCES[torch.float16],
+        )
+
+    def test_tdm_flex_config_flag_disables_descriptors(self, device):
+        """`enable_flex_tdm=False` forces the pointer path for eligible inputs."""
+        from torch._inductor import config as inductor_config
+
+        def fn(q, k, v):
+            return flex_attention(q, k, v)
+
+        q, k, v = self._qkv(device, torch.float16)
+        with inductor_config.patch({"triton.enable_flex_tdm": False}):
+            result, code = self._compile_and_get_code(fn, q, k, v)
+        self._assert_pointer_path(code, _TDM_FORWARD_OPERANDS)
+        torch.testing.assert_close(
+            result,
+            fn(q, k, v),
+            atol=_TDM_TOLERANCES[torch.float16].atol,
+            rtol=_TDM_TOLERANCES[torch.float16].rtol,
+        )
+
+    @common_utils.parametrize(
+        "backend, operands",
+        [("TRITON", _TDM_FORWARD_OPERANDS), ("TRITON_DECODE", _TDM_DECODE_OPERANDS)],
+    )
+    @common_utils.parametrize("rejected_by", ["layout", "capability", "config"])
+    def test_tdm_flex_ignores_generic_tma_probe(
+        self, device, backend, operands, rejected_by
+    ):
+        """A true can_use_tma must not route ROCm through NVIDIA's rules.
+
+        has_triton_tma_device() excludes HIP only in its CUDA arm, so it can
+        read true on a ROCm host. USE_TMA=True is required to reach the bypass:
+        with the option omitted the old selector left it false and short-
+        circuited before ever consulting the probe, so the pointer path held
+        for an unrelated reason and this test would pass unfixed.
+        """
+        from torch._inductor import config as inductor_config
+
+        options = {"USE_TMA": True, "BACKEND": backend}
+
+        def fn(q, k, v):
+            return flex_attention(q, k, v, kernel_options=options)
+
+        # Each arm is rejected by a different AMD-side rule, all of which the
+        # generic probe would skip.
+        head_dim = 33 if rejected_by == "layout" else 64
+        q, k, v = self._qkv(
+            device,
+            torch.float16,
+            q_len=1 if backend == "TRITON_DECODE" else None,
+            head_dim=head_dim,
+        )
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(
+                mock.patch(
+                    "torch._inductor.kernel.flex.flex_attention.can_use_tma",
+                    return_value=True,
+                )
+            )
+            stack.enter_context(
+                mock.patch(
+                    "torch._inductor.kernel.flex.flex_decoding.can_use_tma",
+                    return_value=True,
+                )
+            )
+            if rejected_by == "capability":
+                stack.enter_context(
+                    mock.patch(
+                        "torch._inductor.utils._gfx1250_device_prereqs",
+                        return_value=False,
+                    )
+                )
+            if rejected_by == "config":
+                stack.enter_context(
+                    inductor_config.patch({"triton.enable_flex_tdm": False})
+                )
+            _, code = self._compile_and_get_code(fn, q, k, v)
+
+        self._assert_pointer_path(code, operands)
+
+    def test_tdm_flex_forward_nonzero_storage_offset(self, device):
+        # 8 rows of head_dim 64 in fp16 is a 1024-byte offset, so the operand
+        # stays admissible and the descriptor base is not the allocation base.
+        def fn(q, k, v):
+            return flex_attention(q, k, v)
+
+        q, k, v = self._qkv(device, torch.float16, offset=8)
+        self.assertNotEqual(q.storage_offset(), 0)
+        result, code = self._compile_and_get_code(fn, q, k, v)
+        self._assert_descriptor_path(code, _TDM_FORWARD_OPERANDS)
+        torch.testing.assert_close(
+            result,
+            fn(q, k, v),
+            atol=_TDM_TOLERANCES[torch.float16].atol,
+            rtol=_TDM_TOLERANCES[torch.float16].rtol,
+        )
+
+    def test_tdm_flex_padded_head_dim_correctness_and_selection(self, device):
+        # head_dim 65 rounds to a descriptor block width of 128, so the block
+        # overhangs the logical head dimension. Check that the out-of-bounds
+        # region does not corrupt the attention result.
+        def fn(q, k, v):
+            return flex_attention(q, k, v)
+
+        q = self._head_dim_tail(device, self.Q_LEN)
+        k = self._head_dim_tail(device, self.KV_LEN)
+        v = self._head_dim_tail(device, self.KV_LEN)
+
+        result, code = self._compile_and_get_code(fn, q, k, v)
+        self._assert_descriptor_path(code, _TDM_FORWARD_OPERANDS)
+        torch.testing.assert_close(
+            result,
+            fn(q, k, v),
+            atol=_TDM_TOLERANCES[torch.float16].atol,
+            rtol=_TDM_TOLERANCES[torch.float16].rtol,
+        )
+
+    def test_tdm_flex_decode_padded_head_dim_correctness_and_selection(self, device):
+        # Decode composes flex_decode.py.jinja and builds its own descriptors,
+        # so the forward padded-head test does not cover this codegen. Only
+        # K/V are gated here; q_len=1 just selects the decode lowering.
+        def fn(q, k, v):
+            return flex_attention(q, k, v)
+
+        q = self._head_dim_tail(device, 1)
+        k = self._head_dim_tail(device, self.KV_LEN)
+        v = self._head_dim_tail(device, self.KV_LEN)
+
+        result, code = self._compile_and_get_code(fn, q, k, v)
+        self._assert_descriptor_path(code, _TDM_DECODE_OPERANDS)
+        torch.testing.assert_close(
+            result,
+            fn(q, k, v),
+            atol=_TDM_TOLERANCES[torch.float16].atol,
+            rtol=_TDM_TOLERANCES[torch.float16].rtol,
+        )
+
+    @common_utils.parametrize(
+        "backend, operands",
+        [("TRITON", _TDM_FORWARD_OPERANDS), ("TRITON_DECODE", _TDM_DECODE_OPERANDS)],
+    )
+    @common_utils.parametrize(
+        "options, descriptors",
+        [
+            ({}, True),
+            ({"USE_TMA": True}, True),
+            ({"USE_TMA": False}, False),
+            # USE_TMA is typed bool but not validated at runtime, and every
+            # falsy value took the pointer path before this feature existed.
+            # An identity test against False would let these through.
+            ({"USE_TMA": 0}, False),
+            ({"USE_TMA": None}, False),
+            # fwd_ wins over the unprefixed key for the forward kernels.
+            ({"USE_TMA": True, "fwd_USE_TMA": False}, False),
+            ({"USE_TMA": True, "fwd_USE_TMA": 0}, False),
+        ],
+    )
+    def test_tdm_flex_use_tma_option(
+        self, device, backend, operands, options, descriptors
+    ):
+        def fn(q, k, v):
+            return flex_attention(
+                q, k, v, kernel_options=dict(options, BACKEND=backend)
+            )
+
+        q, k, v = self._qkv(
+            device, torch.float16, q_len=1 if backend == "TRITON_DECODE" else None
+        )
+        result, code = self._compile_and_get_code(fn, q, k, v)
+        if descriptors:
+            self._assert_descriptor_path(code, operands)
+        else:
+            self._assert_pointer_path(code, operands)
+        torch.testing.assert_close(
+            result,
+            fn(q, k, v),
+            atol=_TDM_TOLERANCES[torch.float16].atol,
+            rtol=_TDM_TOLERANCES[torch.float16].rtol,
+        )
+
+    @common_utils.parametrize(
+        "backend, operands",
+        [("TRITON", _TDM_FORWARD_OPERANDS), ("TRITON_DECODE", _TDM_DECODE_OPERANDS)],
+    )
+    def test_tdm_flex_rejected_layout_falls_back(self, device, backend, operands):
+        # head_dim 33 in fp16 gives a 66-byte row stride, which fails the
+        # operand alignment rule, so every operand must take the pointer path.
+        def fn(q, k, v):
+            return flex_attention(q, k, v, kernel_options={"BACKEND": backend})
+
+        q, k, v = self._qkv(
+            device,
+            torch.float16,
+            q_len=1 if backend == "TRITON_DECODE" else None,
+            head_dim=33,
+        )
+        result, code = self._compile_and_get_code(fn, q, k, v)
+        self._assert_pointer_path(code, operands)
+        torch.testing.assert_close(
+            result,
+            fn(q, k, v),
+            atol=_TDM_TOLERANCES[torch.float16].atol,
+            rtol=_TDM_TOLERANCES[torch.float16].rtol,
+        )
+
+    def test_tdm_flex_dynamic_sequence_reuses_descriptor_graph(self, device):
+        def fn(q, k, v):
+            return flex_attention(q, k, v)
+
+        cnt = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(fn, backend=cnt, dynamic=True)
+
+        q, k, v = self._qkv(device, torch.float16)
+        result, code = run_and_get_code(compiled, q, k, v)
+        self.assertEqual(cnt.frame_count, 1)
+        self._assert_descriptor_path(code, _TDM_FORWARD_OPERANDS)
+        torch.testing.assert_close(
+            result,
+            fn(q, k, v),
+            atol=_TDM_TOLERANCES[torch.float16].atol,
+            rtol=_TDM_TOLERANCES[torch.float16].rtol,
+        )
+
+        # A second length must reuse the same graph. run_and_get_code is not
+        # used here: with no recompilation there is no generated code to
+        # capture, so the reuse itself is what carries the descriptor claim.
+        q2, k2, v2 = self._qkv(device, torch.float16, q_len=637, kv_len=641)
+        result2 = compiled(q2, k2, v2)
+        self.assertEqual(cnt.frame_count, 1)
+        torch.testing.assert_close(
+            result2,
+            fn(q2, k2, v2),
+            atol=_TDM_TOLERANCES[torch.float16].atol,
+            rtol=_TDM_TOLERANCES[torch.float16].rtol,
+        )
+
+    def test_tdm_flex_training_and_gqa_keep_backward_correct(self, device):
+        # The skip-odd-keys score_mod plus GQA, run through the existing
+        # backward: PR3 changes forward and decode only, so the gradients and
+        # LSE have to stay correct while the forward takes the descriptor path.
+        def score_mod(score, b, h, q, kv):
+            return torch.where(kv % 2 == 0, score, float("-inf"))
+
+        def fn(q, k, v):
+            return flex_attention(
+                q, k, v, score_mod=score_mod, enable_gqa=True, return_lse=True
+            )
+
+        def make(n_heads, seq_len, requires_grad):
+            return torch.randn(
+                2,
+                n_heads,
+                seq_len,
+                64,
+                device=device,
+                dtype=torch.float16,
+                requires_grad=requires_grad,
+            )
+
+        q, k, v = (
+            make(8, self.Q_LEN, True),
+            make(2, self.KV_LEN, True),
+            make(2, self.KV_LEN, True),
+        )
+        ref_q, ref_k, ref_v = (
+            t.detach().clone().requires_grad_(True) for t in (q, k, v)
+        )
+
+        (out, lse), code = self._compile_and_get_code(fn, q, k, v)
+        self._assert_descriptor_path(code, _TDM_FORWARD_OPERANDS)
+
+        ref_out, ref_lse = fn(ref_q, ref_k, ref_v)
+        tol = _TDM_TOLERANCES[torch.float16]
+        torch.testing.assert_close(out, ref_out, atol=tol.atol, rtol=tol.rtol)
+        torch.testing.assert_close(lse, ref_lse, atol=tol.atol, rtol=tol.rtol)
+
+        out.sum().backward()
+        ref_out.sum().backward()
+        for actual, expected in ((q, ref_q), (k, ref_k), (v, ref_v)):
+            torch.testing.assert_close(actual.grad, expected.grad, atol=5e-2, rtol=5e-2)
 
 
 @large_tensor_test_class("2GB", device=test_device[0])
@@ -6087,6 +6803,246 @@ class GraphModule(torch.nn.Module):
     @supported_platform
     @skip_on_cpu
     @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
+    def test_backward_calls_flex_attention_backward_choices_hook(self, device):
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.virtualized import V
+
+        class ForwardChoices(InductorChoices):
+            def __init__(self):
+                self.calls = 0
+
+            def append_flex_attention_choices(
+                self,
+                choices,
+                configs,
+                input_nodes,
+                subgraphs,
+                layout,
+                kernel_options,
+                sparse_q_block_size,
+                sparse_kv_block_size,
+            ):
+                self.calls += 1
+                return choices
+
+        class SelectedChoice:
+            def __init__(self, choice, owner):
+                self.choice = choice
+                self.owner = owner
+
+            def __getattr__(self, name):
+                return getattr(self.choice, name)
+
+            def output_node(self):
+                self.owner.selected = True
+                return self.choice.output_node()
+
+        class RecordingChoices(InductorChoices):
+            def __init__(self):
+                self.calls = []
+                self.selected = False
+                self.stock_input_nodes = None
+                self.stock_mutated_inputs = None
+
+            def append_flex_attention_backward_choices(
+                self,
+                choices,
+                configs,
+                input_nodes,
+                subgraphs,
+                layout,
+                kernel_options,
+                sparse_q_block_size,
+                sparse_kv_block_size,
+                *,
+                mutated_inputs,
+            ):
+                self.calls.append((input_nodes, subgraphs, mutated_inputs))
+                stock_choice = choices[0]
+                self.stock_input_nodes = stock_choice.input_nodes
+                self.stock_mutated_inputs = stock_choice.mutated_inputs
+                choices.clear()
+                choices.append(SelectedChoice(stock_choice, self))
+                return choices
+
+        class MutatingChoices(InductorChoices):
+            def __init__(self):
+                self.stock_input_node_count = None
+                self.stock_mutated_input_count = None
+
+            def append_flex_attention_backward_choices(
+                self,
+                choices,
+                configs,
+                input_nodes,
+                subgraphs,
+                layout,
+                kernel_options,
+                sparse_q_block_size,
+                sparse_kv_block_size,
+                *,
+                mutated_inputs,
+            ):
+                input_nodes.clear()
+                subgraphs.clear()
+                mutated_inputs.clear()
+                self.stock_input_node_count = len(choices[0].input_nodes)
+                self.stock_mutated_input_count = len(choices[0].mutated_inputs)
+                return choices
+
+        shape = (1, 1, 128, 16)
+        query = torch.randn(shape, device=device)
+        key = torch.randn(shape, device=device)
+        value = torch.randn(shape, device=device)
+        block_mask = _create_empty_block_mask(query, key)
+        scale = 1.0 / shape[-1] ** 0.5
+        out, logsumexp = flex_attention_fwd(
+            query,
+            key,
+            value,
+            _identity,
+            block_mask,
+            scale,
+        )
+        grad_out = torch.randn_like(out)
+
+        def compiled_bw(query, key, value, out, logsumexp, grad_out):
+            return torch.ops.higher_order.flex_attention_backward(
+                query,
+                key,
+                value,
+                out,
+                logsumexp,
+                grad_out,
+                None,
+                _identity,
+                None,
+                block_mask.as_tuple(),
+                scale,
+                {"BACKEND": "TRITON"},
+                (),
+                (),
+            )
+
+        def run_with_choices(choices):
+            torch._dynamo.reset()
+            with (
+                config.patch(force_disable_caches=True),
+                V.set_choices_handler(choices),
+                torch.no_grad(),
+            ):
+                return torch.compile(compiled_bw, fullgraph=True)(
+                    query, key, value, out, logsumexp, grad_out
+                )
+
+        forward_choices = ForwardChoices()
+        stock_result = run_with_choices(forward_choices)
+        self.assertEqual(forward_choices.calls, 0)
+
+        recording_choices = RecordingChoices()
+        recording_result = run_with_choices(recording_choices)
+
+        self.assertEqual(len(recording_choices.calls), 1)
+        self.assertTrue(recording_choices.selected)
+        self.assertEqual(recording_result, stock_result)
+        input_nodes, subgraphs, mutated_inputs = recording_choices.calls[0]
+        self.assertEqual(len(input_nodes), 16)
+        self.assertEqual(len(subgraphs), 4)
+        self.assertEqual(len(mutated_inputs), 2)
+        self.assertEqual(len(recording_choices.stock_input_nodes), len(input_nodes))
+        for stock_node, hook_node in zip(
+            recording_choices.stock_input_nodes, input_nodes
+        ):
+            self.assertIs(hook_node, stock_node)
+        self.assertEqual(
+            len(recording_choices.stock_mutated_inputs), len(mutated_inputs)
+        )
+        for stock_node, hook_node in zip(
+            recording_choices.stock_mutated_inputs, mutated_inputs
+        ):
+            self.assertIs(hook_node, stock_node)
+        self.assertIs(mutated_inputs[0], input_nodes[6])
+        self.assertIs(mutated_inputs[1], input_nodes[7])
+
+        mutating_choices = MutatingChoices()
+        mutating_result = run_with_choices(mutating_choices)
+        self.assertEqual(mutating_result, stock_result)
+        self.assertEqual(mutating_choices.stock_input_node_count, 16)
+        self.assertEqual(mutating_choices.stock_mutated_input_count, 2)
+
+    @supported_platform
+    @skip_on_cpu
+    @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
+    def test_backward_choices_hook_preserves_captured_grad_mutations(self, device):
+        from torch._inductor.choices import InductorChoices
+        from torch._inductor.virtualized import V
+
+        class RecordingChoices(InductorChoices):
+            def __init__(self):
+                self.calls = []
+
+            def uuid(self):
+                return "captured_grad_mutation_test"
+
+            def append_flex_attention_backward_choices(
+                self,
+                choices,
+                configs,
+                input_nodes,
+                subgraphs,
+                layout,
+                kernel_options,
+                sparse_q_block_size,
+                sparse_kv_block_size,
+                *,
+                mutated_inputs,
+            ):
+                self.calls.append((input_nodes, subgraphs, mutated_inputs))
+                return choices
+
+        shape = (1, 1, 128, 16)
+        query = torch.randn(shape, device=device, requires_grad=True)
+        key = torch.randn(shape, device=device, requires_grad=True)
+        value = torch.randn(shape, device=device, requires_grad=True)
+        score_bias = torch.randn((1,), device=device, requires_grad=True)
+
+        def compiled_attention(query, key, value, bias):
+            def score_mod(score, b, h, m, n):
+                return score * bias[0]
+
+            return flex_attention(
+                query,
+                key,
+                value,
+                score_mod=score_mod,
+                kernel_options={"BACKEND": "TRITON"},
+            )
+
+        choices = RecordingChoices()
+        torch._dynamo.reset()
+        with (
+            config.patch(
+                force_disable_caches=True,
+                inductor_choices_class=lambda: choices,
+            ),
+            V.set_choices_handler(choices),
+        ):
+            torch.compile(compiled_attention, fullgraph=True)(
+                query, key, value, score_bias
+            ).sum().backward()
+
+        backward_calls = [call for call in choices.calls if len(call[0]) == 16]
+        self.assertEqual(len(backward_calls), 1)
+        input_nodes, subgraphs, mutated_inputs = backward_calls[0]
+        self.assertEqual(len(subgraphs), 4)
+        self.assertEqual(len(mutated_inputs), 3)
+        self.assertIs(mutated_inputs[0], input_nodes[6])
+        self.assertIs(mutated_inputs[1], input_nodes[7])
+        self.assertEqual(mutated_inputs[2].get_size(), [1])
+
+    @supported_platform
+    @skip_on_cpu
+    @expected_not_implemented_on_mps  # backward path; NIE on MPS via _validate_device
     def test_direct_backward_preserves_explicit_buffers(self, device):
         mask_buffer = torch.full((), 128, device=device, dtype=torch.int32)
 
@@ -7093,6 +8049,107 @@ class GraphModule(torch.nn.Module):
             raise AssertionError(
                 "Warp specialized kernel result differs from reference"
             )
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # pins kernel_options={"BACKEND": ...}
+    # Scope is NVIDIA CUDA and XPU. ROCm is excluded explicitly rather than by
+    # has_triton_tma_device(), whose HIP exclusion sits only in its CUDA arm:
+    # its XPU and Triton-CPU-backend alternatives can make the aggregate true on
+    # a ROCm host, and gfx1250 also reports device type "cuda" while defaulting
+    # the option on. TestFlexAttentionTDMEndToEnd covers that backend.
+    @skipIfRocm
+    @skipCUDAIf(not has_triton_tma_device(), "Requires TMA enabled CUDA device")
+    @common_utils.parametrize("backend", ["TRITON", "TRITON_DECODE"])
+    def test_tma_with_customer_kernel_options_selection(self, device, backend):
+        """Descriptor selection follows USE_TMA on the TMA backends.
+
+        test_tma_with_customer_kernel_options only compares numbers, so it still
+        passes when both requests land on the same implementation. This asserts
+        the generated code instead, and lives outside the gfx1250-gated class so
+        the shared USE_TMA contract keeps CI coverage on CUDA and XPU. The name
+        shares that test's prefix so the H100 smoke suite's -k filter selects
+        both; keep them together if either is renamed.
+        """
+        # Operands are deliberately TMA-eligible: contiguous bf16 with a
+        # 256-byte innermost row, so only the option decides the path.
+        operands = ("q", "k", "v") if backend == "TRITON" else ("k", "v")
+        make_tensor = functools.partial(
+            torch.ones, (1, 1, 256, 128), device=device, dtype=torch.bfloat16
+        )
+        query = (
+            make_tensor()
+            if backend == "TRITON"
+            else torch.ones((1, 1, 1, 128), device=device, dtype=torch.bfloat16)
+        )
+        key, value = make_tensor(), make_tensor()
+
+        # Omission is backend-dependent: Intel GPUs default the option on, and
+        # CUDA leaves it off. Everything else is explicit. This keys on the
+        # device rather than has_triton_tma_device(), which is a single flag
+        # covering both backends and so cannot express the differing defaults.
+        xpu_defaults_on = device.split(":")[0] == "xpu"
+        cases = [
+            ({}, xpu_defaults_on),
+            ({"USE_TMA": False}, False),
+            ({"USE_TMA": True}, True),
+            # Falsy non-False values are not runtime-validated and have always
+            # taken the pointer path.
+            ({"USE_TMA": 0}, False),
+            ({"USE_TMA": None}, False),
+            # fwd_ wins over the unprefixed key for forward and decode alike.
+            ({"USE_TMA": True, "fwd_USE_TMA": False}, False),
+        ]
+
+        for options, expect_descriptors in cases:
+            with self.subTest(options=options):
+                kernel_options = dict(options, BACKEND=backend)
+
+                def fn(q, k, v, kernel_options=kernel_options):
+                    return flex_attention(q, k, v, kernel_options=kernel_options)
+
+                torch._dynamo.reset()
+                _, code = run_and_get_code(torch.compile(fn), query, key, value)
+                joined = "\n".join(code)
+                for name in operands:
+                    if expect_descriptors:
+                        self.assertRegex(joined, _descriptor_load_pattern(name))
+                    else:
+                        self.assertRegex(joined, _pointer_load_pattern(name))
+                        self.assertNotRegex(joined, _descriptor_load_pattern(name))
+
+    @supported_platform
+    @skip_on_cpu
+    @skip_on_mps  # pins kernel_options={"BACKEND": ...}
+    # Same scope as the selection test above, and ROCm is excluded for the same
+    # reason: TestFlexAttentionTDMEndToEnd holds the gfx1250 copy of this check.
+    @skipIfRocm
+    @skipCUDAIf(not has_triton_tma_device(), "Requires TMA enabled CUDA device")
+    def test_tma_with_customer_kernel_options_int64_decode(self, device):
+        """Decode descriptor coordinates stay int32 when indexing is int64.
+
+        The narrowing lives in the shared common.py.jinja, so the bug this
+        covers is reachable on any descriptor backend, but the gfx1250 copy of
+        the check sits behind a hardware skip and never runs in CI. The name
+        shares test_tma_with_customer_kernel_options' prefix so the H100 smoke
+        suite's -k filter selects it; keep them together if either is renamed.
+        """
+        # Random rather than the neighbours' ones(): with a constant fill every
+        # row reads alike, so a wrongly narrowed coordinate still produces the
+        # reference numbers and only the codegen assertions would catch it.
+        make_tensor = functools.partial(
+            torch.randn, (1, 1, 256, 128), device=device, dtype=torch.bfloat16
+        )
+        _check_int64_decode_narrows_coordinates(
+            self,
+            torch.randn((1, 1, 1, 128), device=device, dtype=torch.bfloat16),
+            make_tensor(),
+            make_tensor(),
+            # Decode is requested explicitly: CUDA defaults descriptors off,
+            # and a query length of 1 alone does not pin the decode kernel.
+            kernel_options={"USE_TMA": True, "BACKEND": "TRITON_DECODE"},
+            tolerances=_TDM_TOLERANCES[torch.bfloat16],
+        )
 
     @supported_platform
     @skip_on_cpu
@@ -10552,6 +11609,19 @@ instantiate_device_type_tests(
 )
 instantiate_device_type_tests(
     TestLearnableBiases, globals(), only_for=test_device, allow_xpu=True
+)
+# Register on the primary local device only. Hardcoding ("cuda",) generates no
+# class at all on a CPU/XPU/MPS-only build, so the suite reports zero tests
+# rather than a skip, and coverage becomes indistinguishable from absence.
+# Passing all of test_device is also wrong: it includes "cpu" alongside "cuda",
+# and running_on_tdm_device() is host-global, so the CPU class would clear the
+# class-level skip on a gfx1250 host and then run these tests on CPU.
+instantiate_device_type_tests(
+    TestFlexAttentionTDMEndToEnd,
+    globals(),
+    only_for=(test_device[0],),
+    allow_xpu=True,
+    allow_mps=True,
 )
 
 
