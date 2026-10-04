@@ -916,8 +916,8 @@ _efficient_attention_backward(
     }
 
     // Heuristic for finding optimal number of splits
-    auto parallelism_without_split_key =
-        p.getBlocksGrid().x * p.getBlocksGrid().y * p.getBlocksGrid().z;
+    const int64_t parallelism_without_split_key =
+        int64_t(p.num_batches) * p.num_heads;
     p.num_splits_key = cutlass::ceil_div(p.num_keys, Kernel::kBlockSizeJ);
     if (num_splits_key.has_value()) {
       p.num_splits_key =
@@ -935,8 +935,8 @@ _efficient_attention_backward(
       // Increasing `split_keys` leads to using more gmem for temporary storage
       // when we need a staging area for gK/gV. let's avoid that
       if (Kernel::kNeedsAccumGradK || Kernel::kNeedsAccumGradV) {
-        p.num_splits_key = std::min(
-            int32_t(p.num_splits_key), 200 / ((int32_t)(p.num_batches * p.num_heads)));
+        p.num_splits_key = std::min<int64_t>(
+            p.num_splits_key, 200 / parallelism_without_split_key);
       }
     }
     if (!Kernel::kEnableSplitKeys || p.num_splits_key < 1) {

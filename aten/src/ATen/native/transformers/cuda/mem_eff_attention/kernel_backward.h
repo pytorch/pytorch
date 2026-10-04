@@ -889,7 +889,7 @@ struct AttentionBackwardKernel {
     }
     CUTLASS_HOST_DEVICE int64_t workspace_size() const {
       // Returns size of buffer we need to run this kernel
-      return num_batches * num_heads * workspace_strideBH() * sizeof(float);
+      return int64_t(num_batches) * num_heads * workspace_strideBH() * sizeof(float);
     }
     CUTLASS_HOST_DEVICE bool should_zero_workspace() const {
       return num_splits_key > 1 || window_size > 0;
