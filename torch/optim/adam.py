@@ -32,6 +32,12 @@ from .optimizer import (
 __all__ = ["Adam", "adam"]
 
 
+def _check_no_first_moment(beta1: float | Tensor) -> None:
+    # An empty ``exp_avgs`` means the first moment is the gradient itself.
+    if isinstance(beta1, Tensor) or beta1 != 0.0:
+        raise ValueError("exp_avgs can only be empty when beta1 == 0")
+
+
 class Adam(Optimizer):
     def __init__(
         self,
@@ -148,6 +154,17 @@ class Adam(Optimizer):
         state_steps,
     ):
         has_complex = False
+        beta1 = group["betas"][0]
+        # With beta1 == 0 the first moment equals the gradient, so there is
+        # nothing to store. The fused kernels read the buffer, so they keep it.
+        # State that was saved with a first moment keeps it: the moment is part of
+        # the saved state and the user may switch beta1 back.
+        use_first_moment = (
+            group["fused"]
+            or isinstance(beta1, Tensor)
+            or beta1 != 0.0
+            or any("exp_avg" in self.state.get(p, {}) for p in group["params"])
+        )
         for p in group["params"]:
             if p.grad is not None:
                 has_complex |= torch.is_complex(p)
@@ -175,10 +192,11 @@ class Adam(Optimizer):
                         if group["capturable"] or group["fused"]
                         else torch.tensor(0.0, dtype=_get_scalar_dtype(), device="cpu")
                     )
-                    # Exponential moving average of gradient values
-                    state["exp_avg"] = torch.zeros_like(
-                        p, memory_format=torch.preserve_format
-                    )
+                    if use_first_moment:
+                        # Exponential moving average of gradient values
+                        state["exp_avg"] = torch.zeros_like(
+                            p, memory_format=torch.preserve_format
+                        )
                     # Exponential moving average of squared gradient values
                     state["exp_avg_sq"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
@@ -189,7 +207,14 @@ class Adam(Optimizer):
                             p, memory_format=torch.preserve_format
                         )
 
-                exp_avgs.append(state["exp_avg"])
+                if use_first_moment:
+                    # State loaded from an optimizer that ran with beta1 == 0 has no
+                    # first moment yet.
+                    if "exp_avg" not in state:
+                        state["exp_avg"] = torch.zeros_like(
+                            p, memory_format=torch.preserve_format
+                        )
+                    exp_avgs.append(state["exp_avg"])
                 exp_avg_sqs.append(state["exp_avg_sq"])
 
                 if group["amsgrad"]:
@@ -319,7 +344,10 @@ Adam.__doc__ = (
             LR if you are not also specifying fused=True or capturable=True.
         betas (tuple[float | Tensor, float | Tensor], optional):
             coefficients used for computing running averages of gradient and
-            its square. If a tensor is provided, must be 1-element. (default: (0.9, 0.999))
+            its square. If a tensor is provided, must be 1-element. If the
+            first coefficient is the float ``0.0``, no first moment is stored
+            and the gradient is used instead, except with ``fused=True``.
+            (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
@@ -394,9 +422,14 @@ def _single_tensor_adam(
     else:
         beta1_dict = None
 
+    # No first moment is stored for beta1 == 0: it equals the gradient.
+    has_first_moment = len(exp_avgs) != 0
+    if not has_first_moment and not torch.jit.is_scripting():
+        _check_no_first_moment(beta1)
+
     for i, param in enumerate(params):
         grad = grads[i] if not maximize else -grads[i]
-        exp_avg = exp_avgs[i]
+        exp_avg = exp_avgs[i] if has_first_moment else grad
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
 
@@ -436,6 +469,9 @@ def _single_tensor_adam(
                 max_exp_avg_sqs[i] = torch.view_as_real(max_exp_avg_sqs[i])
             param = torch.view_as_real(param)
 
+        if not has_first_moment:
+            exp_avg = grad
+
         device = param.device
 
         if beta1_dict is not None:
@@ -454,7 +490,8 @@ def _single_tensor_adam(
 
         # Decay the first and second moment running average coefficient
 
-        exp_avg.lerp_(grad, 1 - device_beta1)
+        if has_first_moment:
+            exp_avg.lerp_(grad, 1 - device_beta1)
 
         # Nested if is necessary to bypass jitscript rules
         if differentiable and isinstance(beta2, Tensor):
@@ -624,8 +661,24 @@ def _multi_tensor_adam(
     beta1 = _to_scalar(beta1)
     beta2 = _to_scalar(beta2)
 
+    # No first moment is stored for beta1 == 0: it equals the gradient. The grads
+    # take the place of the exp_avgs so that the grouping still lines up.
+    has_first_moment = len(exp_avgs) != 0
+    if not has_first_moment:
+        _check_no_first_moment(beta1)
+
     grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
+        cast(
+            list[list[Tensor | None]],
+            [
+                params,
+                grads,
+                exp_avgs if has_first_moment else grads,
+                exp_avg_sqs,
+                max_exp_avg_sqs,
+                state_steps,
+            ],
+        )
     )
 
     # We only shuffle around the beta when it is a Tensor and on CUDA, otherwise, we prefer
@@ -702,9 +755,12 @@ def _multi_tensor_adam(
         # Decay the first and second moment running average coefficient
         # Use device beta1 if beta1 is a tensor to ensure all
         # tensors are on the same device
-        torch._foreach_lerp_(
-            device_exp_avgs, device_grads, cast(float, 1 - device_beta1)
-        )
+        if has_first_moment:
+            torch._foreach_lerp_(
+                device_exp_avgs, device_grads, cast(float, 1 - device_beta1)
+            )
+        else:
+            device_exp_avgs = device_grads
 
         torch._foreach_mul_(device_exp_avg_sqs, beta2)
 
@@ -723,7 +779,10 @@ def _multi_tensor_adam(
             device_exp_avg_sqs, scaled_device_grads, device_grads, value
         )
 
-        # Delete the local intermediate(s) since they won't be used anymore to save on peak memory
+        # Delete the local intermediate(s) since they won't be used anymore to save on peak memory.
+        # With beta1 == 0 the first moment is the gradient, so device_exp_avgs aliases it.
+        if not has_first_moment:
+            device_exp_avgs = device_exp_avgs[:]
         del device_grads
         del scaled_device_grads
 
@@ -826,6 +885,10 @@ def _fused_adam(
         return
     if differentiable:
         raise RuntimeError("Adam with fused=True does not support differentiable=True")
+    if len(exp_avgs) == 0:
+        raise RuntimeError(
+            "Adam with fused=True requires exp_avgs, even for beta1 == 0"
+        )
 
     beta1 = _to_scalar(beta1)
     beta2 = _to_scalar(beta2)
