@@ -104,7 +104,7 @@ void gemm_grouped_cuda_internal(
       at::TensorOptions().dtype(at::kLong).pinned_memory(true));
 
   // Obtain pointers for each argument (on host)
-  int64_t* lda_data = gmm_args.data_ptr<int64_t>(); // Base pointer
+  int64_t* lda_data = gmm_args.mutable_data_ptr<int64_t>(); // Base pointer
   int64_t* ldb_data = lda_data + problem_count;
   int64_t* ldd_data = lda_data + 2 * problem_count;
   int64_t* ptr_a_data = lda_data + 3 * problem_count;
@@ -130,7 +130,7 @@ void gemm_grouped_cuda_internal(
   gmm_args = gmm_args.to(device, true);
 
   // Obtain pointers for each of arguments (on GPU)
-  lda_data = gmm_args.data_ptr<int64_t>(); // Base pointer
+  lda_data = gmm_args.mutable_data_ptr<int64_t>(); // Base pointer
   ldb_data = lda_data + problem_count;
   ldd_data = lda_data + 2 * problem_count;
   ptr_a_data = lda_data + 3 * problem_count;
@@ -373,7 +373,7 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
       get_nested_tensor_impl(self)->get_nested_sizes() : get_nested_tensor_impl(mat2)->get_nested_sizes();
 
   Tensor out_sizemat = self_sizemat.new_empty(self_sizemat.sizes());
-  int64_t* out_sizemat_ptr = out_sizemat.data_ptr<int64_t>();
+  int64_t* out_sizemat_ptr = out_sizemat.mutable_data_ptr<int64_t>();
 
   int64_t out_numel = 0;
   for (int64_t i = 0; i < ntensors; i++) {
@@ -428,9 +428,9 @@ Tensor bmm_nested_cuda(const Tensor& self, const Tensor& mat2) {
           const int64_t &mat2_size0 = mat2_shape[0];
           const int64_t &mat2_size1 = mat2_shape[1];
           gemm_sizes.emplace_back(self_size0, mat2_size1, self_size1);
-          aptr[i] = self_buffer.data_ptr<scalar_t>() + get_offset_for_index(self, i);
-          bptr[i] = mat2_buffer.data_ptr<scalar_t>() + get_offset_for_index(mat2, i);
-          dptr[i] = out_buffer.data_ptr<scalar_t>() + out_offsets_ptr[i];
+          aptr[i] = self_buffer.mutable_data_ptr<scalar_t>() + get_offset_for_index(self, i);
+          bptr[i] = mat2_buffer.mutable_data_ptr<scalar_t>() + get_offset_for_index(mat2, i);
+          dptr[i] = out_buffer.mutable_data_ptr<scalar_t>() + out_offsets_ptr[i];
           auto self_stride = get_stride_for_index(self, i);
           auto mat2_stride = get_stride_for_index(mat2, i);
           all_row_major = all_row_major && (self_stride[1] == 1);
