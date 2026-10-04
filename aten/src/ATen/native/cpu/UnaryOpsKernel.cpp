@@ -139,7 +139,7 @@ bool LogitMKLEnabled() {
   return true;
 }
 
-#if defined(AT_VEC_CUSTOM_MATH)
+#if 1
 template<>
 bool LogitMKLEnabled<float>() {
   return false;

@@ -1,5 +1,10 @@
 #pragma once
 
+#if (defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || \
+      defined(__aarch64__))
+  #define AT_VEC_CUSTOM_MATH 1
+#endif
+
 #if defined(CPU_CAPABILITY_AVX512)
 #include <ATen/cpu/vec/vec512/vec512.h>
 #else
@@ -10,8 +15,8 @@
 #if (                                                                 \
     defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || \
     defined(__aarch64__)) &&                                          \
-    defined(AT_VEC_CUSTOM_MATH) && defined(FBCODE_CAFFE2)
-#include <ATen/cpu/vec/fb/single.h>
+    defined(AT_VEC_CUSTOM_MATH)
+#include <ATen/cpu/vec/single.h>
 #endif
 
 namespace at::vec {
