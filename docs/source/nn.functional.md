@@ -200,6 +200,7 @@ scaled_dot_product_attention.
     soft_margin_loss
     triplet_margin_loss
     triplet_margin_with_distance_loss
+    info_nce_loss
 ```
 
 ## Vision functions
