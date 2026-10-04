@@ -10,6 +10,8 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 import uuid
 import zipfile
@@ -103,6 +105,7 @@ from torch.testing._internal.common_utils import (
     random_matrix_with_scaled_reduction_dim,
     runOnRocm,
     set_cwd,
+    skipIfFreeThreaded,
     skipIfRocmArch,
     skipIfWindows,
     skipIfWindowsXPU,
@@ -706,6 +709,202 @@ class AOTInductorTestsTemplate:
         self.assertGreaterEqual(parallel_windows, 1)
         self.assertGreater(task_count, parallel_windows)
         self.assertEqual(optimized(*example_inputs), model(*example_inputs))
+
+    @skipIfFreeThreaded("Measures whether the GIL is released")
+    def test_model_loading_and_execution_release_gil(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                # Large enough that loading the weights dominates construction.
+                self.linear = torch.nn.Linear(2048, 2048)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        example_inputs = (torch.randn(2, 2048, device=self.device),)
+        model = Model().to(self.device)
+
+        def assert_gil_released_during(call):
+            # A binding that holds the GIL for the whole call never lets the
+            # canary step, so the count stays exactly zero. That only holds
+            # while the measurement is shorter than the switch interval, so
+            # raise it to 1 s, and repeat the call for up to 0.25 s so that
+            # the canary gets scheduled.
+            old_interval = sys.getswitchinterval()
+            sys.setswitchinterval(1.0)
+            stop = threading.Event()
+            steps = 0
+
+            def canary():
+                nonlocal steps
+                while not stop.is_set():
+                    steps += 1
+                    time.sleep(0.0001)
+
+            thread = threading.Thread(target=canary)
+            thread.start()
+            # Kept alive: destroying a runner releases the GIL too.
+            results = []
+            try:
+                while steps == 0:
+                    time.sleep(0.001)
+                before = steps
+                deadline = time.perf_counter() + 0.25
+                while steps == before and time.perf_counter() < deadline:
+                    results.append(call())
+                after = steps
+            finally:
+                stop.set()
+                thread.join()
+                sys.setswitchinterval(old_interval)
+            self.assertGreater(after - before, 0)
+            return results[-1]
+
+        so_path = AOTIRunnerUtil.legacy_compile(model, example_inputs)
+
+        # Keep the one-time setup of the first construction and run out of the
+        # measurements.
+        warmup = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, self.device)
+        warmup.run([example_inputs[0]])
+        del warmup
+
+        runner = assert_gil_released_during(
+            lambda: torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, self.device)
+        )
+        assert_gil_released_during(lambda: runner.run([example_inputs[0]]))
+
+        package_path = AOTIRunnerUtil.compile(model, example_inputs)
+        with tempfile.TemporaryDirectory() as extracted:
+            # Unzipping the .pt2 is slow, so load from an extracted directory.
+            with zipfile.ZipFile(package_path) as archive:
+                archive.extractall(extracted)
+
+            loader = assert_gil_released_during(
+                lambda: torch._C._aoti.AOTIModelPackageLoader(
+                    extracted, "model", False, 1, -1
+                )
+            )
+            # boxed_run clears the list it is given, so pass a fresh one each call.
+            assert_gil_released_during(lambda: loader.boxed_run([example_inputs[0]]))
+
+    @unittest.skipIf(
+        IS_FBCODE, "Subprocess spawning doesn't work in fbcode Buck environment"
+    )
+    def test_concurrent_run_and_swap_constant_buffer(self):
+        if self.device not in ("cpu", "cuda"):
+            raise unittest.SkipTest("Only covers the CPU and CUDA runners")
+
+        # run() holds model_exec_mutex_ while the Python op below takes the GIL
+        # back, and its eager op hands the GIL to the other threads. A second
+        # run() then waits for the only model instance, and
+        # swap_constant_buffer() for model_exec_mutex_; either one deadlocks if
+        # it waits with the GIL held. A deadlock holds the GIL forever, so the
+        # threads run in a subprocess, under faulthandler's watchdog.
+        with torch.library._scoped_library("aoti_gil", "FRAGMENT") as lib:
+            torch.library.define(
+                "aoti_gil::add_one",
+                "(Tensor x) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=lib,
+            )
+
+            @torch.library.impl(
+                "aoti_gil::add_one", "CompositeExplicitAutograd", lib=lib
+            )
+            @torch.library.register_fake("aoti_gil::add_one", lib=lib)
+            def add_one(x: torch.Tensor) -> torch.Tensor:
+                return x + 1
+
+            class Model(torch.nn.Module):
+                def __init__(self, device):
+                    super().__init__()
+                    self.weight = torch.randn(16, 16, device=device)
+
+                def forward(self, x):
+                    return torch.ops.aoti_gil.add_one(x) @ self.weight
+
+            example_inputs = (torch.randn(4, 16, device=self.device),)
+            with config.patch({"always_keep_tensor_constants": True}):
+                so_path = AOTIRunnerUtil.legacy_compile(
+                    Model(self.device), example_inputs
+                )
+
+        script = """
+import faulthandler
+import sys
+import threading
+
+import torch
+
+so_path, device = sys.argv[1:]
+op_calls = []
+
+
+def add_one(x):
+    op_calls.append(None)
+    return x + 1
+
+
+# The proxy executor looks the op up when the runner is constructed.
+lib = torch.library.Library("aoti_gil", "FRAGMENT")
+lib.define("add_one(Tensor x) -> Tensor")
+lib.impl("add_one", add_one, "CompositeExplicitAutograd")
+
+runner_cls = getattr(torch._C._aoti, f"AOTIModelContainerRunner{device.capitalize()}")
+runner = runner_cls(so_path, 1) if device == "cpu" else runner_cls(so_path, 1, device)
+x = torch.randn(4, 16, device=device)
+expected = runner.run([x])[0]
+runner.update_constant_buffer(runner.extract_constants_map(False), True, False)
+
+swapped = threading.Event()
+done = threading.Event()
+errors = []
+
+
+def run_loop():
+    try:
+        swapped.wait()
+        for _ in range(100):
+            torch.testing.assert_close(runner.run([x])[0], expected)
+    except BaseException as e:
+        errors.append(e)
+    finally:
+        done.set()
+
+
+def swap_loop():
+    try:
+        while not done.is_set():
+            runner.swap_constant_buffer()
+            swapped.set()
+    except BaseException as e:
+        errors.append(e)
+        swapped.set()
+
+
+faulthandler.dump_traceback_later(60, exit=True)
+threads = [threading.Thread(target=f) for f in (run_loop, run_loop, swap_loop)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+faulthandler.cancel_dump_traceback_later()
+if errors:
+    raise errors[0]
+if len(op_calls) != 201:
+    raise AssertionError(f"expected 201 calls to the Python op, got {len(op_calls)}")
+"""
+        proc = subprocess.run(
+            [sys.executable, "-c", script, so_path, self.device],
+            capture_output=True,
+            text=True,
+            # The watchdog only covers the threads; this bounds the rest.
+            timeout=300,
+        )
+        self.assertEqual(proc.returncode, 0, msg=proc.stdout + proc.stderr)
 
     def test_output_path_1(self):
         class Model(torch.nn.Module):
