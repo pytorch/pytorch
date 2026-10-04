@@ -1921,7 +1921,7 @@ class TestNNParametrizationDevice(NNTestCase):
             self.assertEqual(m(input), expected_output)
 
 
-instantiate_device_type_tests(TestNNParametrizationDevice, globals())
+instantiate_device_type_tests(TestNNParametrizationDevice, globals(), allow_mps=True)
 instantiate_parametrized_tests(TestNNParametrization)
 
 if __name__ == "__main__":
