@@ -107,6 +107,7 @@ from .dependencies import (
     SymbolUsageCollectorOpsHandler,
     var_builder,
 )
+from .fx_utils import get_node_storage
 from .loop_body import LoopBody
 from .ops_handler import OpCounterCSE, OpCountResult, ReductionType, StoreMode
 from .runtime.benchmarking import benchmarker
@@ -343,13 +344,42 @@ NHWC_STRIDE_ORDER = [3, 0, 2, 1]
 NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
 
+def _get_shape_env_for_symbolic_stride_order(
+    seq: Sequence[int | torch.SymInt | Expr],
+) -> ShapeEnv | None:
+    for s in seq:
+        # ConstantIntNode and other non-ShapeEnv SymNodes have no shape_env.
+        if isinstance(s, torch.SymInt):
+            shape_env = getattr(s.node, "shape_env", None)
+            if shape_env is not None:
+                return shape_env
+
+    try:
+        graph = V.graph
+    except (AttributeError, RuntimeError):
+        return None
+
+    sizevars = getattr(graph, "sizevars", None)
+    shape_env = getattr(sizevars, "shape_env", None)
+    if shape_env is None:
+        shape_env = getattr(graph, "_shape_env", None)
+    return shape_env
+
+
 def get_fill_order(
     seq: Sequence[int | torch.SymInt | Expr], shape_env: ShapeEnv | None = None
 ) -> Sequence[int]:
     """
     Convert strides to fill order (argsort)
     """
-    if shape_env is None or all(isinstance(s, (int, sympy.Integer)) for s in seq):
+    if shape_env is None:
+        if all(isinstance(s, (int, sympy.Integer)) for s in seq):
+            return argsort(seq)
+        shape_env = _get_shape_env_for_symbolic_stride_order(seq)
+    elif all(isinstance(s, (int, sympy.Integer)) for s in seq):
+        return argsort(seq)
+
+    if shape_env is None:
         sorted_idx: Sequence[int] = argsort(seq)
     else:
         # argsort_sym handles unbacked symints (with the help of the shape_env)
@@ -3604,6 +3634,8 @@ class BaseView(IRNode):
 
 @ir_dataclass
 class ExpandView(BaseView):
+    """Broadcast `data` to `size`; input dims of size 1 always read index 0."""
+
     size: Sequence[Expr]
 
     @staticmethod
@@ -3688,6 +3720,10 @@ class ExpandView(BaseView):
         target = self.get_size()
         actual = self.data.get_size()
         skip = len(target) - len(actual)
+        # A symbolic size such as TruncToInt(s0/300) can be known to be 1 by
+        # the shape env without being the literal 1, so decide broadcast dims
+        # the same way create() does when zeroing strides.
+        broadcast = [V.graph.sizevars.is_size_one_or_false(s) for s in actual]
 
         def reindex(
             index: Sequence[Expr],
@@ -3696,7 +3732,7 @@ class ExpandView(BaseView):
             if len(index) != len(actual):
                 raise AssertionError("Expected len(index) == len(actual)")
             for i in range(len(actual)):
-                if actual[i] == 1:
+                if broadcast[i]:
                     # zero out broadcast dimension
                     index[i] = sympy.S.Zero
             return index
@@ -4096,6 +4132,17 @@ class View(GenericView):
 
             raise GuardOnDataDependentSymNode(sympy.Eq(a, b))
 
+        def check_equals_or_raise(a: Expr, b: Expr) -> None:
+            if V.graph.sizevars.statically_known_equals(a, b):
+                return
+            # For unbacked symbols check_equals() adds a runtime assert instead
+            # of raising. That is only safe when both stacks are empty: every
+            # other size has been matched, and for a valid reshape the total
+            # sizes must match, so a == b must hold.
+            if stack_old or stack_new:
+                raise GuardOnDataDependentSymNode(sympy.Eq(a, b))
+            V.graph.sizevars.check_equals(a, b)
+
         # TODO: These symbols may not escape, if they don't assert so and
         # treat them as temporary
         vars = [
@@ -4134,7 +4181,7 @@ class View(GenericView):
                     var = var2 * size_new + var
                     size_new = size_new * size_new2
                 view_expr.append(var)
-                V.graph.sizevars.check_equals(size_new, size_old)
+                check_equals_or_raise(size_new, size_old)
             elif compare_sizes(size_new, size_old) > 0:
                 divisor = sympy.S.One
                 modulus = size_old
@@ -4145,7 +4192,7 @@ class View(GenericView):
                     view_expr.append(ModularIndexing(var, divisor, modulus))
                     divisor = divisor * modulus
                     size_old = size_old * modulus
-                V.graph.sizevars.check_equals(size_new, size_old)
+                check_equals_or_raise(size_new, size_old)
             else:
                 raise AssertionError
 
@@ -4204,6 +4251,9 @@ class ReinterpretView(BaseView):
     def get_name(self) -> str:
         return self.data.get_name()
 
+    def get_read_names(self) -> OrderedSet[str]:
+        return OrderedSet([self.get_name()])
+
     def get_device(self) -> torch.device | None:
         return self.layout.device
 
@@ -4223,7 +4273,11 @@ class ReinterpretView(BaseView):
     def make_loader(self) -> Callable[[Sequence[Expr]], OpsValue]:
         def loader(index: Sequence[Expr]) -> OpsValue:
             indexer = self.layout.make_indexer()
-            tmp_loader = ops.load(self.get_name(), indexer(index))
+            name = self.get_name()
+            device = ConstantBuffer.override_device
+            if device is not None and name in V.graph.constants:
+                name = V.graph.constant_name(name, device)
+            tmp_loader = ops.load(name, indexer(index))
             if self.layout.dtype != self.data.dtype:
                 return ops.to_dtype_bitcast(tmp_loader, self.dtype, self.data.dtype)
             else:
@@ -5087,7 +5141,11 @@ class FlexibleLayout(Layout):
 
 
 class NonOwningLayout(Layout):
-    """Is a view into the storage of another tensor"""
+    """Layout for a named buffer that aliases another tensor or view.
+
+    This layout does not add a view transformation. ``view`` is the logical
+    tensor being aliased and carries any view-specific layout metadata.
+    """
 
     def __init__(self, view: BaseView | TensorBox) -> None:
         layout = view.get_layout()
@@ -5188,6 +5246,14 @@ class NoneLayout(OutputSpec):
 
 
 class MutationLayoutSHOULDREMOVE(Layout):
+    """Layout for an operation that writes into an existing tensor or view.
+
+    A buffer with this layout does not own a new allocation or add a view
+    transformation. ``target`` is the logical mutation destination and carries
+    any view-specific layout metadata. ``get_buffer()`` unwraps it to the buffer
+    whose storage is mutated.
+    """
+
     def __init__(self, target: IRNode) -> None:
         super().__init__(
             target.get_device_or_error(),
@@ -5231,6 +5297,32 @@ class MutationLayoutSHOULDREMOVE(Layout):
             raise AssertionError("Expected isinstance(layout, Layout)")
         return layout
 
+    @staticmethod
+    def _reads_only_where_it_writes(node: Pointwise, dst: IRNode) -> bool:
+        """
+        Whether the kernel that computes node, storing straight into dst's
+        buffer, reads that buffer only at the element it writes: x + y does,
+        x + x.flip(0) does not. This is the same index rule that
+        Scheduler.fusable_weak_dep applies to a read and a later in-place write
+        of the same buffer.
+        """
+        name = dst.get_name()
+        if name not in node.get_read_names():
+            return True
+        with patch.object(FlexibleLayout, "allow_indexing", True):
+            loader, indexer = node.make_loader(), dst.make_indexer()
+
+            def body(index: Sequence[Expr]) -> None:
+                ops.store(name, indexer(index), loader(index))
+
+            read_writes = extract_read_writes(body, node.get_size())
+        (write,) = read_writes.writes
+        return all(
+            isinstance(read, dependencies.MemoryDep) and read.index == write.index
+            for read in read_writes.reads
+            if read.name == name
+        )
+
     @classmethod
     def realize_into(
         cls, src: IRNode, dst: IRNode, unsafe_alias: bool = False
@@ -5251,6 +5343,20 @@ class MutationLayoutSHOULDREMOVE(Layout):
         # dst would effect users of src. However if there are no more users of
         # dst, we can alias src to dst.
         src.realize_hint()
+
+        if unsafe_alias:
+            # The kernel that computes src would write dst itself. Unless it is
+            # a pointwise one that reads dst only where it writes, compute src
+            # into a buffer of its own and copy that into dst.
+            loops = src.data if isinstance(src, StorageBox) else src
+            if isinstance(loops, ComputedBuffer):
+                loops = loops.data
+            if not (
+                isinstance(loops, Pointwise)
+                and cls._reads_only_where_it_writes(loops, dst)
+            ):
+                src.realize()
+                unsafe_alias = False
 
         if not unsafe_alias:
             node = Pointwise.create(
@@ -6701,6 +6807,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         supports_epilogue_fusion: bool = False,
         swap_ab: bool = False,
         bias_node: Buffer | None = None,
+        output_scale_node: Buffer | None = None,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -6718,10 +6825,27 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         # When set, the last entry of `inputs` is an addmm bias consumed as a
         # fixed bias-add epilogue; the GEMM operands are the remaining inputs.
         self.bias_node = bias_node
+        # Native scaled-GEMM alpha is kept as a TemplateBuffer input so the
+        # scheduler tracks the dependency, then separated from GEMM operands
+        # when rendering the runtime call.
+        self.output_scale_node = output_scale_node
         # Store kernel metadata for code generation since kernels aren't serializeable yet
+        kernel_impl = getattr(kernel, "impl", None)
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.operator_name,
             "min_cc": kernel.designed_for_min_cc,
+            "supports_output_scale": getattr(kernel, "supports_output_scale", False),
+            "use_prefetch": getattr(
+                kernel_impl,
+                "use_prefetch",
+                getattr(kernel.metadata.design, "use_prefetch", False),
+            ),
+            "use_pdl": getattr(
+                kernel_impl,
+                "use_pdl",
+                getattr(kernel.metadata.design, "use_pdl", False),
+            ),
+            "output_dtype": layout.dtype,
         }
         # Override the instance attribute set by parent with our method
         # This is necessary because TemplateBuffer stores make_kernel_render as instance attr
@@ -6761,6 +6885,11 @@ class NVUniversalGemmBuffer(TemplateBuffer):
                 inp = inp.data
             input_nodes.append(inp)
 
+        output_scale_node = None
+        if self.output_scale_node is not None:
+            output_scale_node = input_nodes[-1]
+            input_nodes = input_nodes[:-1]
+
         # For a baked addmm bias, the bias is the last input and is consumed by
         # the epilogue, not as a GEMM operand.
         bias_node = None
@@ -6786,12 +6915,22 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             local_reduce=local_reduce,
             swap_ab=self.swap_ab,
             bias_node=bias_node,
+            output_scale_node=output_scale_node,
         )
 
         def render():
             return render_kernel.render()
 
         return render_kernel, render
+
+    def gemm_inputs(self) -> Sequence[IRNode]:
+        inputs = cast(Sequence[IRNode], self.inputs)
+        num_auxiliary_inputs = int(self.bias_node is not None) + int(
+            self.output_scale_node is not None
+        )
+        if num_auxiliary_inputs:
+            return inputs[:-num_auxiliary_inputs]
+        return inputs
 
 
 def is_node_sequence(
@@ -6995,6 +7134,14 @@ class ConcatKernel(NopKernel):
             inputs=[],
         )
         kernel = StorageBox(concat_kernel)
+        # An input computed straight into the concat storage would leak any
+        # in-place mutation of that input into the concat result. Conservative
+        # on purpose: these are the inputs of the node being lowered (for
+        # aten.cat, the cat's own), and a mutation anywhere in the graph, even
+        # before the cat, turns the aliasing off for all of them.
+        nodes = V.graph.current_node.all_input_nodes
+        mutated = V.graph.mutated_storages
+        allow_alias = not any(get_node_storage(n) in mutated for n in nodes)
         op_names = []
         for i, inp in enumerate(inputs):
             if not isinstance(inp, (BaseView, MutableBox)):
@@ -7004,6 +7151,7 @@ class ConcatKernel(NopKernel):
                 SliceView.create(
                     kernel, dim, offsets_start[i], offsets_end[i], clamp=False
                 ),
+                allow_alias=allow_alias,
             )
             if not isinstance(input_buffer, Buffer):
                 raise AssertionError(type(input_buffer))
@@ -7015,13 +7163,18 @@ class ConcatKernel(NopKernel):
                 input_unwrapped = inp.data.unwrap_view()
             else:
                 input_unwrapped = inp.data
-
             if (
                 isinstance(input_unwrapped, StorageBox)
                 and input_unwrapped.is_input_buffer()
                 and (dev := inp.get_device()) is not None
                 and is_gpu(dev.type)
-                and not is_dynamic(input_buffer)
+                and (
+                    not is_dynamic(input_buffer)
+                    or (
+                        dev.type != "mtia"
+                        and config.combo_kernel_foreach_dynamic_shapes
+                    )
+                )
             ):
                 op_names.append(input_buffer.get_operation_name())
 
@@ -7078,7 +7231,7 @@ class ConcatKernel(NopKernel):
         return NopKernel.get_free_symbol_uses(self, unbacked_only)
 
     @classmethod
-    def realize_into(cls, src: IRNode, dst: IRNode) -> IRNode:
+    def realize_into(cls, src: IRNode, dst: IRNode, allow_alias: bool = True) -> IRNode:
         # Attempt to turn this into a ReinterpretView rather than assert.
         # This has concessions around layout, as as_storage_and_layout
         # can cause us to go from flexible to fixed layout.
@@ -7090,9 +7243,9 @@ class ConcatKernel(NopKernel):
             raise AssertionError(type(dst))
         if isinstance(src, TensorBox):
             # unwrap a TensorBox
-            return cls.realize_into(src.data, dst)
+            return cls.realize_into(src.data, dst, allow_alias)
 
-        if isinstance(src, StorageBox):
+        if isinstance(src, StorageBox) and allow_alias:
             src.realize()
             # ExternKernelAlloc has specific requirements for output layout, should create a copy
             if not hasattr(src.data, "layout"):
@@ -9530,6 +9683,19 @@ class ExternKernelNode:
     node: export_schema.Node
 
 
+# The _quantized ops with a hand-written C shim (see shim.h). Other _quantized
+# ops, e.g. wrapped_quantized_linear left undecomposed in lite mode, use the
+# proxy executor.
+_QUANTIZED_OPS_WITH_C_SHIM = OrderedSet(
+    [
+        "_quantized._wrapped_linear_prepack.default",
+        "_quantized._wrapped_quantized_linear_prepacked.default",
+        "_quantized.wrapped_fbgemm_linear_fp16_weight.default",
+        "_quantized.wrapped_fbgemm_pack_gemm_matrix_fp16.default",
+    ]
+)
+
+
 class FallbackKernel(ExternKernelAlloc):
     """
     A class that represents a fallback kernel for handling operators that are not
@@ -9573,8 +9739,6 @@ class FallbackKernel(ExternKernelAlloc):
 
         # args that are aliased
         self.alias_names: list[str] = []
-        # args that are mutated AND returned from the op
-        self.mutation_names: list[str] = []
 
         if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             # We assume here that HOPs with FallbackKernel are functional.
@@ -9604,10 +9768,16 @@ class FallbackKernel(ExternKernelAlloc):
         # AOTAutograd functionalized them away); the only way for an in-place
         # op to show up here is if a lowering or pass introduced it.
         if torch._library.utils.mutates_and_returns_first_arg(self.op_overload):
-            self.mutation_names.append(tensor_args[0].get_name())
-            # Record aliasing relationship so memory planning doesn't wrongly
-            # reuse its storage.
-            self.alias_names.append(tensor_args[0].get_name())
+            # The returned tensor aliases arg0; it is not a rename of it.
+            # Track the write separately via a MutationOutput.
+            arg = tensor_args[0]
+            mutation_output = MutationOutput(
+                NoneLayout(device=arg.get_device()), arg, self
+            )
+            self.mutation_outputs.append(mutation_output)
+            # Include the sibling mutation version so compute_dependencies merges
+            # its reader list with those of arg0 and the returned alias.
+            self.alias_names.extend((arg.get_name(), mutation_output.get_name()))
             return
 
         def has_functionalize_impl(op: torch._ops.OpOverload) -> bool:
@@ -9816,11 +9986,6 @@ class FallbackKernel(ExternKernelAlloc):
         else:
             return self.alias_names
 
-    def get_mutation_names(self) -> Sequence[str]:
-        if len(self.mutation_names) > 1:
-            raise AssertionError("Expected len(self.mutation_names) <= 1")
-        return self.mutation_names
-
     def export_extern_kernel_node(self):  # type: ignore[no-untyped-def]
         """
         ProxyExecutor Design Note
@@ -9988,6 +10153,9 @@ class FallbackKernel(ExternKernelAlloc):
             # Internal Quantized Fallback Ops
             if not isinstance(kernel, torch._ops.OpOverload):
                 raise AssertionError(type(kernel))
+            self.use_runtime_dispatch = (
+                V.graph.cpp_wrapper and str(kernel) not in _QUANTIZED_OPS_WITH_C_SHIM
+            )
         elif V.graph.cpp_wrapper:
             # For non-aten OpOverload, i.e. custom ops
             # If the op is in custom_ops_to_c_shims, generate direct function call
@@ -10118,7 +10286,7 @@ class FallbackKernel(ExternKernelAlloc):
 
             return str(kernel) not in inductor_fallback_ops
         if kernel.namespace == "_quantized":
-            return False
+            return str(kernel) not in _QUANTIZED_OPS_WITH_C_SHIM
         return kernel not in config.aot_inductor.custom_ops_to_c_shims
 
     @staticmethod
@@ -10254,13 +10422,23 @@ class FallbackKernel(ExternKernelAlloc):
 
         def maybe_wrap(value: Any, arg_info: torch._C.Argument) -> Any:
             # bool is a subclass of int; SymInt/SymFloat/SymBool are not int/float/complex.
-            if not isinstance(value, (int, float, complex)):
+            if not isinstance(value, (int, float, complex, sympy.Expr)):
                 return value
             if not is_tensor_slot(arg_info):
                 return value
             alias = arg_info.alias_info
             if alias is not None and alias.is_write:
                 return value
+            if isinstance(value, sympy.Expr):
+                # A symbolic scalar is only known at runtime, so build the 0-d tensor
+                # at runtime; the proxy executor passes a SymInt in a Scalar slot.
+                dtype = scalar_dtype(0 if value.is_integer else 0.0)
+                return pytree.tree_map(
+                    lambda x: x.wrap_for_lowering() if isinstance(x, IRNode) else x,
+                    cls.create(
+                        aten.scalar_tensor.default, value, dtype=dtype, device=device
+                    ),
+                )
             with torch.utils._python_dispatch._disable_current_modes():
                 const = torch.tensor(value, dtype=scalar_dtype(value), device=device)
             materialized.append(True)
