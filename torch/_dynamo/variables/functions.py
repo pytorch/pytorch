@@ -3849,9 +3849,31 @@ class PolyfilledFunctionVariable(VariableTracker):
     def tp_richcompare_impl(
         self, tx: "InstructionTranslatorBase", other: "VariableTracker", op: str
     ) -> "VariableTracker":
-        from .object_protocol import python_constant_richcompare_impl
+        # wrapper_richcompare: method-wrapper equality is descriptor identity
+        # plus receiver identity. Ordering and non-wrapper operands return
+        # NotImplemented.
+        # https://github.com/python/cpython/blob/3.13/Objects/descrobject.c
+        if op not in ("__eq__", "__ne__") or not isinstance(
+            other, MethodWrapperVariable
+        ):
+            return ConstantVariable.create(NotImplemented)
 
-        return python_constant_richcompare_impl(self, tx, other, op)
+        equal = self.descriptor is other.descriptor
+        if equal:
+            from .object_protocol import vt_identity_compare
+
+            same_receiver = vt_identity_compare(self.obj, other.obj)
+            if same_receiver is None:
+                unimplemented(
+                    gb_type="method-wrapper comparison with undecidable receiver",
+                    context=f"{self} {op} {other}",
+                    explanation="Dynamo cannot determine whether the two "
+                    "method-wrapper objects have the same receiver.",
+                    hints=[*graph_break_hints.SUPPORTABLE],
+                )
+            equal = same_receiver.as_python_constant()
+
+        return ConstantVariable.create(equal if op == "__eq__" else not equal)
 
     def hash_impl(self, tx: "InstructionTranslatorBase") -> tuple[int, bool]:
         try:
@@ -4744,12 +4766,26 @@ class MethodWrapperVariable(VariableTracker):
     # python constant, which would break e.g. a list holding non-constant items.
     # Every entry in CPython's wrapper_getsets has a NULL setter.
     tp_getset = {
+        "__objclass__": GetSet(
+            lambda s, tx: VariableTracker.build(tx, s.descriptor.__objclass__),
+            readonly_setter,
+        ),
         "__name__": GetSet(
             lambda s, tx: ConstantVariable.create(s.descriptor.__name__),
             readonly_setter,
         ),
         "__qualname__": GetSet(
             lambda s, tx: ConstantVariable.create(s.descriptor.__qualname__),
+            readonly_setter,
+        ),
+        "__doc__": GetSet(
+            lambda s, tx: ConstantVariable.create(s.descriptor.__doc__),
+            readonly_setter,
+        ),
+        "__text_signature__": GetSet(
+            lambda s, tx: ConstantVariable.create(
+                getattr(s.descriptor, "__text_signature__", None)
+            ),
             readonly_setter,
         ),
     }

@@ -6182,6 +6182,34 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(fn())
 
+    def test_method_wrapper_reflection_and_identity(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            values = [x]
+            same = values.__add__
+            other = values.__mul__
+            return (
+                same == values.__add__,
+                same != values.__add__,
+                same == [].__add__,
+                same != other,
+                same.__name__,
+                same.__self__ is values,
+                same.__objclass__ is list,
+                same.__doc__ == list.__add__.__doc__,
+                same.__text_signature__ == list.__add__.__text_signature__,
+                x + 1,
+            )
+
+        result = fn(torch.tensor(2))
+        self.assertEqual(result[:4], (True, False, False, True))
+        self.assertEqual(result[4], "__add__")
+        self.assertTrue(result[5])
+        self.assertTrue(result[6])
+        self.assertTrue(result[7])
+        self.assertTrue(result[8])
+        self.assertEqual(result[9], torch.tensor(3))
+
     def test_method_vt_not_a_function_vt(self):
         """Methods must not subclass UserFunctionVariable (CPython parity).
 
