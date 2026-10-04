@@ -1328,8 +1328,6 @@ void addStorageDeleterFns(
 
 namespace {
 
-using PythonAllocatorCallbackState = c10::SafePyObject;
-
 thread_local bool python_allocator_alloc_callback_active = false;
 
 class PythonAllocatorCallbackGuard {
@@ -1348,7 +1346,7 @@ class PythonAllocatorCallbackGuard {
 };
 
 PyObject* getPythonAllocatorCallback(
-    const std::shared_ptr<PythonAllocatorCallbackState>& state,
+    const std::shared_ptr<c10::SafePyObject>& state,
     Py_ssize_t index) {
   auto* callbacks = state->ptr(getPyInterpreter());
   TORCH_INTERNAL_ASSERT(PyTuple_CheckExact(callbacks));
@@ -1356,7 +1354,7 @@ PyObject* getPythonAllocatorCallback(
 }
 
 void* callPythonAllocator(
-    const std::shared_ptr<PythonAllocatorCallbackState>& state,
+    const std::shared_ptr<c10::SafePyObject>& state,
     size_t size,
     int device,
     cudaStream_t stream) {
@@ -1383,7 +1381,7 @@ void* callPythonAllocator(
 }
 
 void callPythonDeallocator(
-    const std::shared_ptr<PythonAllocatorCallbackState>& state,
+    const std::shared_ptr<c10::SafePyObject>& state,
     void* ptr,
     size_t size,
     int device,
@@ -1540,7 +1538,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
             PyCallable_Check(free_fn.ptr()),
             "free_fn must be a Python callable");
         auto callbacks = py::make_tuple(alloc_fn, free_fn);
-        auto state = std::make_shared<PythonAllocatorCallbackState>(
+        auto state = std::make_shared<c10::SafePyObject>(
             callbacks.release().ptr(), getPyInterpreter());
         return torch::cuda::CUDAPluggableAllocator::createPythonAllocator(
             [state](size_t size, int device, cudaStream_t stream) {

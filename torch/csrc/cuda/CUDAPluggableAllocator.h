@@ -168,6 +168,7 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   std::mutex allocator_mutex_;
   // We do the bookkeeping here in order to simplify custom allocators
   std::unordered_map<void*, _AllocationMetadata> allocation_metadata_;
+
   bool initialized_ = false;
 };
 } // namespace torch::cuda::CUDAPluggableAllocator

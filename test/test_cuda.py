@@ -9989,6 +9989,7 @@ for args in ((a, b), (a, b, False)):
         from cuda.bindings import runtime
 
         free_calls = []
+        allocation_callback_active = False
 
         def cuda_alloc(size, device, stream):
             err, ptr = runtime.cudaMalloc(size)
@@ -9996,22 +9997,42 @@ for args in ((a, b), (a, b, False)):
                 return None
             return int(ptr)
 
-        def cuda_free(ptr, size, device, stream):
+        def reclaimable_free(ptr, size, device, stream):
+            self.assertTrue(allocation_callback_active)
             free_calls.append(ptr)
             (err,) = runtime.cudaFree(ptr)
             self.assertEqual(err, runtime.cudaError_t.cudaSuccess)
 
-        reclaimable_pool = torch.cuda.MemPool.from_callbacks(cuda_alloc, cuda_free)
+        def cuda_free(ptr, size, device, stream):
+            (err,) = runtime.cudaFree(ptr)
+            self.assertEqual(err, runtime.cudaError_t.cudaSuccess)
+
+        reclaimable_pool = torch.cuda.MemPool.from_callbacks(
+            cuda_alloc, reclaimable_free
+        )
         with torch.cuda.use_mem_pool(reclaimable_pool):
             reclaimable = torch.empty(1, dtype=torch.uint8, device="cuda")
-        del reclaimable, reclaimable_pool
+        # Destroying the pool marks it freeable, but its active tensor keeps
+        # the segment alive through MemPool::~MemPool's immediate emptyCache.
+        del reclaimable_pool
         gc.collect()
+        self.assertEqual(free_calls, [])
+
+        # The segment becomes reclaimable, but raw_delete does not run until a
+        # reclamation operation drains this dead pool.
+        del reclaimable
+        self.assertEqual(free_calls, [])
 
         def alloc_after_reclaiming(size, device, stream):
+            nonlocal allocation_callback_active
             # This drains reclaimable_pool while an allocation callback is
             # active on this thread. The free callback must still run.
-            torch.cuda.empty_cache()
-            return cuda_alloc(size, device, stream)
+            allocation_callback_active = True
+            try:
+                torch.cuda.empty_cache()
+                return cuda_alloc(size, device, stream)
+            finally:
+                allocation_callback_active = False
 
         allocating_pool = torch.cuda.MemPool.from_callbacks(
             alloc_after_reclaiming, cuda_free
