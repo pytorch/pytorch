@@ -3137,10 +3137,6 @@ class InstructionTranslatorBase(
                     # instruction translator. We use special exception for this.
                     self.stack.clear()
 
-                    # attach traceback to the exception and set it as current exception
-                    curr_exc = self.exn_vt_stack.get_raised_exception()
-                    self._attach_traceback_to_exception(curr_exc)
-
                     if type(self) is InstructionTranslator:
                         bubble_exception_to_interpreter(raised_exception)
                     raise raised_exception
