@@ -528,6 +528,13 @@ class BaseBuiltinVariable(VariableTracker):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        if (
+            name == "__init__"
+            and self.as_python_constant() is super
+            and args
+            and isinstance(args[0], variables.SuperVariable)
+        ):
+            return args[0].tp_init_impl(tx, args[1:], kwargs)
         if name == "__str__" and len(args) == 1 and not kwargs:
             arg = args[0]
             if self.as_python_constant() is object:
