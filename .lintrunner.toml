@@ -458,9 +458,7 @@ exclude_patterns=[
     '**/*.ps1',
     '**/*.ptl',
     'fb/**',
-    # Directory paths, not files: the .claude/skills symlink, and .agents/skills
-    # when a diff replaces that path's earlier symlink. Files are linted below them.
-    '.claude/skills',
+    # An earlier PR revision used a directory symlink here; lint the files below it.
     '.agents/skills',
     '**/fb/**',
     'tools/clang_format_hash/**',
@@ -825,9 +823,7 @@ exclude_patterns = [
     '**/gradlew',
     'fb/**',
     '**/fb/**',
-    # Directory paths, not files: the .claude/skills symlink, and .agents/skills
-    # when a diff replaces that path's earlier symlink. Files are linted below them.
-    '.claude/skills',
+    # An earlier PR revision used a directory symlink here; lint the files below it.
     '.agents/skills',
 ]
 command = [
