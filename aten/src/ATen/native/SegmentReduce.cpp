@@ -51,7 +51,7 @@ void _segment_reduce_lengths_cpu_kernel1(
   auto output_size_axis = output.size(axis);
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, data.scalar_type(), "_segment_reduce_cpu", [&]() {
-        auto* output_data = output.data_ptr<scalar_t>();
+        auto* output_data = output.mutable_data_ptr<scalar_t>();
         const auto* values_data = data.const_data_ptr<scalar_t>();
         for (const auto outer_idx : c10::irange(outer_offset)) {
           int64_t segment_start, segment_length;
