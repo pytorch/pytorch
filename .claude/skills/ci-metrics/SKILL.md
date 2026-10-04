@@ -5,7 +5,7 @@ description: Query PyTorch CI, GitHub Actions, HUD, Grafana, and infrastructure 
 
 # PyTorch CI Metrics
 
-PyTorch CI and infrastructure metrics are exposed through Grafana. Use [.agents/skills/ci-metrics/gcx-wrapper.sh](gcx-wrapper.sh) for all Grafana access; it configures the PyTorch Grafana server, context, and authentication. Only users with write permission to the repo have access to Grafana. The authentication only provides read only access.
+PyTorch CI and infrastructure metrics are exposed through Grafana. Use [.claude/skills/ci-metrics/gcx-wrapper.sh](gcx-wrapper.sh) for all Grafana access; it configures the PyTorch Grafana server, context, and authentication. Only users with write permission to the repo have access to Grafana. The authentication only provides read only access.
 
 ## Requirements
 
@@ -20,7 +20,7 @@ On first use the wrapper downloads a pinned, checksum-verified `gcx` binary into
 Get the list of datasources available:
 
 ```
-.agents/skills/ci-metrics/gcx-wrapper.sh datasources list
+.claude/skills/ci-metrics/gcx-wrapper.sh datasources list
 ```
 
 The data contains metrics for many repos owned by the PyTorch repo. When possible, restrict queries to just the `pytorch/pytorch` repository.
@@ -30,7 +30,7 @@ The data contains metrics for many repos owned by the PyTorch repo. When possibl
 CI and test run data are stored in `grafana-clickhouse-datasource`. List all the available tables:
 
 ```
-.agents/skills/ci-metrics/gcx-wrapper.sh datasources clickhouse list-tables
+.claude/skills/ci-metrics/gcx-wrapper.sh datasources clickhouse list-tables
 ```
 
 Important dataset:
@@ -49,7 +49,7 @@ To get additional guidance on common queries, clone https://github.com/pytorch/t
 
 Within the pytorch/pytorch repo on main, list the top most failing workflow jobs in the last 2 weeks:
 ```
-.agents/skills/ci-metrics/gcx-wrapper.sh datasources clickhouse query "
+.claude/skills/ci-metrics/gcx-wrapper.sh datasources clickhouse query "
   SELECT name, count(DISTINCT id) AS failures
   FROM default.workflow_job
   WHERE conclusion = 'failure'
@@ -61,7 +61,7 @@ Within the pytorch/pytorch repo on main, list the top most failing workflow jobs
 
 For a test file, how many times was it run in the last week? How many times did it pass or fail?
 ```
-.agents/skills/ci-metrics/gcx-wrapper.sh datasources clickhouse query "
+.claude/skills/ci-metrics/gcx-wrapper.sh datasources clickhouse query "
   SELECT
     file,
     classname,
@@ -87,10 +87,10 @@ CI infrastructure metrics are stored in `grafanacloud-pytorchci-prom`. To get a 
 
 Which runner types have the deepest queue right now (jobs assigned but not yet running)?
 ```
-.agents/skills/ci-metrics/gcx-wrapper.sh datasources prometheus query -d grafanacloud-prom 'topk(10, clamp_min(sum by (name) (gha_assigned_jobs) - sum by (name) (gha_running_jobs), 0))'
+.claude/skills/ci-metrics/gcx-wrapper.sh datasources prometheus query -d grafanacloud-prom 'topk(10, clamp_min(sum by (name) (gha_assigned_jobs) - sum by (name) (gha_running_jobs), 0))'
 ```
 
 How many jobs were running per cluster over the last 6 hours, sampled every 30 minutes? Use `--since`/`--step` (or `--from`/`--to`) for a range query:
 ```
-.agents/skills/ci-metrics/gcx-wrapper.sh datasources prometheus query -d grafanacloud-prom 'sum by (cluster) (gha_running_jobs)' --since 6h --step 30m
+.claude/skills/ci-metrics/gcx-wrapper.sh datasources prometheus query -d grafanacloud-prom 'sum by (cluster) (gha_running_jobs)' --since 6h --step 30m
 ```
