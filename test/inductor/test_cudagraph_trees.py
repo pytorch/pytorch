@@ -7075,6 +7075,39 @@ if HAS_CUDA_AND_TRITON:
             with self.assertRaises(RuntimeError):
                 f(torch.tensor(1, device="cuda"))
 
+        @parametrize("cudagraph_or_error", (False, True))
+        @config.patch(implicit_fallbacks=True, graph_partition=True)
+        def test_cudagraph_empty_partition(self, cudagraph_or_error):
+            @torch.library.custom_op(
+                "test_cudagraph_empty_partition::unsafe_mul",
+                mutates_args=(),
+                tags=(torch._C.Tag.cudagraph_unsafe,),
+            )
+            def unsafe_mul(x: torch.Tensor) -> torch.Tensor:
+                return x * 2.0
+
+            @unsafe_mul.register_fake
+            def _(x):
+                return torch.empty_like(x)
+
+            def f(x):
+                return unsafe_mul(x)
+
+            x = torch.randn(4, device="cuda")
+            skips_before = counters["inductor"]["cudagraph_skips"]
+            with config.patch("triton.cudagraph_or_error", cudagraph_or_error):
+                compiled_fn = torch.compile(f, mode="reduce-overhead")
+                if cudagraph_or_error:
+                    with self.assertRaisesRegex(
+                        RuntimeError,
+                        r"skipping cudagraphs as len\(compiled_graph\.partition_maps\) == 0",
+                    ):
+                        compiled_fn(x)
+                else:
+                    self.assertEqual(compiled_fn(x), f(x))
+
+            self.assertEqual(counters["inductor"]["cudagraph_skips"], skips_before + 1)
+
         @config.patch(implicit_fallbacks=True)
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_input_layout_symints(self):
