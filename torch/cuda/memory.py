@@ -1422,7 +1422,6 @@ class MemPool(_MemPool):
         r"""Create a MemPool backed by Python allocation callbacks.
 
         ``alloc_fn(size, device, stream)`` must return an integer device pointer.
-        Returning ``None`` or zero reports an ordinary allocation failure.
         Return ``None`` or zero for out-of-memory so the caching allocator can
         run its normal release-and-retry path and OOM observers. Exceptions,
         including ``MemoryError``, are treated as non-OOM callback failures and
