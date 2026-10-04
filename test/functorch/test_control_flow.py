@@ -1,7 +1,6 @@
 # Owner(s): ["module: functorch"]
 import contextlib
 import functools
-import importlib
 import unittest
 import unittest.mock
 
@@ -4996,32 +4995,25 @@ class TestControlFlowDevice(_TestControlFlowBase):
 
     @skipCUDAIf(not SM70OrLater, "triton")
     def test_scan_parallel_backward_chunked_additional_inputs_grad(self, device):
-        # With a 1-element budget and at most 4 chunks, the additional_inputs gradient
-        # of a 10-step scan is reduced in chunks of ceil(10 / 4) = 3, i.e. 3 + 3 + 3 + 1,
-        # which exercises the accumulation, the concatenation of grad_xs and the ragged
-        # final chunk.
-        scan_module = importlib.import_module("torch._higher_order_ops.scan")
-        W = torch.randn(4, 4, device=device, requires_grad=True)
-        b = torch.randn(4, device=device, requires_grad=True)
-        init = torch.randn(4, device=device, requires_grad=True)
-        xs = torch.randn(10, 4, device=device, requires_grad=True)
-        cotangents = (torch.randn_like(init), torch.randn_like(xs))
+        # Each chunk's [steps, *addi] temporary is capped at the Jacobian buffer size:
+        # a 2-element carry over 10 steps gives 10 * 2 * 2 = 40 elements, and W, a hold
+        # 12, so the reduction runs in chunks of 40 // 12 = 3 steps (3 + 3 + 3 + 1),
+        # exercising the accumulation, the grad_xs concatenation and the ragged chunk.
+        W = torch.randn(5, 2, device=device, requires_grad=True)
+        a = torch.randn(2, device=device, requires_grad=True)
+        init = torch.randn(2, device=device, requires_grad=True)
+        xs = torch.randn(10, 5, device=device, requires_grad=True)
+        cotangents = (torch.randn_like(init), torch.randn(10, 2, device=device))
 
         def combine_fn(carry, x):
-            next_carry = torch.tanh(carry @ W + x + b)
+            next_carry = torch.tanh(carry * a + x @ W)
             return next_carry, next_carry.clone()
 
         def grads(parallel_backward):
             carry, ys = scan(combine_fn, init, xs, parallel_backward=parallel_backward)
-            return torch.autograd.grad((carry, ys), [init, xs, W, b], cotangents)
+            return torch.autograd.grad((carry, ys), [init, xs, W, a], cotangents)
 
-        expected = grads(False)
-        self.assertEqual(grads(True), expected)
-        with (
-            unittest.mock.patch.object(scan_module, "_ADDI_GRAD_CHUNK_BUDGET_ELEMS", 1),
-            unittest.mock.patch.object(scan_module, "_ADDI_GRAD_MAX_CHUNKS", 4),
-        ):
-            self.assertEqual(grads(True), expected)
+        self.assertEqual(grads(True), grads(False))
 
     @skipIfTorchDynamo(
         "the sequential reference backward fails scan's init/carry stride check "

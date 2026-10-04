@@ -54,16 +54,6 @@ from torch.utils._python_dispatch import _get_current_dispatch_mode
 logger: logging.Logger = logging.getLogger(__name__)
 aten = torch._ops.ops.aten
 
-# bw_gm reduces additional-input gradients over the step's batch dim, so vmapping
-# it over time yields a per-step [scan_length, *addi_shape] buffer that still has
-# to be summed. Time is chunked to keep that temporary bounded. The budget decides
-# whether chunking is worth it at all (below it the buffer is already small), and
-# the chunk cap keeps the reduction parallel: n_chunks grows with both scan_length
-# and addi size, and past a few dozen chunks the extra passes cost far more time
-# than they save memory (measured 10x slower for ~4MB on a 1024-step scan).
-_ADDI_GRAD_CHUNK_BUDGET_ELEMS = 2**22
-_ADDI_GRAD_MAX_CHUNKS = 16
-
 
 def wrap_combine_fn_flat(
     *args, combine_fn, spec_init, spec_xs, num_init_leaves, num_inp_leaves
@@ -1183,8 +1173,10 @@ class ScanAutogradImpl:
         # grad_xs and grad_additional_inputs for every step follow from one more
         # batched evaluation of the same (correct, no_grad-respecting) bw_gm, now that
         # every step's incoming carry gradient is known. bw_gm already reduces
-        # additional-input grads over the batch dim but not over time, so the time
-        # reduction is accumulated chunk by chunk rather than materialized in full.
+        # additional-input grads over the batch dim but not over time, so vmapping it
+        # over time yields a [steps, *addi] temporary that is summed chunk by chunk.
+        # Each chunk's temporary is capped at the size of the Jacobian buffers, which
+        # are freed first, so the reduction never raises the peak set by the scan.
         n_addi = sum(additional_inputs_tensor_masks)
         step_carry_leaves = unflatten_carry(step_carry_out_grads)
         addi_numel = sum(
@@ -1193,15 +1185,11 @@ class ScanAutogradImpl:
                 self.additional_inputs, additional_inputs_tensor_masks
             )
         )
+        jacobian_numel = a_prefix.numel()
+        del a_prefix, b_prefix, columns_out, comp_a, comp_b
         chunk = scan_length
         if addi_numel > 0:
-            chunk = min(
-                scan_length,
-                max(
-                    -(-scan_length // _ADDI_GRAD_MAX_CHUNKS),
-                    _ADDI_GRAD_CHUNK_BUDGET_ELEMS // addi_numel,
-                ),
-            )
+            chunk = max(1, min(scan_length, jacobian_numel // addi_numel))
 
         grad_xs_parts: list[list[torch.Tensor]] = []
         grad_additional_inputs: list[torch.Tensor | None] = []
