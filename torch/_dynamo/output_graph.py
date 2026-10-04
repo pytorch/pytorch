@@ -922,6 +922,9 @@ class OutputGraph(OutputGraphCommon):
         # recording!
         self.source_to_user_stacks: dict[Source, list[traceback.StackSummary]] = {}
 
+        # Formatted text of user frames for node stack traces; see format_user_stack.
+        self._formatted_frame_cache: dict[tuple[Any, ...], str | None] = {}
+
         self._current_tx: list[InstructionTranslatorBase] = []
         self.cleanups: list[CleanupHook] = []
         self.should_exit = False
@@ -1330,6 +1333,30 @@ class OutputGraph(OutputGraphCommon):
     def is_root_tracer(self) -> bool:
         # Helper to tell if we are inside the higher order operator tracing.
         return len(self.tracers) == 1
+
+    def format_user_stack(self, frames: list[traceback.FrameSummary]) -> str:
+        """Equivalent to "".join(StackSummary.from_list(frames).format()).
+
+        Every traced node gets a stack trace, and nodes share most of their
+        frames (e.g. all ops inside a repeated layer). Formatting a frame with
+        carets re-parses its source line, so memoize the per-frame text.
+        """
+        stack = traceback.StackSummary.from_list(frames)
+        # format() collapses runs of identical consecutive frames (recursion),
+        # which per-frame memoization cannot reproduce; that case is rare.
+        if any(
+            (a.filename, a.lineno, a.name) == (b.filename, b.lineno, b.name)
+            for a, b in itertools.pairwise(frames)
+        ):
+            return "".join(stack.format())
+        parts = []
+        for f in frames:
+            key = (f.filename, f.lineno, f.end_lineno, f.colno, f.end_colno, f.name)
+            if key not in self._formatted_frame_cache:
+                self._formatted_frame_cache[key] = stack.format_frame_summary(f)
+            if (text := self._formatted_frame_cache[key]) is not None:
+                parts.append(text)
+        return "".join(parts)
 
     def check_input_mutation_on_current_stream(
         self, tx: "InstructionTranslatorBase"
@@ -4254,9 +4281,9 @@ class SubgraphTracer(fx.Tracer):
             # Reverse the frame_summaries, such that the innermost frame is at the last
             filtered_frame_summaries.reverse()
 
-            # official from_list stub doesn't have new-style type
-            msgs = traceback.StackSummary.from_list(filtered_frame_summaries).format()
-            rv.node.stack_trace = "".join(msgs)
+            rv.node.stack_trace = self.output_graph.format_user_stack(
+                filtered_frame_summaries
+            )
 
         if (
             torch._dynamo.config.use_graph_deduplication
