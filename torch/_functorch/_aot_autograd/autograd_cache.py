@@ -320,6 +320,40 @@ def check_node_safe(node: Node) -> None:
 
     # I'd love to use a match statement here, but it wasn't introduced until py3.10
     if node.op == "call_function":
+        if node.target is torch.nn.attention._backend_from_string:
+            if (
+                not node.kwargs
+                and len(node.args) == 1
+                and isinstance(node.args[0], str)
+                and node.args[0] in torch.nn.attention.SDPBackend.__members__
+            ):
+                return
+            raise BypassAOTAutogradCache("SDPA backend name must be constant")
+        if node.target is torch.nn.attention._sdpa_kernel:
+            normalized = torch.fx.operator_schemas.normalize_function(
+                node.target, node.args, node.kwargs, normalize_to_only_use_kwargs=True
+            )
+            if normalized is not None:
+                _, kwargs = normalized
+                backends = kwargs["backends"]
+                if (
+                    kwargs["set_priority"] is False
+                    and isinstance(backends, (list, tuple))
+                    and all(
+                        isinstance(backend, Node)
+                        and backend.op == "call_function"
+                        and backend.target is torch.nn.attention._backend_from_string
+                        and not backend.kwargs
+                        and len(backend.args) == 1
+                        and isinstance(backend.args[0], str)
+                        and backend.args[0] in torch.nn.attention.SDPBackend.__members__
+                        for backend in backends
+                    )
+                ):
+                    return
+            raise BypassAOTAutogradCache(
+                "SDPA context requires constant backends and set_priority=False"
+            )
         if node.meta and node.meta.get("is_wrapped", False):
             # This is fx.wrap function
             # By default we BypassAOTAutogradCache for unknown functions,
@@ -642,6 +676,30 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             for device_type in torch._C._autocast_supported_devices()
         }
         self.deterministic_algorithms = torch.are_deterministic_algorithms_enabled()
+        # SDPA backend selection runs during AOT dispatch, so by the time inductor
+        # hashes the graph the chosen aten op is already node content. The dynamo
+        # graph keyed here still holds the composite scaled_dot_product_attention,
+        # so this is the layer that has to record the selection state.
+        #
+        # The priority order is not pure user state: the first eager SDPA dispatch
+        # in the process may rewrite it once via setSDPPriorityOrder(), to cuDNN
+        # first on CUDA (sm90/sm100/sm103, cuDNN > 9.15.0, and env var
+        # TORCH_CUDNN_SDPA_DEPRIORITIZED unset) and to a different order on XPU
+        # with no version or hardware gate. An identical config can therefore land
+        # in two entries depending on whether eager SDPA ran before the compile.
+        # Hit rate only, not correctness.
+        self.sdpa_settings = (
+            torch.backends.cuda.flash_sdp_enabled(),
+            torch.backends.cuda.mem_efficient_sdp_enabled(),
+            torch.backends.cuda.math_sdp_enabled(),
+            torch.backends.cuda.cudnn_sdp_enabled(),
+            torch._C._get_overrideable_sdp_enabled(),
+            torch._C._get_fa3_sdp_enabled(),
+            torch._C._get_fa4_sdp_enabled(),
+            torch.backends.cuda.preferred_rocm_fa_library(),
+            torch.backends.cuda.fp16_bf16_reduction_math_sdp_allowed(),
+            tuple(torch._C._get_sdp_priority_order()),
+        )
         self.autograd_config = config.save_config()
         if has_triton_package():
             self.triton_kernel_source_codes = self.get_triton_source_codes_from_gm(gm)
