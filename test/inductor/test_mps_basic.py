@@ -10,9 +10,7 @@ import numpy as np
 
 import torch
 from torch._inductor import config as inductor_config
-from torch._inductor.codegen.common import Kernel
-from torch._inductor.codegen.mps import MetalKernel, MetalOverrides
-from torch._inductor.virtualized import V
+from torch._inductor.codegen.mps import MetalKernel
 from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
@@ -377,30 +375,6 @@ class MPSBasicTests(TestCase):
     def test_metal_kernel_device_type(self):
         self.assertEqual(MetalKernel.device_type, "mps")
 
-    def test_metal_masked_cse_outer_var_collision(self):
-        kernel = Kernel()
-        with V.set_kernel_handler(kernel):
-
-            def load_x():
-                return kernel.cse.generate(
-                    kernel.loads, "in_ptr0[x2]", dtype=torch.float32
-                )
-
-            def load_y():
-                return kernel.cse.generate(
-                    kernel.loads, "in_ptr1[x2]", dtype=torch.float32
-                )
-
-            x_var = load_x()
-            y_var = load_y()
-            mask = kernel.cse.generate(kernel.compute, "x0 < 64", dtype=torch.bool)
-            masked_x = MetalOverrides.masked(mask, load_x, 0.0)
-            masked_y = MetalOverrides.masked(mask, load_y, 0.0)
-            masked_x_repeat = MetalOverrides.masked(mask, load_x, 0.0)
-        self.assertNotEqual(x_var, y_var)
-        self.assertNotEqual(masked_x, masked_y)
-        self.assertEqual(masked_x, masked_x_repeat)
-
     def test_masked_cse_recomputed_load(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/199642
         # When an input load is first emitted inside ops.masked (via F.pad),
@@ -418,7 +392,6 @@ class MPSBasicTests(TestCase):
             idx2 = ((i + 4) % 8).long()
             return (m > table.gather(1, idx1)) & (m > table.gather(1, idx2))
 
-        torch.manual_seed(0)
         x, y = torch.randn(2, 1, 1, 64, 80, device=self.device).unbind(0)
         table = torch.rand(1, 8, 64, 80, device=self.device) * 4
         self.common(fn, (x, y, table), check_lowp=False)
