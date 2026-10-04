@@ -1,10 +1,12 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import sys
+import unittest
 from collections import OrderedDict
 
 import torch
 from torch import distributed as dist
+from torch._utils import _get_device_module
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
@@ -24,10 +26,15 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_device_type import (
+    Capability,
+    instantiate_device_type_tests,
+    requires_capabilities,
+)
+from torch.testing._internal.common_distributed import requires_world_size
 from torch.testing._internal.common_fsdp import FSDPTestContinuous
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
+    HardwareClassification,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
@@ -47,8 +54,6 @@ if TEST_WITH_DEV_DBG_ASAN:
         file=sys.stderr,
     )
     sys.exit(0)
-
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 class SimpleModel(torch.nn.Module):
@@ -84,7 +89,45 @@ def distribute_rmsnorm(module, device_mesh):
     )
 
 
-class TestTPFSDPIntegration(FSDPTestContinuous):
+class TPFSDPIntegrationTestBase(FSDPTestContinuous):
+    """Device-agnostic base class for TP + FSDP integration tests.
+
+    The intermediate class holds ``backend_str`` so device-specific generated
+    classes inherit the method instance rather than port it (a ported classmethod
+    cannot see the variant's ``device_type``).
+    """
+
+    hw_classification = HardwareClassification.ACCELERATOR
+
+    @classmethod
+    def _resolved_device_type(cls) -> str:
+        dt = cls.device_type
+        if dt == "privateuse1":
+            dt = torch._C._get_privateuse1_backend_name()
+        return dt
+
+    @classmethod
+    def backend_str(cls) -> str:
+        try:
+            return dist.get_default_backend_for_device(cls._resolved_device_type())
+        except ValueError as e:
+            # Devices without a registered default backend (e.g. ``hpu`` unless
+            # the vendor extension registers ``hccl`` via ``register_backend``).
+            # There is no correct global fallback: ``common_fsdp``'s
+            # ``DISTRIBUTED_BACKEND`` is computed from the host's TEST_* flags at
+            # import time, so it can hand e.g. ``nccl`` to an HPU variant on a
+            # mixed host. Skip the variant instead of running collectives on the
+            # wrong transport.
+            raise unittest.SkipTest(
+                f"no default distributed backend registered for device {cls.device_type}: {e}"
+            ) from e
+
+    @property
+    def world_size(self) -> int:
+        return _get_device_module(self._resolved_device_type()).device_count()
+
+
+class TestTPFSDPIntegration(TPFSDPIntegrationTestBase):
     def _get_params_and_sharding_info(
         self,
         model: SimpleModel,
@@ -121,7 +164,7 @@ class TestTPFSDPIntegration(FSDPTestContinuous):
         """
         # 2-D mesh is [dp, tp]
         twod_mesh = DeviceMesh(
-            device_type=device_type,
+            device_type=self._resolved_device_type(),
             mesh=torch.arange(0, self.world_size).view(-1, tensor_parallel_size),
         )
 
@@ -231,8 +274,13 @@ class TestTPFSDPIntegration(FSDPTestContinuous):
                 ).reshape(-1)
         return torch.cat(all_grads_per_param).contiguous()
 
-    @skip_if_lt_x_gpu(4)
-    def test_fsdp_tp_integration(self):
+    @requires_world_size(4)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.dtensor,
+        Capability.distributed.fsdp,
+    )
+    def test_fsdp_tp_integration(self, device):
         self.run_subtests(
             {
                 "cpu_offload": [
@@ -274,7 +322,7 @@ class TestTPFSDPIntegration(FSDPTestContinuous):
         inp = torch.rand(*inp_size).to(self.rank)
         self.assertEqual(model(inp), tp_fsdp_model(inp))  # sanity check
 
-        mesh_1d = init_device_mesh(device_type, (self.world_size,))
+        mesh_1d = init_device_mesh(self._resolved_device_type(), (self.world_size,))
         fsdp_model = FSDP(
             model,
             cpu_offload=cpu_offload,
@@ -283,7 +331,7 @@ class TestTPFSDPIntegration(FSDPTestContinuous):
             use_orig_params=use_orig_params,
         )
         mesh_2d = init_device_mesh(
-            device_type,
+            self._resolved_device_type(),
             (self.world_size // tensor_parallel_size, tensor_parallel_size),
             mesh_dim_names=["dp", "tp"],
         )
@@ -360,13 +408,21 @@ class TestTPFSDPIntegration(FSDPTestContinuous):
         tp_fsdp_out = tp_fsdp_model(inp)
         self.assertEqual(fsdp_out, tp_fsdp_out)
 
-    @skip_if_lt_x_gpu(4)
-    def test_fsdp_tp_extension_grad(self):
+    @requires_world_size(4)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.dtensor,
+        Capability.distributed.fsdp,
+    )
+    def test_fsdp_tp_extension_grad(self, device):
         """
         Tests TP + FSDP extension with correct gradient (i.e. no ACT)
         """
+        device_type = self._resolved_device_type()
         mesh_2d = init_device_mesh(
-            device_type, (self.world_size // 2, 2), mesh_dim_names=["dp", "tp"]
+            device_type,
+            (self.world_size // 2, 2),
+            mesh_dim_names=["dp", "tp"],
         )
 
         class TestModel(torch.nn.Module):
@@ -415,10 +471,17 @@ class TestTPFSDPIntegration(FSDPTestContinuous):
         for grad in grads:
             self.assertFalse(grad.isnan().any().item())
 
-    @skip_if_lt_x_gpu(4)
-    def test_fsdp_tp_sync_module_state(self):
+    @requires_world_size(4)
+    @requires_capabilities(
+        Capability.distributed.backend,
+        Capability.distributed.dtensor,
+        Capability.distributed.fsdp,
+    )
+    def test_fsdp_tp_sync_module_state(self, device):
         mesh_2d = init_device_mesh(
-            device_type, (self.world_size // 2, 2), mesh_dim_names=["dp", "tp"]
+            self._resolved_device_type(),
+            (self.world_size // 2, 2),
+            mesh_dim_names=["dp", "tp"],
         )
         tp_mesh = mesh_2d["tp"]
         dp_mesh = mesh_2d["dp"]
@@ -477,7 +540,13 @@ class TestTPFSDPIntegration(FSDPTestContinuous):
             assert_local_shard_across_ranks(local_buf, dp_group, check_equal=True)
 
 
-instantiate_parametrized_tests(TestTPFSDPIntegration)
+instantiate_device_type_tests(
+    TestTPFSDPIntegration,
+    globals(),
+    except_for="cpu",
+    allow_xpu=True,
+)
+
 
 if __name__ == "__main__":
     run_tests()
