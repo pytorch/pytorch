@@ -34,6 +34,7 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
+    parametrize,
     run_tests,
     skipIfCrossRef,
     skipIfTorchDynamo,
@@ -1178,6 +1179,32 @@ instantiate_device_type_tests(TestDecomp, globals())
 
 
 class DecompOneOffTests(TestCase):
+    @parametrize("case", ("single", "negative_dim", "mixed_dtype", "empty"))
+    def test_stack_decomp(self, device, case):
+        decomp = get_decompositions([aten._stack.default])[aten._stack.default]
+        if case == "empty":
+            with self.assertRaisesRegex(AssertionError, "non-empty TensorList"):
+                decomp([], 0)
+            return
+
+        if case == "single":
+            tensors = [torch.tensor([1, 2], device=device)]
+            dim = 0
+        elif case == "negative_dim":
+            tensors = [
+                torch.tensor([1, 2], device=device),
+                torch.tensor([3, 4], device=device),
+            ]
+            dim = -1
+        else:
+            tensors = [
+                torch.tensor([1, 2], dtype=torch.int32, device=device),
+                torch.tensor([3.0, 4.0], dtype=torch.float32, device=device),
+            ]
+            dim = 0
+
+        self.assertEqual(decomp(tensors, dim), aten._stack.default(tensors, dim))
+
     @onlyNativeDeviceTypes
     @skipIfCrossRef
     def test_polar_decomposition_is_functional(self, device):
