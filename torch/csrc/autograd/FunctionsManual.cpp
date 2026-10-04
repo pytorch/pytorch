@@ -1134,6 +1134,189 @@ Tensor cumsum_backward(const Tensor& grad, int64_t dim) {
   return grad.flip(dim).cumsum(dim).flip(dim);
 }
 
+namespace {
+
+// Subgradient of an inclusive running max/min scan: the output is
+// non-decreasing (max) / non-increasing (min) along `dim`, so the gradient
+// flows only to the first element of each constant plateau of the scan
+// output. Computed with vectorized ops only (device agnostic):
+//   r(i)    = index of the end of the plateau containing i
+//   g_x[i]  = (P[r(i)] - P[i-1]) if i is a plateau head, else 0
+// where P is the inclusive cumulative sum of the upstream gradient.
+Tensor maxmin_scan_backward(const Tensor& grad, const Tensor& y, int64_t dim) {
+  dim = at::maybe_wrap_dim(dim, y.dim());
+  const int64_t N = y.sizes()[dim];
+  if (N <= 1) {
+    return grad;
+  }
+  // diff[i] == 1 marks the last index of a plateau (y[i] != y[i+1]).
+  auto y0 = y.narrow(dim, 0, N - 1);
+  auto y1 = y.narrow(dim, 1, N - 1);
+  auto diff = y0.ne(y1);
+  auto ones_tail =
+      at::ones_like(y.narrow(dim, 0, 1), y.options().dtype(at::kBool));
+  auto diff_padded = at::cat({diff, ones_tail}, dim);
+
+  std::vector<int64_t> pos_shape(y.dim(), 1);
+  pos_shape[dim] = N;
+  auto positions =
+      at::arange(N, y.options().dtype(at::kLong)).reshape(pos_shape);
+  // r_index[i] = index of the end of the plateau containing i, i.e. the next
+  // position at or after i whose y value differs from its successor. Computed
+  // as a suffix-minimum of the end-marker positions (sentinel N).
+  auto marker = at::where(diff_padded, positions, at::full_like(positions, N));
+  auto r_index =
+      at::flip(std::get<0>(at::cummin(at::flip(marker, {dim}), dim)), {dim});
+
+  auto P = at::cumsum(grad, dim);
+  auto P_prev = at::cat(
+      {at::zeros_like(P.narrow(dim, 0, 1)), P.narrow(dim, 0, N - 1)}, dim);
+  auto summed = P.gather(dim, r_index).sub(P_prev);
+
+  // A plateau head is the first index of a run of equal values.
+  auto head = at::cat(
+      {at::ones_like(y.narrow(dim, 0, 1), y.options().dtype(at::kBool)), diff},
+      dim);
+  return at::where(head, summed, at::zeros_like(summed));
+}
+
+} // namespace
+
+Tensor associative_scan_backward(
+    const Tensor& grad,
+    const Tensor& self,
+    const std::string& combine_mode,
+    int64_t dim,
+    const Tensor& result,
+    bool reverse) {
+  if (combine_mode == "add") {
+    // forward: y = reverse ? flip(cumsum(flip(x))) : cumsum(x)
+    // backward: grad_x = reverse ? cumsum(grad) : flip(cumsum(flip(grad)))
+    if (reverse) {
+      return at::cumsum(grad, dim);
+    }
+    return cumsum_backward(grad, dim);
+  }
+  if (combine_mode == "mul") {
+    Tensor g;
+    if (reverse) {
+      // y = flip(cumprod(flip(x))), so work in the flipped frame.
+      g = cumprod_backward(
+          grad.flip(dim), self.flip(dim), dim, result.flip(dim));
+      g = g.flip(dim);
+    } else {
+      g = cumprod_backward(grad, self, dim, result);
+    }
+    return g;
+  }
+  if (combine_mode == "max" || combine_mode == "min") {
+    if (reverse) {
+      auto g = maxmin_scan_backward(grad.flip(dim), result.flip(dim), dim);
+      return g.flip(dim);
+    }
+    return maxmin_scan_backward(grad, result, dim);
+  }
+  TORCH_CHECK(
+      false,
+      "associative_scan_backward: unsupported combine_mode ",
+      combine_mode);
+}
+
+namespace {
+
+// out[0] = fill, out[i] = t[i - 1]; a one-step shift towards higher indices.
+Tensor shift_right(const Tensor& t, int64_t dim, const Scalar& fill) {
+  const int64_t n = t.size(dim);
+  auto head = at::full(t.narrow(dim, 0, 1).sizes(), fill, t.options());
+  if (n <= 1) {
+    return head;
+  }
+  return at::cat({head, t.narrow(dim, 0, n - 1)}, dim);
+}
+
+// Reverse linear recurrence out[i] = coeff[i] * out[i + 1] + input[i], i.e. a
+// linear recurrence over the reversed dimension.
+Tensor reverse_linear_recurrence(
+    const Tensor& coeff,
+    const Tensor& input,
+    int64_t dim) {
+  std::vector<Tensor> xs{coeff, input};
+  return at::associative_scan(
+      xs, "linear_recurrence", dim, /*reverse=*/true)[1];
+}
+
+} // namespace
+
+std::vector<Tensor> associative_scan_tensor_list_backward(
+    const std::vector<Tensor>& grads,
+    const std::vector<Tensor>& xs,
+    int64_t dim,
+    bool reverse) {
+  TORCH_CHECK(
+      grads.size() == 2 && xs.size() == 2,
+      "associative_scan_tensor_list_backward expects 2 inputs and 2 output gradients");
+  Tensor grad_A = grads[0];
+  Tensor grad_H = grads[1];
+  Tensor a = xs[0];
+  Tensor b = xs[1];
+
+  dim = at::maybe_wrap_dim(dim, a.dim(), /*wrap_scalar=*/true);
+
+  // Forward is [flip -> scan -> flip] for reverse=True; work in the scan frame.
+  if (reverse) {
+    a = at::flip(a, {dim});
+    b = at::flip(b, {dim});
+    if (grad_A.defined()) {
+      grad_A = at::flip(grad_A, {dim});
+    }
+    if (grad_H.defined()) {
+      grad_H = at::flip(grad_H, {dim});
+    }
+  }
+  if (!grad_A.defined()) {
+    grad_A = at::zeros_like(a);
+  }
+  if (!grad_H.defined()) {
+    grad_H = at::zeros_like(b);
+  }
+
+  // A[0] = a[0], H[0] = b[0]: the scan is the identity for 0-d tensors and for
+  // a scan dimension of size <= 1 (the forward returns clones without
+  // flipping).
+  if (a.dim() == 0 || a.size(dim) <= 1) {
+    return {grad_A, grad_H};
+  }
+  const int64_t N = a.size(dim);
+
+  // A[i] = prod_{j <= i} a[j], H[i] = a[i] * H[i - 1] + b[i].
+  std::vector<Tensor> ab{a, b};
+  auto fwd =
+      at::associative_scan(ab, "linear_recurrence", dim, /*reverse=*/false);
+  const Tensor& A = fwd[0];
+  const Tensor& H = fwd[1];
+
+  // a_shift[i] = a[i + 1] (0 at the last index).
+  auto a_shift = at::cat(
+      {a.narrow(dim, 1, N - 1), at::zeros_like(a.narrow(dim, 0, 1))}, dim);
+
+  // G[i]  = grad_H[i] + a_shift[i] * G[i + 1]   (dL/db)
+  // GA[i] = grad_A[i] + a_shift[i] * GA[i + 1]
+  auto G = reverse_linear_recurrence(a_shift, grad_H, dim);
+  auto GA = reverse_linear_recurrence(a_shift, grad_A, dim);
+
+  // dL/da = GA * A[i - 1] + G * H[i - 1], with A[-1] = 1 and H[-1] = 0.
+  auto A_prev = shift_right(A, dim, /*fill=*/1);
+  auto H_prev = shift_right(H, dim, /*fill=*/0);
+  auto da = GA * A_prev + G * H_prev;
+  auto db = G;
+
+  if (reverse) {
+    da = at::flip(da, {dim});
+    db = at::flip(db, {dim});
+  }
+  return {da, db};
+}
+
 Tensor logsumexp_backward(
     Tensor grad,
     const Tensor& self,

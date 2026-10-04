@@ -15586,6 +15586,76 @@ def _get_device_name(idx):
     return f"{torch.accelerator.current_accelerator().type}:{idx}"
 
 
+class TestAssociativeScanAutograd(TestCase):
+    def _reverse_cumsum(self, g, dim):
+        return torch.flip(torch.cumsum(torch.flip(g, [dim]), dim), [dim])
+
+    @parametrize("reverse", [False, True])
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_associative_scan_add_backward(self, device, reverse, dtype):
+        x = torch.randn(8, 4, device=device, dtype=dtype, requires_grad=True)
+        out = torch.associative_scan(x, "add", 0, reverse=reverse)
+        grad = torch.randn_like(x)
+        out.backward(grad)
+        expected = torch.cumsum(grad, 0) if reverse else self._reverse_cumsum(grad, 0)
+        self.assertEqual(x.grad, expected)
+
+    @parametrize("reverse", [False, True])
+    @dtypes(torch.float32)
+    def test_associative_scan_gradcheck(self, device, reverse, dtype):
+        def make_fn(mode):
+            def fn(t):
+                return torch.associative_scan(t, mode, 0, reverse=reverse)
+
+            return fn
+
+        for mode in ["add", "mul", "max", "min"]:
+            x = torch.randn(5, 4, device=device, dtype=dtype, requires_grad=True)
+            self.assertTrue(
+                gradcheck(make_fn(mode), (x,), eps=1e-3, atol=1e-3, rtol=1e-3)
+            )
+
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    def test_associative_scan_dim_backward(self, device, dtype):
+        x = torch.randn(4, 6, 3, device=device, dtype=dtype, requires_grad=True)
+        for dim in range(x.ndim):
+            out = torch.associative_scan(x, "mul", dim)
+            out.sum().backward()
+            self.assertEqual(x.grad.shape, x.shape)
+            x.grad = None
+
+    @parametrize("reverse", [False, True])
+    @dtypes(torch.float64)
+    def test_associative_scan_linear_recurrence_gradcheck(self, device, reverse, dtype):
+        def fn(a, b):
+            return torch.associative_scan(
+                [a, b], "linear_recurrence", 0, reverse=reverse
+            )
+
+        a = (torch.rand(6, 4, device=device, dtype=dtype) * 0.5 + 0.5).requires_grad_()
+        b = torch.randn(6, 4, device=device, dtype=dtype, requires_grad=True)
+        # The TensorList backward evaluates the native op, which has no vmap
+        # batching rule yet, so batched-gradient checking is disabled.
+        self.assertTrue(
+            gradcheck(
+                fn, (a, b), eps=1e-6, atol=1e-5, rtol=1e-3, check_batched_grad=False
+            )
+        )
+        self.assertTrue(
+            gradgradcheck(
+                fn,
+                (a, b),
+                eps=1e-6,
+                atol=1e-5,
+                rtol=1e-3,
+                check_batched_grad=False,
+                # Compiled autograd does not yet propagate undefined grads
+                # through this custom double-backward.
+                check_undefined_grad=False,
+            )
+        )
+
+
 class _TestAutogradStreamSynchronizationBase(TestCase):
     def get_default_streams(self, num_devices=1):
         out = []
@@ -19168,6 +19238,7 @@ instantiate_device_type_tests(
     TestSelectiveActivationCheckpointCudaOnly, globals(), only_for="cuda"
 )
 instantiate_device_type_tests(TestInputGradBuffers, globals())
+instantiate_device_type_tests(TestAssociativeScanAutograd, globals())
 
 instantiate_parametrized_tests(TestAutograd)
 instantiate_parametrized_tests(TestNestedCheckpoint)
