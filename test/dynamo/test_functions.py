@@ -6182,6 +6182,46 @@ class GraphModule(torch.nn.Module):
 
         self.assertTrue(fn())
 
+    def test_bound_method_attribute_mutation_rejected(self):
+        class Counter:
+            def method(self, x):
+                return x + 1
+
+        def helper():
+            pass
+
+        obj = Counter()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            helper.known_attr = 7
+            set_raised = False
+            del_raised = False
+            try:
+                obj.method.pending_attr = 1
+            except AttributeError:
+                set_raised = True
+            try:
+                del obj.method.pending_attr
+            except AttributeError:
+                del_raised = True
+            return (
+                helper.known_attr,
+                set_raised,
+                del_raised,
+                hasattr(Counter.method, "pending_attr"),
+                x + 1,
+            )
+
+        known_attr, set_raised, del_raised, leaked_to_function, out = fn(
+            torch.tensor(2)
+        )
+        self.assertEqual(known_attr, 7)
+        self.assertTrue(set_raised)
+        self.assertTrue(del_raised)
+        self.assertFalse(leaked_to_function)
+        self.assertEqual(out, torch.tensor(3))
+
     def test_method_vt_not_a_function_vt(self):
         """Methods must not subclass UserFunctionVariable (CPython parity).
 
