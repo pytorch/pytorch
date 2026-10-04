@@ -1332,6 +1332,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if isinstance(self.value, type) and type_disallows_instantiation(self.value):
             raise_type_error(tx, f"cannot create '{self.value.__name__}' instances")
 
+        if (
+            self.value is type(None)
+            or self.value is type(Ellipsis)
+            or self.value is type(NotImplemented)
+        ):
+            if args or kwargs:
+                name = self.value.__name__
+                if self.value is type(Ellipsis):
+                    name = "EllipsisType"
+                raise_type_error(tx, f"{name} takes no arguments")
+            return variables.ConstantVariable.create(self.value())
+
         if torch.distributed.is_available() and self.value is torch.distributed.P2POp:
             if not config.enable_p2p_compilation:
                 unimplemented(
