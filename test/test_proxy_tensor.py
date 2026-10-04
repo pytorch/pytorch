@@ -2099,7 +2099,6 @@ only_fake_tensor_failures = {
 fake_tensor_failures = set()
 
 symbolic_tensor_failures = {
-    xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
 

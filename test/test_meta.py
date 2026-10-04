@@ -673,7 +673,6 @@ meta_function_expected_failures = {
     torch.corrcoef : {f64, i32, c128, i64, i16, u8, c64, bf16, f16, i8, f32},
     torch.cov : {f64, i32, c128, i64, i16, u8, c64, bf16, i8, f32, f16},
     torch.functional.istft : {f64, c64, c128, f32},
-    torch.geqrf : {f64, c64, c128, f32},
     torch.masked_select : {f64, i32, c128, i64, i16, f16, u8, c64, bf16, b8, i8, f32},
     torch.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
     torch.Tensor.nonzero : {f64, i32, c128, i64, i16, c32, f16, u8, c64, bf16, b8, i8, f32},
@@ -837,7 +836,6 @@ class MetaCrossRefFunctionMode(torch.overrides.TorchFunctionMode):
 # these always fail
 meta_dispatch_expected_failures = {
     aten.allclose.default: {f16, bf16, f32, f64, c64, c128},  # NotImplementedError: 'aten::_local_scalar_dense'
-    aten.geqrf.default : {c64, c128, f64, f32},
     aten.linalg_lstsq.default : {c64, c128, f64, f32},
     aten.masked_select.default : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
     aten.masked_select.out : {c64, f16, i8, f64, c128, i64, bf16, f32, i32, b8, i16, u8},
@@ -2285,6 +2283,79 @@ class TestMetaKernelConv(TestCase):
 
 @instantiate_parametrized_tests
 class TestMetaKernelRegistrations(TestCase):
+    @parametrize("shape", [(3, 2), (2, 3), (2, 3, 4), (0, 3), (2, 0, 3)])
+    @parametrize(
+        "dtype", [torch.float32, torch.float64, torch.complex64, torch.complex128]
+    )
+    def test_geqrf_matches_cpu(self, shape, dtype):
+        input = torch.ones(shape, dtype=dtype)
+        expected = torch.geqrf(input)
+        actual = torch.geqrf(input.to(device="meta"))
+        for meta_tensor, cpu_tensor in zip(actual, expected):
+            self.assertEqual(meta_tensor.shape, cpu_tensor.shape)
+            self.assertEqual(meta_tensor.stride(), cpu_tensor.stride())
+            self.assertEqual(meta_tensor.dtype, cpu_tensor.dtype)
+
+    @parametrize("shape", [(3, 2), (2, 3), (2, 3, 4), (0, 3), (2, 0, 3)])
+    @parametrize(
+        "dtype", [torch.float32, torch.float64, torch.complex64, torch.complex128]
+    )
+    def test_geqrf_empty_out_matches_cpu(self, shape, dtype):
+        input = torch.ones(shape, dtype=dtype)
+        cpu_out = (torch.empty(0, dtype=dtype), torch.empty(0, dtype=dtype))
+        meta_out = (
+            torch.empty(0, dtype=dtype, device="meta"),
+            torch.empty(0, dtype=dtype, device="meta"),
+        )
+        expected = torch.ops.aten.geqrf.a(input, a=cpu_out[0], tau=cpu_out[1])
+        actual = torch.ops.aten.geqrf.a(
+            input.to(device="meta"), a=meta_out[0], tau=meta_out[1]
+        )
+        for meta_tensor, cpu_tensor, out in zip(actual, expected, meta_out):
+            self.assertIs(meta_tensor, out)
+            self.assertEqual(meta_tensor.shape, cpu_tensor.shape)
+            self.assertEqual(meta_tensor.stride(), cpu_tensor.stride())
+            self.assertEqual(meta_tensor.dtype, cpu_tensor.dtype)
+
+    @parametrize("layout", ["row", "column", "cast"])
+    def test_geqrf_out_layout_matches_cpu(self, layout):
+        def outputs(device):
+            if layout == "row":
+                a = torch.empty((3, 2), device=device)
+            elif layout == "column":
+                a = torch.empty((2, 3), device=device).mT
+            else:
+                a = torch.empty(0, device=device)
+            tau_dtype = torch.float64 if layout == "cast" else torch.float32
+            return a, torch.empty(0, dtype=tau_dtype, device=device)
+
+        cpu_out = outputs("cpu")
+        meta_out = outputs("meta")
+        expected = torch.ops.aten.geqrf.a(
+            torch.ones((3, 2)), a=cpu_out[0], tau=cpu_out[1]
+        )
+        actual = torch.ops.aten.geqrf.a(
+            torch.ones((3, 2), device="meta"), a=meta_out[0], tau=meta_out[1]
+        )
+        for meta_tensor, cpu_tensor, out in zip(actual, expected, meta_out):
+            self.assertIs(meta_tensor, out)
+            self.assertEqual(meta_tensor.shape, cpu_tensor.shape)
+            self.assertEqual(meta_tensor.stride(), cpu_tensor.stride())
+            self.assertEqual(meta_tensor.dtype, cpu_tensor.dtype)
+
+    def test_geqrf_invalid_rank(self):
+        with self.assertRaisesRegex(
+            RuntimeError, "input must have at least 2 dimensions"
+        ):
+            torch.geqrf(torch.empty(3, device="meta"))
+
+    @parametrize("dtype", [torch.int32, torch.float16])
+    def test_geqrf_unsupported_dtype(self, dtype):
+        with self.assertRaisesRegex(
+            RuntimeError, "Expected a floating point or complex|Low precision"
+        ):
+            torch.geqrf(torch.empty((3, 2), dtype=dtype, device="meta"))
+
     @parametrize("dtype", [torch.uint16, torch.uint32, torch.uint64])
     def test_arange_meta_barebones_unsigned(self, dtype):
         result = torch.arange(256, dtype=dtype, device="meta")

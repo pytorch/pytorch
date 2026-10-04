@@ -60,7 +60,6 @@ fake_export_failures = {
 
 # These pass with CUDA enabled but still fail fake CUDA export on CPU-only builds.
 if not torch.backends.cuda.is_built():
-    fake_export_failures.add(xfail("geqrf"))
     fake_export_failures.add(xfail("sparse.sampled_addmm"))
     fake_export_failures.add(xfail("to_sparse"))
     fake_export_failures.add(xfail("__getitem__"))
