@@ -3055,6 +3055,20 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    def test_cond_nested_lite_mode(self):
+        # With all ops falling back, the nested subgraphs keep tensor constants,
+        # which the model constructor looks up on the root graph.
+        inputs = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+        )
+        with config.patch(torch._inductor.lite_mode_options):
+            self.check_model_with_multiple_inputs(
+                CondModels.Nested(),
+                prepend_predicates(inputs, num_predicates=3),
+            )
+
     def test_cond_with_parameters(self):
         inputs = (torch.randn((10, 20), device=self.device),)
         dim0_abc = Dim("s0", min=2, max=1024)
@@ -3554,6 +3568,20 @@ class AOTInductorTestsTemplate:
             prepend_counters(inputs),
             dynamic_shapes=dynamic_shapes,
         )
+
+    def test_symint_in_tensor_arg_lite_mode(self):
+        # The int64 add has no C-shim-compatible scalar ABI, so the fallback goes
+        # through the proxy executor, which cannot take the SymInt as a tensor.
+        class Model(torch.nn.Module):
+            def forward(self, c, b):
+                return c + torch.nonzero(b).size(0)
+
+        inputs = (
+            torch.tensor(3, device=self.device),
+            torch.tensor([0, 1, 1, 0], device=self.device),
+        )
+        with config.patch(torch._inductor.lite_mode_options):
+            self.check_model(Model(), inputs)
 
     @common_utils.parametrize("dynamic", [False, True])
     def test_while_loop_with_conv(self, dynamic):
@@ -8277,6 +8305,33 @@ class AOTInductorTestsTemplate:
                 AOTIRunnerUtil.legacy_compile, model, example_inputs
             )
         FileCheck().check_not(INFERRED_BOUND).run(code)
+
+    def test_unbacked_relation_assert_lite_mode(self):
+        # Lite mode retraces the graph (selective_decompose), re-allocating the
+        # unbacked symbols the deferred assert is keyed on.
+        class Model(torch.nn.Module):
+            def forward(self, a, b):
+                shorter = torch.nonzero(a).size(0)
+                longer = torch.nonzero(b).size(0)
+                torch._check(shorter <= longer)
+                return a.new_ones([shorter]), b.new_ones([longer])
+
+        def mask(*bits):
+            return torch.tensor(bits, dtype=torch.float, device=self.device)
+
+        model = Model()
+        example_inputs = (mask(1, 1, 0, 0), mask(1, 1, 1, 0))
+        with config.patch(torch._inductor.lite_mode_options):
+            so_path, code = run_and_get_cpp_code(
+                AOTIRunnerUtil.legacy_compile, model, example_inputs
+            )
+        FileCheck().check_regex(r"Expected u\d+ <= u\d+").run(code)
+        compiled = AOTIRunnerUtil.legacy_load(self.device, so_path)
+        self.assertEqual(compiled(*example_inputs), model(*example_inputs))
+        # Same sizes as the example, so only the relational assert can catch it.
+        # Don't match the message: the fbcode runner doesn't surface it.
+        with self.assertRaisesRegex(Exception, ""):
+            compiled(mask(1, 1, 1, 0), mask(1, 0, 0, 0))
 
     def test_multi_input_nonzero_slice_shared_dim(self):
         # Regression: when multiple inputs share a dynamic batch dim and are
