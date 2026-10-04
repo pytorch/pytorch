@@ -1069,6 +1069,43 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn(x), x * 9.0)
         self.assertEqual(cnt.frame_count, 2)
 
+    @parametrize("method", ("forward", "helper"))
+    @parametrize("mutation", ("code", "rebind"))
+    def test_nn_module_method_mutation_recompiles(self, mutation, method):
+        # forward is short-circuited past _call_impl and helper goes through
+        # resolve_type_attr; both must guard the class function's __code__.
+        def two(self, x):
+            return x * 2.0
+
+        def nine(self, x):
+            return x * 9.0
+
+        class Mod(torch.nn.Module):
+            helper = two
+
+            def forward(self, x):
+                return self.helper(x)
+
+        if method == "forward":
+            Mod.forward = two
+        mod = Mod()
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(lambda x: mod(x), backend=cnt, fullgraph=True)
+
+        x = torch.arange(1.0, 4.0)
+        self.assertEqual(opt_fn(x), x * 2.0)
+        self.assertEqual(cnt.frame_count, 1)
+
+        if mutation == "code":
+            getattr(Mod, method).__code__ = nine.__code__
+        else:
+            setattr(Mod, method, nine)
+
+        self.assertEqual(opt_fn(x), x * 9.0)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(opt_fn(x), x * 9.0)
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_unmutated_method_does_not_recompile(self):
         # The code guard must not fire on unrelated calls: a second instance of
         # the same class shares one code object and must hit the same entry.
