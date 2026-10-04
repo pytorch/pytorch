@@ -4221,6 +4221,45 @@ def write_csv_when_exception(args, name: str, status: str, device=None):
         write_outputs(output_filename, headers, row)
 
 
+def _run_model_in_subprocess(args, runner, name):
+    failure_status = None
+    timeout = args.timeout * (2 if should_diff_branch(args) else 1)
+    env = os.environ.copy()
+    if args.ci and name in CI_PRESERVE_COMPILE_DEBUG:
+        env["TORCH_COMPILE_DEBUG"] = "1"
+
+    try:
+        subprocess.check_call(
+            [sys.executable] + sys.argv + [f"--only={name}"],
+            timeout=timeout,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        failure_status = "timeout"
+    except subprocess.CalledProcessError as e:
+        failure_status = "worker_fail"
+        print("Run failed with return code: ", e.returncode, file=sys.stderr)
+        print("Output: ", e.output, file=sys.stderr)
+        print("Error: ", e.stderr, file=sys.stderr)
+    except OSError as e:
+        failure_status = "worker_fail"
+        print("Failed to start benchmark worker: ", e, file=sys.stderr)
+
+    if failure_status is None:
+        return []
+
+    for device in args.devices:
+        if output_filename and (args.accuracy or args.performance):
+            write_csv_when_exception(args, name, failure_status, device)
+        output_signpost(
+            {"name": name, "dev": device},
+            args,
+            runner.suite_name,
+            error=failure_status,
+        )
+    return [(name, device, failure_status) for device in args.devices]
+
+
 def setup_determinism(args):
     if args.only is not None and args.only not in {
         "alexnet",
@@ -4966,35 +5005,18 @@ def run(runner, args, original_dir=None):
             os.chdir(original_dir)
         model_names = list(runner.iter_model_names(args))
         nmodels = len(model_names)
+        worker_failures = []
         for i, name in enumerate(model_names):
             current_name = name
             if args.progress:
                 print(f"Running model {i + 1}/{nmodels}", flush=True)
-
-            try:
-                timeout = args.timeout
-                if should_diff_branch(args):
-                    timeout *= 2
-                env = os.environ.copy()
-                if args.ci and name in CI_PRESERVE_COMPILE_DEBUG:
-                    env["TORCH_COMPILE_DEBUG"] = "1"
-                subprocess.check_call(
-                    [sys.executable] + sys.argv + [f"--only={name}"],
-                    timeout=timeout,
-                    env=env,
-                )
-            except subprocess.TimeoutExpired:
-                write_csv_when_exception(args, name, "timeout")
-                # NB: device is potentially multiple here, though we should
-                # try our best to report in anyway TODO
-                output_signpost(
-                    {"name": name}, args, runner.suite_name, error="timeout"
-                )
-            except subprocess.CalledProcessError as e:
-                print("Run failed with return code: ", e.returncode, file=sys.stderr)
-                print("Output: ", e.output, file=sys.stderr)
-                print("Error: ", e.stderr, file=sys.stderr)
+            worker_failures.extend(_run_model_in_subprocess(args, runner, name))
         print_summary(output_filename, print_dataframe=args.print_dataframe_summary)
+        if worker_failures:
+            failures = ", ".join(
+                f"{name}[{device}]={status}" for name, device, status in worker_failures
+            )
+            raise RuntimeError(f"Benchmark worker failures: {failures}")
 
 
 def log_operator_inputs(model, example_inputs, model_iter_fn, name, args):
