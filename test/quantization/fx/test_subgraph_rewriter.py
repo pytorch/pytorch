@@ -12,6 +12,7 @@ from torch.fx.experimental.rewriter import RewritingTracer
 
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
+from torch.testing._internal.common_utils import HardwareClassification
 from torch.testing._internal.jit_utils import JitTestCase
 
 if __name__ == '__main__':
@@ -20,6 +21,7 @@ if __name__ == '__main__':
                        "instead.")
 
 class TestSubgraphRewriter(JitTestCase):
+    hw_classification = HardwareClassification.GENERIC
 
     def test_subgraph_rewriter_preserves_logic(self):
         class M(torch.nn.Module):
