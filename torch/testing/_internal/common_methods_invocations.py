@@ -11668,6 +11668,8 @@ foreach_other_op_db: list[ForeachFuncInfo] = [
             # _foreach_mm decomposes into per-element at::mm; meta output
             # storage_offset/strides may differ from the real implementation
             DecorateInfo(unittest.skip("decomposed op"), "TestMeta"),
+            DecorateInfo(unittest.skip("decomposed op"), "TestMetaCudaRef"),
+            DecorateInfo(unittest.skip("decomposed op"), "TestMetaCore"),
         ),
     ),
 ]
@@ -15658,7 +15660,7 @@ op_db: list[OpInfo] = [
                # _batch_norm_with_update expects contiguous inputs for cudnn and miopen
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type="cuda"),
                DecorateInfo(unittest.expectedFailure,
-                            'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides', device_type="cuda"),
+                            'TestMetaCudaRef', 'test_dispatch_symbolic_meta_outplace_all_strides', device_type="cuda"),
                # _batch_norm_with_update does not have python bindings
                DecorateInfo(unittest.skip("Skipped!"), 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # aten out variants do not accept out= kwarg, only python out variants
