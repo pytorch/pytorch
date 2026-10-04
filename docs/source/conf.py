@@ -636,8 +636,6 @@ coverage_ignore_functions = [
     # torch.masked.maskedtensor.creation
     "as_masked_tensor",
     "masked_tensor",
-    # torch.multiprocessing.pool
-    "clean_worker",
     # torch.multiprocessing.reductions
     "fd_id",
     "init_reductions",
