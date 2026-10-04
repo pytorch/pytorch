@@ -879,7 +879,7 @@ class FSDPModule:
         rank's slice is concatenated along that dimension into the output. A
         tensor returned by ``fsdp_pre_all_gather`` may be smaller than its
         cached output, which then has more than ``split_sizes[i] * world_size``
-        elements (see :data:`~torch.distributed.fsdp.experimental.AllGatherOutputFn`).
+        elements.
         The function runs on the current stream after the collective completes
         and must only write to ``outputs``. It is not called when the all-gather
         buffer is empty or the group has a single rank, since FSDP then copies
