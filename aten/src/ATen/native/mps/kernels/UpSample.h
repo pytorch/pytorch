@@ -7,8 +7,8 @@
 #include <optional>
 #endif
 
-// Full threadgroups dispatched per core before the gather backward strides over
-// the remaining (n, c) planes in-thread; measured knee on M-series GPUs.
+// Full threadgroups per core before the gather backward folds the remaining
+// (n, c) planes into per-thread loops; measured knee on M-series GPUs.
 C10_METAL_CONSTEXPR uint32_t GATHER_BACKWARD_TGS_PER_CORE = 16;
 
 template <unsigned N = 5>

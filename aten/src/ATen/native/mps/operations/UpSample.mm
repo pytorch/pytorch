@@ -1,6 +1,7 @@
 //  Copyright © 2023 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/ceil_div.h>
+#include <ATen/native/CanUse32BitIndexMath.h>
 #include <ATen/native/UpSample.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <c10/util/accumulate.h>
@@ -147,12 +148,12 @@ static void upsample_gather_backward_out_template(const Tensor& grad_input,
   auto stream = getCurrentMPSStream();
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
+      const bool use_u32 = offsetsFitIn<int32_t>(grad_input, grad_output);
       auto pso = lib.getPipelineStateForFunc(
-          fmt::format("upsample_{}_backward_{}", name, scalarToMetalTypeString(grad_input)));
+          fmt::format("upsample_{}_backward_{}{}", name, scalarToMetalTypeString(grad_input), mtlIdxSuffix(use_u32)));
       const auto max_threads = [pso maxTotalThreadsPerThreadgroup];
       const auto simd_width = [pso threadExecutionWidth];
-      // Threads the grid gets before planes fold into per-thread loops: folding
-      // amortizes the range search, fewer threads leave GPU cores idle.
+      // Grid threads before (n, c) planes fold into per-thread loops; fewer would starve the GPU.
       const auto threads_in_flight = core_count * max_threads * GATHER_BACKWARD_TGS_PER_CORE;
       const auto planes =
           std::min(all_planes, at::round_up(at::ceil_div(threads_in_flight, height * width), simd_width));
